@@ -539,6 +539,12 @@ Magic weapon bonuses are THREE separate fields on the item:
 - `bonusWeaponAttack`: attack-only bonus
 - `bonusWeaponDamage`: damage-only bonus
 
+Site data authors many flat item mechanics as signed strings (`"+1"`). `getItems()` projects
+those fields as numbers for calculations while `getItemRaw(id)` and serialized state retain the
+authored values. Keep this normalization read-only: Hub inventory metadata is authoritative, and
+rewriting its canonical strings would create a false client inventory patch. Direct raw-inventory
+calculation paths must use the same `_projectItemNumericBonuses()` projection before arithmetic.
+
 ### Magic-item effects and powers
 
 Catalog items use the existing `effects[]` lifecycle for passive mechanics. `addItem()` normalizes high-confidence prose-only passives into the same schema; item-owned alternative AC formulas use `{type: "acFormula", value, addDex, requireUnarmored}` and are registered/removed with `sourceFeatureId: "item:<inventoryId>"`.

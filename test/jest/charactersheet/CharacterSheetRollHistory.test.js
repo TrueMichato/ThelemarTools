@@ -2,18 +2,33 @@ import "./setup.js";
 import {jest} from "@jest/globals";
 
 let CharacterSheetRollHistory;
+let HUB_ROLL_VISIBILITY_CHOICES;
 
 beforeAll(async () => {
-	CharacterSheetRollHistory = (await import("../../../js/charactersheet/charactersheet-rollhistory.js")).CharacterSheetRollHistory;
+	const module = await import("../../../js/charactersheet/charactersheet-rollhistory.js");
+	CharacterSheetRollHistory = module.CharacterSheetRollHistory;
+	HUB_ROLL_VISIBILITY_CHOICES = module.HUB_ROLL_VISIBILITY_CHOICES;
 });
 
 describe("CharacterSheetRollHistory", () => {
 	let history;
 
+	function getStubByClass (root, className) {
+		if (!root) return null;
+		if (`${root._clazz || ""}`.split(/\s+/).includes(className)) return root;
+		for (const child of root._children || []) {
+			const found = getStubByClass(child, className);
+			if (found) return found;
+		}
+		return null;
+	}
+
 	beforeEach(() => {
 		// Provide a minimal page mock — the module only uses page for reference
 		history = new CharacterSheetRollHistory({});
 	});
+
+	afterEach(() => history?._panelEl?.remove());
 
 	// ===================================================================
 	// addRoll
@@ -57,7 +72,88 @@ describe("CharacterSheetRollHistory", () => {
 				formula: "1d20 (14) + 3",
 				total: 17,
 				context: "save",
+				visibility: "all_members",
 			}));
+		});
+
+		test("passes the saved actor-and-DM audience to the Hub adapter", async () => {
+			const pLog = jest.fn(async () => ({}));
+			history = new CharacterSheetRollHistory({
+				_hubRollLogAdapter: {pLog},
+				_state: {getSettings: () => ({hubRollVisibility: "actor_and_dm"})},
+			});
+			history.addRoll({title: "Initiative", total: 14});
+			await Promise.resolve();
+
+			expect(pLog).toHaveBeenCalledWith(expect.objectContaining({visibility: "actor_and_dm"}));
+		});
+	});
+
+	describe("campaign roll audience", () => {
+		test("offers only the honest server-supported player choices", () => {
+			expect(HUB_ROLL_VISIBILITY_CHOICES).toEqual([
+				{value: "all_members", label: "Everyone in the campaign"},
+				{value: "actor_and_dm", label: "Only me and DMs"},
+			]);
+		});
+
+		test("persists the campaign-only selector and applies it to future rolls", () => {
+			const settings = {hubRollVisibility: "actor_and_dm"};
+			const setSetting = jest.fn((key, value) => {
+				settings[key] = value;
+				return true;
+			});
+			const save = jest.fn();
+			history = new CharacterSheetRollHistory({
+				_hubRollLogAdapter: {pLog: async () => ({})},
+				_state: {getSettings: () => settings, setSetting},
+				_saveCurrentCharacter: save,
+			});
+			const control = history._buildHubVisibilityControl();
+			const label = getStubByClass(control, "charsheet__roll-history-visibility-label");
+			const select = getStubByClass(control, "charsheet__roll-history-visibility-select");
+
+			expect(select.value).toBe("actor_and_dm");
+			expect(label.textContent).toBe("Share new campaign rolls with");
+			expect(select._children.map(option => option.textContent)).toEqual(["Everyone in the campaign", "Only me and DMs"]);
+			select.value = "all_members";
+			select._handlers.change();
+
+			expect(setSetting).toHaveBeenCalledWith("hubRollVisibility", "all_members");
+			expect(save).toHaveBeenCalledTimes(1);
+			expect(settings.hubRollVisibility).toBe("all_members");
+		});
+
+		test("syncs the displayed and submitted audience across active character switches", async () => {
+			let activeSettings = {hubRollVisibility: "actor_and_dm"};
+			const pLog = jest.fn(async () => ({}));
+			history = new CharacterSheetRollHistory({
+				_hubRollLogAdapter: {pLog},
+				_state: {getSettings: () => activeSettings},
+			});
+			const control = history._buildHubVisibilityControl();
+			const select = getStubByClass(control, "charsheet__roll-history-visibility-select");
+
+			expect(select.value).toBe("actor_and_dm");
+
+			activeSettings = {};
+			expect(history.syncFromActiveCharacter()).toBe("all_members");
+			expect(select.value).toBe("all_members");
+			history.addRoll({title: "Initiative", total: 12});
+			await Promise.resolve();
+			expect(pLog).toHaveBeenLastCalledWith(expect.objectContaining({visibility: "all_members"}));
+
+			activeSettings = {hubRollVisibility: "actor_and_dm"};
+			expect(history.syncFromActiveCharacter()).toBe("actor_and_dm");
+			expect(select.value).toBe("actor_and_dm");
+			history.addRoll({title: "Perception", total: 18});
+			await Promise.resolve();
+			expect(pLog).toHaveBeenLastCalledWith(expect.objectContaining({visibility: "actor_and_dm"}));
+		});
+
+		test("does not render a misleading audience control outside a campaign", () => {
+			expect(history._page._hubRollLogAdapter).toBeUndefined();
+			expect(history._panelEl).toBeNull();
 		});
 	});
 

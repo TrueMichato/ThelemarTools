@@ -4330,6 +4330,8 @@ class CharacterSheetState {
 		// level-gated grouping in the spell list silently drops the spells.
 		this._allSpells = [];
 		this._allItems = [];
+		this._allItemsRepair = [];
+		this._allItemsPristine = null;
 		// Live handle for the pure static helpers that must consult character state but are
 		// called from contexts with no reference to it — chiefly the item hover builders in
 		// `charactersheet-class-utils.js`, which are invoked from a dozen render sites. Mirrors
@@ -4350,32 +4352,138 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Inject the enhanced item catalog used to repair authoritative metadata on legacy
-	 * inventory rows. The migration also runs here for alternate load orders.
+	 * Inject the enhanced item catalog used for item mechanics and the optional pristine
+	 * catalog used to distinguish source-authored metadata from renderer enhancement.
+	 * The migration also runs here for alternate load orders.
 	 * @param {Array} allItems
+	 * @param {{pristineItems?: Array, repairItems?: Array}} [opts]
 	 */
-	setItemCatalog (allItems) {
+	setItemCatalog (allItems, {pristineItems = null, repairItems = null} = {}) {
 		this._allItems = Array.isArray(allItems) ? allItems : [];
+		this._allItemsRepair = Array.isArray(repairItems) ? repairItems : this._allItems;
+		this._allItemsPristine = Array.isArray(pristineItems) ? pristineItems : null;
 		this._migrateInventoryItemMetadata();
 	}
 
 	/**
-	 * Restore catalog-only identity fields lost by the legacy inventory add path.
-	 * Exact source matching prevents a PHB row from adopting XPHB metadata.
+	 * Restore trusted catalog metadata omitted by legacy/Hub summary-only inventory rows.
+	 * Exact source matching prevents a PHB row from adopting XPHB metadata. Only absent
+	 * values are filled, so customizations and ownership-local state remain authoritative.
 	 */
 	_migrateInventoryItemMetadata () {
-		if (!this._allItems?.length || !Array.isArray(this._data?.inventory)) return;
-		const catalog = new Map(this._allItems
-			.filter(item => item?.name && item?.source)
-			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
+		if (!Array.isArray(this._data?.inventory)) return;
+		const transientCatalogFields = new Set([
+			"__prop",
+			"__proto__",
+			"_attunement",
+			"_attunementCategory",
+			"_category",
+			"_entrySubType",
+			"_entryType",
+			"_fullAdditionalEntries",
+			"_fullEntries",
+			"_isBaseItem",
+			"_isEnhanced",
+			"_isItemGroup",
+			"_textTypes",
+			"_valueFromRarity",
+			"_compositionSearch",
+			"variants",
+			"constructor",
+			"prototype",
+		]);
+		const coarseInventoryTypes = new Set([
+			"armor",
+			"component",
+			"gear",
+			"gemstone",
+			"potion",
+			"ring",
+			"rod",
+			"scroll",
+			"staff",
+			"tool",
+			"wand",
+			"weapon",
+			"wondrous",
+		]);
+		const pristineCatalogFields = new Set([
+			"additionalSources",
+			"entries",
+			"hasRefs",
+		]);
+		const isTransientCatalogField = key => transientCatalogFields.has(key)
+			|| /^_f[A-Z]/.test(key)
+			|| key.startsWith("_l_")
+			|| key.startsWith("_full");
+		const isEnhancedCatalogOnlyField = (key, value, match) => match._isEnhanced && (
+			(key === "entries" && Array.isArray(value) && !value.length)
+			|| key === "additionalSources"
+		);
+		const getFirstByUid = items => {
+			const out = new Map();
+			for (const item of items || []) {
+				if (!item?.name || !item?.source) continue;
+				const uid = `${item.name}|${item.source}`.toLowerCase();
+				if (!out.has(uid)) out.set(uid, item);
+			}
+			return out;
+		};
+		const catalog = getFirstByUid(this._allItemsRepair);
+		const pristineCatalog = getFirstByUid(this._allItemsPristine);
 		for (const inventoryRow of this._data.inventory) {
 			const item = inventoryRow?.item;
-			if (!item?.name || !item?.source || item._isCustom || item.source === "Custom") continue;
-			const match = catalog.get(`${item.name}|${item.source}`.toLowerCase());
-			if (!match) continue;
-			if (item.typeCode == null && match.type != null) item.typeCode = match.type;
-			if (item.scfType == null && match.scfType != null) item.scfType = match.scfType;
-			if (item.focus == null && match.focus != null) item.focus = MiscUtil.copyFast(match.focus);
+			if (!item || typeof item !== "object") continue;
+			const isCustom = item._isCustom || item.source === "Custom";
+			const uid = !isCustom && item.name && item.source
+				? `${item.name}|${item.source}`.toLowerCase()
+				: null;
+			const match = uid ? catalog.get(uid) : null;
+			const pristineMatch = uid ? pristineCatalog.get(uid) : null;
+			if (match && pristineMatch && item.type == null) {
+				for (const [key, value] of Object.entries(match)) {
+					if (
+						isTransientCatalogField(key)
+						|| pristineCatalogFields.has(key)
+						|| isEnhancedCatalogOnlyField(key, value, match)
+						|| item[key] !== undefined
+					) continue;
+					item[key] = MiscUtil.copyFast(value);
+				}
+				for (const key of pristineCatalogFields) {
+					if (
+						item[key] !== undefined
+						|| !Object.prototype.hasOwnProperty.call(pristineMatch, key)
+					) continue;
+					item[key] = MiscUtil.copyFast(pristineMatch[key]);
+				}
+			}
+			const matchedTypeCode = pristineMatch ? match?.typeCode ?? match?.type : null;
+			const hasDerivedCoarseTypeCode = coarseInventoryTypes.has(item.typeCode);
+			const resolvedTypeCode = matchedTypeCode ?? item.type;
+			if (resolvedTypeCode != null && (item.typeCode == null || hasDerivedCoarseTypeCode)) {
+				item.typeCode = resolvedTypeCode;
+			}
+			if (item.scfType == null && pristineMatch && match?.scfType != null) item.scfType = match.scfType;
+			if (item.focus == null && pristineMatch && match?.focus != null) item.focus = MiscUtil.copyFast(match.focus);
+			if (item.requiresAttunement == null && item.reqAttune != null) item.requiresAttunement = !!item.reqAttune;
+			if (item.properties == null && Array.isArray(item.property)) item.properties = MiscUtil.copyFast(item.property);
+			for (const [suffix, ability] of [["Str", "str"], ["Dex", "dex"], ["Con", "con"], ["Int", "int"], ["Wis", "wis"], ["Cha", "cha"]]) {
+				for (const family of ["bonusSavingThrow", "bonusAbilityCheck"]) {
+					const storedKey = `${family}${suffix}`;
+					const catalogKey = `${family}_${ability}`;
+					if (item[storedKey] == null && item[catalogKey] != null) item[storedKey] = item[catalogKey];
+				}
+			}
+			const typeBase = String(item.type || item.typeCode || "").split("|")[0];
+			if (item.shield == null) item.shield = typeBase === "S";
+			if (item.armor == null) item.armor = ["LA", "MA", "HA"].includes(typeBase);
+			if (item.armorType == null && item.armor) {
+				if (typeBase === "HA") item.armorType = "heavy";
+				else if (typeBase === "MA") item.armorType = "medium";
+				else if (typeBase === "LA") item.armorType = "light";
+			}
+			if (item.chargesCurrent == null && typeof item.charges === "number") item.chargesCurrent = item.charges;
 		}
 	}
 
@@ -5950,7 +6058,8 @@ class CharacterSheetState {
 		for (const invItem of this._data.inventory) {
 			const item = invItem?.item;
 			if (!item || item.weapon === true) continue;
-			const typeBase = typeof item.type === "string" ? item.type.split("|")[0] : null;
+			const storedType = item.type || item.typeCode;
+			const typeBase = typeof storedType === "string" ? storedType.split("|")[0] : null;
 			const isWeapon = item.type === "weapon"
 				|| typeBase === "M" || typeBase === "R"
 				|| !!item.weaponCategory;
@@ -12978,7 +13087,7 @@ class CharacterSheetState {
 	 * @returns {object}
 	 */
 	_getArmorAcSlotSnapshot (item) {
-		const projected = this.projectItemMaterial(item);
+		const projected = this._projectItemNumericBonuses(this.projectItemMaterial(item));
 		return {
 			ac: projected.ac,
 			type: projected.armorType || item.armorType || this._inferArmorType(projected),
@@ -13000,7 +13109,7 @@ class CharacterSheetState {
 	 * @returns {object}
 	 */
 	_getShieldAcSlotSnapshot (item) {
-		const projected = this.projectItemMaterial(item);
+		const projected = this._projectItemNumericBonuses(this.projectItemMaterial(item));
 		return {
 			ac: projected.ac ?? 2,
 			bonus: projected.acBonus,
@@ -13046,31 +13155,32 @@ class CharacterSheetState {
 		let minCritThreshold = 20;
 
 		for (const invItem of this._data.inventory) {
-			const bonus = invItem.item?.kiSaveDcBonus || 0;
+			const item = this._projectItemNumericBonuses(invItem.item);
+			const bonus = item?.kiSaveDcBonus || 0;
 			if (bonus > maxKiDcBonus) maxKiDcBonus = bonus;
 
 			// Only consider equipped items for combat bonuses
 			if (!invItem.equipped) continue;
 
 			// Base item bonuses
-			const baseSpellAtk = invItem.item?.bonusSpellAttack || 0;
-			const baseSpellDc = invItem.item?.bonusSpellSaveDc || 0;
-			const baseCrit = invItem.item?.critThreshold || 20;
+			const baseSpellAtk = item?.bonusSpellAttack || 0;
+			const baseSpellDc = item?.bonusSpellSaveDc || 0;
+			const baseCrit = item?.critThreshold || 20;
 
 			// Material crit contribution. Read from the projection so the clamps in
 			// `applyToItem` (never an impossible crit, never past the natural 20) apply here too.
 			let materialCritReduction = 0;
-			if (invItem.item?.material?.name) {
-				const projected = this.projectItemMaterial(invItem.item);
-				if (projected !== invItem.item) materialCritReduction = baseCrit - (projected.critThreshold || baseCrit);
+			if (item?.material?.name) {
+				const projected = this.projectItemMaterial(item);
+				if (projected !== item) materialCritReduction = baseCrit - (projected.critThreshold || baseCrit);
 			}
 
 			// Upgrade bonuses (if CharacterSheetUpgrades module is loaded)
 			let upgradeSpellAtk = 0;
 			let upgradeSpellDc = 0;
 			let upgradeCritReduction = 0;
-			if (typeof CharacterSheetUpgrades !== "undefined" && invItem.item?.appliedUpgrades?.length) {
-				const effects = CharacterSheetUpgrades.getUpgradeEffects(invItem.item);
+			if (typeof CharacterSheetUpgrades !== "undefined" && item?.appliedUpgrades?.length) {
+				const effects = CharacterSheetUpgrades.getUpgradeEffects(item);
 				upgradeSpellAtk = effects.bonusSpellAttack;
 				upgradeSpellDc = effects.bonusSpellSaveDc;
 				upgradeCritReduction = effects.critThresholdReduction;
@@ -30408,18 +30518,66 @@ class CharacterSheetState {
 	// #region Inventory
 	getInventory () { return [...this._data.inventory]; }
 
+	static _ITEM_NUMERIC_BONUS_KEYS = Object.freeze([
+		"ac",
+		"acBonus",
+		"bonusAc",
+		"bonusAbilityCheck",
+		"bonusProficiencyBonus",
+		"bonusSavingThrow",
+		"bonusSavingThrowConcentration",
+		"bonusSpellAttack",
+		"bonusSpellDamage",
+		"bonusSpellSaveDc",
+		"bonusWeapon",
+		"bonusWeaponAttack",
+		"bonusWeaponCritDamage",
+		"bonusWeaponDamage",
+		"critThreshold",
+		"kiSaveDcBonus",
+		...["Str", "Dex", "Con", "Int", "Wis", "Cha"].flatMap(suffix => [
+			`bonusSavingThrow${suffix}`,
+			`bonusAbilityCheck${suffix}`,
+			`bonusSavingThrow_${suffix.toLowerCase()}`,
+			`bonusAbilityCheck_${suffix.toLowerCase()}`,
+		]),
+	]);
+
+	/**
+	 * Project authored signed-number strings (for example `"+1"`) as numbers for mechanics.
+	 * The stored item remains untouched so Hub canonical metadata does not become a client write.
+	 *
+	 * @param {object} itemData
+	 * @returns {object}
+	 */
+	_projectItemNumericBonuses (itemData) {
+		if (!itemData || typeof itemData !== "object") return itemData;
+		let out = itemData;
+		for (const key of CharacterSheetState._ITEM_NUMERIC_BONUS_KEYS) {
+			if (typeof itemData[key] !== "string") continue;
+			const parsed = Number(itemData[key].replace(/\s/g, ""));
+			if (!Number.isFinite(parsed)) continue;
+			if (out === itemData) out = {...itemData};
+			out[key] = parsed;
+		}
+		return out;
+	}
+
 	/**
 	 * Returns flattened items for display - merges item data with inventory metadata
 	 */
 	getItems () {
-		return this._data.inventory.map(invItem => ({
-			id: invItem.id,
-			...this.projectItemMaterial(invItem.item),
-			quantity: invItem.quantity,
-			equipped: invItem.equipped,
-			attuned: invItem.attuned,
-			starred: invItem.starred,
-		}));
+		return this._data.inventory.map(invItem => {
+			const projectedItem = this._projectItemNumericBonuses(this.projectItemMaterial(invItem.item));
+			return {
+				id: invItem.id,
+				...projectedItem,
+				quantity: invItem.quantity,
+				equipped: invItem.equipped,
+				attuned: invItem.attuned,
+				starred: invItem.starred,
+			};
+		});
 	}
 
 	/**

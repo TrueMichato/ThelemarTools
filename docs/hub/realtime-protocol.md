@@ -121,6 +121,13 @@ exhaustion from `events.length`. Because coverage is tracked per document track,
 watermark is still applied to a stale local draft that has not yet folded it in, while canonical truth that
 already reflects it is left untouched.
 
+Backward Campaign Overview history uses the HTTP route's exclusive `beforeSequence` cursor and
+`history.scannedBackThroughSequence`; it is not a WebSocket replay mode. The overview merges and deduplicates
+those older authorized rows with live events and keeps loading, empty-history, and privacy-filtered-window
+states distinct. It seeds realtime from the HTTP snapshot sequence rather than replaying the complete campaign
+history. If a character projection revision changes, the overview replaces its activity cache with a freshly
+authorized page instead of retaining rows that an older sharing policy exposed.
+
 Unknown client types receive:
 
 ```json
@@ -233,7 +240,7 @@ Each campaign has a monotonically allocated `sequence`.
 
 1. Canonical transaction inserts event and outbox row.
 2. Dispatcher claims up to 100 available rows with a claim token.
-3. Rows are processed in order.
+3. Claimed rows are explicitly sorted by campaign sequence before processing; SQL return order is not trusted.
 4. If one campaign event fails, later claimed events for that campaign are marked failed rather than
    overtaking it.
 5. Success marks the row published.
@@ -309,14 +316,32 @@ DM/co-DM; the target leg never exposes source resource ids or values.
 
 Campaign roster consumers coalesce repeated `character.projection.invalidated` events and perform one
 authorization-scoped HTTP fetch. The response **replaces** the previous projection rather than merging with
-it, so a field an owner has just stopped sharing cannot survive from an older, broader response. An editable
+it, so a field an owner has just stopped sharing cannot survive from an older, broader response. Responses are
+also request-sequence and attachment-generation fenced; an older or detached request cannot overwrite a newer
+authorized projection. An editable
 owner Character Sheet instead subscribes only after authenticated campaign activation and canonical character
 load. `CharacterSheetRealtimeCoordinator` filters the open character, serializes projection invalidations and
-semantic lifecycle events behind repository saves, and emits ephemeral callbacks. In this substrate slice,
-those callbacks never fetch/replace the owner document, call `loadFromJson`, render, save, apply an operation,
-or open a generic conflict modal. A missing canonical ref or matching remote archive/move event queues teardown
-behind already-accepted delivery. Persisted `pagehide` suspends the socket and persisted `pageshow` resumes the
-same client, sequence cursor, partial replay chain, buffered live events, and in-memory dedupe state.
+semantic lifecycle events behind repository saves, and emits ephemeral callbacks. Targeted `xp.granted` and
+`item.granted` events also produce an event-id-deduplicated `recipientNotice` callback containing only the
+whitelisted amount/resulting XP/reason or item name/source/quantity/reason. XP schedules an authoritative
+owner-document reconciliation outside the active delivery callback; item awards retain the Party Inventory
+reconciliation signal. Neither notice carries entry ids, item bodies/metadata, account identity, arbitrary JSON,
+or private character state. The coordinator itself does not fetch or mutate the owner document. The Character
+Sheet page consumes a projection invalidation by asking
+the repository to refetch canonical truth and perform an accepted-base/live-state three-way rebase. Disjoint
+offline recovery drafts are retried after reconnect; overlapping paths open the explicit local/server recovery
+dialog and remain unsaved until the player chooses. Client save timestamps do not participate in overlap
+detection, and `Use Local` retains the actual local candidate rather than the server-biased inventory recovery
+candidate, except for server-owned inventory and XP paths. A missing canonical ref or matching remote archive/move
+event queues teardown behind already-accepted delivery. Cursor revision changes always schedule this refetch
+after the repository's ordered replay queue, because one reconnect window can contain both semantic operations
+and ordinary document changes; operation coverage prevents the semantic leg from being applied twice.
+Snapshot-covered replay rows are suppressed only for the initial baseline. Events received live after the
+socket subscribed remain live even when the completing cursor advances through the same batch; replay/live
+duplicates are emitted once, so a concurrent award or rules activation cannot converge state while silently
+losing its semantic notification. Unseen award events recovered by periodic resync or reconnect also reach this
+notice path. Persisted `pagehide` suspends the socket and persisted `pageshow` resumes the same client, sequence
+cursor, partial replay chain, buffered live events, and in-memory dedupe state.
 
 Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Semantic lifecycle
 events are not discarded solely because they are at/below `operationWatermark`; durable roll/operation history
@@ -329,3 +354,7 @@ may still replay because it is not fully represented by current state.
 - Additive server messages still require clients to ignore unknown types safely or a protocol bump.
 - Any shape/visibility/order change updates this document, event catalog, route tests, client tests, and
   `HUB_PROTOCOL_VERSION`.
+
+The `spell.used` event, optional PATCH descriptor, backward HTTP history cursor, and local recipient-notice
+projection are additive protocol-v4 behavior. They neither change a pre-existing event payload nor alter forward
+replay ordering/cursors, so they require no database migration or protocol bump.

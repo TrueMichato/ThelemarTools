@@ -514,6 +514,30 @@ describe("TGTT artifact item effects (Gae Bolg / Necklace / Ring of Human Influe
 		expect(state.getResistances()).toContain("spell");
 	});
 
+	it("setItems normalizes persisted bonuses after their catalog entry is unavailable", () => {
+		const state = mkArtifactState();
+		state.addItem({
+			name: "Retired Ward",
+			source: "TST",
+			equipped: true,
+			quantity: 1,
+			bonusSavingThrow: "+3",
+			bonusSavingThrowInt: "+2",
+		});
+		const inv = new CharacterSheetInventory({getState: () => state});
+		inv._page = {getState: () => state, renderCharacter: () => {}, saveCharacter: () => {}};
+
+		inv.setItems([]);
+
+		const row = state.getItems()[0];
+		expect(row.bonusSavingThrow).toBe(3);
+		expect(row.bonusSavingThrowInt).toBe(2);
+		expect(state.getItemBonuses()).toEqual(expect.objectContaining({
+			savingThrow: 3,
+			savingThrowInt: 2,
+		}));
+	});
+
 	it("Ring of Human Influence sets Charisma to 22 via ability effects", () => {
 		const state = mkArtifactState();
 		addAttuned(state, {

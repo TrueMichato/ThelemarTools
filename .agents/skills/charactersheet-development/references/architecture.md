@@ -169,12 +169,25 @@ No reactive system — renders are explicit. Related modules re-render together 
 - **Toast notifications**: `JqueryUtil.doToast({type: "success", content: "..."})` for user feedback (site-wide utility, not jQuery-dependent despite the name)
 - **HTML generation**: `e_({outer: \`<button class="btn">...</button>\`})` for single elements, `ee\`<div>...</div>\`` tagged template for complex HTML. `insertAdjacentHTML()` for appending HTML strings.
 - **Hub realtime callbacks**: `CharacterSheetRealtimeCoordinator.on()` exposes connection, cursor,
-  metadata-only projection invalidation, semantic-operation lifecycle, and delivery-error handoffs. Only a
+  membership-authority change, metadata-only projection invalidation, semantic-operation lifecycle, minimized
+  XP/item recipient notices, and delivery-error handoffs. Only a
   signed-in campaign-backed canonical character attaches. Delivery uses the repository mutation queue and is
   generation-fenced on switch/detach/revocation/terminal page hide; a missing canonical ref, remote archive, or remote move
   serializes teardown behind already-queued delivery. Persisted `pagehide` suspends the socket and `pageshow`
-  resumes the same client/cursor rather than replaying through a fresh generation. This substrate must not call
-  state load/render/save or a generic conflict modal.
+  resumes the same client/cursor rather than replaying through a fresh generation. The coordinator substrate
+  does not mutate UI state. The page turns notices into text-only toasts and consumes projection invalidations
+  through `HubHttpCharacterRepository.pReconcileAuthoritativeCharacter()`: disjoint offline recovery drafts
+  retry, overlaps open the explicit local/server dialog, and generation fences prevent adoption after a switch
+  or access loss. Cursor revision changes refetch after ordered semantic replay because one reconnect can
+  contain both semantic and ordinary writes; operation coverage prevents double application. Client-only
+  `_savedAt` metadata is excluded from overlap detection. The generic owner-document path preserves the actual
+  local candidate for explicit `Use Local`, except for server-owned inventory and XP paths. XP notices schedule
+  authoritative owner-document reconciliation after delivery; Party Inventory owns stash refresh, direct
+  transfer reconciliation, and item-award reconciliation.
+- **Temporary-to-canonical identity adoption**: create retry and conflict resolution rebind the state id, URL
+  scope, roster selection, projections, and realtime subscription under one updated load/save fence before the
+  repository mutation queue releases canonical events. The identity-only detach preserves canonical repository
+  reconciliation coverage while fencing callbacks from the temporary subscription.
 - **Hub effect UI**: `CharacterSheetHubEffects` is activated and deactivated with the coordinator's current
   canonical character. Its pending read is owner-only and presentation-only. Approval remains visibly pending
   until an authoritative applied event completes repository adoption. The approval response carries that same
@@ -487,6 +500,31 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   truth containing the operation while returning an older recovery draft as live state.
 - An unprovable delivery blocks autosave and schedules a serialized no-reload recovery
   (`pRunPendingResync`) rather than guessing or writing blindly.
+- Explicit one-shot activity such as `spell.used` is part of the same retry envelope as the character patch.
+  If a response is lost, the repository replays the exact persisted PATCH body, activity, rules-version pin, and
+  idempotency key before accepting a newer autosave, so a changing `_savedAt` cannot silently discard or duplicate
+  the semantic event. A confirmed revision conflict rotates the key before storing a rebased request. Recovery is
+  an ordered durable queue, not one replaceable slot: reload preserves every command and its coherent base/snapshot
+  pair, local conflict resolution replays all unresolved activities in order, and server conflict resolution is
+  the explicit discard boundary. Storage uses one base plus a patch chain, capped at 32 commands/3.5 MB; a cloud
+  command is rejected before submission if the complete queue cannot be stored. Operation and resync reconciliation
+  transform every queued base/snapshot and durably replace the queue before replay. Recovery format 3 also records
+  whether that exact request is provable. A legacy one-shot activity without its original PATCH body or rules pin
+  remains quarantined and exportable under `CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE`; the sheet must not
+  retry it under a reconstructed old-key body or rotate the key and duplicate the activity. The sheet offers
+  **Export Then Use Server** or **Use Server**; the artifact includes every queued snapshot, activity, rules pin,
+  and command identity which will be discarded. Closing the dialog exports that artifact, and later save attempts
+  reopen the choice with any newer unsaved document included. Repository resolution fetches canonical truth inside
+  the mutation queue, clears the complete durable recovery queue/save block, adopts the server document, and
+  permits later saves. A recovery-only create may be explicitly exported and discarded after owner-scoped listing
+  proves no server document exists. Activity-free legacy recovery may rotate keys after its replacement request
+  envelope is durably stored; a transactional `RULES_VERSION_STALE` rejection may similarly rotate only after the
+  authoritative active pin and replacement request are persisted. Exact-predecessor ownerless patch recovery binds
+  only after authoritative ownership verification, while ownerless creates remain hidden until the user explicitly
+  claims them for the signed-in account.
+- A `CHARACTER_LIVE_CONFLICT` is detected after the original repository command committed. `Keep Local` retries
+  only the remaining document delta with `activity: null`; replaying the one-shot activity would create a duplicate
+  event under a fresh idempotency key.
 
 Protocol-4 cost-bearing peer operations extend this with per-character operation legs:
 
@@ -497,9 +535,21 @@ Protocol-4 cost-bearing peer operations extend this with per-character operation
 - a local resource conflict after canonical acceptance blocks autosave and keeps the recovery draft visible;
   it never reapplies the operation or silently overwrites the authoritative source spend.
 
+Party-inventory proposal retries use the proposal idempotency key as an actor-only transfer correlation. After
+the 23-hour browser replay window ends, the sheet must list visible transfers before unlocking the frozen
+composer: a correlated pending request remains recoverable/cancellable, while a terminal or confirmed-missing
+request permits an authoritative character-and-stash refresh and close. Never infer absence from balances alone,
+because a pending player stash withdrawal intentionally changes neither container.
+
 `CharacterSheetPeerTargeting` is invoked from the real spell-use path after cast-option validation but before
 local resource mutation. It is gated by the exact campaign `peerSourceCosts` capability tuple. Unsupported
 templates/options and local/signed-out sheets continue through the existing local cast path unchanged.
+The complete proposal request is frozen before first submission and replayed unchanged after ambiguous failures.
+A definitive pre-commit rejection may retire that frozen request only after both authoritative outgoing-action
+reconciliation and the page-owned latest campaign-context fetch/application succeed; either failure stays
+fail-closed, and idempotency collisions never rotate. Realtime membership changes immediately suspend targeting
+and trigger an authoritative context refetch, which resumes only a current player and destructively clears
+spectator/co-DM state.
 
 ## Key Integration Points
 

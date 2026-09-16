@@ -16,8 +16,8 @@ Expansion stays disabled until the V1 physical game day and go/no-go.
 | Job | Gates | Failure owner |
 |---|---|---|
 | `unit-and-supply-chain` | locked install, Hub Jest/docs contracts, JS and Hub/DM SCSS lint, service-worker build, production dependency audit, Hub-credential source scan (tracked plus commit-candidate files), Node/image SBOMs, production BFF build, Trivy HIGH/CRITICAL scan | contributor for code/test failure; security owner for dependency/image finding |
-| `affected-regressions` | Character Sheet persistence/repository/rules/roll seams and targeted DM Screen/Party Tracker suites | Character Sheet or DM Screen maintainer with Hub maintainer |
-| `migration-and-roles` | fresh PostgreSQL 17.6 migration chain, idempotent role grants/status, runtime read access, denied runtime schema alteration | database/migration owner |
+| `affected-regressions` | Character Sheet persistence/repository/rules/roll and item-categorization seams plus targeted DM Screen/Party Tracker suites | Character Sheet or DM Screen maintainer with Hub maintainer |
+| `migration-and-roles` | fresh PostgreSQL 17.6 migration chain, idempotent role grants/status, runtime read access, denied runtime schema alteration, executable inventory award/save/transfer parity | database/migration owner |
 | `real-stack-e2e` | downloads the exact production-image artifact, production-entry-point smoke, synthetic-auth layer derived from that image, disposable HTTPS edge + PostgreSQL 17, two multi-context Playwright journeys, BFF/database restart readiness, unconditional teardown | Hub maintainer; infrastructure owner when failure is runner/Docker-only |
 
 CI failures are not waived by rerunning until green. A non-runtime exception requires an owner, expiry, risk

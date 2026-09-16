@@ -888,6 +888,14 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 	font-weight: var(--cs-weight-semibold, 600);
 }
 
+.charsheet__sharing-preview-summary,
+.charsheet__sharing-preview-omitted {
+	margin: 0 0 var(--cs-space-xs, 4px);
+	color: var(--cs-text-secondary, #9fadc0);
+	font-size: var(--cs-text-xs, 0.75rem);
+	line-height: var(--cs-leading-normal, 1.6);
+}
+
 .charsheet__sharing-preview-list {
 	display: grid;
 	grid-template-columns: minmax(6rem, auto) 1fr;
@@ -902,9 +910,30 @@ body.is-charsheet-page .ve-ui-modal__scroller > .ve-flex.ve-w-100.ve-mb-1 {
 }
 
 .charsheet__sharing-preview-list dd {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--cs-space-xs, 4px);
 	margin: 0;
 	color: var(--cs-text-primary, #f1f5f9);
 	overflow-wrap: anywhere;
+}
+
+.charsheet__sharing-preview-status {
+	display: inline-flex;
+	border: 1px solid var(--cs-border-control, rgba(255, 255, 255, 0.35));
+	border-radius: 999px;
+	color: var(--cs-text-secondary, #9fadc0);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: var(--cs-weight-semibold, 600);
+	line-height: 1.25rem;
+	padding: 0 0.45rem;
+	white-space: nowrap;
+}
+
+.charsheet__sharing-preview-status--replace {
+	border-color: var(--cs-warning, #f59e0b);
+	color: var(--cs-warning-text, #fcd34d);
 }
 
 .charsheet__sharing-preview-empty {
@@ -21521,6 +21550,32 @@ body.is-charsheet-page .ui-modal__inner .charsheet__modal-filter-btn.active:hove
 .charsheet__roll-history-controls {
 	display: flex;
 	gap: 4px;
+}
+
+.charsheet__roll-history-visibility {
+	display: grid;
+	gap: 4px;
+	padding: 10px 16px;
+	border-bottom: 1px solid var(--cs-border, rgba(255,255,255,0.1));
+	background: var(--cs-bg-subtle, rgba(255,255,255,0.03));
+}
+
+.charsheet__roll-history-visibility-label,
+.charsheet__roll-history-visibility-hint {
+	color: var(--cs-text-secondary, #9fadc0);
+	font-size: var(--cs-text-xs, 0.75rem);
+	line-height: 1.4;
+}
+
+.charsheet__roll-history-visibility-select {
+	min-height: 44px;
+	width: 100%;
+	border: 1px solid var(--cs-border-control, rgba(255,255,255,0.45));
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-bg-elevated, #334155);
+	color: var(--cs-text-primary, #f1f5f9);
+	font: inherit;
+	padding: 0.45rem 0.6rem;
 }
 
 .charsheet__roll-history-btn {

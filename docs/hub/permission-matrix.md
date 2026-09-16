@@ -40,10 +40,11 @@ visibility is not authorization.
 | Cancel peer proposal | Yes | Yes | Own proposal only | No |
 | Grant XP or award one item batch to eligible campaign characters | Yes | Yes | No | No |
 | Read party inventory | Yes | Yes | Yes | Yes |
-| Transfer from party inventory | Yes | Yes | No | No |
+| Move from party inventory | Yes | Yes | Request for own character only | No |
 | Transfer from character | Own character | Own character | Own character | No |
-| Resolve transfer to character | Override or target owner | Override or target owner | Target owner | Target owner |
+| Resolve transfer to character | Override or target owner | Override or target owner | Target owner | No |
 | Resolve transfer to party inventory | Yes | Yes | No | No |
+| Approve player party-inventory request | Yes | Yes | No; may cancel own request | No |
 | Read `all_members` event | Yes | Yes | Yes | Yes |
 | Read `dm_only` event | Yes | Yes | No | No |
 | Read `actor_and_dm` event | Yes | Yes | If actor | No |
@@ -72,10 +73,19 @@ account's campaign sockets immediately after the authoritative transaction commi
 - Item awards can target only active characters whose owners remain active campaign members. A hidden peer
   identity does not prevent DM/co-DM targeting, but preview and events disclose no hidden carry or policy value.
 - Spectator is an authenticated read-only campaign role in current mutation paths.
+- DM/co-DM item transfers are explicit direct-authority commands. The Character Sheet and Campaign Overview
+  submit one proposal command that atomically commits both containers; the UI says the move is immediate rather
+  than presenting it as recipient consent.
+- A player may request a party-inventory item only for a character they own. The request remains `proposed`,
+  does not reserve or remove shared assets, and requires DM/co-DM approval. A stale approval fails with
+  `TRANSFER_INSUFFICIENT` and leaves the request pending for decline/cancellation.
+- A player transfer between two characters owned by the same account may resolve immediately because the
+  source and destination authority are the same account. The server commits that proposal without an
+  intermediate reservation. Peer and DM-owned destinations remain reserved until the target owner or a
+  DM/co-DM resolves them.
 - DM/co-DM role alone never approves somebody else's peer proposal. The DM instead issues a distinct direct
   operation with its own actor/command identity.
-- Action resolution is explicitly limited to DM/co-DM/player before the target-owner check. Transfer
-  resolution has no equivalent role list and therefore still permits a spectator who owns the target
-  character to accept/reject that transfer. This asymmetry is current behavior, not a general role rule.
+- Action and transfer resolution are both explicitly limited to active DM/co-DM/player memberships before
+  their operation-specific owner/role checks.
 - Account deletion-pending sessions may read session/deletion state, export, cancel deletion, or logout;
   ordinary campaign routes return `ACCOUNT_DELETION_PENDING`.

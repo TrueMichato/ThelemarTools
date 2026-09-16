@@ -191,6 +191,125 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		expect(dmRead.json().projection.character.data.features[0].description).toBe(`<div class="ve-rd__b"><p><strong>Safe</strong>&lt;script&gt;alert(1)&lt;/script&gt;</p></div>`);
 	});
 
+	it("records an explicit spell-use event and audit atomically with a character save", async () => {
+		const player = await pSignIn(IDENTITIES.player);
+		const campaign = await pCreateCampaign(player, "Spell Activity");
+		const created = await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: mutationHeaders(player),
+			payload: {
+				clientImportId: "spell-activity-character",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {name: "Mira", spellcasting: {spellSlots: {3: {current: 2, max: 2}}}},
+			},
+		});
+		const character = created.json().character;
+		const lease = await app.inject({
+			method: "POST",
+			url: `/api/characters/${character.id}/lease`,
+			headers: mutationHeaders(player),
+			payload: {},
+		});
+		const idempotencyKey = "spell-use-once";
+		const payload = {
+			baseRevision: character.revision,
+			leaseEpoch: lease.json().lease.epoch,
+			patches: [{op: "replace", path: "/spellcasting/spellSlots/3/current", value: 1}],
+			activity: {
+				type: "spell.used",
+				spellName: "<b>Fireball</b>",
+				spellSource: "PHB",
+				spellLevel: 3,
+				slotLevel: 3,
+				mode: "spell_slot",
+			},
+		};
+		const first = await app.inject({
+			method: "PATCH",
+			url: `/api/characters/${character.id}`,
+			headers: mutationHeaders(player, idempotencyKey),
+			payload,
+		});
+		const retry = await app.inject({
+			method: "PATCH",
+			url: `/api/characters/${character.id}`,
+			headers: mutationHeaders(player, idempotencyKey),
+			payload,
+		});
+
+		expect(first.statusCode).toBe(200);
+		expect(retry.statusCode).toBe(200);
+		expect(retry.json()).toEqual(first.json());
+		expect(store.getDomainEvents().filter(event => event.type === "spell.used")).toEqual([
+			expect.objectContaining({
+				aggregateId: character.id,
+				aggregateRevision: character.revision + 1,
+				visibility: "all_members",
+				payload: {
+					spellName: "Fireball",
+					spellSource: "PHB",
+					spellLevel: 3,
+					slotLevel: 3,
+					mode: "spell_slot",
+				},
+			}),
+		]);
+		expect(store.getAuditEntries().filter(entry => entry.action === "spell.used")).toEqual([
+			expect.objectContaining({
+				targetType: "character",
+				targetId: character.id,
+				details: expect.objectContaining({spellName: "Fireball", mode: "spell_slot"}),
+			}),
+		]);
+
+		const cantrip = await app.inject({
+			method: "PATCH",
+			url: `/api/characters/${character.id}`,
+			headers: mutationHeaders(player, "spell-use-cantrip"),
+			payload: {
+				baseRevision: first.json().character.revision,
+				leaseEpoch: lease.json().lease.epoch,
+				patches: [],
+				activity: {
+					type: "spell.used",
+					spellName: "Fire Bolt",
+					spellSource: "PHB",
+					spellLevel: 0,
+					slotLevel: 0,
+					mode: "cantrip",
+					privateState: {spellSlots: "must not pass"},
+				},
+			},
+		});
+		expect(cantrip.statusCode).toBe(200);
+		expect(cantrip.json().character.revision).toBe(first.json().character.revision);
+		expect(store.getDomainEvents().filter(event => event.type === "spell.used")).toHaveLength(2);
+		expect(store.getDomainEvents().find(event => event.payload.spellName === "Fire Bolt").payload).not.toHaveProperty("privateState");
+
+		const invalid = await app.inject({
+			method: "PATCH",
+			url: `/api/characters/${character.id}`,
+			headers: mutationHeaders(player, "spell-use-invalid"),
+			payload: {
+				baseRevision: first.json().character.revision,
+				leaseEpoch: lease.json().lease.epoch,
+				patches: [],
+				activity: {
+					type: "spell.used",
+					spellName: "Fire Bolt",
+					spellSource: "PHB",
+					spellLevel: 0,
+					slotLevel: 0,
+					mode: "arbitrary",
+				},
+			},
+		});
+		expect(invalid.statusCode).toBe(400);
+		expect(store.getDomainEvents().filter(event => event.type === "spell.used")).toHaveLength(2);
+	});
+
 	it("fences the old device after takeover", async () => {
 		const playerA = await pSignIn(IDENTITIES.player);
 		const campaign = await pCreateCampaign(playerA, "Player Campaign");

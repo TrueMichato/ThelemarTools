@@ -6,6 +6,11 @@ Status: shipped in [PR #243](https://github.com/TrueMichato/ThelemarTools/pull/2
 composition while preserving the existing V1 mutations, authority boundaries, privacy projections, and recovery
 states. This merged head is not yet promoted to the older recorded Oracle staging release.
 
+Recent activity now reads the newest authorization-scoped history page rather than an arbitrary raw-sequence
+tail. A keyboard-accessible **Load earlier activity** control follows a separate backward cursor, keeps loaded
+rows through live refresh/reconnect, and distinguishes an empty campaign from a privacy-filtered scan window.
+Technical projection invalidations continue to drive refetches but no longer masquerade as user activity.
+
 ## Purpose and timing
 
 Campaign Overview should answer two questions quickly: **Is this campaign ready?** and **What needs my attention?**

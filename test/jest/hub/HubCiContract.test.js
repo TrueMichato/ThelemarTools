@@ -81,6 +81,9 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(e2eRunner).toContain(`cleanup();`);
 		expect(e2eRunner).toContain(`productionSmokeName`);
 		expect(e2eRunner).toContain(`pCheckProductionProviderMetadata`);
+		expect(e2eRunner).toMatch(
+			/await pCheckProductionProviderMetadata\(\{name: productionSmokeName\}\);\s+await pRemoveProductionSmoke\(\);\s+await run\("node"/,
+		);
 		expect(e2eRunner).toMatch(/catch \(error\)[\s\S]*?composeArgs, "ps", "--all"[\s\S]*?composeArgs, "logs", "--tail=200"/);
 		expect(playwrightConfig).toContain("hub-playwright-results.json");
 		expect(workflow).toContain("test-results/hub-playwright-results.json");

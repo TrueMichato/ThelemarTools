@@ -58,6 +58,7 @@ describe("Character Sheet repository seam", () => {
 		await CharacterSheetPage.prototype._saveCurrentCharacter.call(host);
 
 		expect(repository.pUpsert).toHaveBeenCalledWith({
+			activity: null,
 			character: expect.objectContaining({
 				id: "cloud-character",
 				name: "Cloud Character",
@@ -113,6 +114,55 @@ describe("Character Sheet repository seam", () => {
 			["cloud-b", "Other — Wizard 2"],
 		]);
 		expect(select.value).toBe("cloud-a");
+	});
+
+	it("syncs state-bound Roll History controls on every full character render", () => {
+		const syncFromActiveCharacter = jest.fn();
+		const host = {
+			_state: {
+				syncDerivedResourceMaxes: jest.fn(),
+				getViewMode: () => "normal",
+			},
+			_rollHistory: {syncFromActiveCharacter},
+			_updateTabVisibility: jest.fn(),
+			_applyCharacterAccessMode: jest.fn(),
+		};
+		for (const method of [
+			"_renderBasicInfo",
+			"_renderAbilityScores",
+			"_renderSavingThrows",
+			"_renderSkills",
+			"_renderHp",
+			"_renderCombatStats",
+			"_renderDefenses",
+			"_renderHitDice",
+			"_renderDeathSaves",
+			"_renderInspiration",
+			"_renderProficiencies",
+			"_renderCurrency",
+			"_renderNotes",
+			"_renderAppearance",
+			"_renderPortrait",
+			"_renderConditions",
+			"_renderExhaustion",
+			"_renderResources",
+			"_renderOverviewMetamagic",
+			"_renderOverviewRanger",
+			"_renderOverviewPrinciples",
+			"_renderActiveStates",
+			"_renderFavouritesOverview",
+			"_renderOverviewActions",
+			"_renderOverviewSpecialtiesFeats",
+			"_renderAttacks",
+			"_renderQuickSpells",
+			"_renderAbilitiesDetailed",
+			"_renderModifierIndicators",
+			"_renderCompanions",
+		]) host[method] = jest.fn();
+
+		CharacterSheetPage.prototype._renderCharacter.call(host);
+		expect(syncFromActiveCharacter).toHaveBeenCalledTimes(1);
+		expect(syncFromActiveCharacter).toHaveBeenCalledTimes(1);
 	});
 
 	it("reports remote save failure so character switching can abort", async () => {
@@ -180,13 +230,22 @@ describe("Character Sheet repository seam", () => {
 		const host = {
 			_characterRepository: repository,
 			_currentCharacterId: "temporary-id",
+			_characterLoadGeneration: 1,
+			_isHubCharacter: true,
+			_hubCampaignId: "campaign-1",
 			_isCurrentCharacterNew: true,
-			_state: {toJson: () => ({name: "Cloud Character"})},
+			_state: {
+				toJson: () => ({name: "Cloud Character"}),
+				setId: jest.fn(),
+			},
 			_updateSaveIndicator: jest.fn(),
 			_writeActiveCharacterMirror: jest.fn(),
 			_clearActiveCharacterMirror: jest.fn(),
 			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
+			_adoptCanonicalCharacterIdentity: CharacterSheetPage.prototype._adoptCanonicalCharacterIdentity,
+			_pRefreshCanonicalCharacterRoster: CharacterSheetPage.prototype._pRefreshCanonicalCharacterRoster,
 			_lastSavedAt: 0,
+			_detachHubRealtime: jest.fn(),
 			_pLoadCharacters: jest.fn(async () => calls.push("refresh")),
 			_pRefreshPersistedCharacterUi: CharacterSheetPage.prototype._pRefreshPersistedCharacterUi,
 			_syncCurrentCharacterDropdownOption: CharacterSheetPage.prototype._syncCurrentCharacterDropdownOption,
@@ -221,6 +280,9 @@ describe("Character Sheet repository seam", () => {
 			_currentCharacterId: "temporary-id",
 			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
 			_isCurrentCharacterNew: true,
+			_characterLoadGeneration: 0,
+			_isHubCharacter: true,
+			_hubCampaignId: "campaign-1",
 			_state: {
 				toJson: () => ({name: "Cloud Character"}),
 				setId: jest.fn(),
@@ -229,7 +291,9 @@ describe("Character Sheet repository seam", () => {
 			_writeActiveCharacterMirror: jest.fn(),
 			_clearActiveCharacterMirror: jest.fn(),
 			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
+			_adoptCanonicalCharacterIdentity: CharacterSheetPage.prototype._adoptCanonicalCharacterIdentity,
 			_lastSavedAt: 0,
+			_detachHubRealtime: jest.fn(),
 			_pLoadCharacters: jest.fn(async () => {
 				calls.push("refresh");
 				throw new Error("roster unavailable");
@@ -549,6 +613,7 @@ describe("Character Sheet repository seam", () => {
 			_isHubRealtimeListenersBound: false,
 			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
 			_pRefreshHubReadOnlyCharacter: jest.fn(),
+			_onHubProjectionInvalidated: jest.fn(),
 			_onHubRealtimeCursor: jest.fn(),
 			_onHubSemanticOperation: jest.fn(),
 			_onHubRealtimeConnectionState: jest.fn(),
@@ -564,6 +629,7 @@ describe("Character Sheet repository seam", () => {
 		host._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
 		listeners.get("projectionInvalidated")({characterId: "owner-character"});
 		expect(host._pRefreshHubReadOnlyCharacter).toHaveBeenCalledTimes(1);
+		expect(host._onHubProjectionInvalidated).toHaveBeenCalledWith({characterId: "owner-character"});
 	});
 
 	it("blocks non-control mutation gestures in a DM read-only sheet", () => {
@@ -595,6 +661,57 @@ describe("Character Sheet repository seam", () => {
 			expect(navigation.preventDefault).not.toHaveBeenCalled();
 		} finally {
 			globalThis.document = documentPrevious;
+		}
+	});
+
+	it("adopts a canonical id when loading through a temporary recovery URL", async () => {
+		const previousLocation = globalThis.window.location;
+		const previousHistory = globalThis.window.history;
+		globalThis.window.location = new URL("http://test/charactersheet.html?campaign=campaign-1&id=temporary-id");
+		globalThis.window.history = {replaceState: jest.fn()};
+		const state = {
+			clearCampaignSettingsOverlay: jest.fn(),
+			loadFromJson: jest.fn(),
+			setCampaignSettingsOverlay: jest.fn(),
+			getBackgroundTheme: jest.fn(() => null),
+			getViewMode: jest.fn(() => "sheet"),
+		};
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: null,
+			_characterRepository: {
+				isRescueMirrorEnabled: false,
+				pGet: jest.fn(async ({characterId}) => {
+					expect(characterId).toBe("temporary-id");
+					return {id: "server-id", name: "Recovered"};
+				}),
+			},
+			_state: state,
+			_hubContext: null,
+			_detachHubRealtime: jest.fn(),
+			_reconcilePersistedCharacter: CharacterSheetPage.prototype._reconcilePersistedCharacter,
+			_reconcileClassFeatures: jest.fn(() => null),
+			_ensureLinguisticsSkillIfNeeded: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_applyBackgroundTheme: jest.fn(),
+			_updateThemePickerSelection: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_layout: null,
+			_playMode: null,
+		};
+
+		try {
+			await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "temporary-id")).resolves.toBe(true);
+			expect(host._currentCharacterId).toBe("server-id");
+			expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
+			expect(globalThis.window.history.replaceState).toHaveBeenCalledWith(
+				{},
+				"",
+				expect.objectContaining({searchParams: expect.any(URLSearchParams)}),
+			);
+		} finally {
+			globalThis.window.location = previousLocation;
+			globalThis.window.history = previousHistory;
 		}
 	});
 

@@ -11,6 +11,240 @@ export class HubApiError extends Error {
 	}
 }
 
+export const HUB_TRANSFER_REPLAY_WINDOW_MS = 23 * 60 * 60 * 1000;
+
+export function isTransferOutcomeUncertain (error) {
+	return ["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code) || error?.status >= 500;
+}
+
+export class HubTransferRefreshQueue {
+	constructor () {
+		this._queue = Promise.resolve();
+	}
+
+	pRun (fnRefresh) {
+		if (typeof fnRefresh !== "function") throw new TypeError(`fnRefresh must be a function.`);
+		const pResult = this._queue.then(fnRefresh, fnRefresh);
+		this._queue = pResult.catch(() => {});
+		return pResult;
+	}
+}
+
+export class HubTransferResolutionDrafts {
+	constructor ({
+		fnCreateKey = () => globalThis.crypto.randomUUID(),
+		fnNow = () => Date.now(),
+		replayWindowMs = HUB_TRANSFER_REPLAY_WINDOW_MS,
+	} = {}) {
+		this._fnCreateKey = fnCreateKey;
+		this._fnNow = fnNow;
+		this._replayWindowMs = replayWindowMs;
+		this._drafts = new Map();
+	}
+
+	_getRef ({campaignId, transferId}) {
+		return `${campaignId}\u0000${transferId}`;
+	}
+
+	get ({campaignId, transferId}) {
+		const draft = this._drafts.get(this._getRef({campaignId, transferId}));
+		return draft ? structuredClone(draft) : null;
+	}
+
+	stage ({campaignId, transferId, decision, rulesVersionId = null, idempotencyKey = undefined}) {
+		const existing = this.get({campaignId, transferId});
+		if (existing) return existing;
+		const draft = {
+			campaignId,
+			transferId,
+			decision,
+			rulesVersionId,
+			idempotencyKey: idempotencyKey ?? this._fnCreateKey(),
+			replayUntil: this._fnNow() + this._replayWindowMs,
+		};
+		this._drafts.set(this._getRef({campaignId, transferId}), draft);
+		return structuredClone(draft);
+	}
+
+	isReplayable (draft) {
+		return Number.isFinite(draft?.replayUntil) && this._fnNow() < draft.replayUntil;
+	}
+
+	clear ({campaignId, transferId, idempotencyKey}) {
+		const ref = this._getRef({campaignId, transferId});
+		const draft = this._drafts.get(ref);
+		if (draft?.idempotencyKey !== idempotencyKey) return false;
+		this._drafts.delete(ref);
+		return true;
+	}
+
+	reconcilePending ({campaignId, pendingTransferIds}) {
+		const pending = new Set(pendingTransferIds);
+		const prefix = `${campaignId}\u0000`;
+		for (const [ref, draft] of this._drafts.entries()) {
+			if (!ref.startsWith(prefix)) continue;
+			if (!pending.has(draft.transferId) || !this.isReplayable(draft)) this._drafts.delete(ref);
+		}
+	}
+}
+
+export async function pResolveTransferFromDraft ({
+	drafts,
+	campaignId,
+	transferId,
+	decision = "accept",
+	idempotencyKey = undefined,
+	pGetRulesVersionId = async () => null,
+	pResolve,
+}) {
+	let request = drafts.get({campaignId, transferId});
+	if (request && !drafts.isReplayable(request)) {
+		throw new HubApiError({code: "IDEMPOTENCY_WINDOW_EXPIRED", status: 0});
+	}
+	if (request && request.decision !== decision) {
+		throw new HubApiError({code: "IDEMPOTENCY_KEY_REUSED", status: 409});
+	}
+	if (!request) {
+		request = drafts.stage({
+			campaignId,
+			transferId,
+			decision,
+			rulesVersionId: decision === "accept" ? await pGetRulesVersionId() : null,
+			...(idempotencyKey === undefined ? {} : {idempotencyKey}),
+		});
+	}
+	try {
+		const result = await pResolve(request);
+		drafts.clear({...request});
+		return result;
+	} catch (error) {
+		if (!isTransferOutcomeUncertain(error)) drafts.clear({...request});
+		throw error;
+	}
+}
+
+export class HubTransferProposalDrafts {
+	constructor ({
+		fnNow = () => Date.now(),
+		replayWindowMs = HUB_TRANSFER_REPLAY_WINDOW_MS,
+	} = {}) {
+		this._fnNow = fnNow;
+		this._replayWindowMs = replayWindowMs;
+		this._drafts = new Map();
+	}
+
+	_getRef ({accountId, campaignId}) {
+		return `${accountId}\u0000${campaignId}`;
+	}
+
+	get ({accountId, campaignId}) {
+		const draft = this._drafts.get(this._getRef({accountId, campaignId}));
+		return draft ? structuredClone(draft) : null;
+	}
+
+	stage ({accountId, campaignId, request}) {
+		const existing = this.get({accountId, campaignId});
+		if (existing) return existing;
+		const draft = {
+			...structuredClone(request),
+			replayUntil: this._fnNow() + this._replayWindowMs,
+		};
+		this._drafts.set(this._getRef({accountId, campaignId}), draft);
+		return structuredClone(draft);
+	}
+
+	isReplayable (draft) {
+		return Number.isFinite(draft?.replayUntil) && this._fnNow() < draft.replayUntil;
+	}
+
+	clear ({accountId, campaignId, idempotencyKey}) {
+		const ref = this._getRef({accountId, campaignId});
+		const draft = this._drafts.get(ref);
+		if (draft?.idempotencyKey !== idempotencyKey) return false;
+		this._drafts.delete(ref);
+		return true;
+	}
+
+	static _getComparablePayload (payload = {}) {
+		const value = payload.request || payload.escrow || payload;
+		const items = (value.items || [])
+			.map(item => ({
+				entryId: item.entryId || item.id,
+				quantity: Number(item.quantity),
+			}))
+			.sort((a, b) => `${a.entryId}`.localeCompare(`${b.entryId}`) || a.quantity - b.quantity);
+		const currency = Object.fromEntries(["pp", "gp", "ep", "sp", "cp"]
+			.map(type => [type, Number(value.currency?.[type]) || 0]));
+		return JSON.stringify({items, currency});
+	}
+
+	static _isProjectedTransferMatch ({transfer, request}) {
+		if (
+			!transfer
+			|| transfer.sourceKind !== request.sourceKind
+			|| transfer.targetKind !== request.targetKind
+			|| (transfer.sourceId && transfer.sourceId !== request.sourceId)
+			|| (transfer.targetId && transfer.targetId !== request.targetId)
+		) return false;
+		return this._getComparablePayload(transfer.payload) === this._getComparablePayload(request.payload);
+	}
+
+	static reconcileExpiredProposal ({proposalRequest, transfers = []}) {
+		if (!proposalRequest?.idempotencyKey || !Array.isArray(transfers)) return {state: "ambiguous"};
+		const exactMatches = transfers.filter(transfer => transfer.actorCommandId === proposalRequest?.idempotencyKey);
+		if (exactMatches.length > 1) return {state: "ambiguous"};
+		if (exactMatches.length === 1) {
+			const transfer = exactMatches[0];
+			return {
+				state: ["proposed", "reserved"].includes(transfer.status) ? "pending" : "terminal",
+				transfer,
+			};
+		}
+
+		const legacyMatches = transfers.filter(transfer => !transfer.actorCommandId
+			&& ["proposed", "reserved"].includes(transfer.status)
+			&& this._isProjectedTransferMatch({transfer, request: proposalRequest}));
+		if (legacyMatches.length > 1) return {state: "ambiguous"};
+		if (legacyMatches.length === 1) return {state: "pending", transfer: legacyMatches[0], isLegacy: true};
+		return {state: "absent"};
+	}
+}
+
+export async function pResolveTransferAndRefresh ({pResolve, pRefresh}) {
+	let resolution;
+	try {
+		resolution = await pResolve();
+	} catch (resolutionError) {
+		try {
+			return {
+				state: "resolution_failed_refreshed",
+				resolutionError,
+				refreshResult: await pRefresh(),
+			};
+		} catch (refreshError) {
+			return {
+				state: "resolution_failed_refresh_failed",
+				resolutionError,
+				refreshError,
+			};
+		}
+	}
+
+	try {
+		return {
+			state: "resolved_refreshed",
+			resolution,
+			refreshResult: await pRefresh(),
+		};
+	} catch (refreshError) {
+		return {
+			state: "resolved_refresh_failed",
+			resolution,
+			refreshError,
+		};
+	}
+}
+
 export class HubApiClient {
 	constructor ({fnFetch = null} = {}) {
 		this._fnFetch = fnFetch || globalThis.fetch.bind(globalThis);
@@ -180,8 +414,12 @@ export class HubApiClient {
 		return (await this.pListEventPage({campaignId, afterSequence, limit})).events;
 	}
 
-	async pListEventPage ({campaignId, afterSequence = 0, limit = 200}) {
-		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/events?afterSequence=${afterSequence}&limit=${limit}`);
+	async pListEventPage ({campaignId, afterSequence = null, beforeSequence = null, limit = 200}) {
+		if (afterSequence != null && beforeSequence != null) throw new TypeError(`Only one event cursor may be supplied.`);
+		const cursor = beforeSequence == null
+			? `afterSequence=${afterSequence ?? 0}`
+			: `beforeSequence=${beforeSequence}`;
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/events?${cursor}&limit=${limit}`);
 	}
 
 	async pLogRoll ({campaignId, characterId = null, formula, total, context = null, visibility = "all_members", detail = {}, idempotencyKey}) {
@@ -297,10 +535,10 @@ export class HubApiClient {
 		});
 	}
 
-	async pPatchCharacter ({characterId, baseRevision, leaseEpoch, patches, rulesVersionId = null, idempotencyKey}) {
+	async pPatchCharacter ({characterId, baseRevision, leaseEpoch, patches, activity = null, rulesVersionId = null, idempotencyKey}) {
 		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}`, {
 			method: "PATCH",
-			body: {baseRevision, leaseEpoch, patches, ...(rulesVersionId ? {rulesVersionId} : {})},
+			body: {baseRevision, leaseEpoch, patches, ...(activity ? {activity} : {}), ...(rulesVersionId ? {rulesVersionId} : {})},
 			isMutation: true,
 			idempotencyKey,
 		});
@@ -487,9 +725,19 @@ export class HubApiClient {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/transfers`)).transfers;
 	}
 
-	async pProposeTransfer ({campaignId, sourceKind, sourceId, targetKind, targetId, payload, idempotencyKey}) {
+	async pProposeTransfer ({campaignId, sourceKind, sourceId, targetKind, targetId, payload, rulesVersionId, idempotencyKey}) {
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/transfers`, {
-			method: "POST", body: {sourceKind, sourceId, targetKind, targetId, payload}, isMutation: true, idempotencyKey,
+			method: "POST",
+			body: {
+				sourceKind,
+				sourceId,
+				targetKind,
+				targetId,
+				payload,
+				...(rulesVersionId === undefined ? {} : {rulesVersionId}),
+			},
+			isMutation: true,
+			idempotencyKey,
 		});
 	}
 
@@ -503,14 +751,7 @@ export class HubApiClient {
 		if (decision !== "accept") return pResolve(rulesVersionId);
 		let pin = rulesVersionId;
 		if (pin === undefined) pin = (await this.pGetCampaignContext({campaignId})).rulesVersion?.id || null;
-		try {
-			return await pResolve(pin);
-		} catch (error) {
-			if (error?.code !== "RULES_VERSION_STALE") throw error;
-			const refreshedPin = (await this.pGetCampaignContext({campaignId})).rulesVersion?.id || null;
-			if (refreshedPin === pin) throw error;
-			return pResolve(refreshedPin);
-		}
+		return pResolve(pin);
 	}
 
 	async pLogout () {

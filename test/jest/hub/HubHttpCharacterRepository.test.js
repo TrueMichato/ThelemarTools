@@ -1,7 +1,72 @@
 import {jest} from "@jest/globals";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
 
+class MemoryStorage {
+	constructor () {
+		this._values = new Map();
+	}
+
+	getItem (key) {
+		return this._values.get(key) ?? null;
+	}
+
+	setItem (key, value) {
+		this._values.set(key, value);
+	}
+
+	removeItem (key) {
+		this._values.delete(key);
+	}
+
+	key (index) {
+		return [...this._values.keys()][index] ?? null;
+	}
+
+	get length () {
+		return this._values.size;
+	}
+}
+
+class FailingStorage extends MemoryStorage {
+	constructor ({failOnWrite}) {
+		super();
+		this._failOnWrite = failOnWrite;
+		this._writeCount = 0;
+	}
+
+	setItem (key, value) {
+		this._writeCount++;
+		if (this._writeCount === this._failOnWrite) {
+			const error = new Error("sessionStorage quota exceeded");
+			error.name = "QuotaExceededError";
+			throw error;
+		}
+		super.setItem(key, value);
+	}
+}
+
+const makeSpellActivity = (spellName, mode = "cantrip") => ({
+	type: "spell.used",
+	spellName,
+	spellSource: "PHB",
+	spellLevel: mode === "cantrip" ? 0 : 1,
+	slotLevel: mode === "cantrip" ? 0 : 1,
+	mode,
+});
+
 describe("HTTP character repository", () => {
+	let previousSessionStorage;
+
+	beforeEach(() => {
+		previousSessionStorage = globalThis.sessionStorage;
+		globalThis.sessionStorage = new MemoryStorage();
+	});
+
+	afterEach(() => {
+		if (previousSessionStorage === undefined) delete globalThis.sessionStorage;
+		else globalThis.sessionStorage = previousSessionStorage;
+	});
+
 	it("lists and unwraps campaign character documents", async () => {
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
@@ -205,16 +270,16 @@ describe("HTTP character repository", () => {
 			character: {id: "server-1", name: "Unsaved Owner Draft", hp: {current: 1}},
 		})).rejects.toThrow("offline");
 		expect([...stored.keys()]).toEqual([
-			"hub-character-recovery:campaign-1:owner-account:server-1",
+			"hub-character-recovery:campaign-1:server-1",
 		]);
+		expect(JSON.parse(stored.get("hub-character-recovery:campaign-1:server-1"))).toEqual(expect.objectContaining({
+			ownerAccountId: "owner-account",
+		}));
 
 		const ownerReloadRepository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: ownerApi});
 		ownerReloadRepository._recoveryStorage = storage;
 		await expect(ownerReloadRepository.pGet({characterId: "server-1"}))
 			.resolves.toMatchObject({name: "Unsaved Owner Draft", hp: {current: 1}});
-		stored.set("hub-character-recovery:campaign-1:server-1", JSON.stringify({
-			snapshot: {name: "Legacy Unscoped Owner Draft", hp: {current: 0}},
-		}));
 
 		let dmTruth = {name: "Server Rowan", hp: {current: 12}};
 		const dmRepository = new HubHttpCharacterRepository({
@@ -237,7 +302,7 @@ describe("HTTP character repository", () => {
 		dmRepository._failedWrites.set("server-1", {name: "Leaked In-Memory Owner Draft", hp: {current: 0}});
 		await expect(dmRepository.pGet({characterId: "server-1"}))
 			.resolves.toEqual({id: "server-1", name: "Server Rowan", hp: {current: 12}});
-		expect(stored.has("hub-character-recovery:campaign-1:server-1")).toBe(false);
+		expect(stored.has("hub-character-recovery:campaign-1:server-1")).toBe(true);
 
 		dmTruth = {name: "Server Rowan Updated", hp: {current: 9}};
 		await expect(dmRepository.pGet({characterId: "server-1"}))
@@ -288,6 +353,833 @@ describe("HTTP character repository", () => {
 		expect(repository._accepted.get("server-1")).toEqual(documents[1]);
 	});
 
+	it("binds an exact-base patch recovery only after authoritative owner verification", async () => {
+		const storage = new MemoryStorage();
+		const recoveryKey = "hub-character-recovery:campaign-1:server-id";
+		storage.setItem(recoveryKey, JSON.stringify({
+			version: 1,
+			base: {name: "Mira", hp: {current: 10}},
+			snapshot: {name: "Mira", hp: {current: 9}},
+			commandKeys: {create: "create-old", patch: "patch-old"},
+			coverageVersion: 2,
+			coverage: {
+				base: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+				snapshot: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			},
+		}));
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => ({
+					id: "server-id",
+					ownerAccountId: "owner",
+					campaignId: "campaign-1",
+					revision: 2,
+					data: {name: "Mira", hp: {current: 10}},
+				}),
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pGet({characterId: "server-id"}))
+			.resolves.toEqual({id: "server-id", name: "Mira", hp: {current: 9}});
+		expect(JSON.parse(storage.getItem(recoveryKey))).toEqual(expect.objectContaining({
+			ownerAccountId: "owner",
+			intent: "patch",
+		}));
+	});
+
+	it("requires an explicit account claim before exposing an exact-base recovery-only create", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const recoveryKey = `hub-character-recovery:campaign-1:${temporaryId}`;
+		storage.setItem(recoveryKey, JSON.stringify({
+			version: 1,
+			base: null,
+			snapshot: {name: "Mira", hp: {current: 9}},
+			commandKeys: {create: "create-old", patch: "patch-old"},
+			coverageVersion: 2,
+			coverage: {
+				base: {revision: null, acceptedSequence: null, appliedOperationLegIds: []},
+				snapshot: {revision: null, acceptedSequence: null, appliedOperationLegIds: []},
+			},
+		}));
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [],
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pList()).resolves.toEqual([]);
+		await expect(repository.pListUnboundLegacyRecoveryIds()).resolves.toEqual([temporaryId]);
+		await expect(repository.pClaimUnboundLegacyRecovery({characterId: temporaryId})).resolves.toBe(true);
+		expect(JSON.parse(storage.getItem(recoveryKey))).toEqual(expect.objectContaining({
+			ownerAccountId: "owner",
+			intent: "create",
+			clientImportId: temporaryId,
+		}));
+		await expect(repository.pList()).resolves.toEqual([
+			{id: temporaryId, name: "Mira", hp: {current: 9}},
+		]);
+	});
+
+	it("migrates an explicitly claimed exact-base create after a lost canonical response", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const canonical = {
+			id: "server-id",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: temporaryId,
+			revision: 2,
+			data: {name: "Canonical", hp: {current: 7}},
+		};
+		storage.setItem(`hub-character-recovery:campaign-1:${temporaryId}`, JSON.stringify({
+			version: 1,
+			base: null,
+			snapshot: {name: "Recovered", hp: {current: 9}},
+			commandKeys: {create: "create-old", patch: "patch-old"},
+			coverageVersion: 2,
+			coverage: {
+				base: {revision: null, acceptedSequence: null, appliedOperationLegIds: []},
+				snapshot: {revision: null, acceptedSequence: null, appliedOperationLegIds: []},
+			},
+		}));
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [structuredClone(canonical)],
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pList()).resolves.toEqual([{id: canonical.id, ...canonical.data}]);
+		await expect(repository.pListUnboundLegacyRecoveryIds()).resolves.toEqual([temporaryId]);
+		await repository.pClaimUnboundLegacyRecovery({characterId: temporaryId});
+		await expect(repository.pList()).resolves.toEqual([
+			{id: canonical.id, name: "Recovered", hp: {current: 9}},
+		]);
+		expect(repository._canonicalIds.get(temporaryId)).toBe(canonical.id);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
+		expect(JSON.parse(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`))).toEqual(expect.objectContaining({
+			ownerAccountId: "owner",
+			intent: "create",
+			clientImportId: temporaryId,
+		}));
+	});
+
+	it("migrates temporary recovery to the canonical id when create committed but its response was lost", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const canonical = {
+			id: "server-id",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: temporaryId,
+			revision: 1,
+			data: {name: "Mira", hp: {current: 9}},
+		};
+		let createKey;
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		const firstApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async input => {
+				createKey = input.idempotencyKey;
+				throw new Error("response lost");
+			},
+		};
+		const first = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: firstApi,
+			fnGetRulesVersionId: () => "rules-a",
+		});
+		first._recoveryStorage = storage;
+		await first.pList();
+		await expect(first.pUpsert({character: {id: temporaryId, ...canonical.data}, activity})).rejects.toThrow("response lost");
+		const stored = JSON.parse(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`));
+		const patchKey = stored.commands[0].commandKeys.patch;
+
+		const retryCreates = [];
+		const patches = [];
+		const freshApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [structuredClone(canonical)],
+			pGetCharacter: async ({characterId}) => {
+				expect(characterId).toBe(canonical.id);
+				return structuredClone(canonical);
+			},
+			pCreateCharacter: async input => {
+				retryCreates.push(input);
+				return {character: structuredClone(canonical)};
+			},
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				patches.push(structuredClone(input));
+				return {character: {...structuredClone(canonical), revision: 2}};
+			},
+		};
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: freshApi,
+			fnGetRulesVersionId: () => "rules-b",
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).resolves.toEqual([{id: canonical.id, ...canonical.data}]);
+		expect(fresh._canonicalIds.get(temporaryId)).toBe(canonical.id);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
+		const migrated = JSON.parse(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`));
+		expect(migrated.commands[0].commandKeys).toEqual({create: createKey, patch: patchKey});
+		await expect(fresh.pGet({characterId: temporaryId})).resolves.toEqual({id: canonical.id, ...canonical.data});
+		await expect(fresh.pUpsert({character: {id: canonical.id, ...canonical.data}, activity}))
+			.resolves.toEqual({id: canonical.id, ...canonical.data});
+		expect(retryCreates).toEqual([]);
+		expect(patches).toHaveLength(1);
+		expect(patches[0]).toEqual(expect.objectContaining({idempotencyKey: patchKey, activity}));
+		expect(patches[0].rulesVersionId).toBe("rules-a");
+		for (const id of [temporaryId, canonical.id]) {
+			expect(fresh._failedWrites.has(id)).toBe(false);
+			expect(fresh._recoveredBases.has(id)).toBe(false);
+			expect(fresh._recoveryCommandQueues.has(id)).toBe(false);
+		}
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`)).toBeNull();
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
+		expect(fresh.hasPendingWrites()).toBe(false);
+		expect(createKey).toBeTruthy();
+	});
+
+	it("preserves canonical changes made after a recovered create committed", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const submitted = {
+			name: "Mira",
+			hp: {current: 9},
+			xp: 0,
+			inventory: [],
+		};
+		const canonical = {
+			id: "server-id",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: temporaryId,
+			revision: 3,
+			data: {
+				...submitted,
+				xp: 100,
+				inventory: [{id: "award-1", name: "Potion of Healing"}],
+			},
+		};
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		const seed = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					const error = new Error("missing");
+					error.code = "CHARACTER_NOT_FOUND";
+					throw error;
+				},
+				pCreateCharacter: async () => { throw new Error("response lost"); },
+			},
+		});
+		seed._recoveryStorage = storage;
+		await expect(seed.pUpsert({character: {id: temporaryId, ...submitted}, activity})).rejects.toThrow("response lost");
+
+		const patches = [];
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [structuredClone(canonical)],
+				pGetCharacter: async () => structuredClone(canonical),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async input => {
+					patches.push(structuredClone(input));
+					return {character: {...structuredClone(canonical), revision: 4}};
+				},
+			},
+		});
+		fresh._recoveryStorage = storage;
+
+		await fresh.pList();
+		await expect(fresh.pUpsert({character: {id: canonical.id, ...submitted}, activity}))
+			.resolves.toEqual({id: canonical.id, ...canonical.data});
+		expect(patches).toHaveLength(1);
+		expect(patches[0].patches).toEqual([]);
+		expect(patches[0].activity).toEqual(activity);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`)).toBeNull();
+	});
+
+	it("discovers canonical identity before routing a temporary recovery URL", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const canonical = {
+			id: "server-id",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: temporaryId,
+			revision: 1,
+			data: {name: "Mira"},
+		};
+		const seed = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					const error = new Error("missing");
+					error.code = "CHARACTER_NOT_FOUND";
+					throw error;
+				},
+				pCreateCharacter: async () => { throw new Error("response lost"); },
+			},
+		});
+		seed._recoveryStorage = storage;
+		await expect(seed.pUpsert({character: {id: temporaryId, name: "Mira"}})).rejects.toThrow("response lost");
+
+		const getCharacter = jest.fn(async ({characterId}) => {
+			expect(characterId).toBe(canonical.id);
+			return structuredClone(canonical);
+		});
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [structuredClone(canonical)],
+				pGetCharacter: getCharacter,
+			},
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pGetCampaignId({characterId: temporaryId})).resolves.toBe("campaign-1");
+		expect(fresh._canonicalIds.get(temporaryId)).toBe(canonical.id);
+		expect(getCharacter).not.toHaveBeenCalled();
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`)).not.toBeNull();
+
+		const reloaded = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [structuredClone(canonical)],
+				pGetCharacter: getCharacter,
+			},
+		});
+		reloaded._recoveryStorage = storage;
+		await expect(reloaded.pGetCampaignId({characterId: temporaryId})).resolves.toBe("campaign-1");
+		expect(reloaded._canonicalIds.get(temporaryId)).toBe(canonical.id);
+		expect(getCharacter).not.toHaveBeenCalled();
+	});
+
+	it("routes a genuine recovery-only temporary URL without a doomed character lookup", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const seed = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					const error = new Error("missing");
+					error.code = "CHARACTER_NOT_FOUND";
+					throw error;
+				},
+				pCreateCharacter: async () => { throw new Error("offline before commit"); },
+			},
+		});
+		seed._recoveryStorage = storage;
+		await expect(seed.pUpsert({character: {id: temporaryId, name: "Mira"}})).rejects.toThrow("offline before commit");
+
+		const getCharacter = jest.fn();
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [],
+				pGetCharacter: getCharacter,
+			},
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pGetCampaignId({characterId: temporaryId})).resolves.toBe("campaign-1");
+		expect(getCharacter).not.toHaveBeenCalled();
+		await expect(fresh.pGet({characterId: temporaryId})).resolves.toEqual({id: temporaryId, name: "Mira"});
+	});
+
+	it("keeps temporary recovery intact when canonical identity migration cannot be stored", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const canonicalId = "server-id";
+		const firstApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async () => { throw new Error("response lost"); },
+		};
+		const first = new HubHttpCharacterRepository({campaignId: "campaign-1", api: firstApi});
+		first._recoveryStorage = storage;
+		await first.pList();
+		await expect(first.pUpsert({character: {id: temporaryId, name: "Mira"}})).rejects.toThrow("response lost");
+		const temporaryKey = `hub-character-recovery:campaign-1:${temporaryId}`;
+		const canonicalKey = `hub-character-recovery:campaign-1:${canonicalId}`;
+		const storedBefore = storage.getItem(temporaryKey);
+		const setItem = storage.setItem.bind(storage);
+		storage.setItem = (key, value) => {
+			if (key === canonicalKey) throw new Error("quota");
+			setItem(key, value);
+		};
+
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [{
+					id: canonicalId,
+					ownerAccountId: "owner",
+					campaignId: "campaign-1",
+					clientImportId: temporaryId,
+					revision: 1,
+					data: {name: "Mira"},
+				}],
+			},
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).rejects.toMatchObject({code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		expect(fresh._canonicalIds.has(temporaryId)).toBe(false);
+		expect(storage.getItem(temporaryKey)).toBe(storedBefore);
+		expect(storage.getItem(canonicalKey)).toBeNull();
+	});
+
+	it("keeps a committed create pending until canonical recovery migration and activity replay succeed", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		const canonicalId = "server-id";
+		const temporaryKey = `hub-character-recovery:campaign-1:${temporaryId}`;
+		const canonicalKey = `hub-character-recovery:campaign-1:${canonicalId}`;
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		const creates = [];
+		const patches = [];
+		let isFailCanonicalWrite = true;
+		const setItem = storage.setItem.bind(storage);
+		storage.setItem = (key, value) => {
+			if (isFailCanonicalWrite && key === canonicalKey) throw new Error("quota");
+			setItem(key, value);
+		};
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async input => {
+				creates.push(structuredClone(input));
+				return {
+					character: {
+						id: canonicalId,
+						ownerAccountId: "owner",
+						campaignId: "campaign-1",
+						clientImportId: temporaryId,
+						revision: 1,
+						data: structuredClone(input.data),
+					},
+				};
+			},
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				patches.push(structuredClone(input));
+				return {
+					character: {
+						id: canonicalId,
+						ownerAccountId: "owner",
+						campaignId: "campaign-1",
+						clientImportId: temporaryId,
+						revision: 2,
+						data: {name: "Mira"},
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pUpsert({character: {id: temporaryId, name: "Mira"}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		const pending = JSON.parse(storage.getItem(temporaryKey));
+		expect(pending.commands[0].activity).toEqual(activity);
+		expect(repository._canonicalIds.has(temporaryId)).toBe(false);
+		expect(repository._recoveryCommandQueues.get(temporaryId)).toHaveLength(1);
+		expect(repository._failedWrites.has(temporaryId)).toBe(true);
+		expect(repository.hasPendingWrites()).toBe(true);
+		expect(storage.getItem(canonicalKey)).toBeNull();
+
+		isFailCanonicalWrite = false;
+		await expect(repository.pUpsert({character: {id: temporaryId, name: "Mira"}, activity: null}))
+			.resolves.toEqual({id: canonicalId, name: "Mira"});
+
+		expect(creates).toHaveLength(2);
+		expect(creates[1].idempotencyKey).toBe(creates[0].idempotencyKey);
+		expect(patches).toHaveLength(1);
+		expect(patches[0]).toEqual(expect.objectContaining({
+			characterId: canonicalId,
+			idempotencyKey: pending.commands[0].commandKeys.patch,
+			activity,
+		}));
+		for (const id of [temporaryId, canonicalId]) {
+			expect(repository._failedWrites.has(id)).toBe(false);
+			expect(repository._recoveredBases.has(id)).toBe(false);
+			expect(repository._recoveryCommandQueues.has(id)).toBe(false);
+		}
+		expect(storage.getItem(temporaryKey)).toBeNull();
+		expect(storage.getItem(canonicalKey)).toBeNull();
+		expect(repository.hasPendingWrites()).toBe(false);
+	});
+
+	it("lists and retries an owner-scoped recovery-only create that never reached the server", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "temporary-id";
+		let createKey;
+		const firstApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async input => {
+				createKey = input.idempotencyKey;
+				throw new Error("offline before commit");
+			},
+		};
+		const first = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: firstApi,
+			fnGetRulesVersionId: () => "rules-a",
+		});
+		first._recoveryStorage = storage;
+		await first.pList();
+		await expect(first.pUpsert({character: {id: temporaryId, name: "Mira", hp: {current: 9}}}))
+			.rejects.toThrow("offline before commit");
+
+		const createInputs = [];
+		const canonical = {
+			id: "server-id",
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: temporaryId,
+			revision: 1,
+			data: {name: "Mira", hp: {current: 9}},
+		};
+		const freshApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: jest.fn(async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			}),
+			pCreateCharacter: async input => {
+				createInputs.push(structuredClone(input));
+				return {character: structuredClone(canonical)};
+			},
+		};
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: freshApi,
+			fnGetRulesVersionId: () => "rules-b",
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).resolves.toEqual([{id: temporaryId, name: "Mira", hp: {current: 9}}]);
+		await expect(fresh.pGet({characterId: temporaryId})).resolves.toEqual({id: temporaryId, name: "Mira", hp: {current: 9}});
+		expect(freshApi.pGetCharacter).not.toHaveBeenCalled();
+		await expect(fresh.pUpsert({character: {id: temporaryId, name: "Mira", hp: {current: 9}}}))
+			.resolves.toEqual({id: canonical.id, ...canonical.data});
+		expect(createInputs).toHaveLength(1);
+		expect(createInputs[0].idempotencyKey).toBe(createKey);
+		expect(createInputs[0].rulesVersionId).toBe("rules-a");
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${temporaryId}`)).toBeNull();
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${canonical.id}`)).toBeNull();
+	});
+
+	it("does not list another account's recovery-only create", async () => {
+		const storage = new MemoryStorage();
+		const seedApi = {
+			pGetSession: async () => ({signedIn: true, account: {id: "owner-a"}}),
+			pListCharacters: async () => [],
+			pGetCharacter: async () => {
+				const error = new Error("missing");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			},
+			pCreateCharacter: async () => { throw new Error("offline"); },
+		};
+		const seed = new HubHttpCharacterRepository({campaignId: "campaign-1", api: seedApi});
+		seed._recoveryStorage = storage;
+		await seed.pList();
+		await expect(seed.pUpsert({character: {id: "private-temporary-id", name: "Private"}})).rejects.toThrow("offline");
+
+		const other = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner-b"}}),
+				pListCharacters: async () => [],
+			},
+		});
+		other._recoveryStorage = storage;
+
+		await expect(other.pList()).resolves.toEqual([]);
+	});
+
+	it("does not migrate another account's recovery through a colliding client import id", async () => {
+		const storage = new MemoryStorage();
+		const temporaryId = "colliding-temporary-id";
+		const privateKey = `hub-character-recovery:campaign-1:${temporaryId}`;
+		const seed = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner-a"}}),
+				pGetCharacter: async () => {
+					const error = new Error("missing");
+					error.code = "CHARACTER_NOT_FOUND";
+					throw error;
+				},
+				pCreateCharacter: async () => { throw new Error("offline"); },
+			},
+		});
+		seed._recoveryStorage = storage;
+		await expect(seed.pUpsert({character: {id: temporaryId, name: "Owner A Private"}})).rejects.toThrow("offline");
+		const privateRecovery = storage.getItem(privateKey);
+
+		const ownerBCharacter = {
+			id: "owner-b-character",
+			ownerAccountId: "owner-b",
+			campaignId: "campaign-1",
+			clientImportId: temporaryId,
+			revision: 1,
+			data: {name: "Owner B Public"},
+		};
+		const other = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner-b"}}),
+				pListCharacters: async () => [structuredClone(ownerBCharacter)],
+			},
+		});
+		other._recoveryStorage = storage;
+
+		await expect(other.pList()).resolves.toEqual([{id: ownerBCharacter.id, name: "Owner B Public"}]);
+		expect(other._canonicalIds.has(temporaryId)).toBe(false);
+		expect(storage.getItem(privateKey)).toBe(privateRecovery);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${ownerBCharacter.id}`)).toBeNull();
+	});
+
+	it("does not migrate same-owner patch recovery through a colliding client import id", async () => {
+		const storage = new MemoryStorage();
+		const patchedCharacterId = "established-a";
+		const collidingCharacterId = "established-b";
+		const established = {
+			id: patchedCharacterId,
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {name: "Character A", hp: {current: 10}},
+		};
+		const seed = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => structuredClone(established),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async () => { throw new Error("offline"); },
+			},
+		});
+		seed._recoveryStorage = storage;
+		await seed.pGet({characterId: patchedCharacterId});
+		await expect(seed.pUpsert({
+			character: {id: patchedCharacterId, name: "Character A", hp: {current: 9}},
+		})).rejects.toThrow("offline");
+		const recoveryKey = `hub-character-recovery:campaign-1:${patchedCharacterId}`;
+		const recoveryRaw = storage.getItem(recoveryKey);
+
+		const colliding = {
+			id: collidingCharacterId,
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			clientImportId: patchedCharacterId,
+			revision: 1,
+			data: {name: "Character B", hp: {current: 6}},
+		};
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [structuredClone(colliding)],
+			},
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).resolves.toEqual([{id: collidingCharacterId, name: "Character B", hp: {current: 6}}]);
+		expect(fresh._canonicalIds.has(patchedCharacterId)).toBe(false);
+		expect(storage.getItem(recoveryKey)).toBe(recoveryRaw);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${collidingCharacterId}`)).toBeNull();
+	});
+
+	it("does not expose or recreate a failed patch when its established character disappears", async () => {
+		const storage = new MemoryStorage();
+		const characterId = "established-id";
+		const established = {
+			id: characterId,
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {name: "Mira", hp: {current: 10}},
+		};
+		const seed = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => structuredClone(established),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async () => { throw new Error("offline"); },
+			},
+		});
+		seed._recoveryStorage = storage;
+		await seed.pGet({characterId});
+		await expect(seed.pUpsert({character: {id: characterId, name: "Mira", hp: {current: 9}}})).rejects.toThrow("offline");
+		const stored = JSON.parse(storage.getItem(`hub-character-recovery:campaign-1:${characterId}`));
+		expect(stored.intent).toBe("patch");
+		expect(stored.clientImportId).toBeUndefined();
+
+		const create = jest.fn();
+		const missing = Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [],
+				pGetCharacter: async () => { throw missing; },
+				pCreateCharacter: create,
+			},
+		});
+		fresh._recoveryStorage = storage;
+
+		await expect(fresh.pList()).resolves.toEqual([]);
+		expect(fresh.getPendingRecovery(characterId)).toEqual({name: "Mira", hp: {current: 9}});
+		await expect(fresh.pUpsert({character: {id: characterId, name: "Mira", hp: {current: 9}}})).rejects.toBe(missing);
+		expect(create).not.toHaveBeenCalled();
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${characterId}`)).not.toBeNull();
+	});
+
+	it("does not infer create intent from legacy recovery without a recorded base", async () => {
+		const storage = new MemoryStorage();
+		const characterId = "legacy-established-id";
+		storage.setItem(`hub-character-recovery:campaign-1:${characterId}`, JSON.stringify({
+			ownerAccountId: "owner",
+			clientImportId: characterId,
+			snapshot: {name: "Legacy", hp: {current: 9}},
+			commandKeys: {create: "legacy-create", patch: "legacy-patch"},
+		}));
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [],
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pList()).resolves.toEqual([]);
+		expect(repository._recoveryOnlyIds.has(characterId)).toBe(false);
+		expect(storage.getItem(`hub-character-recovery:campaign-1:${characterId}`)).not.toBeNull();
+	});
+
+	it("resolves Use Local through the canonical id after temporary recovery migration", async () => {
+		const temporaryId = "temporary-id";
+		const canonicalId = "server-id";
+		const leases = [];
+		const patches = [];
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pAcquireCharacterLease: async input => {
+					leases.push(structuredClone(input));
+					return {epoch: 2};
+				},
+				pPatchCharacter: async input => {
+					patches.push(structuredClone(input));
+					return {
+						character: {
+							id: canonicalId,
+							ownerAccountId: "owner",
+							campaignId: "campaign-1",
+							revision: 3,
+							data: {hp: {current: 9}},
+						},
+					};
+				},
+			},
+		});
+		repository._canonicalIds.set(temporaryId, canonicalId);
+		repository._accepted.set(canonicalId, {
+			id: canonicalId,
+			ownerAccountId: "owner",
+			campaignId: "campaign-1",
+			revision: 2,
+			data: {hp: {current: 7}},
+		});
+		repository._conflicts.set(canonicalId, {
+			base: {hp: {current: 10}},
+			local: {hp: {current: 9}},
+			server: {hp: {current: 7}},
+			serverDocument: {
+				id: canonicalId,
+				ownerAccountId: "owner",
+				campaignId: "campaign-1",
+				revision: 2,
+				data: {hp: {current: 7}},
+			},
+			conflicts: [{localPath: "/hp/current", remotePath: "/hp/current"}],
+		});
+		repository._recoveryCommandQueues.set(canonicalId, [{
+			requestedId: canonicalId,
+			submittedSnapshot: {hp: {current: 9}},
+			submittedActivity: makeSpellActivity("Shield", "spell_slot"),
+			commandKeys: {create: "create-key", patch: "patch-key"},
+			submittedBase: {hp: {current: 10}},
+			submittedBaseCoverage: {revision: 1, acceptedSequence: null},
+			submittedSnapshotCoverage: {revision: 1, acceptedSequence: null},
+			state: "conflict",
+			intent: "patch",
+		}]);
+
+		await expect(repository.pResolveConflict({characterId: temporaryId, choice: "local"}))
+			.resolves.toEqual({id: canonicalId, hp: {current: 9}});
+		expect(leases).toEqual([{characterId: canonicalId, isTakeover: true}, {characterId: canonicalId, isTakeover: false}]);
+		expect(patches).toEqual([expect.objectContaining({
+			characterId: canonicalId,
+			idempotencyKey: expect.not.stringMatching(/^patch-key$/),
+			activity: makeSpellActivity("Shield", "spell_slot"),
+		})]);
+		expect(repository.getConflictRecovery(canonicalId)).toBeNull();
+	});
+
 	it("uses accepted revision and lease epoch for patch saves", async () => {
 		const calls = [];
 		const api = {
@@ -323,6 +1215,45 @@ describe("HTTP character repository", () => {
 				patches: [{op: "replace", path: "/hp/current", value: 12}],
 			}),
 		]);
+	});
+
+	it("persists an explicit spell-use activity even when the character document is unchanged", async () => {
+		const calls = [];
+		const activity = {
+			type: "spell.used",
+			spellName: "Fire Bolt",
+			spellSource: "PHB",
+			spellLevel: 0,
+			slotLevel: 0,
+			mode: "cantrip",
+		};
+		const character = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 3,
+			data: {name: "Mira"},
+		};
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(character),
+			pAcquireCharacterLease: async () => ({epoch: 7}),
+			pPatchCharacter: async input => {
+				calls.push(input);
+				return {character: structuredClone(character)};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+
+		await repository.pUpsert({character: {id: "server-1", name: "Mira"}, activity});
+
+		expect(calls).toEqual([expect.objectContaining({
+			characterId: "server-1",
+			baseRevision: 3,
+			leaseEpoch: 7,
+			patches: [],
+			activity,
+		})]);
 	});
 
 	it("keeps campaign characters read-only while signed out", async () => {
@@ -380,6 +1311,58 @@ describe("HTTP character repository", () => {
 		expect(repository._recoveryVersions.size).toBe(0);
 	});
 
+	it("converges a queued owner save when an authoritative refresh already accepted the identical changes", async () => {
+		const base = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {
+				name: "Mira",
+				hp: {current: 12, max: 12},
+				resources: [],
+			},
+		};
+		const converged = {
+			...base,
+			revision: 2,
+			data: {
+				...base.data,
+				hp: {current: 11, max: 12},
+				resources: [{id: "second-wind", name: "Second Wind", current: 1, max: 1}],
+			},
+		};
+		let resolveRefresh;
+		const pRefresh = new Promise(resolve => resolveRefresh = resolve);
+		let getCount = 0;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => (++getCount === 1 ? structuredClone(base) : pRefresh),
+			pAcquireCharacterLease: jest.fn(),
+			pPatchCharacter: jest.fn(),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+
+		const pReconcile = repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => structuredClone(base.data),
+			fnAdoptLive: jest.fn(),
+		});
+		const pSave = repository.pUpsert({
+			character: {
+				id: "server-1",
+				...structuredClone(converged.data),
+				_savedAt: 123,
+			},
+		});
+		resolveRefresh(structuredClone(converged));
+
+		await expect(pReconcile).resolves.toMatchObject({status: "reconciled", revision: 2});
+		await expect(pSave).resolves.toEqual({id: "server-1", ...converged.data});
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
 	it("rebases authoritative inventory escrow into the live sheet without losing disjoint edits", async () => {
 		let revision = 1;
 		const documents = {
@@ -402,6 +1385,513 @@ describe("HTTP character repository", () => {
 
 		expect(adopted).toEqual({notes: "locally edited", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]});
 		expect(repository._accepted.get("server-1")).toEqual(documents[2]);
+	});
+
+	it("keeps the real overlapping owner draft as the explicit Use Local candidate", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {name: "Mira", hp: {current: 12}, xp: 100, inventory: [{id: "arrow", quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {name: "Mira", hp: {current: 9}, xp: 120, inventory: [{id: "arrow", quantity: 7}]}},
+			3: {id: "server-1", campaignId: "campaign-1", revision: 3, data: {name: "Mira", hp: {current: 8}, xp: 140, inventory: [{id: "arrow", quantity: 5}]}},
+		};
+		const patches = [];
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(documents[revision]),
+			pAcquireCharacterLease: async () => ({epoch: 2}),
+			pPatchCharacter: async input => {
+				patches.push(...input.patches);
+				return {
+					character: {
+						id: "server-1",
+						campaignId: "campaign-1",
+						revision: 4,
+						data: {name: "Mira", hp: {current: 7}, xp: 140, inventory: [{id: "arrow", quantity: 5}]},
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({name: "Mira", hp: {current: 7}, xp: 110, inventory: [{id: "arrow", quantity: 9}]}),
+			fnAdoptLive: () => { throw new Error("must not adopt"); },
+			isPreserveLocalOnConflict: true,
+		})).resolves.toMatchObject({status: "conflict"});
+		expect(repository.getConflictRecovery("server-1")).toMatchObject({
+			local: {hp: {current: 7}, xp: 120, inventory: [{quantity: 7}]},
+			server: {hp: {current: 9}, xp: 120, inventory: [{quantity: 7}]},
+		});
+
+		revision = 3;
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({name: "Mira", hp: {current: 7}, xp: 110, inventory: [{id: "arrow", quantity: 9}]}),
+			fnAdoptLive: () => { throw new Error("must not adopt"); },
+			isPreserveLocalOnConflict: true,
+		})).resolves.toMatchObject({status: "conflict"});
+		expect(repository.getConflictRecovery("server-1")).toMatchObject({
+			base: {hp: {current: 8}, xp: 140, inventory: [{quantity: 5}]},
+			local: {hp: {current: 7}, xp: 140, inventory: [{quantity: 5}]},
+			server: {hp: {current: 8}, xp: 140, inventory: [{quantity: 5}]},
+		});
+
+		await expect(repository.pResolveConflict({
+			characterId: "server-1",
+			choice: "local",
+		})).resolves.toMatchObject({hp: {current: 7}});
+		expect(patches).toContainEqual({op: "replace", path: "/hp/current", value: 7});
+		expect(patches.some(patch => patch.path.startsWith("/inventory"))).toBe(false);
+		expect(patches.some(patch => patch.path === "/xp")).toBe(false);
+	});
+
+	it("ignores client save timestamps while rebasing disjoint owner edits", async () => {
+		let revision = 1;
+		const documents = {
+			1: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 1,
+				data: {name: "Mira", hp: {current: 12}, _savedAt: 1},
+			},
+			2: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 2,
+				data: {name: "Mira", hp: {current: 9}, _savedAt: 3},
+			},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({name: "Mira Offline", hp: {current: 12}, _savedAt: 2}),
+			fnAdoptLive: data => adopted = data,
+			isPreserveLocalOnConflict: true,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		expect(adopted).toMatchObject({name: "Mira Offline", hp: {current: 9}});
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
+	it("ignores deterministic Character Sheet item aliases while reconciling transfer quantities", async () => {
+		let revision = 1;
+		const item = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			property: ["V"],
+			reqAttune: true,
+			charges: 5,
+		};
+		const documents = {
+			1: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 1,
+				data: {
+					notes: "before",
+					inventory: [{id: "stable-stack", item, quantity: 2}],
+				},
+			},
+			2: {
+				id: "server-1",
+				campaignId: "campaign-1",
+				revision: 2,
+				data: {
+					notes: "before",
+					inventory: [{id: "stable-stack", item, quantity: 1}],
+				},
+			},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({
+				notes: "locally edited",
+				inventory: [{
+					id: "stable-stack",
+					item: {
+						...item,
+						typeCode: "M",
+						properties: ["V"],
+						requiresAttunement: true,
+						shield: false,
+						armor: false,
+						weapon: true,
+						chargesCurrent: 5,
+						appliedUpgrades: [],
+						socketedGemstones: [],
+					},
+					quantity: 2,
+				}],
+			}),
+			fnAdoptLive: data => adopted = data,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		expect(adopted).toEqual({
+			notes: "locally edited",
+			inventory: [{id: "stable-stack", item, quantity: 1}],
+		});
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
+	it("clears a stale ordinary conflict after authoritative inventory reconciliation resolves it", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._conflicts.set("server-1", {
+			base: structuredClone(documents[1].data),
+			local: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+			server: {notes: "remote edit", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+			serverDocument: structuredClone(documents[1]),
+			conflicts: [{localPath: "/notes", remotePath: "/notes"}],
+			coverage: {},
+		});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({notes: "local live", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}),
+			fnAdoptLive: data => adopted = data,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+		expect(adopted).toEqual({
+			notes: "local live",
+			inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}],
+		});
+	});
+
+	it("clears a stale ordinary conflict even when canonical data is unchanged", async () => {
+		const canonical = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(canonical),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._conflicts.set("server-1", {
+			base: structuredClone(canonical.data),
+			local: structuredClone(canonical.data),
+			server: {notes: "remote edit", inventory: structuredClone(canonical.data.inventory)},
+			serverDocument: structuredClone(canonical),
+			conflicts: [{localPath: "/notes", remotePath: "/notes"}],
+			coverage: {},
+		});
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+		})).resolves.toMatchObject({status: "unchanged"});
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+	});
+
+	it("clears canonical-equivalent failed recovery while retaining genuinely unique failed intent", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {notes: "before", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {notes: "before", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+			3: {id: "server-1", campaignId: "campaign-1", revision: 3, data: {notes: "before", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 5}]}},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._failedWrites.set("server-1", {...structuredClone(documents[1].data), id: "server-1"});
+		repository._recoveredBases.set("server-1", structuredClone(documents[1].data));
+		revision = 2;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+		expect(repository._failedWrites.has("server-1")).toBe(false);
+		expect(repository._recoveredBases.has("server-1")).toBe(false);
+
+		repository._failedWrites.set("server-1", {
+			...structuredClone(documents[2].data),
+			id: "server-1",
+			notes: "unsaved local intent",
+		});
+		repository._recoveredBases.set("server-1", structuredClone(documents[2].data));
+		revision = 3;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+		})).resolves.toMatchObject({status: "reconciled", revision: 3});
+		expect(repository._failedWrites.get("server-1")).toMatchObject({
+			id: "server-1",
+			notes: "unsaved local intent",
+			inventory: [{quantity: 5}],
+		});
+		expect(repository._recoveredBases.get("server-1")).toEqual(documents[3].data);
+	});
+
+	it("does not clear a conflict while authoritative reconciliation still holds unique discarded intent", async () => {
+		let revision = 1;
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]}},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]}},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._conflicts.set("server-1", {
+			base: structuredClone(documents[1].data),
+			local: structuredClone(documents[1].data),
+			server: {notes: "remote edit", inventory: structuredClone(documents[1].data.inventory)},
+			serverDocument: structuredClone(documents[1]),
+			conflicts: [{localPath: "/notes", remotePath: "/notes"}],
+			coverage: {},
+			authoritativeDiscarded: {
+				local: {notes: "unique local intent", inventory: structuredClone(documents[1].data.inventory)},
+			},
+		});
+		revision = 2;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+		})).resolves.toMatchObject({status: "conflict"});
+		expect(repository.getConflictRecovery("server-1")).toMatchObject({
+			authoritativeDiscarded: {
+				local: {notes: "unique local intent"},
+			},
+		});
+	});
+
+	it("clears a stale conflict once every discarded draft is represented semantically", async () => {
+		let revision = 1;
+		const canonicalItem = {name: "Rations", source: "PHB", type: "G"};
+		const canonicalData = {inventory: [{id: "rations", item: canonicalItem, quantity: 2}]};
+		const documents = {
+			1: {id: "server-1", campaignId: "campaign-1", revision: 1, data: canonicalData},
+			2: {id: "server-1", campaignId: "campaign-1", revision: 2, data: canonicalData},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(documents[revision]),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		const sheetData = {
+			inventory: [{
+				id: "rations",
+				item: {
+					...canonicalItem,
+					typeCode: "G",
+					shield: false,
+					armor: false,
+					appliedUpgrades: [],
+					socketedGemstones: [],
+				},
+				quantity: 2,
+			}],
+		};
+		repository._conflicts.set("server-1", {
+			base: structuredClone(sheetData),
+			local: structuredClone(sheetData),
+			server: structuredClone(sheetData),
+			serverDocument: structuredClone(documents[1]),
+			conflicts: [{localPath: "/inventory/0", remotePath: "/inventory/0"}],
+			coverage: {},
+			authoritativeDiscarded: {
+				base: structuredClone(sheetData),
+				local: structuredClone(sheetData),
+				latestSubmitted: structuredClone(sheetData),
+			},
+		});
+		revision = 2;
+		let adopted;
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => structuredClone(sheetData),
+			fnAdoptLive: data => adopted = data,
+		})).resolves.toMatchObject({status: "reconciled", revision: 2});
+
+		expect(repository.getConflictRecovery("server-1")).toBeNull();
+		expect(adopted).toEqual(canonicalData);
+	});
+
+	it("clears canonical-equivalent failed recovery when accepted truth is already current", async () => {
+		const canonicalItem = {name: "Rations", source: "PHB", type: "G"};
+		const canonicalData = {inventory: [{id: "rations", item: canonicalItem, quantity: 2}]};
+		const canonical = {id: "server-1", campaignId: "campaign-1", revision: 2, data: canonicalData};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(canonical),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		const removedRecoveryKeys = [];
+		repository._recoveryStorage = {
+			getItem: () => null,
+			removeItem: key => removedRecoveryKeys.push(key),
+			setItem () {},
+		};
+		const sheetData = {
+			inventory: [{
+				id: "rations",
+				item: {
+					...canonicalItem,
+					typeCode: "G",
+					shield: false,
+					armor: false,
+					appliedUpgrades: [],
+					socketedGemstones: [],
+				},
+				quantity: 2,
+			}],
+		};
+		const coverage = repository._cloneTrackCoverage(repository._getAcceptedCoverage("server-1"));
+		repository._persistRecoveryCommandQueue("server-1", {
+			queue: [{
+				requestedId: "server-1",
+				submittedBase: structuredClone(canonicalData),
+				submittedBaseCoverage: repository._cloneTrackCoverage(coverage),
+				submittedSnapshot: structuredClone(sheetData),
+				submittedSnapshotCoverage: repository._cloneTrackCoverage(coverage),
+				submittedActivity: null,
+				commandKeys: {create: "create-1", patch: "patch-1"},
+				state: "failed",
+				intent: "patch",
+			}],
+			isRequired: true,
+		});
+		repository._recoveredBases.set("server-1", structuredClone(canonicalData));
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => structuredClone(sheetData),
+		})).resolves.toMatchObject({status: "unchanged"});
+
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(repository._recoveryCommandQueues.has("server-1")).toBe(false);
+		expect(repository._recoveredBases.has("server-1")).toBe(false);
+		expect(removedRecoveryKeys).toEqual(["hub-character-recovery:campaign-1:server-1"]);
+	});
+
+	it("retains failed recovery when accepted truth is current but local intent is unique", async () => {
+		const canonical = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 2,
+			data: {notes: "server", inventory: []},
+		};
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "campaign-1",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => structuredClone(canonical),
+			},
+		});
+		await repository.pGet({characterId: "server-1"});
+		repository._failedWrites.set("server-1", {id: "server-1", notes: "local", inventory: []});
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => ({notes: "local", inventory: []}),
+		})).resolves.toMatchObject({status: "unchanged"});
+
+		expect(repository._failedWrites.get("server-1")).toEqual({id: "server-1", notes: "local", inventory: []});
+		expect(repository.hasPendingWrites()).toBe(true);
+	});
+
+	it.each([
+		["live operation", (repository, conflict) => {
+			repository._conflicts.set("server-1", conflict);
+			repository._commitOneConflictRecord({
+				store: repository._conflicts,
+				prefix: "conflict",
+				canonicalId: "server-1",
+				plan: {staged: {}},
+				revision: 3,
+				operationLegKey: "operation-1:source",
+				sequence: 7,
+				isClearOnResolve: true,
+			});
+		}],
+		["resync", (repository, conflict) => {
+			repository._conflicts.set("server-1", conflict);
+			repository._commitResyncConflict({
+				store: repository._conflicts,
+				prefix: "conflict",
+				canonicalId: "server-1",
+				working: {},
+				isClearOnResolve: true,
+			});
+		}],
+	])("retains unique discarded intent after %s removes the current overlap", (name, fnCommit) => {
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1"});
+		const canonicalData = {inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 2}]};
+		const uniqueDiscarded = {inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 9}]};
+		const conflict = {
+			base: structuredClone(canonicalData),
+			local: structuredClone(canonicalData),
+			server: structuredClone(canonicalData),
+			conflicts: [{localPath: "/inventory", remotePath: "/inventory"}],
+			coverage: {},
+			authoritativeDiscarded: {live: uniqueDiscarded},
+		};
+
+		fnCommit(repository, conflict);
+
+		expect(repository.getConflictRecovery("server-1")).toEqual(expect.objectContaining({
+			isResolved: true,
+			conflicts: [],
+			authoritativeDiscarded: {live: uniqueDiscarded},
+		}));
 	});
 
 	it("does not treat a recomputed derived carry block as an inventory conflict", async () => {
@@ -443,6 +1933,56 @@ describe("HTTP character repository", () => {
 			inventory: [{id: "sword", item: {name: "Sword"}, quantity: 1}],
 		});
 		expect(repository._conflicts.size).toBe(0);
+	});
+
+	it.each([
+		["quantity", ({row}) => row.quantity = 3],
+		["spent charges", ({item}) => item.chargesCurrent = 4],
+		["non-empty upgrades", ({item}) => item.appliedUpgrades = [{name: "Keen", source: "TST"}]],
+		["non-empty gemstones", ({item}) => item.socketedGemstones = [{name: "Ruby", source: "TST"}]],
+		["custom metadata", ({item}) => item.custom = {maker: "Rook"}],
+		["award provenance", ({item}) => item._awardProvenance = {awardId: "award-1"}],
+		["effects", ({item}) => item.effects = [{type: "savingThrow", ability: "str", bonus: 1}]],
+		["materials", ({item}) => item.material = {name: "Darkmetal", source: "TGTT"}],
+	])("keeps %s identity-significant during authoritative inventory rebase", (_, mutate) => {
+		const canonicalItem = {
+			name: "Longsword",
+			source: "PHB",
+			type: "M",
+			property: ["V"],
+			reqAttune: true,
+			charges: 5,
+		};
+		const base = {
+			notes: "before",
+			inventory: [{id: "stable-stack", item: canonicalItem, quantity: 1}],
+		};
+		const local = structuredClone(base);
+		local.inventory[0].item = {
+			...local.inventory[0].item,
+			typeCode: "M",
+			properties: ["V"],
+			requiresAttunement: true,
+			shield: false,
+			armor: false,
+			weapon: true,
+			chargesCurrent: 5,
+			appliedUpgrades: [],
+			socketedGemstones: [],
+		};
+		mutate({row: local.inventory[0], item: local.inventory[0].item});
+		const remote = structuredClone(base);
+		remote.inventory[0].quantity = 2;
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api: {}});
+
+		expect(repository._rebaseAuthoritativeCandidate({base, local, remote})).toMatchObject({
+			isConflict: true,
+			conflicts: [{localPath: "/inventory", remotePath: "/inventory"}],
+			document: {
+				notes: "before",
+				inventory: [{id: "stable-stack", item: canonicalItem, quantity: 2}],
+			},
+		});
 	});
 
 	it("rebases live-conflict recovery before it can restore pre-transfer inventory", async () => {
@@ -548,6 +2088,86 @@ describe("HTTP character repository", () => {
 		for (const key of ["base", "local", "server"]) expect(recovery[key].inventory[0].quantity).toBe(5);
 		expect(recovery.authoritativeDiscarded.live.inventory[0].quantity).toBe(9);
 		expect(recovery.serverDocument).toEqual(documents[3]);
+	});
+
+	it("persists authoritative conflict rebases across every queued command before Use Local replay", async () => {
+		let canonical = {
+			id: "server-1",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 10}]},
+		};
+		const requests = [];
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => structuredClone(canonical),
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				requests.push(input);
+				expect(input.patches.some(patch => patch.path.startsWith("/inventory"))).toBe(false);
+				const notesPatch = input.patches.find(patch => patch.path === "/notes");
+				canonical = {
+					...canonical,
+					revision: canonical.revision + 1,
+					data: notesPatch ? {...canonical.data, notes: notesPatch.value} : canonical.data,
+				};
+				return {character: structuredClone(canonical)};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pGet({characterId: "server-1"});
+		const initialCoverage = repository._cloneTrackCoverage(repository._getAcceptedCoverage("server-1"));
+		const firstActivity = makeSpellActivity("Shield", "spell_slot");
+		const secondActivity = makeSpellActivity("Magic Missile", "spell_slot");
+		const firstSnapshot = {notes: "first", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 9}]};
+		const secondSnapshot = {notes: "second", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 9}]};
+		repository._persistRecoveryCommandQueue("server-1", {
+			queue: [
+				{
+					requestedId: "server-1",
+					submittedBase: structuredClone(canonical.data),
+					submittedBaseCoverage: repository._cloneTrackCoverage(initialCoverage),
+					submittedSnapshot: firstSnapshot,
+					submittedSnapshotCoverage: repository._cloneTrackCoverage(initialCoverage),
+					submittedActivity: firstActivity,
+					commandKeys: {create: "create-1", patch: "patch-1"},
+					state: "failed",
+				},
+				{
+					requestedId: "server-1",
+					submittedBase: firstSnapshot,
+					submittedBaseCoverage: repository._cloneTrackCoverage(initialCoverage),
+					submittedSnapshot: secondSnapshot,
+					submittedSnapshotCoverage: repository._cloneTrackCoverage(initialCoverage),
+					submittedActivity: secondActivity,
+					commandKeys: {create: "create-2", patch: "patch-2"},
+					state: "pending",
+				},
+			],
+			isRequired: true,
+		});
+		canonical = {
+			...canonical,
+			revision: 2,
+			data: {notes: "server", inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}]},
+		};
+
+		await expect(repository.pReconcileAuthoritativeCharacter({
+			characterId: "server-1",
+			fnGetLiveData: () => secondSnapshot,
+		})).resolves.toMatchObject({status: "conflict"});
+		const queued = repository._recoveryCommandQueues.get("server-1");
+		expect(queued.map(command => command.submittedBase.inventory[0].quantity)).toEqual([7, 7]);
+		expect(queued.map(command => command.submittedSnapshot.inventory[0].quantity)).toEqual([7, 7]);
+		expect(queued.map(command => command.submittedActivity)).toEqual([firstActivity, secondActivity]);
+
+		await expect(repository.pResolveConflict({characterId: "server-1", choice: "local"})).resolves.toEqual({
+			id: "server-1",
+			notes: "second",
+			inventory: [{id: "arrows", item: {name: "Arrow"}, quantity: 7}],
+		});
+		expect(requests.map(request => request.activity)).toEqual([firstActivity, secondActivity]);
+		expect(repository._recoveryCommandQueues.size).toBe(0);
 	});
 
 	it("suppresses duplicate authoritative reconciliation once the revision is accepted", async () => {
@@ -682,7 +2302,7 @@ describe("HTTP character repository", () => {
 			pGetSession: async () => ({signedIn: true}),
 			pGetCharacter: async () => ++getCount === 1
 				? {id: "c", campaignId: "cmp", revision: 1, data: {name: "Mira", xp: 100}}
-				: {id: "c", campaignId: "cmp", revision: 2, data: {name: "Mira", xp: 200}},
+				: {id: "c", campaignId: "cmp", revision: 2, data: {name: "Server", xp: 200}},
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async () => {
 				const error = new Error("conflict");
@@ -697,6 +2317,59 @@ describe("HTTP character repository", () => {
 				code: "CHARACTER_CONFLICT",
 				recovery: expect.objectContaining({local: expect.any(Object), server: expect.any(Object)}),
 			}));
+	});
+
+	it("protects server-owned inventory and XP when Use Local resolves a normal revision conflict", async () => {
+		let getCount = 0;
+		let patchCount = 0;
+		let resolvedPatches;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ++getCount === 1
+				? {
+					id: "c",
+					campaignId: "cmp",
+					revision: 1,
+					data: {hp: {current: 20}, xp: 100, inventory: [{id: "arrow", quantity: 10}]},
+				}
+				: {
+					id: "c",
+					campaignId: "cmp",
+					revision: 2,
+					data: {hp: {current: 19}, xp: 200, inventory: [{id: "arrow", quantity: 7}]},
+				},
+			pAcquireCharacterLease: async () => ({epoch: 1}),
+			pPatchCharacter: async input => {
+				if (!patchCount++) {
+					const error = new Error("conflict");
+					error.code = "REVISION_CONFLICT";
+					throw error;
+				}
+				resolvedPatches = input.patches;
+				return {
+					character: {
+						id: "c",
+						campaignId: "cmp",
+						revision: 3,
+						data: {hp: {current: 18}, xp: 200, inventory: [{id: "arrow", quantity: 7}]},
+					},
+				};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+		await expect(repository.pUpsert({
+			character: {id: "c", hp: {current: 18}, xp: 150, inventory: [{id: "arrow", quantity: 9}]},
+		})).rejects.toMatchObject({code: "CHARACTER_CONFLICT"});
+		expect(repository.getConflictRecovery("c")).toMatchObject({
+			local: {hp: {current: 18}, xp: 200, inventory: [{quantity: 7}]},
+			server: {hp: {current: 19}, xp: 200, inventory: [{quantity: 7}]},
+		});
+
+		await expect(repository.pResolveConflict({characterId: "c", choice: "local"}))
+			.resolves.toMatchObject({hp: {current: 18}, xp: 200, inventory: [{quantity: 7}]});
+		expect(resolvedPatches).toContainEqual({op: "replace", path: "/hp/current", value: 18});
+		expect(resolvedPatches.some(patch => patch.path === "/xp" || patch.path.startsWith("/inventory"))).toBe(false);
 	});
 
 	it("clears rejected local recovery when the user chooses server", async () => {
@@ -716,7 +2389,7 @@ describe("HTTP character repository", () => {
 		repository._failedWrites.set("c", {xp: 150});
 		await expect(repository.pResolveConflict({characterId: "c", choice: "server"})).resolves.toEqual({id: "c", xp: 200});
 		expect(repository.hasPendingWrites()).toBe(false);
-		expect(removed).toEqual(["hub-character-recovery:cmp:owner-account:c"]);
+		expect(removed).toEqual(["hub-character-recovery:cmp:c"]);
 	});
 
 	it("keeps the newest queued local snapshot in conflict recovery", async () => {
@@ -740,18 +2413,19 @@ describe("HTTP character repository", () => {
 		};
 		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
 		await repository.pGet({characterId: "c"});
-		const first = repository.pUpsert({character: {id: "c", name: "Mira", xp: 150}});
+		const first = repository.pUpsert({character: {id: "c", name: "First", xp: 150}});
 		await pStarted;
-		const second = repository.pUpsert({character: {id: "c", name: "Mira", xp: 175}});
+		const second = repository.pUpsert({character: {id: "c", name: "Newest", xp: 175}});
 		doRelease();
 		await expect(first).rejects.toEqual(expect.objectContaining({code: "CHARACTER_CONFLICT"}));
 		await expect(second).rejects.toEqual(expect.objectContaining({code: "CHARACTER_CONFLICT"}));
-		expect(repository.getConflictRecovery("c").local.xp).toBe(175);
+		expect(repository.getConflictRecovery("c").local).toMatchObject({name: "Newest", xp: 200});
 		expect(repository.hasPendingWrites()).toBe(true);
 	});
 
 	it("reuses the exact patch key after a lost response", async () => {
 		const keys = [];
+		const activities = [];
 		let attempts = 0;
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
@@ -759,14 +2433,975 @@ describe("HTTP character repository", () => {
 			pAcquireCharacterLease: async () => ({epoch: 1}),
 			pPatchCharacter: async input => {
 				keys.push(input.idempotencyKey);
+				activities.push(input.activity);
 				if (++attempts === 1) throw new Error("response lost");
 				return {character: {id: "c", revision: 2, data: {hp: 9}}};
 			},
 		};
 		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
 		await repository.pGet({characterId: "c"});
-		await expect(repository.pUpsert({character: {id: "c", hp: 9}})).rejects.toThrow("response lost");
-		await expect(repository.pUpsert({character: {id: "c", hp: 9}})).resolves.toEqual({id: "c", hp: 9});
+		const activity = {type: "spell.used", spellName: "Shield", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"};
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity})).rejects.toThrow("response lost");
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity})).resolves.toEqual({id: "c", hp: 9});
 		expect(keys[1]).toBe(keys[0]);
+		expect(activities).toEqual([activity, activity]);
+	});
+
+	it("replays the exact persisted patch body and rules pin after reload", async () => {
+		const storage = new MemoryStorage();
+		const requests = [];
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		const first = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async input => {
+					requests.push(structuredClone(input));
+					throw new Error("response lost");
+				},
+			},
+			fnGetRulesVersionId: () => "rules-a",
+		});
+		first._recoveryStorage = storage;
+		await first.pGet({characterId: "c"});
+		await expect(first.pUpsert({character: {id: "c", hp: 9}, activity})).rejects.toThrow("response lost");
+
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 3, data: {hp: 9, xp: 100}}),
+				pAcquireCharacterLease: async () => ({epoch: 2}),
+				pPatchCharacter: async input => {
+					requests.push(structuredClone(input));
+					return {character: {id: "c", campaignId: "cmp", revision: 2, data: {hp: 9}}};
+				},
+			},
+			fnGetRulesVersionId: () => "rules-b",
+		});
+		fresh._recoveryStorage = storage;
+		await fresh.pGet({characterId: "c"});
+		await expect(fresh.pUpsert({character: {id: "c", hp: 9}, activity})).resolves.toEqual({id: "c", hp: 9, xp: 100});
+
+		expect(requests).toHaveLength(2);
+		expect(requests[1]).toEqual({
+			characterId: "c",
+			baseRevision: requests[0].baseRevision,
+			leaseEpoch: 2,
+			patches: requests[0].patches,
+			activity,
+			rulesVersionId: "rules-a",
+			idempotencyKey: requests[0].idempotencyKey,
+		});
+	});
+
+	it("rotates and durably replays a patch after authoritative rules-version rejection", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		const requests = [];
+		const first = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => ({id: "c", ownerAccountId: "owner", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+				pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+				pPatchCharacter: async input => {
+					requests.push(structuredClone(input));
+					if (requests.length === 1) {
+						throw Object.assign(new Error("stale rules"), {
+							code: "RULES_VERSION_STALE",
+							details: {activeRulesVersionId: "rules-b"},
+						});
+					}
+					throw new Error("offline after durable rebase");
+				},
+			},
+			fnGetRulesVersionId: () => "rules-a",
+		});
+		first._recoveryStorage = storage;
+		await first.pGet({characterId: "c"});
+		await expect(first.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toThrow("offline after durable rebase");
+
+		expect(requests).toHaveLength(2);
+		expect(requests[1]).toEqual(expect.objectContaining({
+			rulesVersionId: "rules-b",
+			activity,
+		}));
+		expect(requests[1].idempotencyKey).not.toBe(requests[0].idempotencyKey);
+		const stored = JSON.parse(storage.getItem("hub-character-recovery:cmp:c"));
+		expect(stored.commands[0]).toEqual(expect.objectContaining({
+			rulesVersionId: "rules-b",
+			commandKeys: expect.objectContaining({patch: requests[1].idempotencyKey}),
+			outboundPatch: {baseRevision: 1},
+		}));
+
+		const replayRequests = [];
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => ({id: "c", ownerAccountId: "owner", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+				pAcquireCharacterLease: async () => ({epoch: 3}),
+				pPatchCharacter: async input => {
+					replayRequests.push(structuredClone(input));
+					return {character: {id: "c", ownerAccountId: "owner", campaignId: "cmp", revision: 2, data: {hp: 9}}};
+				},
+			},
+			fnGetRulesVersionId: () => "rules-c",
+		});
+		fresh._recoveryStorage = storage;
+		await fresh.pGet({characterId: "c"});
+		await expect(fresh.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.resolves.toEqual({id: "c", hp: 9});
+		expect(replayRequests).toEqual([expect.objectContaining({
+			rulesVersionId: "rules-b",
+			idempotencyKey: requests[1].idempotencyKey,
+			activity,
+		})]);
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+	});
+
+	it("rotates a create command after authoritative rules-version rejection", async () => {
+		const creates = [];
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					const error = new Error("missing");
+					error.code = "CHARACTER_NOT_FOUND";
+					throw error;
+				},
+				pCreateCharacter: async input => {
+					creates.push(structuredClone(input));
+					if (creates.length === 1) {
+						throw Object.assign(new Error("stale rules"), {
+							code: "RULES_VERSION_STALE",
+							details: {activeRulesVersionId: "rules-b"},
+						});
+					}
+					return {
+						character: {
+							id: "server-id",
+							ownerAccountId: "owner",
+							campaignId: "cmp",
+							clientImportId: "temporary-id",
+							revision: 1,
+							data: structuredClone(input.data),
+						},
+					};
+				},
+			},
+			fnGetRulesVersionId: () => "rules-a",
+		});
+
+		await expect(repository.pUpsert({character: {id: "temporary-id", name: "Mira"}}))
+			.resolves.toEqual({id: "server-id", name: "Mira"});
+		expect(creates).toHaveLength(2);
+		expect(creates.map(input => input.rulesVersionId)).toEqual(["rules-a", "rules-b"]);
+		expect(creates[1].idempotencyKey).not.toBe(creates[0].idempotencyKey);
+	});
+
+	it("rebases a later queued snapshot without reverting canonical XP returned by replay", async () => {
+		const requests = [];
+		let rejectFirstPatch;
+		let markFirstPatchStarted;
+		const firstPatchStarted = new Promise(resolve => markFirstPatchStarted = resolve);
+		const firstPatch = new Promise((resolve, reject) => rejectFirstPatch = reject);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10, xp: 0}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstPatchStarted();
+					return firstPatch;
+				}
+				if (requests.length === 2) {
+					return {character: {id: "c", campaignId: "cmp", revision: 3, data: {hp: 9, xp: 100}}};
+				}
+				return {character: {id: "c", campaignId: "cmp", revision: 4, data: {hp: 8, xp: 100}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+
+		const first = repository.pUpsert({
+			character: {id: "c", hp: 9, xp: 0},
+			activity: makeSpellActivity("Shield", "spell_slot"),
+		});
+		await firstPatchStarted;
+		const second = repository.pUpsert({character: {id: "c", hp: 8, xp: 0}});
+		rejectFirstPatch(new Error("response lost"));
+
+		const results = await Promise.allSettled([first, second]);
+		expect(results.map(result => result.status)).toEqual(["rejected", "fulfilled"]);
+		expect(requests).toHaveLength(3);
+		expect(requests[2].patches).toEqual([{op: "replace", path: "/hp", value: 8}]);
+		expect(results[1].value).toEqual({id: "c", hp: 8, xp: 100});
+	});
+
+	it("replays a failed spell command before saving a newer snapshot", async () => {
+		const requests = [];
+		let attempts = 0;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: attempts + 1}),
+			pPatchCharacter: async input => {
+				requests.push(input);
+				attempts++;
+				if (attempts === 1) throw new Error("response lost");
+				if (attempts === 2) return {character: {id: "c", revision: 2, data: {hp: 9}}};
+				return {character: {id: "c", revision: 3, data: {hp: 8}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+		const activity = {type: "spell.used", spellName: "Shield", spellSource: "PHB", spellLevel: 1, slotLevel: 1, mode: "spell_slot"};
+
+		await expect(repository.pUpsert({character: {id: "c", hp: 9, _savedAt: 1}, activity})).rejects.toThrow("response lost");
+		await expect(repository.pUpsert({character: {id: "c", hp: 8, _savedAt: 2}})).resolves.toEqual({id: "c", hp: 8});
+
+		expect(requests).toHaveLength(3);
+		expect(requests[1].idempotencyKey).toBe(requests[0].idempotencyKey);
+		expect(requests[1].activity).toEqual(activity);
+		expect(requests[2].idempotencyKey).not.toBe(requests[0].idempotencyKey);
+		expect(requests[2].activity).toBeNull();
+	});
+
+	it("replays a failed spell command when the later save was queued before rejection", async () => {
+		const requests = [];
+		let rejectFirstPatch;
+		let markFirstPatchStarted;
+		const firstPatchStarted = new Promise(resolve => markFirstPatchStarted = resolve);
+		const firstPatch = new Promise((resolve, reject) => rejectFirstPatch = reject);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstPatchStarted();
+					return firstPatch;
+				}
+				if (requests.length === 2) return {character: {id: "c", revision: 2, data: {hp: 10}}};
+				return {character: {id: "c", revision: 3, data: {hp: 10}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+		const failedActivity = {type: "spell.used", spellName: "Fire Bolt", spellSource: "PHB", spellLevel: 0, slotLevel: 0, mode: "cantrip"};
+		const laterActivity = {type: "spell.used", spellName: "Ray of Frost", spellSource: "PHB", spellLevel: 0, slotLevel: 0, mode: "cantrip"};
+
+		const failed = repository.pUpsert({character: {id: "c", hp: 10}, activity: failedActivity});
+		await firstPatchStarted;
+		const later = repository.pUpsert({character: {id: "c", hp: 10}, activity: laterActivity});
+		rejectFirstPatch(new Error("response lost"));
+
+		const results = await Promise.allSettled([failed, later]);
+
+		expect(results.map(result => result.status)).toEqual(["rejected", "fulfilled"]);
+		expect(requests).toHaveLength(3);
+		expect(requests[1].idempotencyKey).toBe(requests[0].idempotencyKey);
+		expect(requests[1].activity).toEqual(failedActivity);
+		expect(requests[2].idempotencyKey).not.toBe(requests[0].idempotencyKey);
+		expect(requests[2].activity).toEqual(laterActivity);
+		expect(results[1].value).toEqual({id: "c", hp: 10});
+		expect(repository._recoveryCommandQueues.size).toBe(0);
+		expect(repository.hasPendingWrites()).toBe(false);
+	});
+
+	it("durably retains every command when the page reloads during a blocked replay", async () => {
+		const storage = new MemoryStorage();
+		const requests = [];
+		let rejectFirstPatch;
+		let markFirstPatchStarted;
+		let rejectReplay;
+		let markReplayStarted;
+		const firstPatchStarted = new Promise(resolve => markFirstPatchStarted = resolve);
+		const firstPatch = new Promise((resolve, reject) => rejectFirstPatch = reject);
+		const replayStarted = new Promise(resolve => markReplayStarted = resolve);
+		const replay = new Promise((resolve, reject) => rejectReplay = reject);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstPatchStarted();
+					return firstPatch;
+				}
+				markReplayStarted();
+				return replay;
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+		const shield = makeSpellActivity("Shield", "spell_slot");
+		const magicMissile = makeSpellActivity("Magic Missile", "spell_slot");
+
+		const failed = repository.pUpsert({character: {id: "c", hp: 9}, activity: shield});
+		await firstPatchStarted;
+		const queued = repository.pUpsert({character: {id: "c", hp: 8}, activity: magicMissile});
+		const settled = Promise.allSettled([failed, queued]);
+		rejectFirstPatch(new Error("response lost"));
+		await replayStarted;
+
+		const stored = JSON.parse(storage.getItem("hub-character-recovery:cmp:c"));
+		expect(stored.queueVersion).toBe(3);
+		expect(stored.commands).toHaveLength(2);
+		expect(stored.commands.map(command => command.activity)).toEqual([shield, magicMissile]);
+		expect(stored.commands[0].commandKeys.patch).toBe(requests[0].idempotencyKey);
+		expect(stored.commands[0].outboundPatch).toEqual({baseRevision: 1});
+		expect(stored.commands[1].commandKeys.patch).not.toBe(requests[0].idempotencyKey);
+		expect(stored).not.toHaveProperty("snapshot");
+		expect(stored).not.toHaveProperty("activity");
+		expect(stored).not.toHaveProperty("commandKeys");
+		expect(stored.commands[0]).not.toHaveProperty("base");
+		expect(stored.commands[0]).not.toHaveProperty("snapshot");
+
+		const fresh = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		fresh._recoveryStorage = storage;
+		expect(fresh.getPendingRecovery("c")).toEqual({hp: 8});
+		expect(fresh._recoveryCommandQueues.get("c").map(command => command.submittedActivity)).toEqual([shield, magicMissile]);
+		expect(fresh._recoveryCommandQueues.get("c")[0].outboundPatch).toEqual({
+			baseRevision: 1,
+			patches: requests[0].patches,
+		});
+
+		rejectReplay(new Error("still offline"));
+		await settled;
+	});
+
+	it("loads the previous full-snapshot recovery queue format without dropping commands", () => {
+		const storage = new MemoryStorage();
+		const coverage = {
+			base: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: [], appliedOperationIds: []},
+			snapshot: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: [], appliedOperationIds: []},
+		};
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 3,
+			queueVersion: 1,
+			commands: [
+				{
+					base: {hp: 10},
+					snapshot: {hp: 9},
+					activity: makeSpellActivity("Shield", "spell_slot"),
+					commandKeys: {create: "create-1", patch: "patch-1"},
+					state: "failed",
+					coverageVersion: 2,
+					coverage,
+				},
+				{
+					base: {hp: 9},
+					snapshot: {hp: 8},
+					activity: makeSpellActivity("Magic Missile", "spell_slot"),
+					commandKeys: {create: "create-2", patch: "patch-2"},
+					state: "pending",
+					coverageVersion: 2,
+					coverage,
+				},
+			],
+		}));
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api: {}});
+		repository._recoveryStorage = storage;
+
+		expect(repository.getPendingRecovery("c")).toEqual({hp: 8});
+		expect(repository._recoveryCommandQueues.get("c").map(command => command.submittedSnapshot.hp)).toEqual([9, 8]);
+	});
+
+	it("quarantines legacy activity recovery whose exact request hash cannot be proven", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 1,
+			queueVersion: 2,
+			intent: "patch",
+			base: {hp: 10},
+			baseCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			commands: [{
+				patches: [{op: "replace", path: "/hp", value: 9}],
+				activity,
+				commandKeys: {create: "create-old", patch: "patch-old"},
+				state: "pending",
+				snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			}],
+		}));
+		const patchCharacter = jest.fn();
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 2, data: {hp: 9}}),
+				pPatchCharacter: patchCharacter,
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pGet({characterId: "c"})).resolves.toEqual({id: "c", hp: 9});
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(patchCharacter).not.toHaveBeenCalled();
+		expect(repository.hasPendingWrites()).toBe(true);
+		const stored = JSON.parse(storage.getItem("hub-character-recovery:cmp:c"));
+		expect(stored.queueVersion).toBe(3);
+		expect(stored.commands[0]).toEqual(expect.objectContaining({
+			activity,
+			commandKeys: {create: "create-old", patch: "patch-old"},
+			isExactRequestUnproven: true,
+		}));
+	});
+
+	it("exports every queued legacy snapshot and activity before clearing quarantine", async () => {
+		const storage = new MemoryStorage();
+		const shield = makeSpellActivity("Shield", "spell_slot");
+		const magicMissile = makeSpellActivity("Magic Missile", "spell_slot");
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 3,
+			queueVersion: 1,
+			ownerAccountId: "owner",
+			intent: "patch",
+			commands: [
+				{
+					base: {hp: 10},
+					snapshot: {hp: 9},
+					activity: shield,
+					commandKeys: {create: "create-1", patch: "patch-1"},
+					state: "failed",
+				},
+				{
+					base: {hp: 9},
+					snapshot: {hp: 8},
+					activity: magicMissile,
+					commandKeys: {create: "create-2", patch: "patch-2"},
+					state: "pending",
+				},
+			],
+		}));
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => ({id: "c", ownerAccountId: "owner", campaignId: "cmp", revision: 3, data: {hp: 7}}),
+			},
+		});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+
+		let recovery;
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity: shield}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		try {
+			await repository.pUpsert({character: {id: "c", hp: 9}, activity: shield});
+		} catch (error) {
+			recovery = error.recovery;
+		}
+		expect(recovery).toEqual(expect.objectContaining({
+			intent: "patch",
+			character: {id: "c", hp: 8},
+			commands: [
+				{
+					character: {id: "c", hp: 9},
+					activity: shield,
+					commandKeys: {create: "create-1", patch: "patch-1"},
+					rulesVersionId: null,
+					intent: "patch",
+					state: "failed",
+				},
+				{
+					character: {id: "c", hp: 8},
+					activity: magicMissile,
+					commandKeys: {create: "create-2", patch: "patch-2"},
+					rulesVersionId: null,
+					intent: "patch",
+					state: "pending",
+				},
+			],
+		}));
+
+		await expect(repository.pResolveUnprovableRecovery({characterId: "c"}))
+			.resolves.toEqual({id: "c", hp: 7});
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+		expect(repository.hasPendingWrites()).toBe(false);
+	});
+
+	it("explicitly discards a quarantined recovery-only create that never reached the server", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		storage.setItem("hub-character-recovery:cmp:temporary-id", JSON.stringify({
+			version: 1,
+			queueVersion: 1,
+			ownerAccountId: "owner",
+			clientImportId: "temporary-id",
+			intent: "create",
+			commands: [{
+				base: null,
+				snapshot: {name: "Mira", hp: 9},
+				activity,
+				commandKeys: {create: "create-old", patch: "patch-old"},
+				state: "failed",
+			}],
+		}));
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pListCharacters: async () => [],
+				pGetCharacter: async () => {
+					const error = new Error("missing");
+					error.code = "CHARACTER_NOT_FOUND";
+					throw error;
+				},
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await expect(repository.pList()).resolves.toEqual([{id: "temporary-id", name: "Mira", hp: 9}]);
+		await repository.pGet({characterId: "temporary-id"});
+		await expect(repository.pUpsert({character: {id: "temporary-id", name: "Mira", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		const discarded = [];
+		await expect(repository.pResolveUnprovableRecovery({
+			characterId: "temporary-id",
+			fnDiscardLive: input => {
+				discarded.push(input);
+				return true;
+			},
+		})).resolves.toBeNull();
+		expect(discarded).toEqual([{characterId: "temporary-id"}]);
+		expect(repository.getSaveBlock("temporary-id")).toBeNull();
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(storage.getItem("hub-character-recovery:cmp:temporary-id")).toBeNull();
+	});
+
+	it("adopts fresh server truth and clears quarantined activity recovery explicitly", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 1,
+			queueVersion: 2,
+			intent: "patch",
+			base: {hp: 10},
+			baseCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			commands: [{
+				patches: [{op: "replace", path: "/hp", value: 9}],
+				activity,
+				commandKeys: {create: "create-old", patch: "patch-old"},
+				state: "failed",
+				snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			}],
+		}));
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 3, data: {hp: 7}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async input => ({
+					character: {id: "c", campaignId: "cmp", revision: 4, data: {hp: input.patches.at(-1).value}},
+				}),
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await repository.pGet({characterId: "c"});
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(repository.getSaveBlock("c")).toEqual(expect.objectContaining({
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+		}));
+		await expect(repository.pUpsert({
+			character: {id: "c", hp: 8},
+			activity: makeSpellActivity("Magic Missile", "spell_slot"),
+		})).rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(repository._recoveryCommandQueues.get("c")).toHaveLength(1);
+		const adopted = [];
+		await expect(repository.pResolveUnprovableRecovery({
+			characterId: "c",
+			fnAdoptLive: character => {
+				adopted.push(character);
+				return true;
+			},
+		})).resolves.toBeNull();
+		expect(adopted).toEqual([{id: "c", hp: 7}]);
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(repository.getSaveBlock("c")).toBeNull();
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+		await expect(repository.pUpsert({character: {id: "c", hp: 6}})).resolves.toEqual({id: "c", hp: 6});
+	});
+
+	it("rotates an unproven legacy key before retrying an activity-free recovery", async () => {
+		const storage = new MemoryStorage();
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 1,
+			queueVersion: 2,
+			intent: "patch",
+			base: {hp: 10},
+			baseCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			commands: [{
+				patches: [{op: "replace", path: "/hp", value: 9}],
+				activity: null,
+				commandKeys: {create: "create-old", patch: "patch-old"},
+				state: "failed",
+				snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			}],
+		}));
+		const requests = [];
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async input => {
+					requests.push(structuredClone(input));
+					return {character: {id: "c", campaignId: "cmp", revision: 2, data: {hp: 9}}};
+				},
+			},
+			fnGetRulesVersionId: () => "rules-current",
+		});
+		repository._recoveryStorage = storage;
+
+		await repository.pGet({characterId: "c"});
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}})).resolves.toEqual({id: "c", hp: 9});
+		expect(requests).toHaveLength(1);
+		expect(requests[0]).toEqual(expect.objectContaining({
+			idempotencyKey: expect.not.stringMatching(/^patch-old$/),
+			rulesVersionId: "rules-current",
+			patches: [{op: "replace", path: "/hp", value: 9}],
+		}));
+	});
+
+	it("replays a never-submitted pending activity from the previous compact queue format", async () => {
+		const storage = new MemoryStorage();
+		const shield = makeSpellActivity("Shield", "spell_slot");
+		const magicMissile = makeSpellActivity("Magic Missile", "spell_slot");
+		storage.setItem("hub-character-recovery:cmp:c", JSON.stringify({
+			version: 1,
+			queueVersion: 2,
+			intent: "patch",
+			base: {hp: 10},
+			baseCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+			commands: [
+				{
+					patches: [{op: "replace", path: "/hp", value: 9}],
+					activity: shield,
+					commandKeys: {create: "create-1", patch: "patch-1"},
+					rulesVersionId: "rules-original",
+					outboundPatch: {baseRevision: 1},
+					state: "failed",
+					snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+				},
+				{
+					patches: [{op: "replace", path: "/hp", value: 8}],
+					activity: magicMissile,
+					commandKeys: {create: "create-2", patch: "patch-2"},
+					rulesVersionId: "rules-original",
+					state: "pending",
+					snapshotCoverage: {revision: 1, acceptedSequence: 10, appliedOperationLegIds: []},
+				},
+			],
+		}));
+		const requests = [];
+		let revision = 1;
+		let hp = 10;
+		const repository = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision, data: {hp}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async input => {
+					requests.push(structuredClone(input));
+					hp = requests.length === 1 ? 9 : 8;
+					revision++;
+					return {character: {id: "c", campaignId: "cmp", revision, data: {hp}}};
+				},
+			},
+		});
+		repository._recoveryStorage = storage;
+
+		await repository.pGet({characterId: "c"});
+		await expect(repository.pUpsert({character: {id: "c", hp: 8}})).resolves.toEqual({id: "c", hp: 8});
+		expect(requests.map(request => request.activity)).toEqual([shield, magicMissile]);
+		expect(requests.map(request => request.idempotencyKey)).toEqual(["patch-1", "patch-2"]);
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+	});
+
+	it("replays every unresolved activity after a replay conflict is resolved with local state", async () => {
+		const storage = new MemoryStorage();
+		const requests = [];
+		let getCount = 0;
+		let rejectFirstPatch;
+		let markFirstPatchStarted;
+		const firstPatchStarted = new Promise(resolve => markFirstPatchStarted = resolve);
+		const firstPatch = new Promise((resolve, reject) => rejectFirstPatch = reject);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ++getCount === 1
+				? {id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}
+				: {id: "c", campaignId: "cmp", revision: 2, data: {hp: 7}},
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstPatchStarted();
+					return firstPatch;
+				}
+				if (requests.length === 2) throw Object.assign(new Error("conflict"), {code: "REVISION_CONFLICT"});
+				if (requests.length === 3) return {character: {id: "c", revision: 3, data: {hp: 9}}};
+				return {character: {id: "c", revision: 4, data: {hp: 8}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+		const shield = makeSpellActivity("Shield", "spell_slot");
+		const magicMissile = makeSpellActivity("Magic Missile", "spell_slot");
+
+		const failed = repository.pUpsert({character: {id: "c", hp: 9}, activity: shield});
+		await firstPatchStarted;
+		const queued = repository.pUpsert({character: {id: "c", hp: 8}, activity: magicMissile});
+		const results = Promise.allSettled([failed, queued]);
+		rejectFirstPatch(new Error("response lost"));
+		const [failedResult, queuedResult] = await results;
+		expect(failedResult).toEqual(expect.objectContaining({status: "rejected", reason: expect.objectContaining({message: "response lost"})}));
+		expect(queuedResult).toEqual(expect.objectContaining({status: "rejected", reason: expect.objectContaining({code: "CHARACTER_CONFLICT"})}));
+
+		expect(repository.getConflictRecovery("c").local).toEqual({hp: 8});
+		await expect(repository.pResolveConflict({characterId: "c", choice: "local"})).resolves.toEqual({id: "c", hp: 8});
+
+		expect(requests).toHaveLength(4);
+		expect(requests.map(request => request.activity)).toEqual([shield, shield, shield, magicMissile]);
+		expect(requests[2].idempotencyKey).not.toBe(requests[0].idempotencyKey);
+		expect(requests[3].idempotencyKey).not.toBe(requests[0].idempotencyKey);
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+	});
+
+	it("explicitly discards every unresolved activity when a replay conflict is resolved with server state", async () => {
+		const storage = new MemoryStorage();
+		const requests = [];
+		let getCount = 0;
+		let rejectFirstPatch;
+		let markFirstPatchStarted;
+		const firstPatchStarted = new Promise(resolve => markFirstPatchStarted = resolve);
+		const firstPatch = new Promise((resolve, reject) => rejectFirstPatch = reject);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ++getCount === 1
+				? {id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}
+				: {id: "c", campaignId: "cmp", revision: 2, data: {hp: 7}},
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstPatchStarted();
+					return firstPatch;
+				}
+				throw Object.assign(new Error("conflict"), {code: "REVISION_CONFLICT"});
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+		const shield = makeSpellActivity("Shield", "spell_slot");
+		const magicMissile = makeSpellActivity("Magic Missile", "spell_slot");
+
+		const failed = repository.pUpsert({character: {id: "c", hp: 9}, activity: shield});
+		await firstPatchStarted;
+		const queued = repository.pUpsert({character: {id: "c", hp: 8}, activity: magicMissile});
+		const results = Promise.allSettled([failed, queued]);
+		rejectFirstPatch(new Error("response lost"));
+		const [failedResult, queuedResult] = await results;
+		expect(failedResult).toEqual(expect.objectContaining({status: "rejected", reason: expect.objectContaining({message: "response lost"})}));
+		expect(queuedResult).toEqual(expect.objectContaining({status: "rejected", reason: expect.objectContaining({code: "CHARACTER_CONFLICT"})}));
+
+		await expect(repository.pResolveConflict({characterId: "c", choice: "server"})).resolves.toEqual({id: "c", hp: 7});
+
+		expect(requests).toHaveLength(2);
+		expect(repository._recoveryCommandQueues.has("c")).toBe(false);
+		expect(repository.hasPendingWrites()).toBe(false);
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+	});
+
+	it("rejects a semantic command when session recovery storage refuses the complete queue", async () => {
+		const storage = new FailingStorage({failOnWrite: 3});
+		const requests = [];
+		let releaseFirst;
+		let markFirstStarted;
+		const firstStarted = new Promise(resolve => markFirstStarted = resolve);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstStarted();
+					await new Promise(resolve => releaseFirst = resolve);
+					return {character: {id: "c", revision: 2, data: {hp: 9}}};
+				}
+				return {character: {id: "c", revision: 3, data: {hp: 8}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+
+		const first = repository.pUpsert({character: {id: "c", hp: 9}, activity: makeSpellActivity("Shield", "spell_slot")});
+		await firstStarted;
+		const rejected = repository.pUpsert({character: {id: "c", hp: 8}, activity: makeSpellActivity("Magic Missile", "spell_slot")});
+		const rejectedAssertion = expect(rejected).rejects.toMatchObject({code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		releaseFirst();
+
+		await expect(first).resolves.toEqual({id: "c", hp: 9});
+		await rejectedAssertion;
+		expect(requests).toHaveLength(1);
+		expect(repository._recoveryCommandQueues.size).toBe(0);
+	});
+
+	it("rejects an ordinary cloud save when no reload-durable recovery storage is available", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pPatchCharacter: jest.fn(),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = null;
+		await repository.pGet({characterId: "c"});
+
+		await expect(repository.pUpsert({character: {id: "c", hp: 9}}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE"});
+		expect(api.pPatchCharacter).not.toHaveBeenCalled();
+	});
+
+	it("rejects a queued semantic command before its compact recovery payload exceeds the byte limit", async () => {
+		const storage = new MemoryStorage();
+		const requests = [];
+		let releaseFirst;
+		let markFirstStarted;
+		const firstStarted = new Promise(resolve => markFirstStarted = resolve);
+		const base = "a".repeat(1_450_000);
+		const firstValue = "b".repeat(1_450_000);
+		const secondValue = "c".repeat(1_450_000);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {notes: base}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(input);
+				if (requests.length === 1) {
+					markFirstStarted();
+					await new Promise(resolve => releaseFirst = resolve);
+					return {character: {id: "c", revision: 2, data: {notes: firstValue}}};
+				}
+				return {character: {id: "c", revision: 3, data: {notes: secondValue}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+
+		const first = repository.pUpsert({character: {id: "c", notes: firstValue}, activity: makeSpellActivity("Shield", "spell_slot")});
+		await firstStarted;
+		const rejected = repository.pUpsert({character: {id: "c", notes: secondValue}, activity: makeSpellActivity("Magic Missile", "spell_slot")});
+		const rejectedAssertion = expect(rejected).rejects.toMatchObject({code: "CHARACTER_RECOVERY_LIMIT"});
+		await rejectedAssertion;
+		const stored = storage.getItem("hub-character-recovery:cmp:c");
+		expect(new TextEncoder().encode(stored).byteLength).toBeLessThanOrEqual(3_500_000);
+		releaseFirst();
+
+		await expect(first).resolves.toEqual({id: "c", notes: firstValue});
+		expect(requests).toHaveLength(1);
+	});
+
+	it("rejects a semantic command before the recovery queue exceeds its command limit", async () => {
+		const storage = new MemoryStorage();
+		const requests = [];
+		let releaseFirst;
+		let markFirstStarted;
+		const firstStarted = new Promise(resolve => markFirstStarted = resolve);
+		let revision = 1;
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {value: -1}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(input);
+				const value = input.patches.find(patch => patch.path === "/value")?.value;
+				if (requests.length === 1) {
+					markFirstStarted();
+					await new Promise(resolve => releaseFirst = resolve);
+				}
+				return {character: {id: "c", revision: ++revision, data: {value}}};
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		repository._recoveryStorage = storage;
+		await repository.pGet({characterId: "c"});
+
+		const accepted = [repository.pUpsert({character: {id: "c", value: 0}, activity: makeSpellActivity("Spell 0")})];
+		await firstStarted;
+		for (let i = 1; i < 32; ++i) {
+			accepted.push(repository.pUpsert({character: {id: "c", value: i}, activity: makeSpellActivity(`Spell ${i}`)}));
+		}
+		const rejected = repository.pUpsert({character: {id: "c", value: 32}, activity: makeSpellActivity("Spell 32")});
+		const rejectedAssertion = expect(rejected).rejects.toMatchObject({code: "CHARACTER_RECOVERY_LIMIT"});
+		releaseFirst();
+
+		await rejectedAssertion;
+		await expect(Promise.all(accepted)).resolves.toHaveLength(32);
+		expect(requests).toHaveLength(32);
+	});
+
+	it("retains the earlier failed spell command when its queued replay also fails", async () => {
+		const requests = [];
+		let rejectFirstPatch;
+		let markFirstPatchStarted;
+		const firstPatchStarted = new Promise(resolve => markFirstPatchStarted = resolve);
+		const firstPatch = new Promise((resolve, reject) => rejectFirstPatch = reject);
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+			pAcquireCharacterLease: async () => ({epoch: requests.length + 1}),
+			pPatchCharacter: async input => {
+				requests.push(structuredClone(input));
+				if (requests.length === 1) {
+					markFirstPatchStarted();
+					return firstPatch;
+				}
+				throw new Error("retry also failed");
+			},
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "cmp", api});
+		await repository.pGet({characterId: "c"});
+		const failedActivity = {type: "spell.used", spellName: "Fire Bolt", spellSource: "PHB", spellLevel: 0, slotLevel: 0, mode: "cantrip"};
+		const laterActivity = {type: "spell.used", spellName: "Ray of Frost", spellSource: "PHB", spellLevel: 0, slotLevel: 0, mode: "cantrip"};
+
+		const failed = repository.pUpsert({character: {id: "c", hp: 10}, activity: failedActivity});
+		await firstPatchStarted;
+		const later = repository.pUpsert({character: {id: "c", hp: 10}, activity: laterActivity});
+		rejectFirstPatch(new Error("response lost"));
+
+		const results = await Promise.allSettled([failed, later]);
+
+		expect(results.map(result => result.status)).toEqual(["rejected", "rejected"]);
+		expect(requests).toHaveLength(2);
+		expect(requests[1].idempotencyKey).toBe(requests[0].idempotencyKey);
+		expect(repository._recoveryCommandQueues.get("c")?.[0]).toEqual(expect.objectContaining({
+			submittedActivity: failedActivity,
+			commandKeys: expect.objectContaining({patch: requests[0].idempotencyKey}),
+		}));
+		expect(repository.hasPendingWrites()).toBe(true);
 	});
 });

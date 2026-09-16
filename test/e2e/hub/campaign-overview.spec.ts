@@ -291,11 +291,16 @@ test("DM same-tab login ignores another account's failed owner recovery and stay
 			sheet._state.setName("Unsaved Owner Draft");
 			return sheet._saveCurrentCharacter();
 		})).toBe(false);
-		await shared.page.unroute(characterRoute);
-		await expect.poll(() => shared.page.evaluate(() =>
-			Object.keys(sessionStorage).find(key => key.startsWith("hub-character-recovery:")) || null,
-		)).toContain(`:${ownerAccountId}:${character.id}`);
+		const hasOwnerRecovery = () => shared.page.evaluate(({ownerAccountId, characterId}) => {
+			const key = Object.keys(sessionStorage)
+				.find(it => it.startsWith("hub-character-recovery:") && it.endsWith(`:${characterId}`));
+			if (!key) return false;
+			const payload = JSON.parse(sessionStorage.getItem(key) || "null");
+			return payload?.ownerAccountId === ownerAccountId;
+		}, {ownerAccountId, characterId: character.id});
+		await expect.poll(hasOwnerRecovery).toBe(true);
 		expect((await shared.getCharacter(character.id)).data.name).toBe("Canonical Rowan");
+		await shared.releaseCharacterLease(character.id);
 
 		shared.page.on("dialog", dialog => void dialog.accept());
 		await shared.gotoHub();
@@ -309,6 +314,8 @@ test("DM same-tab login ignores another account's failed owner recovery and stay
 		await expect(dmSheet.characterName).toHaveValue("Canonical Rowan", {timeout: 20_000});
 		await expect(dmSheet.characterName).toBeDisabled();
 		await dmSheet.waitForHubRealtimeLive();
+		await expect.poll(hasOwnerRecovery).toBe(true);
+		await shared.page.unroute(characterRoute);
 
 		await ownerUpdate.signInSynthetic({
 			providerSubject: "recovery-owner",
@@ -317,7 +324,47 @@ test("DM same-tab login ignores another account's failed owner recovery and stay
 		});
 		const updatingOwnerSheet = new CharacterSheetPage(ownerUpdate.page);
 		await updatingOwnerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
-		await updatingOwnerSheet.renameCharacter("Canonical Rowan Updated");
+		await updatingOwnerSheet.characterName.fill("Canonical Rowan Updated");
+		const ownerSave = await ownerUpdate.page.evaluate(async () => {
+			const sheet = (globalThis as any).charSheet;
+			const repository = sheet._characterRepository;
+			const originalUpsert = repository.pUpsert;
+			let submittedName = null;
+			let persistedName = null;
+			repository.pUpsert = async function (options: any) {
+				submittedName = options.character?.name || null;
+				const persisted = await originalUpsert.call(this, options);
+				persistedName = persisted?.name || null;
+				return persisted;
+			};
+			try {
+				sheet._state.setName((document.querySelector("#charsheet-ipt-name") as HTMLInputElement).value);
+				return {
+					saved: await sheet._saveCurrentCharacter(),
+					access: sheet._currentCharacterAccess,
+					repositoryAccess: repository.getCharacterAccess({characterId: sheet._currentCharacterId}),
+					isNew: sheet._isCurrentCharacterNew,
+					stateName: sheet._state.getName(),
+					submittedName,
+					persistedName,
+				};
+			} finally {
+				repository.pUpsert = originalUpsert;
+			}
+		});
+		expect(ownerSave).toEqual({
+			saved: true,
+			access: "owner",
+			repositoryAccess: "owner",
+			isNew: false,
+			stateName: "Canonical Rowan Updated",
+			submittedName: "Canonical Rowan Updated",
+			persistedName: "Canonical Rowan Updated",
+		});
+		await expect.poll(
+			async () => (await ownerUpdate.getCharacter(character.id)).data.name,
+			{timeout: 20_000},
+		).toBe("Canonical Rowan Updated");
 		await expect(dmSheet.characterName).toHaveValue("Canonical Rowan Updated", {timeout: 20_000});
 		await expect(dmSheet.characterName).toBeDisabled();
 	} finally {
@@ -385,6 +432,55 @@ test("condition catalog module retries exhaust without request storms", async ({
 		expect(conditionModuleRequests).toHaveLength(3);
 	} finally {
 		await pCloseContext(context);
+	}
+});
+
+test("peer shared profiles render as visible native disclosures", async ({browser}) => {
+	test.setTimeout(120_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmContext = await browser.newContext(contextOptions);
+	const viewerContext = await browser.newContext(contextOptions);
+	const ownerContext = await browser.newContext(contextOptions);
+	try {
+		const dm = new HubCampaignPage(await dmContext.newPage());
+		const viewer = new HubCampaignPage(await viewerContext.newPage());
+		const owner = new HubCampaignPage(await ownerContext.newPage());
+		await dm.signInSynthetic({providerSubject: "shared-profile-dm", displayName: "Shared Profile DM", secret});
+		await viewer.signInSynthetic({providerSubject: "shared-profile-viewer", displayName: "Profile Viewer", secret});
+		await owner.signInSynthetic({providerSubject: "shared-profile-owner", displayName: "Profile Owner", secret});
+		const campaignId = await dm.createCampaign("Shared Profile Disclosure E2E");
+		await viewer.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		await owner.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		await owner.createCharacter({campaignId, name: "Shared Profile Hero"});
+
+		await viewer.gotoCampaign(campaignId);
+		const disclosure = viewer.page.locator("#campaign-party-roster details.hub-shared-profile", {
+			hasText: "Shared Profile Hero",
+		});
+		const summary = disclosure.locator(":scope > summary");
+		const body = disclosure.locator(":scope > .hub-shared-profile__body");
+		await expect(disclosure).not.toHaveAttribute("open", "");
+		await expect(summary).toBeVisible();
+		await expect(summary).toContainText("Shared Profile Hero");
+		await expect(summary).toContainText("View shared profile");
+		await expect(body).toBeHidden();
+
+		await summary.click();
+		await expect(disclosure).toHaveAttribute("open", "");
+		await expect(body).toBeVisible();
+		await expect(body).toContainText("Server-authorized profile shared with players");
+	} finally {
+		await Promise.all([
+			pCloseContext(dmContext),
+			pCloseContext(viewerContext),
+			pCloseContext(ownerContext),
+		]);
 	}
 });
 

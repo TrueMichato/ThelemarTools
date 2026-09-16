@@ -4,6 +4,7 @@ import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetRealtimeCoordinator} from "../../../js/charactersheet/charactersheet-realtime.js";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
 import {LocalCharacterRepository} from "../../../js/hub/hub-character-repository.js";
+import {applyJsonPatch} from "../../../js/hub/hub-json-patch.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
@@ -121,13 +122,14 @@ const makeDeferred = () => {
 const makeCharacterDocument = (data, revision = 1) => ({id: "character-1", campaignId: "campaign-1", revision, data});
 
 const makeApi = character => {
-	const state = {character: structuredClone(character), patches: []};
+	const state = {character: structuredClone(character), patches: [], isOffline: false};
 	return {
 		state,
 		pGetSession: jest.fn(async () => ({signedIn: true})),
 		pGetCharacter: jest.fn(async () => structuredClone(state.character)),
 		pAcquireCharacterLease: jest.fn(async () => ({epoch: 1})),
 		pPatchCharacter: jest.fn(async ({patches}) => {
+			if (state.isOffline) throw Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"});
 			state.patches.push(...patches);
 			return {character: structuredClone(state.character)};
 		}),
@@ -203,6 +205,7 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		_isHubRealtimeListenersBound: false,
 		_renderCount: 0,
 		_saveIndicator: [],
+		_lastSavedAt: 0,
 		_renderCharacter: function () { this._renderCount++; },
 		_reconcileClassFeatures: () => ({}),
 		_updateSaveIndicator: function (status) { this._saveIndicator.push(status); },
@@ -213,13 +216,25 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		"_onHubRealtimeCursor",
 		"_onHubRealtimeConnectionState",
 		"_onHubRealtimeDeliveryError",
+		"_onHubRecipientNotice",
 		"_onHubSemanticOperation",
 		"_getHubLiveCharacterData",
 		"_adoptHubLiveCharacterData",
 		"_scheduleHubRealtimeResync",
 		"_onHubAuthoritativeApproval",
 		"_pRunHubRealtimeResync",
-	]) host[name] = CharacterSheetPage.prototype[name].bind(host);
+		"_onHubProjectionInvalidated",
+		"_scheduleHubAuthoritativeReconcile",
+		"_pDrainHubAuthoritativeReconcile",
+		"_pRunHubAuthoritativeReconcile",
+		"_pResolveHubCharacterConflict",
+		"_adoptCanonicalCharacterIdentity",
+		"_pRefreshCanonicalCharacterRoster",
+		"_getNextSavedAt",
+		"_saveCurrentCharacter",
+	]) {
+		if (typeof CharacterSheetPage.prototype[name] === "function") host[name] = CharacterSheetPage.prototype[name].bind(host);
+	}
 
 	host._initHubRealtimeListeners();
 	await repository.pGet({characterId: "character-1"});
@@ -237,6 +252,95 @@ beforeAll(async () => {
 });
 
 describe("Live campaign effects on an open Character Sheet", () => {
+	it("shows bounded XP and item award reasons and schedules XP reconciliation", async () => {
+		const {api, clients, host, state, toasts} = await pMakeHarness();
+		api.state.character = makeCharacterDocument({
+			...api.state.character.data,
+			xp: 9000,
+		}, 2);
+
+		clients[0].emit("event", {
+			id: "xp-notice",
+			campaignId: "campaign-1",
+			sequence: 21,
+			type: "xp.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {amount: 250, xp: 9000, reason: "<b>For the Ashen Pass</b>"},
+		});
+		clients[0].emit("event", {
+			id: "item-notice",
+			campaignId: "campaign-1",
+			sequence: 22,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {
+				entry: {item: {name: "Longsword", source: "PHB"}, quantity: 1},
+				note: "<i>For the Ashen Pass</i>",
+			},
+		});
+		await pFlush();
+		if (host._hubAuthoritativeReconcilePromise) await host._hubAuthoritativeReconcilePromise;
+		await pFlush();
+
+		expect(toasts.map(toast => toast.content.textContent || toast.content.innerHTML || toast.content._html)).toEqual([
+			"Received 250 XP (9000 XP total) — For the Ashen Pass.",
+			"Received Longsword — For the Ashen Pass.",
+		]);
+		expect(state.toJson().xp).toBe(9000);
+		expect(api.pGetCharacter).toHaveBeenCalled();
+	});
+
+	it("commits spell activity once when Keep Local retries a post-save live conflict", async () => {
+		const {api, host, state} = await pMakeHarness({seed: {name: "Mira"}});
+		const firstPatchStarted = makeDeferred();
+		const releaseFirstPatch = makeDeferred();
+		const requests = [];
+		api.pPatchCharacter.mockImplementation(async input => {
+			requests.push(structuredClone(input));
+			if (requests.length === 1) {
+				firstPatchStarted.resolve();
+				await releaseFirstPatch.promise;
+				api.state.character = makeCharacterDocument({
+					...applyJsonPatch(api.state.character.data, input.patches),
+					name: "Server Edit",
+				}, 2);
+				return {character: structuredClone(api.state.character)};
+			}
+			api.state.character = makeCharacterDocument(
+				applyJsonPatch(api.state.character.data, input.patches),
+				api.state.character.revision + 1,
+			);
+			return {character: structuredClone(api.state.character)};
+		});
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+		const activity = {
+			type: "spell.used",
+			spellName: "Shield",
+			spellSource: "PHB",
+			spellLevel: 1,
+			slotLevel: 1,
+			mode: "spell_slot",
+		};
+
+		try {
+			const pendingSave = host._saveCurrentCharacter({activity});
+			await firstPatchStarted.promise;
+			state.setName("Local Edit");
+			releaseFirstPatch.resolve();
+
+			await expect(pendingSave).resolves.toBe(true);
+			expect(requests).toHaveLength(2);
+			expect(requests.map(request => request.activity)).toEqual([activity, null]);
+			expect(state.toJson().name).toBe("Local Edit");
+		} finally {
+			consoleError.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
 	it("adopts an authoritative approval response when its socket edge is missed", async () => {
 		const {clients, host, hubEffects, state} = await pMakeHarness();
 		const operation = makeAppliedEvent({
@@ -601,6 +705,153 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		await pFlush();
 
 		expect(repository._realtimeCursors.get("character-1")).toMatchObject({lastSequence: 42, operationWatermark: 41});
+	});
+
+	it("refetches canonical truth after mixed semantic and ordinary reconnect changes without double-applying", async () => {
+		const {api, clients, state} = await pMakeHarness({seed: {xp: 6_500}});
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 20},
+			characterRefs: [{id: "character-1", revision: 1, projectionRevision: 1, operationWatermark: 20}],
+		});
+		await pFlush();
+		const fetchCount = api.pGetCharacter.mock.calls.length;
+		api.state.character = makeCharacterDocument({
+			...structuredClone(api.state.character.data),
+			hp: {...api.state.character.data.hp, current: 26},
+			xp: 7_000,
+		}, 3);
+
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 21},
+			characterRefs: [{id: "character-1", revision: 3, projectionRevision: 3, operationWatermark: 21}],
+		});
+		clients[0].emit("event", makeAppliedEvent());
+		await pFlush();
+		await pFlush();
+
+		expect(api.pGetCharacter.mock.calls.length).toBeGreaterThan(fetchCount);
+		expect(state.getCurrentHp()).toBe(26);
+		expect(state.getXp()).toBe(7_000);
+	});
+
+	it("surfaces an overlapping offline draft and converges when reconnect reports a newer canonical revision", async () => {
+		const {api, clients, host, repository, state} = await pMakeHarness();
+		const previousPrompt = globalThis.InputUiUtil.pGetUserBoolean;
+		globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => false);
+		try {
+			clients[0].emit("cursor", {
+				cursor: {campaignId: "campaign-1", lastSequence: 20},
+				characterRefs: [{id: "character-1", revision: 1, projectionRevision: 1, operationWatermark: 20}],
+			});
+			await pFlush();
+			state.setCurrentHp(24);
+			api.state.isOffline = true;
+			await expect(repository.pUpsert({
+				character: {...state.toJson(), id: "character-1"},
+			})).rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+
+			api.state.isOffline = false;
+			api.state.character = makeCharacterDocument({
+				...structuredClone(api.state.character.data),
+				hp: {...api.state.character.data.hp, current: 18},
+			}, 2);
+
+			clients[0].emit("cursor", {
+				cursor: {campaignId: "campaign-1", lastSequence: 21},
+				characterRefs: [{id: "character-1", revision: 2, projectionRevision: 2, operationWatermark: 20}],
+			});
+			await pFlush();
+			await pFlush();
+
+			expect(globalThis.InputUiUtil.pGetUserBoolean).toHaveBeenCalledWith(expect.objectContaining({
+				title: "Character Changed on Another Device",
+			}));
+			expect(state.getCurrentHp()).toBe(18);
+			expect(repository._accepted.get("character-1").revision).toBe(2);
+			expect(repository.getConflictRecovery("character-1")).toBeNull();
+			expect(host._saveIndicator.at(-1)).toBe("saved");
+		} finally {
+			globalThis.InputUiUtil.pGetUserBoolean = previousPrompt;
+		}
+	});
+
+	it("preserves the overlapping offline value when the player explicitly chooses Use Local", async () => {
+		const {api, clients, repository, state} = await pMakeHarness();
+		const previousPrompt = globalThis.InputUiUtil.pGetUserBoolean;
+		globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => true);
+		try {
+			clients[0].emit("cursor", {
+				cursor: {campaignId: "campaign-1", lastSequence: 20},
+				characterRefs: [{id: "character-1", revision: 1, projectionRevision: 1, operationWatermark: 20}],
+			});
+			await pFlush();
+			state.setCurrentHp(24);
+			api.state.isOffline = true;
+			await expect(repository.pUpsert({
+				character: {...state.toJson(), id: "character-1"},
+			})).rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+
+			api.state.isOffline = false;
+			api.state.character = makeCharacterDocument({
+				...structuredClone(api.state.character.data),
+				hp: {...api.state.character.data.hp, current: 18},
+			}, 2);
+			api.pPatchCharacter.mockImplementation(async ({patches}) => {
+				api.state.patches.push(...patches);
+				api.state.character = makeCharacterDocument(
+					applyJsonPatch(api.state.character.data, patches),
+					api.state.character.revision + 1,
+				);
+				return {character: structuredClone(api.state.character)};
+			});
+
+			clients[0].emit("cursor", {
+				cursor: {campaignId: "campaign-1", lastSequence: 21},
+				characterRefs: [{id: "character-1", revision: 2, projectionRevision: 2, operationWatermark: 20}],
+			});
+			await pFlush();
+			await pFlush();
+
+			expect(globalThis.InputUiUtil.pGetUserBoolean).toHaveBeenCalledWith(expect.objectContaining({
+				title: "Character Changed on Another Device",
+			}));
+			expect(api.state.character).toMatchObject({
+				revision: 3,
+				data: {hp: {current: 24}},
+			});
+			expect(state.getCurrentHp()).toBe(24);
+			expect(repository.getConflictRecovery("character-1")).toBeNull();
+		} finally {
+			globalThis.InputUiUtil.pGetUserBoolean = previousPrompt;
+		}
+	});
+
+	it("retries a disjoint offline draft when the realtime connection returns", async () => {
+		const {api, clients, repository, state} = await pMakeHarness();
+		state.setName("Mira Offline");
+		api.state.isOffline = true;
+		await expect(repository.pUpsert({
+			character: {...state.toJson(), id: "character-1"},
+		})).rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+
+		api.state.isOffline = false;
+		api.pPatchCharacter.mockImplementation(async ({patches}) => {
+			api.state.patches.push(...patches);
+			api.state.character = makeCharacterDocument(
+				applyJsonPatch(api.state.character.data, patches),
+				api.state.character.revision + 1,
+			);
+			return {character: structuredClone(api.state.character)};
+		});
+		clients[0].emit("state", {state: "live"});
+		await pFlush();
+		await pFlush();
+
+		expect(api.state.character).toMatchObject({
+			revision: 2,
+			data: {name: "Mira Offline"},
+		});
+		expect(repository.hasPendingWrites()).toBe(false);
 	});
 
 	it("surfaces a delivery failure without leaking the operation payload", async () => {

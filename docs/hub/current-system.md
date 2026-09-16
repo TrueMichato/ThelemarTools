@@ -266,7 +266,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - canonical condition add/remove pickers whose catalog remains outside lightweight boot, retries module and data
   failures through realtime/cursor refresh, and stops module retries after a fixed set of fresh URLs until reload;
 - XP and item grants;
-- party inventory summary and item/currency transfers.
+- party inventory summary, player requests to take stash items with DM approval, explicit DM/same-owner
+  immediate moves, peer/deposit escrow, and recoverable transfer-state refresh/retry.
 
 Lifecycle administration is authoritative: member removal restores escrow, cancels pending work, releases
 leases, archives the member workspace, detaches player-owned characters, and closes campaign sockets. Account

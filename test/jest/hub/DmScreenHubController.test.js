@@ -513,6 +513,145 @@ describe("campaign DM Screen controller", () => {
 		// ADR 0011: projections come from the HTTP projector, never from a socket resync.
 		expect(requestResyncCount).toBe(0);
 	});
+
+	it("replaces a stale DM projection from authoritative HTTP state after reconnect", async () => {
+		const realtime = new Observable();
+		const timers = new Map();
+		const published = [];
+		let nextTimerId = 0;
+		let authoritativeHp = 30;
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pListCampaignCharacterProjections: async () => ({
+					projections: [{
+						id: "character-1",
+						revision: authoritativeHp === 30 ? 1 : 2,
+						data: {name: "Mira", hp: {current: authoritativeHp, max: 44}},
+					}],
+					roster: [],
+				}),
+			},
+			document: null,
+			fnSetTimeout: fn => {
+				const id = ++nextTimerId;
+				timers.set(id, fn);
+				return id;
+			},
+			fnClearTimeout: id => timers.delete(id),
+		});
+		controller.attach({
+			board: {fireBoardEvent: event => published.push(event)},
+			repository: null,
+			realtime,
+		});
+		controller.applySnapshot({
+			characters: [{
+				id: "character-1",
+				revision: 1,
+				data: {name: "Mira", hp: {current: 30, max: 44}},
+			}],
+			roster: [],
+		});
+
+		authoritativeHp = 18;
+		realtime.emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 21},
+			characterRefs: [{id: "character-1", revision: 2, projectionRevision: 2}],
+		});
+		for (const fn of [...timers.values()]) fn();
+		await new Promise(resolve => setImmediate(resolve));
+
+		expect(published.filter(event => event.type === "hubCharacterProjections").at(-1)).toEqual({
+			type: "hubCharacterProjections",
+			payload: {
+				characters: [{
+					id: "character-1",
+					revision: 2,
+					data: {name: "Mira", hp: {current: 18, max: 44}},
+				}],
+				roster: [],
+			},
+		});
+	});
+
+	it("does not let an older projection response overwrite a newer refresh or a reattached board", async () => {
+		const requests = [];
+		const firstBoardEvents = [];
+		const secondBoardEvents = [];
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pListCampaignCharacterProjections: () => new Promise(resolve => requests.push(resolve)),
+			},
+			document: null,
+		});
+		controller.attach({
+			board: {fireBoardEvent: event => firstBoardEvents.push(event)},
+			repository: null,
+			realtime: null,
+		});
+		const older = controller.pRefreshProjections();
+		const newer = controller.pRefreshProjections();
+		requests[1]({
+			projections: [{id: "character-1", revision: 2, data: {hp: {current: 18}}}],
+			roster: [],
+		});
+		await expect(newer).resolves.toBe(true);
+		requests[0]({
+			projections: [{id: "character-1", revision: 1, data: {hp: {current: 30}}}],
+			roster: [],
+		});
+		await expect(older).resolves.toBe(false);
+		expect(firstBoardEvents.filter(event => event.type === "hubCharacterProjections")).toHaveLength(1);
+		expect(firstBoardEvents.find(event => event.type === "hubCharacterProjections"))
+			.toMatchObject({payload: {characters: [{revision: 2}]}});
+
+		const detached = controller.pRefreshProjections();
+		controller.attach({
+			board: {fireBoardEvent: event => secondBoardEvents.push(event)},
+			repository: null,
+			realtime: null,
+		});
+		requests[2]({
+			projections: [{id: "character-1", revision: 3, data: {hp: {current: 12}}}],
+			roster: [],
+		});
+		await expect(detached).resolves.toBe(false);
+		expect(secondBoardEvents.filter(event => event.type === "hubCharacterProjections")).toHaveLength(0);
+	});
+
+	it("does not let an older projection response hide a newer refresh failure", async () => {
+		const requests = [];
+		const events = [];
+		const controller = new DmScreenHubController({
+			campaignId: "campaign-1",
+			api: {
+				pListCampaignCharacterProjections: () => new Promise((resolve, reject) => requests.push({resolve, reject})),
+			},
+			document: null,
+		});
+		controller.attach({
+			board: {fireBoardEvent: event => events.push(event)},
+			repository: null,
+			realtime: null,
+		});
+		const older = controller.pRefreshProjections();
+		const newer = controller.pRefreshProjections();
+		requests[1].reject(new Error("newer refresh failed"));
+		await expect(newer).resolves.toBe(false);
+		requests[0].resolve({
+			projections: [{id: "character-1", revision: 1, data: {hp: {current: 30}}}],
+			roster: [],
+		});
+		await expect(older).resolves.toBe(false);
+
+		expect(events.filter(event => event.type === "hubCharacterProjections")).toHaveLength(0);
+		expect(controller.getState()).toMatchObject({
+			sync: "stale",
+			message: "newer refresh failed",
+		});
+	});
 });
 
 describe("party stash weight path", () => {

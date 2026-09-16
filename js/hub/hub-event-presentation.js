@@ -189,16 +189,29 @@ function getActivityDetails ({event, members}) {
 		case "xp.granted": {
 			const amount = getFiniteNumber(payload.amount);
 			const xp = getFiniteNumber(payload.xp);
+			const reason = getDetailText(payload.reason);
 			return [
 				`Amount: ${amount ?? 0} XP`,
 				...(xp == null ? [] : [`Total: ${xp} XP`]),
+				...(reason ? [`Reason: ${reason}`] : []),
 			];
 		}
 		case "item.granted": {
 			const quantity = getFiniteNumber(payload.entry?.quantity);
+			const reason = getDetailText(payload.note);
 			return [
 				`Item: ${getDetailText(payload.entry?.item?.name || payload.entry?.name) || "Item"}`,
 				...(quantity == null ? [] : [`Quantity: ${quantity}`]),
+				...(reason ? [`Reason: ${reason}`] : []),
+			];
+		}
+		case "spell.used": {
+			const spellLevel = getFiniteNumber(payload.spellLevel);
+			const slotLevel = getFiniteNumber(payload.slotLevel);
+			return [
+				...(spellLevel == null ? [] : [spellLevel === 0 ? "Cantrip" : `Spell level: ${spellLevel}`]),
+				...(slotLevel != null && slotLevel > spellLevel ? [`Cast at level: ${slotLevel}`] : []),
+				...(payload.mode === "ritual" ? ["Ritual"] : []),
 			];
 		}
 		case "brew.activated":
@@ -214,6 +227,7 @@ function getActivityDetails ({event, members}) {
 
 export function normalizeHubEvent ({event, characters = [], members = [], actorDisplayName = null}) {
 	if (!event || typeof event !== "object") return null;
+	if (event.type === "character.projection.invalidated") return null;
 	const actorName = cleanText(actorDisplayName ?? event.actorDisplayName, MAX_SNAPSHOT_LENGTH)
 		|| getMemberName(members, event.actorAccountId);
 	if (event.type === "roll.logged") {
@@ -257,6 +271,7 @@ export function normalizeHubEvent ({event, characters = [], members = [], actorD
 	const semanticTarget = cleanText(event.payload?.targetDisplaySnapshot?.identity?.name, MAX_SNAPSHOT_LENGTH)
 		|| (event.aggregateType === "character" ? getSubjectName({event, characters, members}) : target);
 	const semanticEffect = cleanText(event.payload?.effectDisplaySnapshot?.label, MAX_TITLE_LENGTH) || "An effect";
+	const spellName = getDetailText(event.payload?.spellName);
 	const subject = event.aggregateType === "character"
 		? getSubjectName({event, characters, members})
 		: event.type.startsWith("character.operation.")
@@ -283,7 +298,7 @@ export function normalizeHubEvent ({event, characters = [], members = [], actorD
 		"character.archived": `${subject} was archived.`,
 		"character.deleted": `${subject} was deleted.`,
 		"character.save_forced": `${actorName} forced a save for ${subject}.`,
-		"character.projection.invalidated": `${subject} updated.`,
+		"spell.used": spellName ? `${subject} cast ${spellName}.` : `${subject} used a spell.`,
 		"character.operation.proposed": `${semanticTarget} was offered ${semanticEffect.toLowerCase()} by ${actorName}.`,
 		"character.operation.applied": `${semanticEffect} was applied to ${semanticTarget}.`,
 		"character.operation.rejected": `${semanticEffect} for ${semanticTarget} was rejected.`,
@@ -296,8 +311,9 @@ export function normalizeHubEvent ({event, characters = [], members = [], actorD
 		"xp.granted": `${subject || target || "A character"} received XP.`,
 		"item.granted": `${subject} received an item.`,
 		"party_inventory.invalidated": "Party stash updated.",
+		"transfer.proposed": `${transferTarget || "A character"} requested a transfer${transferSource ? ` from ${transferSource}` : ""}.`,
 		"transfer.reserved": `${transferSource || "A character"} offered a transfer${transferTarget ? ` to ${transferTarget}` : ""}.`,
-		"transfer.committed": `${actorName} accepted a transfer${transferSource && transferTarget ? ` from ${transferSource} to ${transferTarget}` : ""}.`,
+		"transfer.committed": `${actorName} completed a transfer${transferSource && transferTarget ? ` from ${transferSource} to ${transferTarget}` : ""}.`,
 		"transfer.rejected": `${actorName} rejected a transfer${transferSource && transferTarget ? ` from ${transferSource} to ${transferTarget}` : ""}.`,
 		"transfer.cancelled": transferSource || transferTarget
 			? `${transferTarget || transferSource}'s transfer was cancelled.`

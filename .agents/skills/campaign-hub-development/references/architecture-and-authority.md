@@ -56,8 +56,46 @@ assertion, clears that release gate.
 - Writes require base revision, held lease, and monotonic lease epoch.
 - The client retains the accepted base for each in-flight write and performs explicit disjoint rebase or conflict
   recovery. It must not promote an unacknowledged snapshot to the base.
+- A transport-failed owner write remains a local recovery draft. Reconnect/refocus refetches canonical truth:
+  disjoint drafts retry, while overlapping paths use the explicit local/server recovery flow. Client-only save
+  timestamps are excluded from overlap detection. `Use Local` preserves the actual local candidate, except that
+  server-owned inventory and XP paths retain their stricter server-wins overlap policy.
+- Persist the hash-significant PATCH body and rules-version pin before submission. Transport retries reuse that
+  exact body and idempotency key; a confirmed revision conflict may rebase only after rotating and durably storing
+  a new key. Never advance a later queued base without coherently rebasing its snapshot, because that turns stale
+  XP/inventory into local removal intent.
+- Choosing server conflict truth updates accepted, live, latest-submitted, and visible Character Sheet state
+  inside the same serialized and generation-fenced mutation before queued realtime delivery resumes. A covered
+  event remains suppressed, and a genuinely newer queued operation cannot be overwritten by stale caller
+  adoption.
+- Recovery for a create without a canonical response remains keyed by the temporary id. Startup may migrate it
+  through an owner-visible matching `clientImportId`, or list it as a recovery-only draft when no server row
+  exists; both discovery paths validate the stored owner before hydration and preserve the original create
+  idempotency key. Persist first-command intent, and never expose or replay established-character patch recovery
+  as a replacement create. Canonicalization must also rebind Character Sheet identity, URL/roster, projections,
+  and realtime before queued canonical events resume. Publish a temporary-to-canonical alias only after its
+  pending queue is durably migrated; on storage failure, retain the temporary in-memory/durable queue with its
+  original keys and activities. Remove obsolete pending aliases only after hydration, migration, or replay
+  succeeds. A matching canonical row proves the create portion committed: replay later deltas from the original
+  create snapshot as their base, rather than diffing that stale snapshot directly against current canonical truth.
 - Access loss, takeover, campaign switch, detach, logout, or terminal page hide fences queued callbacks and
   pending saves.
+- Durable recovery format 3 stores the exact PATCH body and rules-version pin used with each idempotency key.
+  Legacy activity commands that cannot prove that exact request are quarantined locally and remain exportable;
+  never reconstruct under the old key or rotate to a new key, because either path can lose or duplicate the
+  one-shot event. Quarantine installs a save block so newer commands cannot accumulate; its export contains every
+  queued snapshot, activity, rules pin, and command identity that an explicit server resolution will atomically
+  discard. Dismissal exports and later saves reopen the choice. Explicit server adoption refetches canonical truth,
+  durably clears the queue, and adopts every repository/page track inside the serialized mutation; a recovery-only
+  create may be explicitly discarded only after an owner-scoped listing proves it absent. Activity-free legacy
+  commands may rotate keys only after the replacement recovery envelope is durably stored. A transactional
+  `RULES_VERSION_STALE` rejection is also definitive non-commit evidence: rotate the affected key and durably pin
+  the authoritative active version before retrying. A legacy `pending` state is not proof of non-submission;
+  require the later rules-pin marker too.
+- Exact-predecessor recovery without owner metadata must not disappear. Bind an established patch only after the
+  authoritative row proves current-account ownership. Keep ownerless creates hidden until an explicit account
+  claim; do not expose their document content in the claim prompt or infer ownership from a `clientImportId`
+  collision.
 
 Primary sources: `docs/hub/architecture.md`, ADR 0002, `hub-http-character-repository.js`, and the character/
 workspace repository tests.
@@ -65,6 +103,12 @@ workspace repository tests.
 ## Realtime and projections
 
 - Domain events and outbox rows are committed with authority state. WebSockets deliver already-committed facts.
+- Backward activity requests are fenced by the authorization generation which started them. If role or projection
+  authority changes, replace the visible window and discard older in-flight pages. Projection invalidation,
+  authority reload, and realtime access loss increment that generation synchronously rather than waiting for a
+  follow-up authorization fetch. Conceal cached and rendered rows, prevent already-started refreshes from
+  publishing, and keep paging disabled until the authorized replacement succeeds; authorization errors keep the
+  fence latched.
 - The projector has three outcomes: `owner_truth`, `dm_truth`, and recipient-independent `peer_profile`.
 - `character.projection.invalidated` contains metadata only. Consumers batch/coalesce invalidations, refetch the
   authorization-scoped projection over HTTP, sequence-fence responses, and replace the prior view.

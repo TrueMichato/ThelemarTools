@@ -128,6 +128,53 @@ describe("campaign authorization matrix", () => {
 		expect(peerRead.json().projection).toEqual(dmRead.json().projection.peerPreview);
 	});
 
+	it("shows actor-and-DM rolls to the actor, DM, and co-DM but not another player", async () => {
+		const dm = await signIn(identities.dmA);
+		const campaignA = await campaign(dm, "Private rolls");
+		const coDmInvite = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaignA.id}/invites`,
+			headers: headers(dm),
+			payload: {role: "co_dm"},
+		});
+		const playerInvite = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaignA.id}/invites`,
+			headers: headers(dm),
+			payload: {role: "player", maxUses: 2},
+		});
+		const coDm = await signIn(identities.dmB);
+		await app.inject({method: "POST", url: "/api/invites/redeem", headers: headers(coDm), payload: {token: coDmInvite.json().token}});
+		const actor = await signIn(identities.player);
+		await app.inject({method: "POST", url: "/api/invites/redeem", headers: headers(actor), payload: {token: playerInvite.json().token}});
+		const peer = await signIn(identities.other);
+		await app.inject({method: "POST", url: "/api/invites/redeem", headers: headers(peer), payload: {token: playerInvite.json().token}});
+		const character = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(actor),
+			payload: {clientImportId: "private-roll", campaignId: campaignA.id, schemaVersion: 1, data: {name: "Mira"}},
+		})).json().character;
+
+		const logged = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaignA.id}/rolls`,
+			headers: headers(actor),
+			payload: {characterId: character.id, formula: "1d20+3", total: 17, context: "Initiative", visibility: "actor_and_dm", detail: {}},
+		});
+		expect(logged.statusCode).toBe(200);
+
+		const getRolls = async session => (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaignA.id}/events?afterSequence=0&limit=100`,
+			headers: readHeaders(session),
+		})).json().events.filter(event => event.type === "roll.logged" && event.aggregateId === character.id);
+		expect(await getRolls(actor)).toHaveLength(1);
+		expect(await getRolls(dm)).toHaveLength(1);
+		expect(await getRolls(coDm)).toHaveLength(1);
+		expect(await getRolls(peer)).toHaveLength(0);
+	});
+
 	it("prevents spectators from creating characters or proposing actions", async () => {
 		const dm = await signIn(identities.dmA);
 		const campaignA = await campaign(dm, "A");

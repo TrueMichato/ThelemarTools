@@ -202,10 +202,14 @@ async function pCheckProductionProviderMetadata ({name}) {
 	}
 }
 
+async function pRemoveProductionSmoke () {
+	await run("docker", ["rm", "--force", productionSmokeName], {isAllowFailure: true, isCleanup: true});
+}
+
 function cleanup () {
 	if (cleanupPromise) return cleanupPromise;
 	cleanupPromise = (async () => {
-		await run("docker", ["rm", "--force", productionSmokeName], {isAllowFailure: true, isCleanup: true});
+		await pRemoveProductionSmoke();
 		await run("docker", [...composeArgs, "down", "-v", "--remove-orphans", "--rmi", "local"], {isAllowFailure: true, isCleanup: true});
 		await run("docker", ["image", "rm", "--force", testBffImage], {isAllowFailure: true, isCleanup: true});
 		if (!externalBaseImage) {
@@ -291,7 +295,7 @@ try {
 		"--env", "HUB_CSRF_SECRET",
 		"--env", "HUB_METRICS_TOKEN",
 		"--env", "HUB_ALLOWED_OAUTH_SUBJECTS",
-		"--env", "HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS",
+		"--env", "HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS=",
 		"--env", "HUB_AUTH_PROVIDERS=github,discord,google",
 		"--env", "GITHUB_CLIENT_ID",
 		"--env", "GITHUB_CLIENT_SECRET",
@@ -304,6 +308,7 @@ try {
 	]);
 	await pWaitForContainerHealthy({name: productionSmokeName});
 	await pCheckProductionProviderMetadata({name: productionSmokeName});
+	await pRemoveProductionSmoke();
 	await run("node", [
 		"--experimental-vm-modules",
 		"./node_modules/jest/bin/jest.js",

@@ -14,14 +14,16 @@ function cookie (response, name) {
 
 describe("Phase 4 actions, grants, and transfers", () => {
 	let app;
+	let store;
 	let identity;
 	let ix;
 
 	beforeEach(async () => {
 		identity = identities.dm;
 		ix = 0;
+		store = new MemoryHubStore({fnResolveAwardItem: async ({item}) => structuredClone(item)});
 		app = await createHubApp({
-			store: new MemoryHubStore(),
+			store,
 			oauthProvider: {getAuthorizationUrl: ({state}) => `https://x/?state=${state}`, pExchangeCode: async () => identity},
 			config: {appOrigin: ORIGIN, cookieSecret: "x".repeat(32), csrfSecret: "y".repeat(32), allowedOAuthSubjects: ["github:1", "github:2", "github:3"]},
 		});
@@ -168,6 +170,641 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		expect(target.data.currency).toEqual({cp: 0, sp: 6, ep: 0, gp: 14, pp: 0});
 	});
 
+	it("keeps transfer authority tied to source control and destination ownership", async () => {
+		const {dm, campaign, a, b} = await setup();
+		const dmCharacter = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(dm),
+			payload: {
+				clientImportId: "local-dm-authority",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {
+					name: "Guide",
+					inventory: [{id: "dm-arrows", item: {name: "Arrow", source: "PHB"}, quantity: 5}],
+					currency: {},
+				},
+			},
+		})).json().character;
+		const secondOwned = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(a.session),
+			payload: {
+				clientImportId: "local-a-second",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {name: "A Two", inventory: [], currency: {}},
+			},
+		})).json().character;
+
+		const playerToPeerKey = "player-to-peer";
+		const playerToPeerRequest = {
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session, playerToPeerKey),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "character",
+				targetId: b.character.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			},
+		};
+		const playerToPeer = await app.inject(playerToPeerRequest);
+		expect(playerToPeer.statusCode).toBe(201);
+		expect(playerToPeer.json().transfer).toMatchObject({
+			actorAccountId: a.session.account.id,
+			actorCommandId: playerToPeerKey,
+			sourceKind: "character",
+			sourceId: a.character.id,
+			targetKind: "character",
+			status: "reserved",
+		});
+		expect(playerToPeer.json().transfer).not.toHaveProperty("targetId");
+		expect((await app.inject(playerToPeerRequest)).json()).toEqual(playerToPeer.json());
+		const sourceTransferView = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(a.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(sourceTransferView).toMatchObject({
+			actorAccountId: a.session.account.id,
+			actorCommandId: playerToPeerKey,
+			sourceKind: "character",
+			sourceId: a.character.id,
+			targetKind: "character",
+			targetDisplaySnapshot: {version: 1, displayName: "B"},
+		});
+		expect(sourceTransferView).not.toHaveProperty("targetId");
+		const targetTransferView = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(targetTransferView).toMatchObject({
+			actorAccountId: null,
+			sourceKind: "character",
+			targetKind: "character",
+			targetId: b.character.id,
+			sourceDisplaySnapshot: {version: 1, displayName: "A"},
+		});
+		expect(targetTransferView).not.toHaveProperty("sourceId");
+		expect(targetTransferView).not.toHaveProperty("actorCommandId");
+		const dmTransferView = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(dm),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(dmTransferView).toMatchObject({
+			sourceDisplaySnapshot: {version: 1, displayName: "A"},
+			targetDisplaySnapshot: {version: 1, displayName: "B"},
+		});
+		expect(dmTransferView).not.toHaveProperty("actorCommandId");
+		const actorCannotSelfAcceptPeer = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${playerToPeer.json().transfer.id}/resolve`,
+			headers: headers(a.session),
+			payload: {decision: "accept"},
+		});
+		expect(actorCannotSelfAcceptPeer.statusCode).toBe(403);
+		expect(actorCannotSelfAcceptPeer.json().error).toBe("FORBIDDEN");
+		const acceptPeerKey = "accept-player-to-peer";
+		const acceptPeerRequest = {
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${playerToPeer.json().transfer.id}/resolve`,
+			headers: headers(b.session, acceptPeerKey),
+			payload: {decision: "accept"},
+		};
+		const acceptedPeer = await app.inject(acceptPeerRequest);
+		expect(acceptedPeer.json().transfer).toMatchObject({
+			actorAccountId: null,
+			sourceKind: "character",
+			targetKind: "character",
+			targetId: b.character.id,
+			status: "committed",
+		});
+		expect(acceptedPeer.json().transfer).not.toHaveProperty("sourceId");
+		expect(acceptedPeer.json().transfer).not.toHaveProperty("actorCommandId");
+		expect((await app.inject(acceptPeerRequest)).json()).toEqual(acceptedPeer.json());
+		const acceptedSourceView = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(a.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(acceptedSourceView.actorCommandId).toBe(playerToPeerKey);
+
+		const playerToOwnKey = "player-direct-own";
+		const playerToOwnRequest = {
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session, playerToOwnKey),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "character",
+				targetId: secondOwned.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			},
+		};
+		const playerToOwn = await app.inject(playerToOwnRequest);
+		expect(playerToOwn.json().transfer.status).toBe("committed");
+		expect(playerToOwn.json().transfer.actorCommandId).toBe(playerToOwnKey);
+		expect((await app.inject(playerToOwnRequest)).json()).toEqual(playerToOwn.json());
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${playerToOwn.json().transfer.id}/resolve`,
+			headers: headers(a.session),
+			payload: {decision: "reject"},
+		})).statusCode).toBe(404);
+
+		const playerToDm = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "character",
+				targetId: dmCharacter.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			},
+		});
+		expect(playerToDm.json().transfer.status).toBe("reserved");
+		const acceptPlayerToDmKey = "accept-player-to-dm";
+		const acceptPlayerToDmRequest = {
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${playerToDm.json().transfer.id}/resolve`,
+			headers: headers(dm, acceptPlayerToDmKey),
+			payload: {decision: "accept"},
+		};
+		const acceptedPlayerToDm = await app.inject(acceptPlayerToDmRequest);
+		expect(acceptedPlayerToDm.json().transfer).toMatchObject({
+			actorAccountId: a.session.account.id,
+			sourceId: a.character.id,
+			targetId: dmCharacter.id,
+			status: "committed",
+		});
+		expect(acceptedPlayerToDm.json().transfer).not.toHaveProperty("actorCommandId");
+		expect((await app.inject(acceptPlayerToDmRequest)).json()).toEqual(acceptedPlayerToDm.json());
+
+		const dmToPlayerKey = "dm-direct-player";
+		const dmToPlayer = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(dm, dmToPlayerKey),
+			payload: {
+				sourceKind: "character",
+				sourceId: dmCharacter.id,
+				targetKind: "character",
+				targetId: b.character.id,
+				payload: {items: [{entryId: "dm-arrows", quantity: 1}]},
+			},
+		});
+		expect(dmToPlayer.json().transfer.status).toBe("committed");
+		expect(dmToPlayer.json().transfer.actorCommandId).toBe(dmToPlayerKey);
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(dm, dmToPlayerKey),
+			payload: {
+				sourceKind: "character",
+				sourceId: dmCharacter.id,
+				targetKind: "character",
+				targetId: b.character.id,
+				payload: {items: [{entryId: "dm-arrows", quantity: 1}]},
+			},
+		})).json()).toEqual(dmToPlayer.json());
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${dmToPlayer.json().transfer.id}/resolve`,
+			headers: headers(b.session),
+			payload: {decision: "reject"},
+		})).statusCode).toBe(404);
+		const directTarget = (await app.inject({
+			method: "GET",
+			url: `/api/characters/${b.character.id}`,
+			headers: readHeaders(b.session),
+		})).json().projection.character;
+		expect(directTarget.data.inventory.find(entry => entry.item.name === "Arrow").quantity).toBe(12);
+
+		const aliasPolicy = await store.pSetProjectionPolicy({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			policy: {
+				version: 1,
+				preset: "private",
+				overrides: {identity: {mode: "replace", value: {name: "Masked A"}}},
+			},
+			expectedProjectionRevision: a.character.projectionRevision,
+			idempotencyKey: "alias-a-after-transfer",
+		});
+		const targetViewAfterSourceAlias = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(targetViewAfterSourceAlias).toMatchObject({
+			sourceDisplaySnapshot: {version: 1, displayName: "Masked A"},
+		});
+		expect(targetViewAfterSourceAlias).not.toHaveProperty("sourceId");
+		const dmViewAfterSourceAlias = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(dm),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(dmViewAfterSourceAlias.sourceDisplaySnapshot).toEqual({version: 1, displayName: "A"});
+
+		const privatePolicy = await store.pSetProjectionPolicy({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			policy: {version: 1, preset: "private", overrides: {}},
+			expectedProjectionRevision: aliasPolicy.projectionRevision,
+			idempotencyKey: "hide-a-after-transfer",
+		});
+		const targetViewAfterSourceHide = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceDisplaySnapshot");
+		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceId");
+		await store.pSetProjectionPolicy({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			policy: {version: 1, preset: "table", overrides: {}},
+			expectedProjectionRevision: privatePolicy.projectionRevision,
+			idempotencyKey: "restore-a-after-transfer",
+		});
+		const sourceDestinationCampaign = (await store.pCreateCampaign({
+			accountId: a.session.account.id,
+			name: "Transferred source destination",
+			idempotencyKey: "create-source-destination",
+		})).campaign;
+
+		const aMembership = await store.pGetMembership({accountId: a.session.account.id, campaignId: campaign.id});
+		await store.pChangeMemberRole({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			membershipId: aMembership.id,
+			role: "spectator",
+			idempotencyKey: "downgrade-a-after-transfer",
+		});
+		await store.pMoveCharacter({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			campaignId: sourceDestinationCampaign.id,
+			idempotencyKey: "move-a-after-transfer",
+		});
+		const targetViewAfterSourceDetach = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(b.session),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(targetViewAfterSourceDetach).not.toHaveProperty("sourceDisplaySnapshot");
+		expect(targetViewAfterSourceDetach).not.toHaveProperty("sourceId");
+		const dmViewAfterSourceDetach = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: readHeaders(dm),
+		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
+		expect(dmViewAfterSourceDetach).not.toHaveProperty("sourceDisplaySnapshot");
+		expect((await app.inject(playerToOwnRequest)).json()).toEqual(playerToOwn.json());
+
+		const bMembership = await store.pGetMembership({accountId: b.session.account.id, campaignId: campaign.id});
+		await store.pChangeMemberRole({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			membershipId: bMembership.id,
+			role: "spectator",
+			idempotencyKey: "downgrade-b-after-transfer",
+		});
+		expect((await app.inject(acceptPeerRequest)).json()).toEqual(acceptedPeer.json());
+	});
+
+	it("rechecks Memory direct-transfer receipts and participants after policy loading", async () => {
+		const {dm, campaign, a, b} = await setup();
+		const source = (await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: headers(dm),
+			payload: {
+				clientImportId: "direct-race-source",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {
+					name: "Direct race source",
+					inventory: [{
+						id: "direct-race-token",
+						item: {name: "Direct Race Token", source: "PHB"},
+						quantity: 1,
+					}],
+					currency: {},
+				},
+			},
+		})).json().character;
+		const originalGetEnforcement = store._pGetCampaignContentEnforcement.bind(store);
+		let policyReads = 0;
+		let resolvePolicyReadsStarted;
+		const policyReadsStarted = new Promise(resolve => { resolvePolicyReadsStarted = resolve; });
+		let releasePolicyReads;
+		const policyGate = new Promise(resolve => { releasePolicyReads = resolve; });
+		store._pGetCampaignContentEnforcement = async campaignId => {
+			const out = await originalGetEnforcement(campaignId);
+			policyReads++;
+			if (policyReads === 2) resolvePolicyReadsStarted();
+			await policyGate;
+			return out;
+		};
+		const key = "direct-race-same-key";
+		const propose = targetId => app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(dm, key),
+			payload: {
+				sourceKind: "character",
+				sourceId: source.id,
+				targetKind: "character",
+				targetId,
+				payload: {items: [{entryId: "direct-race-token", quantity: 1}]},
+			},
+		});
+		const first = propose(a.character.id);
+		const second = propose(b.character.id);
+		await policyReadsStarted;
+		releasePolicyReads();
+		const responses = await Promise.all([first, second]);
+
+		expect(responses.map(response => response.statusCode).sort()).toEqual([201, 409]);
+		expect(responses.find(response => response.statusCode === 409).json().error).toBe("IDEMPOTENCY_KEY_REUSED");
+		const targetCharacters = await Promise.all([a, b].map(({session, character}) => app.inject({
+			method: "GET",
+			url: `/api/characters/${character.id}`,
+			headers: readHeaders(session),
+		})));
+		const receivedQuantity = targetCharacters
+			.map(response => response.json().projection.character.data.inventory)
+			.flat()
+			.filter(entry => entry.item?.name === "Direct Race Token")
+			.reduce((total, entry) => total + entry.quantity, 0);
+		expect(receivedQuantity).toBe(1);
+		expect((await app.inject({
+			method: "GET",
+			url: `/api/characters/${source.id}`,
+			headers: readHeaders(dm),
+		})).json().projection.character.data.inventory).toEqual([]);
+	});
+
+	it("reprojects raced Memory proposal and resolution receipts after authority changes", async () => {
+		const pRunWithSecondPolicyReadPaused = async fnRun => {
+			const originalGetEnforcement = store._pGetCampaignContentEnforcement.bind(store);
+			let reads = 0;
+			let resolveSecondRead;
+			const secondRead = new Promise(resolve => { resolveSecondRead = resolve; });
+			let releaseSecondRead;
+			const secondReadGate = new Promise(resolve => { releaseSecondRead = resolve; });
+			store._pGetCampaignContentEnforcement = async campaignId => {
+				reads++;
+				if (reads === 2) {
+					resolveSecondRead();
+					await secondReadGate;
+				}
+				return originalGetEnforcement(campaignId);
+			};
+			try {
+				return await fnRun({secondRead, releaseSecondRead});
+			} finally {
+				store._pGetCampaignContentEnforcement = originalGetEnforcement;
+			}
+		};
+
+		const firstSetup = await setup();
+		const firstMembership = await store.pGetMembership({
+			accountId: firstSetup.a.session.account.id,
+			campaignId: firstSetup.campaign.id,
+		});
+		await store.pChangeMemberRole({
+			accountId: firstSetup.dm.account.id,
+			campaignId: firstSetup.campaign.id,
+			membershipId: firstMembership.id,
+			role: "co_dm",
+			idempotencyKey: "promote-proposal-race-actor",
+		});
+		const proposalInput = {
+			accountId: firstSetup.a.session.account.id,
+			campaignId: firstSetup.campaign.id,
+			sourceKind: "character",
+			sourceId: firstSetup.a.character.id,
+			targetKind: "character",
+			targetId: firstSetup.b.character.id,
+			payload: {items: [{entryId: "arrows-2", quantity: 1}]},
+			idempotencyKey: "same-key-proposal-role-race",
+		};
+		await pRunWithSecondPolicyReadPaused(async ({secondRead, releaseSecondRead}) => {
+			const first = store.pProposeTransfer(proposalInput);
+			const second = store.pProposeTransfer(proposalInput);
+			await secondRead;
+			const firstResponse = await first;
+			expect(firstResponse.transfer.targetId).toBe(firstSetup.b.character.id);
+			await store.pChangeMemberRole({
+				accountId: firstSetup.dm.account.id,
+				campaignId: firstSetup.campaign.id,
+				membershipId: firstMembership.id,
+				role: "spectator",
+				idempotencyKey: "downgrade-proposal-race-actor",
+			});
+			releaseSecondRead();
+			const replayed = await second;
+			expect(replayed.transfer.sourceId).toBe(firstSetup.a.character.id);
+			expect(replayed.transfer).not.toHaveProperty("targetId");
+		});
+
+		const secondSetup = await setup();
+		const secondMembership = await store.pGetMembership({
+			accountId: secondSetup.a.session.account.id,
+			campaignId: secondSetup.campaign.id,
+		});
+		const reserved = await store.pProposeTransfer({
+			accountId: secondSetup.b.session.account.id,
+			campaignId: secondSetup.campaign.id,
+			sourceKind: "character",
+			sourceId: secondSetup.b.character.id,
+			targetKind: "character",
+			targetId: secondSetup.a.character.id,
+			payload: {items: [{entryId: "arrows-3", quantity: 1}]},
+			idempotencyKey: "resolution-race-transfer",
+		});
+		const resolutionInput = {
+			accountId: secondSetup.a.session.account.id,
+			campaignId: secondSetup.campaign.id,
+			transferId: reserved.transfer.id,
+			decision: "accept",
+			idempotencyKey: "same-key-resolution-role-race",
+		};
+		await pRunWithSecondPolicyReadPaused(async ({secondRead, releaseSecondRead}) => {
+			const first = store.pResolveTransfer(resolutionInput);
+			const second = store.pResolveTransfer(resolutionInput);
+			await secondRead;
+			const firstResponse = await first;
+			expect(firstResponse.transfer).not.toHaveProperty("sourceId");
+			expect(firstResponse.transfer.actorAccountId).toBeNull();
+			await store.pChangeMemberRole({
+				accountId: secondSetup.dm.account.id,
+				campaignId: secondSetup.campaign.id,
+				membershipId: secondMembership.id,
+				role: "co_dm",
+				idempotencyKey: "promote-resolution-race-actor",
+			});
+			releaseSecondRead();
+			const replayed = await second;
+			expect(replayed.transfer.targetId).toBe(secondSetup.a.character.id);
+			expect(replayed.transfer.sourceId).toBe(secondSetup.b.character.id);
+			expect(replayed.transfer.actorAccountId).toBe(secondSetup.b.session.account.id);
+		});
+	});
+
+	it("lets a player request stash items without reserving them before DM approval", async () => {
+		const {dm, campaign, a, b} = await setup();
+		const party = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/party-inventory`,
+			headers: readHeaders(dm),
+		})).json().partyInventory;
+		const deposit = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "character",
+				sourceId: a.character.id,
+				targetKind: "party_inventory",
+				targetId: party.id,
+				payload: {items: [{entryId: "arrows-2", quantity: 4}]},
+			},
+		});
+		await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${deposit.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		});
+		const seeded = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/party-inventory`,
+			headers: readHeaders(a.session),
+		})).json().partyInventory;
+		const stashEntry = seeded.inventory[0];
+
+		const requested = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "party_inventory",
+				sourceId: seeded.id,
+				targetKind: "character",
+				targetId: a.character.id,
+				payload: {items: [{entryId: stashEntry.id, quantity: 1}]},
+			},
+		});
+		expect(requested.statusCode).toBe(201);
+		expect(requested.json().transfer).toMatchObject({
+			status: "proposed",
+			sourceKind: "party_inventory",
+			targetKind: "character",
+			targetId: a.character.id,
+			payload: {
+				request: {items: [{entryId: stashEntry.id, quantity: 1}]},
+				preview: {
+					items: [expect.objectContaining({
+						item: {name: "Arrow", source: "PHB"},
+						quantity: 1,
+					})],
+				},
+			},
+		});
+		expect((await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/party-inventory`,
+			headers: readHeaders(a.session),
+		})).json().partyInventory.inventory[0].quantity).toBe(4);
+
+		const playerCannotApproveOwnRequest = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
+			headers: headers(a.session),
+			payload: {decision: "accept"},
+		});
+		expect(playerCannotApproveOwnRequest.statusCode).toBe(403);
+		expect(playerCannotApproveOwnRequest.json().error).toBe("FORBIDDEN");
+
+		const approvalKey = "approve-player-stash-request";
+		const approved = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
+			headers: headers(dm, approvalKey),
+			payload: {decision: "accept"},
+		});
+		expect(approved.statusCode).toBe(200);
+		expect(approved.json().transfer.status).toBe("committed");
+		const approvalReplay = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
+			headers: headers(dm, approvalKey),
+			payload: {decision: "accept"},
+		});
+		expect(approvalReplay.statusCode).toBe(200);
+		expect(approvalReplay.json()).toEqual(approved.json());
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requested.json().transfer.id}/resolve`,
+			headers: headers(dm, "approve-player-stash-request-new-key"),
+			payload: {decision: "accept"},
+		})).statusCode).toBe(404);
+
+		const requestA = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(a.session),
+			payload: {
+				sourceKind: "party_inventory",
+				sourceId: seeded.id,
+				targetKind: "character",
+				targetId: a.character.id,
+				payload: {items: [{entryId: stashEntry.id, quantity: 3}]},
+			},
+		});
+		const requestB = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers`,
+			headers: headers(b.session),
+			payload: {
+				sourceKind: "party_inventory",
+				sourceId: seeded.id,
+				targetKind: "character",
+				targetId: b.character.id,
+				payload: {items: [{entryId: stashEntry.id, quantity: 3}]},
+			},
+		});
+		expect(requestA.json().transfer.status).toBe("proposed");
+		expect(requestB.json().transfer.status).toBe("proposed");
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requestA.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		})).json().transfer.status).toBe("committed");
+		const staleApproval = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${requestB.json().transfer.id}/resolve`,
+			headers: headers(dm),
+			payload: {decision: "accept"},
+		});
+		expect(staleApproval.statusCode).toBe(409);
+		expect(staleApproval.json().error).toBe("TRANSFER_INSUFFICIENT");
+	});
+
 	it("returns escrow to the source when a transfer is rejected", async () => {
 		const {campaign, a, b} = await setup();
 		const item = a.character.data.inventory[0];
@@ -183,12 +820,26 @@ describe("Phase 4 actions, grants, and transfers", () => {
 				payload: {items: [{entryId: item.id, quantity: item.quantity}], currency: {gp: 3}},
 			},
 		});
-		await app.inject({
+		const rejectionKey = "reject-transfer-retry";
+		const rejected = await app.inject({
 			method: "POST",
 			url: `/api/campaigns/${campaign.id}/transfers/${proposed.json().transfer.id}/resolve`,
-			headers: headers(b.session),
+			headers: headers(b.session, rejectionKey),
 			payload: {decision: "reject"},
 		});
+		const rejectionReplay = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${proposed.json().transfer.id}/resolve`,
+			headers: headers(b.session, rejectionKey),
+			payload: {decision: "reject"},
+		});
+		expect(rejectionReplay.json()).toEqual(rejected.json());
+		expect((await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/transfers/${proposed.json().transfer.id}/resolve`,
+			headers: headers(b.session, "reject-transfer-new-key"),
+			payload: {decision: "reject"},
+		})).statusCode).toBe(404);
 		const source = (await app.inject({method: "GET", url: `/api/characters/${a.character.id}`, headers: readHeaders(a.session)})).json().projection.character;
 		expect(source.data.currency.gp).toBe(10);
 		expect(source.data.inventory).toContainEqual(expect.objectContaining({id: item.id, quantity: item.quantity}));

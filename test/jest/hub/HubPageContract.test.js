@@ -1,5 +1,9 @@
 import fs from "node:fs";
-import {renderHubActivityRows} from "../../../js/hub/hub-activity-render.js";
+import {jest} from "@jest/globals";
+import {
+	bindHubActivityHistoryPagination,
+	renderHubActivityRows,
+} from "../../../js/hub/hub-activity-render.js";
 
 const read = path => fs.readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 
@@ -98,12 +102,80 @@ describe("campaign hub pages", () => {
 			"campaign-pending-actions-empty",
 			"campaign-pending-transfers-empty",
 			"campaign-activity-empty",
+			"campaign-activity-status",
+			"campaign-activity-load-earlier",
 			"campaign-invite-form-status",
 			"campaign-action-form-status",
 			"campaign-transfer-form-status",
 		]) expect(campaignHtml).toContain(`id="${id}"`);
 		expect(campaignHtml).toContain("aria-live=\"polite\"");
 		expect(campaignHtml).toContain("data-pending-label=\"Applying...\"");
+	});
+
+	it("keeps transfer submission recoverable after a successful mutation outlives its refresh", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("HubTransferProposalDrafts");
+		expect(source).toContain("transferProposalDrafts.stage");
+		expect(source).toContain("transferProposalDrafts.get(proposalRef)");
+		expect(source).toContain("proposalRequest.isAutoResolved");
+		expect(source).toContain("transferProposalDrafts.isReplayable");
+		expect(source).toContain("HubTransferProposalDrafts.reconcileExpiredProposal");
+		expect(source).toContain("transfers: refreshResult.transfers");
+		expect(source).toContain("This request remains locked to prevent a duplicate");
+		expect(source).toContain("The original transfer was found and is still pending.");
+		expect(source).toContain("No matching transfer was found. Latest balances are loaded");
+		expect(source).toContain("Retry transfer");
+		expect(source).toContain("Retry to reconcile the same transfer.");
+		expect(source).toContain("Refresh latest balances");
+		expect(source).toContain("form._hubMutationKey = null");
+		expect(source).toContain("form._hubMutationFingerprint = null");
+		expect(source).toContain("setTransferRefreshFailure");
+		expect(source).toContain("const form = event.currentTarget;");
+		expect(source).toContain("Retry latest balances");
+		expect(source).toContain("Latest balances loaded. You can send another transfer.");
+		expect(source).toContain("const latestSelections = readSelections();");
+		expect(source).toContain("selectionsToRestore");
+		expect(source).toContain("if (sourceKind !== \"character\") return false;");
+		expect(source).toContain("Request sent. A DM must approve before anything leaves the party inventory.");
+		expect(source).not.toContain("Reload the campaign before sending another transfer.");
+		expect(source).not.toContain("event.currentTarget.querySelector(\"button[type='submit']\").disabled = true");
+	});
+
+	it("keeps inbox transfer decisions idempotent and separates committed outcomes from refresh failures", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("HubTransferResolutionDrafts");
+		expect(source).toContain("HubTransferRefreshQueue");
+		expect(source).toContain("transferRefreshQueue.pRun");
+		expect(source).toContain("const pTransferStateRefresh = pRefreshTransferState({");
+		expect(source).toContain("charactersNxt: pCharactersNxt");
+		expect(source).toContain("snapshotNxt: pSnapshotNxt");
+		expect(source).toContain("fnIsSnapshotCurrent: snapshotNxt => snapshotNxt.lastSequence >= liveLastSequence");
+		expect(source).toContain("const acceptedSnapshot = snapshotNxt && fnIsSnapshotCurrent(snapshotNxt)");
+		expect(source).toContain("if (acceptedSnapshot?.roster) rosterRef.current = acceptedSnapshot.roster");
+		expect(source).toContain("pResolveTransferAndRefresh");
+		expect(source).toContain("transferResolutionDrafts.stage");
+		expect(source).toContain("pResolveTransferFromDraft");
+		expect(source).toContain("error?.code !== \"RULES_VERSION_STALE\"");
+		expect(source).toContain("const isDefinitiveWithoutPending = error instanceof HubApiError");
+		expect(source).toContain("&& !isTransferOutcomeUncertain(error)");
+		expect(source).toContain("if (isDefinitiveWithoutPending) {");
+		expect(source).toContain("await pRefreshTransferState();");
+		expect(source).toContain("The latest balances could not be loaded.");
+		expect(source).toContain("setTransferProposalControls");
+		expect(source).toContain("form._hubTransferControlStates");
+		expect(source).toContain("const transfers = await api.pListTransfers({campaignId})");
+		expect(source).toContain("const currentTransfer = transfers.find(it => it.id === proposed.transfer.id)");
+		expect(source).toContain("option[data-hub-frozen-proposal]");
+		expect(source).toContain("Original item stack");
+		expect(source).toContain("const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId})");
+		expect(source).toContain("resolutionRequest.decision !== decision");
+		expect(source).toContain("transferResolutionDrafts.isReplayable");
+		expect(source).toContain("transferResolutionDrafts.reconcilePending");
+		expect(source).toContain("Transfer applied.");
+		expect(source).toContain("The committed outcome is safe");
+		expect(source).toContain("The transfer outcome is not yet confirmed.");
+		expect(source).toContain("Retry inbox refresh");
+		expect(source).not.toMatch(/pResolveTransfer\([\s\S]{0,300}idempotencyKey: crypto\.randomUUID\(\)/);
 	});
 
 	it("requires an explicit source identity for condition effects", () => {
@@ -138,6 +210,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("const isReadOnlyDm = isDm && character.ownerAccountId !== session.account.id");
 		expect(source).toContain("Open this character in a read-only DM view");
 		expect(source).toContain("\"Inspect sheet\" : \"Open sheet\"");
+		expect(source).toContain("document.createElement(canOpen ? \"a\" : \"summary\")");
 	});
 
 	it("keeps loaded campaign data visible while offline and requires a refresh after reconnecting", () => {
@@ -218,8 +291,12 @@ describe("campaign hub pages", () => {
 
 	it("renders a named inbox, recent activity, and copyable invite result", () => {
 		const source = read("js/hub/hub-page.js");
-		expect(source).toContain("api.pListEvents({");
-		expect(source).toContain("new HubRealtimeClient({campaignId})");
+		const activitySource = read("js/hub/hub-activity-render.js");
+		expect(source).toContain("api.pListEventPage({");
+		expect(source).toContain("beforeSequence:");
+		expect(source).not.toContain("snapshot.lastSequence - 50");
+		expect(activitySource).toContain("No additional visible activity in this window");
+		expect(source).toContain("new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence})");
 		expect(source).toContain("realtime.on(\"event\", event =>");
 		expect(source).toContain("realtime.on(\"cursor\", baseline =>");
 		// ADR 0011: the page must not read character data off an event payload; every
@@ -227,6 +304,24 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
 		expect(source).toContain("const reloadForAuthorityChange = () =>");
+		expect(source).toContain("let activityAuthorizationGeneration = 0");
+		expect(source).toContain("let isActivityAuthorizationFenced = false");
+		expect(source).toContain("const invalidateActivityAuthorization = () =>");
+		expect(source).toContain("const concealActivityAuthorization = ({isLoading = false} = {}) =>");
+		expect(source).toMatch(/const concealActivityAuthorization = \(\{isLoading = false\} = \{\}\) => \{[\s\S]*liveEvents = \[\];[\s\S]*liveMembers = \[\];[\s\S]*renderRecentActivity\(\{[\s\S]*events: \[\],[\s\S]*isLoading,[\s\S]*isAuthorizationFenced: true/);
+		expect(source).toContain("isActivityAuthorizationFenced = true");
+		expect(source).toContain("isActivityAuthorizationFenced = false");
+		expect(source).toContain("isActivityAuthorizationFenced ? [] : liveEvents");
+		expect(source).toContain("[\"AUTH_REQUIRED\", \"FORBIDDEN\", \"CAMPAIGN_NOT_FOUND\"]");
+		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
+		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
+		expect(source).toContain("const isProjectionInvalidation = event.type === \"character.projection.invalidated\"");
+		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toMatch(/onAuthorizationError:[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toContain("concealActivityAuthorization({isLoading: true})");
+		expect(source).toMatch(/const \[membersNxt, charactersNxt, snapshotNxt, activityRefresh\] = await Promise\.all[\s\S]*if \(isCampaignReloadRequired\) return;/);
+		expect(activitySource).toContain("requestAuthorizationGeneration === getAuthorizationGeneration()");
 		expect(source).toContain("event.type === \"membership.role_changed\"");
 		expect(source).toContain("event.payload?.accountId === session.account.id");
 		expect(source).toContain("event.payload?.role !== campaign.role");
@@ -238,11 +333,132 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("if (isCampaignReloadRequired) return;");
 		expect(source).toContain("snapshotNxt.lastSequence >= liveLastSequence");
 		expect(source).toContain("liveEvents = [...liveEvents.filter");
-		expect(source).toContain("renderRecentActivity({events: liveEvents");
+		expect(source).toContain("events: liveEvents");
 		expect(source).toContain("getCharacterName(target)");
-		expect(source).toContain("getContainerName({kind: transfer.sourceKind");
+		expect(source).toContain("getTransferContainerName({transfer, endpoint: \"source\"");
+		expect(source).toContain("DisplaySnapshot`]?.displayName || \"A character\"");
 		expect(source).toContain("navigator.clipboard.writeText(inviteOutput.value)");
 		expect(campaignHtml).toContain("id=\"campaign-invite-copy\"");
+	});
+
+	it("loads earlier activity for an archived campaign before active-only controls initialize", async () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source.indexOf("bindHubActivityHistoryPagination({"))
+			.toBeLessThan(source.indexOf("if (campaign.status !== \"active\")"));
+		const listeners = {};
+		const button = {
+			disabled: false,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const pageRequests = [];
+		const renders = [];
+		let state = {
+			events: [{id: "event-2", sequence: 2}],
+			characters: [],
+			members: [],
+			history: {hasMore: true, scannedBackThroughSequence: 2},
+		};
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage: async request => {
+				pageRequests.push(request);
+				return {
+					events: [{id: "event-1", sequence: 1}],
+					history: {hasMore: false, scannedBackThroughSequence: 1},
+				};
+			},
+			getState: () => state,
+			setState: ({events, history}) => state = {...state, events, history},
+			render: input => renders.push(input),
+			renderError: error => { throw error; },
+			getAuthorizationGeneration: () => 0,
+			isTerminal: () => false,
+		});
+
+		await listeners.click();
+
+		expect(pageRequests).toEqual([{beforeSequence: 2, limit: 50}]);
+		expect(state.events.map(event => event.id)).toEqual(["event-1", "event-2"]);
+		expect(state.history).toEqual({hasMore: false, scannedBackThroughSequence: 1});
+		expect(renders.at(-1)).toEqual(expect.objectContaining({
+			events: state.events,
+			history: state.history,
+			statusMessage: "",
+		}));
+		expect(button.disabled).toBe(false);
+	});
+
+	it("keeps earlier-activity paging fenced until authorized history is replaced", async () => {
+		const listeners = {};
+		let isAuthorizationFenced = true;
+		const button = {
+			disabled: true,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const pListEventPage = jest.fn().mockResolvedValue({
+			events: [],
+			history: {hasMore: false, scannedBackThroughSequence: 1},
+		});
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage,
+			getState: () => ({
+				events: [{id: "stale", sequence: 2}],
+				characters: [],
+				members: [],
+				history: {hasMore: true, scannedBackThroughSequence: 2},
+			}),
+			setState: jest.fn(),
+			render: jest.fn(),
+			renderError: jest.fn(),
+			getAuthorizationGeneration: () => 1,
+			isAuthorizationFenced: () => isAuthorizationFenced,
+			isTerminal: () => false,
+		});
+
+		await listeners.click();
+		expect(pListEventPage).not.toHaveBeenCalled();
+		expect(button.disabled).toBe(true);
+
+		isAuthorizationFenced = false;
+		await listeners.click();
+		expect(pListEventPage).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps earlier-activity paging fenced after an authorization error", async () => {
+		const listeners = {};
+		let isAuthorizationFenced = false;
+		const error = Object.assign(new Error("access lost"), {code: "CAMPAIGN_NOT_FOUND"});
+		const button = {
+			disabled: false,
+			addEventListener: (type, listener) => listeners[type] = listener,
+		};
+		const renderError = jest.fn();
+		bindHubActivityHistoryPagination({
+			button,
+			pListEventPage: jest.fn().mockRejectedValue(error),
+			getState: () => ({
+				events: [{id: "visible", sequence: 2}],
+				characters: [],
+				members: [],
+				history: {hasMore: true, scannedBackThroughSequence: 2},
+			}),
+			setState: jest.fn(),
+			render: jest.fn(),
+			renderError,
+			getAuthorizationGeneration: () => 0,
+			isAuthorizationFenced: () => isAuthorizationFenced,
+			onAuthorizationError: caught => {
+				isAuthorizationFenced = caught === error;
+				return isAuthorizationFenced;
+			},
+			isTerminal: () => isAuthorizationFenced,
+		});
+
+		await listeners.click();
+
+		expect(renderError).toHaveBeenCalledWith(error);
+		expect(button.disabled).toBe(true);
 	});
 
 	it("renders normalized character subjects safely and keeps activity rows usable on mobile", () => {
@@ -413,7 +629,9 @@ describe("campaign hub pages", () => {
 		expect(source).toMatch(/^async function renderPendingTransfers/m);
 		expect(source.indexOf("async function renderPendingTransfers")).toBeLessThan(source.indexOf("async function pInitCampaignForms"));
 		expect(source).toContain("const canReject = canAct && (canAccept || transfer.actorAccountId === session.account.id)");
-		expect(source).toContain("canAccept ? \"Reject\" : \"Cancel\"");
+		expect(source).toContain("[\"proposed\", \"reserved\"].includes(transfer.status)");
+		expect(source).toContain("DM approval is needed before the stash changes");
+		expect(source).toContain("isRequest ? \"Decline\" : \"Reject\"");
 	});
 
 	it("initializes every rules control from the active campaign version", () => {

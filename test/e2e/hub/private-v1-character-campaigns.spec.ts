@@ -308,7 +308,6 @@ test("players target Cure Wounds with approval-time source costs and atomic effe
 		await target.signInSynthetic({providerSubject: "targeting-ui-target", displayName: "Bryn", secret});
 
 		const campaignId = await dm.createCampaign("Cure Wounds Targeting E2E");
-		await dm.publishDefaultCampaignRulesViaApi(campaignId);
 		await source.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
 		await target.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
 		const sourceCharacter = await source.createCharacter({
@@ -335,8 +334,23 @@ test("players target Cure Wounds with approval-time source costs and atomic effe
 		await Promise.all([
 			source.waitForCharacterRealtimeLive(),
 			target.waitForCharacterRealtimeLive(),
-			source.waitForPeerTargetingReady(),
 		]);
+		const disabledContext = await source.getCampaignContext(campaignId);
+		expect(disabledContext.rulesVersion ?? null).toBeNull();
+		expect(disabledContext.capabilities.peerSourceCosts.enabled).toBe(false);
+		await source.expectPeerTargetingUnavailable();
+
+		const rulesVersionId = await dm.publishDefaultCampaignRulesViaApi(campaignId);
+		await source.waitForPeerTargetingReady();
+		const enabledContext = await source.getCampaignContext(campaignId);
+		expect(enabledContext.rulesVersion.id).toBe(rulesVersionId);
+		expect(enabledContext.capabilities.peerSourceCosts).toMatchObject({
+			enabled: true,
+			contractVersion: 1,
+			protocolVersion: 4,
+			operationVersion: 1,
+			templateRegistryVersion: "peer-effects-v1",
+		});
 		await source.page.setViewportSize({width: 390, height: 844});
 		await expect.poll(async () => {
 			const data = (await source.getCharacter(sourceCharacter.id)).data;
@@ -384,6 +398,40 @@ test("players target Cure Wounds with approval-time source costs and atomic effe
 		await source.resolveIncomingPeerSpell({spellName: "Cure Wounds", decision: "Approve"});
 		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.spellcasting.spellSlots[1].current).toBe(0);
 		await expect.poll(async () => (await source.getCharacter(sourceCharacter.id)).data.hp.current).toBeGreaterThan(4);
+
+		const xphbSourceCharacter = await source.createCharacter({
+			campaignId,
+			name: "Aster 2024",
+			className: "Cleric",
+			classSource: "XPHB",
+			spellsKnown: [{
+				id: "cure-wounds|XPHB",
+				name: "Cure Wounds",
+				source: "XPHB",
+				level: 1,
+				prepared: true,
+				sourceClass: "Cleric",
+				sourceFeature: "Prepared Spells",
+			}],
+			rulesVersionId,
+		});
+		await source.openCharacterSheet({
+			campaignId,
+			characterId: xphbSourceCharacter.id,
+			name: "Aster 2024",
+		});
+		await source.waitForCharacterRealtimeLive();
+		await source.waitForPeerTargetingReady();
+		await source.castSpellAtPeerTarget({spellName: "Cure Wounds", targetName: "Bryn"});
+		await target.resolveIncomingPeerSpell({spellName: "Cure Wounds", decision: "Approve"});
+		await source.expectOutgoingPeerSpellStatus({
+			spellName: "Cure Wounds",
+			targetName: "Bryn",
+			status: "applied",
+		});
+		await expect.poll(
+			async () => (await source.getCharacter(xphbSourceCharacter.id)).data.spellcasting.spellSlots[1].current,
+		).toBe(1);
 	} finally {
 		await Promise.all([dmContext.close(), sourceContext.close(), targetContext.close()]);
 	}

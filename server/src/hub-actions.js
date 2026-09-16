@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {isDeepStrictEqual} from "node:util";
 import {getInventoryTransferEligibility} from "../../js/hub/hub-inventory-contract.js";
+import {getInventoryItemWithoutDeterministicAliases} from "../../js/hub/hub-inventory-equivalence.js";
 import {getHealedHp, resolveApplicableMaxHp} from "../../js/hub/hub-semantic-hp.js";
 import {HubStoreError} from "./hub-store-error.js";
 
@@ -116,11 +117,13 @@ export function normalizeSafeItemSummary (item) {
 
 export function getSafeItemSummary (item) {
 	if (!isPlainObject(item)) throwItemAwardInvalid(`Item must be an object.`);
-	return normalizeSafeItemSummary(Object.fromEntries(
+	const summary = Object.fromEntries(
 		SAFE_ITEM_SUMMARY_FIELDS
 			.filter(key => Object.hasOwn(item, key))
 			.map(key => [key, item[key]]),
-	));
+	);
+	if (summary.typeCode == null && typeof item.type === "string") summary.typeCode = item.type;
+	return normalizeSafeItemSummary(summary);
 }
 
 export function normalizeItemAwardQuantity (quantity) {
@@ -271,10 +274,26 @@ function getComparableInventoryEntry (entry) {
 	delete out.id;
 	delete out.quantity;
 	delete out._sourceIndex;
+	if (out.item && typeof out.item === "object" && !Array.isArray(out.item)) {
+		out.item = getInventoryItemWithoutDeterministicAliases(out.item);
+	}
 	for (const key of ["equipped", "attuned", "starred"]) {
 		if (!out[key]) delete out[key];
 	}
 	return out;
+}
+
+function isInventoryEntryStackEquivalent (left, right) {
+	return isDeepStrictEqual(getComparableInventoryEntry(left), getComparableInventoryEntry(right));
+}
+
+function getCollisionFreeInventoryEntryId (inventory) {
+	const ids = new Set(inventory.map(entry => entry.id));
+	let id;
+	do {
+		id = crypto.randomUUID();
+	} while (ids.has(id));
+	return id;
 }
 
 function getDestinationInventoryEntry (entry) {
@@ -286,25 +305,70 @@ function getDestinationInventoryEntry (entry) {
 	return out;
 }
 
-function addDestinationInventoryEntry ({inventory, incoming}) {
+function isSafeSummaryOnlyItem (item) {
+	return isPlainObject(item)
+		&& Object.keys(item).every(key => SAFE_ITEM_SUMMARY_FIELDS.includes(key));
+}
+
+function getComparableInventoryEntryWithoutItem (entry) {
+	const out = getComparableInventoryEntry(entry);
+	delete out.item;
+	return out;
+}
+
+function isSafeSummaryCompatible (left, right) {
+	const leftSummary = getSafeItemSummary(left);
+	const rightSummary = getSafeItemSummary(right);
+	if (leftSummary.name !== rightSummary.name || leftSummary.source !== rightSummary.source) return false;
+	for (const key of SAFE_ITEM_SUMMARY_FIELDS) {
+		if (!Object.hasOwn(leftSummary, key) || !Object.hasOwn(rightSummary, key)) continue;
+		if (!isDeepStrictEqual(leftSummary[key], rightSummary[key])) return false;
+	}
+	return true;
+}
+
+function isCustomInventoryItem (item) {
+	return item?._isCustom
+		|| item?.source === "Custom"
+		|| Object.hasOwn(item || {}, "custom");
+}
+
+function addDestinationInventoryEntry ({inventory, incoming, isAllowLegacySummaryUpgrade = false}) {
 	const entry = getDestinationInventoryEntry(incoming);
-	const existing = inventory.find(it => isDeepStrictEqual(getComparableInventoryEntry(it), getComparableInventoryEntry(entry)));
+	let existing = inventory.find(it => isInventoryEntryStackEquivalent(it, entry));
+	if (
+		!existing
+		&& isAllowLegacySummaryUpgrade
+		&& !isSafeSummaryOnlyItem(entry.item)
+		&& !isCustomInventoryItem(entry.item)
+	) {
+		existing = inventory.find(candidate => {
+			if (!isDeepStrictEqual(
+				getComparableInventoryEntryWithoutItem(candidate),
+				getComparableInventoryEntryWithoutItem(entry),
+			)) return false;
+			if (!isSafeSummaryOnlyItem(candidate.item)) return false;
+			return isSafeSummaryCompatible(candidate.item, entry.item);
+		});
+		if (existing) existing.item = structuredClone(entry.item);
+	}
 	if (existing) {
 		existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
 		return existing;
 	}
-	const created = {...entry, id: crypto.randomUUID()};
+	const created = {...entry, id: getCollisionFreeInventoryEntryId(inventory)};
 	inventory.push(created);
 	return created;
 }
 
-export function addAwardedEntryToCharacter ({container, incoming}) {
+export function addAwardedEntryToCharacter ({container, incoming, isAllowLegacySummaryUpgrade = false}) {
 	const out = normalizeCharacterInventory(container);
 	const normalizedIncoming = structuredClone(incoming);
 	normalizedIncoming.quantity = normalizeItemAwardQuantity(normalizedIncoming.quantity);
 	const entry = addDestinationInventoryEntry({
 		inventory: out.inventory,
 		incoming: normalizedIncoming,
+		isAllowLegacySummaryUpgrade,
 	});
 	return {container: out, entry: structuredClone(entry)};
 }
@@ -351,6 +415,63 @@ export function removeTransferPayload ({container, payload}) {
 	return {container: out, escrow: {items: escrowItems, currency: escrowCurrency}};
 }
 
+export function prepareTransferRequest ({container, payload}) {
+	const {escrow} = removeTransferPayload({container, payload});
+	return {
+		request: {
+			items: escrow.items.map(entry => ({entryId: entry.id, quantity: entry.quantity})),
+			currency: structuredClone(escrow.currency),
+		},
+		preview: escrow,
+	};
+}
+
+export function isDirectTransferAuthority ({
+	role,
+	accountId,
+	sourceKind,
+	targetKind,
+	targetOwnerAccountId,
+}) {
+	if (["dm", "co_dm"].includes(role)) return true;
+	return role === "player"
+		&& sourceKind === "character"
+		&& targetKind === "character"
+		&& targetOwnerAccountId === accountId;
+}
+
+export function orderTransfersForLifecycleCancellation (transfers) {
+	const bySource = new Map();
+	for (const transfer of transfers) {
+		const sourceKey = `${transfer.sourceKind}::${transfer.sourceId}`;
+		const group = bySource.get(sourceKey) || [];
+		group.push(transfer);
+		bySource.set(sourceKey, group);
+	}
+	const getTimestamp = transfer => {
+		const timestamp = new Date(transfer.createdAt).getTime();
+		return Number.isFinite(timestamp) ? timestamp : 0;
+	};
+	return [...bySource.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.flatMap(([, group]) => group.sort((left, right) => {
+			const leftIsReserved = left.status === "reserved";
+			const rightIsReserved = right.status === "reserved";
+			if (leftIsReserved !== rightIsReserved) return leftIsReserved ? -1 : 1;
+			if (leftIsReserved) {
+				const leftRevision = Number.isSafeInteger(left._sourceRevision) ? left._sourceRevision : null;
+				const rightRevision = Number.isSafeInteger(right._sourceRevision) ? right._sourceRevision : null;
+				if (leftRevision != null && rightRevision != null && leftRevision !== rightRevision) {
+					return rightRevision - leftRevision;
+				}
+				const leftHasRevision = leftRevision != null;
+				const rightHasRevision = rightRevision != null;
+				if (leftHasRevision !== rightHasRevision) return leftHasRevision ? -1 : 1;
+			}
+			return getTimestamp(right) - getTimestamp(left) || `${right.id}`.localeCompare(`${left.id}`);
+		}));
+}
+
 export function addTransferPayload ({container, escrow, isRestore = false}) {
 	const out = structuredClone(container);
 	out.inventory = normalizeInventory(out.inventory);
@@ -358,6 +479,7 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 	const incomingItems = isRestore
 		? [...(escrow.items || [])].sort((a, b) => (a._sourceIndex ?? Number.MAX_SAFE_INTEGER) - (b._sourceIndex ?? Number.MAX_SAFE_INTEGER))
 		: escrow.items || [];
+	const collisionRestores = [];
 	for (const incoming of incomingItems) {
 		if (!isRestore) {
 			addDestinationInventoryEntry({inventory: out.inventory, incoming});
@@ -366,8 +488,20 @@ export function addTransferPayload ({container, escrow, isRestore = false}) {
 		const entry = structuredClone(incoming);
 		delete entry._sourceIndex;
 		const existing = out.inventory.find(it => it.id === entry.id);
-		if (existing) existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
-		else out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
+		if (existing && isInventoryEntryStackEquivalent(existing, entry)) {
+			existing.quantity = addFinite(existing.quantity, incoming.quantity, "Item quantity");
+			continue;
+		}
+		if (existing) {
+			collisionRestores.push({entry, existingId: existing.id});
+			continue;
+		}
+		out.inventory.splice(Math.min(incoming._sourceIndex ?? out.inventory.length, out.inventory.length), 0, entry);
+	}
+	for (const {entry, existingId} of collisionRestores) {
+		const existing = out.inventory.find(it => it.id === existingId);
+		entry.id = getCollisionFreeInventoryEntryId(out.inventory);
+		out.inventory.splice(existing ? out.inventory.indexOf(existing) : out.inventory.length, 0, entry);
 	}
 	const currency = normalizeCurrency(escrow.currency);
 	for (const type of CURRENCY_TYPES) out.currency[type] = addFinite(out.currency[type], currency[type], `${type} amount`);

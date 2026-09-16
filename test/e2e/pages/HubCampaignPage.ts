@@ -279,7 +279,10 @@ export class HubCampaignPage {
 		const networkUrls = requests.map(url => new URL(url)).filter(url => ["http:", "https:"].includes(url.protocol));
 		expect(networkUrls.filter(url => url.origin !== pageOrigin), `${path} should not make third-party requests`).toEqual([]);
 		expect(networkUrls.filter(url => /^\/(?:data|fonts|homebrew|prerelease|search)\//.test(url.pathname)), `${path} should not load the general data graph`).toEqual([]);
-		if (maxRequests != null) expect(networkUrls.length, `${path} initial request budget`).toBeLessThanOrEqual(maxRequests);
+		if (maxRequests != null) {
+			const requestPaths = networkUrls.map(url => `${url.pathname}${url.search}`);
+			expect(networkUrls.length, `${path} initial request budget:\n${requestPaths.join("\n")}`).toBeLessThanOrEqual(maxRequests);
+		}
 		if (maxLcpMs != null) {
 			const lcpMs = await this.page.evaluate(() => (window as any).__hubLargestContentfulPaint);
 			expect(lcpMs, `${path} should report an LCP entry`).toBeGreaterThan(0);
@@ -322,7 +325,25 @@ export class HubCampaignPage {
 			this.page.locator("#hub-campaign-list .hub-campaign-row, #hub-campaign-empty:not(.ve-hidden)").first(),
 		).toBeVisible();
 		await this.page.locator("#hub-campaign-name").fill(name);
-		await this.page.locator("#hub-create-submit").click();
+		const submit = this.page.locator("#hub-create-submit");
+		for (let attempt = 0; attempt < 2; ++attempt) {
+			const responsePromise = this.page.waitForResponse(response =>
+				response.request().method() === "POST"
+				&& new URL(response.url()).pathname === "/api/campaigns",
+			);
+			await submit.click();
+			const response = await responsePromise;
+			if (response.status() === 201) break;
+			if (response.status() !== 429 || attempt === 1) {
+				throw new Error(`Campaign creation failed with HTTP ${response.status()}.`);
+			}
+			const retryAfterSeconds = Number(response.headers()["retry-after"]);
+			if (!Number.isInteger(retryAfterSeconds) || retryAfterSeconds < 1 || retryAfterSeconds > 60) {
+				throw new Error(`Campaign creation returned an invalid Retry-After value: ${response.headers()["retry-after"] || "<missing>"}.`);
+			}
+			await expect(submit).toBeEnabled();
+			await this.page.waitForTimeout(retryAfterSeconds * 1_000 + 250);
+		}
 		await this.page.waitForURL(/campaign\.html\?id=/);
 		const campaignId = new URL(this.page.url()).searchParams.get("id")!;
 		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
@@ -356,6 +377,14 @@ export class HubCampaignPage {
 		);
 		expect(activated.ok(), await activated.text()).toBe(true);
 		return rulesVersionId;
+	}
+
+	async getCampaignContext (campaignId: string): Promise<any> {
+		const response = await this.page.request.get(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/context`,
+		);
+		expect(response.ok(), await response.text()).toBe(true);
+		return (await response.json()).context;
 	}
 
 	async gotoCampaign (campaignId: string): Promise<void> {
@@ -608,6 +637,7 @@ export class HubCampaignPage {
 		race = null,
 		spellsKnown = [],
 		rulesVersionId = null,
+		inventory = null,
 	}: {
 		campaignId: string;
 		name: string;
@@ -626,6 +656,7 @@ export class HubCampaignPage {
 			sourceFeature?: string;
 		}>;
 		rulesVersionId?: string | null;
+		inventory?: Array<Record<string, unknown>> | null;
 	}): Promise<any> {
 		const response = await this.page.request.post("/api/characters", {
 			headers: await this.getMutationHeaders(),
@@ -649,7 +680,7 @@ export class HubCampaignPage {
 						...(spellsKnown.length ? {spellsKnown, cantripsKnown: []} : {}),
 					},
 					conditions: [],
-					inventory: [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
+					inventory: inventory || [{id: "rations", item: {name: "Rations", source: "PHB"}, quantity: 5}],
 					currency: {cp: 8, sp: 6, ep: 4, gp: 10, pp: 2},
 				},
 			},
@@ -1015,6 +1046,14 @@ export class HubCampaignPage {
 		return (await response.json()).events;
 	}
 
+	async getCampaignSnapshot (campaignId: string): Promise<any> {
+		const response = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/snapshot`, {
+			headers: {"x-hub-protocol-version": "3"},
+		});
+		expect(response.ok()).toBe(true);
+		return (await response.json()).snapshot;
+	}
+
 	async waitForOutboxDrain ({token, timeout = 90_000}: {token: string; timeout?: number}): Promise<void> {
 		await expect.poll(async () => {
 			const response = await this.page.request.get("/api/metrics", {
@@ -1109,6 +1148,58 @@ export class HubCampaignPage {
 		expect(text).not.toContain("projectionrevision");
 	}
 
+	async expectSavedSharingPreview ({
+		sharedText,
+		replacedText,
+		omittedText,
+	}: {
+		sharedText: string;
+		replacedText: string;
+		omittedText: string;
+	}): Promise<void> {
+		const preview = this.page.locator(".charsheet__sharing-preview");
+		await expect(preview).toContainText(sharedText);
+		await expect(preview.locator(".charsheet__sharing-preview-status--replace")).toHaveText("Shown instead");
+		await expect(preview.locator(".charsheet__sharing-preview-status--replace").locator("xpath=..")).toContainText(replacedText);
+		await expect(preview.locator(".charsheet__sharing-preview-omitted")).toContainText(omittedText);
+	}
+
+	async expectSharedProfile ({
+		campaignId,
+		characterName,
+		expectedText,
+		forbiddenText = [],
+	}: {
+		campaignId: string;
+		characterName: string;
+		expectedText: string[];
+		forbiddenText?: string[];
+	}): Promise<void> {
+		await this.page.setViewportSize({width: 390, height: 844});
+		await this.gotoCampaign(campaignId);
+		const details = this.page.locator("#campaign-party-roster .hub-shared-profile").filter({hasText: characterName}).first();
+		const summary = details.locator(":scope > summary");
+		await expect(summary).toBeVisible();
+		await expect(summary).toContainText("View shared profile");
+		await expect(details.locator("a[href*='charactersheet.html']")).toHaveCount(0);
+		await summary.focus();
+		await summary.press("Enter");
+		await expect(details).toHaveAttribute("open", "");
+		for (const text of expectedText) await expect(details.locator(".hub-shared-profile__body")).toContainText(text);
+		for (const text of forbiddenText) await expect(details.locator(".hub-shared-profile__body")).not.toContainText(text);
+		const audit = await details.evaluate(element => {
+			const summaryRect = element.querySelector("summary")!.getBoundingClientRect();
+			return {
+				clientWidth: document.documentElement.clientWidth,
+				scrollWidth: document.documentElement.scrollWidth,
+				summaryHeight: summaryRect.height,
+			};
+		});
+		expect(audit.scrollWidth).toBeLessThanOrEqual(audit.clientWidth);
+		expect(audit.summaryHeight).toBeGreaterThanOrEqual(44);
+		await this.page.setViewportSize({width: 1280, height: 720});
+	}
+
 	/** The raw ADR 0011 authorization envelope for a character. */
 	async getCharacterProjection (characterId: string): Promise<any> {
 		const response = await this.page.request.get(`/api/characters/${encodeURIComponent(characterId)}`, {
@@ -1143,6 +1234,26 @@ export class HubCampaignPage {
 			() => this.page.evaluate(() => (window as any).charSheet?._peerTargeting?._hasCapability?.() === true),
 			{timeout: 15_000},
 		).toBe(true);
+	}
+
+	async expectPeerTargetingUnavailable (): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => {
+				const targeting = (window as any).charSheet?._peerTargeting;
+				return {
+					hasCapability: targeting?._hasCapability?.() === true,
+					phbSupported: targeting?.isSupportedSpellCast?.({
+						spell: {name: "Cure Wounds", source: "PHB", level: 1},
+						selectedSlot: {level: 1},
+					}) === true,
+					xphbSupported: targeting?.isSupportedSpellCast?.({
+						spell: {name: "Cure Wounds", source: "XPHB", level: 1},
+						selectedSlot: {level: 1},
+					}) === true,
+				};
+			}),
+			{timeout: 15_000},
+		).toEqual({hasCapability: false, phbSupported: false, xphbSupported: false});
 	}
 
 	async castSpellAtPeerTarget ({spellName, targetName}: {spellName: string; targetName: string}): Promise<void> {
@@ -1249,11 +1360,15 @@ export class HubCampaignPage {
 		itemName,
 		source,
 		quantity,
+		reason,
 	}: {
 		itemName: string;
 		source: string;
 		quantity: number;
+		reason?: string;
 	}): Promise<void> {
+		const notice = `Received ${quantity > 1 ? `${quantity}× ` : ""}${itemName}${reason ? ` — ${reason}` : ""}.`;
+		await expect(this.page.locator(".toast__wrp-content").filter({hasText: notice})).toBeVisible({timeout: 15_000});
 		await expect.poll(() => this.page.evaluate(
 			({itemNameNxt, sourceNxt}) => {
 				const inventory = (window as any).charSheet?._state?._data?.inventory || [];
@@ -1265,7 +1380,51 @@ export class HubCampaignPage {
 		), {timeout: 15_000}).toBe(quantity);
 	}
 
-	async editCharacterHpAndRollInitiative ({campaignId, characterId, name, hp}: {campaignId: string; characterId: string; name: string; hp: number}): Promise<void> {
+	async expectLiveXpAwardArrival ({
+		amount,
+		totalXp,
+		reason,
+	}: {
+		amount: number;
+		totalXp: number;
+		reason?: string;
+	}): Promise<void> {
+		const notice = `Received ${amount} XP (${totalXp} XP total)${reason ? ` — ${reason}` : ""}.`;
+		await expect(this.page.locator(".toast__wrp-content").filter({hasText: notice})).toBeVisible({timeout: 15_000});
+		await expect.poll(
+			() => this.page.evaluate(() => Number((window as any).charSheet?._state?._data?.xp || 0)),
+			{timeout: 15_000},
+		).toBe(totalXp);
+	}
+
+	async expectActivitySurvivesRefresh ({
+		campaignId,
+		expectedText,
+	}: {
+		campaignId: string;
+		expectedText: string[];
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		const activity = this.page.locator("#campaign-activity-list");
+		for (const text of expectedText) await expect(activity).toContainText(text);
+		await this.page.reload();
+		await expect(this.page.locator("#campaign-content")).toBeVisible({timeout: 30_000});
+		for (const text of expectedText) await expect(activity).toContainText(text);
+	}
+
+	async editCharacterHpAndRollInitiative ({
+		campaignId,
+		characterId,
+		name,
+		hp,
+		rollVisibility = "all_members",
+	}: {
+		campaignId: string;
+		characterId: string;
+		name: string;
+		hp: number;
+		rollVisibility?: "all_members" | "actor_and_dm";
+	}): Promise<void> {
 		await this.openCharacterSheet({campaignId, characterId, name});
 		await this.waitForCharacterRealtimeLive();
 		await this.page.locator("#charsheet-ipt-hp-current").evaluate((input: HTMLInputElement, value) => {
@@ -1273,10 +1432,50 @@ export class HubCampaignPage {
 			input.dispatchEvent(new Event("change", {bubbles: true}));
 		}, hp);
 		await expect.poll(async () => (await this.getCharacter(characterId)).data.hp.current, {timeout: 15_000}).toBe(hp);
+		await this.page.locator("#charsheet-btn-rolllog").click();
+		const visibility = this.page.locator("#charsheet-roll-history-visibility");
+		await expect(visibility).toBeVisible();
+		await visibility.selectOption(rollVisibility);
+		await expect.poll(async () => (await this.getCharacter(characterId)).data.settings?.hubRollVisibility).toBe(rollVisibility);
+		await this.page.locator(".charsheet__roll-history-btn", {hasText: "✕"}).click();
 		await this.page.locator("#charsheet-box-initiative").click();
 		await expect.poll(async () => (await this.getEvents(campaignId))
-			.filter(event => event.type === "roll.logged" && event.aggregateId === characterId)
+			.filter(event => event.type === "roll.logged" && event.aggregateId === characterId && event.visibility === rollVisibility)
 			.length).toBeGreaterThan(0);
+	}
+
+	async switchCharacterAndExpectRollVisibility ({
+		characterId,
+		rollVisibility,
+	}: {
+		characterId: string;
+		rollVisibility: "all_members" | "actor_and_dm";
+	}): Promise<void> {
+		await this.page.locator("#charsheet-sel-character").selectOption(characterId);
+		await expect.poll(() => new URL(this.page.url()).searchParams.get("id")).toBe(characterId);
+
+		await this.page.locator("#charsheet-btn-rolllog").click();
+		const visibility = this.page.locator("#charsheet-roll-history-visibility");
+		await expect(visibility).toBeVisible();
+		await expect(visibility).toHaveValue(rollVisibility);
+		await this.page.locator(".charsheet__roll-history-btn", {hasText: "✕"}).click();
+	}
+
+	async rollInitiativeAndExpectVisibility ({
+		campaignId,
+		characterId,
+		rollVisibility,
+	}: {
+		campaignId: string;
+		characterId: string;
+		rollVisibility: "all_members" | "actor_and_dm";
+	}): Promise<void> {
+		const countMatchingEvents = async () => (await this.getEvents(campaignId))
+			.filter(event => event.type === "roll.logged" && event.aggregateId === characterId && event.visibility === rollVisibility)
+			.length;
+		const countBefore = await countMatchingEvents();
+		await this.page.locator("#charsheet-box-initiative").click();
+		await expect.poll(countMatchingEvents).toBe(countBefore + 1);
 	}
 
 	async editCharacterHpAndResolveDeviceConflict ({
@@ -1295,6 +1494,7 @@ export class HubCampaignPage {
 		if (!this.page.url().includes(`/charactersheet.html?id=${encodeURIComponent(characterId)}`)) {
 			await this.openCharacterSheet({campaignId, characterId, name});
 		}
+		await this.waitForCharacterRealtimeLive();
 		await this.page.locator("#charsheet-ipt-hp-current").fill(`${hp}`);
 		await this.page.locator("#charsheet-ipt-hp-current").blur();
 		await expect(this.page.getByText("Character Changed on Another Device", {exact: true})).toBeVisible();
@@ -1302,10 +1502,53 @@ export class HubCampaignPage {
 		await expect(this.page.getByText("Character Changed on Another Device", {exact: true})).toBeHidden();
 	}
 
+	async editCharacterHpWhileOffline ({
+		campaignId,
+		characterId,
+		name,
+		hp,
+	}: {
+		campaignId: string;
+		characterId: string;
+		name: string;
+		hp: number;
+	}): Promise<void> {
+		if (!this.page.url().includes(`/charactersheet.html?id=${encodeURIComponent(characterId)}`)) {
+			await this.openCharacterSheet({campaignId, characterId, name});
+		}
+		await this.waitForCharacterRealtimeLive();
+		await this.page.context().setOffline(true);
+		await this.page.locator("#charsheet-ipt-hp-current").fill(`${hp}`);
+		await this.page.locator("#charsheet-ipt-hp-current").blur();
+		await expect(this.page.locator("#charsheet-save-indicator")).toHaveClass(/charsheet__save-indicator--error/);
+		await expect(this.page.locator("#charsheet-save-indicator .charsheet__save-icon")).toHaveText("✗");
+		await expect(this.page.locator("#charsheet-ipt-hp-current")).toHaveValue(`${hp}`);
+	}
+
+	async reconnectAndResolveCharacterConflict ({
+		hp,
+		resolution,
+	}: {
+		hp: number;
+		resolution: "Use Local" | "Use Server";
+	}): Promise<void> {
+		await this.page.context().setOffline(false);
+		await expect(this.page.getByText("Character Changed on Another Device", {exact: true})).toBeVisible({timeout: 20_000});
+		await this.page.getByRole("button", {name: new RegExp(resolution)}).click();
+		await expect(this.page.getByText("Character Changed on Another Device", {exact: true})).toBeHidden();
+		await expect(this.page.locator("#charsheet-ipt-hp-current")).toHaveValue(`${hp}`);
+		await expect(this.page.locator("#charsheet-save-indicator")).not.toHaveClass(/charsheet__save-indicator--error/);
+		await expect(this.page.locator("#charsheet-save-indicator .charsheet__save-icon")).toHaveText("✓");
+	}
+
+	async expectCampaignCharacterHp ({characterName, hp, maxHp = 12}: {characterName: string; hp: number; maxHp?: number}): Promise<void> {
+		const row = this.page.locator("#campaign-party-roster .hub-data-row").filter({hasText: characterName});
+		await expect(row).toContainText(`HP ${hp}/${maxHp}`, {timeout: 15_000});
+	}
+
 	async expectLiveCharacterUpdateAndRoll ({characterName, hp}: {characterName: string; hp: number}): Promise<void> {
 		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
-		const row = this.page.locator("#campaign-party-roster .hub-data-row").filter({hasText: characterName});
-		await expect(row).toContainText(`HP ${hp}/12`, {timeout: 15_000});
+		await this.expectCampaignCharacterHp({characterName, hp});
 		const roll = this.page.locator("#campaign-activity-list .hub-activity-row")
 			.filter({hasText: characterName})
 			.filter({hasText: "Initiative"})
@@ -1331,7 +1574,15 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#charsheet-ipt-name")).toHaveValue(name);
 	}
 
-	async expectCampaignPartyTrackerProjection ({campaignId, name}: {campaignId: string; name: string}): Promise<void> {
+	async expectCampaignPartyTrackerProjection ({
+		campaignId,
+		name,
+		campaignName = "Ashen March E2E",
+	}: {
+		campaignId: string;
+		name: string;
+		campaignName?: string;
+	}): Promise<void> {
 		const pageErrors: string[] = [];
 		const failedResponses: string[] = [];
 		const onPageError = (error: Error) => pageErrors.push(error.message);
@@ -1346,7 +1597,7 @@ export class HubCampaignPage {
 				() => this.page.evaluate(() => (window as any).DM_SCREEN?._hubCharacterProjections?.length || 0),
 				{timeout: 30_000},
 			).toBeGreaterThan(0);
-			await expect(this.page.locator("#dm-screen-hub-status")).toContainText("Ashen March E2E");
+			await expect(this.page.locator("#dm-screen-hub-status")).toContainText(campaignName);
 			await expect(this.page.locator(".dm-hub__status-pill--live")).toContainText("Live party sync");
 			await this.page.evaluate(async () => {
 				const {PartyTrackerRoot} = await import("/js/dmscreen/partytracker/dmscreen-partytracker.js");
@@ -1408,6 +1659,22 @@ export class HubCampaignPage {
 		}
 	}
 
+	async expectCampaignPartyTrackerHp (hp: number): Promise<void> {
+		await expect.poll(
+			() => this.page.evaluate(() => {
+				const projection = (window as any).DM_SCREEN?._hubCharacterProjections?.[0];
+				const data = projection?.character?.data || projection?.data || projection;
+				return data?.hp?.current;
+			}),
+			{timeout: 15_000},
+		).toBe(hp);
+		await this.page.evaluate(() => {
+			(window as any).HUB_E2E_PARTY_TRACKER.setHubCharacterProjections((window as any).DM_SCREEN._hubCharacterProjections);
+		});
+		await expect(this.page.locator("#hub-e2e-party-tracker [aria-label^='Hit points']").first())
+			.toHaveAttribute("aria-label", new RegExp(`^Hit points ${hp}/`));
+	}
+
 	async expectCampaignDmScreenDenied (campaignId: string): Promise<void> {
 		await this.page.goto(`/dmscreen.html?hubCampaign=${encodeURIComponent(campaignId)}`);
 		await expect(this.page.locator(".dm-hub__banner--permission_denied")).toContainText("Only the campaign DM or a co-DM");
@@ -1415,13 +1682,31 @@ export class HubCampaignPage {
 		await expect.poll(() => this.page.evaluate(() => !!(window as any).DM_SCREEN)).toBe(false);
 	}
 
-	async grantXp ({campaignId, characterName, amount}: {campaignId: string; characterName: string; amount: number}): Promise<void> {
+	async grantXp ({
+		campaignId,
+		characterName,
+		amount,
+		reason,
+		recipientExpectation,
+	}: {
+		campaignId: string;
+		characterName: string;
+		amount: number;
+		reason?: string;
+		recipientExpectation?: () => Promise<void>;
+	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await this.openCampaignWorkbench();
 		await this.page.locator("#campaign-xp-target").selectOption({label: characterName});
 		await this.page.locator("#campaign-xp-amount").fill(`${amount}`);
+		if (reason) await this.page.locator("#campaign-xp-reason").fill(reason);
+		const recipientResult = recipientExpectation
+			? recipientExpectation().then(() => null, error => error)
+			: Promise.resolve(null);
 		await this.page.locator("#campaign-xp-form button[type='submit']").click();
 		await expect(this.page.locator("#campaign-xp-form button[type='submit']")).toBeEnabled();
+		const recipientError = await recipientResult;
+		if (recipientError) throw recipientError;
 	}
 
 	private async selectItemAwardTargets (characterNames: string[]): Promise<void> {
@@ -1442,6 +1727,7 @@ export class HubCampaignPage {
 		source,
 		quantity,
 		note,
+		recipientExpectation,
 	}: {
 		campaignId: string;
 		characterNames: string[];
@@ -1449,6 +1735,7 @@ export class HubCampaignPage {
 		source: string;
 		quantity: number;
 		note?: string;
+		recipientExpectation?: () => Promise<void>;
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
 		await this.openCampaignWorkbench();
@@ -1505,7 +1792,11 @@ export class HubCampaignPage {
 		const form = this.page.locator("#campaign-item-form");
 		const submit = form.locator("button[type='submit']");
 		const status = this.page.locator("#campaign-item-form-status");
+		let recipientResult = Promise.resolve<unknown>(null);
 		try {
+			recipientResult = recipientExpectation
+				? recipientExpectation().then(() => null, error => error)
+				: Promise.resolve(null);
 			await submit.click();
 			await expect(status).toContainText("temporarily unavailable");
 			await expect(submit).toBeEnabled();
@@ -1534,6 +1825,8 @@ export class HubCampaignPage {
 			if (attempt > 1) await successHandled;
 			await this.page.unroute(requestUrl);
 		}
+		const recipientError = await recipientResult;
+		if (recipientError) throw recipientError;
 	}
 
 	async awardStashItems ({
@@ -1683,7 +1976,7 @@ export class HubCampaignPage {
 		expect(await this.page.locator("#campaign-transfer-target").inputValue())
 			.not.toBe(await this.page.locator("#campaign-transfer-source").inputValue());
 		await this.page.locator("#campaign-transfer-target").selectOption({label: "Party inventory"});
-		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
 		await expect(itemOption).toContainText("available");
 		await this.page.locator("#campaign-transfer-entry").selectOption(await itemOption.getAttribute("value") || "");
 		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
@@ -1694,23 +1987,308 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
 	}
 
+	async submitAuthoritativeItemTransfer ({
+		campaignId,
+		sourceName,
+		targetName,
+		itemName,
+		quantity,
+	}: {
+		campaignId: string;
+		sourceName: string;
+		targetName: string;
+		itemName: string;
+		quantity: number;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
+		await this.page.locator("#campaign-transfer-target").selectOption({label: targetName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
+		const itemValue = await itemOption.getAttribute("value") || "";
+		await this.page.locator("#campaign-transfer-entry").selectOption(itemValue);
+		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
+		await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
+		const proposalPath = `/api/campaigns/${campaignId}/transfers`;
+		const resolutionPathPrefix = `${proposalPath}/`;
+		const proposalMatcher = `**${proposalPath}`;
+		const proposalBodies: string[] = [];
+		const proposalKeys: Array<string | undefined> = [];
+		let proposalAttempts = 0;
+		let resolutionCount = 0;
+		const observeResolution = (request: Request) => {
+			const pathname = new URL(request.url()).pathname;
+			if (request.method() === "POST" && pathname.startsWith(resolutionPathPrefix) && pathname.endsWith("/resolve")) {
+				resolutionCount++;
+			}
+		};
+		const loseFirstProposalResponse = async (route: Route) => {
+			const body = route.request().postData();
+			if (!body) {
+				await route.continue();
+				return;
+			}
+			proposalAttempts++;
+			proposalBodies.push(body);
+			proposalKeys.push(route.request().headers()["idempotency-key"]);
+			if (proposalAttempts === 1) {
+				const committed = await route.fetch();
+				expect(committed.ok()).toBe(true);
+				expect((await committed.json()).transfer?.status).toBe("committed");
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: "NETWORK_UNAVAILABLE"}),
+				});
+				return;
+			}
+			await route.continue();
+		};
+		this.page.on("request", observeResolution);
+		await this.page.route(proposalMatcher, loseFirstProposalResponse);
+		try {
+			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("outcome is not yet confirmed");
+			const retry = this.page.locator("#campaign-transfer-form button[type='submit']");
+			await expect(retry).toHaveText("Retry transfer");
+			await expect(this.page.locator("#campaign-transfer-source")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-target")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-entry")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
+			await expect(this.page.locator("#campaign-transfer-quantity")).toBeDisabled();
+			await expect(this.page.locator("#campaign-transfer-quantity")).toHaveValue(`${quantity}`);
+			await retry.click();
+			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
+			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
+			expect(proposalAttempts).toBeGreaterThanOrEqual(2);
+			expect(new Set(proposalBodies)).toEqual(new Set([proposalBodies[0]]));
+			expect(new Set(proposalKeys)).toEqual(new Set([proposalKeys[0]]));
+			expect(resolutionCount).toBe(0);
+		} finally {
+			await this.page.unroute(proposalMatcher, loseFirstProposalResponse);
+			this.page.off("request", observeResolution);
+		}
+	}
+
+	async reserveRepeatedItemTransfersAfterRefreshRetry ({
+		campaignId,
+		sourceName,
+		targetName,
+		itemName,
+		quantity,
+	}: {
+		campaignId: string;
+		sourceName: string;
+		targetName: string;
+		itemName: string;
+		quantity: number;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
+		await this.page.locator("#campaign-transfer-target").selectOption({label: targetName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
+		await this.page.locator("#campaign-transfer-entry").selectOption(await itemOption.getAttribute("value") || "");
+		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
+
+		const transferMatcher = `**/api/campaigns/${campaignId}/transfers`;
+		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		let transferPostCount = 0;
+		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
+		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
+			failedRefreshCount++;
+			return route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
+		};
+		const observeTransfer = async (route: Route) => {
+			if (route.request().method() === "POST") await this.page.route(partyMatcher, failRefresh);
+			const response = await route.fetch();
+			if (route.request().method() === "POST" && response.ok()) {
+				transferPostCount++;
+			}
+			await route.fulfill({response});
+		};
+		await this.page.route(transferMatcher, observeTransfer);
+		try {
+			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+			await expect.poll(() => transferPostCount).toBe(1);
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
+			const retry = this.page.getByRole("button", {name: "Retry latest balances"});
+			await expect(retry).toBeVisible();
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
+			shouldFailRefresh = false;
+			await retry.click();
+			await expect(this.page.locator("#campaign-transfer-form-status")).toHaveText("Latest balances loaded. You can send another transfer.");
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
+		} finally {
+			await this.page.unroute(transferMatcher, observeTransfer);
+			await this.page.unroute(partyMatcher, failRefresh);
+		}
+
+		await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
+	}
+
 	async acceptFirstPendingTransfer ({
 		campaignId,
 		expectedText,
 		expectedAbsentText = [],
+		buttonName = "Accept",
 	}: {
 		campaignId: string;
 		expectedText: string[];
 		expectedAbsentText?: string[];
+		buttonName?: "Accept" | "Approve";
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
-		const transfer = this.page.locator("#campaign-pending-transfers .hub-data-row").first();
+		const transfers = this.page.locator("#campaign-pending-transfers .hub-data-row");
+		const transferCount = await transfers.count();
+		const transfer = transfers.first();
 		for (const text of expectedText) await expect(transfer).toContainText(text);
 		for (const text of expectedAbsentText) await expect(transfer).not.toContainText(text);
-		const button = this.page.locator("#campaign-pending-transfers button", {hasText: "Accept"}).first();
+		const button = transfer.getByRole("button", {name: buttonName, exact: true});
 		await expect(button).toBeVisible();
 		await button.click();
-		await expect(button).toBeHidden();
+		await expect(transfers).toHaveCount(transferCount - 1);
+	}
+
+	async resolveFirstPendingTransferAfterCommittedRefreshFailure ({
+		campaignId,
+		expectedText,
+		buttonName,
+	}: {
+		campaignId: string;
+		expectedText: string[];
+		buttonName: "Accept" | "Approve" | "Decline" | "Reject";
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		const transfers = this.page.locator("#campaign-pending-transfers .hub-data-row");
+		const transferCount = await transfers.count();
+		const transfer = transfers.first();
+		for (const text of expectedText) await expect(transfer).toContainText(text);
+
+		const resolveMatcher = `**/api/campaigns/${campaignId}/transfers/*/resolve`;
+		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		const idempotencyKeys: string[] = [];
+		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
+		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
+			failedRefreshCount++;
+			return route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
+		};
+		const observeResolution = async (route: Route) => {
+			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+			await this.page.route(partyMatcher, failRefresh);
+			const response = await route.fetch();
+			expect(response.ok()).toBe(true);
+			await route.fulfill({response});
+		};
+		await this.page.route(resolveMatcher, observeResolution);
+		try {
+			await transfer.getByRole("button", {name: buttonName, exact: true}).click();
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
+			await expect(transfer).toContainText("The committed outcome is safe");
+			await expect(transfer.getByRole("button", {name: buttonName, exact: true})).toHaveCount(0);
+			const retry = transfer.getByRole("button", {name: "Retry inbox refresh", exact: true});
+			await expect(retry).toBeVisible();
+			shouldFailRefresh = false;
+			await retry.click();
+			await expect(transfers).toHaveCount(transferCount - 1);
+			expect(idempotencyKeys).toHaveLength(1);
+		} finally {
+			await this.page.unroute(resolveMatcher, observeResolution);
+			await this.page.unroute(partyMatcher, failRefresh);
+		}
+	}
+
+	async resolveFirstPendingTransferAfterLostResponse ({
+		campaignId,
+		expectedText,
+		buttonName,
+	}: {
+		campaignId: string;
+		expectedText: string[];
+		buttonName: "Accept" | "Approve" | "Decline" | "Reject";
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		const transfers = this.page.locator("#campaign-pending-transfers .hub-data-row");
+		const transferCount = await transfers.count();
+		const transfer = transfers.first();
+		for (const text of expectedText) await expect(transfer).toContainText(text);
+
+		const resolveMatcher = `**/api/campaigns/${campaignId}/transfers/*/resolve`;
+		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		const idempotencyKeys: string[] = [];
+		const resolutionBodies: string[] = [];
+		let attempt = 0;
+		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
+		const failRefresh = (route: Route) => {
+			if (!shouldFailRefresh) return route.continue();
+			failedRefreshCount++;
+			return route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
+		};
+		const loseFirstResponse = async (route: Route) => {
+			const body = route.request().postData();
+			if (!body) {
+				await route.continue();
+				return;
+			}
+			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+			resolutionBodies.push(body);
+			if (++attempt === 1) {
+				await this.page.route(partyMatcher, failRefresh);
+				const committed = await route.fetch();
+				expect(committed.ok()).toBe(true);
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+				});
+				return;
+			}
+			await route.continue();
+		};
+		await this.page.route(resolveMatcher, loseFirstResponse);
+		try {
+			const decision = transfer.getByRole("button", {name: buttonName, exact: true});
+			await decision.click();
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
+			await expect(transfer).toContainText("outcome is not yet confirmed");
+			await expect(transfer.getByRole("button", {name: "Retry inbox refresh", exact: true})).toBeVisible();
+			await expect(decision).toBeEnabled();
+			const oppositeName = {
+				Accept: "Reject",
+				Approve: "Decline",
+				Decline: "Approve",
+				Reject: "Accept",
+			}[buttonName];
+			await expect(transfer.getByRole("button", {name: oppositeName, exact: true})).toBeDisabled();
+
+			shouldFailRefresh = false;
+			await decision.click();
+			await expect(transfers).toHaveCount(transferCount - 1);
+			expect(idempotencyKeys.length).toBeGreaterThanOrEqual(2);
+			expect(new Set(idempotencyKeys)).toEqual(new Set([idempotencyKeys[0]]));
+			expect(new Set(resolutionBodies)).toEqual(new Set([resolutionBodies[0]]));
+		} finally {
+			await this.page.unroute(resolveMatcher, loseFirstResponse);
+			await this.page.unroute(partyMatcher, failRefresh);
+		}
 	}
 
 	async expectTransferItemAvailable ({sourceName, itemName}: {sourceName: string; itemName: string}): Promise<void> {

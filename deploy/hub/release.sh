@@ -117,6 +117,12 @@ env_value () {
 	"$HELPER" env --file "$ENV_FILE" --key "$1"
 }
 
+assert_no_peer_source_cost_ambient_override () {
+	if [[ "${HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS+set}" == "set" ]]; then
+		fail "HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS must be configured only in .env.hub, not the invoking environment"
+	fi
+}
+
 sha256_file () {
 	"$HELPER" sha256 --file "$1"
 }
@@ -707,6 +713,7 @@ phase_preflight () {
 	ROOT="$(cd "$ROOT" && pwd -P)"
 	ENV_FILE="$ROOT/.env.hub"
 	[[ "$(pwd -P)" == "$ROOT" ]] || fail "run this command from the deployment repository root: ${ROOT}"
+	assert_no_peer_source_cost_ambient_override
 	if [[ "$TEST_MODE" != "1" ]]; then
 		[[ "$ROOT" == "$EXPECTED_ROOT" ]] || fail "expected deployment root ${EXPECTED_ROOT}, got ${ROOT}"
 	fi
@@ -981,6 +988,17 @@ phase_deploy () {
 	compose_release run --rm --no-deps migrate node server/scripts/migrate.mjs status >"$before_cutover"
 	[[ "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["pending"]))' "$before_cutover")" == "0" ]] \
 		|| fail "migrations remain pending before application cutover"
+	local peer_source_cost_campaign_ids
+	peer_source_cost_campaign_ids="$(env_value HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS 2>/dev/null || true)"
+	if [[ -n "$peer_source_cost_campaign_ids" ]]; then
+		local peer_source_cost_rollout="${RELEASE_DIR}/peer-source-cost-rollout.txt"
+		compose_release run --rm --no-deps bff \
+			node server/scripts/check-peer-source-cost-rollout.mjs >"$peer_source_cost_rollout"
+		record peer_source_cost_rollout_sha256 "$(sha256_file "$peer_source_cost_rollout")"
+		replace_record peer_source_cost_rollout passed
+	else
+		replace_record peer_source_cost_rollout disabled
+	fi
 	TRAFFIC_MUTATED="true"
 	replace_record traffic_mutated true
 	compose_release up -d --no-deps --force-recreate --wait bff static
