@@ -271,7 +271,12 @@ every draft discarded by an earlier authoritative rebase is semantically represe
 base/local/server candidate. Unique local intent remains exportable behind explicit conflict recovery, and
 live-operation conflicts are never cleared through this shortcut. A failed-write recovery marker is removed
 only when its draft is already represented by canonical truth; disjoint unsaved edits retain their retry and
-reload recovery state.
+reload recovery state. Ordered browser recovery commands carrying one-shot activity have a persisted absolute
+23-hour replay deadline. Expired activity, missing deadline proof, or a stable non-recoverable failed head blocks
+later saves behind one complete export/use-server choice. Transactional `POLICY_VERSION_STALE` rejection is
+recoverable only after canonical refetch and stale derived carry removal; the changed request is durably persisted
+under a new key before retry. Revision conflict proves no successful receipt matched, so an activity-bearing
+command retains its semantic activity after rebase even when the document patch becomes empty.
 
 ## Atomic item-award invariant
 
