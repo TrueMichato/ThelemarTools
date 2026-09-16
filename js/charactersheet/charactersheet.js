@@ -331,6 +331,7 @@ class CharacterSheetPage {
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
+		this._hubRealtime.on("membershipChanged", event => this._onHubMembershipChanged(event));
 		this._hubRealtime.on("projectionInvalidated", event => this._onHubProjectionInvalidated(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
@@ -454,6 +455,16 @@ class CharacterSheetPage {
 	_onHubProjectionInvalidated (event) {
 		if (!this._currentCharacterId || event?.characterId !== this._currentCharacterId) return false;
 		return this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
+	}
+
+	_onHubMembershipChanged (event) {
+		if (event?.campaignId && event.campaignId !== this._hubCampaignId) return false;
+		if (!this._hubCampaignContext) {
+			this._peerTargeting?.deactivate();
+			return false;
+		}
+		this._onHubCampaignContextChanged({type: "membership.changed"});
+		return true;
 	}
 
 	_applyHubContext (context) {

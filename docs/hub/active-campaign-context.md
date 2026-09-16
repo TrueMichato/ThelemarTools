@@ -133,6 +133,14 @@ The campaign context includes the caller's current membership role. During recon
 refresh, peer source-cost targeting is suspended without discarding an in-flight command. It resumes only
 when the refreshed context still identifies the caller as a player with the exact capability; a role change,
 capability removal, character switch, access loss, or true close performs destructive targeting teardown.
+Realtime membership notifications are invalidation hints, not role authority: the Character Sheet suspends
+targeting immediately, refetches campaign context, and trusts only the returned membership role.
+
+A Cure Wounds proposal freezes its complete request before first submission and replays that request unchanged
+after an ambiguous transport failure. A definitive stale-policy rejection is different: after an authoritative
+outgoing-action refresh succeeds, the rejected request is retired so the player can create a new command with
+the current rules pin. If that reconciliation fails, targeting remains locked rather than rotating identity or
+risking a duplicate proposal.
 
 Private persistence is fenced independently from realtime teardown. Character saves capture both
 the character identity and load generation before their first await; DM workspace saves capture the

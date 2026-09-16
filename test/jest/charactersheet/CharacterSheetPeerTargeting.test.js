@@ -270,6 +270,75 @@ describe("Character Sheet peer targeting", () => {
 		expect(controller._fnCreateId).toHaveBeenCalledTimes(1);
 	});
 
+	it("retires a definitively stale proposal after reconciliation and permits a current-policy command", async () => {
+		await pFlush();
+		const commandIds = ["command-1", "command-2"];
+		controller._fnCreateId = jest.fn(() => commandIds.shift());
+		api.pCreatePeerAction
+			.mockRejectedValueOnce(Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"}))
+			.mockRejectedValueOnce(Object.assign(new Error("rules changed"), {code: "POLICY_VERSION_STALE"}))
+			.mockResolvedValueOnce({operation: {operationId: "operation-2", status: "proposed"}});
+		const request = {
+			spell: {name: "Cure Wounds", source: "PHB", level: 1},
+			selectedSlot: {level: 1},
+		};
+
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		const frozenRequest = api.pCreatePeerAction.mock.calls[0][0];
+		controller.onConnectionState({state: "reconnecting", attempt: 1});
+		rulesVersionId = "rules-version-2";
+		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
+		await pFlush();
+
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		expect(api.pCreatePeerAction.mock.calls[1][0]).toBe(frozenRequest);
+		expect(controller._drafts.size).toBe(0);
+
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: true});
+		expect(api.pCreatePeerAction.mock.calls[2][0]).toEqual(expect.objectContaining({
+			idempotencyKey: "command-2",
+			rulesVersionId: "rules-version-2",
+		}));
+		expect(api.pCreatePeerAction.mock.calls[2][0]).not.toBe(frozenRequest);
+	});
+
+	it("keeps a definitively stale proposal fail-closed until reconciliation succeeds", async () => {
+		await pFlush();
+		const commandIds = ["command-1", "command-2"];
+		controller._fnCreateId = jest.fn(() => commandIds.shift());
+		api.pCreatePeerAction
+			.mockRejectedValueOnce(Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"}))
+			.mockRejectedValueOnce(Object.assign(new Error("rules changed"), {code: "POLICY_VERSION_STALE"}));
+		const request = {
+			spell: {name: "Cure Wounds", source: "XPHB", level: 1},
+			selectedSlot: {level: 1},
+		};
+
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		controller.onConnectionState({state: "reconnecting", attempt: 1});
+		rulesVersionId = "rules-version-2";
+		expect(controller.activate({characterId: "source-character", membershipRole: "player"})).toBe(true);
+		await pFlush();
+		api.pListCharacterOutgoingActions.mockRejectedValueOnce(Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"}));
+
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		expect([...controller._drafts.values()]).toEqual([
+			expect.objectContaining({
+				commandId: "command-1",
+				isAwaitingAuthoritativeReconciliation: true,
+				isSubmitting: false,
+			}),
+		]);
+		const pickCount = fnPickTarget.mock.calls.length;
+		expect(await controller.pMaybeProposeSpell(request)).toEqual({handled: true, proposed: false});
+		expect(fnPickTarget).toHaveBeenCalledTimes(pickCount);
+		expect(api.pCreatePeerAction).toHaveBeenCalledTimes(2);
+
+		api.pListCharacterOutgoingActions.mockResolvedValueOnce([]);
+		expect(await controller.pRefresh()).toBe(true);
+		expect(controller._drafts.size).toBe(0);
+	});
+
 	it.each(["spectator", "co_dm"])("discards a suspended proposal when membership changes to %s", async membershipRole => {
 		await pFlush();
 		const proposal = makeDeferred();

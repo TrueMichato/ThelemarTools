@@ -18,10 +18,12 @@ const _SOURCE_VERSIONS = new Map([
 const _STATUSES = new Set(["proposed", "applied", "rejected", "cancelled", "expired", "failed"]);
 const _TERMINAL_STATUSES = new Set([..._STATUSES].filter(status => status !== "proposed"));
 const _ACCESS_LOSS_CODES = new Set(["AUTH_REQUIRED", "CAMPAIGN_NOT_FOUND", "CHARACTER_NOT_FOUND", "FORBIDDEN"]);
+const _DEFINITIVE_PROPOSAL_REJECTION_CODES = new Set(["POLICY_VERSION_STALE"]);
 
 const _getSafeError = error => {
 	switch (error?.code) {
 		case "NETWORK_UNAVAILABLE": return "Targeting is offline. Reconnect before sending this request.";
+		case "POLICY_VERSION_STALE": return "Campaign rules changed. Rechecking targeting before you start a new request.";
 		case "PROTOCOL_UPDATE_REQUIRED": return "Reload the page to use campaign targeting.";
 		case "CAPABILITY_UNAVAILABLE": return "Campaign targeting is not available right now.";
 		case "SOURCE_OR_TARGET_UNAVAILABLE": return "That spell or target is no longer available.";
@@ -174,12 +176,22 @@ export class CharacterSheetPeerTargeting {
 		hasMetamagic = false,
 		hasVariantComponent = false,
 	} = {}) {
+		const isSupportedSpellShape = this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent});
 		if (
 			this._isSuspended
 			&& this._characterId
-			&& this._isSupportedSpellShape({spell, selectedSlot, hasMetamagic, hasVariantComponent})
+			&& isSupportedSpellShape
 		) {
 			this._showError("Campaign targeting is reconnecting. Wait for the campaign context to refresh before casting Cure Wounds.");
+			return {handled: true, proposed: false};
+		}
+		if (
+			this._characterId
+			&& this._membershipRole === "player"
+			&& isSupportedSpellShape
+			&& this._hasDraftAwaitingAuthoritativeReconciliation()
+		) {
+			this._showError("Campaign targeting is reconciling a rejected request. Reconnect before starting another Cure Wounds request.");
 			return {handled: true, proposed: false};
 		}
 		if (!this.isSupportedSpellCast({spell, selectedSlot, hasMetamagic, hasVariantComponent})) return {handled: false};
@@ -250,6 +262,7 @@ export class CharacterSheetPeerTargeting {
 				.map(action => this._normalizeOutgoing(action))
 				.filter(Boolean)
 				.map(action => [action.actionId, action]));
+			this._retireDraftsAwaitingAuthoritativeReconciliation();
 			return true;
 		} catch (error) {
 			if (!this._isRefreshCurrent(token)) return false;
@@ -345,7 +358,7 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	async _pSubmitDraft (draft) {
-		if (this._isSuspended || draft.isSubmitting) return false;
+		if (this._isSuspended || draft.isSubmitting || draft.isAwaitingAuthoritativeReconciliation) return false;
 		const token = {generation: this._generation, characterId: draft.sourceCharacterId};
 		draft.isSubmitting = true;
 		draft.error = null;
@@ -376,6 +389,22 @@ export class CharacterSheetPeerTargeting {
 			return true;
 		} catch (error) {
 			if (!this._isCurrent(token)) return false;
+			if (_DEFINITIVE_PROPOSAL_REJECTION_CODES.has(error?.code)) {
+				draft.isAwaitingAuthoritativeReconciliation = true;
+				draft.error = _getSafeError(error);
+				draft.errorCode = error.code;
+				this._render();
+				const isReconciled = await this.pRefresh();
+				if (!this._isCurrent(token)) return false;
+				const currentDraft = this._drafts.get(draft.draftKey);
+				if (currentDraft !== draft) return false;
+				if (!isReconciled) {
+					draft.isSubmitting = false;
+					draft.error = "Campaign rules changed, but targeting could not be reconciled. Reconnect before starting a new request.";
+					this._render();
+				}
+				return false;
+			}
 			draft.isSubmitting = false;
 			draft.error = _getSafeError(error);
 			draft.errorCode = typeof error?.code === "string" ? error.code.slice(0, 80) : "REQUEST_FAILED";
@@ -428,6 +457,16 @@ export class CharacterSheetPeerTargeting {
 			&& !selectedSlot.isWizardCapstone
 			&& !hasMetamagic
 			&& !hasVariantComponent;
+	}
+
+	_hasDraftAwaitingAuthoritativeReconciliation () {
+		return [...this._drafts.values()].some(draft => draft.isAwaitingAuthoritativeReconciliation);
+	}
+
+	_retireDraftsAwaitingAuthoritativeReconciliation () {
+		for (const [draftKey, draft] of this._drafts.entries()) {
+			if (draft.isAwaitingAuthoritativeReconciliation) this._drafts.delete(draftKey);
+		}
 	}
 
 	_getProposalRequest ({commandId, sourceCharacterId, spell, slotLevel, targetRef}) {
@@ -553,18 +592,15 @@ export class CharacterSheetPeerTargeting {
 
 	_getDraftCard (draft) {
 		const card = e_({tag: "article", clazz: "charsheet__peer-action"});
+		let statusText = draft.error;
+		if (draft.isSubmitting) statusText = "Sending request… No spell slot has been spent.";
+		if (draft.isAwaitingAuthoritativeReconciliation) statusText = draft.error;
+		if (this._isSuspended) statusText = "Reconnecting… This request keeps its original identity. No spell slot has been spent.";
 		card.append(
 			e_({tag: "strong", text: `Cure Wounds → ${draft.target.name}`}),
-			e_({
-				tag: "span",
-				text: this._isSuspended
-					? "Reconnecting… This request keeps its original identity. No spell slot has been spent."
-					: draft.isSubmitting
-						? "Sending request… No spell slot has been spent."
-						: draft.error,
-			}),
+			e_({tag: "span", text: statusText}),
 		);
-		if (draft.error) {
+		if (draft.error && !draft.isAwaitingAuthoritativeReconciliation) {
 			const retry = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-primary", text: "Retry"});
 			retry.type = "button";
 			retry.disabled = this._isSuspended;
