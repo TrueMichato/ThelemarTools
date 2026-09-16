@@ -91,20 +91,44 @@ describe("Character Sheet peer targeting", () => {
 		expect(controller.activate({characterId: "source-character"})).toBe(true);
 	});
 
-	it("fails closed without the exact cost-bearing capability tuple", async () => {
+	it.each([
+		["PHB", "phb-2014-v1"],
+		["XPHB", "xphb-2024-v1"],
+	])("fails closed for %s Cure Wounds without the exact cost-bearing capability tuple", async (source, version) => {
 		capability.protocolVersion = 3;
 		controller.deactivate();
 
 		expect(controller.activate({characterId: "source-character"})).toBe(false);
 		expect(controller.isSupportedSpellCast({
-			spell: {name: "Cure Wounds", source: "PHB", level: 1},
+			spell: {name: "Cure Wounds", source, level: 1},
 			selectedSlot: {level: 1},
 		})).toBe(false);
 		expect(await controller.pMaybeProposeSpell({
-			spell: {name: "Cure Wounds", source: "PHB", level: 1},
+			spell: {name: "Cure Wounds", source, level: 1},
 			selectedSlot: {level: 1},
 		})).toEqual({handled: false});
+		expect(fnPickTarget).not.toHaveBeenCalled();
 		expect(api.pCreatePeerAction).not.toHaveBeenCalled();
+
+		capability.protocolVersion = 4;
+		expect(controller.activate({characterId: "source-character"})).toBe(true);
+		expect(controller.isSupportedSpellCast({
+			spell: {name: "Cure Wounds", source, level: 1},
+			selectedSlot: {level: 1},
+		})).toBe(true);
+		await pFlush();
+		await controller.pMaybeProposeSpell({
+			spell: {name: "Cure Wounds", source, level: 1},
+			selectedSlot: {level: 1},
+		});
+		expect(fnPickTarget).toHaveBeenCalledTimes(1);
+		expect(api.pCreatePeerAction).toHaveBeenCalledWith(expect.objectContaining({
+			sourceEntity: {
+				type: "spell",
+				uid: `cure wounds|${source.toLowerCase()}`,
+				version,
+			},
+		}));
 	});
 
 	it("creates a source-derived Cure Wounds proposal without exposing target state", async () => {

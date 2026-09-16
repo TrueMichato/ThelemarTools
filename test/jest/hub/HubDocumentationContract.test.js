@@ -39,6 +39,7 @@ describe("Campaign Hub documentation contract", () => {
 		"troubleshooting.md",
 		"post-v1-roadmap.md",
 		"runbooks/README.md",
+		"runbooks/peer-source-cost-rollout.md",
 		"runbooks/private-game-day.md",
 	];
 

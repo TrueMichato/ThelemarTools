@@ -37,6 +37,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 | CI, test-auth boundary, artifacts | [CI and provenance](ci-and-provenance.md) |
 | How to change Hub safely | [Contributor guide](contributing.md) |
 | Oracle staging and game-day plan | [Staging plan](staging-plan.md) |
+| Enable a campaign for peer source costs | [Peer source-cost rollout](runbooks/peer-source-cost-rollout.md) |
 | Run the private one-DM/two-player game day | [Game-day runbook](runbooks/private-game-day.md) |
 | Managed provider decision | [Provider comparison](provider-comparison.md) |
 | Historical Phase 6A-6H launch plan | [Private-V1 roadmap](private-v1-roadmap.md) |

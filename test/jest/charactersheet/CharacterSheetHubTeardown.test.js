@@ -277,6 +277,33 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		]);
 	});
 
+	it("resynchronizes peer targeting when authoritative capability context changes", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._currentCharacterId = "source-character";
+		page._peerTargeting = {
+			activate: jest.fn(),
+			deactivate: jest.fn(),
+		};
+
+		page._applyHubContext({
+			rulesVersion: null,
+			brewBundle: null,
+			capabilities: {peerSourceCosts: {enabled: false}},
+		});
+		expect(page._peerTargeting.activate).toHaveBeenLastCalledWith({characterId: "source-character"});
+
+		page._applyHubContext({
+			rulesVersion: {id: "rules-1", rules: {}},
+			brewBundle: null,
+			capabilities: {peerSourceCosts: {enabled: true}},
+		});
+		expect(page._peerTargeting.activate).toHaveBeenCalledTimes(2);
+		expect(page._peerTargeting.activate).toHaveBeenLastCalledWith({characterId: "source-character"});
+
+		page._clearHubRules();
+		expect(page._peerTargeting.deactivate).toHaveBeenCalledTimes(1);
+	});
+
 	it("blocks candidates immediately during refresh and activates only the refreshed policy", async () => {
 		const page = new CharacterSheetPage({characterRepository: {}});
 		page._applyHubContext(makeContentContext());
@@ -426,6 +453,48 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page.filterByAllowedSources(getContentCandidates())).toEqual([]);
 		expect(campaignContext.pRefresh).toHaveBeenCalledTimes(1);
 		expect(page._hubCampaignContext).toBeNull();
+	});
+
+	it("revalidates capability-only configuration changes after an ordinary reconnect", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		const targeting = {
+			activate: jest.fn(),
+			deactivate: jest.fn(),
+			onConnectionState: jest.fn(),
+		};
+		page._currentCharacterId = "source-character";
+		page._peerTargeting = targeting;
+		page._campaign = {render: jest.fn()};
+		page._renderCharacter = jest.fn();
+		page._characterRepository = {clearRealtimeReconciliation: jest.fn()};
+		page._hubCampaignContext = {
+			pRefresh: jest.fn(async () => ({
+				...makeContentContext({id: "rules-1"}),
+				capabilities: {peerSourceCosts: {enabled: false}},
+			})),
+		};
+		page._applyHubContext({
+			...makeContentContext({id: "rules-1"}),
+			capabilities: {peerSourceCosts: {enabled: true}},
+		});
+		targeting.activate.mockClear();
+		targeting.deactivate.mockClear();
+
+		page._onHubRealtimeConnectionState({state: "reconnecting", attempt: 1});
+		expect(page._hubContext).toBeNull();
+		expect(page._isHubContextRevalidationRequired).toBe(true);
+		expect(targeting.deactivate).toHaveBeenCalledTimes(1);
+
+		page._onHubRealtimeConnectionState({state: "live"});
+		await pFlushPromises();
+
+		expect(page._hubCampaignContext.pRefresh).toHaveBeenCalledTimes(1);
+		expect(page._hubContext).toMatchObject({
+			rulesVersion: {id: "rules-1"},
+			capabilities: {peerSourceCosts: {enabled: false}},
+		});
+		expect(targeting.activate).toHaveBeenCalledWith({characterId: "source-character"});
+		expect(page._isHubContextRevalidationRequired).toBe(false);
 	});
 
 	it("routes realtime access loss through the full campaign teardown", async () => {

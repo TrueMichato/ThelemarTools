@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import pg from "pg";
 
 import {HubStoreError} from "../../../server/src/hub-store-error.js";
+import {pCheckPeerSourceCostsCampaignReadiness} from "../../../server/src/peer-source-cost-rollout.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 import {createSemanticOperationRegistry} from "../../../server/src/semantic-operation-registry.js";
 import {hasSourceCostBindingChanged} from "../../../js/hub/hub-source-costs.js";
@@ -747,6 +748,13 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 				},
 			},
 		});
+		await expect(pCheckPeerSourceCostsCampaignReadiness({
+			queryable: pool,
+			campaignIds: [campaign.id],
+		})).resolves.toEqual({
+			configuredCampaignCount: 1,
+			readyCampaignCount: 1,
+		});
 		const dmSource = (await store.pCreateCharacter({
 			accountId: dm.id,
 			campaignId: campaign.id,
@@ -1091,5 +1099,26 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 				failureCode: "unavailable",
 			});
 		}
+
+		await store.pArchiveCampaign({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await expect(costStore.pGetCampaignContext({
+			accountId: casterOwner.id,
+			campaignId: campaign.id,
+		})).resolves.toMatchObject({
+			capabilities: {peerSourceCosts: {enabled: false}},
+		});
+		await expect(pCheckPeerSourceCostsCampaignReadiness({
+			queryable: pool,
+			campaignIds: [campaign.id],
+		})).rejects.toMatchObject({
+			code: "CAMPAIGN_ROLLOUT_NOT_READY",
+			details: {
+				blockers: [{campaignId: campaign.id, reason: "campaign_not_active"}],
+			},
+		});
 	});
 });

@@ -250,6 +250,16 @@ describe("Campaign Hub deliberate release automation", () => {
 		}
 	});
 
+	it("rejects an ambient peer source-cost allowlist before Compose can override .env.hub", () => {
+		const result = spawnSync("bash", ["-c", [
+			`source ${JSON.stringify(releaseScript)}`,
+			"HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS=11111111-1111-4111-8111-111111111111",
+			"assert_no_peer_source_cost_ambient_override",
+		].join("\n")], {encoding: "utf8"});
+		expect(result.status).not.toBe(0);
+		expect(result.stderr).toMatch(/configured only in \.env\.hub/);
+	});
+
 	it("marks a successful test simulation explicitly without production-shaped success evidence", () => {
 		const dir = makeTempDir();
 		try {
@@ -594,6 +604,8 @@ describe("Campaign Hub deliberate release automation", () => {
 				.toBeLessThan(successfulApply.indexOf("replace_record migrations_planned"));
 			expect(successfulApply.indexOf("record migration_apply_sha256"))
 				.toBeLessThan(successfulApply.indexOf("APPLIED_MIGRATIONS=\"$(python3"));
+			expect(successfulApply.indexOf("check-peer-source-cost-rollout.mjs"))
+				.toBeLessThan(successfulApply.indexOf("TRAFFIC_MUTATED=\"true\""));
 		} finally {
 			fs.rmSync(dir, {recursive: true, force: true});
 		}
