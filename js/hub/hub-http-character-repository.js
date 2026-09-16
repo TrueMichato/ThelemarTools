@@ -156,6 +156,12 @@ export class HubHttpCharacterRepository {
 			listedIds.add(character.id);
 			let recovery = null;
 			const isOwner = !!accountId && character.ownerAccountId === accountId;
+			if (isOwner) {
+				this._bindUnboundLegacyRecoveryOwner({
+					characterId: character.id,
+					expectedIntent: "patch",
+				});
+			}
 			if (isOwner && character.clientImportId && character.clientImportId !== character.id) {
 				const recoveryRecord = this._getRecoveryStorageRecord(character.clientImportId, {isRequireOwner: true});
 				if (recoveryRecord?.intent === "create") {
@@ -193,6 +199,12 @@ export class HubHttpCharacterRepository {
 		const character = await this._api.pGetCharacter({characterId: canonicalId});
 		this._assertCharacterScope(character);
 		this._accepted.set(canonicalId, character);
+		if (character.ownerAccountId === this._session?.account?.id) {
+			this._bindUnboundLegacyRecoveryOwner({
+				characterId: canonicalId,
+				expectedIntent: "patch",
+			});
+		}
 		const book = this._getCoverageBook(canonicalId);
 		book.acceptedOperationLegIds = new BoundedIdSet();
 		const recovery = this._failedWrites.get(canonicalId) || this.getPendingRecovery(canonicalId);
@@ -1682,6 +1694,15 @@ export class HubHttpCharacterRepository {
 	_getRecoveryIntent (parsed) {
 		if (["create", "patch"].includes(parsed?.intent)) return parsed.intent;
 		if (
+			!Object.hasOwn(parsed || {}, "queueVersion")
+			&& parsed?.snapshot
+			&& parsed?.commandKeys?.create
+			&& parsed?.commandKeys?.patch
+			&& Object.hasOwn(parsed, "base")
+		) {
+			return parsed.base == null ? "create" : "patch";
+		}
+		if (
 			[_RECOVERY_COMMAND_QUEUE_VERSION, _RECOVERY_COMMAND_QUEUE_COMPACT_LEGACY_VERSION].includes(parsed?.queueVersion)
 			&& Object.hasOwn(parsed, "base")
 		) {
@@ -1692,6 +1713,83 @@ export class HubHttpCharacterRepository {
 			return firstLegacyCommand.base == null ? "create" : "patch";
 		}
 		return "patch";
+	}
+
+	_isUnboundLegacyRecoveryRecord (parsed) {
+		return !!parsed
+			&& !Object.hasOwn(parsed, "ownerAccountId")
+			&& !Object.hasOwn(parsed, "queueVersion")
+			&& Object.hasOwn(parsed, "base")
+			&& parsed.snapshot
+			&& typeof parsed.snapshot === "object"
+			&& !Array.isArray(parsed.snapshot)
+			&& typeof parsed.commandKeys?.create === "string"
+			&& !!parsed.commandKeys.create
+			&& typeof parsed.commandKeys?.patch === "string"
+			&& !!parsed.commandKeys.patch;
+	}
+
+	_getUnboundLegacyRecoveryStorageRecord (characterId) {
+		const key = this._getRecoveryStorageKey(characterId);
+		const raw = this._recoveryStorage?.getItem(key);
+		if (!raw) return null;
+		try {
+			const parsed = JSON.parse(raw);
+			if (!this._isUnboundLegacyRecoveryRecord(parsed)) return null;
+			return {key, parsed, intent: this._getRecoveryIntent(parsed)};
+		} catch {
+			return null;
+		}
+	}
+
+	_getUnboundLegacyRecoveryIds () {
+		if (!this._session?.account?.id || !this._recoveryStorage || typeof this._recoveryStorage.key !== "function") return [];
+		const prefix = this._getRecoveryStoragePrefix();
+		const out = [];
+		for (let i = 0; i < this._recoveryStorage.length; ++i) {
+			const key = this._recoveryStorage.key(i);
+			if (!key?.startsWith(prefix)) continue;
+			const characterId = key.slice(prefix.length);
+			const record = this._getUnboundLegacyRecoveryStorageRecord(characterId);
+			if (record?.intent === "create") out.push(characterId);
+		}
+		return out;
+	}
+
+	async pListUnboundLegacyRecoveryIds () {
+		await this._pEnsureSession();
+		return this._getUnboundLegacyRecoveryIds();
+	}
+
+	_bindUnboundLegacyRecoveryOwner ({characterId, expectedIntent}) {
+		const accountId = this._session?.account?.id;
+		if (!accountId) return false;
+		const record = this._getUnboundLegacyRecoveryStorageRecord(characterId);
+		if (!record || record.intent !== expectedIntent) return false;
+		const payload = {
+			...record.parsed,
+			ownerAccountId: accountId,
+			intent: record.intent,
+			...(record.intent === "create" ? {clientImportId: characterId} : {}),
+		};
+		try {
+			this._recoveryStorage.setItem(record.key, JSON.stringify(payload));
+		} catch (cause) {
+			throw this._getRecoveryStorageError({
+				code: "CHARACTER_RECOVERY_STORAGE_UNAVAILABLE",
+				message: `This older cloud character recovery could not be bound safely to the signed-in account.`,
+				cause,
+			});
+		}
+		return true;
+	}
+
+	async pClaimUnboundLegacyRecovery ({characterId}) {
+		await this._pEnsureSession();
+		return this._pRunMutation(() => this._bindUnboundLegacyRecoveryOwner({
+			characterId,
+			expectedIntent: "create",
+		}));
 	}
 
 	_getRecoveryStorageRecord (characterId, {isRequireOwner = false} = {}) {
@@ -1774,6 +1872,23 @@ export class HubHttpCharacterRepository {
 		error.code = code;
 		if (cause) error.cause = cause;
 		return error;
+	}
+
+	_getRecoveryExport ({characterId, queue}) {
+		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+		const commands = queue.map(command => ({
+			character: {...structuredClone(command.submittedSnapshot), id: canonicalId},
+			activity: structuredClone(command.submittedActivity ?? null),
+			commandKeys: {...command.commandKeys},
+			rulesVersionId: command.submittedRulesVersionId ?? null,
+			intent: command.intent || (command.submittedBase == null ? "create" : "patch"),
+			state: command.state,
+		}));
+		return {
+			intent: commands[0]?.intent || "patch",
+			character: structuredClone(commands.at(-1)?.character || {id: canonicalId}),
+			commands,
+		};
 	}
 
 	_getRecoveryQueuePayload ({queue, version}) {
@@ -2045,10 +2160,19 @@ export class HubHttpCharacterRepository {
 		return staged;
 	}
 
-	_prepareRecoveryPatchCommand ({characterId, command, baseRevision, patches, isRotateKey = false}) {
+	_prepareRecoveryPatchCommand ({
+		characterId,
+		command,
+		baseRevision,
+		patches,
+		isRotateKey = false,
+		rulesVersionId = command.submittedRulesVersionId ?? null,
+	}) {
 		const previousPatchKey = command.commandKeys.patch;
 		const previousOutboundPatch = command.outboundPatch;
+		const previousRulesVersionId = command.submittedRulesVersionId;
 		if (isRotateKey) command.commandKeys.patch = crypto.randomUUID();
+		command.submittedRulesVersionId = rulesVersionId;
 		command.outboundPatch = {
 			baseRevision,
 			patches: structuredClone(patches),
@@ -2058,6 +2182,7 @@ export class HubHttpCharacterRepository {
 		} catch (error) {
 			command.commandKeys.patch = previousPatchKey;
 			command.outboundPatch = previousOutboundPatch;
+			command.submittedRulesVersionId = previousRulesVersionId;
 			throw error;
 		}
 		return {
@@ -2065,6 +2190,34 @@ export class HubHttpCharacterRepository {
 			patches: structuredClone(patches),
 			idempotencyKey: command.commandKeys.patch,
 		};
+	}
+
+	_prepareRecoveryCreateCommand ({characterId, command, rulesVersionId}) {
+		const previousCreateKey = command.commandKeys.create;
+		const previousRulesVersionId = command.submittedRulesVersionId;
+		command.commandKeys.create = crypto.randomUUID();
+		command.submittedRulesVersionId = rulesVersionId;
+		try {
+			this._persistRecoveryCommandQueue(characterId, {isRequired: true});
+		} catch (error) {
+			command.commandKeys.create = previousCreateKey;
+			command.submittedRulesVersionId = previousRulesVersionId;
+			throw error;
+		}
+		return {
+			idempotencyKey: command.commandKeys.create,
+			rulesVersionId: command.submittedRulesVersionId ?? null,
+		};
+	}
+
+	_getRulesVersionAfterStaleRejection ({error, previousRulesVersionId}) {
+		const details = error?.details;
+		const rulesVersionId = details && Object.hasOwn(details, "activeRulesVersionId")
+			? details.activeRulesVersionId
+			: this._fnGetRulesVersionId();
+		return rulesVersionId === previousRulesVersionId
+			? {isChanged: false, rulesVersionId}
+			: {isChanged: true, rulesVersionId};
 	}
 
 	async _pExecuteUpsertCommand (command) {
@@ -2097,10 +2250,11 @@ export class HubHttpCharacterRepository {
 			throw conflict;
 		}
 		if (command.isExactRequestUnproven && submittedActivity) {
-			const recovery = {
-				character: structuredClone(characterNxt),
-				activity: structuredClone(submittedActivity),
-			};
+			const queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
+			const recovery = this._getRecoveryExport({
+				characterId: canonicalId,
+				queue: queueEntry?.queue || [command],
+			});
 			this._setSaveBlock(canonicalId, {
 				reason: "exact_request_unavailable",
 				code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
@@ -2148,13 +2302,34 @@ export class HubHttpCharacterRepository {
 			}
 			if (!accepted) {
 				if (command.intent !== "create") throw notFoundError;
-				const created = await this._api.pCreateCharacter({
+				const pCreate = ({rulesVersionId, idempotencyKey}) => this._api.pCreateCharacter({
 					clientImportId: requestedId,
 					campaignId: this._campaignId,
 					data: this._getSnapshotData(characterNxt),
-					rulesVersionId: submittedRulesVersionId,
-					idempotencyKey: commandKeys.create,
+					rulesVersionId,
+					idempotencyKey,
 				});
+				let created;
+				try {
+					created = await pCreate({
+						rulesVersionId: submittedRulesVersionId,
+						idempotencyKey: commandKeys.create,
+					});
+				} catch (error) {
+					if (error?.code !== "RULES_VERSION_STALE") throw error;
+					const rulesRefresh = this._getRulesVersionAfterStaleRejection({
+						error,
+						previousRulesVersionId: submittedRulesVersionId,
+					});
+					if (!rulesRefresh.isChanged) throw error;
+					const retry = this._prepareRecoveryCreateCommand({
+						characterId: requestedId,
+						command,
+						rulesVersionId: rulesRefresh.rulesVersionId,
+					});
+					submittedRulesVersionId = retry.rulesVersionId;
+					created = await pCreate(retry);
+				}
 				canonicalId = created.character.id;
 				this._migrateCharacterIdentity({fromId: requestedId, toId: canonicalId});
 				this._accepted.set(canonicalId, created.character);
@@ -2262,7 +2437,16 @@ export class HubHttpCharacterRepository {
 				conflict.recovery = structuredClone(recovery);
 				throw conflict;
 			}
-			if (error?.code !== "REVISION_CONFLICT") throw error;
+			const isRulesVersionStale = error?.code === "RULES_VERSION_STALE";
+			if (!isRulesVersionStale && error?.code !== "REVISION_CONFLICT") throw error;
+			if (isRulesVersionStale) {
+				const rulesRefresh = this._getRulesVersionAfterStaleRejection({
+					error,
+					previousRulesVersionId: submittedRulesVersionId,
+				});
+				if (!rulesRefresh.isChanged) throw error;
+				submittedRulesVersionId = rulesRefresh.rulesVersionId;
+			}
 			const canonical = await this._api.pGetCharacter({characterId: canonicalId});
 			const rebased = this._rebaseOwnerCandidate({
 				base: isRetryingPreparedPatch ? (effectiveSubmittedBase || accepted.data) : accepted.data,
@@ -2307,6 +2491,7 @@ export class HubHttpCharacterRepository {
 				baseRevision: canonical.revision,
 				patches: rebasedPatches,
 				isRotateKey: true,
+				rulesVersionId: submittedRulesVersionId,
 			});
 			const leaseNxt = await this.pAcquireLease({characterId: canonicalId});
 			result = await this._api.pPatchCharacter({
@@ -2583,13 +2768,57 @@ export class HubHttpCharacterRepository {
 		return true;
 	}
 
-	async pResolveUnprovableRecovery ({characterId, fnAdoptLive = null}) {
-		const canonicalId = this._canonicalIds.get(characterId) || characterId;
+	async pResolveUnprovableRecovery ({characterId, fnAdoptLive = null, fnDiscardLive = null}) {
+		let canonicalId = this._canonicalIds.get(characterId) || characterId;
 		return this._pRunMutation(async () => {
-			const queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
+			let queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
 			if (!queueEntry?.queue.some(command => command.isExactRequestUnproven && command.submittedActivity)) return null;
 			await this._pEnsureSession();
-			const serverDocument = await this._api.pGetCharacter({characterId: canonicalId});
+			let serverDocument = null;
+			try {
+				serverDocument = await this._api.pGetCharacter({characterId: canonicalId});
+			} catch (error) {
+				if (error?.code !== "CHARACTER_NOT_FOUND" || queueEntry.queue[0]?.intent !== "create") throw error;
+				const accountId = this._session?.account?.id;
+				const characters = await this._api.pListCharacters({campaignId: this._campaignId});
+				const matching = characters.find(character => (
+					character.ownerAccountId === accountId
+					&& character.clientImportId === queueEntry.queue[0].requestedId
+				));
+				if (matching) {
+					this._migrateCharacterIdentity({
+						fromId: queueEntry.queue[0].requestedId,
+						toId: matching.id,
+					});
+					canonicalId = matching.id;
+					queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
+					serverDocument = matching;
+				}
+			}
+			if (!serverDocument) {
+				const stagedQueue = this._stageRecoveryCommandQueue({
+					characterId: canonicalId,
+					queue: [],
+					isRequired: true,
+				});
+				try {
+					if (fnDiscardLive && fnDiscardLive({characterId: canonicalId}) === false) {
+						this._rollbackStagedRecoveryCommandQueue(stagedQueue);
+						return null;
+					}
+				} catch (error) {
+					this._rollbackStagedRecoveryCommandQueue(stagedQueue);
+					throw error;
+				}
+				this._commitStagedRecoveryCommandQueue(stagedQueue);
+				this._conflicts.delete(characterId);
+				this._conflicts.delete(canonicalId);
+				this._clearSaveBlock(characterId);
+				this._clearSaveBlock(canonicalId);
+				this._recoveryOnlyIds.delete(characterId);
+				this._recoveryOnlyIds.delete(canonicalId);
+				return fnDiscardLive ? null : {status: "discarded_create", characterId: canonicalId};
+			}
 			this._assertCharacterScope(serverDocument);
 			const stagedQueue = this._stageRecoveryCommandQueue({
 				characterId: canonicalId,

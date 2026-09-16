@@ -83,10 +83,19 @@ assertion, clears that release gate.
 - Durable recovery format 3 stores the exact PATCH body and rules-version pin used with each idempotency key.
   Legacy activity commands that cannot prove that exact request are quarantined locally and remain exportable;
   never reconstruct under the old key or rotate to a new key, because either path can lose or duplicate the
-  one-shot event. Quarantine installs a save block so newer commands cannot accumulate; explicit server adoption
-  refetches canonical truth, durably clears the queue, and adopts every repository/page track inside the serialized
-  mutation. Activity-free legacy commands may rotate keys only after the replacement recovery envelope is durably
-  stored. A legacy `pending` state is not proof of non-submission; require the later rules-pin marker too.
+  one-shot event. Quarantine installs a save block so newer commands cannot accumulate; its export contains every
+  queued snapshot, activity, rules pin, and command identity that an explicit server resolution will atomically
+  discard. Dismissal exports and later saves reopen the choice. Explicit server adoption refetches canonical truth,
+  durably clears the queue, and adopts every repository/page track inside the serialized mutation; a recovery-only
+  create may be explicitly discarded only after an owner-scoped listing proves it absent. Activity-free legacy
+  commands may rotate keys only after the replacement recovery envelope is durably stored. A transactional
+  `RULES_VERSION_STALE` rejection is also definitive non-commit evidence: rotate the affected key and durably pin
+  the authoritative active version before retrying. A legacy `pending` state is not proof of non-submission;
+  require the later rules-pin marker too.
+- Exact-predecessor recovery without owner metadata must not disappear. Bind an established patch only after the
+  authoritative row proves current-account ownership. Keep ownerless creates hidden until an explicit account
+  claim; do not expose their document content in the claim prompt or infer ownership from a `clientImportId`
+  collision.
 
 Primary sources: `docs/hub/architecture.md`, ADR 0002, `hub-http-character-repository.js`, and the character/
 workspace repository tests.
@@ -97,8 +106,9 @@ workspace repository tests.
 - Backward activity requests are fenced by the authorization generation which started them. If role or projection
   authority changes, replace the visible window and discard older in-flight pages. Projection invalidation,
   authority reload, and realtime access loss increment that generation synchronously rather than waiting for a
-  follow-up authorization fetch. Conceal cached rows and keep paging disabled until the authorized replacement
-  succeeds; authorization errors keep the fence latched.
+  follow-up authorization fetch. Conceal cached and rendered rows, prevent already-started refreshes from
+  publishing, and keep paging disabled until the authorized replacement succeeds; authorization errors keep the
+  fence latched.
 - The projector has three outcomes: `owner_truth`, `dm_truth`, and recipient-independent `peer_profile`.
 - `character.projection.invalidated` contains metadata only. Consumers batch/coalesce invalidations, refetch the
   authorization-scoped projection over HTTP, sequence-fence responses, and replace the prior view.

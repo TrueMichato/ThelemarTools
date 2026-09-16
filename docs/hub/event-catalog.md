@@ -136,7 +136,8 @@ realtime access loss advance the generation synchronously; a stale request compl
 after terminal access loss. The read-only pagination handler is installed before the archived-campaign early
 return, so authorized retained history remains reachable when campaign mutations are disabled. Active campaigns
 conceal cached rows and keep pagination disabled while an authorization replacement is pending; authorization
-errors leave that fence latched.
+errors and realtime access loss atomically clear the rendered activity window, leave that fence latched, and
+prevent an already-started refresh from restoring stale rows.
 
 ## Audit entries
 

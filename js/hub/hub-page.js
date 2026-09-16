@@ -1295,6 +1295,21 @@ async function pInitCampaign ({session}) {
 		const loadEarlier = document.getElementById("campaign-activity-load-earlier");
 		if (loadEarlier) loadEarlier.disabled = true;
 	};
+	const concealActivityAuthorization = ({isLoading = false} = {}) => {
+		invalidateActivityAuthorization();
+		liveEvents = [];
+		activityHistory = null;
+		liveMembers = [];
+		liveCharacters = [];
+		renderRecentActivity({
+			events: [],
+			characters: [],
+			members: [],
+			history: null,
+			isLoading,
+			isAuthorizationFenced: true,
+		});
+	};
 	bindHubActivityHistoryPagination({
 		button: document.getElementById("campaign-activity-load-earlier"),
 		pListEventPage: ({beforeSequence, limit}) => api.pListEventPage({campaignId, beforeSequence, limit}),
@@ -1314,7 +1329,7 @@ async function pInitCampaign ({session}) {
 		isAuthorizationFenced: () => isActivityAuthorizationFenced,
 		onAuthorizationError: error => {
 			if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND"].includes(error?.code)) return false;
-			invalidateActivityAuthorization();
+			concealActivityAuthorization();
 			isCampaignReloadRequired = true;
 			return true;
 		},
@@ -1416,6 +1431,7 @@ async function pInitCampaign ({session}) {
 				pSnapshotNxt,
 				pActivityRefresh,
 			]);
+			if (isCampaignReloadRequired) return;
 			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
 			liveEvents = activityRefresh.events;
 			if (activityRefresh.isAuthorizationChanged) {
@@ -1481,7 +1497,7 @@ async function pInitCampaign ({session}) {
 	};
 	const reloadForAuthorityChange = () => {
 		if (isCampaignReloadRequired) return;
-		invalidateActivityAuthorization();
+		concealActivityAuthorization();
 		isCampaignReloadRequired = true;
 		if (refreshTimer != null) {
 			window.clearTimeout(refreshTimer);
@@ -1504,15 +1520,7 @@ async function pInitCampaign ({session}) {
 		}
 		const isProjectionInvalidation = event.type === "character.projection.invalidated";
 		if (isProjectionInvalidation) {
-			invalidateActivityAuthorization();
-			renderRecentActivity({
-				events: [],
-				characters: [],
-				members: [],
-				history: null,
-				isLoading: true,
-				isAuthorizationFenced: true,
-			});
+			concealActivityAuthorization({isLoading: true});
 		}
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
@@ -1550,7 +1558,7 @@ async function pInitCampaign ({session}) {
 		if (state === "live") setCampaignConnectionStatus({label: "Live updates connected", state: "connected"});
 		else if (state === "reconnecting") setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
 		else if (state === "access_lost") {
-			invalidateActivityAuthorization();
+			concealActivityAuthorization();
 			isCampaignReloadRequired = true;
 			if (/session|account deletion/i.test(reason || "")) renderError(new HubApiError({code: "AUTH_REQUIRED", status: 401}));
 			else if (/membership|authorization/i.test(reason || "")) renderError(new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}));

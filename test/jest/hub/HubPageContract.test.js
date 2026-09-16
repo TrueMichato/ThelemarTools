@@ -274,6 +274,8 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("let activityAuthorizationGeneration = 0");
 		expect(source).toContain("let isActivityAuthorizationFenced = false");
 		expect(source).toContain("const invalidateActivityAuthorization = () =>");
+		expect(source).toContain("const concealActivityAuthorization = ({isLoading = false} = {}) =>");
+		expect(source).toMatch(/const concealActivityAuthorization = \(\{isLoading = false\} = \{\}\) => \{[\s\S]*liveEvents = \[\];[\s\S]*liveMembers = \[\];[\s\S]*renderRecentActivity\(\{[\s\S]*events: \[\],[\s\S]*isLoading,[\s\S]*isAuthorizationFenced: true/);
 		expect(source).toContain("isActivityAuthorizationFenced = true");
 		expect(source).toContain("isActivityAuthorizationFenced = false");
 		expect(source).toContain("isActivityAuthorizationFenced ? [] : liveEvents");
@@ -281,7 +283,11 @@ describe("campaign hub pages", () => {
 		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
 		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
 		expect(source).toContain("const isProjectionInvalidation = event.type === \"character.projection.invalidated\"");
-		expect(source).toMatch(/state === "access_lost"[\s\S]*invalidateActivityAuthorization\(\)/);
+		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toMatch(/onAuthorizationError:[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toContain("concealActivityAuthorization({isLoading: true})");
+		expect(source).toMatch(/const \[membersNxt, charactersNxt, snapshotNxt, activityRefresh\] = await Promise\.all[\s\S]*if \(isCampaignReloadRequired\) return;/);
 		expect(activitySource).toContain("requestAuthorizationGeneration === getAuthorizationGeneration()");
 		expect(source).toContain("event.type === \"membership.role_changed\"");
 		expect(source).toContain("event.payload?.accountId === session.account.id");

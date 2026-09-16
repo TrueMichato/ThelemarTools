@@ -512,9 +512,16 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   whether that exact request is provable. A legacy one-shot activity without its original PATCH body or rules pin
   remains quarantined and exportable under `CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE`; the sheet must not
   retry it under a reconstructed old-key body or rotate the key and duplicate the activity. The sheet offers
-  **Export Then Use Server** or **Use Server**; repository resolution fetches canonical truth inside the mutation
-  queue, clears the complete durable recovery queue/save block, adopts the server document, and permits later
-  saves. Activity-free legacy recovery may rotate keys after its replacement request envelope is durably stored.
+  **Export Then Use Server** or **Use Server**; the artifact includes every queued snapshot, activity, rules pin,
+  and command identity which will be discarded. Closing the dialog exports that artifact, and later save attempts
+  reopen the choice with any newer unsaved document included. Repository resolution fetches canonical truth inside
+  the mutation queue, clears the complete durable recovery queue/save block, adopts the server document, and
+  permits later saves. A recovery-only create may be explicitly exported and discarded after owner-scoped listing
+  proves no server document exists. Activity-free legacy recovery may rotate keys after its replacement request
+  envelope is durably stored; a transactional `RULES_VERSION_STALE` rejection may similarly rotate only after the
+  authoritative active pin and replacement request are persisted. Exact-predecessor ownerless patch recovery binds
+  only after authoritative ownership verification, while ownerless creates remain hidden until the user explicitly
+  claims them for the signed-in account.
 - A `CHARACTER_LIVE_CONFLICT` is detected after the original repository command committed. `Keep Local` retries
   only the remaining document delta with `activity: null`; replaying the one-shot activity would create a duplicate
   event under a fresh idempotency key.

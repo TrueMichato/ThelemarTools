@@ -214,10 +214,42 @@ class CharacterSheetPage {
 		this._dialectParentMap = {};
 	}
 
+	async _pClaimUnboundLegacyHubRecovery ({characterId = null} = {}) {
+		if (
+			this._isUnboundLegacyRecoveryClaimDeferred
+			|| typeof this._characterRepository?.pListUnboundLegacyRecoveryIds !== "function"
+			|| typeof this._characterRepository?.pClaimUnboundLegacyRecovery !== "function"
+		) return null;
+		const recoveryIds = (await this._characterRepository.pListUnboundLegacyRecoveryIds())
+			.filter(id => characterId == null || id === characterId);
+		if (!recoveryIds.length) return null;
+		const choice = await InputUiUtil.pGetUserBoolean({
+			title: "Older Local Recovery Found",
+			htmlDescription: `This browser contains ${recoveryIds.length === 1 ? "an older character recovery" : `${recoveryIds.length} older character recoveries`} saved before account binding was added. Claim ${recoveryIds.length === 1 ? "it" : "them"} only if ${recoveryIds.length === 1 ? "this draft belongs" : "these drafts belong"} to the currently signed-in account.`,
+			textYes: "Claim Local Recovery",
+			textNo: "Leave Hidden",
+		});
+		if (choice !== true) {
+			this._isUnboundLegacyRecoveryClaimDeferred = true;
+			return false;
+		}
+		for (const recoveryId of recoveryIds) {
+			await this._characterRepository.pClaimUnboundLegacyRecovery({characterId: recoveryId});
+		}
+		return true;
+	}
+
 	async _pCanonicalizeHubCharacterUrl () {
 		if (!this._isHubCharacter || !this._characterRepository.pGetCampaignId) return false;
 		const characterId = new URLSearchParams(window.location.search).get("id");
 		if (!characterId) return false;
+		const claimResult = await this._pClaimUnboundLegacyHubRecovery({characterId});
+		if (claimResult === false) {
+			const url = new URL(window.location.href);
+			url.searchParams.delete("id");
+			window.location.replace(url.href);
+			return true;
+		}
 		const campaignId = await this._characterRepository.pGetCampaignId({characterId});
 		if (campaignId === this._hubCampaignId) return false;
 		window.location.replace(getCloudCharacterUrl({campaignId, characterId}));
@@ -948,15 +980,28 @@ class CharacterSheetPage {
 			isCharacterSaveFenceCurrent({sheet: this, saveFence: resolutionFence})
 			&& (isIdentityChanged || fnIsCurrent())
 		);
+		const recoveryExport = structuredClone(recovery);
+		const unsavedCharacter = {...this._state.toJson(), id: resolutionFence.characterId};
+		if (JSON.stringify(recoveryExport.character) !== JSON.stringify(unsavedCharacter)) {
+			recoveryExport.unsavedCharacter = unsavedCharacter;
+		}
+		const isRecoveryOnlyCreate = recovery?.intent === "create";
 		const choice = await InputUiUtil.pGetUserBoolean({
 			title: "Recovered Activity Needs Your Choice",
-			htmlDescription: "This older recovery cannot safely resend its activity. Load the latest server version to discard the blocked recovery. You can export the local recovery first.",
-			textYes: "Export Then Use Server",
-			textNo: "Use Server",
+			htmlDescription: isRecoveryOnlyCreate
+				? "This older recovery cannot safely resend its activity, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
+				: "This older recovery cannot safely resend its activity. Load the latest server version to discard the blocked recovery. You can export every queued change first.",
+			textYes: isRecoveryOnlyCreate ? "Export Then Discard" : "Export Then Use Server",
+			textNo: isRecoveryOnlyCreate ? "Discard Recovery" : "Use Server",
 		});
-		if (choice == null || !isResolutionCurrent()) return false;
-		if (choice) DataUtil.userDownload("character-activity-recovery", recovery, {fileType: "character-conflict"});
+		if (!isResolutionCurrent()) return false;
+		if (choice == null) {
+			DataUtil.userDownload("character-activity-recovery", recoveryExport, {fileType: "character-conflict"});
+			return false;
+		}
+		if (choice) DataUtil.userDownload("character-activity-recovery", recoveryExport, {fileType: "character-conflict"});
 		let isResolutionAdopted = false;
+		let isCreateDiscarded = false;
 		const fnAdoptResolution = resolved => {
 			if (!isResolutionCurrent()) return false;
 			const identity = this._adoptCanonicalCharacterIdentity({
@@ -971,12 +1016,32 @@ class CharacterSheetPage {
 			isResolutionAdopted = true;
 			return true;
 		};
+		const fnDiscardResolution = () => {
+			if (!isResolutionCurrent()) return false;
+			this._createNewCharacter();
+			isCreateDiscarded = true;
+			return true;
+		};
 		try {
 			const resolved = await this._characterRepository.pResolveUnprovableRecovery({
 				characterId,
 				fnAdoptLive: fnAdoptResolution,
+				fnDiscardLive: fnDiscardResolution,
 			});
+			if (isCreateDiscarded) {
+				await this._pLoadCharacters?.();
+				if (this._selCharacter) this._selCharacter.value = "";
+				this._updateSaveIndicator("saved");
+				return true;
+			}
 			if (!isResolutionCurrent()) return false;
+			if (resolved?.status === "discarded_create") {
+				this._createNewCharacter();
+				await this._pLoadCharacters?.();
+				if (this._selCharacter) this._selCharacter.value = "";
+				this._updateSaveIndicator("saved");
+				return true;
+			}
 			if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
 			if (!resolved && !isResolutionAdopted) return false;
 			if (isIdentityChanged && !await this._pRefreshCanonicalCharacterRoster({
@@ -2759,7 +2824,10 @@ class CharacterSheetPage {
 
 	// #region Character Management
 	async _pLoadCharacters () {
-		const characters = await this._characterRepository.pList();
+		let characters = await this._characterRepository.pList();
+		if (await this._pClaimUnboundLegacyHubRecovery?.() === true) {
+			characters = await this._characterRepository.pList();
+		}
 		this._updateCharacterDropdown(characters);
 	}
 
@@ -4796,6 +4864,14 @@ class CharacterSheetPage {
 		if (this._characterRepository.isSaveBlocked?.(this._currentCharacterId)) {
 			const block = this._characterRepository.getSaveBlock?.(this._currentCharacterId);
 			this._updateSaveIndicator("error");
+			if (block?.code === "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE" && block.recovery) {
+				return this._pResolveUnprovableHubRecovery({
+					characterId: saveFence.characterId,
+					recovery: block.recovery,
+					fnIsCurrent: isSaveCurrent,
+					saveFence,
+				});
+			}
 			JqueryUtil.doToast({type: "warning", content: block?.message || `Saving is paused while this character catches up with campaign effects.`});
 			return false;
 		}

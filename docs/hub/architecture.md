@@ -138,13 +138,20 @@ Recovery format 3 records whether the exact hash-significant request can still b
 activity commands that lack the original PATCH body or rules-version pin are quarantined locally with
 `CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE`: retrying the old key with a reconstructed body would violate
 idempotency, while rotating the key could duplicate the one-shot activity. The Character Sheet keeps the draft
-exportable and offers an explicit export-then-use-server or use-server choice instead of sending it. The
-repository refetches canonical truth inside the serialized mutation, durably clears the entire blocked queue,
-adopts that document into every live/accepted coverage track, and only then permits later saves. A save block
-prevents newer commands accumulating behind the quarantined activity. Activity-free legacy commands may safely
-rotate their command keys, persist a current request envelope, and resume convergence because they cannot
-duplicate a semantic event. A format-2 `pending` state alone does not prove a request was unsent; only records
-carrying the later rules-pin marker but no prepared outbound PATCH qualify for that compatibility path.
+exportable and offers an explicit export-then-use-server or use-server choice instead of sending it. The export
+contains the latest local document plus every queued snapshot, activity, rules pin, and command identity which
+the resolution will discard. Dismissing the choice exports that complete artifact and later save attempts reopen
+the decision; edits made after dismissal are included as a separate unsaved document rather than silently lost.
+The repository refetches canonical truth inside the serialized mutation, durably clears the entire blocked queue,
+adopts that document into every live/accepted coverage track, and only then permits later saves. A quarantined
+recovery-only create which is still absent from an owner-scoped server listing can instead be explicitly exported
+and discarded without inventing server state. A save block prevents newer commands accumulating behind the
+quarantined activity. Activity-free legacy commands may safely rotate their command keys, persist a current
+request envelope, and resume convergence because they cannot duplicate a semantic event. A transactional
+`RULES_VERSION_STALE` rejection likewise proves the old request did not commit: the repository adopts the
+authoritative active version, rotates the affected key, durably stores the replacement envelope, and only then
+retries. A format-2 `pending` state alone does not prove a request was unsent; only records carrying the later
+rules-pin marker but no prepared outbound PATCH qualify for that compatibility path.
 
 Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
 the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its
@@ -162,6 +169,11 @@ canonical lookup but remove obsolete pending-state aliases, so a completed retry
 context-switch blockers behind. If startup discovers that the create already committed, the original creation
 snapshot becomes the replay base and the current canonical row remains authoritative; later XP, inventory, and
 other server changes are not reverted while pending activity or later local deltas are replayed.
+Recovery blobs written by the exact predecessor before owner metadata existed are never silently ignored.
+Established-character patch recovery is bound only after an authoritative row proves current-account ownership.
+An ownerless create remains hidden until the user explicitly claims it for the signed-in account; the claim prompt
+reveals only the local recovery count, not character contents, and declining a direct temporary-id URL removes
+that selection while preserving the untouched recovery.
 Transport-failed writes remain in that durable queue. Reconnect/refocus refetches canonical truth: disjoint
 drafts retry, while overlapping paths require an explicit local/server choice. Client-only save timestamps are
 excluded from overlap detection. `Use Local` is explicit authority to retry the actual local candidate against

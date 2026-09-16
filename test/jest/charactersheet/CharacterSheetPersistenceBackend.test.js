@@ -59,6 +59,15 @@ const makeDeferred = () => {
 	return {promise, resolve, reject};
 };
 
+const makeSpellActivity = (spellName, mode = "cantrip") => ({
+	type: "spell.used",
+	spellName,
+	spellSource: "PHB",
+	spellLevel: mode === "cantrip" ? 0 : 1,
+	slotLevel: mode === "cantrip" ? 0 : 1,
+	mode,
+});
+
 function makeConcealDocument () {
 	const main = {
 		hidden: false,
@@ -102,6 +111,7 @@ function makeHost ({state} = {}) {
 		_getNextSavedAt: proto._getNextSavedAt,
 		_pResolveHubCharacterConflict: proto._pResolveHubCharacterConflict,
 		_pResolveUnprovableHubRecovery: proto._pResolveUnprovableHubRecovery,
+		_pClaimUnboundLegacyHubRecovery: proto._pClaimUnboundLegacyHubRecovery,
 		_adoptCanonicalCharacterIdentity: proto._adoptCanonicalCharacterIdentity,
 		_pRefreshCanonicalCharacterRoster: proto._pRefreshCanonicalCharacterRoster,
 		_saveCurrentCharacter: proto._saveCurrentCharacter,
@@ -604,6 +614,114 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 		}
 	});
 
+	it("claims ownerless predecessor recovery only after an explicit account-scoped choice", async () => {
+		const host = makeHost();
+		host._characterRepository = {
+			pListUnboundLegacyRecoveryIds: jest.fn(async () => ["temporary-id"]),
+			pClaimUnboundLegacyRecovery: jest.fn(async () => true),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+
+		try {
+			await expect(host._pClaimUnboundLegacyHubRecovery()).resolves.toBe(true);
+			expect(prompt).toHaveBeenCalledWith(expect.objectContaining({
+				title: "Older Local Recovery Found",
+				textYes: "Claim Local Recovery",
+				textNo: "Leave Hidden",
+			}));
+			expect(host._characterRepository.pClaimUnboundLegacyRecovery)
+				.toHaveBeenCalledWith({characterId: "temporary-id"});
+		} finally {
+			prompt.mockRestore();
+		}
+	});
+
+	it("exports a dismissed quarantine and reopens the decision on the next save", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Legacy Caster");
+		const host = makeHost({state});
+		host._currentCharacterId = "character-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._reconcileClassFeatures = jest.fn();
+		host._renderCharacter = jest.fn();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		const recovery = {
+			intent: "patch",
+			character: {...state.toJson(), id: "character-id"},
+			commands: [{
+				character: {...state.toJson(), id: "character-id"},
+				activity,
+				commandKeys: {create: "create-old", patch: "patch-old"},
+				rulesVersionId: null,
+				intent: "patch",
+				state: "failed",
+			}],
+		};
+		const error = Object.assign(new Error("Exact request unavailable."), {
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+			recovery,
+		});
+		let isBlocked = false;
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn()
+				.mockImplementationOnce(async () => {
+					isBlocked = true;
+					throw error;
+				})
+				.mockImplementation(async ({character}) => character),
+			isSaveBlocked: jest.fn(() => isBlocked),
+			getSaveBlock: jest.fn(() => isBlocked ? {code: error.code, recovery} : null),
+			pResolveUnprovableRecovery: jest.fn(async ({fnAdoptLive}) => {
+				isBlocked = false;
+				fnAdoptLive({id: "character-id", name: "Canonical Caster"});
+				return null;
+			}),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean")
+			.mockResolvedValueOnce(null)
+			.mockResolvedValueOnce(true);
+		const download = jest.spyOn(characterSheetDataUtil, "userDownload").mockImplementation(() => {});
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(host._saveCurrentCharacter({activity})).resolves.toBe(false);
+			expect(download).toHaveBeenNthCalledWith(
+				1,
+				"character-activity-recovery",
+				recovery,
+				{fileType: "character-conflict"},
+			);
+
+			host._state.setName("Unsaved After Dismissal");
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(prompt).toHaveBeenCalledTimes(2);
+			expect(download).toHaveBeenNthCalledWith(
+				2,
+				"character-activity-recovery",
+				expect.objectContaining({
+					...recovery,
+					unsavedCharacter: expect.objectContaining({
+						id: "character-id",
+						name: "Unsaved After Dismissal",
+					}),
+				}),
+				{fileType: "character-conflict"},
+			);
+			expect(host._characterRepository.pResolveUnprovableRecovery).toHaveBeenCalledTimes(1);
+			expect(host._state.toJson().name).toBe("Canonical Caster");
+
+			host._state.setName("Later Save");
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(host._characterRepository.pUpsert).toHaveBeenCalledTimes(2);
+		} finally {
+			consoleError.mockRestore();
+			download.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
 	it("exports quarantined activity recovery, adopts server truth, and permits a later save", async () => {
 		const state = new CharacterSheetState();
 		state.setName("Legacy Caster");
@@ -659,6 +777,64 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			host._state.setName("Later Save");
 			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
 			expect(host._characterRepository.pUpsert).toHaveBeenCalledTimes(2);
+		} finally {
+			consoleError.mockRestore();
+			download.mockRestore();
+			prompt.mockRestore();
+		}
+	});
+
+	it("exports and discards a quarantined recovery-only create without requiring server state", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Uncommitted Caster");
+		const host = makeHost({state});
+		host._currentCharacterId = "temporary-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._createNewCharacter = jest.fn(function () {
+			this._currentCharacterId = "new-character-id";
+		});
+		host._pLoadCharacters = jest.fn(async () => {});
+		host._selCharacter = {value: "temporary-id"};
+		const recovery = {
+			intent: "create",
+			character: {...state.toJson(), id: "temporary-id"},
+			commands: [{
+				character: {...state.toJson(), id: "temporary-id"},
+				activity: makeSpellActivity("Shield", "spell_slot"),
+				intent: "create",
+				state: "failed",
+			}],
+		};
+		const error = Object.assign(new Error("Exact request unavailable."), {
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+			recovery,
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn().mockRejectedValue(error),
+			pResolveUnprovableRecovery: jest.fn(async ({fnDiscardLive}) => {
+				fnDiscardLive({characterId: "temporary-id"});
+				return null;
+			}),
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const download = jest.spyOn(characterSheetDataUtil, "userDownload").mockImplementation(() => {});
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(host._saveCurrentCharacter({activity: recovery.commands[0].activity})).resolves.toBe(true);
+			expect(download).toHaveBeenCalledWith(
+				"character-activity-recovery",
+				recovery,
+				{fileType: "character-conflict"},
+			);
+			expect(host._createNewCharacter).toHaveBeenCalledTimes(1);
+			expect(host._pLoadCharacters).toHaveBeenCalledTimes(1);
+			expect(host._selCharacter.value).toBe("");
+			expect(host._characterRepository.pResolveUnprovableRecovery).toHaveBeenCalledWith(expect.objectContaining({
+				fnDiscardLive: expect.any(Function),
+			}));
 		} finally {
 			consoleError.mockRestore();
 			download.mockRestore();
