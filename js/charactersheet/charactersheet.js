@@ -986,28 +986,40 @@ class CharacterSheetPage {
 			recoveryExport.unsavedCharacter = unsavedCharacter;
 		}
 		const isRecoveryOnlyCreate = recovery?.intent === "create";
-		const isFailedCommandRecovery = recovery?.commands?.some(command => command.failureCode);
+		const failedCommand = recovery?.commands?.find(command => command.failureCode);
+		const isFailedCommandRecovery = !!failedCommand;
+		const isMissingServerPatchRecovery = !isRecoveryOnlyCreate
+			&& ["CHARACTER_NOT_FOUND", "IDEMPOTENCY_RESULT_GONE"].includes(failedCommand?.failureCode);
 		const exportName = isFailedCommandRecovery ? "character-cloud-recovery" : "character-activity-recovery";
 		const choice = await InputUiUtil.pGetUserBoolean({
-			title: isFailedCommandRecovery ? "Cloud Save Needs Your Choice" : "Recovered Activity Needs Your Choice",
-			htmlDescription: isFailedCommandRecovery
-				? (isRecoveryOnlyCreate
-					? "This failed cloud save cannot be retried safely, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
-					: "This failed cloud save cannot be retried safely. Load the latest server version to discard the blocked recovery. You can export every queued change first.")
-				: (isRecoveryOnlyCreate
-					? "This older recovery cannot safely resend its activity, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
-					: "This older recovery cannot safely resend its activity. Load the latest server version to discard the blocked recovery. You can export every queued change first."),
-			textYes: isRecoveryOnlyCreate ? "Export Then Discard" : "Export Then Use Server",
-			textNo: isRecoveryOnlyCreate ? "Discard Recovery" : "Use Server",
+			title: isMissingServerPatchRecovery
+				? "Cloud Character Is No Longer Available"
+				: (isFailedCommandRecovery ? "Cloud Save Needs Your Choice" : "Recovered Activity Needs Your Choice"),
+			htmlDescription: isMissingServerPatchRecovery
+				? "The server character no longer exists, so this blocked recovery cannot be applied or loaded. Export every queued change, then remove the inaccessible local copy to continue."
+				: isFailedCommandRecovery
+					? (isRecoveryOnlyCreate
+						? "This failed cloud save cannot be retried safely, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
+						: "This failed cloud save cannot be retried safely. Load the latest server version to discard the blocked recovery. You can export every queued change first.")
+					: (isRecoveryOnlyCreate
+						? "This older recovery cannot safely resend its activity, and no server character may exist. Discard the blocked recovery to continue. You can export every queued change first."
+						: "This older recovery cannot safely resend its activity. Load the latest server version to discard the blocked recovery. You can export every queued change first."),
+			textYes: isMissingServerPatchRecovery
+				? "Export Then Remove Local Copy"
+				: (isRecoveryOnlyCreate ? "Export Then Discard" : "Export Then Use Server"),
+			textNo: isMissingServerPatchRecovery
+				? "Keep Blocked"
+				: (isRecoveryOnlyCreate ? "Discard Recovery" : "Use Server"),
 		});
 		if (!isResolutionCurrent()) return false;
+		if (isMissingServerPatchRecovery && choice === false) return false;
 		if (choice == null) {
 			DataUtil.userDownload(exportName, recoveryExport, {fileType: "character-conflict"});
 			return false;
 		}
 		if (choice) DataUtil.userDownload(exportName, recoveryExport, {fileType: "character-conflict"});
 		let isResolutionAdopted = false;
-		let isCreateDiscarded = false;
+		let isRecoveryDiscarded = false;
 		const fnAdoptResolution = resolved => {
 			if (!isResolutionCurrent()) return false;
 			const identity = this._adoptCanonicalCharacterIdentity({
@@ -1025,7 +1037,7 @@ class CharacterSheetPage {
 		const fnDiscardResolution = () => {
 			if (!isResolutionCurrent()) return false;
 			this._createNewCharacter();
-			isCreateDiscarded = true;
+			isRecoveryDiscarded = true;
 			return true;
 		};
 		try {
@@ -1034,19 +1046,11 @@ class CharacterSheetPage {
 				fnAdoptLive: fnAdoptResolution,
 				fnDiscardLive: fnDiscardResolution,
 			});
-			if (isCreateDiscarded) {
-				await this._pLoadCharacters?.();
-				if (this._selCharacter) this._selCharacter.value = "";
-				this._updateSaveIndicator("saved");
-				return true;
-			}
+			if (isRecoveryDiscarded) return this._pFinalizeDiscardedHubRecovery();
 			if (!isResolutionCurrent()) return false;
-			if (resolved?.status === "discarded_create") {
+			if (["discarded_create", "discarded_missing_patch"].includes(resolved?.status)) {
 				this._createNewCharacter();
-				await this._pLoadCharacters?.();
-				if (this._selCharacter) this._selCharacter.value = "";
-				this._updateSaveIndicator("saved");
-				return true;
+				return this._pFinalizeDiscardedHubRecovery();
 			}
 			if (resolved && !isResolutionAdopted && !fnAdoptResolution(resolved)) return false;
 			if (!resolved && !isResolutionAdopted) return false;
@@ -1063,6 +1067,23 @@ class CharacterSheetPage {
 			});
 			return false;
 		}
+	}
+
+	async _pFinalizeDiscardedHubRecovery () {
+		const url = new URL(window.location.href);
+		url.searchParams.delete("id");
+		window.history?.replaceState?.({}, "", url);
+		if (this._selCharacter) this._selCharacter.value = "";
+		this._updateSaveIndicator("saved");
+		try {
+			await this._pLoadCharacters?.();
+		} catch (error) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `The blocked recovery was removed, but the cloud character list could not be refreshed: ${error.message}`,
+			});
+		}
+		return true;
 	}
 
 	// #endregion

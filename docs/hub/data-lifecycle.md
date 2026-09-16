@@ -27,7 +27,7 @@
 | Character Sheet realtime delivery | Ordered metadata/lifecycle handoff for the open owned character | current authenticated campaign page only | memory only; fenced and discarded on switch/detach/access loss/logout/terminal page hide; temporarily retained across BFCache suspension |
 | Outbox rows | Technical delivery | BFF/operators | published 7-day cleanup approved, not implemented |
 | Command receipts | Idempotent retry | BFF/store | 24 hours |
-| Browser character recovery queue | Exact request identity, ordered local snapshots, closed activity descriptor, absolute activity replay deadline, and failure posture | signed-in character owner in bounded session storage; export only by explicit user choice | cleared after commit/use-server/discard; activity replay is capped at 23 hours and expired activity-bearing queues are quarantined |
+| Browser character recovery queue | Exact request identity, ordered local snapshots, closed activity descriptor, absolute activity replay deadline, and failure posture | signed-in character owner in bounded session storage; export only by explicit user choice | cleared after commit/use-server/discard; activity replay is capped at 23 hours and expired activity-bearing queues are quarantined; confirmed missing-server PATCH state is exported before its inaccessible local live copy is removed |
 | Semantic operations/commands | Effect lifecycle, stable exactly-once replay, resulting revision/event linkage | authorized participants; BFF/store command records | campaign/account lifecycle; not pruned as technical receipts |
 | Character target references/watermarks | Opaque peer targeting and owner/DM replay reconciliation | target ref only in authorized profiles/truth; watermark owner/DM truth only | character lifetime; target ref rotates on detach/move/archive/reactivation |
 | Encrypted backup archives | Recovery | operators | nightly/off-machine policy; must age deleted data out |
@@ -191,7 +191,9 @@ Approved private-V1 policy:
 - ordinary command receipts: 24 hours;
 - browser character recovery: activity-bearing commands persist an absolute 23-hour replay deadline, never
   extended by reload/rebase/key rotation; expired or deadline-less activity recovery is exported/resolved rather
-  than replayed, while activity-free commands may continue safe convergence;
+  than replayed, while activity-free commands may continue safe convergence; definitive PATCH
+  `CHARACTER_NOT_FOUND`/`IDEMPOTENCY_RESULT_GONE` recovery is removed from browser storage only after explicit
+  export-then-discard and a fresh authoritative not-found result, with no character recreation;
 - semantic command/operation replay records: campaign/account lifecycle, so stable command/operation/event
   identity survives receipt cleanup;
 - published outbox rows: 7 days;

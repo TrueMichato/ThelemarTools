@@ -167,7 +167,10 @@ For a transactionally rejected `POLICY_VERSION_STALE`, recovery refetches canoni
 `data.carry` authority, rotates the request identity, persists that replacement, and then retries. A revision
 conflict has no matching successful receipt, so recovery retains activity on the rotated request even when the
 rebased document patch is empty. `IDEMPOTENCY_RESULT_GONE` instead proves the receipt committed but its character
-was later removed; create recovery blocks for explicit export/discard and never recreates the character.
+was later removed; create recovery blocks for explicit export/discard and never recreates the character. For a
+definitive PATCH `CHARACTER_NOT_FOUND` or `IDEMPOTENCY_RESULT_GONE`, an authoritative not-found response permits
+only export-then-remove-local resolution: the browser clears the inaccessible local character and blocked exact
+request without loading server state, matching `clientImportId`, or issuing a replacement CREATE.
 
 ## Rolls, actions, and grants
 

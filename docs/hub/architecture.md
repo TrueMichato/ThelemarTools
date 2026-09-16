@@ -166,7 +166,12 @@ request-level pin is current. A format-2 `pending` state alone does not prove a 
 carrying the later rules-pin marker but no prepared outbound PATCH qualify for that compatibility path.
 `IDEMPOTENCY_RESULT_GONE` is not receipt expiry: it proves a prior receipt references a character that has since
 been removed. Create recovery never rotates or recreates from that result; it blocks behind the same complete
-export/discard lifecycle choice.
+export/discard lifecycle choice. A definitive PATCH failure with `CHARACTER_NOT_FOUND` or
+`IDEMPOTENCY_RESULT_GONE` may likewise resolve only after a fresh canonical fetch confirms
+`CHARACTER_NOT_FOUND`: the Character Sheet exports first, explicitly removes the inaccessible local live copy,
+and the repository clears the durable queue and browser reconciliation state without listing by
+`clientImportId`, issuing CREATE, or resurrecting the removed character. Other access-loss errors retain their
+existing blocked posture.
 
 Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
 the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its

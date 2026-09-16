@@ -3047,26 +3047,33 @@ export class HubHttpCharacterRepository {
 		return this._pRunMutation(async () => {
 			let queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
 			if (!queueEntry?.queue.some(command => this._isRecoveryResolutionRequired(command))) return null;
+			const firstCommand = queueEntry.queue[0];
+			const isMissingServerPatchRecovery = firstCommand?.intent === "patch"
+				&& ["CHARACTER_NOT_FOUND", "IDEMPOTENCY_RESULT_GONE"].includes(firstCommand.recoveryFailureCode);
 			await this._pEnsureSession();
 			let serverDocument = null;
 			try {
 				serverDocument = await this._api.pGetCharacter({characterId: canonicalId});
 			} catch (error) {
-				if (error?.code !== "CHARACTER_NOT_FOUND" || queueEntry.queue[0]?.intent !== "create") throw error;
-				const accountId = this._session?.account?.id;
-				const characters = await this._api.pListCharacters({campaignId: this._campaignId});
-				const matching = characters.find(character => (
-					character.ownerAccountId === accountId
-					&& character.clientImportId === queueEntry.queue[0].requestedId
-				));
-				if (matching) {
-					this._migrateCharacterIdentity({
-						fromId: queueEntry.queue[0].requestedId,
-						toId: matching.id,
-					});
-					canonicalId = matching.id;
-					queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
-					serverDocument = matching;
+				if (error?.code !== "CHARACTER_NOT_FOUND") throw error;
+				if (firstCommand?.intent === "create") {
+					const accountId = this._session?.account?.id;
+					const characters = await this._api.pListCharacters({campaignId: this._campaignId});
+					const matching = characters.find(character => (
+						character.ownerAccountId === accountId
+						&& character.clientImportId === firstCommand.requestedId
+					));
+					if (matching) {
+						this._migrateCharacterIdentity({
+							fromId: firstCommand.requestedId,
+							toId: matching.id,
+						});
+						canonicalId = matching.id;
+						queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
+						serverDocument = matching;
+					}
+				} else if (!isMissingServerPatchRecovery) {
+					throw error;
 				}
 			}
 			if (!serverDocument) {
@@ -3089,9 +3096,27 @@ export class HubHttpCharacterRepository {
 				this._conflicts.delete(canonicalId);
 				this._clearSaveBlock(characterId);
 				this._clearSaveBlock(canonicalId);
+				if (isMissingServerPatchRecovery) {
+					for (const id of new Set([characterId, canonicalId])) {
+						this._accepted.delete(id);
+						this._leases.delete(id);
+						this._latestSubmitted.delete(id);
+						this.clearRealtimeReconciliation({characterId: id});
+					}
+					for (const [aliasId, targetId] of this._canonicalIds) {
+						if (aliasId === characterId || aliasId === canonicalId || targetId === canonicalId) {
+							this._canonicalIds.delete(aliasId);
+						}
+					}
+				}
 				this._recoveryOnlyIds.delete(characterId);
 				this._recoveryOnlyIds.delete(canonicalId);
-				return fnDiscardLive ? null : {status: "discarded_create", characterId: canonicalId};
+				return fnDiscardLive
+					? null
+					: {
+						status: isMissingServerPatchRecovery ? "discarded_missing_patch" : "discarded_create",
+						characterId: canonicalId,
+					};
 			}
 			this._assertCharacterScope(serverDocument);
 			const stagedQueue = this._stageRecoveryCommandQueue({

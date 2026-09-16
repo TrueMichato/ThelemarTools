@@ -111,6 +111,7 @@ function makeHost ({state} = {}) {
 		_getNextSavedAt: proto._getNextSavedAt,
 		_pResolveHubCharacterConflict: proto._pResolveHubCharacterConflict,
 		_pResolveUnprovableHubRecovery: proto._pResolveUnprovableHubRecovery,
+		_pFinalizeDiscardedHubRecovery: proto._pFinalizeDiscardedHubRecovery,
 		_pClaimUnboundLegacyHubRecovery: proto._pClaimUnboundLegacyHubRecovery,
 		_adoptCanonicalCharacterIdentity: proto._adoptCanonicalCharacterIdentity,
 		_pRefreshCanonicalCharacterRoster: proto._pRefreshCanonicalCharacterRoster,
@@ -836,6 +837,106 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			consoleError.mockRestore();
 			download.mockRestore();
 			prompt.mockRestore();
+		}
+	});
+
+	it.each([
+		["CHARACTER_NOT_FOUND", false],
+		["IDEMPOTENCY_RESULT_GONE", true],
+	])("exports and removes missing-server patch recovery for %s before allowing a later save", async (failureCode, isRosterRefreshFailure) => {
+		const previousLocation = globalThis.window.location;
+		const previousHistory = globalThis.window.history;
+		globalThis.window.location = new URL("http://test/charactersheet.html?id=character-id&hubCampaign=campaign-1");
+		globalThis.window.history = {replaceState: jest.fn()};
+		const state = new CharacterSheetState();
+		state.setName("Blocked Caster");
+		const host = makeHost({state});
+		host._currentCharacterId = "character-id";
+		host._characterLoadGeneration = 1;
+		host._isHubCharacter = true;
+		host._createNewCharacter = jest.fn(function () {
+			this._currentCharacterId = "new-character-id";
+			this._state.reset();
+			this._state.setId("new-character-id");
+			this._state.setName("New Character");
+		});
+		host._pLoadCharacters = isRosterRefreshFailure
+			? jest.fn(async () => { throw new Error("Roster unavailable."); })
+			: jest.fn(async () => {});
+		host._selCharacter = {value: "character-id"};
+		const recovery = {
+			intent: "patch",
+			character: {...state.toJson(), id: "character-id"},
+			commands: [{
+				character: {...state.toJson(), id: "character-id"},
+				activity: null,
+				failureCode,
+				intent: "patch",
+				state: "failed",
+			}],
+		};
+		const error = Object.assign(new Error("Exact request unavailable."), {
+			code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+			recovery,
+		});
+		const pResolveUnprovableRecovery = jest.fn(async ({fnDiscardLive}) => {
+			fnDiscardLive({characterId: "character-id"});
+			return null;
+		});
+		host._characterRepository = {
+			isRescueMirrorEnabled: false,
+			pUpsert: jest.fn()
+				.mockRejectedValueOnce(error)
+				.mockImplementation(async ({character}) => character),
+			pResolveUnprovableRecovery,
+		};
+		const prompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		const download = jest.spyOn(characterSheetDataUtil, "userDownload").mockImplementation(() => {});
+		const toast = jest.spyOn(globalThis.JqueryUtil, "doToast").mockImplementation(() => {});
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(prompt).toHaveBeenCalledWith(expect.objectContaining({
+				title: "Cloud Character Is No Longer Available",
+				htmlDescription: expect.stringContaining("remove the inaccessible local copy"),
+				textYes: "Export Then Remove Local Copy",
+				textNo: "Keep Blocked",
+			}));
+			expect(download).toHaveBeenCalledWith(
+				"character-cloud-recovery",
+				recovery,
+				{fileType: "character-conflict"},
+			);
+			expect(download.mock.invocationCallOrder[0]).toBeLessThan(pResolveUnprovableRecovery.mock.invocationCallOrder[0]);
+			expect(host._createNewCharacter).toHaveBeenCalledTimes(1);
+			expect(host._currentCharacterId).toBe("new-character-id");
+			expect(host._selCharacter.value).toBe("");
+			const discardedUrl = globalThis.window.history.replaceState.mock.calls.at(-1)[2];
+			expect(discardedUrl.searchParams.get("id")).toBeNull();
+			expect(discardedUrl.searchParams.get("hubCampaign")).toBe("campaign-1");
+			if (isRosterRefreshFailure) {
+				expect(toast).toHaveBeenCalledWith({
+					type: "warning",
+					content: expect.stringContaining("blocked recovery was removed"),
+				});
+			}
+
+			host._state.setName("Later Save");
+			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
+			expect(host._characterRepository.pUpsert).toHaveBeenLastCalledWith(expect.objectContaining({
+				character: expect.objectContaining({
+					id: "new-character-id",
+					name: "Later Save",
+				}),
+			}));
+		} finally {
+			consoleError.mockRestore();
+			toast.mockRestore();
+			download.mockRestore();
+			prompt.mockRestore();
+			globalThis.window.location = previousLocation;
+			globalThis.window.history = previousHistory;
 		}
 	});
 

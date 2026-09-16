@@ -2788,6 +2788,62 @@ describe("HTTP character repository", () => {
 		expect(repository._recoveryCommandQueues.get("temporary-id")).toHaveLength(1);
 	});
 
+	it.each([
+		"CHARACTER_NOT_FOUND",
+		"IDEMPOTENCY_RESULT_GONE",
+	])("discards missing-server patch recovery for %s after reload without recreating the character", async failureCode => {
+		const storage = new MemoryStorage();
+		const first = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => ({
+					id: "c",
+					ownerAccountId: "owner",
+					campaignId: "cmp",
+					revision: 1,
+					data: {name: "Mira", hp: 10},
+				}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async () => {
+					throw Object.assign(new Error(failureCode), {code: failureCode});
+				},
+			},
+		});
+		first._recoveryStorage = storage;
+		await first.pGet({characterId: "c"});
+		await expect(first.pUpsert({character: {id: "c", name: "Mira", hp: 9}}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+
+		const listCharacters = jest.fn(async () => []);
+		const createCharacter = jest.fn();
+		const discardLive = jest.fn(() => true);
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pListCharacters: listCharacters,
+				pCreateCharacter: createCharacter,
+			},
+		});
+		fresh._recoveryStorage = storage;
+		expect(fresh.getPendingRecovery("c")).toEqual({name: "Mira", hp: 9});
+
+		await expect(fresh.pResolveUnprovableRecovery({
+			characterId: "c",
+			fnDiscardLive: discardLive,
+		})).resolves.toBeNull();
+		expect(discardLive).toHaveBeenCalledWith({characterId: "c"});
+		expect(listCharacters).not.toHaveBeenCalled();
+		expect(createCharacter).not.toHaveBeenCalled();
+		expect(fresh.getSaveBlock("c")).toBeNull();
+		expect(fresh.hasPendingWrites()).toBe(false);
+		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+	});
+
 	it("quarantines an activity-only command after its replay deadline instead of replaying beyond receipt expiry", async () => {
 		const storage = new MemoryStorage();
 		const activity = makeSpellActivity("Fire Bolt");

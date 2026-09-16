@@ -330,8 +330,11 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   identity, persisted replacement envelopes across reload and later saves, activity-only expiry quarantine,
   response-loss resource casts quarantined before receipt expiry, in-window revision conflicts retaining activity
   after an empty rebase, expired/unexpired/activity-free hydration, committed-then-removed creates never being
-  recreated, and stable poison heads becoming actionable export/use-server blocks. Memory and PostgreSQL
-  authority tests prove stale carry rejection changes no character revision, audit, event, outbox, or receipt evidence.
+  recreated, stable poison heads becoming actionable export/use-server blocks, and definitive missing-server
+  PATCH recovery surviving reload before export-then-remove-local resolution. The PATCH regressions cover both
+  `CHARACTER_NOT_FOUND` and `IDEMPOTENCY_RESULT_GONE`, prove no `clientImportId` rematch or CREATE occurs, and
+  verify a later save uses a fresh character identity. Memory and PostgreSQL authority tests prove stale carry
+  rejection changes no character revision, audit, event, outbox, or receipt evidence.
 - Item-award regressions mutation-verify role/tenant/target gates, strict source and note/quantity bounds,
   trusted site/campaign identity resolution, cross-authority collision rejection, resolved Recent provenance,
   full authoritative metadata persistence, privacy-reduced
