@@ -190,8 +190,10 @@ Approved private-V1 policy:
 - user-visible campaign history: campaign/account deletion;
 - ordinary command receipts: 24 hours;
 - browser character recovery: activity-bearing commands persist an absolute 23-hour replay deadline, never
-  extended by reload/rebase/key rotation; expired or deadline-less activity recovery is exported/resolved rather
-  than replayed, while activity-free commands may continue safe convergence; definitive PATCH
+  extended by reload/rebase/key rotation and rechecked after awaited preflight at every submit/rotation boundary;
+  expired or deadline-less activity recovery is exported/resolved rather than replayed, while activity-free
+  commands may continue safe convergence; the exact failed operation leg is persisted independently of original
+  create/patch intent, and definitive PATCH
   `CHARACTER_NOT_FOUND`/`IDEMPOTENCY_RESULT_GONE` recovery is removed from browser storage only after explicit
   export-then-discard and a fresh authoritative not-found result, with no character recreation;
 - semantic command/operation replay records: campaign/account lifecycle, so stable command/operation/event

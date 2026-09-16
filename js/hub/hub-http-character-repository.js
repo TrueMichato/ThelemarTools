@@ -1915,7 +1915,12 @@ export class HubHttpCharacterRepository {
 			rulesVersionId: command.submittedRulesVersionId ?? null,
 			intent: command.intent || (command.submittedBase == null ? "create" : "patch"),
 			state: command.state,
-			...(command.recoveryFailureCode ? {failureCode: command.recoveryFailureCode} : {}),
+			...(command.recoveryFailureCode
+				? {
+					failureCode: command.recoveryFailureCode,
+					failureOperation: this._getRecoveryFailureOperation(command),
+				}
+				: {}),
 		}));
 		return {
 			intent: commands[0]?.intent || "patch",
@@ -1953,6 +1958,7 @@ export class HubHttpCharacterRepository {
 				rulesVersionId: command.submittedRulesVersionId ?? null,
 				...(command.isExactRequestUnproven ? {isExactRequestUnproven: true} : {}),
 				...(command.recoveryFailureCode ? {recoveryFailureCode: command.recoveryFailureCode} : {}),
+				...(command.recoveryFailureOperation ? {recoveryFailureOperation: command.recoveryFailureOperation} : {}),
 				...(command.outboundPatch
 					? {
 						outboundPatch: {
@@ -2010,6 +2016,9 @@ export class HubHttpCharacterRepository {
 			recoveryFailureCode: typeof raw.recoveryFailureCode === "string" && raw.recoveryFailureCode
 				? raw.recoveryFailureCode
 				: null,
+			recoveryFailureOperation: ["create", "patch"].includes(raw.recoveryFailureOperation)
+				? raw.recoveryFailureOperation
+				: null,
 			outboundPatch: raw.outboundPatch
 				? {
 					baseRevision: raw.outboundPatch.baseRevision,
@@ -2065,6 +2074,9 @@ export class HubHttpCharacterRepository {
 				recoveryFailureCode: typeof raw.recoveryFailureCode === "string" && raw.recoveryFailureCode
 					? raw.recoveryFailureCode
 					: null,
+				recoveryFailureOperation: ["create", "patch"].includes(raw.recoveryFailureOperation)
+					? raw.recoveryFailureOperation
+					: null,
 				outboundPatch: raw.outboundPatch
 					? {
 						baseRevision: raw.outboundPatch.baseRevision,
@@ -2089,6 +2101,21 @@ export class HubHttpCharacterRepository {
 
 	_isRecoveryResolutionRequired (command) {
 		return !!command?.recoveryFailureCode || this._isActivityReplayUnavailable(command);
+	}
+
+	_getRecoveryFailureOperation (command) {
+		if (["create", "patch"].includes(command?.recoveryFailureOperation)) return command.recoveryFailureOperation;
+		return command?.outboundPatch || command?.intent === "patch" ? "patch" : "create";
+	}
+
+	_assertActivityReplayAvailable ({characterId, command}) {
+		if (!this._isActivityReplayUnavailable(command)) return;
+		const queueEntry = this._getRecoveryCommandQueueEntry(characterId);
+		throw this._getBlockedRecoveryError({
+			characterId,
+			queue: queueEntry?.queue || [command],
+			command,
+		});
 	}
 
 	_getRecoveryResolutionMessage (command) {
@@ -2160,6 +2187,7 @@ export class HubHttpCharacterRepository {
 				}
 				: null,
 			recoveryFailureCode: null,
+			recoveryFailureOperation: null,
 			state: "pending",
 		};
 		const queueNxt = [head];
@@ -2469,6 +2497,7 @@ export class HubHttpCharacterRepository {
 				});
 				let created;
 				try {
+					this._assertActivityReplayAvailable({characterId: requestedId, command});
 					created = await pCreate({
 						rulesVersionId: submittedRulesVersionId,
 						idempotencyKey: commandKeys.create,
@@ -2480,12 +2509,14 @@ export class HubHttpCharacterRepository {
 							previousRulesVersionId: submittedRulesVersionId,
 						});
 						if (!rulesRefresh.isChanged) throw error;
+						this._assertActivityReplayAvailable({characterId: requestedId, command});
 						const retry = this._prepareRecoveryCreateCommand({
 							characterId: requestedId,
 							command,
 							rulesVersionId: rulesRefresh.rulesVersionId,
 						});
 						submittedRulesVersionId = retry.rulesVersionId;
+						this._assertActivityReplayAvailable({characterId: requestedId, command});
 						created = await pCreate(retry);
 					} else if (error?.code === "POLICY_VERSION_STALE") {
 						const accountId = this._session?.account?.id;
@@ -2502,6 +2533,7 @@ export class HubHttpCharacterRepository {
 								error,
 								previousRulesVersionId: submittedRulesVersionId,
 							});
+							this._assertActivityReplayAvailable({characterId: requestedId, command});
 							const sanitizedSnapshot = stripCarryAuthority(structuredClone(submittedSnapshot));
 							command = this._replaceRecoveryCommandHead({
 								characterId: requestedId,
@@ -2523,6 +2555,7 @@ export class HubHttpCharacterRepository {
 							} = command);
 							submittedRulesVersionId = command.submittedRulesVersionId ?? null;
 							characterNxt = {...structuredClone(submittedSnapshot), id: canonicalId};
+							this._assertActivityReplayAvailable({characterId: requestedId, command});
 							created = await pCreate({
 								rulesVersionId: submittedRulesVersionId,
 								idempotencyKey: commandKeys.create,
@@ -2605,6 +2638,7 @@ export class HubHttpCharacterRepository {
 		let result;
 		try {
 			const lease = await this.pAcquireLease({characterId: canonicalId});
+			this._assertActivityReplayAvailable({characterId: canonicalId, command});
 			result = await this._api.pPatchCharacter({
 				characterId: canonicalId,
 				baseRevision: outboundPatch.baseRevision,
@@ -2655,6 +2689,7 @@ export class HubHttpCharacterRepository {
 			}
 			const canonical = await this._api.pGetCharacter({characterId: canonicalId});
 			this._assertCharacterScope(canonical);
+			this._assertActivityReplayAvailable({characterId: canonicalId, command});
 			const rebaseBase = structuredClone(isRetryingPreparedPatch ? (effectiveSubmittedBase || accepted.data) : accepted.data);
 			const rebaseLocal = structuredClone(isRetryingPreparedPatch ? submittedDesired : desired);
 			if (isPolicyVersionStale) {
@@ -2699,6 +2734,7 @@ export class HubHttpCharacterRepository {
 				document: rebased.document,
 				base: canonical.data,
 			});
+			this._assertActivityReplayAvailable({characterId: canonicalId, command});
 			const rebasedOutboundPatch = isPolicyVersionStale
 				? (() => {
 					const rebasedSnapshotCoverage = createCoverage({
@@ -2741,6 +2777,7 @@ export class HubHttpCharacterRepository {
 					rulesVersionId: submittedRulesVersionId,
 				});
 			const leaseNxt = await this.pAcquireLease({characterId: canonicalId});
+			this._assertActivityReplayAvailable({characterId: canonicalId, command});
 			result = await this._api.pPatchCharacter({
 				characterId: canonicalId,
 				baseRevision: rebasedOutboundPatch.baseRevision,
@@ -2784,12 +2821,15 @@ export class HubHttpCharacterRepository {
 				lastResult = await this._pExecuteUpsertCommand(command);
 			} catch (error) {
 				const currentEntry = this._getRecoveryCommandQueueEntry(characterId);
+				const failedCommand = currentEntry?.queue?.[0] || command;
+				const recoveryFailureOperation = this._getRecoveryFailureOperation(failedCommand);
 				const queueNxt = (currentEntry?.queue || entry.queue).map((it, index) => index
 					? it
 					: {
 						...it,
 						state: error?.code === "CHARACTER_CONFLICT" ? "conflict" : "failed",
 						...(this._isDefinitiveRecoveryFailure(error) ? {recoveryFailureCode: error.code} : {}),
+						...(this._isDefinitiveRecoveryFailure(error) ? {recoveryFailureOperation} : {}),
 					});
 				if (error?.code === "CHARACTER_CONFLICT") {
 					const canonicalId = this._canonicalIds.get(characterId) || characterId;
@@ -2904,6 +2944,8 @@ export class HubHttpCharacterRepository {
 				submittedRulesVersionId: this._fnGetRulesVersionId(),
 				isExactRequestUnproven: false,
 				outboundPatch: null,
+				recoveryFailureCode: null,
+				recoveryFailureOperation: null,
 				submittedBase,
 				submittedBaseCoverage,
 				submittedSnapshotCoverage,
@@ -3048,7 +3090,7 @@ export class HubHttpCharacterRepository {
 			let queueEntry = this._getRecoveryCommandQueueEntry(canonicalId);
 			if (!queueEntry?.queue.some(command => this._isRecoveryResolutionRequired(command))) return null;
 			const firstCommand = queueEntry.queue[0];
-			const isMissingServerPatchRecovery = firstCommand?.intent === "patch"
+			const isMissingServerPatchRecovery = this._getRecoveryFailureOperation(firstCommand) === "patch"
 				&& ["CHARACTER_NOT_FOUND", "IDEMPOTENCY_RESULT_GONE"].includes(firstCommand.recoveryFailureCode);
 			await this._pEnsureSession();
 			let serverDocument = null;
@@ -3056,7 +3098,7 @@ export class HubHttpCharacterRepository {
 				serverDocument = await this._api.pGetCharacter({characterId: canonicalId});
 			} catch (error) {
 				if (error?.code !== "CHARACTER_NOT_FOUND") throw error;
-				if (firstCommand?.intent === "create") {
+				if (!isMissingServerPatchRecovery && firstCommand?.intent === "create") {
 					const accountId = this._session?.account?.id;
 					const characters = await this._api.pListCharacters({campaignId: this._campaignId});
 					const matching = characters.find(character => (

@@ -2880,6 +2880,206 @@ describe("HTTP character repository", () => {
 		}));
 	});
 
+	it("quarantines activity when PATCH preflight crosses the replay deadline before submission", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		let now = 0;
+		const first = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async () => {
+					throw Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"});
+				},
+			},
+			fnNow: () => now,
+		});
+		first._recoveryStorage = storage;
+		await first.pGet({characterId: "c"});
+		await expect(first.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+
+		now = 23 * 60 * 60 * 1000 - 1;
+		const patchCharacter = jest.fn(async () => ({
+			character: {id: "c", campaignId: "cmp", revision: 2, data: {hp: 9}},
+		}));
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+				pAcquireCharacterLease: async () => {
+					now = 25 * 60 * 60 * 1000;
+					return {epoch: 2};
+				},
+				pPatchCharacter: patchCharacter,
+			},
+			fnNow: () => now,
+		});
+		fresh._recoveryStorage = storage;
+		await fresh.pGet({characterId: "c"});
+
+		await expect(fresh.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(patchCharacter).not.toHaveBeenCalled();
+	});
+
+	it("quarantines activity when CREATE preflight crosses the replay deadline before submission", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		let now = 0;
+		const first = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => {
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pCreateCharacter: async () => {
+					throw Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"});
+				},
+			},
+			fnNow: () => now,
+		});
+		first._recoveryStorage = storage;
+		await expect(first.pUpsert({character: {id: "temporary-id", name: "Mira"}, activity}))
+			.rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+
+		now = 23 * 60 * 60 * 1000 - 1;
+		const createCharacter = jest.fn(async () => ({
+			character: {id: "server-id", campaignId: "cmp", revision: 1, data: {name: "Mira"}},
+		}));
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => {
+					now = 25 * 60 * 60 * 1000;
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pCreateCharacter: createCharacter,
+			},
+			fnNow: () => now,
+		});
+		fresh._recoveryStorage = storage;
+		expect(fresh.getPendingRecovery("temporary-id")).toEqual({name: "Mira"});
+
+		await expect(fresh.pUpsert({character: {id: "temporary-id", name: "Mira"}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(createCharacter).not.toHaveBeenCalled();
+	});
+
+	it("does not rotate or resend an activity PATCH after a stale-rule rejection crosses its deadline", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		let now = 0;
+		const first = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => ({id: "c", campaignId: "cmp", revision: 1, data: {hp: 10}}),
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async () => {
+					throw Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"});
+				},
+			},
+			fnNow: () => now,
+			fnGetRulesVersionId: () => "rules-a",
+		});
+		first._recoveryStorage = storage;
+		await first.pGet({characterId: "c"});
+		await expect(first.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+		const originalPatchKey = JSON.parse(storage.getItem("hub-character-recovery:cmp:c")).commands[0].commandKeys.patch;
+
+		now = 23 * 60 * 60 * 1000 - 1;
+		let getCount = 0;
+		const patchCharacter = jest.fn(async () => {
+			throw Object.assign(new Error("rules changed"), {
+				code: "RULES_VERSION_STALE",
+				details: {activeRulesVersionId: "rules-b"},
+			});
+		});
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => {
+					getCount++;
+					if (getCount > 1) now = 25 * 60 * 60 * 1000;
+					return {id: "c", campaignId: "cmp", revision: getCount, data: {hp: 10}};
+				},
+				pAcquireCharacterLease: async () => ({epoch: 2}),
+				pPatchCharacter: patchCharacter,
+			},
+			fnNow: () => now,
+			fnGetRulesVersionId: () => "rules-b",
+		});
+		fresh._recoveryStorage = storage;
+		await fresh.pGet({characterId: "c"});
+
+		await expect(fresh.pUpsert({character: {id: "c", hp: 9}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(patchCharacter).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(storage.getItem("hub-character-recovery:cmp:c")).commands[0].commandKeys.patch)
+			.toBe(originalPatchKey);
+	});
+
+	it("does not rotate or resend an activity CREATE after a stale-rule rejection crosses its deadline", async () => {
+		const storage = new MemoryStorage();
+		const activity = makeSpellActivity("Shield", "spell_slot");
+		let now = 0;
+		const first = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => {
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pCreateCharacter: async () => {
+					throw Object.assign(new Error("response lost"), {code: "NETWORK_UNAVAILABLE"});
+				},
+			},
+			fnNow: () => now,
+			fnGetRulesVersionId: () => "rules-a",
+		});
+		first._recoveryStorage = storage;
+		await expect(first.pUpsert({character: {id: "temporary-id", name: "Mira"}, activity}))
+			.rejects.toMatchObject({code: "NETWORK_UNAVAILABLE"});
+		const originalCreateKey = JSON.parse(storage.getItem("hub-character-recovery:cmp:temporary-id")).commands[0].commandKeys.create;
+
+		now = 23 * 60 * 60 * 1000 - 1;
+		const createCharacter = jest.fn(async () => {
+			now = 25 * 60 * 60 * 1000;
+			throw Object.assign(new Error("rules changed"), {
+				code: "RULES_VERSION_STALE",
+				details: {activeRulesVersionId: "rules-b"},
+			});
+		});
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true}),
+				pGetCharacter: async () => {
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pCreateCharacter: createCharacter,
+			},
+			fnNow: () => now,
+			fnGetRulesVersionId: () => "rules-b",
+		});
+		fresh._recoveryStorage = storage;
+		expect(fresh.getPendingRecovery("temporary-id")).toEqual({name: "Mira"});
+
+		await expect(fresh.pUpsert({character: {id: "temporary-id", name: "Mira"}, activity}))
+			.rejects.toMatchObject({code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE"});
+		expect(createCharacter).toHaveBeenCalledTimes(1);
+		expect(JSON.parse(storage.getItem("hub-character-recovery:cmp:temporary-id")).commands[0].commandKeys.create)
+			.toBe(originalCreateKey);
+	});
+
 	it("replays activity after an in-window revision conflict proves the original request did not commit", async () => {
 		const storage = new MemoryStorage();
 		const activity = makeSpellActivity("Shield", "spell_slot");
@@ -2932,6 +3132,77 @@ describe("HTTP character repository", () => {
 		expect(requests[2].idempotencyKey).not.toBe(requests[1].idempotencyKey);
 		expect(activityCount).toBe(1);
 		expect(storage.getItem("hub-character-recovery:cmp:c")).toBeNull();
+	});
+
+	it.each([
+		"CHARACTER_NOT_FOUND",
+		"IDEMPOTENCY_RESULT_GONE",
+	])("persists and resolves create-success PATCH failure %s as missing-server PATCH recovery", async failureCode => {
+		const storage = new MemoryStorage();
+		const createCharacter = jest.fn(async ({clientImportId, data}) => ({
+			character: {
+				id: "server-id",
+				ownerAccountId: "owner",
+				campaignId: "cmp",
+				clientImportId,
+				revision: 1,
+				data,
+			},
+		}));
+		const first = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pCreateCharacter: createCharacter,
+				pAcquireCharacterLease: async () => ({epoch: 1}),
+				pPatchCharacter: async () => {
+					throw Object.assign(new Error(failureCode), {code: failureCode});
+				},
+			},
+		});
+		first._recoveryStorage = storage;
+		const activity = makeSpellActivity("Shield", "spell_slot");
+
+		await expect(first.pUpsert({character: {id: "temporary-id", name: "Mira"}, activity}))
+			.rejects.toMatchObject({
+				code: "CHARACTER_RECOVERY_EXACT_REQUEST_UNAVAILABLE",
+				recovery: expect.objectContaining({
+					intent: "create",
+					commands: [expect.objectContaining({
+						failureCode,
+						failureOperation: "patch",
+						intent: "create",
+					})],
+				}),
+			});
+		const stored = JSON.parse(storage.getItem("hub-character-recovery:cmp:server-id"));
+		expect(stored.intent).toBe("create");
+		expect(stored.commands[0].recoveryFailureOperation).toBe("patch");
+
+		const listCharacters = jest.fn(async () => []);
+		const recreate = jest.fn();
+		const fresh = new HubHttpCharacterRepository({
+			campaignId: "cmp",
+			api: {
+				pGetSession: async () => ({signedIn: true, account: {id: "owner"}}),
+				pGetCharacter: async () => {
+					throw Object.assign(new Error("missing"), {code: "CHARACTER_NOT_FOUND"});
+				},
+				pListCharacters: listCharacters,
+				pCreateCharacter: recreate,
+			},
+		});
+		fresh._recoveryStorage = storage;
+		expect(fresh.getPendingRecovery("server-id")).toEqual({name: "Mira"});
+
+		await expect(fresh.pResolveUnprovableRecovery({characterId: "server-id"}))
+			.resolves.toEqual({status: "discarded_missing_patch", characterId: "server-id"});
+		expect(listCharacters).not.toHaveBeenCalled();
+		expect(recreate).not.toHaveBeenCalled();
+		expect(storage.getItem("hub-character-recovery:cmp:server-id")).toBeNull();
 	});
 
 	it("quarantines a committed resource cast before receipt-expiry replay can duplicate its activity", async () => {

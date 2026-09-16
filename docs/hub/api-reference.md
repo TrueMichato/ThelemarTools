@@ -161,8 +161,10 @@ committed without incrementing the character revision or emitting a projection i
 
 Browser recovery persists the exact character request envelope before submission. Commands carrying spell
 activity receive an absolute 23-hour replay deadline so a browser retry cannot outlive the 24-hour receipt.
-Expired activity-bearing commands are not sent: the Character Sheet blocks later saves and offers a complete
-recovery export plus explicit use-server/discard resolution. Activity-free character commands remain replayable.
+The deadline is rechecked after awaited request preflight, immediately before every submission and before
+rejection-driven key rotation/resend. Expired activity-bearing commands are not sent: the Character Sheet blocks
+later saves and offers a complete recovery export plus explicit use-server/discard resolution. Activity-free
+character commands remain replayable.
 For a transactionally rejected `POLICY_VERSION_STALE`, recovery refetches canonical truth, removes stale derived
 `data.carry` authority, rotates the request identity, persists that replacement, and then retries. A revision
 conflict has no matching successful receipt, so recovery retains activity on the rotated request even when the
@@ -170,7 +172,9 @@ rebased document patch is empty. `IDEMPOTENCY_RESULT_GONE` instead proves the re
 was later removed; create recovery blocks for explicit export/discard and never recreates the character. For a
 definitive PATCH `CHARACTER_NOT_FOUND` or `IDEMPOTENCY_RESULT_GONE`, an authoritative not-found response permits
 only export-then-remove-local resolution: the browser clears the inaccessible local character and blocked exact
-request without loading server state, matching `clientImportId`, or issuing a replacement CREATE.
+request without loading server state, matching `clientImportId`, or issuing a replacement CREATE. Recovery
+persists the failed CREATE/PATCH leg separately from original command intent, so this remains true when CREATE
+succeeded and the command's following activity PATCH failed.
 
 ## Rolls, actions, and grants
 

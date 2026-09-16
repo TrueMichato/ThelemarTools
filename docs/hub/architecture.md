@@ -155,7 +155,9 @@ expired activity or any stable non-recoverable failed queue head; the Character 
 export/use-server decision rather than silently accumulating later saves behind poison. Activity-free legacy
 commands may safely rotate their command keys, persist a current request envelope, and resume convergence because
 they cannot duplicate a semantic event. Activity-bearing recovery is quarantined when its persisted deadline is
-missing or reached, before hydration/drain can replay it beyond the server receipt lifetime. A transactional
+missing or reached. The repository rechecks that deadline after awaited session, canonical-character, and lease
+preflight, immediately before every network submission and before any rejection-driven key rotation, so an
+in-flight preflight cannot carry activity past the server receipt lifetime. A transactional
 `RULES_VERSION_STALE` rejection likewise proves the old request did not commit: the repository adopts the
 authoritative active version, rotates the affected key, durably stores the replacement envelope, and only then
 retries. `POLICY_VERSION_STALE` is also proof of non-commit. Create and patch recovery refetch canonical state,
@@ -171,7 +173,9 @@ export/discard lifecycle choice. A definitive PATCH failure with `CHARACTER_NOT_
 `CHARACTER_NOT_FOUND`: the Character Sheet exports first, explicitly removes the inaccessible local live copy,
 and the repository clears the durable queue and browser reconciliation state without listing by
 `clientImportId`, issuing CREATE, or resurrecting the removed character. Other access-loss errors retain their
-existing blocked posture.
+existing blocked posture. Each failed recovery command persists the actual failed operation leg independently
+from its original intent, so a successful CREATE followed by a missing-server activity PATCH receives this same
+PATCH lifecycle resolution rather than create-discard/recreation behavior.
 
 Recovery queues carry the authenticated owner id and explicit first-command intent. Only genuine creates retain
 the original `clientImportId`; patch recovery is never exposed or replayed as a replacement create when its

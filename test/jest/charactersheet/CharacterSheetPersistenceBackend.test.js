@@ -841,9 +841,11 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 	});
 
 	it.each([
-		["CHARACTER_NOT_FOUND", false],
-		["IDEMPOTENCY_RESULT_GONE", true],
-	])("exports and removes missing-server patch recovery for %s before allowing a later save", async (failureCode, isRosterRefreshFailure) => {
+		["patch CHARACTER_NOT_FOUND", "patch", "CHARACTER_NOT_FOUND", false],
+		["patch IDEMPOTENCY_RESULT_GONE", "patch", "IDEMPOTENCY_RESULT_GONE", true],
+		["create-success PATCH CHARACTER_NOT_FOUND", "create", "CHARACTER_NOT_FOUND", false],
+		["create-success PATCH IDEMPOTENCY_RESULT_GONE", "create", "IDEMPOTENCY_RESULT_GONE", true],
+	])("exports and removes missing-server recovery for %s before allowing a later save", async (_label, intent, failureCode, isRosterRefreshFailure) => {
 		const previousLocation = globalThis.window.location;
 		const previousHistory = globalThis.window.history;
 		globalThis.window.location = new URL("http://test/charactersheet.html?id=character-id&hubCampaign=campaign-1");
@@ -865,13 +867,14 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			: jest.fn(async () => {});
 		host._selCharacter = null;
 		const recovery = {
-			intent: "patch",
+			intent,
 			character: {...state.toJson(), id: "character-id"},
 			commands: [{
 				character: {...state.toJson(), id: "character-id"},
 				activity: null,
 				failureCode,
-				intent: "patch",
+				failureOperation: "patch",
+				intent,
 				state: "failed",
 			}],
 		};

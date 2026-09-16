@@ -75,6 +75,7 @@ class CharacterRecoveryDropdownPage {
 		isLaterSaveSuccessful: boolean;
 		isResolved: boolean;
 		options: Array<{text: string; value: string}>;
+		prompt: Record<string, unknown> | null;
 		savedCharacterId: string | null;
 		selectedIndex: number;
 		selectedText: string | null;
@@ -113,21 +114,26 @@ class CharacterRecoveryDropdownPage {
 			};
 
 			const recovery = {
-				intent: "patch",
+				intent: "create",
 				character: {id: aliasCharacterId, name: "Inaccessible Character"},
 				commands: [{
 					character: {id: aliasCharacterId, name: "Inaccessible Character"},
 					failureCode: "CHARACTER_NOT_FOUND",
-					intent: "patch",
+					failureOperation: "patch",
+					intent: "create",
 					state: "failed",
 				}],
 			};
+			let prompt: Record<string, unknown> | null = null;
 			const toasts: Array<{content?: string; type?: string}> = [];
 			const originalDoToast = (globalThis as any).JqueryUtil.doToast;
 			const originalPrompt = (globalThis as any).InputUiUtil.pGetUserBoolean;
 			const originalDownload = (globalThis as any).DataUtil.userDownload;
 			(globalThis as any).JqueryUtil.doToast = (toast: {content?: string; type?: string}) => toasts.push(toast);
-			(globalThis as any).InputUiUtil.pGetUserBoolean = async () => true;
+			(globalThis as any).InputUiUtil.pGetUserBoolean = async (options: Record<string, unknown>) => {
+				prompt = structuredClone(options);
+				return true;
+			};
 			(globalThis as any).DataUtil.userDownload = () => {};
 			try {
 				const isResolved = await sheet._pResolveUnprovableHubRecovery({
@@ -142,6 +148,7 @@ class CharacterRecoveryDropdownPage {
 					isLaterSaveSuccessful,
 					isResolved,
 					options: [...select.options].map(option => ({text: option.textContent || "", value: option.value})),
+					prompt,
 					savedCharacterId,
 					selectedIndex: select.selectedIndex,
 					selectedText: select.selectedOptions[0]?.textContent || null,
@@ -185,6 +192,11 @@ test.describe("discarded character recovery dropdown", () => {
 		expect(result.selectedText).toContain("Create New Character");
 		expect(result.options).not.toContainEqual(expect.objectContaining({value: "discarded-canonical-id"}));
 		expect(result.options).toContainEqual(expect.objectContaining({value: "other-character-id"}));
+		expect(result.prompt).toMatchObject({
+			title: "Cloud Character Is No Longer Available",
+			textYes: "Export Then Remove Local Copy",
+			textNo: "Keep Blocked",
+		});
 		expect(result.toasts).toContainEqual({
 			type: "warning",
 			content: expect.stringContaining("blocked recovery was removed"),

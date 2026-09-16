@@ -985,11 +985,13 @@ class CharacterSheetPage {
 		if (JSON.stringify(recoveryExport.character) !== JSON.stringify(unsavedCharacter)) {
 			recoveryExport.unsavedCharacter = unsavedCharacter;
 		}
-		const isRecoveryOnlyCreate = recovery?.intent === "create";
 		const failedCommand = recovery?.commands?.find(command => command.failureCode);
 		const isFailedCommandRecovery = !!failedCommand;
-		const isMissingServerPatchRecovery = !isRecoveryOnlyCreate
+		const failedOperation = failedCommand?.failureOperation
+			|| (failedCommand?.intent === "patch" ? "patch" : null);
+		const isMissingServerPatchRecovery = failedOperation === "patch"
 			&& ["CHARACTER_NOT_FOUND", "IDEMPOTENCY_RESULT_GONE"].includes(failedCommand?.failureCode);
+		const isRecoveryOnlyCreate = recovery?.intent === "create" && failedOperation !== "patch";
 		const exportName = isFailedCommandRecovery ? "character-cloud-recovery" : "character-activity-recovery";
 		const choice = await InputUiUtil.pGetUserBoolean({
 			title: isMissingServerPatchRecovery
