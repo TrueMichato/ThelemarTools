@@ -159,6 +159,23 @@ derived from arbitrary patches. The event, audit row, outbox row, character muta
 commit together. A cantrip or ritual may submit an empty patch array; in that case the semantic event/audit are
 committed without incrementing the character revision or emitting a projection invalidation.
 
+Browser recovery persists the exact character request envelope before submission. Commands carrying spell
+activity receive an absolute 23-hour replay deadline so a browser retry cannot outlive the 24-hour receipt.
+The deadline is rechecked after awaited request preflight, immediately before every submission and before
+rejection-driven key rotation/resend. Expired activity-bearing commands are not sent: the Character Sheet blocks
+later saves and offers a complete recovery export plus explicit use-server/discard resolution. Activity-free
+character commands remain replayable.
+For a transactionally rejected `POLICY_VERSION_STALE`, recovery refetches canonical truth, removes stale derived
+`data.carry` authority, rotates the request identity, persists that replacement, and then retries. A revision
+conflict has no matching successful receipt, so recovery retains activity on the rotated request even when the
+rebased document patch is empty. `IDEMPOTENCY_RESULT_GONE` instead proves the receipt committed but its character
+was later removed; create recovery blocks for explicit export/discard and never recreates the character. For a
+definitive PATCH `CHARACTER_NOT_FOUND` or `IDEMPOTENCY_RESULT_GONE`, an authoritative not-found response permits
+only export-then-remove-local resolution: the browser clears the inaccessible local character and blocked exact
+request without loading server state, matching `clientImportId`, or issuing a replacement CREATE. Recovery
+persists the failed CREATE/PATCH leg separately from original command intent, so this remains true when CREATE
+succeeded and the command's following activity PATCH failed.
+
 ## Rolls, actions, and grants
 
 | Method/path | Authorization | Input | Result |
@@ -361,6 +378,7 @@ Campaign role alone does not permit reading another DM's workspace.
 | Concurrency/lifecycle conflicts | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY`, `MEMBERSHIP_OWNER_PROTECTED`, `ACCOUNT_OWNS_CAMPAIGN` |
 | Character/cloud content | `CHARACTER_INVALID`, `CHARACTER_TOO_LARGE`, `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, `CLOUD_DATA_TOO_DEEP`, `CLOUD_HTML_FORBIDDEN`, `CLOUD_URL_FORBIDDEN`, `CLOUD_KEY_FORBIDDEN` |
 | Campaign content | `BREW_INVALID`, `BREW_TOO_LARGE`, `BREW_TOO_DEEP`, `BREW_BLOCKLIST_FORBIDDEN`, `BREW_RAW_HTML_FORBIDDEN`, `BREW_URL_FORBIDDEN`, `BREW_KEY_FORBIDDEN`, `BREW_DEPENDENCY_MISSING`, `RULES_INVALID`; generic `CLOUD_DATA_INVALID`, `CLOUD_DATA_TOO_LARGE`, or `CLOUD_DATA_TOO_DEEP` may surface from the shared JSON-safety pass |
+| Campaign rule authority | `RULES_VERSION_STALE`, `POLICY_VERSION_STALE`, `RULES_SCHEMA_UNSUPPORTED`, `RULES_CATALOG_UNSUPPORTED`, `RULES_PROTOCOL_UNSUPPORTED`, `RULES_UNAVAILABLE` |
 | Actions/transfers/awards | `ACTION_INVALID`, `OPERATION_FORBIDDEN`, `SOURCE_OR_TARGET_UNAVAILABLE`, `SOURCE_COST_UNSUPPORTED`, `PROPOSAL_STALE`, `RESOURCE_INSUFFICIENT`, `NUMERIC_INVALID`, `ITEM_AWARD_INVALID`, `ITEM_AWARD_SOURCE_NOT_FOUND`, `ITEM_AWARD_SOURCE_INVALID`, `TRANSFER_EMPTY`, `TRANSFER_INSUFFICIENT`, `TRANSFER_ITEM_LINKED`, `TRANSFER_TARGET_INVALID` |
 | Availability | `DATABASE_UNAVAILABLE`, `INTERNAL_ERROR` |
 
