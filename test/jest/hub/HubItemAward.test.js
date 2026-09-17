@@ -1,6 +1,7 @@
 import {
 	buildAwardSubmission,
 	buildAwardPreview,
+	buildAwardSuccessEvent,
 	buildRecentAwardItems,
 	buildStashAwardItems,
 	createCatalogRenderFence,
@@ -64,6 +65,47 @@ describe("Hub item award presentation contract", () => {
 			item: {name: "Campaign Harp", source: "TST", weight: 2},
 		});
 		expect(getAwardSourceRequest(stash[0])).toEqual({kind: "party_inventory", entryId: "entry-1"});
+	});
+
+	it("keeps locally synthesized award provenance when authoritative refresh is unavailable", () => {
+		const events = [{sequence: 4, type: "campaign.updated", payload: {}}];
+		const stashEvent = buildAwardSuccessEvent({
+			result: {
+				awardId: "award-stash",
+				source: {
+					kind: "party_inventory",
+					item: {name: "Private Stash Relic", source: "TST", weight: 2},
+				},
+			},
+			events,
+		});
+		const catalogEvent = buildAwardSuccessEvent({
+			result: {
+				awardId: "award-catalog",
+				source: {
+					kind: "catalog",
+					item: {name: "Torch", source: "PHB", weight: 1},
+				},
+			},
+			events: [...events, stashEvent],
+		});
+
+		expect(stashEvent).toMatchObject({
+			id: "local-award-stash",
+			sequence: 5,
+			payload: {sourceKind: "party_inventory"},
+		});
+		expect(catalogEvent).toMatchObject({
+			id: "local-award-catalog",
+			sequence: 6,
+			payload: {sourceKind: "catalog"},
+		});
+		expect(buildRecentAwardItems([...events, stashEvent, catalogEvent])).toEqual([{
+			name: "Torch",
+			source: "PHB",
+			sourceKind: "catalog",
+			weight: 1,
+		}]);
 	});
 
 	it("filters source choices predictably and keeps catalog search lazy", () => {

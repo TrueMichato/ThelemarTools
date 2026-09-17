@@ -37,6 +37,7 @@ import {
 import {
 	buildAwardSubmission,
 	buildAwardPreview,
+	buildAwardSuccessEvent,
 	buildRecentAwardItems,
 	buildStashAwardItems,
 	createCatalogRenderFence,
@@ -816,15 +817,8 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			});
 		},
 		onSuccess (result) {
-			const awarded = result?.source?.item;
-			if (awarded) {
-				currentEvents = [...currentEvents, {
-					id: `local-${result.awardId}`,
-					sequence: Math.max(0, ...currentEvents.map(event => event.sequence || 0)) + 1,
-					type: "item.granted",
-					payload: {entry: {item: awarded}},
-				}];
-			}
+			const successEvent = buildAwardSuccessEvent({result, events: currentEvents});
+			if (successEvent) currentEvents = [...currentEvents, successEvent];
 			selectedItem = null;
 			selectionKey.value = "";
 			selectionSummary.textContent = "No item selected.";

@@ -86,6 +86,20 @@ export function buildRecentAwardItems (events = []) {
 	return [...byUid.values()];
 }
 
+export function buildAwardSuccessEvent ({result, events = []}) {
+	const awarded = result?.source?.item;
+	if (!awarded) return null;
+	return {
+		id: `local-${result.awardId}`,
+		sequence: Math.max(0, ...events.map(event => event.sequence || 0)) + 1,
+		type: "item.granted",
+		payload: {
+			sourceKind: result.source.kind,
+			entry: {item: awarded},
+		},
+	};
+}
+
 export function buildStashAwardItems (partyInventory) {
 	return (Array.isArray(partyInventory?.inventory) ? partyInventory.inventory : [])
 		.map(entry => {
