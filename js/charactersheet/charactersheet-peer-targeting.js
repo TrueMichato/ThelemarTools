@@ -591,7 +591,9 @@ export class CharacterSheetPeerTargeting {
 				isMinHeight0: true,
 				isWidth100: true,
 				cbClose: () => doResolve({kind: "cancel"}),
+				cbCharacterScopeTeardown: () => doResolve({kind: "cancel"}),
 			}).then(({eleModalInner, doClose}) => {
+				if (isResolved) return;
 				const body = e_({tag: "div", clazz: "charsheet__peer-target-picker cs-adaptive-panel"});
 				const help = e_({
 					tag: "p",

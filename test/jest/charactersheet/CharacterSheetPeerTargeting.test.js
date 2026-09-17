@@ -179,6 +179,36 @@ describe("Character Sheet peer targeting", () => {
 		});
 	});
 
+	it("settles an awaited target picker when character-scope teardown wins modal creation", async () => {
+		const pGetShowOriginal = globalThis.CharacterSheetModal.pGetShow;
+		let modalOptions;
+		let resolveModal;
+		globalThis.CharacterSheetModal.pGetShow = jest.fn(options => {
+			modalOptions = options;
+			return new Promise(resolve => { resolveModal = resolve; });
+		});
+
+		try {
+			const pending = controller._pPickTarget({
+				spell: {name: "Cure Wounds"},
+				slotLevel: 1,
+				targets: [{name: "Bram", targetRef: "opaque-target", isSelf: false}],
+			});
+			await Promise.resolve();
+			modalOptions.cbCharacterScopeTeardown();
+
+			await expect(pending).resolves.toEqual({kind: "cancel"});
+
+			resolveModal({
+				eleModalInner: globalThis.e_({tag: "div"}),
+				doClose: jest.fn(),
+			});
+			await pFlush();
+		} finally {
+			globalThis.CharacterSheetModal.pGetShow = pGetShowOriginal;
+		}
+	});
+
 	it("routes self-target through the same approval proposal", async () => {
 		await pFlush();
 		fnPickTarget.mockImplementationOnce(async ({targets}) => ({

@@ -2266,15 +2266,30 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter();
+		};
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Arcane Shot — ${ctx.attack?.name || "Ranged Attack"}`,
 			isMinHeight0: true,
-			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
+			cbClose: () => { cancel(); csRestoreModalFocus(trigger); },
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		await new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = () => { if (isResolved) return false; isResolved = true; resolve(); return true; };
 
 			const remaining = this._state.getArcaneShotRemaining?.() || 0;
@@ -2444,15 +2459,30 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter();
+		};
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Critical Hit Effect — ${ctx.attack?.name || "Weapon"}`,
 			isMinHeight0: true,
-			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
+			cbClose: () => { cancel(); csRestoreModalFocus(trigger); },
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		await new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = () => { if (isResolved) return false; isResolved = true; resolve(); return true; };
 
 			const rowsHtml = riders.map((r, i) => {
@@ -3498,7 +3528,7 @@ class CharacterSheetCombat {
 		this._pushDiceGroup(diceGroups, handOfHarmRollForAnim);
 		this._pushDiceGroup(diceGroups, methodRollForAnim);
 		this._pushDiceGroup(diceGroups, channelSpellRoll);
-		await this._page.pAnimateDamageDice?.(diceGroups);
+		if (await this._page.pAnimateDamageDice?.(diceGroups) === false) return;
 
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
@@ -5226,14 +5256,29 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter();
+		};
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Baleful Interdict — ${ctx.attack?.name || "Weapon Attack"}`,
 			isMinHeight0: true,
-			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
+			cbClose: cancel,
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		await new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = () => { if (isResolved) return; isResolved = true; resolve(); };
 
 			const placeholder = ctx.attack?.name ? `creature hit by ${ctx.attack.name}` : "creature";

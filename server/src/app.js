@@ -348,6 +348,10 @@ export async function createHubApp ({
 			return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
 		}
 	};
+	const requireCurrentProtocolVersion = async (request, reply) => {
+		if (request.headers["x-hub-protocol-version"] === HUB_PROTOCOL_VERSION) return;
+		return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
+	};
 	const hasOnlyKeys = (value, allowedKeys) => (
 		!!value
 		&& typeof value === "object"
@@ -1986,7 +1990,7 @@ export async function createHubApp ({
 	}));
 
 	app.post("/api/characters/:characterId/lease/release", {
-		preHandler: requireMutationSecurity,
+		preValidation: [requireMutationSecurity, requireCurrentProtocolVersion],
 		schema: {
 			params: {
 				type: "object",

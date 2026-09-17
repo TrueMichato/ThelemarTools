@@ -66,6 +66,13 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		};
 	}
 
+	function leaseReleaseHeaders (session) {
+		return {
+			...mutationHeaders(session),
+			"x-hub-protocol-version": "5",
+		};
+	}
+
 	/** Projection-shaped reads must declare their protocol version, like mutations. */
 	function readHeaders (session) {
 		return {cookie: session.cookie, "x-hub-protocol-version": "3"};
@@ -467,7 +474,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		const refused = await app.inject({
 			method: "POST",
 			url: `/api/characters/${characterId}/lease/release`,
-			headers: mutationHeaders(playerB),
+			headers: leaseReleaseHeaders(playerB),
 			payload: {leaseEpoch: leaseA.epoch, expiresAt: leaseA.expiresAt},
 		});
 		expect(refused.statusCode).toBe(409);
@@ -476,7 +483,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		const released = await app.inject({
 			method: "POST",
 			url: `/api/characters/${characterId}/lease/release`,
-			headers: mutationHeaders(playerA),
+			headers: leaseReleaseHeaders(playerA),
 			payload: {leaseEpoch: leaseA.epoch, expiresAt: leaseA.expiresAt},
 		});
 		expect(released.statusCode).toBe(200);
@@ -525,7 +532,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		const staleRelease = await app.inject({
 			method: "POST",
 			url: `/api/characters/${characterId}/lease/release`,
-			headers: mutationHeaders(player),
+			headers: leaseReleaseHeaders(player),
 			payload: {leaseEpoch: first.epoch, expiresAt: first.expiresAt},
 		});
 		expect(staleRelease.statusCode).toBe(200);
@@ -534,11 +541,39 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		const activeRelease = await app.inject({
 			method: "POST",
 			url: `/api/characters/${characterId}/lease/release`,
-			headers: mutationHeaders(player),
+			headers: leaseReleaseHeaders(player),
 			payload: {leaseEpoch: renewed.epoch, expiresAt: renewed.expiresAt},
 		});
 		expect(activeRelease.statusCode).toBe(200);
 		expect(activeRelease.json()).toEqual({released: true});
+	});
+
+	it.each(["3", "4"])("requires protocol 5 before validating lease-release identity for protocol %s", async protocolVersion => {
+		const player = await pSignIn(IDENTITIES.player);
+		const response = await app.inject({
+			method: "POST",
+			url: `/api/characters/${crypto.randomUUID()}/lease/release`,
+			headers: {
+				...mutationHeaders(player),
+				"x-hub-protocol-version": protocolVersion,
+			},
+			payload: {},
+		});
+
+		expect(response.statusCode).toBe(426);
+		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "5"});
+	});
+
+	it("keeps protocol 5 lease-release identity validation strict", async () => {
+		const player = await pSignIn(IDENTITIES.player);
+		const response = await app.inject({
+			method: "POST",
+			url: `/api/characters/${crypto.randomUUID()}/lease/release`,
+			headers: leaseReleaseHeaders(player),
+			payload: {},
+		});
+
+		expect(response.statusCode).toBe(400);
 	});
 
 	it("blocks mutation calls from stale protocol clients", async () => {

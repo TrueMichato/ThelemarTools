@@ -2242,7 +2242,8 @@ class CharacterSheetSpells {
 			this._state.breakConcentration?.();
 		}
 		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: false})) return false;
-		await this._showCastResult(spell, slotLevel, false, false, {sourceItem: power.itemName});
+		const castResult = await this._showCastResult(spell, slotLevel, false, false, {sourceItem: power.itemName});
+		if (castResult?.characterScopeCancelled) return false;
 		if (requiresConcentration) {
 			this._state.setConcentration?.(spell.name, slotLevel);
 			this._updateConcentrationUI();
@@ -2347,7 +2348,10 @@ class CharacterSheetSpells {
 				}
 			}
 
-			if (!weaponChannelChoice) await this._showCastResult(spell, 0, false, false, castMeta);
+			if (!weaponChannelChoice) {
+				const castResult = await this._showCastResult(spell, 0, false, false, castMeta);
+				if (castResult?.characterScopeCancelled) return;
+			}
 			await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 			// Set concentration for concentration cantrips (rare but possible)
 			const vcRemovesConc0 = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
@@ -2422,7 +2426,8 @@ class CharacterSheetSpells {
 				});
 
 				// Ritual cast: no slot consumed
-				await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
+				const castResult = await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
+				if (castResult?.characterScopeCancelled) return;
 				await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 				const vcRemovesConcR = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 				if (requiresConcentration && !vcRemovesConcR) {
@@ -2625,6 +2630,7 @@ class CharacterSheetSpells {
 					: {}),
 			},
 		);
+		if (castResult?.characterScopeCancelled) return;
 
 		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
@@ -2731,7 +2737,8 @@ class CharacterSheetSpells {
 
 		// Cast as ritual — no slot consumed
 		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: true})) return;
-		await this._showCastResult(spell, spell.level, false, true);
+		const castResult = await this._showCastResult(spell, spell.level, false, true);
+		if (castResult?.characterScopeCancelled) return;
 		await this._pConsumeMaterialComponent({spell, spellData, variantUsed: false});
 
 		if (requiresConcentration) {
@@ -3459,6 +3466,7 @@ class CharacterSheetSpells {
 			title: `Cast ${spell.name} — Metamagic`,
 			isMinHeight0: true,
 			cbClose: () => resolveOuter(result),
+			cbCharacterScopeTeardown: () => resolveOuter(result),
 		});
 
 		modalInner.appendChild(e_({tag: "div",
@@ -4115,7 +4123,9 @@ class CharacterSheetSpells {
 					? normalizedCastMeta.attackMeta.rerolledRoll
 					: initialRoll;
 				// Animate the spell-attack d20 (lands on the resolved roll).
-				await this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: [finalRoll]}]});
+				if (await this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: [finalRoll]}]}) === false) {
+					return {cancelled: true, characterScopeCancelled: true};
+				}
 				const aimedText = aimedBonus ? ` + ${aimedBonus.total} aimed` : "";
 				const seekingText = normalizedCastMeta.attackMeta?.seekingRerollUsed
 					? ` <span class="ve-muted">(rerolled from ${normalizedCastMeta.attackMeta.originalRoll})</span>`
@@ -8652,6 +8662,7 @@ class CharacterSheetSpells {
 			isMinHeight0: true,
 			zIndex: 10002, // Above QuickBuild/LevelUp modals
 			cbClose: () => resolveClosed(),
+			cbCharacterScopeTeardown: () => resolveClosed(),
 		});
 
 		// Description
@@ -8910,6 +8921,7 @@ class CharacterSheetSpells {
 			title: "📝 Scribe Spell",
 			isMinHeight0: true,
 			cbClose: () => resolveOuter(result),
+			cbCharacterScopeTeardown: () => resolveOuter(result),
 		});
 
 		modalInner.appendChild(e_({tag: "div",
@@ -9088,6 +9100,7 @@ class CharacterSheetSpells {
 					isMinHeight0: true,
 					zIndex: 10002,
 					cbClose: () => resolve(null),
+					cbCharacterScopeTeardown: () => resolve(null),
 				});
 
 				modalInner.insertAdjacentHTML("beforeend", `<p class="mb-2">${prompt}</p>`);
@@ -9210,6 +9223,7 @@ class CharacterSheetSpells {
 					isMinHeight0: true,
 					zIndex: 10002,
 					cbClose: () => resolve(null),
+					cbCharacterScopeTeardown: () => resolve(null),
 				});
 
 				modalInner.insertAdjacentHTML("beforeend", `<p class="mb-2">Select a <strong>${className} spell</strong> (level 1–${maxLevel}) for your scribing spellbook:</p>`);

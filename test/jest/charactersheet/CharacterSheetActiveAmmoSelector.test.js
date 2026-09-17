@@ -25,6 +25,7 @@
  *   (iv)  selecting "Regular" applies no bonus and does not consume.
  *   (v)   depleting the selected ammo reverts the weapon to Regular.
  */
+import {jest} from "@jest/globals";
 
 import "./setup.js";
 import * as fs from "fs";
@@ -308,6 +309,23 @@ describe("Bug #3 (iii) — damage roll folds in ammo damage and consumes exactly
 		expect(combat.__captured.subtitle).toMatch(/Flame Arrow 2d6 fire/);
 		// One round consumed.
 		expect(state.getItems().find(i => i.id === "fireArrow").quantity).toBe(3);
+	});
+
+	test("a canceled character-scope animation cannot consume ammunition or publish a result", async () => {
+		const state = loadCharacter();
+		addQuiverArrow(state, {id: "plus1", name: "+1 Arrow", quantity: 7, bonusWeapon: "+1"});
+		state.setSelectedAmmoId(ID.longbow, "plus1");
+
+		const combat = mkDamageCombat(state);
+		combat._page.pAnimateDamageDice = jest.fn(async () => false);
+		combat._page.showDiceResult = jest.fn();
+
+		await combat._rollDamage(`auto_${ID.longbow}`);
+
+		expect(state.getItems().find(i => i.id === "plus1").quantity).toBe(7);
+		expect(combat._page.showDiceResult).not.toHaveBeenCalled();
+		expect(combat.__calls.save).toBe(0);
+		expect(combat.__calls.invRender).toBe(0);
 	});
 });
 

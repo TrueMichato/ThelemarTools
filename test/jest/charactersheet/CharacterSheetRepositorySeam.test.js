@@ -5,6 +5,7 @@ import {CHARACTER_ACCESS_MODES} from "../../../js/hub/hub-character-view.js";
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 let CharacterSheetPage;
+let CharacterSheetModal;
 
 const makeRepository = (characters = []) => {
 	const data = new Map(characters.map(character => [character.id, structuredClone(character)]));
@@ -40,6 +41,7 @@ describe("Character Sheet repository seam", () => {
 		globalThis.window = globalThis.window || {addEventListener: () => {}, location: {search: "", href: "http://test/"}};
 		globalThis.document = globalThis.document || {getElementById: () => null, querySelector: () => null, addEventListener: () => {}};
 		CharacterSheetPage = (await import(`${REPO_ROOT}js/charactersheet/charactersheet.js`)).CharacterSheetPage;
+		CharacterSheetModal = globalThis.CharacterSheetModal;
 	});
 
 	it("saves through the injected repository without writing a local rescue mirror", async () => {
@@ -1239,7 +1241,7 @@ describe("Character Sheet repository seam", () => {
 		expect(host._state.setId).toHaveBeenCalledWith(host._currentCharacterId);
 	});
 
-	it("restores the previous subscription when a character switch cannot load", async () => {
+	it("keeps the previous subscription attached when a character switch cannot load", async () => {
 		const host = {
 			_characterLoadGeneration: 0,
 			_currentCharacterId: "character-1",
@@ -1253,8 +1255,142 @@ describe("Character Sheet repository seam", () => {
 		await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-2"))
 			.rejects.toThrow("offline");
 
-		expect(host._detachHubRealtime).toHaveBeenCalledTimes(1);
-		expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "character-1"});
+		expect(host._detachHubRealtime).not.toHaveBeenCalled();
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+	});
+
+	it.each(["CHARACTER_NOT_FOUND", "FORBIDDEN"])("keeps the previous character fully attached when the selected target fails with %s", async code => {
+		const terminalError = Object.assign(new Error("unavailable target"), {code, status: 404});
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_selCharacter: {value: "character-b"},
+			_characterRepository: {
+				pGet: jest.fn(async () => { throw terminalError; }),
+			},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_campaign: {
+				resetCharacterScope: jest.fn(),
+				pRefreshCurrentCharacter: jest.fn(),
+			},
+			_canRestoreHubRealtimeAfterError: CharacterSheetPage.prototype._canRestoreHubRealtimeAfterError,
+			_endCurrentHubCharacterAccess: jest.fn(),
+		};
+
+		await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-b"))
+			.rejects.toBe(terminalError);
+
+		expect(host._currentCharacterId).toBe("character-a");
+		expect(host._selCharacter.value).toBe("character-a");
+		expect(host._detachHubRealtime).not.toHaveBeenCalled();
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+		expect(host._campaign.resetCharacterScope).not.toHaveBeenCalled();
+		expect(host._endCurrentHubCharacterAccess).not.toHaveBeenCalled();
+	});
+
+	it("conceals the previous Hub character when target loading proves the session lost authority", async () => {
+		const authError = Object.assign(new Error("signed out"), {code: "AUTH_REQUIRED", status: 401});
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_selCharacter: {value: "character-b"},
+			_characterRepository: {
+				pGet: jest.fn(async () => { throw authError; }),
+			},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+			_campaign: {resetCharacterScope: jest.fn()},
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+		};
+
+		await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-b"))
+			.rejects.toBe(authError);
+
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-a",
+			accessEndCause: "campaign",
+		});
+	});
+
+	it.each([
+		["character replacement", host => {
+			host._currentCharacterId = "character-b";
+			host._characterLoadGeneration++;
+		}],
+		["owner authority loss", host => {
+			host._currentCharacterAccess = "dm_readonly";
+		}],
+	])("cancels a completed 3D animation after %s", async (_label, applyTransition) => {
+		let resolveRoll;
+		const pRoll = new Promise(resolve => { resolveRoll = resolve; });
+		const host = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: "owner",
+			_state: {getSettings: jest.fn(() => ({animatedDice: true, diceSound: false}))},
+			_getCharacterScopeSnapshot: CharacterSheetPage.prototype._getCharacterScopeSnapshot,
+			_isCharacterScopeSnapshotCurrent: CharacterSheetPage.prototype._isCharacterScopeSnapshotCurrent,
+			_buildDiceAppearance: jest.fn(() => null),
+			_getDice3d: jest.fn(() => ({
+				canRender: jest.fn(() => true),
+				pRollMany: jest.fn(() => pRoll),
+			})),
+		};
+		const originalDice3d = globalThis.CharacterSheetDice3d;
+		globalThis.CharacterSheetDice3d = {isReducedMotion: () => false};
+
+		try {
+			const pending = CharacterSheetPage.prototype.pAnimateDiceSpec.call(host, {
+				groups: [{sides: 20, values: [12]}],
+			});
+			await Promise.resolve();
+			applyTransition(host);
+			resolveRoll();
+
+			await expect(pending).resolves.toBe(false);
+		} finally {
+			globalThis.CharacterSheetDice3d = originalDice3d;
+		}
+	});
+
+	it("settles a feature-choice modal torn down before the caller installs its resolver", async () => {
+		const host = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: "owner",
+			_formatSkillKeyLabel: CharacterSheetPage.prototype._formatSkillKeyLabel,
+		};
+		const originalUiUtil = globalThis.UiUtil;
+		globalThis.UiUtil = {
+			pGetShowModal: async ({cbClose}) => {
+				host._currentCharacterId = "character-b";
+				host._characterLoadGeneration++;
+				return {
+					eleModalInner: {},
+					doClose: value => cbClose?.(value),
+				};
+			},
+		};
+		CharacterSheetModal.bindCharacterSheet(host);
+
+		try {
+			await expect(Promise.race([
+				CharacterSheetPage.prototype._pPickFeatureChoice.call(host, {
+					id: "tool-choice",
+					featureName: "Tool Training",
+					kind: "tool",
+					options: ["Smith's tools"],
+				}),
+				new Promise(resolve => setTimeout(() => resolve("still-pending"), 50)),
+			])).resolves.toBeNull();
+		} finally {
+			CharacterSheetModal.bindCharacterSheet(null);
+			globalThis.UiUtil = originalUiUtil;
+		}
 	});
 
 	it("selects a directly loaded character in the dropdown", async () => {

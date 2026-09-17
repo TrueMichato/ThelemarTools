@@ -3187,21 +3187,23 @@ class CharacterSheetPage {
 		this._characterLoadGeneration = loadGeneration;
 		this._closeCharacterScopedTransientUi?.();
 		const previousCharacterId = this._currentCharacterId;
-		this._detachHubRealtime?.();
-		this._campaign?.resetCharacterScope?.();
 		let canonical;
 		try {
 			canonical = await this._characterRepository.pGet({characterId: charId});
 		} catch (error) {
 			if (error?.code !== "CHARACTER_CAMPAIGN_MISMATCH") {
-				if (
-					loadGeneration === this._characterLoadGeneration
-					&& this._currentCharacterId === previousCharacterId
-					&& previousCharacterId
-					&& this._canRestoreHubRealtimeAfterError?.(error) !== false
-				) {
-					this._attachHubRealtime?.({characterId: previousCharacterId});
-					await this._campaign?.pRefreshCurrentCharacter?.();
+				if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === previousCharacterId) {
+					if (this._selCharacter) this._selCharacter.value = previousCharacterId || "";
+					if (
+						previousCharacterId
+						&& this._isHubCharacter
+						&& ["AUTH_REQUIRED", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND", "CAMPAIGN_ARCHIVED"].includes(error?.code)
+					) {
+						this._endCurrentHubCharacterAccess?.({
+							characterId: previousCharacterId,
+							accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+						});
+					}
 				}
 				throw error;
 			}
@@ -3213,6 +3215,8 @@ class CharacterSheetPage {
 			return false;
 		}
 		if (loadGeneration !== this._characterLoadGeneration) return false;
+		this._detachHubRealtime?.();
+		this._campaign?.resetCharacterScope?.();
 
 		// Reconcile against the synchronous rescue mirror: if a mutation was mirrored but its
 		// async IndexedDB write never settled (fast refresh / character-switch race), the mirror
@@ -15653,7 +15657,7 @@ class CharacterSheetPage {
 		this._renderDeathSaves();
 		this._renderConditions(); // Update bloodied condition display
 
-		await this.pAnimateD20({roll, mode: "normal"});
+		if (await this.pAnimateD20({roll, mode: "normal"}) === false) return;
 		this._showDiceResult("Death Save", roll, result);
 	}
 
@@ -17081,6 +17085,16 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter({appliedConditionalIds: new Set(), applied: [], cancelled: true});
+		};
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Conditional Modifiers — ${rollLabel}`,
 			isMinHeight0: true,
@@ -17089,15 +17103,17 @@ class CharacterSheetPage {
 				// button handler has already resolved. Button handlers below
 				// call resolve() before doClose(), so this is a no-op in the
 				// normal flow.
-				if (resolveOuter && !isResolved) {
-					isResolved = true;
-					resolveOuter({appliedConditionalIds: new Set(), applied: [], cancelled: true});
-				}
+				cancel();
 			},
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		return new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = (/** @type {Set<string>} */ ids, /** @type {boolean} */ cancelled) => {
 				if (isResolved) return;
 				isResolved = true;
@@ -17254,6 +17270,16 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter(null);
+		};
 		// When a wizard overlay is up (QuickBuild z-index 9999), a default-z-index modal
 		// renders BEHIND it — invisible and unclickable ("Finish does nothing" + orphan;
 		// CS-BUG #10). Stack above the overlay so the pick is always reachable. Mirrors the
@@ -17263,13 +17289,16 @@ class CharacterSheetPage {
 			title: `${choice.featureName || "Feature"} — Choose ${kindLabel}`,
 			isMinHeight0: true,
 			...(isOverlayUp ? {zIndex: 10001} : {}),
-			cbClose: () => {
-				if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(null); }
-			},
+			cbClose: cancel,
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		return new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = (val) => {
 				if (isResolved) return;
 				isResolved = true;
@@ -17443,20 +17472,32 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter(false);
+		};
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Red Cant",
 			isMinHeight0: true,
 			cbClose: () => {
 				// Backdrop / X dismissal == decline (only if no button already resolved).
-				if (resolveOuter && !isResolved) {
-					isResolved = true;
-					resolveOuter(false);
-				}
+				cancel();
 			},
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		return new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = (/** @type {boolean} */ val) => {
 				if (isResolved) return;
 				isResolved = true;
@@ -17647,19 +17688,31 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter(null);
+		};
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Press Your Luck",
 			isMinHeight0: true,
 			cbClose: () => {
-				if (resolveOuter && !isResolved) {
-					isResolved = true;
-					resolveOuter(null);
-				}
+				cancel();
 			},
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		return new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = (val) => {
 				if (isResolved) return;
 				isResolved = true;
@@ -17859,7 +17912,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 
 		const acBreakdown = this._formatD20BreakdownWithCustom(rollResult, baseMod, customBonus, exhaustionStr, minimumApplied ? aggregated.minimum : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr;
 		this._showDiceResult(
@@ -18040,7 +18093,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
@@ -18276,7 +18329,7 @@ class CharacterSheetPage {
 		const indomNote = `🛡️ Indomitable: rerolled d20 [${reroll.roll}]${bonus ? ` + ${bonus}` : ""} → save total ${newTotal} (${left} use${left === 1 ? "" : "s"} left)`;
 		const mergedNote = resultNote ? `${resultNote}\n${indomNote}` : indomNote;
 
-		await this.pAnimateD20(reroll);
+		if (await this.pAnimateD20(reroll) === false) return;
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(reroll.mode)}${stateEffectStr} [Indomitable]`,
 			newTotal,
@@ -18460,7 +18513,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 
 		const skillBreakdown = this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr;
 		this._showDiceResult(
@@ -18637,7 +18690,7 @@ class CharacterSheetPage {
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
 			+ (maneuverBonus ? ` + ${maneuverBonus.roll} [${maneuverBonus.name}]` : "");
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 		this._showDiceResult(
 			`Initiative${this._getModeLabel(rollResult.mode)}`,
 			totalWithDice,
@@ -18758,7 +18811,7 @@ class CharacterSheetPage {
 		const bladesongDamageStr = bladesongBonus > 0 ? ` + ${bladesongBonus} (Bladesong INT)` : "";
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 		this._showDiceResult(
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			attackTotalWithDice,
@@ -18877,7 +18930,7 @@ class CharacterSheetPage {
 	 * @param {number} finalValue - The value the die should land on
 	 * @param {boolean} isAdvantage - Whether rolling with advantage
 	 * @param {boolean} isDisadvantage - Whether rolling with disadvantage
-	 * @returns {Promise} Resolves when animation is complete
+	 * @returns {Promise<void|false>} False when character-scope teardown cancels it.
 	 */
 	async _showAnimatedDice (diceType, finalValue, isAdvantage = false, isDisadvantage = false) {
 		return this.pAnimateDiceSpec({
@@ -18908,16 +18961,18 @@ class CharacterSheetPage {
 	 * @param {Array<{sides:number, values:number[]}>} opts.groups
 	 * @param {boolean} [opts.isAdvantage]
 	 * @param {boolean} [opts.isDisadvantage]
-	 * @returns {Promise} Resolves when the animation is complete.
+	 * @returns {Promise<void|false>} False when character-scope teardown cancels it.
 	 */
 	async pAnimateDiceSpec ({groups, isAdvantage = false, isDisadvantage = false} = {}) {
+		const characterScope = this._getCharacterScopeSnapshot();
+		const isCharacterScopeCurrent = () => this._isCharacterScopeSnapshotCurrent(characterScope);
 		const settings = /** @type {*} */ (this._state?.getSettings?.()) || {};
-		if (!settings.animatedDice) return;
+		if (!settings.animatedDice) return isCharacterScopeCurrent() ? undefined : false;
 
 		const cleanGroups = (Array.isArray(groups) ? groups : [])
 			.map(g => g ? {sides: Number(g.sides), values: (Array.isArray(g.values) ? g.values : []).map(Number).filter(Number.isFinite)} : null)
 			.filter(g => g && Number.isFinite(g.sides) && g.values.length);
-		if (!cleanGroups.length) return;
+		if (!cleanGroups.length) return isCharacterScopeCurrent() ? undefined : false;
 
 		const Dice3d = (/** @type {*} */ (globalThis)).CharacterSheetDice3d;
 
@@ -18930,7 +18985,7 @@ class CharacterSheetPage {
 
 		// Honour reduced-motion: skip the visual entirely (sound already played).
 		if (Dice3d && typeof Dice3d.isReducedMotion === "function" && Dice3d.isReducedMotion()) {
-			return;
+			return isCharacterScopeCurrent() ? undefined : false;
 		}
 
 		const theme = settings.diceTheme || "standard";
@@ -18940,10 +18995,12 @@ class CharacterSheetPage {
 		try {
 			const dice3d = this._getDice3d();
 			if (dice3d && cleanGroups.every(g => dice3d.canRender(g.sides))) {
-				await dice3d.pRollMany({groups: cleanGroups, theme, appearance});
+				const animationResult = await dice3d.pRollMany({groups: cleanGroups, theme, appearance});
+				if (animationResult === false || !isCharacterScopeCurrent()) return false;
 				return;
 			}
 		} catch (e) {
+			if (!isCharacterScopeCurrent()) return false;
 			// Fall through to the legacy animation on any 3D failure.
 			// eslint-disable-next-line no-console
 			console.warn("3D dice unavailable, falling back to legacy animation", e);
@@ -18952,7 +19009,8 @@ class CharacterSheetPage {
 		// Legacy fallback: animate a single representative die (the first one of
 		// the first renderable-or-any group). Multi-die fidelity is a 3D-only win.
 		const primary = cleanGroups.find(g => g.sides !== 100) || cleanGroups[0];
-		await this._showLegacyDice(primary.sides, primary.values[0], isAdvantage, isDisadvantage);
+		const animationResult = await this._showLegacyDice(primary.sides, primary.values[0], isAdvantage, isDisadvantage);
+		if (animationResult === false || !isCharacterScopeCurrent()) return false;
 	}
 
 	/**
@@ -18960,7 +19018,7 @@ class CharacterSheetPage {
 	 * groups (no advantage semantics). Accepts the same `{sides, values}` group
 	 * shape as {@link pAnimateDiceSpec}.
 	 * @param {Array<{sides:number, values:number[]}>} groups
-	 * @returns {Promise}
+	 * @returns {Promise<void|false>}
 	 */
 	async pAnimateDamageDice (groups) {
 		return this.pAnimateDiceSpec({groups});
@@ -19270,9 +19328,22 @@ class CharacterSheetPage {
 		`});
 
 		document.body.append(overlay);
+		let resolveAnimation = null;
+		let isSettled = false;
+		const timeoutIds = new Set();
+		const settle = ({isCancelled = false} = {}) => {
+			if (isSettled) return;
+			isSettled = true;
+			for (const timeoutId of timeoutIds) clearTimeout(timeoutId);
+			timeoutIds.clear();
+			resolveAnimation?.(isCancelled ? false : undefined);
+		};
 		const portal = CharacterSheetModal.registerCharacterScopePortal({
 			sheet: this,
 			element: overlay,
+			cleanup: ({isCharacterScopeTeardown}) => {
+				if (isCharacterScopeTeardown) settle({isCancelled: true});
+			},
 		});
 
 		// Animate random values
@@ -19298,6 +19369,14 @@ class CharacterSheetPage {
 		};
 
 		return new Promise(resolve => {
+			resolveAnimation = resolve;
+			const schedule = (fn, delay) => {
+				const timeoutId = setTimeout(() => {
+					timeoutIds.delete(timeoutId);
+					fn();
+				}, delay);
+				timeoutIds.add(timeoutId);
+			};
 			const animate = () => {
 				if (animationCycles < maxCycles) {
 					const randomVal = diceType === 100
@@ -19315,7 +19394,7 @@ class CharacterSheetPage {
 						delay = 120 + (animationCycles - 8) * 40;
 					}
 
-					setTimeout(animate, delay);
+					schedule(animate, delay);
 				} else {
 					// Show final value with landing animation
 					updateFace(finalValue);
@@ -19333,15 +19412,18 @@ class CharacterSheetPage {
 
 					// Remove after delay
 					const displayTime = (finalValue === 20 || finalValue === 1) && diceType === 20 ? 1000 : 700;
-					setTimeout(() => {
+					schedule(() => {
 						overlay.style.transition = "opacity 150ms";
 						overlay.style.opacity = "0";
-						setTimeout(() => { portal.close(); resolve(); }, 150);
+						schedule(() => {
+							portal.close();
+							settle();
+						}, 150);
 					}, displayTime);
 				}
 			};
 
-			setTimeout(animate, 50);
+			schedule(animate, 50);
 		});
 	}
 
@@ -22522,6 +22604,7 @@ class CharacterSheetPage {
 					isMinHeight0: true,
 					isWidth100: true,
 					cbClose: () => resolve(selectedLanguages.length === count ? selectedLanguages : null),
+					cbCharacterScopeTeardown: () => resolve(null),
 				});
 
 				modalInner.insertAdjacentHTML("beforeend", `
@@ -23083,6 +23166,7 @@ class CharacterSheetPage {
 			title: "Lore Mastery — Choose",
 			isMinHeight0: true,
 			cbClose: () => resolveOnce(null),
+			cbCharacterScopeTeardown: () => resolveOnce(null),
 		});
 		const finish = (value) => {
 			resolveOnce(value);

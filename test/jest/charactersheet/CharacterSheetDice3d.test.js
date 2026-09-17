@@ -96,6 +96,7 @@ function makeFakeFactory (opts = {}) {
 	FakeBox.prototype.initialize = async function () {
 		calls.initialize++;
 		if (opts.failInit) throw new Error("init fail");
+		if (opts.initPromise) await opts.initPromise;
 	};
 	FakeBox.prototype.updateConfig = async function (cfg) { calls.updateConfig.push(cfg); };
 	FakeBox.prototype.roll = function (notation) {
@@ -423,6 +424,31 @@ describe("CharacterSheetDice3d", () => {
 			const p2 = d.pRoll({diceType: 20, finalValue: 9, theme: "standard"});
 			await expect(p1).resolves.toBeUndefined();
 			await expect(p2).resolves.toBeUndefined();
+		});
+
+		test("reports cancellation when character-scope teardown resets an active roll", async () => {
+			const factory = makeFakeFactory({neverResolve: true});
+			const d = new CharacterSheetDice3d({diceBoxFactory: factory});
+			const pending = d.pRoll({diceType: 20, finalValue: 12, theme: "standard"});
+			await new Promise(r => setTimeout(r, 5));
+
+			d.resetCharacterScopeUi();
+
+			await expect(pending).resolves.toBe(false);
+		});
+
+		test("reports cancellation when teardown happens while the 3D engine is initializing", async () => {
+			let resolveInit;
+			const factory = makeFakeFactory({initPromise: new Promise(resolve => { resolveInit = resolve; })});
+			const d = new CharacterSheetDice3d({diceBoxFactory: factory});
+			const pending = d.pRoll({diceType: 20, finalValue: 12, theme: "standard"});
+			await Promise.resolve();
+
+			d.resetCharacterScopeUi();
+			resolveInit();
+
+			await expect(pending).resolves.toBe(false);
+			expect(factory._calls.roll).toHaveLength(0);
 		});
 	});
 

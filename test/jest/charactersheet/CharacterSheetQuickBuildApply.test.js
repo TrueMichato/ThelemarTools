@@ -5,6 +5,7 @@ import "../../../js/charactersheet/charactersheet-quickbuild.js";
 
 const CharacterSheetQuickBuild = globalThis.CharacterSheetQuickBuild;
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const CharacterSheetModal = globalThis.CharacterSheetModal;
 
 describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 	test("does not throw when there are no analyzed levels", async () => {
@@ -156,6 +157,113 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 		expect(page.renderCharacter).not.toHaveBeenCalled();
 		expect(globalThis.JqueryUtil.doToast).not.toHaveBeenCalled();
 		CharacterSheetClassUtils.updateRacialSpells = originalUpdateRacialSpells;
+	});
+
+	test("character-scope teardown cancels a pending choice and clears the apply lock", async () => {
+		const originalUpdateRacialSpells = CharacterSheetClassUtils.updateRacialSpells;
+		const originalUiUtil = globalThis.UiUtil;
+		CharacterSheetClassUtils.updateRacialSpells = jest.fn();
+		globalThis.UiUtil = {
+			pGetShowModal: async ({cbClose}) => ({
+				eleModalInner: {},
+				doClose: value => cbClose?.(value),
+			}),
+		};
+
+		const state = {
+			getAbilityMod: jest.fn(() => 2),
+			setWeaponMasteries: jest.fn(),
+			mergeCombatTraditions: jest.fn(),
+			getCombatTraditions: jest.fn(() => []),
+			getWeaponMasteries: jest.fn(() => []),
+			recordLevelChoice: jest.fn(),
+			updateLevelChoice: jest.fn(() => true),
+			addSpell: jest.fn(),
+			addCantrip: jest.fn(),
+			setSpellMasterySpells: jest.fn(),
+			setSignatureSpells: jest.fn(),
+			ensureXpMatchesLevel: jest.fn(),
+			applyClassFeatureEffects: jest.fn(),
+			calculateSpellSlots: jest.fn(),
+			recalculateAllCompanions: jest.fn(),
+			recalculateHp: jest.fn(),
+			setClassFeatureCatalog: jest.fn(),
+			reconcileSubclassFeatureEntries: jest.fn(),
+			getFeatures: jest.fn(() => []),
+		};
+		const page = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: "owner",
+			getFilteredSpellData: jest.fn(() => []),
+			getOptionalFeatures: jest.fn(() => []),
+			saveCharacter: jest.fn(async () => {}),
+			renderCharacter: jest.fn(),
+			_updateTabVisibility: jest.fn(),
+		};
+		page._spells = {
+			processPendingSpellChoices: jest.fn(async () => {
+				let resolveChoice;
+				const pChoice = new Promise(resolve => { resolveChoice = resolve; });
+				await CharacterSheetModal.pGetShow({
+					title: "Pending spell choice",
+					cbClose: resolveChoice,
+					cbCharacterScopeTeardown: resolveChoice,
+				});
+				return pChoice;
+			}),
+		};
+		const qb = Object.create(CharacterSheetQuickBuild.prototype);
+		Object.assign(qb, {
+			_state: state,
+			_page: page,
+			_levelAnalysis: [],
+			_classAllocations: [],
+			_targetLevel: 1,
+			_fromLevel: 1,
+			_selections: {
+				subclasses: {},
+				asi: {},
+				optionalFeatures: {},
+				featureOptions: {},
+				expertise: {},
+				languages: {},
+				scholarSkill: null,
+				spellbookSpells: [],
+				spellMasterySpells: [],
+				signatureSpells: [],
+				knownSpells: [],
+				knownCantrips: [],
+				preparedSpells: [],
+				preparedCantrips: [],
+				hpMethod: "average",
+				hpRolls: {},
+				weaponMasteries: [],
+				_combatTraditions: [],
+			},
+		});
+		globalThis.JqueryUtil = {doToast: jest.fn()};
+		CharacterSheetModal.bindCharacterSheet(page);
+
+		try {
+			const pending = qb._applyQuickBuild();
+			await new Promise(resolve => setTimeout(resolve, 0));
+			expect(page._spells.processPendingSpellChoices).toHaveBeenCalledTimes(1);
+			expect(qb._isApplying).toBe(true);
+
+			page._currentCharacterId = "character-b";
+			page._characterLoadGeneration++;
+			await CharacterSheetModal.closeCharacterScopeModals();
+
+			await expect(pending).resolves.toBe(false);
+			expect(qb._isApplying).toBe(false);
+			expect(page.saveCharacter).not.toHaveBeenCalled();
+			expect(page.renderCharacter).not.toHaveBeenCalled();
+		} finally {
+			CharacterSheetModal.bindCharacterSheet(null);
+			CharacterSheetClassUtils.updateRacialSpells = originalUpdateRacialSpells;
+			globalThis.UiUtil = originalUiUtil;
+		}
 	});
 
 	test("builds spells step after resetting selections for builder quickbuild sorcerers", () => {

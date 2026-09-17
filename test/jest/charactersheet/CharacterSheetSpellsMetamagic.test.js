@@ -7,6 +7,7 @@ import "../../../js/charactersheet/charactersheet-combat.js";
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
+const CharacterSheetModal = globalThis.CharacterSheetModal;
 
 /** Extract toast content string from doToast mock (content may be a string or an element with innerHTML) */
 const getLastToastContent = () => {
@@ -301,6 +302,45 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		}
 	});
 
+	it("settles an awaited cast-time picker when character-scope teardown closes it", async () => {
+		state.getKnownMetamagicKeys = () => ["quickened"];
+		state.setSorceryPoints(5, 5);
+		Object.assign(page, {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: "owner",
+		});
+		CharacterSheetModal.bindCharacterSheet(page);
+
+		const origUiUtil = globalThis.UiUtil;
+		globalThis.UiUtil = {
+			pGetShowModal: async ({cbClose}) => ({
+				eleModalInner: globalThis.e_({tag: "div"}),
+				doClose: value => cbClose?.(value),
+			}),
+		};
+
+		try {
+			const pending = spells._pChooseActiveMetamagic({
+				spell: {name: "Fireball", source: "XPHB", level: 3},
+				spellData: {...SAMPLE_SPELLS.fireball, time: [{number: 1, unit: "action"}]},
+				slotLevel: 3,
+			});
+			await new Promise(resolve => setTimeout(resolve, 0));
+			page._currentCharacterId = "character-b";
+			page._characterLoadGeneration++;
+			await CharacterSheetModal.closeCharacterScopeModals();
+
+			await expect(Promise.race([
+				pending,
+				new Promise(resolve => setTimeout(() => resolve("still-pending"), 50)),
+			])).resolves.toEqual({cancelled: true, metamagic: null});
+		} finally {
+			CharacterSheetModal.bindCharacterSheet(null);
+			globalThis.UiUtil = origUiUtil;
+		}
+	});
+
 	it("should manually decrease and increase sorcery points from the spells tab and sync all dashboards", () => {
 		mockKnownMetamagicDashboard({current: 3, max: 5});
 		renderMetamagicDom();
@@ -412,6 +452,35 @@ describe("CharacterSheetSpells Metamagic Automation", () => {
 		expect(parseRandomise2Mock).toHaveBeenCalledWith("1d6");
 		const toast = getLastToastContent();
 		expect(toast).toContain("Spell Attack: 11 + 6 + 4 aimed = <strong>21</strong>");
+	});
+
+	it("stops the outer item-spell cast when character-scope teardown cancels the spell attack", async () => {
+		const spell = {
+			...SAMPLE_SPELLS.firebolt,
+			name: "Concentration Ray",
+			duration: [{type: "timed", duration: {type: "minute", amount: 1}, concentration: true}],
+		};
+		spells._allSpells = [spell];
+		spells._pHandleCastingConstraints = jest.fn(async () => true);
+		page.pAnimateDiceSpec = jest.fn(async () => false);
+		const setConcentration = jest.spyOn(state, "setConcentration");
+		const consumeStates = jest.spyOn(state, "consumeStatesEndingOnSpellCast");
+		const fnOnCast = jest.fn();
+
+		const out = await spells.pCastItemSpell({
+			id: "scope-ray",
+			itemId: "scope-wand",
+			itemName: "Scope Wand",
+			spellName: spell.name,
+			spellSource: spell.source,
+			castLevel: 1,
+		}, {fnOnCast});
+
+		expect(out).toBe(false);
+		expect(page.pAnimateDiceSpec).toHaveBeenCalled();
+		expect(setConcentration).not.toHaveBeenCalled();
+		expect(consumeStates).not.toHaveBeenCalled();
+		expect(fnOnCast).not.toHaveBeenCalled();
 	});
 
 	it("should heal current HP from dealt damage for Vampiric Spell and cap at max HP", async () => {

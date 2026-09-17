@@ -1538,6 +1538,7 @@ class CharacterSheetCrafting {
 			title,
 			isMinHeight0: true,
 			cbClose: () => resolveOuter(result),
+			cbCharacterScopeTeardown: () => resolveOuter(result),
 		});
 
 		const body = e_({tag: "div", html});

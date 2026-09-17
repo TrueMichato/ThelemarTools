@@ -89,14 +89,23 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 
 		const dmOwnedSheet = new CharacterSheetPage(dm.page);
 		await dmOwnedSheet.gotoCampaignCharacter({campaignId, characterId: dmCharacter.id});
-		await dm.page.evaluate(() => {
+		await dm.page.evaluate(async () => {
 			const sheet = (globalThis as any).charSheet;
+			sheet._state.setSetting("animatedDice", true);
+			sheet._state.setSetting("diceSound", false);
+			const dice3d = sheet._getDice3d();
+			await dice3d._pInit();
+			dice3d._box.roll = () => new Promise(() => {});
+			(globalThis as any).__accessLossDice = sheet.pAnimateD20({roll: 12, mode: "normal"});
 			sheet._customAbilities._showAbilityModal(null);
 			const modal = document.querySelector(".custom-abilities__modal")!;
 			(modal.querySelector("[name=name]") as HTMLInputElement).value = "SECRET PRIVATE DRAFT";
 			(globalThis as any).__accessLossCustomAbilitySave = modal.querySelector(".custom-abilities__save-btn");
-			sheet._concealHubPrivateCharacter();
 		});
+		await expect(dm.page.locator(".charsheet__dice3d-overlay")).toHaveClass(/charsheet__dice3d-overlay--active/);
+		await dm.page.evaluate(() => (globalThis as any).charSheet._concealHubPrivateCharacter());
+		expect(await dm.page.evaluate(() => (globalThis as any).__accessLossDice)).toBe(false);
+		await expect(dm.page.locator(".charsheet__dice3d-overlay")).not.toHaveClass(/charsheet__dice3d-overlay--active/);
 		await expect(dm.page.locator(".custom-abilities__modal")).toHaveCount(0);
 		await expect(dm.page.locator("body")).not.toContainText("SECRET PRIVATE DRAFT");
 		await expect(dm.page.locator("main.charsheet-page")).toBeHidden();
@@ -156,10 +165,75 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 			await sheet._quickBuild._showWizard();
 			(globalThis as any).__replacementQuickBuildNext = document.querySelector("#quickbuild-next");
 			(globalThis as any).__replacementQuickBuildStep = sheet._quickBuild._currentStep;
+
+			const weaponId = "scope-bow";
+			const quiverId = "scope-quiver";
+			const ammoId = "scope-arrow";
+			sheet._state.setSetting("animatedDice", true);
+			sheet._state.setSetting("diceSound", false);
+			const dice3d = sheet._getDice3d();
+			if (!sheet._state.getSettings().animatedDice || !dice3d?.canRender?.(8)) {
+				throw new Error("Replacement-scope Dice3D precondition unavailable");
+			}
+			sheet._state._data.inventory.push(
+				{
+					id: weaponId,
+					item: {name: "Scope Bow", type: "R", weapon: true, ammoType: "arrow|xphb"},
+					quantity: 1,
+					equipped: true,
+					attuned: false,
+				},
+				{
+					id: quiverId,
+					item: {name: "Scope Quiver", type: "G", containedItems: [ammoId]},
+					quantity: 1,
+					equipped: true,
+					attuned: false,
+				},
+				{
+					id: ammoId,
+					item: {name: "Scope Arrow", type: "A", baseItem: "arrow|xphb", arrow: true},
+					quantity: 2,
+					equipped: false,
+					attuned: false,
+				},
+			);
+			sheet._state.setSelectedAmmoId(weaponId, ammoId);
+			const weapon = sheet._state.getItems().find((item: any) => item.id === weaponId);
+			sheet._combat._cachedAttacks = [{
+				id: "scope-bow-attack",
+				name: "Scope Bow",
+				sourceItem: weapon,
+				isSpell: false,
+				isMelee: false,
+				damage: "1d8",
+				damageType: "piercing",
+				abilityMod: "dex",
+			}];
+			(globalThis as any).__replacementAmmoConsumeCount = 0;
+			const consumeAmmunition = sheet._state.consumeAmmunition.bind(sheet._state);
+			sheet._state.consumeAmmunition = (...args: any[]) => {
+				(globalThis as any).__replacementAmmoConsumeCount++;
+				return consumeAmmunition(...args);
+			};
+			(globalThis as any).__replacementDamageSaveCount = 0;
+			const saveCharacter = sheet.saveCharacter.bind(sheet);
+			sheet.saveCharacter = (...args: any[]) => {
+				(globalThis as any).__replacementDamageSaveCount++;
+				return saveCharacter(...args);
+			};
+			(globalThis as any).__replacementDiceResultCount = 0;
+			const showDiceResult = sheet.showDiceResult.bind(sheet);
+			sheet.showDiceResult = (...args: any[]) => {
+				(globalThis as any).__replacementDiceResultCount++;
+				return showDiceResult(...args);
+			};
+			(globalThis as any).__replacementDamageRoll = sheet._combat._rollDamage("scope-bow-attack");
 		});
 		await expect(dm.page.locator(".custom-abilities__modal")).toBeVisible();
 		await expect(dm.page.locator(".charsheet__ability-detail-modal")).toBeVisible();
 		await expect(dm.page.locator(".charsheet__quickbuild-overlay")).toBeVisible();
+		await expect(dm.page.locator(".charsheet__dice3d-overlay")).toHaveClass(/charsheet__dice3d-overlay--active/);
 
 		let releaseProjectionRead!: () => void;
 		let markProjectionReadStarted!: () => void;
@@ -175,15 +249,25 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 			await projectionReadGate;
 			await route.continue();
 		});
-		await dm.page.locator("#charsheet-sel-character").selectOption(character.id);
+		await dm.page.evaluate(characterId => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._selCharacter.value = characterId;
+			(globalThis as any).__replacementCharacterLoad = sheet._pLoadCharacter(characterId);
+		}, character.id);
 		await projectionReadStarted;
 		await expect(dm.page.locator(".ve-ui-modal__overlay")).toHaveCount(0);
 		await expect(dm.page.locator(".custom-abilities__modal")).toHaveCount(0);
 		await expect(dm.page.locator("body")).not.toContainText("SECRET REPLACEMENT DRAFT");
 		await expect(dm.page.locator(".charsheet__ability-detail-modal")).toHaveCount(0);
 		await expect(dm.page.locator(".charsheet__quickbuild-overlay")).toHaveCount(0);
+		await expect(dm.page.locator(".charsheet__dice3d-overlay")).not.toHaveClass(/charsheet__dice3d-overlay--active/);
 		expect(await dm.page.evaluate(() => document.body.classList.contains("has-quickbuild-overlay"))).toBe(false);
+		await dm.page.evaluate(() => (globalThis as any).__replacementDamageRoll);
+		expect(await dm.page.evaluate(() => (globalThis as any).__replacementAmmoConsumeCount)).toBe(0);
+		expect(await dm.page.evaluate(() => (globalThis as any).__replacementDamageSaveCount)).toBe(0);
+		expect(await dm.page.evaluate(() => (globalThis as any).__replacementDiceResultCount)).toBe(0);
 		releaseProjectionRead();
+		await dm.page.evaluate(() => (globalThis as any).__replacementCharacterLoad);
 		await expect(dmOwnedSheet.characterName).toHaveValue("Readonly Rowan", {timeout: 20_000});
 		await expect(dmOwnedSheet.characterName).toBeDisabled();
 		await dm.page.evaluate(() => {

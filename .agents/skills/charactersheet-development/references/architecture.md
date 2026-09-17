@@ -482,6 +482,16 @@ Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the r
    continuations and mutating handlers must also final-check the captured character ID, load
    generation, and owner authority after every await and immediately before changing state.
    Wrapped `pGetResolved` completions become cancellation when their originating scope changed.
+6. **Awaited caller-owned modal promises must settle on scope teardown.** Pass a cancellation-only
+   `cbCharacterScopeTeardown`; do not reuse a mutating ordinary `cbClose`. Create the outer resolver
+   before opening the modal, or explicitly handle teardown that occurs while asynchronous modal
+   creation is still completing. Animated dice use the same rule: scope teardown returns `false`,
+   clears timers/listeners immediately, and every awaited result/mutation continuation stops on it.
+
+When replacing a loaded Hub character, close transient UI immediately, but keep the previous
+realtime subscription and campaign controls intact until the target projection has fetched
+successfully under the current load-generation fence. A target-specific 404/forbidden response
+restores the selector to the still-authorized character; proven session/campaign loss conceals it.
 
 `CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard,
 ordinary `cbClose` composition, synchronous modal/portal tracking, generic input cancellation, late
