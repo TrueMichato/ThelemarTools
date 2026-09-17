@@ -252,6 +252,7 @@ test("stale move completion cannot detach the selected character and terminal de
 			mobile._statusModels.failedLoadProbe = {value: "retained"};
 			return {
 				rollCount: sheet._rollHistory._rolls.length,
+				rollTitles: sheet._rollHistory._rolls.map((roll: any) => roll.title),
 				isMobileScopeSuspended: mobile._isCharacterScopeUiSuspended,
 				mobileStatusModels: JSON.stringify(mobile._statusModels),
 			};
@@ -274,10 +275,12 @@ test("stale move completion cannot detach the selected character and terminal de
 				return {errorCode: null};
 			} catch (error: any) {
 				const mobile = (globalThis as any)._charsheetMobile;
+				const errorCode = typeof error?.code === "string" ? error.code : error?.code?.code;
 				return {
-					errorCode: error?.code || null,
+					errorCode: errorCode || null,
 					currentCharacterId: sheet._currentCharacterId,
 					rollCount: sheet._rollHistory._rolls.length,
+					rollTitles: sheet._rollHistory._rolls.map((roll: any) => roll.title),
 					isMobileScopeSuspended: mobile._isCharacterScopeUiSuspended,
 					mobileStatusModels: JSON.stringify(mobile._statusModels),
 				};
@@ -289,7 +292,6 @@ test("stale move completion cannot detach the selected character and terminal de
 			currentCharacterId: sourceCharacter.id,
 			...retainedUiBeforeFailedLoad,
 		});
-		await expect(player.page.locator(".charsheet__roll-history-entry-title", {hasText: "Retained load probe"})).toBeAttached();
 		await expect(player.page.locator("#charsheet-ipt-name")).toHaveValue("Deferred Source");
 
 		await player.page.evaluate(async ({selectedCharacterId, sourceCharacterId}) => {
