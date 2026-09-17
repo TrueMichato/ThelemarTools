@@ -358,6 +358,11 @@ cursor sequence cannot override a later DM/co-DM promotion. A newer live demotio
 invalid authority cursor is reported through the existing realtime unavailable/delivery-error path rather than
 being interpreted as a valid sequence-zero baseline.
 
+Campaign Overview may retain its last authorized rendering while connectivity alone is unknown. Once a cursor or
+newer live event confirms a role change, however, it synchronously destroys the retained campaign surfaces and
+closes realtime even when an offline warning has already marked reload as required. That flag suppresses only
+duplicate navigation; it never suppresses privacy teardown.
+
 ## Protocol evolution
 
 - Header/query version mismatch fails closed.

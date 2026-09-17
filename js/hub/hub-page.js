@@ -10,6 +10,7 @@ import {
 } from "./hub-api-client.js";
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
+import {createCampaignAuthorityChangeHandler} from "./hub-campaign-authority.js";
 import {
 	HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT,
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
@@ -1854,13 +1855,13 @@ async function pInitCampaign ({session}) {
 			void pRefreshLiveViews();
 		}, 250);
 	};
-	const reloadForAuthorityChange = () => {
-		if (isCampaignReloadRequired) return;
-		concealCampaignAuthorization();
-		isCampaignReloadRequired = true;
-		stopCampaignLiveUpdates();
-		window.location.reload();
-	};
+	const reloadForAuthorityChange = createCampaignAuthorityChangeHandler({
+		fnIsReloadRequired: () => isCampaignReloadRequired,
+		fnSetReloadRequired: () => isCampaignReloadRequired = true,
+		fnConcealAuthorization: concealCampaignAuthorization,
+		fnStopLiveUpdates: stopCampaignLiveUpdates,
+		fnReload: () => window.location.reload(),
+	});
 	realtime.on("event", event => {
 		const isOwnRoleChange = event.type === "membership.role_changed"
 			&& event.payload?.accountId === session.account.id

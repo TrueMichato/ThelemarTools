@@ -1248,6 +1248,81 @@ test("campaign authorization loss immediately destroys previously visible privat
 	}
 });
 
+test("confirmed co-DM role loss conceals Campaign Overview after offline cursor or live event", async ({browser}) => {
+	test.setTimeout(180_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmContext = await browser.newContext(contextOptions);
+	const offlineCoDmContext = await browser.newContext(contextOptions);
+	const liveCoDmContext = await browser.newContext(contextOptions);
+	try {
+		const dm = new HubCampaignPage(await dmContext.newPage());
+		const offlineCoDm = new HubCampaignPage(await offlineCoDmContext.newPage());
+		const liveCoDm = new HubCampaignPage(await liveCoDmContext.newPage());
+		await dm.signInSynthetic({providerSubject: "offline-demotion-dm", displayName: "Offline Demotion DM", secret});
+		await offlineCoDm.signInSynthetic({providerSubject: "offline-demotion-codm", displayName: "Offline Demotion Co-DM", secret});
+		await liveCoDm.signInSynthetic({providerSubject: "live-demotion-codm", displayName: "Live Demotion Co-DM", secret});
+		const campaignId = await dm.createCampaign("Offline Authority Concealment E2E");
+		await offlineCoDm.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId, "co_dm"));
+		await liveCoDm.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId, "co_dm"));
+		await dm.createCharacter({campaignId, name: "Offline Private Roster Hero"});
+
+		await offlineCoDm.gotoCampaign(campaignId);
+		await expect(offlineCoDm.page.locator("#campaign-content")).toHaveAttribute("data-campaign-role", "co_dm");
+		await expect(offlineCoDm.page.locator("#campaign-character-list")).toContainText("Offline Private Roster Hero");
+		await offlineCoDm.page.evaluate(() => (globalThis as any).__offlineAuthorityPageMarker = "retained");
+
+		await offlineCoDmContext.setOffline(true);
+		await expect(offlineCoDm.page.locator("#campaign-connection-status")).toHaveText("Offline · shown data may be stale");
+		await dm.changeMemberRoleViaApi({
+			campaignId,
+			displayName: "Offline Demotion Co-DM",
+			role: "player",
+		});
+		await offlineCoDmContext.setOffline(false);
+
+		await expect(offlineCoDm.page.locator("#campaign-content")).toBeHidden({timeout: 20_000});
+		await expect(offlineCoDm.page.locator("#campaign-content")).toHaveAttribute("aria-hidden", "true");
+		await expect(offlineCoDm.page.locator("#campaign-content")).toBeEmpty();
+		await expect(offlineCoDm.page.locator("body")).not.toContainText("Offline Private Roster Hero");
+		await expect.poll(() => offlineCoDm.page.evaluate(() => (globalThis as any).__offlineAuthorityPageMarker))
+			.toBe("retained");
+
+		await liveCoDm.gotoCampaign(campaignId);
+		await expect(liveCoDm.page.locator("#campaign-content")).toHaveAttribute("data-campaign-role", "co_dm");
+		await expect(liveCoDm.page.locator("#campaign-character-list")).toContainText("Offline Private Roster Hero");
+		await liveCoDm.page.evaluate(() => {
+			(globalThis as any).__liveAuthorityPageMarker = "retained";
+			window.dispatchEvent(new Event("offline"));
+		});
+		await expect(liveCoDm.page.locator("#campaign-connection-status")).toHaveText("Offline · shown data may be stale");
+		await dm.changeMemberRoleViaApi({
+			campaignId,
+			displayName: "Live Demotion Co-DM",
+			role: "player",
+		});
+
+		await expect(liveCoDm.page.locator("#campaign-content")).toBeHidden({timeout: 20_000});
+		await expect(liveCoDm.page.locator("#campaign-content")).toHaveAttribute("aria-hidden", "true");
+		await expect(liveCoDm.page.locator("#campaign-content")).toBeEmpty();
+		await expect(liveCoDm.page.locator("body")).not.toContainText("Offline Private Roster Hero");
+		await expect.poll(() => liveCoDm.page.evaluate(() => (globalThis as any).__liveAuthorityPageMarker))
+			.toBe("retained");
+	} finally {
+		await offlineCoDmContext.setOffline(false).catch(() => {});
+		await Promise.all([
+			pCloseContext(dmContext),
+			pCloseContext(offlineCoDmContext),
+			pCloseContext(liveCoDmContext),
+		]);
+	}
+});
+
 test("HTTP authorization loss conceals campaign data even when realtime cannot report it", async ({browser}) => {
 	test.setTimeout(180_000);
 	const secret = process.env.HUB_TEST_AUTH_SECRET;

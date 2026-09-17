@@ -314,7 +314,9 @@ describe("campaign hub pages", () => {
 		// invalidation is coalesced into an authorization-scoped HTTP refetch.
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
-		expect(source).toContain("const reloadForAuthorityChange = () =>");
+		expect(source).toMatch(/const reloadForAuthorityChange = createCampaignAuthorityChangeHandler\(\{[\s\S]*fnConcealAuthorization: concealCampaignAuthorization,[\s\S]*fnStopLiveUpdates: stopCampaignLiveUpdates,[\s\S]*fnReload: \(\) => window\.location\.reload\(\),[\s\S]*\}\)/);
+		expect(source).toMatch(/realtime\.on\("event", event =>[\s\S]*reloadForAuthorityChange\(\)/);
+		expect(source).toMatch(/realtime\.on\("cursor", baseline =>[\s\S]*reloadForAuthorityChange\(\)/);
 		expect(source).toContain("let activityAuthorizationGeneration = 0");
 		expect(source).toContain("getProjectionAuthorizationGeneration: () => projectionAuthorizationGeneration");
 		expect(source).toContain("const captureProjectionAuthorization = () =>");
