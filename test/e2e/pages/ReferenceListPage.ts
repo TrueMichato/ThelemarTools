@@ -248,6 +248,17 @@ export class ReferenceListPage {
 		}
 	}
 
+	async assertLogicalNavigationHashes (): Promise<void> {
+		const missing = await this.page.evaluate(() => {
+			const listPage = (globalThis as ReferenceBrowserGlobal).Hist?._listPage;
+			if (!listPage) throw new Error("Reference list page is not ready");
+			return listPage.primaryLists.flatMap((list, listIndex) => list.items
+				.filter(item => typeof (item.data.hashCurr ?? item.data.hash) !== "string")
+				.map(item => `${listIndex}:${item.ix}:${item.name}`));
+		});
+		expect(missing, "every logical reference row must expose a navigation hash in ListItem.data").toEqual([]);
+	}
+
 	async assertLegacyRendering (): Promise<void> {
 		for (const list of await this.snapshots()) {
 			expect(list.hasVirtualRenderer, "excluded lists must not allocate a virtual renderer, even below its threshold").toBe(false);

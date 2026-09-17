@@ -144,7 +144,6 @@ class CombatMethodsPage extends ListPage {
 			},
 			it.name,
 			{
-				hash,
 				source,
 				tradition: it.tradition || "",
 				type,
@@ -153,6 +152,8 @@ class CombatMethodsPage extends ListPage {
 				action,
 			},
 			{
+				hash,
+				page: it.page,
 				isExcluded,
 			},
 		);

@@ -138,9 +138,7 @@ class CraftingPage extends ListPage {
 			},
 			ent.name,
 			{
-				hash,
 				source,
-				page: ent.page,
 				type,
 				category,
 				dc: dc ?? Number.MAX_SAFE_INTEGER,
@@ -148,7 +146,11 @@ class CraftingPage extends ListPage {
 				creature: ent.harvest?.creature?.name || "",
 				effects: (ent.effectTags || []).join(" "),
 			},
-			{isExcluded},
+			{
+				hash,
+				page: ent.page,
+				isExcluded,
+			},
 		);
 
 		return listItem;

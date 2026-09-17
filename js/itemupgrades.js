@@ -145,9 +145,7 @@ class ItemUpgradesPage extends ListPage {
 			},
 			it.name,
 			{
-				hash,
 				source,
-				page: it.page,
 				cost,
 				category: it._lCategory,
 				tier: it._lTier,
@@ -155,6 +153,8 @@ class ItemUpgradesPage extends ListPage {
 				prerequisite: it._lHasPrerequisite,
 			},
 			{
+				hash,
+				page: it.page,
 				isExcluded,
 			},
 		);

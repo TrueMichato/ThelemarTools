@@ -17,8 +17,24 @@ test.describe("Reference lists — lazy rows and measured virtualization", () =>
 		test(`${pageName}: complete logical results survive automatic/full rendering`, async () => {
 			await reference.goto(pageName);
 			await reference.assertLoaded();
+			await reference.assertLogicalNavigationHashes();
 			await reference.assertAutomaticBounds({isInitial: true});
 			await reference.assertModeParity();
+		});
+	}
+
+	for (const pageName of ["combatmethods", "itemupgrades", "crafting"] as const) {
+		test(`${pageName}: selection and deep links render details across rendering modes`, async () => {
+			await reference.goto(pageName);
+			await reference.assertLoaded();
+			const rows = await reference.rows();
+			const selected = rows.at(-1)!;
+			await reference.select(selected);
+			await reference.setRenderingMode(true);
+			await reference.assertSelected(selected);
+			await reference.setRenderingMode(false);
+			await reference.assertSelected(selected);
+			await reference.followHash(rows[Math.floor(rows.length / 2)]);
 		});
 	}
 
