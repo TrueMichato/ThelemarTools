@@ -327,6 +327,47 @@ describe("Bug #3 (iii) — damage roll folds in ammo damage and consumes exactly
 		expect(combat.__calls.save).toBe(0);
 		expect(combat.__calls.invRender).toBe(0);
 	});
+
+	test("switching characters during an early damage prompt cannot mutate or publish against the replacement", async () => {
+		const state = loadCharacter();
+		addQuiverArrow(state, {id: "plus1", name: "+1 Arrow", quantity: 9, bonusWeapon: "+1"});
+		state.setSelectedAmmoId(ID.longbow, "plus1");
+
+		const combat = mkDamageCombat(state);
+		Object.assign(combat._page, {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: "owner",
+			_getCharacterScopeSnapshot () {
+				return {
+					characterId: this._currentCharacterId,
+					loadGeneration: this._characterLoadGeneration,
+					accessMode: this._currentCharacterAccess,
+				};
+			},
+			_isCharacterScopeSnapshotCurrent (snapshot, {isRequireOwner = false} = {}) {
+				return snapshot.characterId === this._currentCharacterId
+					&& snapshot.loadGeneration === this._characterLoadGeneration
+					&& snapshot.accessMode === this._currentCharacterAccess
+					&& (!isRequireOwner || this._currentCharacterAccess === "owner");
+			},
+		});
+		combat._promptUseCombatMethod = jest.fn(async () => {
+			state.setName("Character B");
+			combat._page._currentCharacterId = "character-b";
+			combat._page._characterLoadGeneration++;
+			return null;
+		});
+		combat._page.showDiceResult = jest.fn();
+
+		await combat._rollDamage(`auto_${ID.longbow}`);
+
+		expect(state.getName()).toBe("Character B");
+		expect(state.getItems().find(i => i.id === "plus1").quantity).toBe(9);
+		expect(combat.__calls.save).toBe(0);
+		expect(combat.__calls.invRender).toBe(0);
+		expect(combat._page.showDiceResult).not.toHaveBeenCalled();
+	});
 });
 
 // ===========================================================================

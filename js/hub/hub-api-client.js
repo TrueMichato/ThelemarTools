@@ -15,8 +15,12 @@ export class HubApiError extends Error {
 export const HUB_COMMAND_REPLAY_WINDOW_MS = 23 * 60 * 60 * 1000;
 export const HUB_TRANSFER_REPLAY_WINDOW_MS = HUB_COMMAND_REPLAY_WINDOW_MS;
 
-export function isTransferOutcomeUncertain (error) {
+export function isMutationOutcomeUncertain (error) {
 	return ["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code) || error?.status >= 500;
+}
+
+export function isTransferOutcomeUncertain (error) {
+	return isMutationOutcomeUncertain(error);
 }
 
 export class HubTransferRefreshQueue {

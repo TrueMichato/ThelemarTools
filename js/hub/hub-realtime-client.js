@@ -23,6 +23,19 @@ export function createCampaignAuthorityChangeHandler ({
 	};
 }
 
+export function concealProjectionFormControl ({
+	control,
+	controlStates,
+	mutationControlStates = null,
+	isCampaignReloadRequired = false,
+}) {
+	if (!controlStates.has(control)) {
+		controlStates.set(control, mutationControlStates?.get(control) ?? control.disabled);
+	}
+	if (control.dataset?.hubProjectionRecoveryControl === "true" && !isCampaignReloadRequired) return;
+	control.disabled = true;
+}
+
 export class HubRealtimeClient {
 	constructor ({
 		campaignId,

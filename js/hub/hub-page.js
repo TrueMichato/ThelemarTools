@@ -4,6 +4,7 @@ import {
 	HubTransferProposalDrafts,
 	HubTransferRefreshQueue,
 	HubTransferResolutionDrafts,
+	isMutationOutcomeUncertain,
 	isTransferOutcomeUncertain,
 	pResolveTransferFromDraft,
 	pResolveTransferAndRefresh,
@@ -16,6 +17,7 @@ import {
 	pLoadHubCapabilityModule,
 } from "./hub-capabilities.js";
 import {
+	concealProjectionFormControl,
 	createCampaignAuthorityChangeHandler,
 	HubRealtimeClient,
 	isRealtimeEventCoveredByBaseline,
@@ -47,9 +49,9 @@ import {
 	createCatalogRenderFence,
 	createGenerationFencedCatalogLoader,
 	filterAwardItems,
-	getAwardCommandFingerprint,
 	getAwardItemSelectionKey,
 	resolveAwardItemSelection,
+	stageAwardMutationDraft,
 } from "./hub-item-award.js";
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
@@ -985,6 +987,18 @@ function setFormStatus ({formId, message = "", isError = false}) {
 	status.classList.toggle("hub-inline-status--error", isError);
 }
 
+function applyTransferRefreshRecoverySuccess ({form}) {
+	if (!form?.isConnected || !form._hubTransferRefreshRecovery || isCampaignReloadRequired) return false;
+	delete form._hubTransferRefreshRecovery;
+	const submit = form.querySelector("button[type='submit']");
+	if (submit) submit.disabled = false;
+	setFormStatus({
+		formId: "campaign-transfer-form",
+		message: "Latest balances loaded. You can send another transfer.",
+	});
+	return true;
+}
+
 function setTransferRefreshFailure ({form, message, pRetry}) {
 	const status = document.getElementById("campaign-transfer-form-status");
 	if (!form?.isConnected) return;
@@ -993,25 +1007,30 @@ function setTransferRefreshFailure ({form, message, pRetry}) {
 	submit.disabled = true;
 	status.classList.add("hub-inline-status--error");
 	status.replaceChildren(document.createTextNode(isCampaignReloadRequired ? message : `${message} `));
-	if (isCampaignReloadRequired) return;
+	if (isCampaignReloadRequired) {
+		delete form._hubTransferRefreshRecovery;
+		return;
+	}
+	form._hubTransferRefreshRecovery = {message, pRetry};
 	const retry = document.createElement("button");
 	retry.type = "button";
 	retry.className = "hub-button hub-button--inline";
 	retry.textContent = "Retry latest balances";
+	retry.dataset.hubProjectionRecoveryControl = "true";
 	retry.addEventListener("click", async () => {
 		if (isCampaignReloadRequired) return;
 		retry.disabled = true;
 		retry.textContent = "Retrying...";
 		try {
 			const result = await pRetry();
-			if (isCampaignReloadRequired || result?.isFenced) return;
-			submit.disabled = false;
-			setFormStatus({
-				formId: "campaign-transfer-form",
-				message: "Latest balances loaded. You can send another transfer.",
-			});
+			if (!form.isConnected || isCampaignReloadRequired) return;
+			if (result?.isFenced) {
+				setTransferRefreshFailure({form, message, pRetry});
+				return;
+			}
+			applyTransferRefreshRecoverySuccess({form});
 		} catch {
-			if (isCampaignReloadRequired) return;
+			if (!form.isConnected || isCampaignReloadRequired) return;
 			setTransferRefreshFailure({form, message, pRetry});
 		}
 	});
@@ -1170,13 +1189,12 @@ function setProjectionFormControlsConcealed ({form, isConcealed}) {
 		if (!form._hubProjectionControlStates) form._hubProjectionControlStates = new Map();
 		if (form.contains(document.activeElement)) form._hubProjectionFocusedControl = document.activeElement;
 		for (const control of form.querySelectorAll("button, input, select, textarea")) {
-			if (!form._hubProjectionControlStates.has(control)) {
-				form._hubProjectionControlStates.set(
-					control,
-					form._hubMutationControlStates?.get(control) ?? control.disabled,
-				);
-			}
-			control.disabled = true;
+			concealProjectionFormControl({
+				control,
+				controlStates: form._hubProjectionControlStates,
+				mutationControlStates: form._hubMutationControlStates,
+				isCampaignReloadRequired,
+			});
 		}
 		return;
 	}
@@ -2951,6 +2969,7 @@ async function pInitCampaignForms ({
 					submit.textContent = "Retry transfer";
 				}
 				delete form?._hubProjectionTransferDraft;
+				applyTransferRefreshRecoverySuccess({form});
 				return true;
 			}
 			setTransferProposalControls({form, isLocked: false});
@@ -2962,6 +2981,7 @@ async function pInitCampaignForms ({
 				submit.textContent = "Submit transfer";
 			}
 			delete form?._hubProjectionTransferDraft;
+			applyTransferRefreshRecoverySuccess({form});
 			return true;
 		};
 		if (!isProjectionControlRestoreDeferred) {
@@ -3322,28 +3342,35 @@ async function pInitCampaignForms ({
 
 	document.getElementById("campaign-item-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
+		const form = event.currentTarget;
 		const fnIsCurrent = captureProjectionAuthorization();
 		const formId = "campaign-item-form";
 		setFormStatus({formId});
 		renderError(null);
 		let isAwardComplete = false;
 		try {
-			const submission = itemAward.getSubmission();
+			const awardDraft = stageAwardMutationDraft({
+				draft: form._hubAwardMutationDraft,
+				submission: itemAward.getSubmission(),
+				rulesVersionId: context.rulesVersion?.id || null,
+			});
+			form._hubAwardMutationDraft = awardDraft;
+			const submission = awardDraft.request;
 			let result;
 			await pRunFormMutation({
-				form: event.currentTarget,
-				fingerprint: getAwardCommandFingerprint(submission),
+				form,
+				fingerprint: awardDraft.fingerprint,
 				fnMutate: async idempotencyKey => {
 					itemAward.setPending(true);
 					result = await api.pAwardItems({
 						campaignId,
 						...submission,
-						rulesVersionId: context.rulesVersion?.id || null,
 						idempotencyKey,
 					});
 				},
 			});
 			if (!result) return;
+			delete form._hubAwardMutationDraft;
 			const applyAwardSuccessUi = () => {
 				itemAward.onSuccess(result);
 				setFormStatus({
@@ -3353,7 +3380,7 @@ async function pInitCampaignForms ({
 			};
 			const deferAwardCompletionUi = ({isApplySuccessUi = false} = {}) => {
 				deferMutationUi({
-					form: event.currentTarget,
+					form,
 					fnApply: () => {
 						itemAward.setPending(false);
 						if (isApplySuccessUi) applyAwardSuccessUi();
@@ -3386,6 +3413,11 @@ async function pInitCampaignForms ({
 				});
 			}
 		} catch (error) {
+			if (!isMutationOutcomeUncertain(error)) {
+				delete form._hubAwardMutationDraft;
+				form._hubMutationKey = null;
+				form._hubMutationFingerprint = null;
+			}
 			if (!fnIsCurrent()) return;
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
 			setFormStatus({formId, message, isError: true});

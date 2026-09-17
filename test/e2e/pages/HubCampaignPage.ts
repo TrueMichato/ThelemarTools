@@ -1800,6 +1800,7 @@ export class HubCampaignPage {
 		quantity,
 		note,
 		beforeUseSelection,
+		afterUncertainResponse,
 		recipientExpectation,
 	}: {
 		campaignId: string;
@@ -1809,6 +1810,7 @@ export class HubCampaignPage {
 		quantity: number;
 		note?: string;
 		beforeUseSelection?: () => Promise<void>;
+		afterUncertainResponse?: () => Promise<void>;
 		recipientExpectation?: () => Promise<void>;
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
@@ -1840,6 +1842,7 @@ export class HubCampaignPage {
 
 		const requestUrl = `**/api/campaigns/${campaignId}/item-awards`;
 		const idempotencyKeys: string[] = [];
+		const requestBodies: string[] = [];
 		let attempt = 0;
 		let releaseSuccess: (() => void) | null = null;
 		let resolveSuccessHandled: (() => void) | null = null;
@@ -1847,6 +1850,7 @@ export class HubCampaignPage {
 		const successHandled = new Promise<void>(resolve => resolveSuccessHandled = resolve);
 		await this.page.route(requestUrl, async route => {
 			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
+			requestBodies.push(JSON.stringify(route.request().postDataJSON()));
 			if (++attempt === 1) {
 				const committed = await route.fetch();
 				expect(committed.ok()).toBe(true);
@@ -1875,6 +1879,7 @@ export class HubCampaignPage {
 			await submit.click();
 			await expect(status).toContainText("temporarily unavailable");
 			await expect(submit).toBeEnabled();
+			await afterUncertainResponse?.();
 			await this.page.locator("#campaign-item-note").fill(`  ${note || ""}  `);
 			await form.evaluate(element => {
 				const incidental = document.createElement("input");
@@ -1896,6 +1901,7 @@ export class HubCampaignPage {
 				);
 			expect(idempotencyKeys).toHaveLength(2);
 			expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+			expect(new Set(requestBodies)).toEqual(new Set([requestBodies[0]]));
 			await expect.poll(() => form.evaluate(element => ({
 				ariaBusy: element.getAttribute("aria-busy"),
 				hasMutationControlStates: !!(element as any)._hubMutationControlStates,
@@ -2221,18 +2227,157 @@ export class HubCampaignPage {
 			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
 			const retry = this.page.getByRole("button", {name: "Retry latest balances"});
 			await expect(retry).toBeVisible();
+			await expect(retry).toBeEnabled();
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
 			shouldFailRefresh = false;
 			await retry.click();
 			await expect(this.page.locator("#campaign-transfer-form-status")).toHaveText("Latest balances loaded. You can send another transfer.");
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
 		} finally {
-			await this.page.unroute(transferMatcher, observeTransfer);
-			await this.page.unroute(partyMatcher, failRefresh);
+			await this.page.unroute(transferMatcher, observeTransfer).catch(() => undefined);
+			await this.page.unroute(partyMatcher, failRefresh).catch(() => undefined);
 		}
 
 		await this.page.locator("#campaign-transfer-form button[type='submit']").click();
 		await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer reserved.");
+	}
+
+	async expectTransferRefreshRecoveryAcrossAuthorizationFence ({
+		campaignId,
+		sourceName,
+		targetName,
+		itemName,
+		quantity,
+		onRetryRefreshHeld,
+	}: {
+		campaignId: string;
+		sourceName: string;
+		targetName: string;
+		itemName: string;
+		quantity: number;
+		onRetryRefreshHeld: () => Promise<void>;
+	}): Promise<void> {
+		await this.gotoCampaign(campaignId);
+		await this.openCampaignWorkbench();
+		await this.page.locator("#campaign-transfer-source").selectOption({label: sourceName});
+		await this.page.locator("#campaign-transfer-target").selectOption({label: targetName});
+		const itemOption = this.page.locator("#campaign-transfer-entry option", {hasText: itemName}).first();
+		await this.page.locator("#campaign-transfer-entry").selectOption(await itemOption.getAttribute("value") || "");
+		await this.page.locator("#campaign-transfer-quantity").fill(`${quantity}`);
+
+		const transferMatcher = `**/api/campaigns/${campaignId}/transfers`;
+		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		let transferPostCount = 0;
+		let failedRefreshCount = 0;
+		let shouldFailRefresh = true;
+		let isHoldingSuccessfulRefreshes = true;
+		const heldSuccessfulRefreshes: Array<{release: () => void}> = [];
+		const releaseAllHeldRefreshes = () => {
+			isHoldingSuccessfulRefreshes = false;
+			for (const held of heldSuccessfulRefreshes) held.release();
+		};
+		const pWaitForFailureQuiescence = async () => {
+			const deadline = Date.now() + 10_000;
+			let lastCount = failedRefreshCount;
+			let stableSince = Date.now();
+			while (Date.now() < deadline) {
+				await this.page.waitForTimeout(100);
+				if (failedRefreshCount !== lastCount) {
+					lastCount = failedRefreshCount;
+					stableSince = Date.now();
+					continue;
+				}
+				if (lastCount > 0 && Date.now() - stableSince >= 500) return;
+			}
+			throw new Error(`Balance refresh failures did not quiesce (failed=${failedRefreshCount}).`);
+		};
+		const pWaitForHeldRefresh = async (index: number, deadline: number) => {
+			while (Date.now() < deadline) {
+				if (heldSuccessfulRefreshes.length > index) return heldSuccessfulRefreshes[index];
+				await this.page.waitForTimeout(50);
+			}
+			throw new Error(`Timed out waiting for held balance refresh ${index + 1} (held=${heldSuccessfulRefreshes.length}).`);
+		};
+		const pGetRecoveryState = async () => ({
+			retryText: await this.page.locator("#campaign-transfer-form-status button")
+				.textContent({timeout: 100})
+				.catch(() => null),
+			hasRecovery: await this.page.locator("#campaign-transfer-form")
+				.evaluate(form => !!(form as any)._hubTransferRefreshRecovery)
+				.catch(() => false),
+		});
+		const pReleaseUntilRetryRecreated = async () => {
+			const deadline = Date.now() + 15_000;
+			const maximumReleasedRefreshes = 5;
+			let nextHeldIndex = 0;
+			while (Date.now() < deadline && nextHeldIndex < maximumReleasedRefreshes) {
+				const held = await pWaitForHeldRefresh(nextHeldIndex, deadline);
+				nextHeldIndex++;
+				held.release();
+				while (Date.now() < deadline) {
+					const recovery = await pGetRecoveryState();
+					if (recovery.retryText === "Retry latest balances" && recovery.hasRecovery) return;
+					if (heldSuccessfulRefreshes.length > nextHeldIndex) break;
+					await this.page.waitForTimeout(50);
+				}
+			}
+			const recovery = await pGetRecoveryState();
+			throw new Error(
+				`Fenced retry was not recreated `
+				+ `(failed=${failedRefreshCount}, held=${heldSuccessfulRefreshes.length}, released=${Math.min(heldSuccessfulRefreshes.length, maximumReleasedRefreshes)}, retry=${recovery.retryText}, recovery=${recovery.hasRecovery}).`,
+			);
+		};
+		const failRefresh = async (route: Route) => {
+			if (shouldFailRefresh) {
+				failedRefreshCount++;
+				return route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+				});
+			}
+			if (!isHoldingSuccessfulRefreshes) return route.continue();
+			let release = () => {};
+			const gate = new Promise<void>(resolve => release = resolve);
+			heldSuccessfulRefreshes.push({release});
+			await gate;
+			return route.continue();
+		};
+		const observeTransfer = async (route: Route) => {
+			if (route.request().method() === "POST") await this.page.route(partyMatcher, failRefresh);
+			const response = await route.fetch();
+			if (route.request().method() === "POST" && response.ok()) transferPostCount++;
+			await route.fulfill({response});
+		};
+		await this.page.route(transferMatcher, observeTransfer);
+		try {
+			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
+			await expect.poll(() => transferPostCount).toBe(1);
+			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
+			const retry = this.page.getByRole("button", {name: "Retry latest balances"});
+			await expect(retry).toBeVisible();
+			await expect(retry).toBeEnabled();
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
+			await pWaitForFailureQuiescence();
+			shouldFailRefresh = false;
+			await retry.click();
+			await pWaitForHeldRefresh(0, Date.now() + 15_000);
+			await onRetryRefreshHeld();
+			await pReleaseUntilRetryRecreated();
+			const deferredRetry = this.page.getByRole("button", {name: "Retry latest balances"});
+			await expect(deferredRetry).toBeVisible();
+			await expect(deferredRetry).toHaveText("Retry latest balances");
+			await expect(deferredRetry).toBeEnabled();
+			await expect.poll(() => this.page.locator("#campaign-transfer-form").evaluate(form => !!(form as any)._hubTransferRefreshRecovery)).toBe(true);
+			await deferredRetry.click();
+			releaseAllHeldRefreshes();
+			await expect(this.page.locator("#campaign-transfer-form-status")).toHaveText("Latest balances loaded. You can send another transfer.");
+			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
+		} finally {
+			releaseAllHeldRefreshes();
+			await this.page.unroute(transferMatcher, observeTransfer).catch(() => undefined);
+			await this.page.unroute(partyMatcher, failRefresh).catch(() => undefined);
+		}
 	}
 
 	async acceptFirstPendingTransfer ({

@@ -82,6 +82,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		});
 		expect((await player.getCharacter(character.id)).data.xp).toBe(250);
 		let spellcaster: Awaited<ReturnType<HubCampaignPage["createCharacter"]>> | null = null;
+		let transientAwardTarget: Awaited<ReturnType<HubCampaignPage["createCharacter"]>> | null = null;
 		const expectedLongsword = {
 			name: "Longsword",
 			source: "PHB",
@@ -100,14 +101,21 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		};
 		await dm.awardCatalogItems({
 			campaignId,
-			characterNames: ["Rowan", "Mira"],
+			characterNames: ["Rowan", "Mira", "Transient Award Target"],
 			itemName: "Longsword",
 			source: "PHB",
 			quantity: 2,
 			note: "For the Ashen Pass",
 			beforeUseSelection: async () => {
 				spellcaster = await player.createCharacter({campaignId, name: "Mira"});
+				transientAwardTarget = await player.createCharacter({campaignId, name: "Transient Award Target"});
 				await expect(dm.page.locator("#campaign-item-targets .hub-item-award__target", {hasText: "Mira"})).toHaveCount(1);
+				await expect(dm.page.locator("#campaign-item-targets .hub-item-award__target", {hasText: "Transient Award Target"})).toHaveCount(1);
+			},
+			afterUncertainResponse: async () => {
+				if (!transientAwardTarget) throw new Error("The transient award target was not created.");
+				await player.archiveCharacterViaApi(transientAwardTarget.id);
+				await expect(dm.page.locator("#campaign-item-targets .hub-item-award__target", {hasText: "Transient Award Target"})).toHaveCount(0);
 			},
 			recipientExpectation: () => player.expectLiveAwardArrival({
 				itemName: "Longsword",

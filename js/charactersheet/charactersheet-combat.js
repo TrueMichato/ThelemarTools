@@ -3072,6 +3072,10 @@ class CharacterSheetCombat {
 	}
 
 	async _rollDamage (attackId, isCrit = false) {
+		const characterScope = this._page?._getCharacterScopeSnapshot?.() || null;
+		const isCurrentOwnerScope = () => !characterScope
+			|| this._page?._isCharacterScopeSnapshotCurrent?.(characterScope, {isRequireOwner: true}) !== false;
+		if (!isCurrentOwnerScope()) return;
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
 		if (!attack && this._cachedAttacks?.length) {
@@ -3107,6 +3111,7 @@ class CharacterSheetCombat {
 			const harmBlocked = inCombat && this._handOfHarmUsedThisTurn;
 			if (harmCalc.hasHandOfHarm && !harmBlocked) {
 				const accepted = await this._promptHandOfHarm(harmCalc);
+				if (!isCurrentOwnerScope()) return;
 				if (accepted) {
 					handOfHarmFormula = harmCalc.handOfHarmDamage;
 					const harmRoll = this._parseDamage(handOfHarmFormula);
@@ -3121,17 +3126,21 @@ class CharacterSheetCombat {
 		const activeMethodEffect = (this._state.getActiveCombatMethodEffects?.() || []).find(e => e.weaponId === attack.id);
 		if (activeMethodEffect) {
 			const accepted = await this._promptApplyMethodEffect(activeMethodEffect);
+			if (!isCurrentOwnerScope()) return;
 			if (accepted) {
 				methodEffectApplied = activeMethodEffect;
 			}
 		} else {
 			// No active effect yet — check for weapon-modifier methods targeting this weapon
 			methodEffectApplied = await this._promptUseCombatMethod(attack);
+			if (!isCurrentOwnerScope()) return;
 		}
 		const juggernautTarget = await this._pChooseJuggernautTargetContext(attack);
+		if (!isCurrentOwnerScope()) return;
 		// One target question, pooled across every rider on this attack that gates on
 		// creature type (gemstones and materials both do).
 		const targetTypes = await this._pChooseTargetTypeContext(attack);
+		if (!isCurrentOwnerScope()) return;
 
 		// Resolve auto-generated weapon damage live so a hands-used change cannot leave a
 		// stale cached die. Explicit/custom attack damage remains authoritative.
@@ -3148,6 +3157,7 @@ class CharacterSheetCombat {
 				fnDisplay: it => it.charAt(0).toUpperCase() + it.slice(1),
 				isResolveItem: true,
 			});
+			if (!isCurrentOwnerScope()) return;
 			if (!weaponDamageType) return;
 		}
 		let destructiveWrathApplied = false;
@@ -3188,6 +3198,7 @@ class CharacterSheetCombat {
 		// (`getDoubleshotRiderForAttack` → `_isMeleeWeaponAttack`); the helper still
 		// self-gates (melee/spell/damage-format) and owns the one-shot consume.
 		if (this._getAttackRollKind(attack).isRanged && !attack.isSpell) {
+			if (!isCurrentOwnerScope()) return;
 			doubleshotDie = this._consumePendingWeaponDamageDie?.(attack);
 			if (doubleshotDie) {
 				doubleshotRoll = this._parseDamage(doubleshotDie, isCrit);
@@ -3250,6 +3261,7 @@ class CharacterSheetCombat {
 				}));
 			}
 
+			if (!isCurrentOwnerScope()) return;
 			this._markSneakAttackUsedThisTurn();
 		}
 
@@ -3280,7 +3292,10 @@ class CharacterSheetCombat {
 				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
 				usedRiderIds.push(rider.id);
-				if (oncePerTurn) this._markRiderUsedThisTurn(rider.id);
+				if (oncePerTurn) {
+					if (!isCurrentOwnerScope()) return;
+					this._markRiderUsedThisTurn(rider.id);
+				}
 			}
 
 			if (juggernautTarget === "construct") {
@@ -3355,7 +3370,10 @@ class CharacterSheetCombat {
 				riderParts.push({name: rider.sourceName, dice: rider.dice, total: riderRoll.total, type: damageType});
 				riderRollsForAnim.push(riderRoll);
 				usedRiderIds.push(riderId);
-				if (rider.perTurn) this._markRiderUsedThisTurn(riderId);
+				if (rider.perTurn) {
+					if (!isCurrentOwnerScope()) return;
+					this._markRiderUsedThisTurn(riderId);
+				}
 			}
 
 			// Active ammunition damage (Bug #3): the selected quiver ammo's bonuses
@@ -3406,6 +3424,7 @@ class CharacterSheetCombat {
 			if (entry.isCrimsonRite && this._state.canUseSanguineMasteryReroll?.()) {
 				const reroll = this._parseDamage(entry.dice, isCrit);
 				if (reroll.total > extraRoll.total) extraRoll = reroll;
+				if (!isCurrentOwnerScope()) return;
 				this._state.markSanguineMasteryRerollUsed?.();
 			}
 			extraDamageTotal += extraRoll.total;
@@ -3426,6 +3445,7 @@ class CharacterSheetCombat {
 		// Channeled-spell on-hit rider (Booming/Green-Flame Blade). Armed by the per-weapon
 		// ✨ button AFTER its attack roll; consumed by the FIRST matching weapon damage roll.
 		// Added as a SEPARATE damage type (its own crit handling + display), like Hand of Harm.
+		if (!isCurrentOwnerScope()) return;
 		const {
 			channelSpell,
 			channelSpellRoll,
@@ -3448,6 +3468,7 @@ class CharacterSheetCombat {
 		}
 		const riderDiffTypeTotal = riderDamageTotal - riderSameTypeTotal;
 
+		if (!isCurrentOwnerScope()) return;
 		const {damage: battleMasterDamage, name: battleMasterName} = this._consumeBattleMasterDamage(attackId, isCrit);
 		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage + battleMasterDamage;
 		const totalBeforeTargetMultiplier = baseDamageTotal + riderDiffTypeTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
@@ -3456,6 +3477,7 @@ class CharacterSheetCombat {
 			: 1;
 		const total = totalBeforeTargetMultiplier * targetMultiplier;
 		const juggernautOutcome = await this._pResolveJuggernautHitEffects(attack);
+		if (!isCurrentOwnerScope()) return;
 
 		// Build subtitle with breakdown
 		let subtitle = `${damageExpression}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
@@ -3529,6 +3551,7 @@ class CharacterSheetCombat {
 		this._pushDiceGroup(diceGroups, methodRollForAnim);
 		this._pushDiceGroup(diceGroups, channelSpellRoll);
 		if (await this._page.pAnimateDamageDice?.(diceGroups) === false) return;
+		if (!isCurrentOwnerScope()) return;
 
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
@@ -3561,7 +3584,10 @@ class CharacterSheetCombat {
 
 		// Consume the channeled-spell on-hit rider — it rides exactly ONE damage roll for its
 		// weapon. Clear whenever it matched this attack, even below level 5 (no on-hit dice yet).
-		if (riderMatched) this._clearPendingSpellRider();
+		if (riderMatched) {
+			if (!isCurrentOwnerScope()) return;
+			this._clearPendingSpellRider();
+		}
 
 		// Active ammunition (Bug #3): a selected quiver ammo is consumed EXACTLY ONCE
 		// here — on the damage roll, never on the attack roll. If that empties the
@@ -3569,12 +3595,14 @@ class CharacterSheetCombat {
 		// silently re-fired. Persist + refresh the Inventory tab and quiver so counts
 		// don't look stale / reset on reload.
 		if (ammoForDamage) {
+			if (!isCurrentOwnerScope()) return;
 			const weaponId = attack.sourceItem?.id;
 			if (this._state.consumeAmmunition?.(ammoForDamage.id, 1)) {
 				const remaining = this._state.getEffectiveAmmoCount?.(
 					this._state.getItems?.().find(i => i.id === ammoForDamage.id),
 				) ?? 0;
 				if (remaining <= 0) this._state.setSelectedAmmoId?.(weaponId, null);
+				if (!isCurrentOwnerScope()) return;
 				this._page?.saveCharacter?.();
 				this._page?._inventory?.render?.();
 				this.renderCombatQuiver?.();

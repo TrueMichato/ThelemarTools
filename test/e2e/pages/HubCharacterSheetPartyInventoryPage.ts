@@ -63,7 +63,7 @@ export class HubCharacterSheetPartyInventoryPage {
 		};
 		this.page.on("request", onRefreshRequest);
 		try {
-			await root.getByRole("button", {name: "Retry"}).click();
+			await root.getByRole("button", {name: "Retry", exact: true}).click();
 			await expect(root.getByRole("button", {name: "Refreshing..."})).toBeDisabled();
 			await expect(root).toContainText("Retrying party stash sync...");
 			await expect(root).toContainText("Party stash refreshed.");

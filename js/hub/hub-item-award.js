@@ -179,8 +179,17 @@ export function buildAwardSubmission ({
 	};
 }
 
-export function getAwardCommandFingerprint ({source, targetCharacterIds, quantity, note}) {
-	return JSON.stringify({source, targetCharacterIds, quantity, note});
+export function getAwardCommandFingerprint ({source, targetCharacterIds, quantity, note, rulesVersionId = null}) {
+	return JSON.stringify({source, targetCharacterIds, quantity, note, rulesVersionId});
+}
+
+export function stageAwardMutationDraft ({draft = null, submission, rulesVersionId = null} = {}) {
+	if (draft) return draft;
+	const request = structuredClone({...submission, rulesVersionId});
+	return {
+		request,
+		fingerprint: getAwardCommandFingerprint(request),
+	};
 }
 
 export function buildAwardPreview ({

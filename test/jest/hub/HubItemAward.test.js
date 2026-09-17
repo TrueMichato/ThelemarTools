@@ -11,6 +11,7 @@ import {
 	getAwardItemSelectionKey,
 	getAwardSourceRequest,
 	resolveAwardItemSelection,
+	stageAwardMutationDraft,
 } from "../../../js/hub/hub-item-award.js";
 
 const getTarget = ({
@@ -220,6 +221,45 @@ describe("Hub item award presentation contract", () => {
 		expect(getAwardCommandFingerprint(incidentalTarget)).toBe(getAwardCommandFingerprint(first));
 		expect(reordered.targetCharacterIds).toEqual(["b", "a"]);
 		expect(getAwardCommandFingerprint(reordered)).not.toBe(getAwardCommandFingerprint(first));
+	});
+
+	it("replays the exact staged award request across projection reorder or removal", () => {
+		const selectedItem = {name: "Torch", source: "PHB", sourceKind: "catalog", weight: 1};
+		const targets = [
+			getTarget({id: "a", name: "A"}),
+			getTarget({id: "b", name: "B"}),
+			getTarget({id: "c", name: "C"}),
+		];
+		const firstSubmission = buildAwardSubmission({
+			selectedItem,
+			targets,
+			selectedTargetIds: new Set(["a", "b", "c"]),
+			quantity: "2",
+			note: "For the road",
+		});
+		const firstDraft = stageAwardMutationDraft({
+			submission: firstSubmission,
+			rulesVersionId: "rules-1",
+		});
+		const replacementSubmission = buildAwardSubmission({
+			selectedItem,
+			targets: [targets[1], targets[0]],
+			selectedTargetIds: new Set(["a", "b"]),
+			quantity: "2",
+			note: "For the road",
+		});
+		const retryDraft = stageAwardMutationDraft({
+			draft: firstDraft,
+			submission: replacementSubmission,
+			rulesVersionId: "rules-2",
+		});
+
+		expect(retryDraft).toBe(firstDraft);
+		expect(retryDraft.request).toEqual({
+			...firstSubmission,
+			rulesVersionId: "rules-1",
+		});
+		expect(retryDraft.fingerprint).toBe(getAwardCommandFingerprint(retryDraft.request));
 	});
 
 	it("distinguishes exact, lower-bound, unavailable, and policy-blocked previews", () => {

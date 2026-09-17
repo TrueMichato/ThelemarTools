@@ -138,9 +138,13 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("form._hubMutationFingerprint = null");
 		expect(source).toContain("setTransferRefreshFailure");
 		expect(source).toContain("if (!form?.isConnected) return;");
+		expect(source).toContain("form._hubTransferRefreshRecovery");
+		expect(source).toContain("applyTransferRefreshRecoverySuccess");
 		expect(source).toContain("const form = event.currentTarget;");
 		expect(source).toContain("Retry latest balances");
 		expect(source).toContain("Latest balances loaded. You can send another transfer.");
+		expect(source).toContain("retry.dataset.hubProjectionRecoveryControl = \"true\"");
+		expect(source).toContain("concealProjectionFormControl");
 		expect(source).toContain("const latestSelections = readSelections();");
 		expect(source).toContain("selectionsToRestore");
 		expect(source).toContain("if (sourceKind !== \"character\") return false;");
@@ -582,7 +586,9 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("ownerAccountId: session.account.id");
 		expect(source).toContain("itemAward.setCampaignBrewContent");
 		expect(source).toContain("api.pAwardItems");
-		expect(source).toContain("fingerprint: getAwardCommandFingerprint(submission)");
+		expect(source).toContain("stageAwardMutationDraft");
+		expect(source).toContain("form._hubAwardMutationDraft");
+		expect(source).toContain("isMutationOutcomeUncertain");
 		expect(source).toContain("form._hubProjectionControlRestores.add(restorePendingControlStates)");
 		expect(source).toMatch(/delete form\._hubProjectionControlRestores;\s+for \(const fnRestore of deferredControlRestores\) fnRestore\(\)/);
 		expect(source).toMatch(/const deferAwardCompletionUi = \(\{isApplySuccessUi = false\} = \{\}\) => \{[\s\S]*if \(isApplySuccessUi\) applyAwardSuccessUi\(\);[\s\S]*itemAward\.focusPrimary\(\)/);
