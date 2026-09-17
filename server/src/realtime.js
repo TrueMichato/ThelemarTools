@@ -227,7 +227,7 @@ export class HubRealtime {
 				this._store.pGetMembership({accountId: connection.accountId, campaignId}),
 			]);
 			if (!session || !membership) {
-				connection.socket.close(1008, "Authorization revoked");
+				connection.socket.close(1008, session ? "Membership revoked" : "Session expired");
 				continue;
 			}
 			connection.role = membership.role;

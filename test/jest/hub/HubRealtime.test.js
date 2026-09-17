@@ -150,6 +150,40 @@ describe("hub realtime", () => {
 		expect(socket.readyState).toBe(3);
 	});
 
+	it("preserves session-versus-membership authority causes during presence revalidation", async () => {
+		const sessions = new Map([
+			["session-member-gone", {id: "session-member-gone"}],
+		]);
+		const memberships = new Map([
+			["session-expired", {role: "player"}],
+		]);
+		const realtime = new HubRealtime({store: {
+			pGetSessionById: async ({sessionId}) => sessions.get(sessionId) || null,
+			pGetMembership: async ({accountId}) => memberships.get(accountId) || null,
+		}});
+		const sessionExpired = new FakeSocket();
+		const membershipRevoked = new FakeSocket();
+		realtime.addConnection({
+			socket: sessionExpired,
+			account: {id: "session-expired", displayName: "Expired"},
+			session: {id: "missing-session"},
+			membership: {id: "m1", role: "player"},
+			campaignId: "cmp",
+		});
+		realtime.addConnection({
+			socket: membershipRevoked,
+			account: {id: "membership-revoked", displayName: "Removed"},
+			session: {id: "session-member-gone"},
+			membership: {id: "m2", role: "player"},
+			campaignId: "cmp",
+		});
+
+		await realtime.pBroadcastPresence({campaignId: "cmp"});
+
+		expect(sessionExpired.closeEvents).toContainEqual({code: 1008, reason: "Session expired"});
+		expect(membershipRevoked.closeEvents).toContainEqual({code: 1008, reason: "Membership revoked"});
+	});
+
 	it("uses a reconnectable close code when a client exceeds the message rate limit", async () => {
 		const realtime = new HubRealtime({store: {
 			pGetSessionById: async () => ({session: {}, account: {}}),

@@ -346,6 +346,11 @@ class CharacterSheetSpells {
 			if (e.target.closest("a")) return;
 			const spellId = item.dataset.spellId;
 			if (!spellId) return;
+			if (this._page?.isCurrentCharacterReadOnly?.()) {
+				e.preventDefault();
+				this._closeCastOptionsMenu();
+				return;
+			}
 			this._openSpellCastMenu(spellId, e);
 		});
 
@@ -3332,6 +3337,11 @@ class CharacterSheetSpells {
 	 * the desktop right-click handler and the mobile long-press handler.
 	 */
 	_openSpellCastMenu (spellId, event) {
+		if (this._page?.isCurrentCharacterReadOnly?.()) {
+			event?.preventDefault?.();
+			this._closeCastOptionsMenu();
+			return;
+		}
 		const spell = this._state.getSpells().find(s => s.id === spellId);
 		if (!spell) return;
 		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source);
@@ -3358,6 +3368,7 @@ class CharacterSheetSpells {
 		this._activeCastMenuCleanup?.();
 		this._activeCastMenuCleanup = null;
 		document.querySelector(".charsheet__cast-menu")?.remove();
+		if (this._page?.isCurrentCharacterReadOnly?.()) return;
 		if (!items || !items.length) return;
 
 		const menu = e_({outer: `<div class="charsheet__cast-menu charsheet__ability-menu"></div>`});
@@ -3387,6 +3398,7 @@ class CharacterSheetSpells {
 				optionEl.addEventListener("click", (e) => {
 					e.stopPropagation();
 					cleanup();
+					if (this._page?.isCurrentCharacterReadOnly?.()) return;
 					item.onSelect?.();
 				});
 			}
@@ -3407,6 +3419,12 @@ class CharacterSheetSpells {
 			document.addEventListener("click", closeMenu);
 			document.addEventListener("keydown", onKey);
 		}, 10);
+	}
+
+	_closeCastOptionsMenu () {
+		this._activeCastMenuCleanup?.();
+		this._activeCastMenuCleanup = null;
+		document.querySelector?.(".charsheet__cast-menu")?.remove();
 	}
 
 	async _pChooseActiveMetamagic ({spell, spellData, slotLevel, isExplicit = false}) {

@@ -241,6 +241,23 @@ test("stale move completion cannot detach the selected character and terminal de
 			targetCampaignId,
 			name: "Deferred Source",
 		});
+		await player.page.evaluate(async ({selectedCharacterId, sourceCharacterId}) => {
+			const sheet = (globalThis as any).charSheet;
+			await sheet._pLoadCharacter(selectedCharacterId);
+			await sheet._pLoadCharacter(sourceCharacterId);
+		}, {
+			selectedCharacterId: selectedCharacter.id,
+			sourceCharacterId: sourceCharacter.id,
+		});
+		await expect.poll(() => player.page.evaluate(
+			() => (globalThis as any).charSheet._campaign._movePreview,
+		)).toBeNull();
+		await player.prepareCharacterMove({
+			characterId: sourceCharacter.id,
+			sourceCampaignId,
+			targetCampaignId,
+			name: "Deferred Source",
+		});
 		const moveRequests: string[] = [];
 		player.page.on("request", request => {
 			if (new URL(request.url()).pathname === `/api/characters/${sourceCharacter.id}/move`) {

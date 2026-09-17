@@ -452,6 +452,11 @@ class CharacterSheetCombat {
 			const item = e.target.closest(".charsheet__attack-item");
 			if (!item) return;
 			if (e.target.closest("a")) return; // keep real link context menus working
+			if (this._page?.isCurrentCharacterReadOnly?.()) {
+				e.preventDefault();
+				ContextUtil.closeAllMenus();
+				return;
+			}
 			const attackId = item.dataset.attackId;
 			if (!attackId) return;
 			const gs = this._page?._resolveGuidedStrikeAbility?.();
@@ -460,7 +465,10 @@ class CharacterSheetCombat {
 			const menu = ContextUtil.getMenu([
 				new ContextUtil.Action(
 					"⚔️ Guided Strike (+10)",
-					() => this._page?._pUseGuidedStrikeOnAttack?.(attackId),
+					() => {
+						if (this._page?.isCurrentCharacterReadOnly?.()) return;
+						return this._page?._pUseGuidedStrikeOnAttack?.(attackId);
+					},
 				),
 			]);
 			void ContextUtil.pOpenMenu(e, menu);

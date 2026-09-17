@@ -201,3 +201,39 @@ describe("R17 Bug #3b: cast-options menu surfaces Feywild only as a metamagic va
 	});
 });
 // endregion
+
+describe("DM read-only cast-menu authority", () => {
+	let spells;
+
+	beforeEach(() => {
+		spells = makeSpells();
+		spells._activeCastMenuCleanup = null;
+	});
+
+	it("does not render a cast menu for a read-only projection", () => {
+		const previousDocument = globalThis.document;
+		const querySelector = jest.fn(() => null);
+		globalThis.document = {querySelector};
+		spells._page.isCurrentCharacterReadOnly = () => true;
+		try {
+			spells._showCastOptionsMenu(null, "Cast Fireball", [{label: "Cast", onSelect: jest.fn()}]);
+		} finally {
+			globalThis.document = previousDocument;
+		}
+
+		expect(querySelector).toHaveBeenCalledWith(".charsheet__cast-menu");
+	});
+
+	it("does not open a spell context menu for a read-only projection", () => {
+		const event = {preventDefault: jest.fn()};
+		spells._page.isCurrentCharacterReadOnly = () => true;
+		spells._closeCastOptionsMenu = jest.fn();
+		spells._state = {getSpells: jest.fn(() => { throw new Error("must not read state"); })};
+
+		spells._openSpellCastMenu("fb", event);
+
+		expect(event.preventDefault).toHaveBeenCalledTimes(1);
+		expect(spells._closeCastOptionsMenu).toHaveBeenCalledTimes(1);
+		expect(spells._state.getSpells).not.toHaveBeenCalled();
+	});
+});

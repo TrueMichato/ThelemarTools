@@ -161,6 +161,8 @@ export class CharacterSheetCampaign {
 		this._currentCharacter = null;
 		this._currentCampaign = null;
 		this._sharing = null;
+		this._selectedCampaignId = null;
+		this._movePreview = null;
 		this._feedback = null;
 		this.render();
 	}
@@ -511,7 +513,12 @@ export class CharacterSheetCampaign {
 			panel.append(createElement("div", {className: "charsheet__campaign-loading", text: "Comparing campaign rules and homebrew…"}));
 			return;
 		}
-		if (!this._movePreview || this._movePreview.campaignId !== campaignId) {
+		const isCurrentMovePreview = this._movePreview
+			&& this._movePreview.characterId === this._page._currentCharacterId
+			&& this._movePreview.characterLoadGeneration === this._page._characterLoadGeneration
+			&& this._movePreview.sourceCampaignId === sourceCampaignId
+			&& this._movePreview.campaignId === campaignId;
+		if (!isCurrentMovePreview) {
 			const review = createElement("button", {
 				className: "charsheet__campaign-button",
 				text: "Review move instead",
@@ -580,6 +587,9 @@ export class CharacterSheetCampaign {
 			]);
 			if (!isCurrentCharacter()) return;
 			this._movePreview = {
+				characterId,
+				characterLoadGeneration,
+				sourceCampaignId,
 				campaignId,
 				report: getCampaignCompatibilityReport({source, target}),
 				rulesVersionId: target.rulesVersion?.id || null,
@@ -670,7 +680,12 @@ export class CharacterSheetCampaign {
 			&& this._page._characterLoadGeneration === characterLoadGeneration
 		);
 		if (!characterId || !campaignId || this._isBusy) return;
-		if (!isDetached && (!sourceCampaignId || this._movePreview?.campaignId !== campaignId)) return;
+		const isCurrentMovePreview = this._movePreview
+			&& this._movePreview.characterId === characterId
+			&& this._movePreview.characterLoadGeneration === characterLoadGeneration
+			&& this._movePreview.sourceCampaignId === sourceCampaignId
+			&& this._movePreview.campaignId === campaignId;
+		if (!isDetached && (!sourceCampaignId || !isCurrentMovePreview)) return;
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();

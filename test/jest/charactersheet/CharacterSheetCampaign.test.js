@@ -107,6 +107,17 @@ function getControl ({
 	return {control, page};
 }
 
+function setCurrentMovePreview ({control, page, campaignId = "campaign-2", rulesVersionId = null, report = {}}) {
+	control._movePreview = {
+		characterId: page._currentCharacterId,
+		characterLoadGeneration: page._characterLoadGeneration,
+		sourceCampaignId: control._currentCharacter?.campaignId || null,
+		campaignId,
+		report,
+		rulesVersionId,
+	};
+}
+
 describe("Character Sheet campaign control", () => {
 	it("does not load owner-only sharing controls for a DM read-only sheet", async () => {
 		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
@@ -419,7 +430,7 @@ describe("Character Sheet campaign control", () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
 
@@ -439,7 +450,7 @@ describe("Character Sheet campaign control", () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}};
+		setCurrentMovePreview({control, page});
 		control._api.pMoveCharacter.mockRejectedValueOnce(new HubApiError({code: "CHARACTER_BUSY", status: 409}));
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
@@ -455,7 +466,7 @@ describe("Character Sheet campaign control", () => {
 		page._currentCharacterId = "cloud-source";
 		page._saveCurrentCharacter.mockImplementationOnce(() => save.promise);
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
 		control._api.pMoveCharacter.mockRejectedValueOnce(new HubApiError({code: "CHARACTER_BUSY", status: 409}));
 
 		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
@@ -479,7 +490,7 @@ describe("Character Sheet campaign control", () => {
 		page._characterLoadGeneration = 7;
 		page._saveCurrentCharacter.mockImplementationOnce(() => save.promise);
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
 
 		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
 		await Promise.resolve();
@@ -543,12 +554,26 @@ describe("Character Sheet campaign control", () => {
 		expect(control._feedback).toBeNull();
 	});
 
+	it("clears a completed move preview when character scope changes", () => {
+		const {control, page} = getControl();
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration = 4;
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		control._selectedCampaignId = "campaign-2";
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
+
+		control.resetCharacterScope();
+
+		expect(control._movePreview).toBeNull();
+		expect(control._selectedCampaignId).toBeNull();
+	});
+
 	it("does not restore the source subscription when a rejected move settles after a switch", async () => {
 		const {control, page} = getControl();
 		const move = makeDeferred();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
 		control._api.pMoveCharacter.mockImplementationOnce(() => move.promise);
 
 		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
@@ -571,7 +596,7 @@ describe("Character Sheet campaign control", () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}};
+		setCurrentMovePreview({control, page});
 		control._api.pMoveCharacter.mockRejectedValueOnce(error);
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});

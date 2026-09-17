@@ -2726,10 +2726,18 @@ class CharacterSheetPage {
 
 		// Header buttons
 		bind("charsheet-btn-new", "click", () => this._onNewCharacter());
-		bind("charsheet-btn-new", "contextmenu", (e) => { e.preventDefault(); this._pOpenSpawnDialog(); });
+		bind("charsheet-btn-new", "contextmenu", (e) => {
+			e.preventDefault();
+			if (this.isCurrentCharacterReadOnly()) return;
+			this._pOpenSpawnDialog();
+		});
 		bind("charsheet-btn-duplicate", "click", () => this._onDuplicateCharacter());
 		bind("charsheet-btn-delete", "click", () => this._onDeleteCharacter());
-		bind("charsheet-btn-delete", "contextmenu", (e) => { e.preventDefault(); this._onManageCharacters(); });
+		bind("charsheet-btn-delete", "contextmenu", (e) => {
+			e.preventDefault();
+			if (this.isCurrentCharacterReadOnly()) return;
+			this._onManageCharacters();
+		});
 		bind("charsheet-btn-modifiers", "click", () => this._showCustomModifiersModal());
 		bind("charsheet-btn-settings", "click", () => this._showSettingsModal());
 		// Import/Export/Print handled by CharacterSheetExport module
@@ -3004,7 +3012,7 @@ class CharacterSheetPage {
 			event.preventDefault();
 			event.stopImmediatePropagation();
 		};
-		for (const eventName of ["click", "input", "change", "submit", "keydown", "dragstart", "dragover", "drop"]) {
+		for (const eventName of ["click", "input", "change", "submit", "keydown", "contextmenu", "dragstart", "dragover", "drop"]) {
 			root.addEventListener(eventName, handle, true);
 		}
 	}
@@ -3751,7 +3759,15 @@ class CharacterSheetPage {
 		try {
 			await this._characterRepository.pDeleteMany({characterIds: [...selectedIds]});
 		} catch (error) {
-			if (activeDeletedId && this._currentCharacterId === activeDeletedId) {
+			const currentDeletedId = error?.deletedCharacterIds?.includes(this._currentCharacterId)
+				? this._currentCharacterId
+				: null;
+			if (currentDeletedId) {
+				this._endCurrentHubCharacterAccess({
+					characterId: currentDeletedId,
+					accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+				});
+			} else if (activeDeletedId && this._currentCharacterId === activeDeletedId) {
 				if (error?.deletedCharacterIds?.includes(activeDeletedId)) {
 					this._endCurrentHubCharacterAccess({
 						characterId: activeDeletedId,
@@ -5569,7 +5585,13 @@ class CharacterSheetPage {
 			}
 		}
 		if (isReadOnly) {
+			this._spells?._closeCastOptionsMenu?.();
+			globalThis._charsheetMobile?._cancelLongPress?.();
+			globalThis._charsheetMobile?._hideContextMenu?.();
+			globalThis.ContextUtil?.closeAllMenus?.();
 			document.querySelectorAll?.(".pm-context-menu, .pm-modal-overlay, #pm-sticky-overlay")
+				?.forEach?.(element => element.remove());
+			document.querySelectorAll?.(".charsheet__ability-menu")
 				?.forEach?.(element => element.remove());
 		}
 		if (isReadOnly) this._updateSaveIndicator("readonly");
@@ -18447,6 +18469,10 @@ class CharacterSheetPage {
 	_showSkillAbilityMenu (event, skillKey, skillName, defaultAbility) {
 		event.preventDefault();
 		event.stopPropagation();
+		if (this.isCurrentCharacterReadOnly()) {
+			document.querySelector(".charsheet__ability-menu")?.remove();
+			return;
+		}
 
 		// Remove any existing menu
 		document.querySelector(".charsheet__ability-menu")?.remove();
@@ -18476,6 +18502,7 @@ class CharacterSheetPage {
 			`});
 			optionEl.addEventListener("click", (e) => {
 				menu.remove();
+				if (this.isCurrentCharacterReadOnly()) return;
 				this._rollSkillCheck(skillKey, skillName, e, ability);
 			});
 			this._bindActivate(optionEl, {label: `Roll ${skillName} using ${abilityNames[ability]}`});

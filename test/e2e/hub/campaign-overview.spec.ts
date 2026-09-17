@@ -164,6 +164,53 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await expect(dm.page.locator("#charsheet-play-mode [role='button']").first())
 			.toHaveAttribute("tabindex", "-1");
 		await dm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._state.setViewMode("sheet");
+			sheet._playMode.deactivate();
+			(globalThis as any).__dmContextActions = {spawn: 0, manage: 0, cast: 0, mobile: 0};
+			sheet._pOpenSpawnDialog = () => { (globalThis as any).__dmContextActions.spawn++; };
+			sheet._onManageCharacters = () => { (globalThis as any).__dmContextActions.manage++; };
+		});
+		await dm.page.locator("#charsheet-btn-new").dispatchEvent("contextmenu");
+		await dm.page.locator("#charsheet-btn-delete").dispatchEvent("contextmenu");
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmContextActions))
+			.toEqual({spawn: 0, manage: 0, cast: 0, mobile: 0});
+
+		await dm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			const fnIsReadOnly = sheet.isCurrentCharacterReadOnly;
+			sheet.isCurrentCharacterReadOnly = () => false;
+			sheet._spells._showCastOptionsMenu(null, "Read-only stale cast", [{
+				label: "Cast",
+				onSelect: () => { (globalThis as any).__dmContextActions.cast++; },
+			}]);
+			sheet.isCurrentCharacterReadOnly = fnIsReadOnly;
+		});
+		await expect(dm.page.locator(".charsheet__cast-menu")).toBeVisible();
+		await dm.page.locator(".charsheet__cast-menu-option").click();
+		await expect(dm.page.locator(".charsheet__cast-menu")).toHaveCount(0);
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmContextActions.cast)).toBe(0);
+
+		await dm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			const mobile = (globalThis as any)._charsheetMobile;
+			const fnIsReadOnly = sheet.isCurrentCharacterReadOnly;
+			const fnGetItems = mobile._getContextMenuItems;
+			sheet.isCurrentCharacterReadOnly = () => false;
+			mobile._getContextMenuItems = () => [{
+				icon: "!",
+				label: "Read-only stale mobile action",
+				action: () => { (globalThis as any).__dmContextActions.mobile++; },
+			}];
+			mobile._showContextMenu(document.body, {clientX: 24, clientY: 24});
+			mobile._getContextMenuItems = fnGetItems;
+			sheet.isCurrentCharacterReadOnly = fnIsReadOnly;
+		});
+		await expect(dm.page.locator(".charsheet-mobile__context-menu")).toHaveClass(/charsheet-mobile--visible/);
+		await dm.page.locator(".charsheet-mobile__context-menu-item").click();
+		await expect(dm.page.locator(".charsheet-mobile__context-menu")).not.toHaveClass(/charsheet-mobile--visible/);
+		expect(await dm.page.evaluate(() => (globalThis as any).__dmContextActions.mobile)).toBe(0);
+		await dm.page.evaluate(() => {
 			(globalThis as any).__dmRecipientNotices = [];
 			const fnToast = (globalThis as any).JqueryUtil.doToast.bind((globalThis as any).JqueryUtil);
 			(globalThis as any).JqueryUtil.doToast = (options: any) => {
@@ -541,6 +588,15 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 		await expect(body).toBeVisible();
 		await expect(body).toContainText("Server-authorized profile shared with players");
 
+		const initialPolicy = await owner.getProjectionPolicy(character.id);
+		const hiddenIdentityPolicy = {version: 1, preset: "private", overrides: {hp: {mode: "share"}}};
+		const hiddenIdentityResult = await owner.setProjectionPolicy({
+			characterId: character.id,
+			expectedProjectionRevision: initialPolicy.projectionRevision,
+			policy: hiddenIdentityPolicy,
+		});
+		await expect(viewer.page.locator("#campaign-party-roster")).not.toContainText("Shared Profile Hero");
+
 		let markActionsRefreshStarted = () => {};
 		const actionsRefreshStarted = new Promise<void>(resolve => {
 			markActionsRefreshStarted = resolve;
@@ -587,11 +643,10 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
 			});
 		});
-		const currentPolicy = await owner.getProjectionPolicy(character.id);
 		const unchangedPolicy = await owner.setProjectionPolicy({
 			characterId: character.id,
-			expectedProjectionRevision: currentPolicy.projectionRevision,
-			policy: currentPolicy.policy,
+			expectedProjectionRevision: hiddenIdentityResult.projectionRevision,
+			policy: hiddenIdentityPolicy,
 		});
 		await actionsRefreshStarted;
 		failSnapshotRefresh = true;
@@ -611,6 +666,93 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 			pCloseContext(viewerContext),
 			pCloseContext(ownerContext),
 		]);
+	}
+});
+
+test("a stale transfer refresh cannot discard a draft needed by the next projection generation", async ({browser}) => {
+	test.setTimeout(120_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const dmContext = await browser.newContext(contextOptions);
+	const ownerContext = await browser.newContext(contextOptions);
+	try {
+		const dm = new HubCampaignPage(await dmContext.newPage());
+		const owner = new HubCampaignPage(await ownerContext.newPage());
+		await dm.signInSynthetic({providerSubject: "draft-fence-dm", displayName: "Draft Fence DM", secret});
+		await owner.signInSynthetic({providerSubject: "draft-fence-owner", displayName: "Draft Fence Owner", secret});
+		const campaignId = await dm.createCampaign("Transfer Draft Fence E2E");
+		await owner.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		const character = await owner.createCharacter({campaignId, name: "Draft Fence Hero"});
+
+		await dm.gotoCampaign(campaignId);
+		await expect(dm.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
+		const workbench = dm.page.locator("#campaign-workbench");
+		if (!await workbench.evaluate(element => (element as HTMLDetailsElement).open)) {
+			await workbench.locator(":scope > summary").click();
+		}
+		const partySource = dm.page.locator("#campaign-transfer-source option").filter({hasText: "Party inventory"}).first();
+		await dm.page.locator("#campaign-transfer-source").selectOption(await partySource.getAttribute("value") || "");
+		await dm.page.locator("#campaign-transfer-target").selectOption({label: "Draft Fence Hero"});
+		await dm.page.locator("#campaign-transfer-gp").fill("7");
+		const selections = await dm.page.evaluate(() => ({
+			source: (document.getElementById("campaign-transfer-source") as HTMLSelectElement).value,
+			target: (document.getElementById("campaign-transfer-target") as HTMLSelectElement).value,
+		}));
+
+		let markFirstRefreshStarted = () => {};
+		const firstRefreshStarted = new Promise<void>(resolve => {
+			markFirstRefreshStarted = resolve;
+		});
+		let continueFirstRefresh = () => {};
+		const firstRefreshGate = new Promise<void>(resolve => {
+			continueFirstRefresh = resolve;
+		});
+		let transferRefreshCount = 0;
+		await dm.page.route(`**/api/campaigns/${campaignId}/transfers`, async route => {
+			if (route.request().method() !== "GET") {
+				await route.continue();
+				return;
+			}
+			transferRefreshCount++;
+			if (transferRefreshCount === 1) {
+				markFirstRefreshStarted();
+				await firstRefreshGate;
+			}
+			await route.continue();
+		});
+
+		const policy = await owner.getProjectionPolicy(character.id);
+		const firstUpdate = await owner.setProjectionPolicy({
+			characterId: character.id,
+			expectedProjectionRevision: policy.projectionRevision,
+			policy: policy.policy,
+		});
+		await firstRefreshStarted;
+		await expect.poll(() => dm.page.evaluate(() => (
+			(document.getElementById("campaign-transfer-form") as any)._hubProjectionTransferDraft?.currency?.gp
+		))).toBe("7");
+		await owner.setProjectionPolicy({
+			characterId: character.id,
+			expectedProjectionRevision: firstUpdate.projectionRevision,
+			policy: policy.policy,
+		});
+		continueFirstRefresh();
+
+		await expect.poll(() => transferRefreshCount).toBeGreaterThanOrEqual(2);
+		await expect.poll(() => dm.page.evaluate(() => ({
+			source: (document.getElementById("campaign-transfer-source") as HTMLSelectElement).value,
+			target: (document.getElementById("campaign-transfer-target") as HTMLSelectElement).value,
+			gp: (document.getElementById("campaign-transfer-gp") as HTMLInputElement).value,
+			hasDraft: !!(document.getElementById("campaign-transfer-form") as any)._hubProjectionTransferDraft,
+		}))).toEqual({...selections, gp: "7", hasDraft: false});
+		await expect(dm.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
+	} finally {
+		await Promise.all([pCloseContext(dmContext), pCloseContext(ownerContext)]);
 	}
 });
 

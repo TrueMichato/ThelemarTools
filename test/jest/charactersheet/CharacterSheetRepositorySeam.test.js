@@ -466,8 +466,10 @@ describe("Character Sheet repository seam", () => {
 			_endCurrentHubCharacterAccess: jest.fn(() => true),
 		};
 		const previousMultipleChoice = globalThis.InputUiUtil.pGetUserMultipleChoice;
+		const previousGetUserString = globalThis.InputUiUtil.pGetUserString;
 		const previousEscapeQuotes = String.prototype.escapeQuotes;
 		globalThis.InputUiUtil.pGetUserMultipleChoice = jest.fn(async () => characters);
+		globalThis.InputUiUtil.pGetUserString = jest.fn(async () => "DELETE");
 		String.prototype.escapeQuotes = function () { return `${this}`; };
 		const confirm = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
 		try {
@@ -476,6 +478,8 @@ describe("Character Sheet repository seam", () => {
 			confirm.mockRestore();
 			if (previousMultipleChoice) globalThis.InputUiUtil.pGetUserMultipleChoice = previousMultipleChoice;
 			else delete globalThis.InputUiUtil.pGetUserMultipleChoice;
+			if (previousGetUserString) globalThis.InputUiUtil.pGetUserString = previousGetUserString;
+			else delete globalThis.InputUiUtil.pGetUserString;
 			if (previousEscapeQuotes) String.prototype.escapeQuotes = previousEscapeQuotes;
 			else delete String.prototype.escapeQuotes;
 		}
@@ -527,6 +531,60 @@ describe("Character Sheet repository seam", () => {
 		expect(host._attachHubRealtime).not.toHaveBeenCalled();
 	});
 
+	it("conceals a later-selected character in the committed prefix of a partial bulk delete", async () => {
+		const deletion = makeDeferred();
+		const partialError = Object.assign(new Error("third archive failed"), {
+			code: "NETWORK_UNAVAILABLE",
+			deletedCharacterIds: ["character-a", "character-b"],
+		});
+		const characters = [
+			{id: "character-a", name: "Mira"},
+			{id: "character-b", name: "Rin"},
+			{id: "character-c", name: "Sol"},
+		];
+		const host = {
+			_characterRepository: {
+				pList: jest.fn(async () => characters),
+				pDeleteMany: jest.fn(() => deletion.promise),
+			},
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_detachHubRealtime: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_canRestoreHubRealtimeAfterError: CharacterSheetPage.prototype._canRestoreHubRealtimeAfterError,
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+		};
+		const previousMultipleChoice = globalThis.InputUiUtil.pGetUserMultipleChoice;
+		const previousGetUserString = globalThis.InputUiUtil.pGetUserString;
+		const previousEscapeQuotes = String.prototype.escapeQuotes;
+		globalThis.InputUiUtil.pGetUserMultipleChoice = jest.fn(async () => characters);
+		globalThis.InputUiUtil.pGetUserString = jest.fn(async () => "DELETE");
+		String.prototype.escapeQuotes = function () { return `${this}`; };
+		const confirm = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockResolvedValue(true);
+		try {
+			const pending = CharacterSheetPage.prototype._onManageCharacters.call(host);
+			await new Promise(resolve => setImmediate(resolve));
+			expect(host._characterRepository.pDeleteMany).toHaveBeenCalledTimes(1);
+			host._currentCharacterId = "character-b";
+			deletion.reject(partialError);
+			await expect(pending).rejects.toBe(partialError);
+		} finally {
+			confirm.mockRestore();
+			if (previousMultipleChoice) globalThis.InputUiUtil.pGetUserMultipleChoice = previousMultipleChoice;
+			else delete globalThis.InputUiUtil.pGetUserMultipleChoice;
+			if (previousGetUserString) globalThis.InputUiUtil.pGetUserString = previousGetUserString;
+			else delete globalThis.InputUiUtil.pGetUserString;
+			if (previousEscapeQuotes) String.prototype.escapeQuotes = previousEscapeQuotes;
+			else delete String.prototype.escapeQuotes;
+		}
+
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-b",
+			accessEndCause: "character",
+		});
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+	});
+
 	it("disables mutation controls before a DM can edit a read-only sheet", () => {
 		const makeControl = ({id = "", disabled = false, role = null, tabindex = null, draggable = null} = {}) => {
 			const attributes = new Map();
@@ -550,6 +608,10 @@ describe("Character Sheet repository seam", () => {
 		const exportButton = makeControl({id: "charsheet-btn-export"});
 		const moreButton = makeControl({id: "charsheet-btn-more"});
 		const stalePortal = {remove: jest.fn()};
+		const closeCastOptionsMenu = jest.fn();
+		const cancelLongPress = jest.fn();
+		const hideMobileContextMenu = jest.fn();
+		const closeAllMenus = jest.fn();
 		const root = {
 			classList: {toggle: jest.fn()},
 			getAttribute: jest.fn(() => null),
@@ -557,18 +619,29 @@ describe("Character Sheet repository seam", () => {
 			querySelectorAll: jest.fn(() => [edit, customButton, draggable, characterSelect, exportButton, moreButton]),
 		};
 		const documentPrevious = globalThis.document;
+		const mobilePrevious = globalThis._charsheetMobile;
+		const contextUtilPrevious = globalThis.ContextUtil;
 		globalThis.document = {
 			querySelector: () => root,
 			querySelectorAll: () => [stalePortal],
 		};
+		globalThis._charsheetMobile = {
+			_cancelLongPress: cancelLongPress,
+			_hideContextMenu: hideMobileContextMenu,
+		};
+		globalThis.ContextUtil = {...contextUtilPrevious, closeAllMenus};
 		const host = {
 			_currentCharacterAccess: "dm_readonly",
+			_spells: {_closeCastOptionsMenu: closeCastOptionsMenu},
 			_updateSaveIndicator: jest.fn(),
 		};
 		try {
 			CharacterSheetPage.prototype._applyCharacterAccessMode.call(host);
 		} finally {
 			globalThis.document = documentPrevious;
+			if (mobilePrevious) globalThis._charsheetMobile = mobilePrevious;
+			else delete globalThis._charsheetMobile;
+			globalThis.ContextUtil = contextUtilPrevious;
 		}
 
 		expect(edit.disabled).toBe(true);
@@ -579,7 +652,11 @@ describe("Character Sheet repository seam", () => {
 		expect(characterSelect.disabled).toBe(false);
 		expect(exportButton.disabled).toBe(false);
 		expect(moreButton.disabled).toBe(false);
-		expect(stalePortal.remove).toHaveBeenCalledTimes(1);
+		expect(stalePortal.remove).toHaveBeenCalledTimes(2);
+		expect(closeCastOptionsMenu).toHaveBeenCalledTimes(1);
+		expect(cancelLongPress).toHaveBeenCalledTimes(1);
+		expect(hideMobileContextMenu).toHaveBeenCalledTimes(1);
+		expect(closeAllMenus).toHaveBeenCalledTimes(1);
 		expect(host._updateSaveIndicator).toHaveBeenCalledWith("readonly");
 
 		host._currentCharacterAccess = "owner";
@@ -874,7 +951,7 @@ describe("Character Sheet repository seam", () => {
 				expect(keyboardActivation.stopImmediatePropagation).toHaveBeenCalled();
 			}
 
-			for (const type of ["dragstart", "dragover", "drop"]) {
+			for (const type of ["contextmenu", "dragstart", "dragover", "drop"]) {
 				const drag = {
 					type,
 					target: {closest: () => null},

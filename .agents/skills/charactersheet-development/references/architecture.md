@@ -340,6 +340,14 @@ BEM-like naming: `.charsheet__element--modifier`
     skips spent/disabled rows, and delegates activation to its existing control.
     Synthetic combat resources use the same contract; the mobile module never
     branches on class, subclass, or feature names.
+15. **`dm_readonly` is checked at menu entry and action time.** The page capture
+    guard blocks desktop context-menu and long-press entry, but spell/mobile menus
+    are portaled to `document.body`, and `ContextUtil` callbacks may already have
+    been created under older authority. Those callbacks recheck
+    `isCurrentCharacterReadOnly()` immediately before acting. Applying read-only
+    mode cancels pending long-press, closes portaled spell/mobile/ability/attack
+    menus, and then disables late-rendered controls. Export and Print remain
+    explicit allowed actions.
 
 Form controls on mobile take a 16px **floor**
 (`max(16px, calc(var(--cs-text-sm) * var(--cs-text-scale)))`) rather than a flat

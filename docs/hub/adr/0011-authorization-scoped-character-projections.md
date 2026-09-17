@@ -167,6 +167,12 @@ replace live local state from an invalidation-triggered fetch: ordinary document
 and live-state rebase, while semantic operations use
 [ADR 0012](0012-idempotent-semantic-character-operations.md).
 
+The invalidation audience is the union of viewers authorized by the old or new policy to receive **any**
+projection field. It is intentionally broader than shared-activity visibility: identity can be hidden while HP,
+conditions, or another field is shared. Such a peer still receives the metadata-only invalidation needed to
+remove or replace that partial projection, without receiving the owner account, character id, name, changed
+field, or value.
+
 WebSocket resync no longer transports character documents or profiles. `resync_complete` supplies the campaign
 cursor, authorized event history, and at most character ids/revisions needed to invalidate client caches.
 Initial, reconnect, Party Tracker, and explicit refresh loads all use the same HTTP projector. This prevents a

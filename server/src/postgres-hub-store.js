@@ -13,6 +13,7 @@ import {
 	getPolicyNotAvailableError,
 	assertPeerTargetable,
 	canViewCharacterEventActor,
+	canViewSharedCharacterProjection,
 	canViewSharedCharacterEvent,
 	redactEventActor,
 	stripProjectionPolicy,
@@ -1726,12 +1727,12 @@ export class PostgresHubStore {
 			await this._pAppendAudit({client, campaignId: characterNxt.campaignId, actorAccountId: accountId, action: "character.projection_policy.updated", targetType: "character", targetId: characterId});
 			const visibleAccountIds = invalidationMemberships
 				.filter(membership => (
-					canViewSharedCharacterEvent({
+					canViewSharedCharacterProjection({
 						character,
 						accountId: membership.account_id,
 						role: membership.role,
 					})
-					|| canViewSharedCharacterEvent({
+					|| canViewSharedCharacterProjection({
 						character: characterNxt,
 						accountId: membership.account_id,
 						role: membership.role,

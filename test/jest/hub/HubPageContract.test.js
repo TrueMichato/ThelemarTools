@@ -159,7 +159,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("const isDefinitiveWithoutPending = error instanceof HubApiError");
 		expect(source).toContain("&& !isTransferOutcomeUncertain(error)");
 		expect(source).toContain("if (isDefinitiveWithoutPending) {");
-		expect(source).toContain("await pRefreshTransferState();");
+		expect(source).toContain("await pRefreshTransferState({fnIsCurrent})");
 		expect(source).toContain("The latest balances could not be loaded.");
 		expect(source).toContain("setTransferProposalControls");
 		expect(source).toContain("form._hubTransferControlStates");
@@ -175,6 +175,10 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("The committed outcome is safe");
 		expect(source).toContain("The transfer outcome is not yet confirmed.");
 		expect(source).toContain("Retry inbox refresh");
+		expect(source).toContain("fnIsCurrentAtAdmission = refresh.fnIsCurrent || captureProjectionAuthorization()");
+		expect(source).toContain("if (!fnIsCurrent() || transferState.isFenced) return {pendingTransferIds: [], isFenced: true}");
+		expect(source).toMatch(/const restoreTransferControlState = \(\) => \{[\s\S]*if \(!fnIsCurrent\(\)\) return false;[\s\S]*delete form\?\._hubProjectionTransferDraft/);
+		expect(source).toContain("button.disabled = isCampaignReloadRequired || !!form._hubProjectionControlStates");
 		expect(source).not.toMatch(/pResolveTransfer\([\s\S]{0,300}idempotencyKey: crypto\.randomUUID\(\)/);
 	});
 
@@ -305,6 +309,15 @@ describe("campaign hub pages", () => {
 		expect(source).not.toContain("character.projection.updated");
 		expect(source).toContain("const reloadForAuthorityChange = () =>");
 		expect(source).toContain("let activityAuthorizationGeneration = 0");
+		expect(source).toContain("getProjectionAuthorizationGeneration: () => projectionAuthorizationGeneration");
+		expect(source).toContain("const captureProjectionAuthorization = () =>");
+		expect(source).toContain("let projectionSnapshotLastSequence = snapshot.lastSequence;");
+		expect(source).toContain("baselineSequence: projectionSnapshotLastSequence");
+		expect(source).toContain("const deferMutationUi = ({form, fnApply}) =>");
+		expect(source).toContain("requestProjectionRefresh()");
+		expect(source).toMatch(/else if \(isProjectionRefreshSuccessful && refreshTimer == null\) \{\s+flushDeferredMutationUi\(\)/);
+		expect(source).toContain("const isProjectionInvalidationCoveredByBaseline = isProjectionInvalidation");
+		expect(source).toContain("if (isProjectionInvalidationCoveredByBaseline) return;");
 		expect(source).toContain("let isActivityAuthorizationFenced = false");
 		expect(source).toContain("const invalidateActivityAuthorization = () =>");
 		expect(source).toContain("const concealCampaignAuthorization = ({isLoading = false} = {}) =>");
@@ -555,6 +568,12 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("itemAward.setCampaignBrewContent");
 		expect(source).toContain("api.pAwardItems");
 		expect(source).toContain("fingerprint: getAwardCommandFingerprint(submission)");
+		expect(source).toContain("form._hubProjectionControlRestores.add(restorePendingControlStates)");
+		expect(source).toMatch(/delete form\._hubProjectionControlRestores;\s+for \(const fnRestore of deferredControlRestores\) fnRestore\(\)/);
+		expect(source).toMatch(/const deferAwardCompletionUi = \(\{isApplySuccessUi = false\} = \{\}\) => \{[\s\S]*if \(isApplySuccessUi\) applyAwardSuccessUi\(\);[\s\S]*itemAward\.focusPrimary\(\)/);
+		expect(source).toMatch(/if \(!fnIsCurrent\(\)\) \{\s+deferAwardCompletionUi\(\{isApplySuccessUi: true\}\);\s+return;\s+\}\s+applyAwardSuccessUi\(\)/);
+		expect(source).toContain("if (!fnIsCurrent() || refreshResult?.isFenced) {");
+		expect(source).toContain("deferAwardCompletionUi();");
 		expect(source).toContain(".sort(([idA], [idB]) => idA.localeCompare(idB))");
 		expect(source).toContain("getTransferContentsDescription(transfer)");
 		expect(campaignHtml).not.toContain("Item entry ID");

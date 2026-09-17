@@ -46,8 +46,10 @@ When changing Character Sheet internals, also use `charactersheet-development` a
 - Live Party Tracker projections are read-only and stay outside serialized Board state.
 - Shared stash detail is not copied into the Board; only the authorized in-memory summary is exposed.
 - Access loss first fences saves and conceals projections/private workspace state, then clears rules/brew.
-- DM truth uses one `dm_readonly` mode across native and custom keyboard controls, including late renders. Export
-  and Print remain reachable through More; recipient notices remain owner-only while invalidations stay live.
+- DM truth uses one `dm_readonly` mode across native and custom keyboard controls, including late renders. Capture
+  guards cover context-menu/drag/long-press entry, and body-portaled spell, attack, ability, and mobile callbacks
+  recheck access before acting. Export and Print remain reachable through More; recipient notices remain owner-only
+  while invalidations stay live.
 - Journey Tracker consumes the existing Party Tracker projection and remains system-neutral.
 
 Primary seams: `js/dmscreen/dmscreen-hub-controller.js`, `js/dmscreen.js`,

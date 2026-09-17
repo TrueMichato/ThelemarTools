@@ -510,6 +510,11 @@ class CharacterSheetMobile {
 	}
 
 	_onLongPressStart (e) {
+		if (this._page?.isCurrentCharacterReadOnly?.()) {
+			this._cancelLongPress();
+			this._hideContextMenu();
+			return;
+		}
 		const target = e.target.closest(CharacterSheetMobile.LONG_PRESS_SELECTOR);
 		if (!target) return;
 
@@ -584,6 +589,7 @@ class CharacterSheetMobile {
 
 	_showContextMenu (target, touch) {
 		this._hideContextMenu();
+		if (this._page?.isCurrentCharacterReadOnly?.()) return;
 
 		if (!this._elContextMenu) {
 			this._elContextMenu = this._createContextMenu();
@@ -663,6 +669,7 @@ class CharacterSheetMobile {
 			} else {
 				el.addEventListener("click", () => {
 					this._hideContextMenu();
+					if (this._page?.isCurrentCharacterReadOnly?.()) return;
 					item.action();
 				});
 			}
@@ -757,6 +764,7 @@ class CharacterSheetMobile {
 	}
 
 	_getContextMenuItems (target) {
+		if (this._page?.isCurrentCharacterReadOnly?.()) return [];
 		const items = [];
 		// Skill/Save row
 		if (target.matches(".charsheet__skill-row, .charsheet__save-row")) {

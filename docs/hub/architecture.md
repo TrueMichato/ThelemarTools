@@ -239,6 +239,14 @@ is not treated as a delivery guarantee. Projection
 HTTP responses are request-sequence and attachment-generation fenced, so a slower old response or a response
 from a detached DM workspace cannot replace newer scoped truth.
 
+Campaign Overview uses a separate projection-authorization generation for roster, action-inbox, transfer-inbox,
+item-award, and grant controls. User mutations capture that generation before their first asynchronous operation
+and carry it through nested refreshes and queued transfer work. A stale completion cannot replace rows, clear form
+state, publish status text, or re-enable concealed controls. Transfer drafts captured during invalidation remain
+owned by the concealed generation until a current authorized refresh successfully restores and reveals them.
+Presence revalidation closes missing sessions as `Session expired` and missing memberships as
+`Membership revoked`, preserving the browser's signed-out fallback versus campaign-access-loss boundary.
+
 An authenticated campaign-backed Character Sheet attaches a focused realtime coordinator only after its
 canonical character has loaded. Socket-generation fencing makes stale messages, closes, and watchdog timers
 inert. The coordinator routes metadata-only projection invalidations and the frozen

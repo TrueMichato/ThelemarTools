@@ -1838,6 +1838,19 @@ export class HubCampaignPage {
 				.toHaveText(`${quantity} × ${itemName} awarded to ${characterNames.length} character${characterNames.length === 1 ? "" : "s"}.`);
 			expect(idempotencyKeys).toHaveLength(2);
 			expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+			await expect.poll(() => form.evaluate(element => ({
+				ariaBusy: element.getAttribute("aria-busy"),
+				hasMutationControlStates: !!(element as any)._hubMutationControlStates,
+				hasProjectionControlStates: !!(element as any)._hubProjectionControlStates,
+				isSearchDisabled: (element.querySelector("#campaign-item-search") as HTMLInputElement).disabled,
+				isSubmitting: !!(element as any)._hubIsSubmitting,
+			}))).toEqual({
+				ariaBusy: null,
+				hasMutationControlStates: false,
+				hasProjectionControlStates: false,
+				isSearchDisabled: false,
+				isSubmitting: false,
+			});
 			await expect(search).toBeFocused();
 			await expect(this.page.locator("#hub-error")).toBeHidden();
 		} finally {

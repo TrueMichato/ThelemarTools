@@ -654,11 +654,29 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			.find(transfer => transfer.id === directPass.transfer.id);
 		expect(dmViewAfterSourceAlias.sourceDisplaySnapshot).toEqual({version: 1, displayName: "Source"});
 
+		const partialPolicy = await store.pSetProjectionPolicy({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			policy: {
+				version: 1,
+				preset: "private",
+				overrides: {hp: {mode: "share"}},
+			},
+			expectedProjectionRevision: aliasPolicy.projectionRevision,
+			idempotencyKey: `${prefix}-share-source-hp-without-identity`,
+		});
+		const invalidationsBeforePrivate = (await store.pListVisibleEventPage({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			limit: 500,
+		})).events.filter(
+			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
+		);
 		const privatePolicy = await store.pSetProjectionPolicy({
 			accountId: sourceOwner.id,
 			characterId: sourceCharacter.id,
 			policy: {version: 1, preset: "private", overrides: {}},
-			expectedProjectionRevision: aliasPolicy.projectionRevision,
+			expectedProjectionRevision: partialPolicy.projectionRevision,
 			idempotencyKey: `${prefix}-hide-source-after-transfer`,
 		});
 		const targetInvalidations = (await store.pListVisibleEventPage({
@@ -668,6 +686,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		})).events.filter(
 			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
 		);
+		expect(targetInvalidations).toHaveLength(invalidationsBeforePrivate.length + 1);
 		expect(targetInvalidations.at(-1)).toMatchObject({
 			actorAccountId: null,
 			aggregateId: campaign.id,

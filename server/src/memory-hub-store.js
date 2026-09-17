@@ -13,6 +13,7 @@ import {
 	getPolicyNotAvailableError,
 	assertPeerTargetable,
 	canViewCharacterEventActor,
+	canViewSharedCharacterProjection,
 	canViewSharedCharacterEvent,
 	redactEventActor,
 	stripProjectionPolicy,
@@ -1282,12 +1283,12 @@ export class MemoryHubStore {
 		const projectionInvalidationVisibleAccountIds = [...this._memberships.values()]
 			.filter(membership => membership.campaignId === character.campaignId && membership.status === "active")
 			.filter(membership => (
-				canViewSharedCharacterEvent({
+				canViewSharedCharacterProjection({
 					character: {...character, projectionPolicy: previousProjectionPolicy},
 					accountId: membership.accountId,
 					role: membership.role,
 				})
-				|| canViewSharedCharacterEvent({
+				|| canViewSharedCharacterProjection({
 					character,
 					accountId: membership.accountId,
 					role: membership.role,

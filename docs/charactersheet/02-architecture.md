@@ -99,13 +99,18 @@ Hub repository save/rebase behavior remain unchanged.
 Character-scoped asynchronous workflows capture the character ID they started with and revalidate it after every
 `await` before releasing a lease, detaching or restoring realtime, navigating, reconciling inventory/effects, or
 showing operation feedback. A stale completion may finish its already-issued server request, but it must not mutate
-the newly selected character's client lifecycle.
+the newly selected character's client lifecycle. A completed move preview is authority-bearing state: it is bound
+to the character ID, character-load generation, source campaign, and destination campaign, and character-scope
+reset clears it. Partial bulk deletion uses the server-confirmed committed-prefix IDs; if the character selected
+while deletion was in flight is in that prefix, the sheet conceals it instead of restoring realtime.
 
 DM truth is one explicit `dm_readonly` access mode. Native form controls, contenteditable regions, and custom
-`[role="button"]` controls are disabled before input; the capture guard blocks click and Enter/Space activation while
-preserving navigation and the safe Character selector, More, Roll Log, Export, and Print paths. Late Play Mode renders
-reapply the same access mode. Recipient-framed award notices are owner-only in this view, while metadata-only
-projection/inventory invalidations continue to refresh the authorized DM projection.
+`[role="button"]` controls are disabled before input; the capture guard blocks click, Enter/Space, context-menu,
+drag/drop, and long-press activation while preserving navigation and the safe Character selector, More, Roll Log,
+Export, and Print paths. Body-portaled spell, ability, attack, and mobile menus recheck access inside their action
+callbacks, and entering read-only mode closes any menu which was opened under older authority. Late Play Mode and
+other renders reapply the same access mode. Recipient-framed award notices are owner-only in this view, while
+metadata-only projection/inventory invalidations continue to refresh the authorized DM projection.
 
 ### Campaign Hub content-policy boundary
 
