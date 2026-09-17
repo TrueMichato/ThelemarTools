@@ -2,6 +2,7 @@ import "./setup.js";
 import {jest} from "@jest/globals";
 import {HubCharacterMemoryAuthority, HubCharacterRepository} from "../../../js/hub/hub-character-repository.js";
 import {CHARACTER_ACCESS_MODES} from "../../../js/hub/hub-character-view.js";
+import {CHARACTER_REALTIME_ACCESS_END_CAUSES} from "../../../js/charactersheet/charactersheet-realtime.js";
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname;
 let CharacterSheetPage;
@@ -1535,6 +1536,125 @@ describe("Character Sheet repository seam", () => {
 			characterId: "character-1",
 			generation: 1,
 		});
+	});
+
+	it("conceals stale DM truth when a disconnected role-demoted viewer selects another character", async () => {
+		const loadError = Object.assign(new Error("Target is now peer-profile scoped."), {
+			code: "CHARACTER_PROJECTION_SCOPED",
+		});
+		const main = {
+			hidden: false,
+			replaceChildren: jest.fn(),
+			before: jest.fn(),
+		};
+		const accessEndedMessage = {setAttribute: jest.fn()};
+		const previousDocument = globalThis.document;
+		globalThis.document = {
+			body: {append: jest.fn()},
+			createElement: jest.fn(() => accessEndedMessage),
+			getElementById: jest.fn(() => null),
+			querySelector: jest.fn(() => main),
+		};
+		const host = Object.assign(Object.create(CharacterSheetPage.prototype), {
+			_characterRepository: {
+				pGet: jest.fn(async () => { throw loadError; }),
+				clearRealtimeReconciliation: jest.fn(),
+			},
+			_characterLoadGeneration: 4,
+			_currentCharacterId: "private-character-a",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			_isHubCharacter: true,
+			_isCurrentCharacterNew: false,
+			_selCharacter: {value: "target-character-b"},
+			_state: {
+				reset: jest.fn(),
+				clearCampaignSettingsOverlay: jest.fn(),
+				setCarryAuthorityContext: jest.fn(),
+			},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_hubRealtimeGeneration: 2,
+			_hubRealtime: {detach: jest.fn()},
+			_isHubReadOnlyRefreshRequired: false,
+			_hubEffects: {onConnectionState: jest.fn(), deactivate: jest.fn()},
+			_peerTargeting: {deactivate: jest.fn(), onConnectionState: jest.fn()},
+			_partyInventory: {
+				isAttachedTo: jest.fn(() => true),
+				detach: jest.fn(),
+				pAttach: jest.fn(),
+			},
+			_campaign: {resetCharacterScope: jest.fn(), render: jest.fn()},
+			_hubActiveCampaign: {pHandleSurfaceRoleLoss: jest.fn(async () => {})},
+			_reattachRetainedHubCharacterIntegrations: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_hubContextGeneration: 0,
+			_hubRulesRefreshGeneration: 0,
+			_hubReadOnlyRefreshGeneration: 0,
+		});
+
+		try {
+			await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "target-character-b"))
+				.rejects.toBe(loadError);
+			await Promise.resolve();
+		} finally {
+			globalThis.document = previousDocument;
+		}
+
+		expect(host._currentCharacterId).toBeNull();
+		expect(host._currentCharacterAccess).toBe(CHARACTER_ACCESS_MODES.OWNER);
+		expect(host._state.reset).toHaveBeenCalledTimes(1);
+		expect(main.replaceChildren).toHaveBeenCalledTimes(1);
+		expect(main.hidden).toBe(true);
+		expect(accessEndedMessage).toMatchObject({
+			id: "charsheet-campaign-access-ended",
+			textContent: "Campaign access ended. Reload or return to the Campaign Hub.",
+		});
+		expect(host._selCharacter.value).toBe("target-character-b");
+		expect(host._hubRealtime.detach).toHaveBeenCalledTimes(1);
+		expect(host._partyInventory.detach).toHaveBeenCalledTimes(1);
+		expect(host._partyInventory.pAttach).not.toHaveBeenCalled();
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+		expect(host._reattachRetainedHubCharacterIntegrations).not.toHaveBeenCalled();
+		expect(host._hubActiveCampaign.pHandleSurfaceRoleLoss).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		{
+			label: "an owner receives a scoped-projection error",
+			accessMode: CHARACTER_ACCESS_MODES.OWNER,
+			error: Object.assign(new Error("Unexpected scoped owner response."), {code: "CHARACTER_PROJECTION_SCOPED"}),
+		},
+		{
+			label: "a DM read-only replacement load fails transiently",
+			accessMode: CHARACTER_ACCESS_MODES.DM_READ_ONLY,
+			error: Object.assign(new Error("Temporary network failure."), {code: "NETWORK_UNAVAILABLE"}),
+		},
+	])("keeps replacement-load recovery when $label", async ({accessMode, error}) => {
+		const host = {
+			_characterRepository: {pGet: jest.fn(async () => { throw error; })},
+			_characterLoadGeneration: 8,
+			_currentCharacterId: "character-a",
+			_currentCharacterAccess: accessMode,
+			_isHubCharacter: true,
+			_selCharacter: {value: "character-b"},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_partyInventory: {isAttachedTo: jest.fn(() => false)},
+			_reattachRetainedHubCharacterIntegrations: jest.fn(),
+			_onHubRealtimeConnectionState: jest.fn(),
+		};
+
+		await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-b")).rejects.toBe(error);
+
+		expect(host._selCharacter.value).toBe("character-a");
+		expect(host._reattachRetainedHubCharacterIntegrations).toHaveBeenCalledWith({
+			characterId: "character-a",
+			generation: 9,
+			isPartyInventoryAttached: false,
+		});
+		expect(host._onHubRealtimeConnectionState).not.toHaveBeenCalledWith(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
+		}));
 	});
 
 	it("does not create a party-inventory attachment after a failed initial character load", async () => {

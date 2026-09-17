@@ -57,9 +57,11 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 	};
 	const dmContext = await browser.newContext(contextOptions);
 	const playerContext = await browser.newContext(contextOptions);
+	const coDmContext = await browser.newContext(contextOptions);
 	try {
 		const dm = new HubCampaignPage(await dmContext.newPage());
 		const player = new HubCampaignPage(await playerContext.newPage());
+		const coDm = new HubCampaignPage(await coDmContext.newPage());
 		const conditionModuleRequests: string[] = [];
 		await dm.page.route(/\/js\/hub\/hub-condition-catalog\.js(?:\?.*)?$/, async route => {
 			conditionModuleRequests.push(route.request().url());
@@ -75,8 +77,10 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		});
 		await dm.signInSynthetic({providerSubject: "authority-dm", displayName: "Authority DM", secret});
 		await player.signInSynthetic({providerSubject: "authority-player", displayName: "Authority Player", secret});
+		await coDm.signInSynthetic({providerSubject: "authority-codm", displayName: "Authority Co-DM", secret});
 		const campaignId = await dm.createCampaign("Authority and Conditions E2E");
 		await player.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
+		await coDm.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId, "co_dm"));
 		const character = await player.createCharacter({campaignId, name: "Readonly Rowan"});
 		const dmCharacter = await dm.createCharacter({campaignId, name: "Authority DM Character"});
 		const playerSheet = new CharacterSheetPage(player.page);
@@ -645,8 +649,73 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 			async () => (await player.getCharacter(character.id)).data.conditions,
 			{timeout: 20_000},
 		).toContainEqual({name: "Blinded", source: "PHB"});
+
+		const coDmSheet = new CharacterSheetPage(coDm.page);
+		await coDmSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
+		await expect(coDmSheet.characterName).toHaveValue("Readonly Rowan Recovered");
+		expect(await coDm.page.evaluate(() => (globalThis as any).charSheet._currentCharacterAccess)).toBe("dm_readonly");
+		expect(await coDm.page.evaluate(
+			characterId => [...(globalThis as any).charSheet._selCharacter.options]
+				.some((option: HTMLOptionElement) => option.value === characterId),
+			dmCharacter.id,
+		)).toBe(true);
+		await coDm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			(globalThis as any).__roleLossRealtimeAttachCount = 0;
+			const attachHubRealtime = sheet._attachHubRealtime.bind(sheet);
+			sheet._attachHubRealtime = (...args: any[]) => {
+				(globalThis as any).__roleLossRealtimeAttachCount++;
+				return attachHubRealtime(...args);
+			};
+			(globalThis as any).__roleLossPartyAttachCount = 0;
+			const attachPartyInventory = sheet._partyInventory.pAttach.bind(sheet._partyInventory);
+			sheet._partyInventory.pAttach = (...args: any[]) => {
+				(globalThis as any).__roleLossPartyAttachCount++;
+				return attachPartyInventory(...args);
+			};
+			sheet._detachHubRealtimeClient();
+		});
+		await dm.changeMemberRoleViaApi({
+			campaignId,
+			displayName: "Authority Co-DM",
+			role: "player",
+		});
+		const scopedLoadResult = await coDm.page.evaluate(async characterId => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._selCharacter.value = characterId;
+			try {
+				await sheet._onCharacterSelect();
+				return {code: null};
+			} catch (error) {
+				return {code: (error as {code?: string})?.code ?? null};
+			}
+		}, dmCharacter.id);
+		expect(scopedLoadResult.code).toBe("CHARACTER_PROJECTION_SCOPED");
+		await expect(coDm.page.locator("main.charsheet-page")).toBeHidden();
+		await expect(coDm.page.locator("#charsheet-campaign-access-ended")).toHaveAttribute("role", "alert");
+		await expect(coDm.page.locator("body")).not.toContainText("Readonly Rowan Recovered");
+		expect(await coDm.page.evaluate(targetCharacterId => {
+			const sheet = (globalThis as any).charSheet;
+			return {
+				currentCharacterId: sheet._currentCharacterId,
+				currentCharacterName: sheet._state.toJson().name,
+				currentAccess: sheet._currentCharacterAccess,
+				selectorValue: sheet._selCharacter.value,
+				realtimeAttachCount: (globalThis as any).__roleLossRealtimeAttachCount,
+				partyAttachCount: (globalThis as any).__roleLossPartyAttachCount,
+				isPreviousPartyInventoryAttached: sheet._partyInventory.isAttachedTo?.({characterId: targetCharacterId}),
+			};
+		}, character.id)).toEqual({
+			currentCharacterId: null,
+			currentCharacterName: "",
+			currentAccess: "owner",
+			selectorValue: dmCharacter.id,
+			realtimeAttachCount: 0,
+			partyAttachCount: 0,
+			isPreviousPartyInventoryAttached: false,
+		});
 	} finally {
-		await Promise.all([pCloseContext(dmContext), pCloseContext(playerContext)]);
+		await Promise.all([pCloseContext(dmContext), pCloseContext(playerContext), pCloseContext(coDmContext)]);
 	}
 });
 

@@ -3263,6 +3263,7 @@ class CharacterSheetPage {
 
 	async _pLoadCharacter (charId) {
 		const previousCharacterId = this._currentCharacterId;
+		const previousCharacterAccess = this._currentCharacterAccess;
 		const isPreviousPartyInventoryAttached = this._partyInventory?.isAttachedTo?.({
 			characterId: previousCharacterId,
 		}) === true;
@@ -3275,18 +3276,32 @@ class CharacterSheetPage {
 		} catch (error) {
 			if (error?.code !== "CHARACTER_CAMPAIGN_MISMATCH") {
 				if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === previousCharacterId) {
-					if (this._selCharacter) this._selCharacter.value = previousCharacterId || "";
+					const isReadOnlySurfaceRoleLoss = (
+						previousCharacterId
+						&& this._isHubCharacter
+						&& previousCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY
+						&& error?.code === "CHARACTER_PROJECTION_SCOPED"
+					);
 					const isTerminalAccessLoss = (
 						previousCharacterId
 						&& this._isHubCharacter
 						&& ["AUTH_REQUIRED", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND", "CAMPAIGN_ARCHIVED"].includes(error?.code)
 					);
-					if (isTerminalAccessLoss) {
+					if (isReadOnlySurfaceRoleLoss) {
+						this._onHubRealtimeConnectionState?.({
+							state: "closed",
+							reason: "Character inspection access is no longer available.",
+							isCharacterAccessEnded: true,
+							accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
+						});
+					} else if (isTerminalAccessLoss) {
+						if (this._selCharacter) this._selCharacter.value = previousCharacterId || "";
 						this._endCurrentHubCharacterAccess?.({
 							characterId: previousCharacterId,
 							accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
 						});
 					} else {
+						if (this._selCharacter) this._selCharacter.value = previousCharacterId || "";
 						this._reattachRetainedHubCharacterIntegrations?.({
 							characterId: previousCharacterId,
 							generation: loadGeneration,
