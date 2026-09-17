@@ -86,7 +86,7 @@ describe("Character Sheet repository seam", () => {
 		expect(host._updateCharacterDropdown).toHaveBeenCalledWith(characters);
 	});
 
-	it("ends old character interactions before awaiting a replacement character", async () => {
+	it("ends unsafe old character interactions before awaiting a replacement character", async () => {
 		const load = makeDeferred();
 		const host = {
 			_characterLoadGeneration: 4,
@@ -103,7 +103,7 @@ describe("Character Sheet repository seam", () => {
 
 		const pending = CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-b");
 
-		expect(host._closeCharacterScopedTransientUi).toHaveBeenCalledTimes(1);
+		expect(host._closeCharacterScopedTransientUi).toHaveBeenCalledWith({isRetainCurrentCharacterUi: true});
 		expect(host._characterRepository.pGet).toHaveBeenCalledWith({characterId: "character-b"});
 		load.resolve(null);
 		await pending;
@@ -1036,6 +1036,7 @@ describe("Character Sheet repository seam", () => {
 			},
 			_state: state,
 			_hubContext: null,
+			_closeCharacterScopedTransientUi: jest.fn(),
 			_detachHubRealtime: jest.fn(),
 			_reconcilePersistedCharacter: CharacterSheetPage.prototype._reconcilePersistedCharacter,
 			_reconcileClassFeatures: jest.fn(() => null),
@@ -1051,6 +1052,10 @@ describe("Character Sheet repository seam", () => {
 		try {
 			await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "temporary-id")).resolves.toBe(true);
 			expect(host._currentCharacterId).toBe("server-id");
+			expect(host._closeCharacterScopedTransientUi.mock.calls).toEqual([
+				[{isRetainCurrentCharacterUi: true}],
+				[],
+			]);
 			expect(host._attachHubRealtime).toHaveBeenCalledWith({characterId: "server-id"});
 			expect(globalThis.window.history.replaceState).toHaveBeenCalledWith(
 				{},
@@ -1289,6 +1294,62 @@ describe("Character Sheet repository seam", () => {
 		expect(host._attachHubRealtime).not.toHaveBeenCalled();
 		expect(host._campaign.resetCharacterScope).not.toHaveBeenCalled();
 		expect(host._endCurrentHubCharacterAccess).not.toHaveBeenCalled();
+	});
+
+	it("preserves retained roll history and mobile status when a replacement character fails to load", async () => {
+		const loadError = new Error("offline");
+		const rollHistory = {
+			_rolls: [{title: "Attack", total: 17}],
+			resetCharacterScopeUi: jest.fn(() => { rollHistory._rolls = []; }),
+		};
+		const mobile = {
+			_isCharacterScopeUiSuspended: false,
+			_statusModels: {hp: {current: 12, max: 18}},
+			resetCharacterScopeUi: jest.fn(() => {
+				mobile._isCharacterScopeUiSuspended = true;
+				mobile._statusModels = {};
+			}),
+		};
+		const previousMobile = globalThis._charsheetMobile;
+		globalThis._charsheetMobile = mobile;
+		const closeModalsSpy = jest.spyOn(CharacterSheetModal, "closeCharacterScopeModals").mockResolvedValue();
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_selCharacter: {value: "character-b"},
+			_characterRepository: {
+				pGet: jest.fn(async () => { throw loadError; }),
+			},
+			_closeCharacterScopedTransientUi: CharacterSheetPage.prototype._closeCharacterScopedTransientUi,
+			_notes: {cancelActiveDrag: jest.fn()},
+			_playMode: {resetCharacterScopeUi: jest.fn()},
+			_spells: {_closeCastOptionsMenu: jest.fn()},
+			_rollHistory: rollHistory,
+			_dice3d: {resetCharacterScopeUi: jest.fn()},
+			_builder: {resetCharacterScopeUi: jest.fn()},
+		};
+		try {
+			await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-b"))
+				.rejects.toBe(loadError);
+			expect(closeModalsSpy).toHaveBeenCalledTimes(1);
+			expect(host._notes.cancelActiveDrag).toHaveBeenCalledTimes(1);
+			expect(host._playMode.resetCharacterScopeUi).toHaveBeenCalledTimes(1);
+			expect(host._spells._closeCastOptionsMenu).toHaveBeenCalledTimes(1);
+			expect(host._dice3d.resetCharacterScopeUi).toHaveBeenCalledTimes(1);
+			expect(host._builder.resetCharacterScopeUi).toHaveBeenCalledTimes(1);
+			expect(rollHistory.resetCharacterScopeUi).not.toHaveBeenCalled();
+			expect(rollHistory._rolls).toEqual([{title: "Attack", total: 17}]);
+			expect(mobile.resetCharacterScopeUi).not.toHaveBeenCalled();
+			expect(mobile._isCharacterScopeUiSuspended).toBe(false);
+			expect(mobile._statusModels).toEqual({hp: {current: 12, max: 18}});
+			expect(host._currentCharacterId).toBe("character-a");
+			expect(host._selCharacter.value).toBe("character-a");
+		} finally {
+			closeModalsSpy.mockRestore();
+			if (previousMobile) globalThis._charsheetMobile = previousMobile;
+			else delete globalThis._charsheetMobile;
+		}
 	});
 
 	it("conceals the previous Hub character when target loading proves the session lost authority", async () => {

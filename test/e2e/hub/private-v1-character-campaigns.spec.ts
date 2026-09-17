@@ -241,6 +241,57 @@ test("stale move completion cannot detach the selected character and terminal de
 			targetCampaignId,
 			name: "Deferred Source",
 		});
+		const retainedUiBeforeFailedLoad = await player.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._rollHistory.addRoll({
+				title: "Retained load probe",
+				total: 17,
+				breakdown: "12 + 5",
+			});
+			const mobile = (globalThis as any)._charsheetMobile;
+			mobile._statusModels.failedLoadProbe = {value: "retained"};
+			return {
+				rollCount: sheet._rollHistory._rolls.length,
+				isMobileScopeSuspended: mobile._isCharacterScopeUiSuspended,
+				mobileStatusModels: JSON.stringify(mobile._statusModels),
+			};
+		});
+		const failedLoadPattern = new RegExp(`/api/characters/${selectedCharacter.id}(?:\\?|$)`);
+		await player.page.route(failedLoadPattern, async route => {
+			await route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {
+					code: "TEST_CHARACTER_LOAD_FAILED",
+					message: "Synthetic target load failure",
+				}}),
+			});
+		});
+		const failedLoadResult = await player.page.evaluate(async characterId => {
+			const sheet = (globalThis as any).charSheet;
+			try {
+				await sheet._pLoadCharacter(characterId);
+				return {errorCode: null};
+			} catch (error: any) {
+				const mobile = (globalThis as any)._charsheetMobile;
+				return {
+					errorCode: error?.code || null,
+					currentCharacterId: sheet._currentCharacterId,
+					rollCount: sheet._rollHistory._rolls.length,
+					isMobileScopeSuspended: mobile._isCharacterScopeUiSuspended,
+					mobileStatusModels: JSON.stringify(mobile._statusModels),
+				};
+			}
+		}, selectedCharacter.id);
+		await player.page.unroute(failedLoadPattern);
+		expect(failedLoadResult).toEqual({
+			errorCode: "TEST_CHARACTER_LOAD_FAILED",
+			currentCharacterId: sourceCharacter.id,
+			...retainedUiBeforeFailedLoad,
+		});
+		await expect(player.page.locator(".charsheet__roll-history-entry-title", {hasText: "Retained load probe"})).toBeAttached();
+		await expect(player.page.locator("#charsheet-ipt-name")).toHaveValue("Deferred Source");
+
 		await player.page.evaluate(async ({selectedCharacterId, sourceCharacterId}) => {
 			const sheet = (globalThis as any).charSheet;
 			await sheet._pLoadCharacter(selectedCharacterId);

@@ -307,19 +307,20 @@ class CharacterSheetPage {
 			&& (!isRequireOwner || !this.isCurrentCharacterReadOnly());
 	}
 
-	_closeCharacterScopedTransientUi () {
+	_closeCharacterScopedTransientUi ({isRetainCurrentCharacterUi = false} = {}) {
 		const closePromise = CharacterSheetModal.closeCharacterScopeModals();
 		this._notes?.cancelActiveDrag?.();
 		this._playMode?.resetCharacterScopeUi?.();
 		this._spells?._closeCastOptionsMenu?.();
-		this._rollHistory?.resetCharacterScopeUi?.();
 		this._dice3d?.resetCharacterScopeUi?.();
 		this._builder?.resetCharacterScopeUi?.();
-		globalThis._charsheetMobile?.resetCharacterScopeUi?.();
 		void closePromise.catch(error => {
 			// eslint-disable-next-line no-console
 			console.error("Could not close character-scoped modal state:", error);
 		});
+		if (isRetainCurrentCharacterUi) return;
+		this._rollHistory?.resetCharacterScopeUi?.();
+		globalThis._charsheetMobile?.resetCharacterScopeUi?.();
 	}
 
 	// #region Hub teardown owners (ADR 0013)
@@ -3185,7 +3186,7 @@ class CharacterSheetPage {
 	async _pLoadCharacter (charId) {
 		const loadGeneration = (this._characterLoadGeneration || 0) + 1;
 		this._characterLoadGeneration = loadGeneration;
-		this._closeCharacterScopedTransientUi?.();
+		this._closeCharacterScopedTransientUi?.({isRetainCurrentCharacterUi: true});
 		const previousCharacterId = this._currentCharacterId;
 		let canonical;
 		try {
@@ -3215,8 +3216,6 @@ class CharacterSheetPage {
 			return false;
 		}
 		if (loadGeneration !== this._characterLoadGeneration) return false;
-		this._detachHubRealtime?.();
-		this._campaign?.resetCharacterScope?.();
 
 		// Reconcile against the synchronous rescue mirror: if a mutation was mirrored but its
 		// async IndexedDB write never settled (fast refresh / character-switch race), the mirror
@@ -3227,6 +3226,9 @@ class CharacterSheetPage {
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
+			this._closeCharacterScopedTransientUi?.();
+			this._detachHubRealtime?.();
+			this._campaign?.resetCharacterScope?.();
 			const resolvedId = canonical?.id || charId;
 			this._currentCharacterId = resolvedId;
 			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({characterId: resolvedId})
