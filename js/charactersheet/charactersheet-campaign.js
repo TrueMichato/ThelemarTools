@@ -5,6 +5,13 @@ import {CharacterSheetState} from "./charactersheet-state.js";
 import {getCampaignSettingsOverlayFromRulesVersion} from "../hub/hub-campaign-rule-evaluator.js";
 
 const _CAMPAIGN_ROLES = new Set(["dm", "co_dm", "player"]);
+const _TERMINAL_CHARACTER_ACCESS_ERROR_CODES = new Set([
+	"AUTH_REQUIRED",
+	"FORBIDDEN",
+	"CAMPAIGN_NOT_FOUND",
+	"MEMBERSHIP_NOT_FOUND",
+	"CAMPAIGN_ARCHIVED",
+]);
 const _RULE_LABELS = {
 	enableTgtt: "Thelemar rules",
 	exhaustionRules: "Exhaustion rules",
@@ -14,6 +21,10 @@ const _RULE_LABELS = {
 	thelemar_linguisticsBonus: "Thelemar linguistics bonus",
 	thelemar_criticalRolls: "Thelemar critical rolls",
 };
+
+export function isTerminalCharacterCampaignAccessError (error) {
+	return _TERMINAL_CHARACTER_ACCESS_ERROR_CODES.has(error?.code);
+}
 
 export function getEligibleCharacterCampaigns (campaigns, {excludeCampaignId = null} = {}) {
 	return (campaigns || [])
@@ -188,6 +199,9 @@ export class CharacterSheetCampaign {
 		this.render();
 		try {
 			const session = await this._api.pGetSession();
+			if (!session.signedIn && this._page._isHubCharacter && characterId) {
+				throw new HubApiError({code: "AUTH_REQUIRED", status: 401});
+			}
 			const campaigns = session.signedIn
 				? await this._api.pListCampaigns()
 				: [];
@@ -211,6 +225,7 @@ export class CharacterSheetCampaign {
 			this._currentCharacter = null;
 			this._currentCampaign = null;
 			this._feedback = {type: "error", text: getCampaignControlErrorMessage(error)};
+			if (isTerminalCharacterCampaignAccessError(error)) throw error;
 		} finally {
 			if (isCurrent()) {
 				this._isLoading = false;

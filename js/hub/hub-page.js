@@ -569,6 +569,7 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	let currentTargets = targetCharacters;
 	let currentEvents = events;
 	let visibleItems = [];
+	let isTargetSelectionInitialized = false;
 	const catalogRenderFence = createCatalogRenderFence({
 		getCatalogGeneration: () => catalogLoader.getGeneration(),
 	});
@@ -659,7 +660,10 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 		for (const id of [...selectedTargetIds]) {
 			if (!availableIds.has(id)) selectedTargetIds.delete(id);
 		}
-		if (!selectedTargetIds.size && currentTargets[0]) selectedTargetIds.add(getProjectionId(currentTargets[0]));
+		if (!isTargetSelectionInitialized && currentTargets[0]) {
+			selectedTargetIds.add(getProjectionId(currentTargets[0]));
+		}
+		isTargetSelectionInitialized = true;
 		targetsRoot.replaceChildren(...currentTargets.map(target => {
 			const characterId = getProjectionId(target);
 			const label = document.createElement("label");
@@ -1515,6 +1519,7 @@ async function pInitCampaign ({session}) {
 		if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND"].includes(error.code)) return false;
 		isCampaignReloadRequired = true;
 		if (error.code === "AUTH_REQUIRED") {
+			concealCampaignAuthorization();
 			stopCampaignLiveUpdates();
 			renderError(error, {isAuthorizationHandled: true});
 			return true;
@@ -1700,15 +1705,18 @@ async function pInitCampaign ({session}) {
 			fillCharacterSelect(
 				actionTarget,
 				getTargetableProjections({projections: liveCharacters, roster: liveRoster}),
+				{isPreserveSelection: true},
 			);
-			fillCharacterSelect(xpTarget, charactersNxt);
+			fillCharacterSelect(xpTarget, charactersNxt, {isPreserveSelection: true});
 			if (!document.getElementById("campaign-action-form")?._hubProjectionControlStates) {
 				if (actionTarget) actionTarget.disabled = !actionTarget.options.length;
 				if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
 				setFormAvailability({
 					formId: "campaign-action-form",
-					isAvailable: !!actionTarget?.options.length,
-					message: "Add a campaign character before proposing an effect.",
+					isAvailable: !!actionTarget?.value,
+					message: actionTarget?.options.length
+						? "Choose a target character before proposing an effect."
+						: "Add a campaign character before proposing an effect.",
 				});
 			}
 			if (activityRefresh.isAuthorizationChanged) isActivityAuthorizationFenced = false;
@@ -1774,13 +1782,17 @@ async function pInitCampaign ({session}) {
 			if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
 			setFormAvailability({
 				formId: "campaign-action-form",
-				isAvailable: !!actionTarget?.options.length,
-				message: "Add a campaign character before proposing an effect.",
+				isAvailable: !!actionTarget?.value,
+				message: actionTarget?.options.length
+					? "Choose a target character before proposing an effect."
+					: "Add a campaign character before proposing an effect.",
 			});
 			setFormAvailability({
 				formId: "campaign-xp-form",
-				isAvailable: !!xpTarget?.options.length,
-				message: "Add a campaign character before using this grant.",
+				isAvailable: !!xpTarget?.value,
+				message: xpTarget?.options.length
+					? "Choose a target character before using this grant."
+					: "Add a campaign character before using this grant.",
 			});
 			refreshItemAwardControlState();
 			refreshActionFields({isRetryConditionCatalog: false});
@@ -2222,8 +2234,18 @@ function renderRecentActivity ({
 	return rows;
 }
 
-function fillCharacterSelect (select, characters, {includeParty = false, partyInventory = null, ownerAccountId = null} = {}) {
+function fillCharacterSelect (
+	select,
+	characters,
+	{
+		includeParty = false,
+		isPreserveSelection = false,
+		partyInventory = null,
+		ownerAccountId = null,
+	} = {},
+) {
 	if (!select) return;
+	const selectedValue = isPreserveSelection ? select.value : null;
 	select.replaceChildren();
 	for (const character of characters) {
 		// `characters` may be raw owner-scoped documents (the player's own list) or
@@ -2239,6 +2261,11 @@ function fillCharacterSelect (select, characters, {includeParty = false, partyIn
 		option.value = `party_inventory:${partyInventory.id}`;
 		option.textContent = "Party inventory";
 		select.append(option);
+	}
+	if (isPreserveSelection) {
+		select.value = [...select.options].some(option => option.value === selectedValue)
+			? selectedValue
+			: "";
 	}
 }
 

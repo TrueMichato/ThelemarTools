@@ -494,6 +494,12 @@ status strip, realtime subscription, and campaign controls until the target proj
 successfully under the current load-generation fence. Only then run the destructive display-scope
 reset before adopting the replacement. A target-specific 404/forbidden response restores the
 selector to the still-authorized character; proven session/campaign loss conceals it.
+Post-load campaign-control refresh is part of that authority proof: signed-out or terminal
+campaign-access results propagate instead of becoming a warning, synchronously end the adopted Hub
+character scope, and prevent realtime attachment. Character selection, New, Duplicate, import, and
+programmatic create flows capture a save fence before their first await and recheck it after every
+save/create/roster await before changing state, selection, navigation, or rendering; a remote create
+may remain committed after supersession, but it must not replace the newer local selection.
 
 `CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard,
 ordinary `cbClose` composition, synchronous modal/portal tracking, generic input cancellation, late

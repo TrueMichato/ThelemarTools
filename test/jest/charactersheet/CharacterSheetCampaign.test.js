@@ -201,6 +201,42 @@ describe("Character Sheet campaign control", () => {
 		}));
 	});
 
+	it("propagates signed-out authority loss while refreshing a loaded Hub character", async () => {
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_page: {
+				_isHubCharacter: true,
+				_currentCharacterId: "character-a",
+				isCurrentCharacterReadOnly: () => false,
+			},
+			_api: {
+				pGetSession: jest.fn(async () => ({signedIn: false})),
+				pListCampaigns: jest.fn(),
+				pGetCharacter: jest.fn(),
+			},
+			_root: null,
+			_isInitialized: true,
+			_refreshGeneration: 0,
+			_session: null,
+			_campaigns: [],
+			_currentCharacter: null,
+			_currentCampaign: null,
+			_isLoading: false,
+			_feedback: null,
+			_sharing: null,
+			render: jest.fn(),
+		});
+
+		await expect(control.pRefreshCurrentCharacter()).rejects.toMatchObject({
+			code: "AUTH_REQUIRED",
+		});
+		expect(control._api.pListCampaigns).not.toHaveBeenCalled();
+		expect(control._api.pGetCharacter).not.toHaveBeenCalled();
+		expect(control._feedback).toEqual(expect.objectContaining({
+			type: "error",
+			text: expect.stringContaining("sign-in has expired"),
+		}));
+	});
+
 	it("uses the full source-edition catalog when deciding whether to show policy warnings", () => {
 		const root = {append: jest.fn()};
 		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {

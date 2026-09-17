@@ -1113,10 +1113,20 @@ export class MemoryHubStore {
 	}) {
 		if (isRevisionBump) character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
-		if (!character.campaignId) return null;
-		const visibleAccountIds = projectionInvalidationVisibleAccountIds ?? [
-			...this._memberships.values(),
-		]
+		return this._appendCharacterProjectionInvalidation({
+			character,
+			actorAccountId,
+			visibleAccountIds: projectionInvalidationVisibleAccountIds,
+		});
+	}
+
+	_appendCharacterProjectionInvalidation ({
+		character,
+		actorAccountId,
+		visibleAccountIds = null,
+	}) {
+		if (!character?.campaignId) return null;
+		visibleAccountIds ??= [...this._memberships.values()]
 			.filter(membership => membership.campaignId === character.campaignId && membership.status === "active")
 			.filter(membership => canViewSharedCharacterProjection({
 				character,
@@ -1639,6 +1649,7 @@ export class MemoryHubStore {
 		this._characters.set(clone.id, clone);
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "character.cloned", targetType: "character", targetId: clone.id, details: {sourceCharacterId: source.id}});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "character.created", aggregateType: "character", aggregateId: clone.id, aggregateRevision: 1, payload: {clonedFromCharacterId: source.id}});
+		this._appendCharacterProjectionInvalidation({character: clone, actorAccountId: accountId});
 		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(clone)}});
 	}
 
@@ -1691,6 +1702,7 @@ export class MemoryHubStore {
 			}
 		}
 		const sourceCampaignId = character.campaignId;
+		const sourceProjectionCharacter = copy(character);
 		const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 		character.campaignId = campaignId;
 		character.data = normalizeCharacterInventory(destinationData);
@@ -1720,6 +1732,13 @@ export class MemoryHubStore {
 			aggregateRevision: character.revision,
 			payload: {sourceCampaignId, characterNameSnapshot},
 		});
+		if (sourceCampaignId && sourceCampaignId !== campaignId) {
+			this._appendCharacterProjectionInvalidation({
+				character: sourceProjectionCharacter,
+				actorAccountId: accountId,
+			});
+		}
+		this._appendCharacterProjectionInvalidation({character, actorAccountId: accountId});
 		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character)}});
 	}
 
@@ -1740,6 +1759,7 @@ export class MemoryHubStore {
 				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
 			}
 		}
+		const projectionCharacter = copy(character);
 		character.status = "archived";
 		character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
@@ -1747,6 +1767,10 @@ export class MemoryHubStore {
 		this._appendAudit({campaignId: character.campaignId, actorAccountId: accountId, action: "character.archived", targetType: "character", targetId: character.id});
 		if (character.campaignId) {
 			this._appendEvent({campaignId: character.campaignId, actorAccountId: accountId, type: "character.archived", aggregateType: "character", aggregateId: character.id, aggregateRevision: character.revision});
+			this._appendCharacterProjectionInvalidation({
+				character: projectionCharacter,
+				actorAccountId: accountId,
+			});
 		}
 		return this._setReceipt({accountId, idempotencyKey, response: {ok: true}});
 	}

@@ -890,6 +890,20 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			idempotencyKey: command("rules-destination-clone"),
 		});
 		expect(cloned.character.data.carry).toBeUndefined();
+		const cloneInvalidation = await pool.query(`
+			SELECT aggregate_type, campaign_id, event_type, payload, visible_account_ids
+			FROM hub.domain_events
+			WHERE campaign_id = $1 AND event_type = 'character.projection.invalidated'
+			ORDER BY sequence DESC
+			LIMIT 1
+		`, [destination.id]);
+		expect(cloneInvalidation.rows[0]).toEqual(expect.objectContaining({
+			aggregate_type: "campaign",
+			campaign_id: destination.id,
+			event_type: "character.projection.invalidated",
+			payload: {},
+		}));
+		expect(cloneInvalidation.rows[0].visible_account_ids).toContain(account.id);
 		const moved = await store.pMoveCharacter({
 			accountId: account.id,
 			characterId: cloned.character.id,
@@ -897,6 +911,31 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			idempotencyKey: command("rules-destination-move"),
 		});
 		expect(moved.character.data.carry).toBeUndefined();
+		const moveInvalidations = await pool.query(`
+			SELECT campaign_id, event_type, payload
+			FROM hub.domain_events
+			WHERE campaign_id = ANY($1::uuid[]) AND event_type = 'character.projection.invalidated'
+			ORDER BY sequence DESC
+			LIMIT 2
+		`, [[destination.id, campaign.id]]);
+		expect(moveInvalidations.rows.map(row => row.campaign_id).sort()).toEqual([campaign.id, destination.id].sort());
+		expect(moveInvalidations.rows.every(row => row.event_type === "character.projection.invalidated" && !Object.keys(row.payload).length)).toBe(true);
+		const invalidationsBeforeArchive = await pool.query(`
+			SELECT count(*)::integer AS count
+			FROM hub.domain_events
+			WHERE campaign_id = $1 AND event_type = 'character.projection.invalidated'
+		`, [campaign.id]);
+		await store.pArchiveCharacter({
+			accountId: account.id,
+			characterId: moved.character.id,
+			idempotencyKey: command("rules-destination-archive"),
+		});
+		const invalidationsAfterArchive = await pool.query(`
+			SELECT count(*)::integer AS count
+			FROM hub.domain_events
+			WHERE campaign_id = $1 AND event_type = 'character.projection.invalidated'
+		`, [campaign.id]);
+		expect(invalidationsAfterArchive.rows[0].count).toBe(invalidationsBeforeArchive.rows[0].count + 1);
 	});
 
 	it("serializes concurrent policy-fenced character creates without lock upgrades", async () => {

@@ -244,6 +244,10 @@ item-award, and grant controls. User mutations capture that generation before th
 and carry it through nested refreshes and queued transfer work. A stale completion cannot replace rows, clear form
 state, publish status text, or re-enable concealed controls. Transfer drafts captured during invalidation remain
 owned by the concealed generation until a current authorized refresh successfully restores and reveals them.
+Authorization-scoped refreshes preserve an explicitly selected action or XP target only while that target remains
+available. A removed target leaves the picker empty and submission disabled rather than silently choosing another
+character. Item-award recipients use the same rule: the first authorized render may initialize a default, but a
+deliberately cleared or later-invalidated recipient set stays empty until the DM selects it again.
 Presence revalidation closes missing sessions as `Session expired` and missing memberships as
 `Membership revoked`, preserving the browser's signed-out fallback versus campaign-access-loss boundary.
 
@@ -253,6 +257,17 @@ inert. The coordinator routes metadata-only projection invalidations and the fro
 `character.operation.*` lifecycle allowlist through the HTTP repository's existing mutation queue, so a
 delivery cannot overtake an in-flight save. Character/campaign switch, canonical-id replacement, detach,
 revocation, logout, and terminal page hide all fence the subscription generation.
+Character selection, New, Duplicate, import, and programmatic create continuations also capture the source
+character/load fence before their first save. Every later await must still belong to that source before it can
+reset state, adopt a created character, update navigation, or render. A committed create that finishes after a
+newer selection remains committed remotely but is not adopted over the newer sheet.
+
+Clone, move, and archive append `character.projection.invalidated` inside the same lifecycle command before its
+receipt commits. Clone invalidates the destination audience; move invalidates audiences captured from both the
+pre-move source projection and the post-move destination projection; archive invalidates the pre-archive
+audience so an identity-hidden shared row can disappear. These events remain campaign-scoped, explicit-audience,
+metadata-only notifications with no character identifier or display name. Memory and PostgreSQL preserve the
+same audit → lifecycle event → invalidation → receipt order.
 
 Applied operations are reconciled in the repository under ADR 0012. `rebaseJsonChanges` treats identical
 same-path edits as convergence while preserving unequal and ancestor/descendant overlaps as conflicts. The

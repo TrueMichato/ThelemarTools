@@ -229,6 +229,99 @@ describe("projection privacy canaries", () => {
 		expect(peerRead.data.hp.current).toBe(12);
 	});
 
+	it("invalidates identity-hidden peer projections across clone, move, and archive", async () => {
+		const {owner, peerA, peerB, campaign, character} = await setup();
+		const destination = (await app.inject({
+			method: "POST",
+			url: "/api/campaigns",
+			headers: headers(owner),
+			payload: {name: "Projection destination"},
+		})).json().campaign;
+		const destinationInvite = (await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${destination.id}/invites`,
+			headers: headers(owner),
+			payload: {role: "player"},
+		})).json();
+		await app.inject({
+			method: "POST",
+			url: "/api/invites/redeem",
+			headers: headers(peerA),
+			payload: {token: destinationInvite.token},
+		});
+
+		const policy = (await app.inject({
+			method: "GET",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: readHeaders(owner),
+		})).json();
+		await app.inject({
+			method: "PUT",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: headers(owner),
+			payload: {
+				expectedProjectionRevision: policy.projectionRevision,
+				policy: {version: 1, preset: "private", overrides: {hp: {mode: "share"}}},
+			},
+		});
+
+		const getInvalidations = async ({session, campaignId}) => (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaignId}/events`,
+			headers: readHeaders(session),
+		})).json().events.filter(event => event.type === "character.projection.invalidated");
+		const sourcePeerBefore = await getInvalidations({session: peerB, campaignId: campaign.id});
+		const destinationPeerBefore = await getInvalidations({session: peerA, campaignId: destination.id});
+
+		const cloneResponse = await app.inject({
+			method: "POST",
+			url: `/api/characters/${character.id}/clone`,
+			headers: headers(owner),
+			payload: {campaignId: destination.id},
+		});
+		expect(cloneResponse.statusCode).toBe(200);
+		const clone = cloneResponse.json().character;
+		const destinationAfterClone = await getInvalidations({session: peerA, campaignId: destination.id});
+		expect(destinationAfterClone).toHaveLength(destinationPeerBefore.length + 1);
+
+		const moveResponse = await app.inject({
+			method: "POST",
+			url: `/api/characters/${character.id}/move`,
+			headers: headers(owner),
+			payload: {campaignId: destination.id},
+		});
+		expect(moveResponse.statusCode).toBe(200);
+		const sourceAfterMove = await getInvalidations({session: peerB, campaignId: campaign.id});
+		const destinationAfterMove = await getInvalidations({session: peerA, campaignId: destination.id});
+		expect(sourceAfterMove).toHaveLength(sourcePeerBefore.length + 1);
+		expect(destinationAfterMove).toHaveLength(destinationAfterClone.length + 1);
+
+		const archiveResponse = await app.inject({
+			method: "DELETE",
+			url: `/api/characters/${clone.id}`,
+			headers: headers(owner),
+		});
+		expect(archiveResponse.statusCode).toBe(200);
+		const destinationAfterArchive = await getInvalidations({session: peerA, campaignId: destination.id});
+		expect(destinationAfterArchive).toHaveLength(destinationAfterMove.length + 1);
+
+		const lifecycleInvalidations = [
+			destinationAfterClone.at(-1),
+			sourceAfterMove.at(-1),
+			destinationAfterMove.at(-1),
+			destinationAfterArchive.at(-1),
+		];
+		for (const event of lifecycleInvalidations) {
+			expect(event).toMatchObject({
+				actorAccountId: null,
+				aggregateType: "campaign",
+				payload: {},
+				visibleAccountIds: null,
+			});
+			expect(JSON.stringify(event)).not.toMatch(new RegExp(`${character.id}|${clone.id}|${CHARACTER_DATA.name}`));
+		}
+	});
+
 	it("does not invalidate for a mutation that cannot change a catalog field", async () => {
 		const {dm, campaign, character} = await setup();
 		const before = (await app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: readHeaders(dm)})).json().events

@@ -292,7 +292,8 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   probe. Projection regressions preserve `owner_truth` versus `dm_truth`; a DM view keeps live reads but disables
   mutation controls and skips owner-only sharing, pending-action, targeting, lease, and party-inventory calls.
   Same-tab account-switch coverage proves a failed owner draft is account-scoped, cannot replace a later DM's
-  projection, and cannot stale a subsequent invalidation refetch.
+  projection, and cannot stale a subsequent invalidation refetch. Selector, New, Duplicate, file-import, and
+  programmatic-create barriers prove a save/create completion from A cannot replace a newer B selection.
 - Campaign action contracts verify that condition add/remove uses the canonical core plus active campaign-brew
   catalog and submits the selected `name|source` identity rather than accepting free-form condition text. The
   browser journeys recover module and data failures through ordinary realtime refresh, reuse a loaded module for
@@ -330,7 +331,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   previously authorized DOM is destroyed immediately, not merely disabled while private roster/profile/member,
   inventory, pending-action, transfer, or administration content remains present. A separate HTTP-first journey
   blocks realtime and proves a rejected mutation performs the same concealment, while session revocation retains
-  the established last-known signed-out read-only fallback.
+  the established last-known signed-out read-only fallback. Character Sheet campaign refreshes separately prove
+  signed-out or terminal campaign authority loss propagates, conceals the loaded Hub document, and prevents a
+  realtime subscription from attaching to already-invalidated authority.
 - Campaign snapshot consumers coalesce `character.projection.invalidated` metadata into one authorization-scoped HTTP refetch and fence older
   in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
   newer visible projection. Policy-change invalidations snapshot the old-or-new authorized audience and redact
@@ -339,6 +342,11 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   10-second client watchdog requests an authoritative snapshot while the
   socket remains live. During replay it allows a full unchanged interval before reconnecting, so advancing
   continuation pages are not interrupted while a stalled chain still recovers.
+- Memory, PostgreSQL, and real-browser lifecycle coverage verifies clone destination, move source/destination, and
+  archive removal invalidations. The browser keeps both source and destination campaigns live while an owner
+  changes an identity-hidden, HP-shared character, proving peers converge only through campaign-scoped,
+  character-id-free invalidations. Campaign action/XP selections survive authorized label refreshes, while a
+  deliberately empty item-recipient set stays empty and disabled rather than silently retargeting.
 - Browser coverage defers an old pending-action response across a newer sharing-policy invalidation, fails the
   replacement snapshot, and proves the stale response cannot repopulate concealed identity. The transfer journey
   separately proves source/target/item/currency drafts survive an authorized refresh, transient submitting state

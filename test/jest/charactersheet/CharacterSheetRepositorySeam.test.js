@@ -1202,6 +1202,269 @@ describe("Character Sheet repository seam", () => {
 		expect(host._showTab).not.toHaveBeenCalled();
 	});
 
+	it("does not continue a superseded character selection after its save settles", async () => {
+		const save = makeDeferred();
+		const host = {
+			_characterLoadGeneration: 1,
+			_currentCharacterId: "character-a",
+			_selCharacter: {value: "character-b"},
+			_saveCurrentCharacter: jest.fn(() => save.promise),
+			_clearLastHpChange: jest.fn(),
+			_pLoadCharacter: jest.fn(),
+			_createNewCharacter: jest.fn(),
+		};
+
+		const pending = CharacterSheetPage.prototype._onCharacterSelect.call(host);
+		host._selCharacter.value = "character-c";
+		save.resolve(true);
+		await pending;
+
+		expect(host._clearLastHpChange).not.toHaveBeenCalled();
+		expect(host._pLoadCharacter).not.toHaveBeenCalled();
+		expect(host._createNewCharacter).not.toHaveBeenCalled();
+		expect(host._selCharacter.value).toBe("character-c");
+	});
+
+	it("does not continue a superseded new-character action after its save settles", async () => {
+		const save = makeDeferred();
+		const host = {
+			_characterLoadGeneration: 1,
+			_currentCharacterId: "character-a",
+			_selCharacter: {value: "character-a"},
+			_saveCurrentCharacter: jest.fn(() => save.promise),
+			_createNewCharacter: jest.fn(),
+			_showTab: jest.fn(),
+			switchToTab: jest.fn(),
+		};
+
+		const pending = CharacterSheetPage.prototype._onNewCharacter.call(host);
+		host._currentCharacterId = "character-c";
+		host._characterLoadGeneration++;
+		save.resolve(true);
+		await pending;
+
+		expect(host._createNewCharacter).not.toHaveBeenCalled();
+		expect(host._showTab).not.toHaveBeenCalled();
+		expect(host.switchToTab).not.toHaveBeenCalled();
+	});
+
+	it("does not continue a superseded duplicate action after its save settles", async () => {
+		const save = makeDeferred();
+		const host = {
+			_characterLoadGeneration: 1,
+			_currentCharacterId: "character-a",
+			_saveCurrentCharacter: jest.fn()
+				.mockImplementationOnce(() => save.promise)
+				.mockResolvedValueOnce(true),
+			_state: {
+				toJson: jest.fn(() => ({id: "character-a", name: "A"})),
+				loadFromJson: jest.fn(),
+			},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+			_campaign: {resetCharacterScope: jest.fn()},
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_pLoadCharacters: jest.fn(),
+			_pRefreshPersistedCharacterUi: jest.fn(),
+			_selCharacter: {value: "character-a"},
+		};
+
+		const pending = CharacterSheetPage.prototype._onDuplicateCharacter.call(host);
+		host._currentCharacterId = "character-c";
+		host._characterLoadGeneration++;
+		save.resolve(true);
+		await pending;
+
+		expect(host._state.toJson).not.toHaveBeenCalled();
+		expect(host._closeCharacterScopedTransientUi).not.toHaveBeenCalled();
+		expect(host._detachHubRealtime).not.toHaveBeenCalled();
+	});
+
+	it("refreshes the roster without restoring a duplicate that committed after supersession", async () => {
+		const duplicateSave = makeDeferred();
+		const host = {
+			_characterLoadGeneration: 1,
+			_currentCharacterId: "character-a",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_saveCurrentCharacter: jest.fn()
+				.mockResolvedValueOnce(true)
+				.mockImplementationOnce(() => duplicateSave.promise),
+			_state: {
+				toJson: jest.fn(() => ({id: "character-a", name: "A"})),
+				loadFromJson: jest.fn(),
+			},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+			_campaign: {resetCharacterScope: jest.fn()},
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_pRefreshCharacterRosterAfterCommittedStaleCreate: jest.fn(async () => {}),
+			_pLoadCharacters: jest.fn(),
+			_selCharacter: {value: "character-a"},
+		};
+
+		const pending = CharacterSheetPage.prototype._onDuplicateCharacter.call(host);
+		await Promise.resolve();
+		host._currentCharacterId = "character-c";
+		host._characterLoadGeneration++;
+		duplicateSave.resolve(true);
+		await pending;
+
+		expect(host._currentCharacterId).toBe("character-c");
+		expect(host._pRefreshCharacterRosterAfterCommittedStaleCreate).toHaveBeenCalledTimes(1);
+		expect(host._pLoadCharacters).not.toHaveBeenCalled();
+		expect(host._selCharacter.value).toBe("character-a");
+	});
+
+	it("does not continue a superseded file import after its save settles", async () => {
+		const save = makeDeferred();
+		const inputPrevious = globalThis.InputUiUtil.pGetUserUploadJson;
+		globalThis.InputUiUtil.pGetUserUploadJson = jest.fn(async () => ({
+			jsons: [{name: "Imported"}],
+			errors: [],
+		}));
+		const host = {
+			_characterLoadGeneration: 1,
+			_currentCharacterId: "character-a",
+			_saveCurrentCharacter: jest.fn()
+				.mockImplementationOnce(() => save.promise)
+				.mockResolvedValueOnce(true),
+			_state: {
+				toJson: jest.fn(() => ({id: "character-a", name: "A"})),
+				loadFromJson: jest.fn(),
+			},
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_pLoadCharacters: jest.fn(),
+			_selCharacter: {value: "character-a"},
+			_renderCharacter: jest.fn(),
+		};
+
+		try {
+			const pending = CharacterSheetPage.prototype._onImportCharacter.call(host);
+			await Promise.resolve();
+			host._currentCharacterId = "character-c";
+			host._characterLoadGeneration++;
+			save.resolve(true);
+			await pending;
+		} finally {
+			globalThis.InputUiUtil.pGetUserUploadJson = inputPrevious;
+		}
+
+		expect(host._clearLastHpChange).not.toHaveBeenCalled();
+		expect(host._state.loadFromJson).not.toHaveBeenCalled();
+		expect(host._renderCharacter).not.toHaveBeenCalled();
+	});
+
+	it("refreshes the roster without restoring an import that committed after supersession", async () => {
+		const importSave = makeDeferred();
+		const inputPrevious = globalThis.InputUiUtil.pGetUserUploadJson;
+		globalThis.InputUiUtil.pGetUserUploadJson = jest.fn(async () => ({
+			jsons: [{name: "Imported"}],
+			errors: [],
+		}));
+		const host = {
+			_characterLoadGeneration: 1,
+			_currentCharacterId: "character-a",
+			_saveCurrentCharacter: jest.fn()
+				.mockResolvedValueOnce(true)
+				.mockImplementationOnce(() => importSave.promise),
+			_state: {
+				toJson: jest.fn(() => ({id: "character-a", name: "A"})),
+				loadFromJson: jest.fn(),
+			},
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_pRefreshCharacterRosterAfterCommittedStaleCreate: jest.fn(async () => {}),
+			_pLoadCharacters: jest.fn(),
+			_selCharacter: {value: "character-a"},
+			_renderCharacter: jest.fn(),
+		};
+
+		try {
+			const pending = CharacterSheetPage.prototype._onImportCharacter.call(host);
+			await Promise.resolve();
+			await Promise.resolve();
+			host._currentCharacterId = "character-c";
+			host._characterLoadGeneration++;
+			importSave.resolve(true);
+			await pending;
+		} finally {
+			globalThis.InputUiUtil.pGetUserUploadJson = inputPrevious;
+		}
+
+		expect(host._currentCharacterId).toBe("character-c");
+		expect(host._pRefreshCharacterRosterAfterCommittedStaleCreate).toHaveBeenCalledTimes(1);
+		expect(host._pLoadCharacters).not.toHaveBeenCalled();
+		expect(host._renderCharacter).not.toHaveBeenCalled();
+	});
+
+	it("does not adopt an added character after another character loads while create persists", async () => {
+		const create = makeDeferred();
+		const host = {
+			_characterLoadGeneration: 1,
+			_currentCharacterId: "character-a",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_isCurrentCharacterNew: false,
+			_saveCurrentCharacter: jest.fn(async () => true),
+			_characterRepository: {
+				pUpsert: jest.fn(() => create.promise),
+			},
+			_state: {loadFromJson: jest.fn()},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+			_campaign: {resetCharacterScope: jest.fn()},
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_pRefreshCharacterRosterAfterCommittedStaleCreate: jest.fn(async () => {}),
+			_pLoadCharacters: jest.fn(),
+			_selCharacter: {value: "character-a"},
+			_attachHubRealtime: jest.fn(),
+		};
+
+		const pending = CharacterSheetPage.prototype.addCharacter.call(host, {
+			toJson: () => ({name: "Imported"}),
+		});
+		await Promise.resolve();
+		host._currentCharacterId = "character-c";
+		host._characterLoadGeneration++;
+		create.resolve({id: "imported-character", name: "Imported"});
+		await expect(pending).resolves.toBe(true);
+
+		expect(host._currentCharacterId).toBe("character-c");
+		expect(host._state.loadFromJson).not.toHaveBeenCalled();
+		expect(host._closeCharacterScopedTransientUi).not.toHaveBeenCalled();
+		expect(host._detachHubRealtime).not.toHaveBeenCalled();
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+		expect(host._pRefreshCharacterRosterAfterCommittedStaleCreate).toHaveBeenCalledTimes(1);
+		expect(host._pLoadCharacters).not.toHaveBeenCalled();
+	});
+
+	it("stops persisted UI refresh when its character scope becomes stale", async () => {
+		const loadCharacters = makeDeferred();
+		const host = {
+			_currentCharacterId: "character-a",
+			_pLoadCharacters: jest.fn(() => loadCharacters.promise),
+			_syncCurrentCharacterDropdownOption: jest.fn(),
+			_selCharacter: {value: "character-a"},
+			_campaign: {pRefreshCurrentCharacter: jest.fn()},
+			_endCurrentHubCharacterAccess: jest.fn(),
+		};
+
+		const pending = CharacterSheetPage.prototype._pRefreshPersistedCharacterUi.call(host, {
+			characterId: "character-a",
+			character: {id: "character-a", name: "A"},
+		});
+		host._currentCharacterId = "character-b";
+		loadCharacters.resolve();
+		await pending;
+
+		expect(host._selCharacter.value).toBe("character-a");
+		expect(host._campaign.pRefreshCurrentCharacter).not.toHaveBeenCalled();
+		expect(host._endCurrentHubCharacterAccess).not.toHaveBeenCalled();
+	});
+
 	it("does not import a character after the current cloud save fails", async () => {
 		const repository = makeRepository();
 		const host = {
@@ -1504,6 +1767,63 @@ describe("Character Sheet repository seam", () => {
 		} finally {
 			globalThis.window = windowPrevious;
 		}
+	});
+
+	it("conceals a loaded Hub character when campaign refresh proves authority loss", async () => {
+		const windowPrevious = globalThis.window;
+		globalThis.window = {
+			location: new URL("https://tools.example/charactersheet.html?id=character-a&hubCampaign=campaign-1"),
+			history: {replaceState: jest.fn()},
+		};
+		const authError = Object.assign(new Error("signed out"), {code: "AUTH_REQUIRED", status: 401});
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: "character-a",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterRepository: {
+				isRescueMirrorEnabled: false,
+				pGet: jest.fn(async () => ({id: "character-b", name: "B"})),
+				getCharacterAccess: jest.fn(() => CHARACTER_ACCESS_MODES.OWNER),
+			},
+			_selCharacter: {value: "character-b"},
+			_hubContext: null,
+			_state: {
+				clearCampaignSettingsOverlay: jest.fn(),
+				loadFromJson: jest.fn(),
+				setCampaignSettingsOverlay: jest.fn(),
+				getBackgroundTheme: jest.fn(() => "default"),
+				getViewMode: jest.fn(() => "sheet"),
+			},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_reconcilePersistedCharacter: jest.fn(canonical => ({chosen: canonical, mirrorWon: false})),
+			_reconcileClassFeatures: jest.fn(() => ({added: 0, backfilled: 0})),
+			_ensureLinguisticsSkillIfNeeded: jest.fn(),
+			_renderCharacter: jest.fn(),
+			_applyBackgroundTheme: jest.fn(),
+			_updateThemePickerSelection: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+			_campaign: {
+				resetCharacterScope: jest.fn(),
+				pRefreshCurrentCharacter: jest.fn(async () => { throw authError; }),
+			},
+			_layout: null,
+			_playMode: null,
+			_endCurrentHubCharacterAccess: jest.fn(),
+		};
+
+		try {
+			await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-b"))
+				.rejects.toBe(authError);
+		} finally {
+			globalThis.window = windowPrevious;
+		}
+
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-b",
+			accessEndCause: "campaign",
+		});
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
 	});
 
 	it("adopts an imported character's canonical id in the URL and campaign controls", async () => {

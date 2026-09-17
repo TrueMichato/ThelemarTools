@@ -588,7 +588,24 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		if (!await workbench.evaluate(element => (element as HTMLDetailsElement).open)) {
 			await workbench.locator(":scope > summary").click();
 		}
-		await dm.page.locator("#campaign-action-target").selectOption({label: "Readonly Rowan Updated"});
+		const actionTarget = dm.page.locator("#campaign-action-target");
+		const xpTarget = dm.page.locator("#campaign-xp-target");
+		await actionTarget.selectOption({label: "Authority DM Character"});
+		await xpTarget.selectOption({label: "Authority DM Character"});
+		const itemTargetCheckboxes = dm.page.locator("#campaign-item-targets input[type='checkbox']");
+		await expect(itemTargetCheckboxes).toHaveCount(2);
+		for (const checkbox of await itemTargetCheckboxes.all()) {
+			if (await checkbox.isChecked()) await checkbox.uncheck();
+		}
+		await expect(dm.page.locator("#campaign-item-targets input[type='checkbox']:checked")).toHaveCount(0);
+		await playerSheet.renameCharacter("Readonly Rowan Target Refresh");
+		await expect(actionTarget.locator("option", {hasText: "Readonly Rowan Target Refresh"})).toHaveCount(1);
+		await expect(actionTarget).toHaveValue(`character:${dmCharacter.id}`);
+		await expect(xpTarget).toHaveValue(`character:${dmCharacter.id}`);
+		await expect(dm.page.locator("#campaign-item-targets input[type='checkbox']:checked")).toHaveCount(0);
+		await expect(dm.page.locator("#campaign-item-form button[type='submit']")).toBeDisabled();
+
+		await actionTarget.selectOption({label: "Readonly Rowan Target Refresh"});
 		await dm.page.locator("#campaign-action-type").selectOption("condition_add");
 		const condition = dm.page.locator("#campaign-action-condition");
 		await expect(condition).toBeDisabled();
@@ -922,6 +939,73 @@ test("peer shared profiles render as visible native disclosures", async ({browse
 			pCloseContext(dmContext),
 			pCloseContext(viewerContext),
 			pCloseContext(ownerContext),
+		]);
+	}
+});
+
+test("identity-hidden lifecycle changes converge through projection invalidations", async ({browser}) => {
+	test.setTimeout(120_000);
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+
+	const contextOptions = {
+		baseURL: process.env.HUB_E2E_ORIGIN || "https://localhost:8443",
+		ignoreHTTPSErrors: true,
+	};
+	const ownerContext = await browser.newContext(contextOptions);
+	const viewerContext = await browser.newContext(contextOptions);
+	try {
+		const owner = new HubCampaignPage(await ownerContext.newPage());
+		const sourceViewer = new HubCampaignPage(await viewerContext.newPage());
+		await owner.signInSynthetic({providerSubject: "lifecycle-owner", displayName: "Lifecycle Owner", secret});
+		await sourceViewer.signInSynthetic({providerSubject: "lifecycle-viewer", displayName: "Lifecycle Viewer", secret});
+		const sourceCampaignId = await owner.createCampaign("Lifecycle Projection Source");
+		const destinationCampaignId = await owner.createCampaign("Lifecycle Projection Destination");
+		await sourceViewer.redeemInviteTokenViaApi(await owner.createInviteViaApi(sourceCampaignId));
+		await sourceViewer.redeemInviteTokenViaApi(await owner.createInviteViaApi(destinationCampaignId));
+		const character = await owner.createCharacter({
+			campaignId: sourceCampaignId,
+			name: "Hidden Lifecycle Hero",
+		});
+		const initialPolicy = await owner.getProjectionPolicy(character.id);
+		await owner.setProjectionPolicy({
+			characterId: character.id,
+			expectedProjectionRevision: initialPolicy.projectionRevision,
+			policy: {version: 1, preset: "private", overrides: {hp: {mode: "share"}}},
+		});
+
+		const destinationViewer = new HubCampaignPage(await viewerContext.newPage());
+		await sourceViewer.gotoCampaign(sourceCampaignId);
+		await destinationViewer.gotoCampaign(destinationCampaignId);
+		await expect(sourceViewer.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
+		await expect(destinationViewer.page.locator("#campaign-connection-status")).toHaveText("Live updates connected");
+		const sourceProfiles = sourceViewer.page.locator("#campaign-party-roster details.hub-shared-profile");
+		const destinationProfiles = destinationViewer.page.locator("#campaign-party-roster details.hub-shared-profile");
+		await expect(sourceProfiles).toHaveCount(1);
+		await expect(destinationProfiles).toHaveCount(0);
+		await expect(sourceViewer.page.locator("#campaign-party-roster")).not.toContainText("Hidden Lifecycle Hero");
+
+		const clone = await owner.cloneCharacterViaApi({
+			characterId: character.id,
+			campaignId: destinationCampaignId,
+		});
+		await expect(destinationProfiles).toHaveCount(1);
+		await expect(destinationViewer.page.locator("#campaign-party-roster")).not.toContainText("Hidden Lifecycle Hero");
+
+		await owner.moveCharacterViaApi({
+			characterId: character.id,
+			campaignId: destinationCampaignId,
+		});
+		await expect(sourceProfiles).toHaveCount(0);
+		await expect(destinationProfiles).toHaveCount(2);
+
+		await owner.archiveCharacterViaApi(clone.id);
+		await expect(destinationProfiles).toHaveCount(1);
+		await expect(destinationViewer.page.locator("#campaign-party-roster")).not.toContainText("Hidden Lifecycle Hero");
+	} finally {
+		await Promise.all([
+			pCloseContext(ownerContext),
+			pCloseContext(viewerContext),
 		]);
 	}
 });

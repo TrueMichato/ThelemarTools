@@ -38,7 +38,11 @@ import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js"
 import {CharacterSheetIoun} from "./charactersheet-ioun.js";
 import {CharacterSheetSpawnSpec, CharacterSheetSpawnRng} from "./charactersheet-spawn.js";
 import {CharacterSheetSpawner} from "./charactersheet-spawn-drivers.js";
-import {CharacterSheetCampaign, getCloudCharacterUrl} from "./charactersheet-campaign.js";
+import {
+	CharacterSheetCampaign,
+	getCloudCharacterUrl,
+	isTerminalCharacterCampaignAccessError,
+} from "./charactersheet-campaign.js";
 import {LocalCharacterRepository} from "../hub/hub-character-repository.js";
 import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.js";
 import {HubActiveCampaignCoordinator} from "../hub/hub-active-campaign-coordinator.js";
@@ -3106,20 +3110,40 @@ class CharacterSheetPage {
 		} catch (error) {
 			failures.push({surface: "character list", error});
 		}
+		if (!isCurrent()) return;
 		if (isCurrent() && this._selCharacter) this._selCharacter.value = characterId;
 		if (isCurrent()) {
 			try {
 				await this._campaign?.pRefreshCurrentCharacter?.();
 			} catch (error) {
+				if (isTerminalCharacterCampaignAccessError(error)) {
+					this._endCurrentHubCharacterAccess?.({
+						characterId,
+						accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+					});
+					throw error;
+				}
 				failures.push({surface: "campaign controls", error});
 			}
 		}
+		if (!isCurrent()) return;
 		if (failures.length) {
 			// eslint-disable-next-line no-console
 			console.warn("Character was saved, but some UI state could not refresh:", failures);
 			JqueryUtil.doToast({
 				type: "warning",
 				content: "Character saved, but some campaign controls could not refresh. Reload this page to retry.",
+			});
+		}
+	}
+
+	async _pRefreshCharacterRosterAfterCommittedStaleCreate () {
+		try {
+			await this._pLoadCharacters();
+		} catch (error) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `Character created, but the character list could not refresh: ${error.message}`,
 			});
 		}
 	}
@@ -3165,14 +3189,22 @@ class CharacterSheetPage {
 
 	async _onCharacterSelect () {
 		const charId = this._selCharacter.value;
+		const sourceFence = getCharacterSaveFence(this);
 
 		// Save current character before switching to prevent data loss
 		if (this._currentCharacterId) {
 			const isSaved = await this._saveCurrentCharacter();
 			if (!isSaved) {
-				this._selCharacter.value = this._currentCharacterId;
+				if (
+					isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})
+					&& this._selCharacter.value === charId
+				) this._selCharacter.value = this._currentCharacterId;
 				return;
 			}
+			if (
+				!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})
+				|| this._selCharacter.value !== charId
+			) return;
 		}
 		this._clearLastHpChange();
 
@@ -3289,7 +3321,21 @@ class CharacterSheetPage {
 			url.searchParams.set("id", resolvedId);
 			window.history.replaceState({}, "", url);
 			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === resolvedId) {
-				await this._campaign?.pRefreshCurrentCharacter?.();
+				try {
+					await this._campaign?.pRefreshCurrentCharacter?.();
+				} catch (error) {
+					if (
+						loadGeneration === this._characterLoadGeneration
+						&& this._currentCharacterId === resolvedId
+						&& isTerminalCharacterCampaignAccessError(error)
+					) {
+						this._endCurrentHubCharacterAccess?.({
+							characterId: resolvedId,
+							accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+						});
+					}
+					throw error;
+				}
 				if (loadGeneration !== this._characterLoadGeneration || this._currentCharacterId !== resolvedId) return false;
 				this._attachHubRealtime({characterId: resolvedId});
 			}
@@ -3402,9 +3448,11 @@ class CharacterSheetPage {
 	// #endregion
 
 	async _onNewCharacter () {
+		const sourceFence = getCharacterSaveFence(this);
 		// Save current character before creating new to prevent data loss
 		if (this._currentCharacterId) {
 			if (!await this._saveCurrentCharacter()) return;
+			if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) return;
 		}
 
 		this._createNewCharacter();
@@ -3575,9 +3623,11 @@ class CharacterSheetPage {
 
 	async _onDuplicateCharacter () {
 		if (!this._currentCharacterId) return;
+		const sourceFence = getCharacterSaveFence(this);
 
 		// Save current character first to preserve any unsaved changes
 		if (!await this._saveCurrentCharacter()) return;
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) return;
 
 		const newId = CryptUtil.uid();
 		const sourceId = this._currentCharacterId;
@@ -3597,7 +3647,13 @@ class CharacterSheetPage {
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(charData);
 		this._reconcileClassFeatures();
-		if (!await this._saveCurrentCharacter()) {
+		const duplicateFence = getCharacterSaveFence(this);
+		const isDuplicateSaved = await this._saveCurrentCharacter();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: duplicateFence})) {
+			if (isDuplicateSaved) await this._pRefreshCharacterRosterAfterCommittedStaleCreate();
+			return;
+		}
+		if (!isDuplicateSaved) {
 			this._currentCharacterId = sourceId;
 			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({characterId: sourceId})
 				|| CHARACTER_ACCESS_MODES.OWNER;
@@ -3614,6 +3670,7 @@ class CharacterSheetPage {
 			return;
 		}
 		await this._pLoadCharacters();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: duplicateFence})) return;
 		this._selCharacter.value = this._currentCharacterId;
 	}
 
@@ -3622,15 +3679,23 @@ class CharacterSheetPage {
 	 * @param {CharacterSheetState} state - The state object to add as a new character
 	 */
 	async addCharacter (state) {
-		if (this._currentCharacterId && !await this._saveCurrentCharacter()) {
-			JqueryUtil.doToast({type: "danger", content: "Could not save the current character; import was cancelled."});
-			return false;
+		const sourceFence = getCharacterSaveFence(this);
+		if (this._currentCharacterId) {
+			if (!await this._saveCurrentCharacter()) {
+				JqueryUtil.doToast({type: "danger", content: "Could not save the current character; import was cancelled."});
+				return false;
+			}
+			if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) return false;
 		}
 		const newId = CryptUtil.uid();
 		const charData = state.toJson();
 		charData.id = newId;
 
 		const persisted = await this._characterRepository.pUpsert({character: charData, isCreate: true});
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) {
+			await this._pRefreshCharacterRosterAfterCommittedStaleCreate();
+			return true;
+		}
 
 		// Load the new character
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
@@ -5468,7 +5533,11 @@ class CharacterSheetPage {
 			return;
 		}
 
-		if (this._currentCharacterId && !await this._saveCurrentCharacter()) return;
+		const sourceFence = getCharacterSaveFence(this);
+		if (this._currentCharacterId) {
+			if (!await this._saveCurrentCharacter()) return;
+			if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) return;
+		}
 		const sourceId = this._currentCharacterId;
 		const sourceData = sourceId ? this._state.toJson() : null;
 
@@ -5478,7 +5547,13 @@ class CharacterSheetPage {
 		this._currentCharacterId = json.id;
 		this._state.loadFromJson(json);
 		this._reconcileClassFeatures();
-		if (!await this._saveCurrentCharacter()) {
+		const importFence = getCharacterSaveFence(this);
+		const isImportSaved = await this._saveCurrentCharacter();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: importFence})) {
+			if (isImportSaved) await this._pRefreshCharacterRosterAfterCommittedStaleCreate();
+			return;
+		}
+		if (!isImportSaved) {
 			this._currentCharacterId = sourceId;
 			if (sourceData) {
 				this._state.loadFromJson(sourceData);
@@ -5489,6 +5564,7 @@ class CharacterSheetPage {
 			return;
 		}
 		await this._pLoadCharacters();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: importFence})) return;
 		this._selCharacter.value = json.id;
 		this._renderCharacter();
 

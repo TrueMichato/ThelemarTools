@@ -2296,6 +2296,14 @@ export class PostgresHubStore {
 					...(isMove ? {characterNameSnapshot} : {}),
 				},
 			});
+			if (isMove && source.campaignId && source.campaignId !== campaignId) {
+				await this._pAppendProjectionInvalidation({
+					client,
+					character: source,
+					actorAccountId: accountId,
+				});
+			}
+			await this._pAppendProjectionInvalidation({client, character, actorAccountId: accountId});
 			const response = {character: stripProjectionPolicy(character)};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: action, response});
 			await client.query("COMMIT");
@@ -2343,6 +2351,11 @@ export class PostgresHubStore {
 			await this._pAppendAudit({client, campaignId: character.campaignId, actorAccountId: accountId, action: "character.archived", targetType: "character", targetId: characterId});
 			if (character.campaignId) {
 				await this._pAppendEvent({client, campaignId: character.campaignId, actorAccountId: accountId, type: "character.archived", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision});
+				await this._pAppendProjectionInvalidation({
+					client,
+					character: characterBefore,
+					actorAccountId: accountId,
+				});
 			}
 			const response = {ok: true};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "character.archive", response});

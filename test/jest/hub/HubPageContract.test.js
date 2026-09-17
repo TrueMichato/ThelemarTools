@@ -344,7 +344,9 @@ describe("campaign hub pages", () => {
 		expect(source).toMatch(/isProjectionInvalidation[\s\S]*concealCampaignProjectionAuthorization\(\)/);
 		expect(source).toMatch(/pRefreshLiveViews = async \(\) => \{[\s\S]*fillCharacterSelect\([\s\S]*"campaign-action-target"[\s\S]*setFormAvailability\(\{[\s\S]*formId: "campaign-action-form"/);
 		expect(source).toContain("const handleCampaignAuthorizationError = error =>");
-		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{[\s\S]*stopCampaignLiveUpdates\(\);[\s\S]*renderError\(error, \{isAuthorizationHandled: true\}\);[\s\S]*return true;[\s\S]*\}[\s\S]*concealCampaignAuthorization\(\)/);
+		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{[\s\S]*concealCampaignAuthorization\(\);[\s\S]*stopCampaignLiveUpdates\(\);[\s\S]*renderError\(error, \{isAuthorizationHandled: true\}\);[\s\S]*return true;/);
+		expect(source).toContain("isPreserveSelection: true");
+		expect(source).toContain("let isTargetSelectionInitialized = false");
 		expect(source).toMatch(/state === "access_lost"[\s\S]*handleCampaignAuthorizationError\(/);
 		expect(source).toMatch(/onAuthorizationError:[\s\S]*handleCampaignAuthorizationError\(error\)/);
 		expect(source).toContain("concealActivityAuthorization({isLoading: true})");

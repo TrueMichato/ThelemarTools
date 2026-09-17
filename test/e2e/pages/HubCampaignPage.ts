@@ -720,6 +720,31 @@ export class HubCampaignPage {
 		return (await response.json()).character;
 	}
 
+	async cloneCharacterViaApi ({characterId, campaignId}: {characterId: string; campaignId: string}): Promise<any> {
+		const response = await this.page.request.post(`/api/characters/${encodeURIComponent(characterId)}/clone`, {
+			headers: await this.getMutationHeaders(),
+			data: {campaignId},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+		return (await response.json()).character;
+	}
+
+	async moveCharacterViaApi ({characterId, campaignId}: {characterId: string; campaignId: string}): Promise<any> {
+		const response = await this.page.request.post(`/api/characters/${encodeURIComponent(characterId)}/move`, {
+			headers: await this.getMutationHeaders(),
+			data: {campaignId},
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+		return (await response.json()).character;
+	}
+
+	async archiveCharacterViaApi (characterId: string): Promise<void> {
+		const response = await this.page.request.delete(`/api/characters/${encodeURIComponent(characterId)}`, {
+			headers: await this.getMutationHeaders(),
+		});
+		expect(response.ok(), await response.text()).toBe(true);
+	}
+
 	async expectDirectCharacterAdmissionRejected ({
 		campaignId,
 		rulesVersionId,
@@ -2008,12 +2033,11 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-party-roster")).toContainText(characterName);
 		await expect(this.page.locator("#hub-error")).toContainText("session has expired");
 		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Signed out · data is read only");
-		await expect(this.page.locator("#campaign-content")).toBeVisible();
-		await expect(this.page.locator("#campaign-action-form button[type='submit']")).toBeDisabled();
+		await expect(this.page.locator("#campaign-content")).toBeHidden();
+		await expect(this.page.locator("#campaign-content")).toHaveAttribute("aria-hidden", "true");
+		await expect(this.page.locator("#campaign-content")).toBeEmpty();
+		await expect(this.page.locator("body")).not.toContainText(characterName);
 		await expect(this.page.locator("#hub-logout")).toBeEnabled();
-		await expect.poll(() => this.page.locator(
-			"#campaign-content button:not(#hub-logout):not([disabled]), #campaign-content input:not([disabled]), #campaign-content select:not([disabled]), #campaign-content textarea:not([disabled])",
-		).count()).toBe(0);
 	}
 
 	async expectMembershipRevokedWhileOpen ({characterName}: {characterName: string}): Promise<void> {
