@@ -6,6 +6,23 @@ export function isRealtimeEventCoveredByBaseline ({event, baselineSequence}) {
 		&& event.sequence <= baselineSequence;
 }
 
+export function createCampaignAuthorityChangeHandler ({
+	fnIsReloadRequired,
+	fnSetReloadRequired,
+	fnConcealAuthorization,
+	fnStopLiveUpdates,
+	fnReload,
+}) {
+	return () => {
+		const isReloadAlreadyRequired = fnIsReloadRequired();
+		fnConcealAuthorization();
+		fnSetReloadRequired();
+		fnStopLiveUpdates();
+		if (isReloadAlreadyRequired) return;
+		fnReload();
+	};
+}
+
 export class HubRealtimeClient {
 	constructor ({
 		campaignId,

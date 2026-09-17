@@ -10,13 +10,16 @@ import {
 } from "./hub-api-client.js";
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
-import {createCampaignAuthorityChangeHandler} from "./hub-campaign-authority.js";
 import {
 	HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT,
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
 	pLoadHubCapabilityModule,
 } from "./hub-capabilities.js";
-import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
+import {
+	createCampaignAuthorityChangeHandler,
+	HubRealtimeClient,
+	isRealtimeEventCoveredByBaseline,
+} from "./hub-realtime-client.js";
 import {
 	bindHubActivityHistoryPagination,
 	hasHubActivityAuthorizationChanged,

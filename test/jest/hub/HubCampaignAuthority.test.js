@@ -1,5 +1,5 @@
 import {jest} from "@jest/globals";
-import {createCampaignAuthorityChangeHandler} from "../../../js/hub/hub-campaign-authority.js";
+import {createCampaignAuthorityChangeHandler} from "../../../js/hub/hub-realtime-client.js";
 
 describe("Campaign Overview authority changes", () => {
 	function getHarness ({isReloadRequired = false} = {}) {
