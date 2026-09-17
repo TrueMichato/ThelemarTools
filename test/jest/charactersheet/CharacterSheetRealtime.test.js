@@ -391,7 +391,81 @@ describe("Character Sheet realtime coordinator", () => {
 		}));
 	});
 
-	it("tears down a DM truth view when the viewer is demoted", async () => {
+	it("keeps a currently authorized DM truth view through cursor-covered demotion and promotion replay", async () => {
+		const repository = {
+			...makeRepository(),
+			isCharacterReadOnly: jest.fn(() => true),
+		};
+		const {clients, coordinator} = makeCoordinator({repository});
+		const membershipChanges = [];
+		const states = [];
+		coordinator.on("connectionState", value => states.push(value));
+		coordinator.on("membershipChanged", value => membershipChanges.push(value));
+		coordinator.attach({characterId: "character-1"});
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 10},
+			membership: {accountId: "dm-account", role: "co_dm"},
+			characterRefs: [{id: "character-1", revision: 1, projectionRevision: 1}],
+		});
+
+		clients[0].emit("event", {
+			id: "event-role-demoted",
+			campaignId: "campaign-1",
+			sequence: 8,
+			type: "membership.role_changed",
+			aggregateType: "membership",
+			aggregateId: "membership-1",
+			payload: {accountId: "dm-account", role: "player"},
+		});
+		clients[0].emit("event", {
+			id: "event-role-promoted",
+			campaignId: "campaign-1",
+			sequence: 10,
+			type: "membership.role_changed",
+			aggregateType: "membership",
+			aggregateId: "membership-1",
+			payload: {accountId: "dm-account", role: "co_dm"},
+		});
+		await pFlush();
+
+		expect(clients[0].close).not.toHaveBeenCalled();
+		expect(states).not.toContainEqual(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+		}));
+		expect(membershipChanges).toEqual([{
+			campaignId: "campaign-1",
+			sequence: 10,
+			source: "cursor",
+			role: "co_dm",
+		}]);
+	});
+
+	it("tears down a DM truth view when the authoritative cursor says the viewer is no longer a DM", async () => {
+		const repository = {
+			...makeRepository(),
+			isCharacterReadOnly: jest.fn(() => true),
+		};
+		const {clients, coordinator} = makeCoordinator({repository});
+		const states = [];
+		coordinator.on("connectionState", value => states.push(value));
+		coordinator.attach({characterId: "character-1"});
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 8},
+			membership: {accountId: "dm-account", role: "player"},
+			characterRefs: [{id: "character-1", revision: 1, projectionRevision: 1}],
+		});
+		await pFlush();
+
+		expect(repository.isCharacterReadOnly).toHaveBeenCalledWith({characterId: "character-1"});
+		expect(states).toContainEqual(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
+		}));
+	});
+
+	it("tears down a DM truth view when a live demotion is newer than the authoritative cursor", async () => {
 		const repository = {
 			...makeRepository(),
 			isCharacterReadOnly: jest.fn(() => true),
@@ -425,7 +499,50 @@ describe("Character Sheet realtime coordinator", () => {
 		}));
 	});
 
-	it("upgrades a missing-character cursor to replayed DM role loss before teardown", async () => {
+	it("reports a malformed authority cursor instead of treating covered role history as live", async () => {
+		const repository = {
+			...makeRepository(),
+			isCharacterReadOnly: jest.fn(() => true),
+		};
+		const {clients, coordinator} = makeCoordinator({repository});
+		const deliveryErrors = [];
+		const states = [];
+		coordinator.on("connectionState", value => states.push(value));
+		coordinator.on("deliveryError", value => deliveryErrors.push(value));
+		coordinator.attach({characterId: "character-1"});
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: "8"},
+			membership: {accountId: "dm-account", role: "dm"},
+			characterRefs: [{id: "character-1", revision: 1, projectionRevision: 1}],
+		});
+		clients[0].emit("event", {
+			id: "event-role-change",
+			campaignId: "campaign-1",
+			sequence: 7,
+			type: "membership.role_changed",
+			aggregateType: "membership",
+			aggregateId: "membership-1",
+			payload: {accountId: "dm-account", role: "player"},
+		});
+		await pFlush();
+
+		expect(deliveryErrors).toEqual([{
+			characterId: "character-1",
+			deliveryType: "cursor",
+			sequence: 0,
+		}]);
+		expect(states).toContainEqual({
+			state: "unavailable",
+			reason: "Realtime cursor baseline is invalid.",
+		});
+		expect(states).not.toContainEqual(expect.objectContaining({
+			state: "closed",
+			isCharacterAccessEnded: true,
+		}));
+		expect(clients[0].close).not.toHaveBeenCalled();
+	});
+
+	it("prioritizes authoritative DM role loss over a missing character ref", async () => {
 		const repository = {
 			...makeRepository(),
 			isCharacterReadOnly: jest.fn(() => true),

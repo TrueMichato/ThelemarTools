@@ -1,4 +1,4 @@
-import {HubRealtimeClient} from "../hub/hub-realtime-client.js";
+import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "../hub/hub-realtime-client.js";
 import {getCharacterOperationRouting} from "../hub/hub-character-operation-events.js";
 
 const _LISTENER_TYPES = new Set([
@@ -18,6 +18,8 @@ const _CHARACTER_TEARDOWN_EVENT_TYPES = new Set([
 	"character.archived",
 	"character.moved_out",
 ]);
+const _CAMPAIGN_MEMBERSHIP_ROLES = new Set(["dm", "co_dm", "player", "spectator"]);
+const _DM_MEMBERSHIP_ROLES = new Set(["dm", "co_dm"]);
 
 export const CHARACTER_REALTIME_ACCESS_END_CAUSES = Object.freeze({
 	CHARACTER: "character",
@@ -112,6 +114,8 @@ export class CharacterSheetRealtimeCoordinator {
 			isDetachQueued: false,
 			isSuspended: false,
 			inventoryEventKeys: new Set(),
+			authorityBaselineSequence: null,
+			isAuthorityBaselineValid: false,
 			membershipRole: null,
 			operationKeys: new Set(),
 			recipientNoticeKeys: new Set(),
@@ -182,22 +186,61 @@ export class CharacterSheetRealtimeCoordinator {
 
 	_handleCursor (active, baseline) {
 		if (!this._isCurrent(active)) return;
-		if (baseline.cursor?.campaignId !== this._campaignId) return;
-		if (baseline.membership?.accountId) active.viewerAccountId = baseline.membership.accountId;
-		if (baseline.membership?.role && baseline.membership.role !== active.membershipRole) {
-			active.membershipRole = baseline.membership.role;
+		const baselineCampaignId = baseline?.cursor?.campaignId;
+		const baselineSequence = baseline?.cursor?.lastSequence;
+		const membershipRole = baseline?.membership?.role ?? active.membershipRole;
+		const viewerAccountId = baseline?.membership?.accountId ?? active.viewerAccountId;
+		const isCharacterReadOnly = this._repository.isCharacterReadOnly?.({characterId: active.characterId}) === true;
+		const isCursorMalformed = (
+			baselineCampaignId !== this._campaignId
+			|| !Number.isSafeInteger(baselineSequence)
+			|| baselineSequence < 0
+			|| (baseline?.membership?.role != null && !_CAMPAIGN_MEMBERSHIP_ROLES.has(baseline.membership.role))
+			|| (isCharacterReadOnly && (
+				typeof viewerAccountId !== "string"
+				|| !viewerAccountId
+				|| !_CAMPAIGN_MEMBERSHIP_ROLES.has(membershipRole)
+			))
+		);
+		if (isCursorMalformed) {
+			active.isAuthorityBaselineValid = false;
+			this._emit("deliveryError", {
+				characterId: active.characterId,
+				deliveryType: "cursor",
+				sequence: 0,
+			});
+			this._handleConnectionState(active, {
+				state: "unavailable",
+				reason: "Realtime cursor baseline is invalid.",
+			});
+			return;
+		}
+		active.authorityBaselineSequence = Math.max(active.authorityBaselineSequence ?? 0, baselineSequence);
+		active.isAuthorityBaselineValid = true;
+		if (viewerAccountId) active.viewerAccountId = viewerAccountId;
+		const isMembershipRoleChanged = membershipRole && membershipRole !== active.membershipRole;
+		if (membershipRole) active.membershipRole = membershipRole;
+		if (isCharacterReadOnly && !_DM_MEMBERSHIP_ROLES.has(membershipRole)) {
+			this._queueDetach(active, {
+				accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
+				reason: "Your campaign role no longer permits this character view.",
+				sequence: baselineSequence,
+			});
+			return;
+		}
+		if (isMembershipRoleChanged) {
 			this._enqueue(active, {
 				type: "membershipChanged",
 				value: {
 					campaignId: this._campaignId,
-					sequence: baseline.cursor?.lastSequence || 0,
+					sequence: baselineSequence,
 					source: "cursor",
-					role: baseline.membership.role,
+					role: membershipRole,
 				},
 			});
 		}
 		if (
-			baseline.campaign
+			baseline?.campaign
 			&& Object.hasOwn(baseline.campaign, "activeRulesVersionId")
 			&& Object.hasOwn(baseline.campaign, "activeBrewBundleVersionId")
 		) {
@@ -206,18 +249,18 @@ export class CharacterSheetRealtimeCoordinator {
 				value: {
 					type: "campaign.cursor",
 					campaignId: this._campaignId,
-					sequence: baseline.cursor?.lastSequence || 0,
+					sequence: baselineSequence,
 					rulesVersionId: baseline.campaign.activeRulesVersionId ?? null,
 					brewBundleVersionId: baseline.campaign.activeBrewBundleVersionId ?? null,
 				},
 			});
 		}
-		const characterRef = baseline.characterRefs?.find(ref => ref?.id === active.characterId);
+		const characterRef = baseline?.characterRefs?.find(ref => ref?.id === active.characterId);
 		if (!characterRef) {
 			this._queueDetach(active, {
 				accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
 				reason: "Character is no longer available in this campaign.",
-				sequence: baseline.cursor?.lastSequence || 0,
+				sequence: baselineSequence,
 			});
 			return;
 		}
@@ -225,7 +268,7 @@ export class CharacterSheetRealtimeCoordinator {
 		const metadata = {
 			campaignId: this._campaignId,
 			characterId: active.characterId,
-			lastSequence: baseline.cursor?.lastSequence || 0,
+			lastSequence: baselineSequence,
 			revision: characterRef.revision,
 			projectionRevision: characterRef.projectionRevision,
 			...(hasOperationWatermark ? {operationWatermark: characterRef.operationWatermark} : {}),
@@ -257,10 +300,24 @@ export class CharacterSheetRealtimeCoordinator {
 
 	_handleEvent (active, event) {
 		if (!this._isCurrent(active) || event?.campaignId !== this._campaignId) return;
-		const isViewerDemotedFromDm = event.type === "membership.role_changed"
-			&& event.payload?.accountId === active.viewerAccountId
-			&& !["dm", "co_dm"].includes(event.payload?.role)
+		const isViewerRoleChange = event.type === "membership.role_changed"
+			&& event.payload?.accountId === active.viewerAccountId;
+		const isViewerRoleChangeCoveredByBaseline = isViewerRoleChange
+			&& active.isAuthorityBaselineValid
+			&& isRealtimeEventCoveredByBaseline({
+				event,
+				baselineSequence: active.authorityBaselineSequence,
+			});
+		if (isViewerRoleChangeCoveredByBaseline) return;
+		const isViewerDemotedFromDm = isViewerRoleChange
+			&& active.isAuthorityBaselineValid
+			&& !_DM_MEMBERSHIP_ROLES.has(event.payload?.role)
 			&& this._repository.isCharacterReadOnly?.({characterId: active.characterId});
+		if (
+			isViewerRoleChange
+			&& active.isAuthorityBaselineValid
+			&& _CAMPAIGN_MEMBERSHIP_ROLES.has(event.payload?.role)
+		) active.membershipRole = event.payload.role;
 		if (event.type === "campaign.archived" || isViewerDemotedFromDm) {
 			this._queueDetach(active, {
 				accessEndCause: event.type === "campaign.archived"

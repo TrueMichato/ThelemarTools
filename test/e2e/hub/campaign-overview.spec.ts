@@ -714,6 +714,40 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 			partyAttachCount: 0,
 			isPreviousPartyInventoryAttached: false,
 		});
+
+		await dm.changeMemberRoleViaApi({
+			campaignId,
+			displayName: "Authority Co-DM",
+			role: "co_dm",
+		});
+		await coDmSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
+		await coDmSheet.waitForHubRealtimeLive();
+		await coDm.page.waitForTimeout(500);
+		await expect(coDm.page.locator("#charsheet-campaign-access-ended")).toHaveCount(0);
+		await expect(coDm.page.locator("main.charsheet-page")).toBeVisible();
+		await expect(coDmSheet.characterName).toHaveValue("Readonly Rowan Recovered");
+		expect(await coDm.page.evaluate(() => (globalThis as any).charSheet._currentCharacterAccess)).toBe("dm_readonly");
+
+		await dm.changeMemberRoleViaApi({
+			campaignId,
+			displayName: "Authority Co-DM",
+			role: "player",
+		});
+		await expect(coDm.page.locator("#charsheet-campaign-access-ended"))
+			.toHaveAttribute("role", "alert", {timeout: 20_000});
+		await expect(coDm.page.locator("main.charsheet-page")).toBeHidden();
+		expect(await coDm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			return {
+				currentCharacterId: sheet._currentCharacterId,
+				currentCharacterName: sheet._state.toJson().name,
+				currentAccess: sheet._currentCharacterAccess,
+			};
+		})).toEqual({
+			currentCharacterId: null,
+			currentCharacterName: "",
+			currentAccess: "owner",
+		});
 	} finally {
 		await Promise.all([pCloseContext(dmContext), pCloseContext(playerContext), pCloseContext(coDmContext)]);
 	}

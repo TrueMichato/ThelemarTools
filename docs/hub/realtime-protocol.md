@@ -352,6 +352,11 @@ cursor, partial replay chain, buffered live events, and in-memory dedupe state.
 Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Semantic lifecycle
 events are not discarded solely because they are at/below `operationWatermark`; durable roll/operation history
 may still replay because it is not fully represented by current state.
+Character Sheet read-only projections additionally treat the cursor membership as the current authority
+baseline: a current non-DM role ends the private surface immediately, while replayed role changes at or below the
+cursor sequence cannot override a later DM/co-DM promotion. A newer live demotion still ends the surface. An
+invalid authority cursor is reported through the existing realtime unavailable/delivery-error path rather than
+being interpreted as a valid sequence-zero baseline.
 
 ## Protocol evolution
 
