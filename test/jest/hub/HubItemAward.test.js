@@ -3,6 +3,8 @@ import {
 	buildAwardPreview,
 	buildRecentAwardItems,
 	buildStashAwardItems,
+	createCatalogRenderFence,
+	createGenerationFencedCatalogLoader,
 	filterAwardItems,
 	getAwardCommandFingerprint,
 	getAwardItemSelectionKey,
@@ -88,6 +90,60 @@ describe("Hub item award presentation contract", () => {
 			visibleItems: [{name: "Club", source: "PHB", sourceKind: "catalog"}],
 			sourceItems: [longsword],
 		})).toEqual(longsword);
+	});
+
+	it("does not let an older campaign catalog request overwrite newer brew content", async () => {
+		const pending = [];
+		const loader = createGenerationFencedCatalogLoader({
+			pLoadCatalog: content => new Promise(resolve => pending.push({content, resolve})),
+		});
+		loader.setCampaignBrewContent([{name: "Old Item"}]);
+		const oldLoad = loader.pEnsureCatalog();
+		loader.setCampaignBrewContent([{name: "New Item"}]);
+		const newLoad = loader.pEnsureCatalog();
+		await Promise.resolve();
+
+		pending[1].resolve([{name: "New Item", source: "NEW"}]);
+		await expect(newLoad).resolves.toEqual([{name: "New Item", source: "NEW"}]);
+		pending[0].resolve([{name: "Old Item", source: "OLD"}]);
+		await expect(oldLoad).resolves.toBeNull();
+
+		expect(loader.getCatalog()).toEqual([{name: "New Item", source: "NEW"}]);
+		expect(loader.getCampaignBrewContent()).toEqual([{name: "New Item"}]);
+		expect(loader.getGeneration()).toBe(2);
+	});
+
+	it("ignores an obsolete catalog failure after a newer generation succeeds", async () => {
+		const pending = [];
+		const loader = createGenerationFencedCatalogLoader({
+			pLoadCatalog: content => new Promise((resolve, reject) => pending.push({content, resolve, reject})),
+		});
+		loader.setCampaignBrewContent([{name: "Old Item"}]);
+		const oldLoad = loader.pEnsureCatalog();
+		loader.setCampaignBrewContent([{name: "New Item"}]);
+		const newLoad = loader.pEnsureCatalog();
+		await Promise.resolve();
+
+		pending[1].resolve([{name: "New Item", source: "NEW"}]);
+		await expect(newLoad).resolves.toEqual([{name: "New Item", source: "NEW"}]);
+		pending[0].reject(new Error("stale catalog failure"));
+
+		await expect(oldLoad).resolves.toBeNull();
+		expect(loader.getCatalog()).toEqual([{name: "New Item", source: "NEW"}]);
+	});
+
+	it("fences obsolete result renders across both render and catalog generations", () => {
+		let catalogGeneration = 0;
+		const fence = createCatalogRenderFence({getCatalogGeneration: () => catalogGeneration});
+		const firstRender = fence.begin();
+		const secondRender = fence.begin();
+
+		expect(firstRender()).toBe(false);
+		expect(secondRender()).toBe(true);
+
+		catalogGeneration++;
+		expect(secondRender()).toBe(false);
+		expect(fence.begin()()).toBe(true);
 	});
 
 	it("keys retries from the normalized ordered award command instead of incidental controls", () => {

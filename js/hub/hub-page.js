@@ -39,6 +39,8 @@ import {
 	buildAwardPreview,
 	buildRecentAwardItems,
 	buildStashAwardItems,
+	createCatalogRenderFence,
+	createGenerationFencedCatalogLoader,
 	filterAwardItems,
 	getAwardCommandFingerprint,
 	getAwardItemSelectionKey,
@@ -554,14 +556,21 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 		};
 	}
 
-	let campaignBrewContent = context.brewBundle?.content;
-	let catalog = null;
-	let catalogLoad = null;
+	const catalogLoader = createGenerationFencedCatalogLoader({
+		campaignBrewContent: context.brewBundle?.content,
+		pLoadCatalog: async campaignBrewContent => {
+			const {pLoadHubItemCatalog} = await import("./hub-item-catalog.js");
+			return pLoadHubItemCatalog({campaignBrewContent});
+		},
+	});
 	let selectedItem = null;
 	let currentPartyInventory = partyInventory;
 	let currentTargets = targetCharacters;
 	let currentEvents = events;
 	let visibleItems = [];
+	const catalogRenderFence = createCatalogRenderFence({
+		getCatalogGeneration: () => catalogLoader.getGeneration(),
+	});
 	const selectedTargetIds = new Set();
 	const pendingDisabledStates = new Map();
 	const restorePendingControlStates = () => {
@@ -581,6 +590,7 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	};
 
 	const getSourceItems = () => {
+		const catalog = catalogLoader.getCatalog();
 		switch (sourceKind.value) {
 			case "recent": return buildRecentAwardItems(currentEvents);
 			case "campaign_item": return (catalog || []).filter(item => item.sourceKind === "campaign_item");
@@ -590,15 +600,8 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	};
 
 	const pEnsureCatalog = async () => {
-		if (catalog) return catalog;
-		if (!catalogLoad) {
-			resultsStatus.textContent = "Loading item catalog...";
-			catalogLoad = import("./hub-item-catalog.js")
-				.then(({pLoadHubItemCatalog}) => pLoadHubItemCatalog({campaignBrewContent}))
-				.then(loaded => catalog = loaded)
-				.finally(() => catalogLoad = null);
-		}
-		return catalogLoad;
+		resultsStatus.textContent = "Loading item catalog...";
+		return catalogLoader.pEnsureCatalog();
 	};
 
 	const getSelectedTargets = () => currentTargets.filter(target => selectedTargetIds.has(getProjectionId(target)));
@@ -686,17 +689,20 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	};
 
 	const renderResults = async () => {
+		const isCurrentRender = catalogRenderFence.begin();
 		const previousSelectionKey = results.value;
 		const isCatalogSource = ["catalog", "campaign_item"].includes(sourceKind.value);
 		if (isCatalogSource && (sourceKind.value === "campaign_item" || search.value.trim().length >= 2)) {
 			try {
 				await pEnsureCatalog();
 			} catch (error) {
+				if (!isCurrentRender()) return;
 				results.replaceChildren();
 				resultsStatus.textContent = error.message || "The item catalog could not be loaded.";
 				setFormStatus({formId: "campaign-item-form", message: resultsStatus.textContent, isError: true});
 				return;
 			}
+			if (!isCurrentRender()) return;
 		}
 		visibleItems = filterAwardItems({
 			items: getSourceItems(),
@@ -829,10 +835,8 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			renderPreview();
 		},
 		setCampaignBrewContent (content) {
-			campaignBrewContent = content;
-			catalog = null;
-			catalogLoad = null;
-			if (sourceKind.value === "campaign_item") {
+			catalogLoader.setCampaignBrewContent(content);
+			if (["catalog", "campaign_item"].includes(sourceKind.value)) {
 				clearSelection();
 				void renderResults();
 			}

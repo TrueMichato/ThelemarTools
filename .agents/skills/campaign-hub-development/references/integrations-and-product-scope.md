@@ -49,9 +49,13 @@ When changing Character Sheet internals, also use `charactersheet-development` a
 - DM truth uses one `dm_readonly` mode across native and custom keyboard controls, including late renders. Capture
   guards cover context-menu/drag/long-press entry, and body-portaled spell, attack, ability, and mobile callbacks
   recheck access before acting. Manual sticky-note movement is character/load/access-fenced, and every
-  Character Sheet-owned generic modal is synchronously concealed and closed on character or authority transition;
-  stale controls/callbacks cannot mutate the replacement projection. Export and Print remain reachable through
-  More; recipient notices remain owner-only while invalidations stay live.
+  Character Sheet-owned synchronous, asynchronous, and `InputUiUtil` modal is synchronously concealed and closed
+  on character or authority transition; stale controls/callbacks cannot mutate the replacement projection. Export
+  and Print remain reachable through More; recipient notices remain owner-only while invalidations stay live.
+- Projection invalidations are payload-free campaign control events sent explicitly to active accounts currently
+  authorized for any projected field. Policy changes use the old/new audience union; ordinary mutations use the
+  current audience. Identity-hidden peers therefore still refetch shared HP/conditions without receiving character
+  identity in the event.
 - Journey Tracker consumes the existing Party Tracker projection and remains system-neutral.
 
 Primary seams: `js/dmscreen/dmscreen-hub-controller.js`, `js/dmscreen.js`,

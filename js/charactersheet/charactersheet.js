@@ -309,6 +309,7 @@ class CharacterSheetPage {
 
 	_closeCharacterScopedTransientUi () {
 		this._notes?.cancelActiveDrag?.();
+		this._playMode?.resetCharacterScopeUi?.();
 		void CharacterSheetModal.closeCharacterScopeModals().catch(error => {
 			// eslint-disable-next-line no-console
 			console.error("Could not close character-scoped modal state:", error);
@@ -3421,7 +3422,7 @@ class CharacterSheetPage {
 		const backgrounds = this.filterByAllowedSources(this._backgrounds || []);
 		const byName = (/** @type {*} */ a, /** @type {*} */ b) => SortUtil.ascSortLower(a.name, b.name);
 
-		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner: modalInner, doClose} = CharacterSheetModal.getShow({
 			title: "⚡ Spawn Character",
 			isMinHeight0: true,
 		});
@@ -4879,9 +4880,20 @@ class CharacterSheetPage {
 	 * Generic beast picker from bestiary
 	 */
 	async _pShowBeastPicker (options = {}) {
-		const {maxCr = 1, canFly = false, canSwim = true, origin, type, onSelectCreature = null} = options;
+		const {
+			maxCr = 1,
+			canFly = false,
+			canSwim = true,
+			origin,
+			type,
+			onSelectCreature = null,
+			characterScope = null,
+		} = options;
+		const isCurrentOwnerScope = () => !characterScope
+			|| this._isCharacterScopeSnapshotCurrent(characterScope, {isRequireOwner: true});
 
 		const validCreatures = await this._pGetWildShapeBeastCandidates(options);
+		if (!isCurrentOwnerScope()) return;
 		if (validCreatures == null) return; // load failed (toast already shown)
 		if (validCreatures.length === 0) {
 			JqueryUtil.doToast({type: "warning", content: "No valid creatures found for this companion type."});
@@ -4895,7 +4907,7 @@ class CharacterSheetPage {
 			values: validCreatures.map(c => `${c.name} (CR ${typeof c.cr === "object" ? c.cr.cr : c.cr})`),
 			isResolveItem: true,
 		});
-		if (!choice) return;
+		if (!choice || !isCurrentOwnerScope()) return;
 
 		const selectedName = choice.split(" (CR")[0];
 		const selectedCreature = validCreatures.find(c => c.name === selectedName);
@@ -4907,6 +4919,7 @@ class CharacterSheetPage {
 		// any state mutation / messaging. Returning here keeps the existing
 		// positional addCompanionFromBestiary contract intact for the other callers.
 		if (typeof onSelectCreature === "function") {
+			if (!isCurrentOwnerScope()) return;
 			onSelectCreature(selectedCreature);
 			return;
 		}
@@ -4917,6 +4930,7 @@ class CharacterSheetPage {
 		// `companion.type`, which never matches the string COMPANION_TYPES constants, so the
 		// companion is mis-typed (Wild Shape forms then never register, the use is never spent,
 		// and Beast Master / Mount companions are mis-bucketed too).
+		if (!isCurrentOwnerScope()) return;
 		this._state.addCompanionFromBestiary?.(selectedCreature, type, origin);
 
 		JqueryUtil.doToast({type: "success", content: `Added ${selectedCreature.name} as ${origin || "companion"}!`});
@@ -7785,7 +7799,7 @@ class CharacterSheetPage {
 			this._renderPortrait();
 		};
 
-		const {eleModalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner, doClose} = CharacterSheetModal.getShow({
 			title: "Frame Portrait",
 			isMinHeight0: true,
 			cbClose: () => commit(),
@@ -11374,7 +11388,7 @@ class CharacterSheetPage {
 			}))
 			.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = UiUtil.getShowModal({
+		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = CharacterSheetModal.getShow({
 			title: "✨ Apply Buff",
 			isMinHeight0: true,
 			isHeight100: true,
@@ -13502,7 +13516,7 @@ class CharacterSheetPage {
 			return true;
 		}
 
-		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner: modalInner, doClose} = CharacterSheetModal.getShow({
 			title: "👅 Forked Tongue — Swap a Language",
 			isMinHeight0: true,
 		});
@@ -15349,8 +15363,10 @@ class CharacterSheetPage {
 	 * @param {number} damageTaken - The amount of damage taken
 	 */
 	async _promptConcentrationCheck (damageTaken) {
+		const characterScope = this._getCharacterScopeSnapshot();
+		const isCurrentOwnerScope = () => this._isCharacterScopeSnapshotCurrent(characterScope, {isRequireOwner: true});
 		const concentration = this._state.getConcentration?.();
-		if (!concentration) return;
+		if (!concentration || !isCurrentOwnerScope()) return;
 
 		const spellName = this._state.getConcentrationLabel?.() || concentration.spellName || "Unknown Spell";
 		const checkInfo = this._state.makeConcentrationCheck(damageTaken);
@@ -15369,6 +15385,10 @@ class CharacterSheetPage {
 			let pendingBreak = false;
 			let maintained = false;
 			const finalize = () => {
+				if (!isCurrentOwnerScope()) {
+					pendingBreak = false;
+					return;
+				}
 				if (pendingBreak && !maintained) {
 					this._state.breakConcentration();
 					this._combatModule?.renderCombatStates?.();
@@ -15379,10 +15399,11 @@ class CharacterSheetPage {
 				pendingBreak = false;
 			};
 
-			const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+			const {eleModalInner: modalInner, doClose} = CharacterSheetModal.getShow({
 				title: "Concentration Check",
 				isMinHeight0: true,
 				cbClose: () => { finalize(); resolve(); },
+				cbCharacterScopeTeardown: resolve,
 			});
 
 			const rollResult = e_({outer: `<div class="charsheet__concentration-result ve-hidden"></div>`});
@@ -15447,6 +15468,7 @@ class CharacterSheetPage {
 
 				// Show animated dice — adv shows both physical d20s.
 				await this.pAnimateD20({roll: effectiveRoll, roll1, roll2: roll2 ?? roll1, mode: advantage ? "advantage" : "normal"});
+				if (!isCurrentOwnerScope()) return;
 
 				const rollText = advantage
 					? `Rolls: ${roll1}, ${roll2} (took ${effectiveRoll}) + ${bonus} = <strong>${total}</strong> vs DC ${currentDc}`
@@ -15482,7 +15504,7 @@ class CharacterSheetPage {
 							</div>`;
 						rollResult.querySelector("#charsheet-strain-maintain")?.addEventListener("click", async () => {
 							const track = await this._pPickStrainTrack(`Keeping ${quote.powers.join(", ")} active costs ${quote.cost} strain. Take it as:`);
-							if (!track) return;
+							if (!track || !isCurrentOwnerScope()) return;
 							const paid = this._state.payStrainToMaintain({track});
 							rollResult.querySelector("#charsheet-strain-maintain")?.remove();
 							if (paid.ok) {
@@ -15520,6 +15542,7 @@ class CharacterSheetPage {
 			const btnBreak = e_({
 				outer: `<button class="ve-btn ve-btn-danger">Break Concentration</button>`,
 				click: () => {
+					if (!isCurrentOwnerScope()) return;
 					pendingBreak = false;
 					this._state.breakConcentration();
 					this._combatModule?.renderCombatStates?.();

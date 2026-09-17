@@ -5227,10 +5227,13 @@ class CharacterSheetSpells {
 	 *   - `pactCreatureNames` (string[]): Additional creature names from Pact of the Chain
 	 */
 	async _pShowFamiliarPicker (opts = {}) {
-		const {isWildCompanion = false, pactCreatureNames = []} = opts;
+		const {isWildCompanion = false, pactCreatureNames = [], characterScope = null} = opts;
+		const isCurrentOwnerScope = () => !characterScope
+			|| this._page._isCharacterScopeSnapshotCurrent?.(characterScope, {isRequireOwner: true});
 
 		// Load bestiary data
 		const bestiaryData = await DataLoader.pCacheAndGetAllSite(UrlUtil.PG_BESTIARY);
+		if (!isCurrentOwnerScope()) return;
 
 		// Standard familiars from Find Familiar spell: CR 0 Tiny beasts
 		// XPHB lists: Bat, Cat, Frog, Hawk, Lizard, Octopus, Owl, Rat, Raven, Spider, Weasel
@@ -5280,6 +5283,7 @@ class CharacterSheetSpells {
 			isWidth100: true,
 			zIndex: 100,
 		});
+		if (!isCurrentOwnerScope()) return;
 
 		modalInner.insertAdjacentHTML("beforeend", `
 			<div class="charsheet__familiar-picker-header mb-3" style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(59, 130, 246, 0.1)); border-radius: 8px; padding: 12px;">
@@ -5693,13 +5697,13 @@ class CharacterSheetSpells {
 
 				card.querySelector(".btn-select-familiar").addEventListener("click", async (evt) => {
 					evt.stopPropagation();
-					await this._selectFamiliar(creature, {isWildCompanion});
+					await this._selectFamiliar(creature, {isWildCompanion, characterScope});
 					doClose();
 				});
 
 				card.addEventListener("click", async (evt) => {
 					if (evt.target.closest("a")?.length) return;
-					await this._selectFamiliar(creature, {isWildCompanion});
+					await this._selectFamiliar(creature, {isWildCompanion, characterScope});
 					doClose();
 				});
 
@@ -5749,7 +5753,11 @@ class CharacterSheetSpells {
 	 *   - `isWildCompanion` (boolean): If true, familiar is summoned as Fey (Wild Companion)
 	 */
 	async _selectFamiliar (creature, opts = {}) {
-		const {isWildCompanion = false} = opts;
+		const {isWildCompanion = false, characterScope = null} = opts;
+		if (
+			characterScope
+			&& !this._page._isCharacterScopeSnapshotCurrent?.(characterScope, {isRequireOwner: true})
+		) return;
 
 		// Remove any existing familiars first (you can only have one)
 		const existingFamiliars = this._state.getCompanionsByType?.(CharacterSheetState.COMPANION_TYPES.FAMILIAR) || [];

@@ -50,12 +50,25 @@ function makeZodiacDruid ({current = 2, max = 2} = {}) {
 	state.setAbilityBase("wis", 18);
 	state.addFeature({name: "Wild Shape", source: "XPHB", uses: {current, max, recharge: "short"}});
 
-	const page = {getState: () => state};
+	const scope = {characterId: "character-a", loadGeneration: 1, accessMode: "owner"};
+	const page = {
+		getState: () => state,
+		_currentCharacterId: scope.characterId,
+		_characterLoadGeneration: scope.loadGeneration,
+		_currentCharacterAccess: scope.accessMode,
+		_getCharacterScopeSnapshot: () => ({...scope}),
+		_isCharacterScopeSnapshotCurrent: snapshot => (
+			snapshot.characterId === page._currentCharacterId
+			&& snapshot.loadGeneration === page._characterLoadGeneration
+			&& snapshot.accessMode === page._currentCharacterAccess
+		),
+		isCurrentCharacterReadOnly: () => page._currentCharacterAccess === "dm_readonly",
+	};
 	const mod = new CharacterSheetDruidResources(page);
 	// The modal isn't mounted in these tests; neutralise the render/persist hops.
 	mod._refreshSheet = () => {};
 	mod._renderModalBody = () => {};
-	return {state, mod};
+	return {state, mod, page};
 }
 
 const usesOf = (state) => state.getWildShapeResource().current;
@@ -117,6 +130,21 @@ describe("Zodiac Form — confirm before spending a Wild Shape use", () => {
 
 		expect(usesOf(state)).toBe(1);
 		expect(state.getActiveZodiacForm()?.formId).toBe("beaver");
+	});
+
+	it("does not spend against a replacement character after an in-flight confirm", async () => {
+		const {state, mod, page} = makeZodiacDruid({current: 2, max: 2});
+		stubConfirm(true, {
+			onOpen: async () => {
+				page._currentCharacterId = "character-b";
+				page._characterLoadGeneration++;
+			},
+		});
+
+		await mod._pSelectZodiacForm("beaver");
+
+		expect(usesOf(state)).toBe(2);
+		expect(state.getActiveZodiacForm()).toBeFalsy();
 	});
 
 	it("blocks BEFORE opening the dialog when no uses remain", async () => {

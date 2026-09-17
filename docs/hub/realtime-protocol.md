@@ -1,7 +1,7 @@
 # Campaign Hub realtime protocol
 
 > **Status:** Current private-V1 wire protocol
-> **Protocol version:** `4`
+> **Protocol version:** `5`
 > **Last verified:** 2026-09-04
 > **Owner:** Campaign Hub maintainers
 
@@ -169,16 +169,22 @@ Presence is ephemeral and not written to the event log.
     "sequence": 43,
     "type": "character.projection.invalidated",
     "actorAccountId": "uuid",
-    "aggregateType": "character",
-    "aggregateId": "uuid",
-    "aggregateRevision": 8,
-    "visibility": "all_members",
+    "aggregateType": "campaign",
+    "aggregateId": "campaign-uuid",
+    "aggregateRevision": null,
+    "visibility": "explicit_accounts",
     "visibleAccountIds": null,
-    "payload": {"projectionRevision": 3},
+    "payload": {},
     "createdAt": "ISO-8601"
   }
 }
 ```
+
+Campaign-scoped `character.projection.invalidated` is a protocol-5-only envelope. Its empty payload and
+explicit account audience intentionally avoid disclosing the changed character to viewers whose projection
+hides identity. Protocol-3 and protocol-4 sockets are closed with `1008 Protocol update required` rather than
+receiving an event shape that their clients would silently ignore. Protocol 4 remains accepted for the
+source-cost event shapes it introduced.
 
 ### Character semantic-operation lifecycle
 

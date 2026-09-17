@@ -69,6 +69,7 @@ import {createSemanticOperationRegistry} from "./semantic-operation-registry.js"
 import {
 	applySourceCost,
 	hasSourceCostBindingChanged,
+	isPeerSourceCostsProtocolVersion,
 	PEER_SOURCE_COSTS_CONTRACT_VERSION,
 	PEER_SOURCE_COSTS_TEMPLATE_REGISTRY_VERSION,
 } from "../../js/hub/hub-source-costs.js";
@@ -1113,16 +1114,26 @@ export class MemoryHubStore {
 		if (isRevisionBump) character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
 		if (!character.campaignId) return null;
+		const visibleAccountIds = projectionInvalidationVisibleAccountIds ?? [
+			...this._memberships.values(),
+		]
+			.filter(membership => membership.campaignId === character.campaignId && membership.status === "active")
+			.filter(membership => canViewSharedCharacterProjection({
+				character,
+				accountId: membership.accountId,
+				role: membership.role,
+			}))
+			.map(membership => membership.accountId);
 		return this._appendEvent({
 			campaignId: character.campaignId,
 			actorAccountId,
 			type: "character.projection.invalidated",
-			aggregateType: projectionInvalidationVisibleAccountIds ? "campaign" : "character",
-			aggregateId: projectionInvalidationVisibleAccountIds ? character.campaignId : character.id,
-			aggregateRevision: projectionInvalidationVisibleAccountIds ? null : character.revision,
-			visibility: projectionInvalidationVisibleAccountIds ? "explicit_accounts" : "all_members",
-			visibleAccountIds: projectionInvalidationVisibleAccountIds,
-			payload: projectionInvalidationVisibleAccountIds ? {} : {projectionRevision: character.projectionRevision},
+			aggregateType: "campaign",
+			aggregateId: character.campaignId,
+			aggregateRevision: null,
+			visibility: "explicit_accounts",
+			visibleAccountIds,
+			payload: {},
 		});
 	}
 
@@ -2633,8 +2644,8 @@ export class MemoryHubStore {
 		} catch {
 			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 		}
-		if (isCostBearing && `${protocolVersion}` !== "4") {
-			throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+		if (isCostBearing && !isPeerSourceCostsProtocolVersion(protocolVersion)) {
+			throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 or newer is required.`, {status: 426});
 		}
 		if (isCostBearing && (
 			contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
@@ -2805,8 +2816,8 @@ export class MemoryHubStore {
 		if (!isDm && !isProposer && !isTargetOwner) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
 		if (operation.sourceCost && (
 			contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
-			|| `${protocolVersion}` !== "4"
-		)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+			|| !isPeerSourceCostsProtocolVersion(protocolVersion)
+		)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 or newer is required.`, {status: 426});
 		if (decision === "accept" && (!isTargetOwner || membership.role !== "player")) {
 			throw new HubStoreError("OPERATION_FORBIDDEN", `Only an active player target owner may approve.`, {status: 403});
 		}

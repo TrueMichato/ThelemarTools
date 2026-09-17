@@ -169,7 +169,26 @@ describe("projection privacy canaries", () => {
 	});
 
 	it("emits metadata-only invalidations for every mutation that can change a shared field", async () => {
-		const {dm, owner, campaign, character} = await setup();
+		const {dm, owner, peerA, campaign, character} = await setup();
+		const policy = (await app.inject({
+			method: "GET",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: readHeaders(owner),
+		})).json();
+		await app.inject({
+			method: "PUT",
+			url: `/api/characters/${character.id}/projection-policy`,
+			headers: headers(owner),
+			payload: {
+				expectedProjectionRevision: policy.projectionRevision,
+				policy: {version: 1, preset: "private", overrides: {hp: {mode: "share"}}},
+			},
+		});
+		const peerEventsBefore = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/events`,
+			headers: readHeaders(peerA),
+		})).json().events.filter(event => event.type === "character.projection.invalidated").length;
 		const lease = (await app.inject({method: "POST", url: `/api/characters/${character.id}/lease`, headers: headers(owner), payload: {}})).json().lease;
 		await app.inject({
 			method: "PATCH",
@@ -189,11 +208,25 @@ describe("projection privacy canaries", () => {
 
 		expect(invalidations.length).toBeGreaterThanOrEqual(2);
 		for (const event of invalidations) {
-			// The payload may carry the projection revision and nothing else.
-			expect(Object.keys(event.payload)).toEqual(["projectionRevision"]);
+			expect(event.aggregateType).toBe("campaign");
+			expect(event.payload).toEqual({});
 		}
 		expect(events.some(event => event.type === "character.projection.updated")).toBe(false);
 		expect(JSON.stringify(invalidations)).not.toContain(CANARY);
+
+		const peerEvents = (await app.inject({
+			method: "GET",
+			url: `/api/campaigns/${campaign.id}/events`,
+			headers: readHeaders(peerA),
+		})).json().events.filter(event => event.type === "character.projection.invalidated");
+		expect(peerEvents).toHaveLength(peerEventsBefore + 2);
+		const peerRead = (await app.inject({
+			method: "GET",
+			url: `/api/characters/${character.id}`,
+			headers: readHeaders(peerA),
+		})).json().projection;
+		expect(peerRead.data.identity).toBeUndefined();
+		expect(peerRead.data.hp.current).toBe(12);
 	});
 
 	it("does not invalidate for a mutation that cannot change a catalog field", async () => {

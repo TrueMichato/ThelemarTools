@@ -163,11 +163,14 @@ export class HubCampaignPage {
 		}
 		await expect(workbench).not.toHaveAttribute("open", "");
 		const summary = workbench.locator(":scope > summary");
+		await expect(summary).toBeVisible();
+		await summary.scrollIntoViewIfNeeded();
 		await summary.focus();
+		await expect(summary).toBeFocused();
 		await summary.press("Enter");
-		await expect(workbench).toHaveAttribute("open", "");
+		await expect(workbench).toHaveJSProperty("open", true);
 		await summary.press("Enter");
-		await expect(workbench).not.toHaveAttribute("open", "");
+		await expect(workbench).toHaveJSProperty("open", false);
 	}
 
 	async expectCampaignPrimaryAction ({

@@ -86,7 +86,7 @@ describe("Campaign Hub documentation contract", () => {
 			"authorization-scoped",
 			"HTTP fetch",
 			"editable owner Character Sheet must never",
-			"{\"projectionRevision\": 4}",
+			"payload is empty",
 			"carries no projected character",
 			"PROJECTION_POLICY_INVALID",
 			"Implementation: Shipped.",

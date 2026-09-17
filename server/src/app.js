@@ -35,14 +35,18 @@ import {getClientIpHeader, getRequestClientIp} from "./client-ip.js";
 import {SAFE_ITEM_SUMMARY_FIELDS} from "./hub-actions.js";
 import {PEER_SOURCE_COSTS_PROTOCOL_VERSION} from "../../js/hub/hub-source-costs.js";
 import {ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY} from "./hub-capabilities.js";
+import {HUB_PROTOCOL_VERSION} from "../../js/hub/hub-capabilities.js";
 import crypto from "node:crypto";
 
 const {normalizeIP} = rateLimit;
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
-const HUB_PROTOCOL_VERSION = PEER_SOURCE_COSTS_PROTOCOL_VERSION;
 const HUB_LEGACY_PROTOCOL_VERSION = "3";
-const SUPPORTED_HUB_PROTOCOL_VERSIONS = new Set([HUB_LEGACY_PROTOCOL_VERSION, HUB_PROTOCOL_VERSION]);
+const SUPPORTED_HUB_PROTOCOL_VERSIONS = new Set([
+	HUB_LEGACY_PROTOCOL_VERSION,
+	PEER_SOURCE_COSTS_PROTOCOL_VERSION,
+	HUB_PROTOCOL_VERSION,
+]);
 const SAFE_ITEM_SUMMARY_KEYS = new Set(SAFE_ITEM_SUMMARY_FIELDS);
 const getProtocolCompatiblePendingActions = ({actions, protocolVersion}) => {
 	if (protocolVersion !== HUB_LEGACY_PROTOCOL_VERSION) return actions;
@@ -324,10 +328,10 @@ export async function createHubApp ({
 	const requirePeerSourceCostsProtocol = async (request, reply) => {
 		const auth = await pGetAuth(request);
 		if (!auth) return reply.code(401).send({error: "AUTH_REQUIRED"});
-		if (request.headers["x-hub-protocol-version"] !== PEER_SOURCE_COSTS_PROTOCOL_VERSION) {
+		if (![PEER_SOURCE_COSTS_PROTOCOL_VERSION, HUB_PROTOCOL_VERSION].includes(request.headers["x-hub-protocol-version"])) {
 			return reply.code(426).send({
 				error: "PROTOCOL_UPDATE_REQUIRED",
-				protocolVersion: PEER_SOURCE_COSTS_PROTOCOL_VERSION,
+				protocolVersion: HUB_PROTOCOL_VERSION,
 			});
 		}
 	};
@@ -489,7 +493,7 @@ export async function createHubApp ({
 			campaignId: request.params.campaignId,
 		});
 		if (!membership) return reply.code(404).send({error: "CAMPAIGN_NOT_FOUND"});
-		if (request.query.v !== PEER_SOURCE_COSTS_PROTOCOL_VERSION) {
+		if (![PEER_SOURCE_COSTS_PROTOCOL_VERSION, HUB_PROTOCOL_VERSION].includes(request.query.v)) {
 			const [capability, isProtocol4History] = await Promise.all([
 				store.pGetPeerSourceCostsCapability?.({
 					accountId: auth.account.id,
@@ -500,7 +504,7 @@ export async function createHubApp ({
 			if (capability?.enabled || isProtocol4History) {
 				return reply.code(426).send({
 					error: "PROTOCOL_UPDATE_REQUIRED",
-					protocolVersion: PEER_SOURCE_COSTS_PROTOCOL_VERSION,
+					protocolVersion: HUB_PROTOCOL_VERSION,
 				});
 			}
 		}

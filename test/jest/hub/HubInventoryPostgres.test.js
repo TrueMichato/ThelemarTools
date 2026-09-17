@@ -672,6 +672,48 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		})).events.filter(
 			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
 		);
+		const sourceForPatch = await pReadCharacter(sourceOwner.id, sourceCharacter.id);
+		const sourceSession = await store.pCreateSession({
+			accountId: sourceOwner.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const sourceLease = await store.pAcquireCharacterLease({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			characterId: sourceCharacter.id,
+		});
+		await store.pPatchCharacter({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			characterId: sourceCharacter.id,
+			baseRevision: sourceForPatch.revision,
+			leaseEpoch: sourceLease.epoch,
+			patches: [{op: "add", path: "/hp", value: {current: 7, max: 12}}],
+			idempotencyKey: `${prefix}-shared-hp-with-hidden-identity`,
+		});
+		await store.pReleaseCharacterLease({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			characterId: sourceCharacter.id,
+		});
+		const invalidationsAfterSharedHp = (await store.pListVisibleEventPage({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			limit: 500,
+		})).events.filter(
+			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
+		);
+		expect(invalidationsAfterSharedHp).toHaveLength(invalidationsBeforePrivate.length + 1);
+		expect(invalidationsAfterSharedHp.at(-1)).toMatchObject({
+			actorAccountId: null,
+			aggregateType: "campaign",
+			payload: {},
+		});
+		const targetSharedHp = await store.pGetCharacter({accountId: targetOwner.id, characterId: sourceCharacter.id});
+		expect(targetSharedHp.kind).toBe("peer_profile");
+		expect(targetSharedHp.data.identity).toBeUndefined();
+		expect(targetSharedHp.data.hp.current).toBe(7);
 		const privatePolicy = await store.pSetProjectionPolicy({
 			accountId: sourceOwner.id,
 			characterId: sourceCharacter.id,
@@ -686,7 +728,7 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		})).events.filter(
 			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
 		);
-		expect(targetInvalidations).toHaveLength(invalidationsBeforePrivate.length + 1);
+		expect(targetInvalidations).toHaveLength(invalidationsAfterSharedHp.length + 1);
 		expect(targetInvalidations.at(-1)).toMatchObject({
 			actorAccountId: null,
 			aggregateId: campaign.id,

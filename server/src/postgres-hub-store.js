@@ -69,6 +69,7 @@ import {
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 import {
 	applySourceCost,
+	isPeerSourceCostsProtocolVersion,
 	PEER_SOURCE_COSTS_CONTRACT_VERSION,
 	PEER_SOURCE_COSTS_TEMPLATE_REGISTRY_VERSION,
 } from "../../js/hub/hub-source-costs.js";
@@ -1601,17 +1602,28 @@ export class PostgresHubStore {
 		visibleAccountIds = null,
 	}) {
 		if (!character.campaignId) return null;
+		visibleAccountIds ??= (await client.query(`
+			SELECT account_id, role
+			FROM hub.memberships
+			WHERE campaign_id = $1 AND status = 'active'
+		`, [character.campaignId])).rows
+			.filter(membership => canViewSharedCharacterProjection({
+				character,
+				accountId: membership.account_id,
+				role: membership.role,
+			}))
+			.map(membership => membership.account_id);
 		return this._pAppendEvent({
 			client,
 			campaignId: character.campaignId,
 			actorAccountId,
 			type: "character.projection.invalidated",
-			aggregateType: visibleAccountIds ? "campaign" : "character",
-			aggregateId: visibleAccountIds ? character.campaignId : character.id,
-			aggregateRevision: visibleAccountIds ? null : character.revision,
-			visibility: visibleAccountIds ? "explicit_accounts" : "all_members",
+			aggregateType: "campaign",
+			aggregateId: character.campaignId,
+			aggregateRevision: null,
+			visibility: "explicit_accounts",
 			visibleAccountIds,
-			payload: visibleAccountIds ? {} : {projectionRevision: character.projectionRevision},
+			payload: {},
 		});
 	}
 
@@ -3922,8 +3934,8 @@ export class PostgresHubStore {
 			} catch {
 				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 			}
-			if (isCostBearing && `${protocolVersion}` !== "4") {
-				throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+			if (isCostBearing && !isPeerSourceCostsProtocolVersion(protocolVersion)) {
+				throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 or newer is required.`, {status: 426});
 			}
 			if (isCostBearing && (
 				contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
@@ -4349,8 +4361,8 @@ export class PostgresHubStore {
 
 			if (operation.sourceCost && (
 				contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
-				|| `${protocolVersion}` !== "4"
-			)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+				|| !isPeerSourceCostsProtocolVersion(protocolVersion)
+			)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 or newer is required.`, {status: 426});
 			const isDm = ["dm", "co_dm"].includes(membership.role);
 			const isTargetOwner = targetOwnerAccountId === accountId;
 			const isProposer = operation.originActorAccountId === accountId;

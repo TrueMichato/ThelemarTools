@@ -327,8 +327,10 @@ export class CharacterSheetRealtimeCoordinator {
 
 		if (
 			event.type === "character.projection.invalidated"
-			&& event.aggregateType === "character"
-			&& event.aggregateId === active.characterId
+			&& (
+				(event.aggregateType === "character" && event.aggregateId === active.characterId)
+				|| (event.aggregateType === "campaign" && event.aggregateId === this._campaignId)
+			)
 		) {
 			this._enqueue(active, {
 				type: "projectionInvalidated",

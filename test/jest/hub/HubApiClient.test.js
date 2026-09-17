@@ -197,7 +197,7 @@ describe("hub API client", () => {
 				headers: expect.objectContaining({
 					"x-csrf-token": "csrf-1",
 					"idempotency-key": "stable-key",
-					"x-hub-protocol-version": "4",
+					"x-hub-protocol-version": "5",
 				}),
 			}),
 		}));

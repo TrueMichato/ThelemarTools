@@ -1,3 +1,5 @@
+import {HUB_PROTOCOL_VERSION} from "./hub-capabilities.js";
+
 export function isRealtimeEventCoveredByBaseline ({event, baselineSequence}) {
 	return Number.isSafeInteger(event?.sequence)
 		&& Number.isSafeInteger(baselineSequence)
@@ -109,7 +111,7 @@ export class HubRealtimeClient {
 			this._hasBaseline = false;
 			if (this._resyncStartSequence == null) this._bufferedEvents = [];
 			const protocol = this._location.protocol === "https:" ? "wss:" : "ws:";
-			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=4`;
+			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=${HUB_PROTOCOL_VERSION}`;
 			const socket = this._fnCreateSocket(url);
 			this._socket = socket;
 			let isOpened = false;

@@ -1,4 +1,5 @@
 import {isCanonicalProjection} from "./hub-character-view.js";
+import {HUB_PROTOCOL_VERSION} from "./hub-capabilities.js";
 
 export class HubApiError extends Error {
 	constructor ({code, status, message = null, details = null, cause = null}) {
@@ -257,7 +258,7 @@ export class HubApiClient {
 	}
 
 	async _pRequest (path, {method = "GET", body = null, isMutation = false, idempotencyKey = null, signal = null} = {}) {
-		const headers = {accept: "application/json", "x-hub-protocol-version": "4"};
+		const headers = {accept: "application/json", "x-hub-protocol-version": HUB_PROTOCOL_VERSION};
 		if (body != null) headers["content-type"] = "application/json";
 		if (isMutation) {
 			if (!this._csrfToken) throw new HubApiError({code: "CSRF_NOT_READY", status: 0});

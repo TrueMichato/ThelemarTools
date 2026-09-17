@@ -3,7 +3,8 @@
 Status: Accepted as an architecture contract (2026-09-01)
 
 Implementation: Shipped. Migration `0004` persists the policy. This projection contract introduced
-`HUB_PROTOCOL_VERSION` 2; the merged implementation has since advanced to protocol 4 for later source-cost work.
+`HUB_PROTOCOL_VERSION` 2; the merged implementation has since advanced to protocol 5. Protocol 4 introduced
+source-cost events, while protocol 5 adds identity-minimized campaign-scoped projection invalidations.
 The required memory/PostgreSQL evidence lives in `test/jest/hub/HubCharacterProjection.test.js`,
 `HubProjectionPolicy.test.js`, `HubProjectionCanary.test.js` and `HubProjectionLifecycle.test.js`. Two
 implementation notes refine, but do not alter, the contract below: `inventorySummary.entryCount` is the total
@@ -153,11 +154,11 @@ truth. The server never falls back to `open` or copies an unvalidated replacemen
 
 `character.projection.updated` is replaced, with the required protocol-version transition, by
 `character.projection.invalidated`. The durable event/outbox/WebSocket message carries no projected character,
-patch, changed path, operation amount, field name, or display text. The event envelope already supplies the
-campaign, aggregate id, aggregate revision, sequence, and event id; its payload is limited to:
+character id, patch, changed path, operation amount, field name, or display text. It is a campaign-scoped control
+event whose envelope supplies only the campaign, sequence, and event id; its payload is empty:
 
 ```json
-{"projectionRevision": 4}
+{}
 ```
 
 After receiving an invalidation, a projection/read-model consumer coalesces repeated invalidations and performs
@@ -167,11 +168,12 @@ replace live local state from an invalidation-triggered fetch: ordinary document
 and live-state rebase, while semantic operations use
 [ADR 0012](0012-idempotent-semantic-character-operations.md).
 
-The invalidation audience is the union of viewers authorized by the old or new policy to receive **any**
-projection field. It is intentionally broader than shared-activity visibility: identity can be hidden while HP,
-conditions, or another field is shared. Such a peer still receives the metadata-only invalidation needed to
-remove or replace that partial projection, without receiving the owner account, character id, name, changed
-field, or value.
+For a policy change, the invalidation audience is the union of viewers authorized by the old or new policy to
+receive **any** projection field. For an ordinary character mutation, it is every active account currently
+authorized for any projection field. This is intentionally broader than shared-activity visibility: identity can
+be hidden while HP, conditions, or another field is shared. Such a peer still receives the metadata-only
+invalidation needed to remove or replace that partial projection, without receiving the owner account, character
+id, name, changed field, or value.
 
 WebSocket resync no longer transports character documents or profiles. `resync_complete` supplies the campaign
 cursor, authorized event history, and at most character ids/revisions needed to invalidate client caches.

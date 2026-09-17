@@ -165,6 +165,16 @@ describe("Character Sheet realtime coordinator", () => {
 			aggregateRevision: 9,
 			payload: {projectionRevision: 6},
 		});
+		clients[0].emit("event", {
+			id: "invalidation-campaign",
+			campaignId: "campaign-1",
+			sequence: 15,
+			type: "character.projection.invalidated",
+			aggregateType: "campaign",
+			aggregateId: "campaign-1",
+			aggregateRevision: null,
+			payload: {},
+		});
 		await pFlush();
 
 		expect(cursors).toEqual([{
@@ -202,6 +212,15 @@ describe("Character Sheet realtime coordinator", () => {
 				sequence: 13,
 				revision: 4,
 				projectionRevision: 3,
+			},
+			{
+				source: "event",
+				eventId: "invalidation-campaign",
+				campaignId: "campaign-1",
+				characterId: "character-1",
+				sequence: 15,
+				revision: null,
+				projectionRevision: undefined,
 			},
 		]);
 	});

@@ -11,6 +11,8 @@
  * - Average or rolled HP
  * - Batch spell selection
  */
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 class CharacterSheetQuickBuild {
 	constructor (page) {
 		this._page = page;
@@ -1211,7 +1213,7 @@ class CharacterSheetQuickBuild {
 			return;
 		}
 
-		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner: modalInner, doClose} = CharacterSheetModal.getShow({
 			title: "Add Multiclass",
 			isMinHeight0: true,
 			zIndex: 10001, // Above quickbuild overlay (z-index: 9999)

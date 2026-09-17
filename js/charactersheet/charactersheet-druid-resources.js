@@ -49,6 +49,25 @@ class CharacterSheetDruidResources {
 	/** Refresh the live state reference (state object can be swapped on load). */
 	_refreshState () { this._state = this._page.getState(); }
 
+	_getOwnerCharacterScope () {
+		if (this._page.isCurrentCharacterReadOnly?.()) return null;
+		return this._page._getCharacterScopeSnapshot?.() || {
+			characterId: this._page._currentCharacterId ?? null,
+			loadGeneration: this._page._characterLoadGeneration ?? 0,
+			accessMode: this._page._currentCharacterAccess ?? null,
+		};
+	}
+
+	_isOwnerCharacterScopeCurrent (scope) {
+		if (!scope || this._page.isCurrentCharacterReadOnly?.()) return false;
+		return this._page._isCharacterScopeSnapshotCurrent?.(scope, {isRequireOwner: true}) ??
+			(
+				scope.characterId === (this._page._currentCharacterId ?? null)
+				&& scope.loadGeneration === (this._page._characterLoadGeneration ?? 0)
+				&& scope.accessMode === (this._page._currentCharacterAccess ?? null)
+			);
+	}
+
 	// #region capability checks
 	/** @returns {boolean} The character has a Wild Shape uses resource or computed uses. */
 	hasWildShape () {
@@ -330,7 +349,7 @@ class CharacterSheetDruidResources {
 	openModal () {
 		this._refreshState();
 		this._modalMode = "full";
-		const {eleModalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner, doClose} = CharacterSheetModal.getShow({
 			title: "🐾 Druid Resources",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -353,7 +372,7 @@ class CharacterSheetDruidResources {
 	openZodiacPicker () {
 		this._refreshState();
 		this._modalMode = "zodiac";
-		const {eleModalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner, doClose} = CharacterSheetModal.getShow({
 			title: "🌟 Zodiac Form",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -548,6 +567,8 @@ class CharacterSheetDruidResources {
 	 */
 	async _pAddKnownForm () {
 		if (this._isTransforming) return;
+		const characterScope = this._getOwnerCharacterScope();
+		if (!characterScope) return;
 		this._refreshState();
 		if (!this._state.canAddKnownWildShapeForm?.()) {
 			JqueryUtil.doToast({type: "warning", content: "You already know the maximum number of forms."});
@@ -570,6 +591,7 @@ class CharacterSheetDruidResources {
 		} finally {
 			this._isTransforming = false;
 		}
+		if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 		if (candidates == null) return; // load failed (toast already shown)
 		if (!candidates.length) {
 			JqueryUtil.doToast({type: "warning", content: "No eligible Beast forms found for your current Wild Shape limits."});
@@ -583,6 +605,7 @@ class CharacterSheetDruidResources {
 			isMinHeight0: true,
 			cbClose: () => this._renderModalBody?.(),
 		});
+		if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 
 		const limitBits = [`CR \u2264 ${(typeof maxCr === "object" ? maxCr.cr : maxCr)}`];
 		if (!options.canFly) limitBits.push("no fly");
@@ -850,7 +873,7 @@ class CharacterSheetDruidResources {
 			return;
 		}
 		this._modalMode = "wsTransform";
-		const {eleModalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner, doClose} = CharacterSheetModal.getShow({
 			title: "🐻 Transform — Wild Shape",
 			isMinHeight0: true,
 			isWidth100: true,
@@ -870,6 +893,8 @@ class CharacterSheetDruidResources {
 	 */
 	async _pTransformWildShapeFree () {
 		if (this._isTransforming) return;
+		const characterScope = this._getOwnerCharacterScope();
+		if (!characterScope) return;
 		this._refreshState();
 		if (!this._state.canSpendWildShapeUse?.(1)) {
 			JqueryUtil.doToast({type: "warning", content: "No Wild Shape uses remaining."});
@@ -887,10 +912,12 @@ class CharacterSheetDruidResources {
 				canFly: calc.wildShapeCanFly ?? (druidLevel >= 8),
 				type: CharacterSheetState.COMPANION_TYPES.WILD_SHAPE,
 				origin: "Wild Shape",
+				characterScope,
 			});
 		} finally {
 			this._isTransforming = false;
 		}
+		if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 
 		// Spend a use ONLY if a new Wild Shape companion was actually created AND a
 		// use is still available (re-checked post-await to survive a racing spend).
@@ -930,6 +957,8 @@ class CharacterSheetDruidResources {
 
 	async _pSummonWildCompanion () {
 		if (this._isSummoning) return;
+		const characterScope = this._getOwnerCharacterScope();
+		if (!characterScope) return;
 		this._refreshState();
 		if (!this._state.canSpendWildShapeUse?.(1)) {
 			JqueryUtil.doToast({type: "warning", content: "No Wild Shape uses remaining."});
@@ -943,10 +972,11 @@ class CharacterSheetDruidResources {
 		}
 		this._isSummoning = true;
 		try {
-			await this._page._spells._pShowFamiliarPicker({isWildCompanion: true});
+			await this._page._spells._pShowFamiliarPicker({isWildCompanion: true, characterScope});
 		} finally {
 			this._isSummoning = false;
 		}
+		if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 
 		// Spend a use ONLY if a new familiar was actually summoned AND a use is still
 		// available (re-checked post-await to survive a racing spend).
@@ -1031,6 +1061,8 @@ class CharacterSheetDruidResources {
 	 */
 	async _pSelectZodiacForm (formId) {
 		if (this._isSelectingZodiac) return;
+		const characterScope = this._getOwnerCharacterScope();
+		if (!characterScope) return;
 		this._refreshState();
 
 		const def = CharacterSheetState.getZodiacFormDef?.(formId);
@@ -1058,7 +1090,7 @@ class CharacterSheetDruidResources {
 		} finally {
 			this._isSelectingZodiac = false;
 		}
-		if (!isConfirmed) return;
+		if (!isConfirmed || !this._isOwnerCharacterScopeCurrent(characterScope)) return;
 
 		// Re-check post-await: uses may have been spent elsewhere while the dialog was open.
 		this._refreshState();

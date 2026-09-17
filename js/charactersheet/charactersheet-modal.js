@@ -52,6 +52,65 @@ class CharacterSheetModal {
 	].join(", ");
 
 	/**
+	 * Drop-in replacement for synchronous `UiUtil.getShowModal`.
+	 */
+	static getShow (opts) {
+		opts = opts || {};
+
+		if (opts.isSkipCharacterSheetEnhancements) {
+			const {isSkipCharacterSheetEnhancements, ...rest} = opts;
+			return globalThis.UiUtil.getShowModal(rest);
+		}
+
+		const eleTrigger = CharacterSheetModal._getRestoreTarget();
+		const isCloseable = !opts.isPermanent;
+		const headerId = `cs-modal-title-${++CharacterSheetModal._uid}`;
+		const btnClose = (isCloseable && opts.title && !opts.isEmpty)
+			? CharacterSheetModal._getBtnClose()
+			: null;
+		const eleTitleSplit = CharacterSheetModal._getMergedTitleSplit(opts, btnClose);
+		const optsOut = {...opts};
+		delete optsOut.cbCharacterScopeTeardown;
+		if (eleTitleSplit) {
+			// eslint-disable-next-line vet-jquery/jquery -- deleting the jQuery option, not using it
+			delete optsOut.$titleSplit;
+			optsOut.eleTitleSplit = eleTitleSplit;
+		}
+
+		const characterScope = CharacterSheetModal._getCharacterScopeSnapshot();
+		const modalMeta = {
+			characterScope,
+			isCharacterScopeTeardown: false,
+			isCharacterScopeTeardownNotified: false,
+			isClosing: false,
+			modal: null,
+			cbCharacterScopeTeardown: opts.cbCharacterScopeTeardown,
+		};
+		const cbCloseOriginal = opts.cbClose;
+		optsOut.cbClose = async (...args) => {
+			let out;
+			CharacterSheetModal._openModalMetas.delete(modalMeta);
+			if (cbCloseOriginal && !modalMeta.isCharacterScopeTeardown) out = await cbCloseOriginal(...args);
+			if (!modalMeta.isCharacterScopeTeardown) CharacterSheetModal._doRestoreFocus(eleTrigger);
+			return out;
+		};
+
+		const modal = globalThis.UiUtil.getShowModal(optsOut);
+		modalMeta.modal = modal;
+		CharacterSheetModal._openModalMetas.add(modalMeta);
+		CharacterSheetModal._wrapResolvedForCharacterScope({modal, characterScope});
+
+		if (modal?.eleModal) {
+			if (btnClose) btnClose.addEventListener("click", () => modal.doClose(false));
+			CharacterSheetModal._decorate({modal, opts, headerId, isCloseable, characterScope});
+		}
+		if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope)) {
+			void CharacterSheetModal._pCloseModalMetaForCharacterScope(modalMeta);
+		}
+		return modal;
+	}
+
+	/**
 	 * Drop-in replacement for `UiUtil.pGetShowModal`.
 	 *
 	 * @param {object} [opts] Passed through untouched, minus the options this owns.
@@ -83,6 +142,7 @@ class CharacterSheetModal {
 		const eleTitleSplit = CharacterSheetModal._getMergedTitleSplit(opts, btnClose);
 
 		const optsOut = {...opts};
+		delete optsOut.cbCharacterScopeTeardown;
 		if (eleTitleSplit) {
 			// eslint-disable-next-line vet-jquery/jquery -- deleting the jQuery option, not using it
 			delete optsOut.$titleSplit;
@@ -93,8 +153,10 @@ class CharacterSheetModal {
 		const modalMeta = {
 			characterScope,
 			isCharacterScopeTeardown: false,
+			isCharacterScopeTeardownNotified: false,
 			isClosing: false,
 			modal: null,
+			cbCharacterScopeTeardown: opts.cbCharacterScopeTeardown,
 		};
 		let doRestoreFocus = null;
 		const cbCloseOriginal = opts.cbClose;
@@ -111,6 +173,7 @@ class CharacterSheetModal {
 		const modal = await CharacterSheetModal._pGetShowModalRaw(optsOut);
 		modalMeta.modal = modal;
 		CharacterSheetModal._openModalMetas.add(modalMeta);
+		CharacterSheetModal._wrapResolvedForCharacterScope({modal, characterScope});
 
 		doRestoreFocus = () => CharacterSheetModal._doRestoreFocus(eleTrigger);
 
@@ -134,6 +197,19 @@ class CharacterSheetModal {
 
 	static bindCharacterSheet (characterSheet) {
 		CharacterSheetModal._characterSheet = characterSheet || null;
+	}
+
+	static hasBoundCharacterSheet () {
+		return !!CharacterSheetModal._characterSheet;
+	}
+
+	static _wrapResolvedForCharacterScope ({modal, characterScope}) {
+		if (!characterScope || typeof modal?.pGetResolved !== "function") return;
+		const pGetResolvedOriginal = modal.pGetResolved.bind(modal);
+		modal.pGetResolved = async (...args) => {
+			const out = await pGetResolvedOriginal(...args);
+			return CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope) ? out : [false];
+		};
 	}
 
 	static _getCharacterScopeSnapshot () {
@@ -169,11 +245,15 @@ class CharacterSheetModal {
 		modalMeta.isClosing = true;
 		modalMeta.isCharacterScopeTeardown = true;
 		CharacterSheetModal._openModalMetas.delete(modalMeta);
-
 		const modal = modalMeta.modal;
 		// Conceal the old character's data synchronously. UiUtil owns the authoritative close and
 		// stack cleanup below, but its callback contract is async.
 		modal?.eleModal?.closest?.(".ve-ui-modal__overlay")?.remove?.();
+		if (!modalMeta.isCharacterScopeTeardownNotified) {
+			modalMeta.isCharacterScopeTeardownNotified = true;
+			await modalMeta.cbCharacterScopeTeardown?.();
+		}
+
 		if (typeof modal?.doClose === "function") {
 			await modal.doClose(false);
 			return;

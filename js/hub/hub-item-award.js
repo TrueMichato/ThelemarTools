@@ -7,6 +7,59 @@ import {getHubItemSummary} from "./hub-item-catalog.js";
 
 const REQUEST_ITEM_FIELDS = Object.freeze(["name", "source", "page", "rarity", "weight", "value", "typeCode", "edition"]);
 
+export function createGenerationFencedCatalogLoader ({pLoadCatalog, campaignBrewContent = null} = {}) {
+	let generation = 0;
+	let catalog = null;
+	let catalogLoad = null;
+	let currentCampaignBrewContent = campaignBrewContent;
+
+	return {
+		getCatalog: () => catalog,
+		getCampaignBrewContent: () => currentCampaignBrewContent,
+		getGeneration: () => generation,
+		async pEnsureCatalog () {
+			if (catalog) return catalog;
+			if (catalogLoad) return catalogLoad;
+			const loadGeneration = generation;
+			const loadContent = currentCampaignBrewContent;
+			const load = Promise.resolve()
+				.then(() => pLoadCatalog(loadContent))
+				.then(loaded => {
+					if (loadGeneration !== generation) return null;
+					catalog = loaded;
+					return catalog;
+				})
+				.catch(error => {
+					if (loadGeneration !== generation) return null;
+					throw error;
+				})
+				.finally(() => {
+					if (catalogLoad === load) catalogLoad = null;
+				});
+			catalogLoad = load;
+			return load;
+		},
+		setCampaignBrewContent (content) {
+			generation++;
+			currentCampaignBrewContent = content;
+			catalog = null;
+			catalogLoad = null;
+		},
+	};
+}
+
+export function createCatalogRenderFence ({getCatalogGeneration}) {
+	let renderGeneration = 0;
+	return {
+		begin () {
+			const currentRenderGeneration = ++renderGeneration;
+			const currentCatalogGeneration = getCatalogGeneration();
+			return () => currentRenderGeneration === renderGeneration
+				&& currentCatalogGeneration === getCatalogGeneration();
+		},
+	};
+}
+
 function getItemUid (item) {
 	return `${item?.name || ""}|${item?.source || ""}`.toLowerCase();
 }

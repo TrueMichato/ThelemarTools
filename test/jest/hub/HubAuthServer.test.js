@@ -53,7 +53,7 @@ describe("Hub durable GitHub registry flow", () => {
 	it("advertises only bounded registry capability metadata", async () => {
 		const response = await app.inject({method: "GET", url: "/api/meta"});
 		expect(response.json()).toEqual(expect.objectContaining({
-			protocolVersion: "4",
+			protocolVersion: "5",
 			capabilities: ["auth.provider_registry.v1", "campaign.active_context.v1"],
 			authProviders: [{
 				slug: "github",

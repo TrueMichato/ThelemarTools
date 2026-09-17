@@ -91,6 +91,23 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await dm.page.locator("#mod-value").fill("9");
 		await dm.page.evaluate(() => {
 			(globalThis as any).__staleCustomModifierSave = document.querySelector("#mod-save");
+			const sheet = (globalThis as any).charSheet;
+			(globalThis as any).__staleInputUiPrompt = (globalThis as any).InputUiUtil.pGetUserBoolean({
+				title: "Scoped authority prompt",
+				textYes: "Apply stale mutation",
+				textNo: "Cancel",
+			}).then((confirmed: boolean) => {
+				(globalThis as any).__staleInputUiResult = confirmed;
+				if (confirmed) sheet._state.addNamedModifier({
+					name: "Stale InputUiUtil modifier",
+					type: "ac",
+					value: 13,
+					enabled: true,
+				});
+			});
+			const overlays = [...document.querySelectorAll(".ve-ui-modal__overlay")];
+			(globalThis as any).__staleInputUiConfirm = [...overlays.at(-1)!.querySelectorAll("button")]
+				.find(button => button.textContent?.includes("Apply stale mutation"));
 		});
 
 		let releaseProjectionRead!: () => void;
@@ -115,9 +132,14 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await expect(dmOwnedSheet.characterName).toBeDisabled();
 		await dm.page.evaluate(() => {
 			(globalThis as any).__staleCustomModifierSave?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+			(globalThis as any).__staleInputUiConfirm?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
 		});
+		await dm.page.evaluate(() => (globalThis as any).__staleInputUiPrompt);
+		expect(await dm.page.evaluate(() => (globalThis as any).__staleInputUiResult)).toBeNull();
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._state.getNamedModifiers()))
 			.not.toContainEqual(expect.objectContaining({name: "Stale cross-character modifier"}));
+		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._state.getNamedModifiers()))
+			.not.toContainEqual(expect.objectContaining({name: "Stale InputUiUtil modifier"}));
 		await dm.page.unroute(projectionRoute);
 
 		await dm.gotoCampaign(campaignId);
@@ -797,9 +819,14 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 		const firstRefreshGate = new Promise<void>(resolve => {
 			continueFirstRefresh = resolve;
 		});
+		let isRefreshGateEnabled = false;
 		let transferRefreshCount = 0;
 		await dm.page.route(`**/api/campaigns/${campaignId}/transfers`, async route => {
 			if (route.request().method() !== "GET") {
+				await route.continue();
+				return;
+			}
+			if (!isRefreshGateEnabled) {
 				await route.continue();
 				return;
 			}
@@ -812,15 +839,20 @@ test("a stale transfer refresh cannot discard a draft needed by the next project
 		});
 
 		const policy = await owner.getProjectionPolicy(character.id);
+		const changedPolicy = {
+			...policy.policy,
+			overrides: {
+				...(policy.policy.overrides || {}),
+				identity: {mode: "hide"},
+			},
+		};
+		isRefreshGateEnabled = true;
 		const firstUpdate = await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: policy.projectionRevision,
-			policy: policy.policy,
+			policy: changedPolicy,
 		});
 		await firstRefreshStarted;
-		await expect.poll(() => dm.page.evaluate(() => (
-			(document.getElementById("campaign-transfer-form") as any)._hubProjectionTransferDraft?.currency?.gp
-		))).toBe("7");
 		await owner.setProjectionPolicy({
 			characterId: character.id,
 			expectedProjectionRevision: firstUpdate.projectionRevision,

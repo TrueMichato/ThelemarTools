@@ -109,10 +109,13 @@ DM truth is one explicit `dm_readonly` access mode. Native form controls, conten
 drag/drop, and long-press activation while preserving navigation and the safe Character selector, More, Roll Log,
 Export, and Print paths. Manual pointer interactions which do not use HTML drag events, including sticky-note
 movement, capture character ID/load generation/access at pointer-down, recheck owner authority during movement and
-completion, and restore their pre-drag DOM position when fenced. `CharacterSheetModal` owns every sheet-created
-body modal: character/access transitions synchronously conceal and close those overlays, suppress stale close
-callbacks, and block retained controls from firing against a replacement character. Mutating modal handlers still
-perform a final current-owner check before changing state. Body-portaled spell, ability, attack, and mobile menus
+completion, and restore their pre-drag DOM position when fenced. Character-scope teardown also removes Play Mode's
+sticky overlay and cancels an active drag, so an owner-to-owner selector switch cannot overwrite a duplicated note
+ID. `CharacterSheetModal` owns every sheet-created body modal through both its async and synchronous wrappers;
+`InputUiUtil` automatically enters the same ownership seam. Character/access transitions synchronously conceal
+and close those overlays, suppress stale close callbacks, convert stale generic-input completions into cancellation,
+and block retained controls from firing against a replacement character. Mutating modal handlers still perform a
+final current-owner check before changing state. Body-portaled spell, ability, attack, and mobile menus
 likewise recheck access inside their action callbacks. Late Play Mode and other renders reapply the same access
 mode. Recipient-framed award notices are owner-only in this view, while metadata-only projection/inventory
 invalidations continue to refresh the authorized DM projection.

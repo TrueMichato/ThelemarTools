@@ -502,7 +502,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			payload: {name: "Old Client"},
 		});
 		expect(response.statusCode).toBe(426);
-		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "4"});
+		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "5"});
 	});
 
 	it("blocks projection-shaped reads from stale protocol clients", async () => {
@@ -531,7 +531,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			expect({url, status: stale.statusCode, body: stale.json()}).toEqual({
 				url,
 				status: 426,
-				body: {error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "4"},
+				body: {error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "5"},
 			});
 		}
 	});

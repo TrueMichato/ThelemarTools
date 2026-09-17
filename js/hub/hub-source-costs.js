@@ -11,6 +11,10 @@ export const SOURCE_COST_KINDS = Object.freeze([
 	"feature_use",
 ]);
 
+export function isPeerSourceCostsProtocolVersion (protocolVersion) {
+	return ["4", "5"].includes(`${protocolVersion}`);
+}
+
 export function getPeerSourceCostsCapability ({enabled = false} = {}) {
 	return {
 		enabled: enabled === true,

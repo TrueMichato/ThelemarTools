@@ -73,11 +73,16 @@ describe("CharacterSheetModal", () => {
 		nextModal = () => ({eleModal: mkEle(), eleModalInner: mkEle(), doClose: () => {}});
 
 		globalThis.UiUtil = {
+			getShowModal: opts => {
+				calls.push(opts);
+				return nextModal(opts);
+			},
 			pGetShowModal: async opts => {
 				calls.push(opts);
 				return nextModal(opts);
 			},
 		};
+		globalThis.InputUiUtil._pGetShowModal = opts => CharacterSheetModal.pGetShow(opts);
 	});
 
 	describe("delegation", () => {
@@ -111,6 +116,35 @@ describe("CharacterSheetModal", () => {
 			expect(calls[0].title).toBe("Raw");
 			// Untouched — no dialog semantics applied
 			expect(modal.eleModal.getAttribute("role")).toBeNull();
+		});
+
+		it("tracks synchronous UiUtil dialogs with the same character ownership contract", () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			const modal = CharacterSheetModal.getShow({title: "Wild Shape"});
+
+			expect(calls[0].title).toBe("Wild Shape");
+			expect(modal.eleModal.getAttribute("role")).toBe("dialog");
+			expect(CharacterSheetModal._openModalMetas.size).toBe(1);
+		});
+
+		it("routes InputUiUtil dialogs through the bound character scope", async () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+
+			const modal = await InputUiUtil._pGetShowModal({title: "Blood Price"});
+
+			expect(calls[0].title).toBe("Blood Price");
+			expect(modal.eleModal.getAttribute("role")).toBe("dialog");
+			expect(CharacterSheetModal._openModalMetas.size).toBe(1);
 		});
 	});
 
@@ -260,6 +294,50 @@ describe("CharacterSheetModal", () => {
 
 			expect(evt.isDefaultPrevented).toBe(true);
 			expect(evt.isImmediatePropagationStopped).toBe(true);
+		});
+
+		it("turns a confirmed InputUiUtil completion into cancellation when its character scope ended", async () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			let resolveModal;
+			nextModal = () => ({
+				eleModal: mkEle(),
+				eleModalInner: mkEle(),
+				doClose: () => {},
+				pGetResolved: () => new Promise(resolve => resolveModal = resolve),
+			});
+			const modal = CharacterSheetModal.getShow({title: "Blood Price"});
+			const pending = modal.pGetResolved();
+			page._currentCharacterId = "character-b";
+			page._characterLoadGeneration++;
+			resolveModal([true, "confirmed"]);
+
+			await expect(pending).resolves.toEqual([false]);
+		});
+
+		it("settles a custom outer promise when character-scope teardown closes its modal", async () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			let resolveOuter;
+			const outer = new Promise(resolve => resolveOuter = resolve);
+			CharacterSheetModal.getShow({
+				title: "Concentration Check",
+				cbCharacterScopeTeardown: () => resolveOuter("cancelled"),
+			});
+			page._currentCharacterId = "character-b";
+			page._characterLoadGeneration++;
+
+			await CharacterSheetModal.closeCharacterScopeModals();
+
+			await expect(outer).resolves.toBe("cancelled");
 		});
 	});
 

@@ -439,9 +439,11 @@ pad by that value rather than re-stacking shared site chrome.
 
 ## Modals
 
-**Never call `UiUtil.pGetShowModal` from character-sheet code.** Use
-`CharacterSheetModal.pGetShow` (`js/charactersheet/charactersheet-modal.js`) — identical signature
-and return shape, so migrating a call site is a rename and nothing else.
+**Never call `UiUtil.pGetShowModal` or `UiUtil.getShowModal` from character-sheet code.** Use
+`CharacterSheetModal.pGetShow` or synchronous `CharacterSheetModal.getShow`
+(`js/charactersheet/charactersheet-modal.js`) — identical signatures and return shapes, so migrating a call
+site is a rename and nothing else. `InputUiUtil` automatically routes its dialogs through the async wrapper
+while a Character Sheet is bound.
 
 The wrapper adds what no individual dialog should have to remember:
 
@@ -474,11 +476,13 @@ Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the r
 5. **Body-portaled dialogs are character-scoped transient UI.** `CharacterSheetPage` closes them
    immediately when character ID, load generation, or access changes. The wrapper removes the
    overlay before awaiting UiUtil teardown and capture-blocks retained controls whose origin scope
-   is stale. Mutating handlers still final-check current owner authority before changing state.
+   is stale. Its wrapped `pGetResolved` converts a completion into cancellation when the origin scope
+   changed while a generic `InputUiUtil` prompt was open. Mutating handlers still final-check current
+   owner authority before changing state.
 
 `CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard,
-ordinary `cbClose` composition, late modal creation, stale callback suppression, and retained
-control fencing.
+ordinary `cbClose` composition, synchronous modal tracking, generic input cancellation, late modal
+creation, stale callback suppression, and retained control fencing.
 
 ### Data Validation Patterns
 

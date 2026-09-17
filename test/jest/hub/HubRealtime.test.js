@@ -139,6 +139,77 @@ describe("hub realtime", () => {
 		expect(current.sent).toContainEqual(expect.objectContaining({type: "event"}));
 	});
 
+	it("never delivers a protocol-5 campaign-scoped projection invalidation to a protocol-4 socket", async () => {
+		const realtime = new HubRealtime({store: {
+			pGetMembership: async () => ({role: "player"}),
+			pGetSessionById: async () => ({session: {}, account: {}}),
+		}});
+		const legacy = new FakeSocket();
+		const current = new FakeSocket();
+		for (const [socket, protocolVersion] of [[legacy, "4"], [current, "5"]]) {
+			realtime.addConnection({
+				socket,
+				account: {id: protocolVersion, displayName: protocolVersion},
+				session: {id: protocolVersion},
+				membership: {id: protocolVersion, role: "player"},
+				campaignId: "cmp",
+				protocolVersion,
+			});
+			socket.sent.length = 0;
+		}
+		await realtime.pPublishEvent({
+			campaignId: "cmp",
+			aggregateType: "campaign",
+			aggregateId: "cmp",
+			visibility: "explicit_accounts",
+			visibleAccountIds: ["4", "5"],
+			type: "character.projection.invalidated",
+			payload: {},
+		});
+		expect(legacy.closeEvents).toContainEqual({code: 1008, reason: "Protocol update required"});
+		expect(current.sent).toContainEqual(expect.objectContaining({type: "event"}));
+	});
+
+	it("closes a protocol-4 socket instead of replaying a campaign-scoped projection invalidation", async () => {
+		const event = {
+			id: "projection-invalidation",
+			sequence: 1,
+			campaignId: "cmp",
+			aggregateType: "campaign",
+			aggregateId: "cmp",
+			visibility: "explicit_accounts",
+			visibleAccountIds: ["4"],
+			type: "character.projection.invalidated",
+			payload: {},
+		};
+		const realtime = new HubRealtime({store: {
+			pGetSessionById: async () => ({session: {}, account: {}}),
+			pGetMembership: async () => ({role: "player"}),
+			pGetCampaignCursor: async () => ({sequence: 1}),
+			pListVisibleEventPage: async () => ({
+				events: [event],
+				replay: {hasMore: false, scannedThroughSequence: 1},
+			}),
+		}});
+		const socket = new FakeSocket();
+		realtime.addConnection({
+			socket,
+			account: {id: "4", displayName: "4"},
+			session: {id: "4"},
+			membership: {id: "4", role: "player"},
+			campaignId: "cmp",
+			protocolVersion: "4",
+		});
+
+		await realtime._pHandleMessage({
+			connection: realtime._connections.get(socket),
+			raw: JSON.stringify({type: "resync", afterSequence: 0}),
+		});
+
+		expect(socket.closeEvents).toContainEqual({code: 1008, reason: "Protocol update required"});
+		expect(socket.sent).not.toContainEqual(expect.objectContaining({type: "resync_complete"}));
+	});
+
 	it("closes sockets whose session was revoked before publication", async () => {
 		const realtime = new HubRealtime({store: {
 			pGetSessionById: async () => null,

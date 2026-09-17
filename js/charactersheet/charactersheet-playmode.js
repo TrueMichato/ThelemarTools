@@ -4762,6 +4762,43 @@ export class CharacterSheetPlayMode {
 		return this._page?._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
 	}
 
+	_getOwnerCharacterScope () {
+		if (this._isReadOnly()) return null;
+		if (typeof this._page?._getCharacterScopeSnapshot === "function") {
+			return this._page._getCharacterScopeSnapshot();
+		}
+		return {
+			characterId: this._page?._currentCharacterId ?? null,
+			loadGeneration: this._page?._characterLoadGeneration ?? 0,
+			accessMode: this._page?._currentCharacterAccess ?? null,
+		};
+	}
+
+	_isOwnerCharacterScopeCurrent (scope) {
+		if (!scope || this._isReadOnly()) return false;
+		if (typeof this._page?._isCharacterScopeSnapshotCurrent === "function") {
+			return this._page._isCharacterScopeSnapshotCurrent(scope, {isRequireOwner: true});
+		}
+		return scope.characterId === (this._page?._currentCharacterId ?? null)
+			&& scope.loadGeneration === (this._page?._characterLoadGeneration ?? 0)
+			&& scope.accessMode === (this._page?._currentCharacterAccess ?? null);
+	}
+
+	_cancelActiveStickyDrag () {
+		const activeDrag = this._activeStickyDrag;
+		if (!activeDrag) return;
+		activeDrag.el.style.left = activeDrag.originalLeft;
+		activeDrag.el.style.top = activeDrag.originalTop;
+		activeDrag.el.style.zIndex = activeDrag.originalZIndex;
+		this._activeStickyDrag = null;
+	}
+
+	resetCharacterScopeUi () {
+		this._cancelActiveStickyDrag();
+		document.getElementById("pm-sticky-overlay")?.remove();
+		for (const overlay of document.querySelectorAll(".pm-modal-overlay")) overlay.remove();
+	}
+
 	/**
 	 * Make an element clickable with full accessibility support.
 	 * Sets role="button", tabindex="0", aria-label, wires click + Enter/Space.
@@ -5029,6 +5066,8 @@ export class CharacterSheetPlayMode {
 	// ─── Phase A2: Sticky Notes Overlay ─────────────────────────
 
 	_toggleStickyNotesOverlay () {
+		const characterScope = this._getOwnerCharacterScope();
+		if (!characterScope) return;
 		let overlay = document.getElementById("pm-sticky-overlay");
 		if (overlay) {
 			overlay.classList.toggle("pm-sticky-overlay--hidden");
@@ -5048,6 +5087,7 @@ export class CharacterSheetPlayMode {
 		fab.textContent = "＋ Sticky";
 		fab.title = "Add a new sticky note";
 		fab.addEventListener("click", () => {
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			const id = this._state.addStickyNote({
 				title: "Note",
 				content: "",
@@ -5063,6 +5103,8 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderStickyNote (overlayEl, note) {
+		const characterScope = this._getOwnerCharacterScope();
+		if (!characterScope) return;
 		const COLORS = {yellow: "#fef08a", pink: "#fbcfe8", blue: "#bfdbfe", green: "#bbf7d0", purple: "#e9d5ff"};
 		const existing = overlayEl.querySelector(`[data-note-id="${note.id}"]`);
 		if (existing) existing.remove();
@@ -5082,6 +5124,7 @@ export class CharacterSheetPlayMode {
 		const titleInput = this._ce("input", "pm-sticky__title-input", titleBar);
 		titleInput.value = note.title || "Note";
 		titleInput.addEventListener("blur", () => {
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			this._state.updateStickyNote(note.id, {title: titleInput.value});
 		});
 		titleInput.addEventListener("click", (e) => e.stopPropagation());
@@ -5096,6 +5139,7 @@ export class CharacterSheetPlayMode {
 		colorPicker.value = note.color || "yellow";
 		colorPicker.addEventListener("change", (e) => {
 			e.stopPropagation();
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			this._state.updateStickyNote(note.id, {color: colorPicker.value});
 			el.style.background = COLORS[colorPicker.value] || COLORS.yellow;
 		});
@@ -5106,6 +5150,7 @@ export class CharacterSheetPlayMode {
 		delBtn.title = "Delete note";
 		delBtn.addEventListener("click", (e) => {
 			e.stopPropagation();
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			this._state.removeStickyNote(note.id);
 			el.remove();
 			this._logActivity("notes", `Deleted sticky note: ${note.title || "Note"}`);
@@ -5116,45 +5161,54 @@ export class CharacterSheetPlayMode {
 		content.value = note.content || "";
 		content.placeholder = "Write something…";
 		content.addEventListener("blur", () => {
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			this._state.updateStickyNote(note.id, {content: content.value});
 		});
 		content.addEventListener("click", (e) => e.stopPropagation());
 
 		// Drag to reposition
-		let dragging = false; let dragOffX = 0; let dragOffY = 0;
 		titleBar.addEventListener("mousedown", (e) => {
-			if (this._isReadOnly()) {
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) {
 				e.preventDefault();
 				return;
 			}
 			if (e.target === titleInput || e.target === colorPicker || e.target === delBtn) return;
-			dragging = true;
 			const rect = el.getBoundingClientRect();
-			dragOffX = e.clientX - rect.left;
-			dragOffY = e.clientY - rect.top;
+			this._activeStickyDrag = {
+				characterScope,
+				el,
+				overlayEl,
+				dragOffX: e.clientX - rect.left,
+				dragOffY: e.clientY - rect.top,
+				originalLeft: el.style.left,
+				originalTop: el.style.top,
+				originalZIndex: el.style.zIndex,
+			};
 			el.style.zIndex = "9999";
 			e.preventDefault();
 		});
 		document.addEventListener("mousemove", (e) => {
-			if (this._isReadOnly()) {
-				dragging = false;
+			const activeDrag = this._activeStickyDrag;
+			if (!activeDrag || activeDrag.el !== el) return;
+			if (!this._isOwnerCharacterScopeCurrent(activeDrag.characterScope)) {
+				this._cancelActiveStickyDrag();
 				return;
 			}
-			if (!dragging) return;
-			const parentRect = overlayEl.getBoundingClientRect();
-			const x = Math.max(0, e.clientX - parentRect.left - dragOffX);
-			const y = Math.max(0, e.clientY - parentRect.top - dragOffY);
+			const parentRect = activeDrag.overlayEl.getBoundingClientRect();
+			const x = Math.max(0, e.clientX - parentRect.left - activeDrag.dragOffX);
+			const y = Math.max(0, e.clientY - parentRect.top - activeDrag.dragOffY);
 			el.style.left = `${x}px`;
 			el.style.top = `${y}px`;
 		});
 		document.addEventListener("mouseup", () => {
-			if (this._isReadOnly()) {
-				dragging = false;
+			const activeDrag = this._activeStickyDrag;
+			if (!activeDrag || activeDrag.el !== el) return;
+			if (!this._isOwnerCharacterScopeCurrent(activeDrag.characterScope)) {
+				this._cancelActiveStickyDrag();
 				return;
 			}
-			if (!dragging) return;
-			dragging = false;
-			el.style.zIndex = "";
+			this._activeStickyDrag = null;
+			el.style.zIndex = activeDrag.originalZIndex;
 			const x = parseFloat(el.style.left) || 0;
 			const y = parseFloat(el.style.top) || 0;
 			this._state.updateStickyNote(note.id, {position: {x, y}});
