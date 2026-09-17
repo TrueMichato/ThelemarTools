@@ -1457,7 +1457,7 @@ export class MemoryHubStore {
 		return copy(lease);
 	}
 
-	async pReleaseCharacterLease ({accountId, sessionId, characterId}) {
+	async pReleaseCharacterLease ({accountId, sessionId, characterId, leaseEpoch, expiresAt}) {
 		const character = this._getCharacterOrThrow(characterId);
 		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can release this character editor.`, {status: 403});
 		const lease = this._characterLeases.get(characterId);
@@ -1472,6 +1472,7 @@ export class MemoryHubStore {
 				details: {expiresAt: lease.expiresAt},
 			});
 		}
+		if (lease.epoch !== leaseEpoch || lease.expiresAt !== new Date(expiresAt).toISOString()) return {released: false};
 		this._characterLeases.delete(characterId);
 		return {released: true};
 	}

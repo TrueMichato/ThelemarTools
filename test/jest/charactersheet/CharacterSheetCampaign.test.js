@@ -359,6 +359,46 @@ describe("Character Sheet campaign control", () => {
 		}));
 	});
 
+	it("does not continue a local copy after a stale save succeeds", async () => {
+		const save = makeDeferred();
+		const {control, page} = getControl();
+		page._saveCurrentCharacter.mockReturnValue(save.promise);
+
+		const pending = control._pCopyLocalCharacter({campaignId: "campaign-1"});
+		page._currentCharacterId = "local-2";
+		page._characterLoadGeneration++;
+		page._state.toJson = () => ({id: "local-2", name: "Replacement"});
+		save.resolve(true);
+		await pending;
+
+		expect(control._api.pGetCampaignContext).not.toHaveBeenCalled();
+		expect(control._api.pCreateCharacter).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it("keeps a committed local copy bound to its originating document after a selector switch", async () => {
+		const create = makeDeferred();
+		const {control, page} = getControl();
+		control._api.pCreateCharacter.mockReturnValue(create.promise);
+
+		const pending = control._pCopyLocalCharacter({campaignId: "campaign-1"});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(control._api.pCreateCharacter).toHaveBeenCalledWith(expect.objectContaining({
+			clientImportId: "local-1",
+			data: expect.objectContaining({name: "Mira"}),
+		}));
+		page._currentCharacterId = "local-2";
+		page._characterLoadGeneration++;
+		page._state.toJson = () => ({id: "local-2", name: "Replacement"});
+		create.resolve({character: {id: "cloud-1"}});
+		await pending;
+
+		expect(control._api.pCreateCharacter.mock.calls[0][0].data).not.toEqual(expect.objectContaining({name: "Replacement"}));
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+		expect(control._feedback).not.toEqual(expect.objectContaining({type: "success"}));
+	});
+
 	it("reuses the same idempotency key when a local copy is retried", async () => {
 		const {control} = getControl();
 		control._api.pCreateCharacter
@@ -386,6 +426,44 @@ describe("Character Sheet campaign control", () => {
 			rulesVersionId: "rules-campaign-2",
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
+	});
+
+	it("does not continue a cloud clone after its compatibility request becomes stale", async () => {
+		const compatibility = makeDeferred();
+		const {control, page} = getControl({createResult: {character: {id: "clone-1"}}});
+		page._currentCharacterId = "cloud-source";
+		control._api.pGetCampaignCompatibility.mockReturnValue(compatibility.promise);
+
+		const pending = control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-replacement";
+		page._characterLoadGeneration++;
+		compatibility.resolve({campaignId: "campaign-2", rulesVersion: {id: "rules-campaign-2"}});
+		await pending;
+
+		expect(control._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it("does not navigate when a clone commits after its originating character was replaced", async () => {
+		const clone = makeDeferred();
+		const {control, page} = getControl();
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockReturnValue(clone.promise);
+
+		const pending = control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(control._api.pCloneCharacter).toHaveBeenCalledWith(expect.objectContaining({
+			characterId: "cloud-source",
+		}));
+		page._currentCharacterId = "cloud-replacement";
+		page._characterLoadGeneration++;
+		clone.resolve({character: {id: "clone-1"}});
+		await pending;
+
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+		expect(control._feedback).not.toEqual(expect.objectContaining({type: "success"}));
 	});
 
 	it("summarizes rule and homebrew differences without exposing documents", () => {

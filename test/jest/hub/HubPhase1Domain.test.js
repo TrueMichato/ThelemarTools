@@ -455,19 +455,20 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			},
 		});
 		const characterId = created.json().character.id;
-		await app.inject({
+		const acquiredByA = await app.inject({
 			method: "POST",
 			url: `/api/characters/${characterId}/lease`,
 			headers: mutationHeaders(playerA),
 			payload: {},
 		});
+		const leaseA = acquiredByA.json().lease;
 		const playerB = await pSignIn(IDENTITIES.player);
 
 		const refused = await app.inject({
 			method: "POST",
 			url: `/api/characters/${characterId}/lease/release`,
 			headers: mutationHeaders(playerB),
-			payload: {},
+			payload: {leaseEpoch: leaseA.epoch, expiresAt: leaseA.expiresAt},
 		});
 		expect(refused.statusCode).toBe(409);
 		expect(refused.json().error).toBe("LEASE_HELD");
@@ -476,7 +477,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			method: "POST",
 			url: `/api/characters/${characterId}/lease/release`,
 			headers: mutationHeaders(playerA),
-			payload: {},
+			payload: {leaseEpoch: leaseA.epoch, expiresAt: leaseA.expiresAt},
 		});
 		expect(released.statusCode).toBe(200);
 		expect(released.json()).toEqual({released: true});
@@ -488,6 +489,56 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			payload: {},
 		});
 		expect(acquired.statusCode).toBe(200);
+	});
+
+	it("does not let a stale same-session release remove a renewed character lease", async () => {
+		const player = await pSignIn(IDENTITIES.player);
+		const campaign = await pCreateCampaign(player, "Player Campaign");
+		const created = await app.inject({
+			method: "POST",
+			url: "/api/characters",
+			headers: mutationHeaders(player),
+			payload: {
+				clientImportId: "local-character-renewal",
+				campaignId: campaign.id,
+				schemaVersion: 1,
+				data: {name: "Mira"},
+			},
+		});
+		const characterId = created.json().character.id;
+		const first = (await app.inject({
+			method: "POST",
+			url: `/api/characters/${characterId}/lease`,
+			headers: mutationHeaders(player),
+			payload: {},
+		})).json().lease;
+		await new Promise(resolve => setTimeout(resolve, 5));
+		const renewed = (await app.inject({
+			method: "POST",
+			url: `/api/characters/${characterId}/lease`,
+			headers: mutationHeaders(player),
+			payload: {},
+		})).json().lease;
+		expect(renewed.epoch).toBe(first.epoch);
+		expect(renewed.expiresAt).not.toBe(first.expiresAt);
+
+		const staleRelease = await app.inject({
+			method: "POST",
+			url: `/api/characters/${characterId}/lease/release`,
+			headers: mutationHeaders(player),
+			payload: {leaseEpoch: first.epoch, expiresAt: first.expiresAt},
+		});
+		expect(staleRelease.statusCode).toBe(200);
+		expect(staleRelease.json()).toEqual({released: false});
+
+		const activeRelease = await app.inject({
+			method: "POST",
+			url: `/api/characters/${characterId}/lease/release`,
+			headers: mutationHeaders(player),
+			payload: {leaseEpoch: renewed.epoch, expiresAt: renewed.expiresAt},
+		});
+		expect(activeRelease.statusCode).toBe(200);
+		expect(activeRelease.json()).toEqual({released: true});
 	});
 
 	it("blocks mutation calls from stale protocol clients", async () => {

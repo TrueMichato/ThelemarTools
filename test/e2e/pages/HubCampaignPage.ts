@@ -11,6 +11,7 @@ type CampaignPrimaryAction = "dm" | "character" | "character-setup" | "character
 
 export class HubCampaignPage {
 	readonly page: Page;
+	readonly _characterLeases = new Map<string, {epoch: number; expiresAt: string}>();
 
 	constructor (page: Page) {
 		this.page = page;
@@ -996,15 +997,27 @@ export class HubCampaignPage {
 			data: {takeover: false},
 		});
 		expect(response.ok()).toBe(true);
+		const {lease} = await response.json();
+		this._characterLeases.set(characterId, lease);
 	}
 
 	async releaseCharacterLease (characterId: string): Promise<void> {
+		let lease = this._characterLeases.get(characterId) || await this.page.evaluate(id => {
+			const charSheet = (window as any).charSheet;
+			return charSheet?._characterRepository?._leases?.get(id) || null;
+		}, characterId);
+		if (!lease) {
+			await this.acquireCharacterLease(characterId);
+			lease = this._characterLeases.get(characterId);
+		}
+		expect(lease).toBeTruthy();
 		const response = await this.page.request.post(`/api/characters/${encodeURIComponent(characterId)}/lease/release`, {
 			headers: await this.getMutationHeaders(),
-			data: {},
+			data: {leaseEpoch: lease.epoch, expiresAt: lease.expiresAt},
 		});
 		expect(response.ok()).toBe(true);
 		expect((await response.json()).released).toEqual(expect.any(Boolean));
+		this._characterLeases.delete(characterId);
 	}
 
 	async replayCharacterMove ({

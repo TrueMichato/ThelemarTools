@@ -529,10 +529,10 @@ export class HubApiClient {
 		})).lease;
 	}
 
-	async pReleaseCharacterLease ({characterId}) {
+	async pReleaseCharacterLease ({characterId, leaseEpoch, expiresAt}) {
 		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}/lease/release`, {
 			method: "POST",
-			body: {},
+			body: {leaseEpoch, expiresAt},
 			isMutation: true,
 		});
 	}

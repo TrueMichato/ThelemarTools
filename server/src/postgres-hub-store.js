@@ -1961,7 +1961,7 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pReleaseCharacterLease ({accountId, sessionId, characterId}) {
+	async pReleaseCharacterLease ({accountId, sessionId, characterId, leaseEpoch, expiresAt}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
@@ -1977,7 +1977,7 @@ export class PostgresHubStore {
 				throw new HubStoreError("FORBIDDEN", `Only the owner can release this character editor.`, {status: 403});
 			}
 			const leaseResult = await client.query(`
-				SELECT session_id, expires_at
+				SELECT session_id, epoch, expires_at
 				FROM hub.character_leases
 				WHERE character_id = $1
 				FOR UPDATE
@@ -1993,6 +1993,10 @@ export class PostgresHubStore {
 					status: 409,
 					details: {expiresAt: lease.expires_at},
 				});
+			}
+			if (Number(lease.epoch) !== leaseEpoch || lease.expires_at.toISOString() !== new Date(expiresAt).toISOString()) {
+				await client.query("COMMIT");
+				return {released: false};
 			}
 			await client.query(`DELETE FROM hub.character_leases WHERE character_id = $1`, [characterId]);
 			await client.query("COMMIT");

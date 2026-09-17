@@ -696,6 +696,8 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			accountId: sourceOwner.id,
 			sessionId: sourceSession.id,
 			characterId: sourceCharacter.id,
+			leaseEpoch: sourceLease.epoch,
+			expiresAt: sourceLease.expiresAt.toISOString(),
 		});
 		const invalidationsAfterSharedHp = (await store.pListVisibleEventPage({
 			accountId: targetOwner.id,

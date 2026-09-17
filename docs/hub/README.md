@@ -83,9 +83,10 @@ The Character Sheet campaign control is the canonical place to add an existing c
 4. Membership removal or campaign lifecycle changes can leave an owned cloud character detached rather than
    deleting it. `hub.html` lists these as **Cloud characters between campaigns**; opening one allows the same
    cloud character to join an eligible campaign.
-5. The current browser releases only its own editor lease before a move. A lease held by another device blocks
-   the operation without opening the normal conflict-takeover dialog; the character stays in its source
-   campaign and the player can retry after that editor closes or expires.
+5. The current browser releases only the exact editor lease instance it acquired before a move. A stale
+   release cannot remove a same-session renewal, and a lease held by another device blocks the operation
+   without opening the normal conflict-takeover dialog; the character stays in its source campaign and the
+   player can retry after that editor closes or expires.
 
 Copy, attach, and move commands reuse an idempotency key when retried, so a lost response cannot create a
 second character or apply the move twice. Local character JSON does not gain Hub ownership metadata.

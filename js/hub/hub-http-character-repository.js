@@ -3436,8 +3436,18 @@ export class HubHttpCharacterRepository {
 		await this._pEnsureSession();
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
 		if (this.isCharacterReadOnly({characterId: canonicalId})) return {released: false};
-		const result = await this._api.pReleaseCharacterLease({characterId: canonicalId});
-		this._leases.delete(canonicalId);
+		const lease = this._leases.get(canonicalId);
+		if (!lease) return {released: false};
+		const result = await this._api.pReleaseCharacterLease({
+			characterId: canonicalId,
+			leaseEpoch: lease.epoch,
+			expiresAt: lease.expiresAt,
+		});
+		const currentLease = this._leases.get(canonicalId);
+		if (
+			currentLease?.epoch === lease.epoch
+			&& currentLease?.expiresAt === lease.expiresAt
+		) this._leases.delete(canonicalId);
 		return result;
 	}
 

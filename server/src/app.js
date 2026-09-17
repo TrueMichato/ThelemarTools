@@ -1996,13 +1996,20 @@ export async function createHubApp ({
 			},
 			body: {
 				type: "object",
+				required: ["leaseEpoch", "expiresAt"],
 				additionalProperties: false,
+				properties: {
+					leaseEpoch: {type: "integer", minimum: 1},
+					expiresAt: {type: "string", format: "date-time"},
+				},
 			},
 		},
 	}, async request => store.pReleaseCharacterLease({
 		accountId: request.hubAuth.account.id,
 		sessionId: request.hubAuth.session.id,
 		characterId: request.params.characterId,
+		leaseEpoch: request.body.leaseEpoch,
+		expiresAt: request.body.expiresAt,
 	}));
 
 	app.patch("/api/characters/:characterId", {

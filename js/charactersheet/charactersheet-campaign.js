@@ -605,28 +605,40 @@ export class CharacterSheetCampaign {
 
 	async _pCopyLocalCharacter ({campaignId}) {
 		const characterId = this._page._currentCharacterId;
+		const characterLoadGeneration = this._page._characterLoadGeneration;
+		const accessMode = this._page._currentCharacterAccess;
+		const isCurrentCharacter = () => (
+			this._page._currentCharacterId === characterId
+			&& this._page._characterLoadGeneration === characterLoadGeneration
+			&& this._page._currentCharacterAccess === accessMode
+		);
 		if (!characterId || !campaignId || this._isBusy) return;
+		const sourceData = this._page._state.toJson();
+		const command = this._getPendingCommand({kind: "copy-local", characterId, campaignId});
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();
 		try {
 			if (!await this._page._saveCurrentCharacter()) throw new Error("LOCAL_SAVE_FAILED");
-			const command = this._getPendingCommand({kind: "copy-local", characterId, campaignId});
+			if (!isCurrentCharacter()) return;
 			const context = await this._api.pGetCampaignContext({campaignId});
+			if (!isCurrentCharacter()) return;
 			const result = await this._api.pCreateCharacter({
 				clientImportId: characterId,
 				campaignId,
 				data: getCampaignPreparedCharacterData({
-					data: this._page._state.toJson(),
+					data: sourceData,
 					context,
 				}),
 				rulesVersionId: context.rulesVersion?.id || null,
 				idempotencyKey: command.idempotencyKey,
 			});
+			if (!isCurrentCharacter()) return;
 			this._feedback = {type: "success", text: "Cloud copy created. Your local original is unchanged."};
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
 		} catch (error) {
+			if (!isCurrentCharacter()) return;
 			this._feedback = {
 				type: "error",
 				text: error?.message === "LOCAL_SAVE_FAILED"
@@ -641,24 +653,35 @@ export class CharacterSheetCampaign {
 
 	async _pCloneCloudCharacter ({campaignId}) {
 		const characterId = this._page._currentCharacterId;
+		const characterLoadGeneration = this._page._characterLoadGeneration;
+		const accessMode = this._page._currentCharacterAccess;
+		const isCurrentCharacter = () => (
+			this._page._currentCharacterId === characterId
+			&& this._page._characterLoadGeneration === characterLoadGeneration
+			&& this._page._currentCharacterAccess === accessMode
+		);
 		if (!characterId || !campaignId || this._isBusy) return;
+		const command = this._getPendingCommand({kind: "clone-cloud", characterId, campaignId});
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();
 		try {
 			if (!await this._page._saveCurrentCharacter({isInteractiveConflict: false})) throw new Error("CLOUD_SAVE_FAILED");
-			const command = this._getPendingCommand({kind: "clone-cloud", characterId, campaignId});
+			if (!isCurrentCharacter()) return;
 			const target = await this._api.pGetCampaignCompatibility({campaignId});
+			if (!isCurrentCharacter()) return;
 			const result = await this._api.pCloneCharacter({
 				characterId,
 				campaignId,
 				rulesVersionId: target.rulesVersion?.id || null,
 				idempotencyKey: command.idempotencyKey,
 			});
+			if (!isCurrentCharacter()) return;
 			this._feedback = {type: "success", text: "Cloud copy created. This campaign character is unchanged."};
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
 		} catch (error) {
+			if (!isCurrentCharacter()) return;
 			this._feedback = {
 				type: "error",
 				text: error?.message === "CLOUD_SAVE_FAILED"

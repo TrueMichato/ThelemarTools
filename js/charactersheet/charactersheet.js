@@ -3266,7 +3266,7 @@ class CharacterSheetPage {
 			this._updateThemePickerSelection(currentTheme);
 
 			// Restore Play Mode if it was active
-			if (this._playMode && this._state.getViewMode() === "play") {
+			if (this._playMode && this._state.getViewMode() === "play" && !this.isCurrentCharacterReadOnly()) {
 				this._playMode.activate();
 			} else if (this._playMode) {
 				this._playMode.deactivate();
@@ -4887,10 +4887,10 @@ class CharacterSheetPage {
 			origin,
 			type,
 			onSelectCreature = null,
-			characterScope = null,
+			characterScope: suppliedCharacterScope = null,
 		} = options;
-		const isCurrentOwnerScope = () => !characterScope
-			|| this._isCharacterScopeSnapshotCurrent(characterScope, {isRequireOwner: true});
+		const characterScope = suppliedCharacterScope || this._getCharacterScopeSnapshot();
+		const isCurrentOwnerScope = () => this._isCharacterScopeSnapshotCurrent(characterScope, {isRequireOwner: true});
 
 		const validCreatures = await this._pGetWildShapeBeastCandidates(options);
 		if (!isCurrentOwnerScope()) return;

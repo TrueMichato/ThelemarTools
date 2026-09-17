@@ -81,6 +81,11 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		const dmCharacter = await dm.createCharacter({campaignId, name: "Authority DM Character"});
 		const playerSheet = new CharacterSheetPage(player.page);
 		await playerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
+		expect(await player.page.evaluate(async () => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._state.setViewMode("play");
+			return sheet._saveCurrentCharacter();
+		})).toBe(true);
 
 		const dmOwnedSheet = new CharacterSheetPage(dm.page);
 		await dmOwnedSheet.gotoCampaignCharacter({campaignId, characterId: dmCharacter.id});
@@ -168,6 +173,8 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await dm.page.waitForFunction(() => !!(globalThis as any).charSheet, undefined, {timeout: 60_000});
 		const dmSheet = new CharacterSheetPage(dm.page);
 		await expect(dmSheet.characterName).toHaveValue("Readonly Rowan");
+		await expect(dm.page.locator("#charsheet-play-mode")).toBeHidden();
+		await expect(dmSheet.characterName).toBeVisible();
 		await expect(dmSheet.characterName).toBeDisabled();
 		await expect(dm.page.locator("#charsheet-btn-export")).toBeEnabled();
 		await expect(dm.page.locator("#charsheet-btn-more")).toBeEnabled();

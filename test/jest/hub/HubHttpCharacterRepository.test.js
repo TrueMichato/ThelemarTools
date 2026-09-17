@@ -144,7 +144,7 @@ describe("HTTP character repository", () => {
 		let releaseInput;
 		const api = {
 			pGetSession: async () => ({signedIn: true}),
-			pAcquireCharacterLease: async () => ({epoch: 7}),
+			pAcquireCharacterLease: async () => ({epoch: 7, expiresAt: "2030-01-01T00:00:00.000Z"}),
 			pReleaseCharacterLease: async input => {
 				releaseInput = input;
 				return {released: true};
@@ -154,8 +154,39 @@ describe("HTTP character repository", () => {
 		await repository.pAcquireLease({characterId: "server-1"});
 
 		await expect(repository.pReleaseLease({characterId: "server-1"})).resolves.toEqual({released: true});
-		expect(releaseInput).toEqual({characterId: "server-1"});
+		expect(releaseInput).toEqual({
+			characterId: "server-1",
+			leaseEpoch: 7,
+			expiresAt: "2030-01-01T00:00:00.000Z",
+		});
 		expect(repository._leases.has("server-1")).toBe(false);
+	});
+
+	it("does not clear a newly reacquired same-session lease when an older release settles", async () => {
+		let resolveRelease;
+		const release = new Promise(resolve => resolveRelease = resolve);
+		const leases = [
+			{epoch: 7, expiresAt: "2030-01-01T00:00:00.000Z"},
+			{epoch: 7, expiresAt: "2030-01-01T00:00:10.000Z"},
+		];
+		const api = {
+			pGetSession: async () => ({signedIn: true}),
+			pAcquireCharacterLease: async () => leases.shift(),
+			pReleaseCharacterLease: async () => release,
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pAcquireLease({characterId: "server-1"});
+
+		const pendingRelease = repository.pReleaseLease({characterId: "server-1"});
+		await Promise.resolve();
+		await repository.pAcquireLease({characterId: "server-1"});
+		resolveRelease({released: false});
+		await pendingRelease;
+
+		expect(repository._leases.get("server-1")).toEqual({
+			epoch: 7,
+			expiresAt: "2030-01-01T00:00:10.000Z",
+		});
 	});
 
 	it("clears only retryable lease conflicts without discarding recovery data", () => {

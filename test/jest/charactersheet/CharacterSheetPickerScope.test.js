@@ -29,14 +29,13 @@ describe("character-scoped async companion pickers", () => {
 		globalThis.InputUiUtil.pGetUserEnum = jest.fn(async () => "Wolf (CR 1/4)");
 		const host = {
 			_pGetWildShapeBeastCandidates: async () => candidates,
+			_getCharacterScopeSnapshot: () => ({characterId: "character-a", loadGeneration: 1, accessMode: "owner"}),
 			_isCharacterScopeSnapshotCurrent: () => isCurrent,
 			_state: {addCompanionFromBestiary},
 		};
 
 		try {
-			const pending = CharacterSheetPage.prototype._pShowBeastPicker.call(host, {
-				characterScope: {characterId: "character-a", loadGeneration: 1, accessMode: "owner"},
-			});
+			const pending = CharacterSheetPage.prototype._pShowBeastPicker.call(host);
 			isCurrent = false;
 			resolveCandidates([{name: "Wolf", cr: "1/4"}]);
 			await pending;
@@ -57,14 +56,15 @@ describe("character-scoped async companion pickers", () => {
 		globalThis.DataLoader = {pCacheAndGetAllSite: jest.fn(async () => bestiary)};
 		CharacterSheetModal.pGetShow = jest.fn();
 		const host = {
-			_page: {_isCharacterScopeSnapshotCurrent: () => isCurrent},
+			_page: {
+				_getCharacterScopeSnapshot: () => ({characterId: "character-a", loadGeneration: 1, accessMode: "owner"}),
+				_isCharacterScopeSnapshotCurrent: () => isCurrent,
+			},
 			_state: {getFeatureCalculations: () => ({})},
 		};
 
 		try {
-			const pending = CharacterSheetSpells.prototype._pShowFamiliarPicker.call(host, {
-				characterScope: {characterId: "character-a", loadGeneration: 1, accessMode: "owner"},
-			});
+			const pending = CharacterSheetSpells.prototype._pShowFamiliarPicker.call(host);
 			isCurrent = false;
 			resolveBestiary([]);
 			await pending;

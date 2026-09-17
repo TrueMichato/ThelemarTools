@@ -556,6 +556,72 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 
 	afterAll(async () => pool.end());
 
+	it("matches memory behavior when a stale same-session release races a renewed lease", async () => {
+		const pRun = async (store, prefix) => {
+			const account = await store.pUpsertOAuthAccount({
+				provider: "github",
+				providerSubject: `${prefix}-${crypto.randomUUID()}`,
+				login: `${prefix}-lease-owner`,
+				displayName: "Lease Owner",
+			});
+			const session = await store.pCreateSession({
+				accountId: account.id,
+				tokenHash: crypto.randomBytes(32).toString("hex"),
+				expiresAt: new Date(Date.now() + 180_000),
+			});
+			const created = await store.pCreateCharacter({
+				accountId: account.id,
+				campaignId: null,
+				clientImportId: `${prefix}-lease-character`,
+				schemaVersion: 1,
+				data: {name: "Lease Character"},
+				idempotencyKey: command(`${prefix}-lease-create`),
+			});
+			const first = await store.pAcquireCharacterLease({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				ttlMs: 60_000,
+			});
+			const renewed = await store.pAcquireCharacterLease({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				ttlMs: 120_000,
+			});
+			const staleRelease = await store.pReleaseCharacterLease({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				leaseEpoch: first.epoch,
+				expiresAt: first.expiresAt,
+			});
+			const activeRelease = await store.pReleaseCharacterLease({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				leaseEpoch: renewed.epoch,
+				expiresAt: renewed.expiresAt,
+			});
+			return {
+				isSameEpoch: first.epoch === renewed.epoch,
+				isRenewed: new Date(renewed.expiresAt) > new Date(first.expiresAt),
+				staleRelease,
+				activeRelease,
+			};
+		};
+
+		const memory = await pRun(new MemoryHubStore(), "memory");
+		const postgres = await pRun(new PostgresHubStore({pool}), "postgres");
+		expect(postgres).toEqual(memory);
+		expect(postgres).toEqual({
+			isSameEpoch: true,
+			isRenewed: true,
+			staleRelease: {released: false},
+			activeRelease: {released: true},
+		});
+	});
+
 	it("matches memory response, compatibility, audit, ordered-event, and outbox behavior exactly", async () => {
 		const memoryStore = new MemoryHubStore();
 		const postgresStore = new PostgresHubStore({pool});
@@ -814,6 +880,8 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			accountId: account.id,
 			sessionId: session.id,
 			characterId: created.character.id,
+			leaseEpoch: lease.epoch,
+			expiresAt: lease.expiresAt.toISOString(),
 		});
 		const cloned = await store.pCloneCharacter({
 			accountId: account.id,

@@ -5227,9 +5227,10 @@ class CharacterSheetSpells {
 	 *   - `pactCreatureNames` (string[]): Additional creature names from Pact of the Chain
 	 */
 	async _pShowFamiliarPicker (opts = {}) {
-		const {isWildCompanion = false, pactCreatureNames = [], characterScope = null} = opts;
-		const isCurrentOwnerScope = () => !characterScope
-			|| this._page._isCharacterScopeSnapshotCurrent?.(characterScope, {isRequireOwner: true});
+		const {isWildCompanion = false, pactCreatureNames = [], characterScope: suppliedCharacterScope = null} = opts;
+		const characterScope = suppliedCharacterScope || this._page._getCharacterScopeSnapshot?.();
+		const isCurrentOwnerScope = () => !!characterScope
+			&& this._page._isCharacterScopeSnapshotCurrent?.(characterScope, {isRequireOwner: true});
 
 		// Load bestiary data
 		const bestiaryData = await DataLoader.pCacheAndGetAllSite(UrlUtil.PG_BESTIARY);

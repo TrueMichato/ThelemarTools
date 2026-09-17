@@ -432,13 +432,21 @@ describe("hub API client", () => {
 
 		await expect(client.pGetCampaignCompatibility({campaignId: "campaign"}))
 			.resolves.toEqual({campaignId: "campaign"});
-		await expect(client.pReleaseCharacterLease({characterId: "character"}))
+		await expect(client.pReleaseCharacterLease({
+			characterId: "character",
+			leaseEpoch: 7,
+			expiresAt: "2030-01-01T00:00:00.000Z",
+		}))
 			.resolves.toEqual({released: true});
 		expect(calls.map(call => [call.path, call.opts.method || "GET"])).toEqual([
 			["/api/session", "GET"],
 			["/api/campaigns/campaign/compatibility", "GET"],
 			["/api/characters/character/lease/release", "POST"],
 		]);
+		expect(JSON.parse(calls.at(-1).opts.body)).toEqual({
+			leaseEpoch: 7,
+			expiresAt: "2030-01-01T00:00:00.000Z",
+		});
 	});
 
 	it("uses an exclusive backward activity cursor and forwards closed spell activity", async () => {
