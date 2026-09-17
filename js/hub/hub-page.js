@@ -987,6 +987,7 @@ function setFormStatus ({formId, message = "", isError = false}) {
 
 function setTransferRefreshFailure ({form, message, pRetry}) {
 	const status = document.getElementById("campaign-transfer-form-status");
+	if (!form?.isConnected) return;
 	const submit = form?.querySelector("button[type='submit']");
 	if (!status || !submit) return;
 	submit.disabled = true;
@@ -3576,7 +3577,6 @@ async function pInitCampaignForms ({
 			try {
 				await pRefreshTransferState({fnIsCurrent});
 			} catch {
-				if (!fnIsCurrent()) return;
 				setTransferRefreshFailure({
 					form,
 					message: `${successMessage} The latest balances could not be loaded.`,

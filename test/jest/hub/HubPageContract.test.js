@@ -137,6 +137,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("form._hubMutationKey = null");
 		expect(source).toContain("form._hubMutationFingerprint = null");
 		expect(source).toContain("setTransferRefreshFailure");
+		expect(source).toContain("if (!form?.isConnected) return;");
 		expect(source).toContain("const form = event.currentTarget;");
 		expect(source).toContain("Retry latest balances");
 		expect(source).toContain("Latest balances loaded. You can send another transfer.");
@@ -144,6 +145,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("selectionsToRestore");
 		expect(source).toContain("if (sourceKind !== \"character\") return false;");
 		expect(source).toContain("Request sent. A DM must approve before anything leaves the party inventory.");
+		expect(source).toMatch(/applyTransferSuccessUi\(\);\s+try \{\s+await pRefreshTransferState\(\{fnIsCurrent\}\);\s+\} catch \{\s+setTransferRefreshFailure\(/);
 		expect(source).not.toContain("Reload the campaign before sending another transfer.");
 		expect(source).not.toContain("event.currentTarget.querySelector(\"button[type='submit']\").disabled = true");
 	});

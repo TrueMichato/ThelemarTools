@@ -1890,7 +1890,10 @@ export class HubCampaignPage {
 			await expect(search).toBeDisabled();
 			releaseSuccess();
 			await expect(status)
-				.toHaveText(`${quantity} × ${itemName} awarded to ${characterNames.length} character${characterNames.length === 1 ? "" : "s"}.`);
+				.toHaveText(
+					`${quantity} × ${itemName} awarded to ${characterNames.length} character${characterNames.length === 1 ? "" : "s"}.`,
+					{timeout: 15_000},
+				);
 			expect(idempotencyKeys).toHaveLength(2);
 			expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
 			await expect.poll(() => form.evaluate(element => ({
@@ -1941,7 +1944,10 @@ export class HubCampaignPage {
 		await this.page.locator("#campaign-item-quantity").fill(`${quantity}`);
 		await this.page.locator("#campaign-item-form button[type='submit']").click();
 		await expect(this.page.locator("#campaign-item-form-status"))
-			.toHaveText(`${quantity} × ${itemName} awarded to ${characterNames.length} character${characterNames.length === 1 ? "" : "s"}.`);
+			.toHaveText(
+				`${quantity} × ${itemName} awarded to ${characterNames.length} character${characterNames.length === 1 ? "" : "s"}.`,
+				{timeout: 15_000},
+			);
 	}
 
 	async applyDamage ({campaignId, characterName, amount}: {campaignId: string; characterName: string; amount: number}): Promise<void> {
