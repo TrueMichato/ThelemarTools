@@ -2,13 +2,13 @@
 
 > **Status:** Current private-V1 wire protocol
 > **Protocol version:** `5`
-> **Last verified:** 2026-09-04
+> **Last verified:** 2026-09-17
 > **Owner:** Campaign Hub maintainers
 
 ## Connection
 
 ```text
-GET /ws/campaign/{campaignId}?v=4
+GET /ws/campaign/{campaignId}?v=5
 Origin: <exact HUB_APP_ORIGIN>
 Cookie: __Host-hub_session=...
 ```
@@ -16,7 +16,7 @@ Cookie: __Host-hub_session=...
 Upgrade requires:
 
 - UUID campaign id;
-- query protocol `v=4`;
+- query protocol `v=5`;
 - exact Origin;
 - valid signed/unexpired session;
 - active campaign membership.
