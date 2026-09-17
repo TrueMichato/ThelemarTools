@@ -201,6 +201,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		});
 		await secondDevice.page.locator("#campaign-transfer-form button[type='submit']").click();
 		await transferStarted;
+		await expect(secondDevice.page.locator("#campaign-party-roster")).toContainText("Rowan");
 		await player.revokeOtherSession();
 		continueTransfer();
 		expect((await secondDevice.page.request.get("/api/campaigns")).status()).toBe(401);

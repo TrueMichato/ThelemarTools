@@ -2030,14 +2030,19 @@ export class HubCampaignPage {
 	}
 
 	async expectSessionRevokedWhileOpen ({characterName}: {characterName: string}): Promise<void> {
-		await expect(this.page.locator("#campaign-party-roster")).toContainText(characterName);
 		await expect(this.page.locator("#hub-error")).toContainText("session has expired");
-		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Signed out · data is read only");
 		await expect(this.page.locator("#campaign-content")).toBeHidden();
 		await expect(this.page.locator("#campaign-content")).toHaveAttribute("aria-hidden", "true");
 		await expect(this.page.locator("#campaign-content")).toBeEmpty();
 		await expect(this.page.locator("body")).not.toContainText(characterName);
-		await expect(this.page.locator("#hub-logout")).toBeEnabled();
+		const signIn = this.page.locator("#hub-sign-in");
+		await expect(signIn).toBeVisible();
+		await expect(signIn).toBeEnabled();
+		const currentUrl = new URL(this.page.url());
+		const signInUrl = new URL(await signIn.getAttribute("href") || "", currentUrl);
+		expect(signInUrl.pathname).toBe("/auth/github/start");
+		expect(signInUrl.searchParams.get("returnTo"))
+			.toBe(`${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
 	}
 
 	async expectMembershipRevokedWhileOpen ({characterName}: {characterName: string}): Promise<void> {

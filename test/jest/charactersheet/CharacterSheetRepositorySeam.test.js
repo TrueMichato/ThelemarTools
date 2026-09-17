@@ -331,6 +331,7 @@ describe("Character Sheet repository seam", () => {
 			_campaign: {
 				pRefreshCurrentCharacter: jest.fn(async () => {
 					calls.push("campaign");
+					host._selCharacter.value = "";
 					throw new Error("campaign controls unavailable");
 				}),
 			},
@@ -1513,9 +1514,14 @@ describe("Character Sheet repository seam", () => {
 		const host = {
 			_characterLoadGeneration: 0,
 			_currentCharacterId: "character-1",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_isHubCharacter: true,
 			_characterRepository: {
 				pGet: jest.fn(async () => { throw new Error("offline"); }),
 			},
+			_partyInventory: {isAttachedTo: jest.fn(() => true), pAttach: jest.fn()},
+			isCurrentCharacterReadOnly: CharacterSheetPage.prototype.isCurrentCharacterReadOnly,
+			_reattachRetainedHubCharacterIntegrations: CharacterSheetPage.prototype._reattachRetainedHubCharacterIntegrations,
 			_attachHubRealtime: jest.fn(),
 			_detachHubRealtime: jest.fn(),
 		};
@@ -1525,6 +1531,35 @@ describe("Character Sheet repository seam", () => {
 
 		expect(host._detachHubRealtime).not.toHaveBeenCalled();
 		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+		expect(host._partyInventory.pAttach).toHaveBeenCalledWith({
+			characterId: "character-1",
+			generation: 1,
+		});
+	});
+
+	it("does not create a party-inventory attachment after a failed initial character load", async () => {
+		const loadError = new Error("offline");
+		const host = {
+			_characterLoadGeneration: 0,
+			_currentCharacterId: "placeholder-character",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_isHubCharacter: true,
+			_characterRepository: {
+				pGet: jest.fn(async () => { throw loadError; }),
+			},
+			_partyInventory: {
+				isAttachedTo: jest.fn(() => false),
+				pAttach: jest.fn(),
+			},
+			isCurrentCharacterReadOnly: CharacterSheetPage.prototype.isCurrentCharacterReadOnly,
+			_reattachRetainedHubCharacterIntegrations: CharacterSheetPage.prototype._reattachRetainedHubCharacterIntegrations,
+		};
+
+		await expect(CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-b"))
+			.rejects.toBe(loadError);
+
+		expect(host._partyInventory.isAttachedTo).toHaveBeenCalledWith({characterId: "placeholder-character"});
+		expect(host._partyInventory.pAttach).not.toHaveBeenCalled();
 	});
 
 	it.each(["CHARACTER_NOT_FOUND", "FORBIDDEN"])("keeps the previous character fully attached when the selected target fails with %s", async code => {
@@ -1537,6 +1572,10 @@ describe("Character Sheet repository seam", () => {
 			_characterRepository: {
 				pGet: jest.fn(async () => { throw terminalError; }),
 			},
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_partyInventory: {isAttachedTo: jest.fn(() => true), pAttach: jest.fn()},
+			isCurrentCharacterReadOnly: CharacterSheetPage.prototype.isCurrentCharacterReadOnly,
+			_reattachRetainedHubCharacterIntegrations: CharacterSheetPage.prototype._reattachRetainedHubCharacterIntegrations,
 			_closeCharacterScopedTransientUi: jest.fn(),
 			_detachHubRealtime: jest.fn(),
 			_attachHubRealtime: jest.fn(),
@@ -1555,6 +1594,10 @@ describe("Character Sheet repository seam", () => {
 		expect(host._selCharacter.value).toBe("character-a");
 		expect(host._detachHubRealtime).not.toHaveBeenCalled();
 		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+		expect(host._partyInventory.pAttach).toHaveBeenCalledWith({
+			characterId: "character-a",
+			generation: 1,
+		});
 		expect(host._campaign.resetCharacterScope).not.toHaveBeenCalled();
 		expect(host._endCurrentHubCharacterAccess).not.toHaveBeenCalled();
 	});
@@ -1625,6 +1668,10 @@ describe("Character Sheet repository seam", () => {
 			_characterRepository: {
 				pGet: jest.fn(async () => { throw authError; }),
 			},
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_partyInventory: {isAttachedTo: jest.fn(() => true), pAttach: jest.fn()},
+			isCurrentCharacterReadOnly: CharacterSheetPage.prototype.isCurrentCharacterReadOnly,
+			_reattachRetainedHubCharacterIntegrations: CharacterSheetPage.prototype._reattachRetainedHubCharacterIntegrations,
 			_closeCharacterScopedTransientUi: jest.fn(),
 			_detachHubRealtime: jest.fn(),
 			_campaign: {resetCharacterScope: jest.fn()},
@@ -1638,6 +1685,93 @@ describe("Character Sheet repository seam", () => {
 			characterId: "character-a",
 			accessEndCause: "campaign",
 		});
+		expect(host._partyInventory.pAttach).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["character replacement", host => {
+			host._currentCharacterId = "character-b";
+			host._characterLoadGeneration++;
+		}],
+		["owner authority loss", host => {
+			host._currentCharacterAccess = CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+		}],
+	])("does not apply a deferred portrait after %s", async (_label, applyTransition) => {
+		let reader;
+		const FileReaderPrevious = globalThis.FileReader;
+		const toastPrevious = globalThis.JqueryUtil.doToast;
+		globalThis.FileReader = class {
+			readAsDataURL () { reader = this; }
+		};
+		globalThis.JqueryUtil.doToast = jest.fn();
+		const host = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_getCharacterScopeSnapshot: CharacterSheetPage.prototype._getCharacterScopeSnapshot,
+			_isCharacterScopeSnapshotCurrent: CharacterSheetPage.prototype._isCharacterScopeSnapshotCurrent,
+			isCurrentCharacterReadOnly: CharacterSheetPage.prototype.isCurrentCharacterReadOnly,
+			_state: {setAppearance: jest.fn()},
+			_saveCurrentCharacter: jest.fn(async () => true),
+			_renderPortrait: jest.fn(),
+		};
+
+		try {
+			CharacterSheetPage.prototype._handlePortraitFile.call(host, {type: "image/png", size: 128});
+			applyTransition(host);
+			await reader.onload({target: {result: "data:image/png;base64,portrait"}});
+
+			expect(host._state.setAppearance).not.toHaveBeenCalled();
+			expect(host._saveCurrentCharacter).not.toHaveBeenCalled();
+			expect(host._renderPortrait).not.toHaveBeenCalled();
+			expect(globalThis.JqueryUtil.doToast).not.toHaveBeenCalled();
+		} finally {
+			globalThis.FileReader = FileReaderPrevious;
+			globalThis.JqueryUtil.doToast = toastPrevious;
+		}
+	});
+
+	it.each([
+		["character replacement", host => {
+			host._currentCharacterId = "character-b";
+			host._characterLoadGeneration++;
+		}],
+		["owner authority loss", host => {
+			host._currentCharacterAccess = CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+		}],
+	])("does not surface a deferred portrait read error after %s", async (_label, applyTransition) => {
+		let reader;
+		const FileReaderPrevious = globalThis.FileReader;
+		const toastPrevious = globalThis.JqueryUtil.doToast;
+		globalThis.FileReader = class {
+			readAsDataURL () { reader = this; }
+		};
+		globalThis.JqueryUtil.doToast = jest.fn();
+		const host = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_getCharacterScopeSnapshot: CharacterSheetPage.prototype._getCharacterScopeSnapshot,
+			_isCharacterScopeSnapshotCurrent: CharacterSheetPage.prototype._isCharacterScopeSnapshotCurrent,
+			isCurrentCharacterReadOnly: CharacterSheetPage.prototype.isCurrentCharacterReadOnly,
+			_state: {setAppearance: jest.fn()},
+			_saveCurrentCharacter: jest.fn(async () => true),
+			_renderPortrait: jest.fn(),
+		};
+
+		try {
+			CharacterSheetPage.prototype._handlePortraitFile.call(host, {type: "image/png", size: 128});
+			applyTransition(host);
+			reader.onerror();
+
+			expect(host._state.setAppearance).not.toHaveBeenCalled();
+			expect(host._saveCurrentCharacter).not.toHaveBeenCalled();
+			expect(host._renderPortrait).not.toHaveBeenCalled();
+			expect(globalThis.JqueryUtil.doToast).not.toHaveBeenCalled();
+		} finally {
+			globalThis.FileReader = FileReaderPrevious;
+			globalThis.JqueryUtil.doToast = toastPrevious;
+		}
 	});
 
 	it.each([
@@ -1824,6 +1958,241 @@ describe("Character Sheet repository seam", () => {
 			accessEndCause: "campaign",
 		});
 		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+	});
+
+	it("ends character access when a rules refresh proves terminal campaign authority loss", async () => {
+		const authError = Object.assign(new Error("signed out"), {code: "AUTH_REQUIRED", status: 401});
+		const pRevalidate = jest.fn(() => new Promise(() => {}));
+		const host = {
+			_hubRulesPendingVersionId: null,
+			_hubRulesRefreshGeneration: 0,
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_hubCampaignContext: {pRefresh: jest.fn(async () => { throw authError; })},
+			_hubActiveCampaign: {pRevalidate},
+			_clearHubRules: jest.fn(),
+			_campaign: {render: jest.fn()},
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+		};
+
+		await expect(CharacterSheetPage.prototype._pRefreshHubRules.call(host)).resolves.toBe(false);
+		await Promise.resolve();
+
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-a",
+			accessEndCause: "campaign",
+		});
+		expect(pRevalidate).toHaveBeenCalledWith({trigger: "access_loss"});
+		expect(host._hubRulesRefreshBlocked).toBe(true);
+	});
+
+	it("keeps campaign rules disabled but retains the character after a transient refresh failure", async () => {
+		const transientError = Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"});
+		const host = {
+			_hubRulesPendingVersionId: null,
+			_hubRulesRefreshGeneration: 0,
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_hubCampaignContext: {pRefresh: jest.fn(async () => { throw transientError; })},
+			_hubActiveCampaign: {pRevalidate: jest.fn()},
+			_clearHubRules: jest.fn(),
+			_campaign: {render: jest.fn()},
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+		};
+
+		await expect(CharacterSheetPage.prototype._pRefreshHubRules.call(host)).resolves.toBe(false);
+
+		expect(host._endCurrentHubCharacterAccess).not.toHaveBeenCalled();
+		expect(host._hubActiveCampaign.pRevalidate).not.toHaveBeenCalled();
+		expect(host._isHubContextRevalidationRequired).toBe(true);
+		expect(host._hubRulesRefreshBlocked).toBe(true);
+	});
+
+	it("ends character access when an event-driven context refresh proves terminal authority loss", async () => {
+		const authError = Object.assign(new Error("campaign unavailable"), {code: "CAMPAIGN_NOT_FOUND", status: 404});
+		const host = {
+			_hubContext: {rulesVersion: null, brewBundle: null},
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_hubCampaignContext: {pRefresh: jest.fn(async () => { throw authError; })},
+			_hubActiveCampaign: {pRevalidate: jest.fn(() => new Promise(() => {}))},
+			_clearHubRules: jest.fn(),
+			_campaign: {render: jest.fn()},
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+		};
+
+		CharacterSheetPage.prototype._onHubCampaignContextChanged.call(host, {type: "membership.changed"});
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-a",
+			accessEndCause: "campaign",
+		});
+		expect(host._hubActiveCampaign.pRevalidate).toHaveBeenCalledWith({trigger: "access_loss"});
+	});
+
+	it("ends character access when authoritative reconciliation proves terminal authority loss", async () => {
+		const authError = Object.assign(new Error("forbidden"), {code: "FORBIDDEN", status: 403});
+		const host = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 4,
+			_hubRealtimeGeneration: 7,
+			_isHubCharacter: true,
+			_characterRepository: {
+				pReconcileAuthoritativeCharacter: jest.fn(async () => { throw authError; }),
+			},
+			_hubActiveCampaign: {pRevalidate: jest.fn(() => new Promise(() => {}))},
+			_getHubLiveCharacterData: jest.fn(),
+			_adoptHubLiveCharacterData: jest.fn(),
+			_updateSaveIndicator: jest.fn(),
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+		};
+
+		await expect(CharacterSheetPage.prototype._pRunHubAuthoritativeReconcile.call(host, {
+			characterId: "character-a",
+			generation: 4,
+			realtimeGeneration: 7,
+		})).resolves.toBe(false);
+		await Promise.resolve();
+
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-a",
+			accessEndCause: "campaign",
+		});
+		expect(host._updateSaveIndicator).not.toHaveBeenCalled();
+	});
+
+	it("ends character access when realtime resync proves terminal authority loss", async () => {
+		const authError = Object.assign(new Error("campaign unavailable"), {code: "CAMPAIGN_NOT_FOUND", status: 404});
+		const host = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 4,
+			_isHubCharacter: true,
+			_characterRepository: {
+				pRunPendingResync: jest.fn(async () => { throw authError; }),
+			},
+			_hubActiveCampaign: {pRevalidate: jest.fn(() => new Promise(() => {}))},
+			_getHubLiveCharacterData: jest.fn(),
+			_adoptHubLiveCharacterData: jest.fn(),
+			_updateSaveIndicator: jest.fn(),
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+		};
+
+		await expect(CharacterSheetPage.prototype._pRunHubRealtimeResync.call(host, {
+			characterId: "character-a",
+		})).resolves.toBe(false);
+		await Promise.resolve();
+
+		expect(host._endCurrentHubCharacterAccess).toHaveBeenCalledWith({
+			characterId: "character-a",
+			accessEndCause: "campaign",
+		});
+		expect(host._updateSaveIndicator).not.toHaveBeenCalled();
+	});
+
+	it("conceals a terminal save failure before campaign revalidation settles or fails", async () => {
+		const authError = Object.assign(new Error("signed out"), {code: "AUTH_REQUIRED", status: 401});
+		const revalidation = makeDeferred();
+		const order = [];
+		const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+		const host = {
+			_currentCharacterId: "character-a",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterLoadGeneration: 2,
+			_isCurrentCharacterNew: false,
+			_isHubCharacter: true,
+			_characterRepository: {
+				isRescueMirrorEnabled: false,
+				isSaveBlocked: jest.fn(() => false),
+				pUpsert: jest.fn(async () => { throw authError; }),
+			},
+			_hubActiveCampaign: {
+				pRevalidate: jest.fn(() => {
+					order.push("revalidate");
+					return revalidation.promise;
+				}),
+			},
+			_state: {toJson: jest.fn(() => ({id: "character-a", name: "Secret"}))},
+			_getNextSavedAt: CharacterSheetPage.prototype._getNextSavedAt,
+			_lastSavedAt: 0,
+			_updateSaveIndicator: jest.fn(),
+			_endCurrentHubCharacterAccess: jest.fn(() => {
+				order.push("conceal");
+				return true;
+			}),
+			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+		};
+
+		try {
+			await expect(Promise.race([
+				CharacterSheetPage.prototype._saveCurrentCharacter.call(host),
+				new Promise(resolve => setTimeout(() => resolve("still-pending"), 50)),
+			])).resolves.toBe(false);
+			expect(order).toEqual(["conceal", "revalidate"]);
+			revalidation.reject(new Error("coordinator unavailable"));
+			await new Promise(resolve => setTimeout(resolve, 0));
+			expect(consoleError).toHaveBeenCalledWith(
+				"Failed to revalidate inaccessible campaign context:",
+				expect.any(Error),
+			);
+		} finally {
+			consoleError.mockRestore();
+		}
+	});
+
+	it("keeps a server-adopted import ID selected after the create continuation becomes stale", async () => {
+		const uploadPrevious = globalThis.InputUiUtil.pGetUserUploadJson;
+		const imported = {id: "exported-id", name: "Imported"};
+		let loaded = null;
+		const host = {
+			_currentCharacterId: null,
+			_characterLoadGeneration: 0,
+			_selCharacter: {value: ""},
+			_state: {
+				loadFromJson: jest.fn(data => { loaded = structuredClone(data); }),
+				setId: jest.fn(id => { loaded.id = id; }),
+			},
+			_clearLastHpChange: jest.fn(),
+			_reconcileClassFeatures: jest.fn(),
+			_pRefreshCharacterRosterAfterCommittedStaleCreate: jest.fn(async () => {}),
+			_renderCharacter: jest.fn(),
+		};
+		host._saveCurrentCharacter = jest.fn(async () => {
+			host._currentCharacterId = "server-import";
+			host._characterLoadGeneration++;
+			host._state.setId("server-import");
+			return true;
+		});
+		globalThis.InputUiUtil.pGetUserUploadJson = jest.fn(async () => ({
+			jsons: [structuredClone(imported)],
+			errors: [],
+		}));
+
+		try {
+			await CharacterSheetPage.prototype._onImportCharacter.call(host);
+		} finally {
+			globalThis.InputUiUtil.pGetUserUploadJson = uploadPrevious;
+		}
+
+		expect(host._pRefreshCharacterRosterAfterCommittedStaleCreate).toHaveBeenCalledTimes(1);
+		expect(host._currentCharacterId).toBe("server-import");
+		expect(loaded.id).toBe("server-import");
+		expect(host._selCharacter.value).toBe("server-import");
+		expect(host._renderCharacter).not.toHaveBeenCalled();
 	});
 
 	it("adopts an imported character's canonical id in the URL and campaign controls", async () => {

@@ -291,6 +291,16 @@ class CharacterSheetPage {
 		return isAttached;
 	}
 
+	_reattachRetainedHubCharacterIntegrations ({characterId, generation, isPartyInventoryAttached = false}) {
+		if (
+			!characterId
+			|| !this._isHubCharacter
+			|| this.isCurrentCharacterReadOnly()
+			|| !isPartyInventoryAttached
+		) return;
+		void this._partyInventory?.pAttach({characterId, generation});
+	}
+
 	isCurrentCharacterReadOnly () {
 		return this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
 	}
@@ -500,6 +510,7 @@ class CharacterSheetPage {
 	}
 
 	async _pRefreshHubRules ({rulesVersionId = null, isUseLatest = false} = {}) {
+		const characterId = this._currentCharacterId;
 		const expectedRulesVersionId = isUseLatest ? null : rulesVersionId ?? this._hubRulesPendingVersionId;
 		const generation = ++this._hubRulesRefreshGeneration;
 		const contextGeneration = ++this._hubContextGeneration;
@@ -539,6 +550,10 @@ class CharacterSheetPage {
 				generation !== this._hubRulesRefreshGeneration
 				|| contextGeneration !== this._hubContextGeneration
 			) return false;
+			if (this._handleTerminalCharacterCampaignAccessError?.({
+				error,
+				characterId,
+			})) return false;
 			this._clearHubRules({
 				isUnavailable: true,
 				isFenceRefresh: false,
@@ -650,6 +665,23 @@ class CharacterSheetPage {
 		return true;
 	}
 
+	_handleTerminalCharacterCampaignAccessError ({
+		error,
+		characterId = this._currentCharacterId,
+	} = {}) {
+		if (!this._isHubCharacter || !isTerminalCharacterCampaignAccessError(error)) return false;
+		const isEnded = this._endCurrentHubCharacterAccess({
+			characterId,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+		});
+		if (!isEnded) return false;
+		void Promise.resolve()
+			.then(() => this._hubActiveCampaign?.pRevalidate?.({trigger: "access_loss"}))
+			// eslint-disable-next-line no-console
+			.catch(revalidationError => console.error("Failed to revalidate inaccessible campaign context:", revalidationError));
+		return true;
+	}
+
 	_onHubProjectionInvalidated (event) {
 		if (!this._currentCharacterId || event?.characterId !== this._currentCharacterId) return false;
 		return this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
@@ -697,6 +729,7 @@ class CharacterSheetPage {
 				? this._hubContext?.brewBundle?.id
 				: null;
 		if (event?.aggregateId && event.aggregateId === activeContextId) return;
+		const characterId = this._currentCharacterId;
 		const generation = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = generation;
 		this._isHubContextRefreshing = true;
@@ -712,8 +745,12 @@ class CharacterSheetPage {
 				this._renderCharacter();
 				this._campaign?.render();
 			})
-			.catch(() => {
+			.catch(error => {
 				if (generation !== this._hubContextGeneration) return;
+				if (this._handleTerminalCharacterCampaignAccessError?.({
+					error,
+					characterId,
+				})) return;
 				this._isHubContextUnavailable = true;
 				this._isHubContextRevalidationRequired = true;
 				JqueryUtil.doToast({
@@ -966,6 +1003,10 @@ class CharacterSheetPage {
 				});
 				return false;
 			case "failed":
+				if (this._handleTerminalCharacterCampaignAccessError?.({
+					error: result.error,
+					characterId,
+				})) return false;
 				this._updateSaveIndicator("error");
 				JqueryUtil.doToast({
 					type: "danger",
@@ -1055,6 +1096,10 @@ class CharacterSheetPage {
 				this._updateSaveIndicator("error");
 				return this._pResolveHubCharacterConflict({characterId, fnIsCurrent});
 			case "failed":
+				if (this._handleTerminalCharacterCampaignAccessError?.({
+					error: result.error,
+					characterId,
+				})) return false;
 				this._updateSaveIndicator("error");
 				JqueryUtil.doToast({
 					type: "danger",
@@ -3127,6 +3172,7 @@ class CharacterSheetPage {
 			}
 		}
 		if (!isCurrent()) return;
+		this._syncCurrentCharacterDropdownOption({previousCharacterId, character});
 		if (failures.length) {
 			// eslint-disable-next-line no-console
 			console.warn("Character was saved, but some UI state could not refresh:", failures);
@@ -3216,10 +3262,13 @@ class CharacterSheetPage {
 	}
 
 	async _pLoadCharacter (charId) {
+		const previousCharacterId = this._currentCharacterId;
+		const isPreviousPartyInventoryAttached = this._partyInventory?.isAttachedTo?.({
+			characterId: previousCharacterId,
+		}) === true;
 		const loadGeneration = (this._characterLoadGeneration || 0) + 1;
 		this._characterLoadGeneration = loadGeneration;
 		this._closeCharacterScopedTransientUi?.({isRetainCurrentCharacterUi: true});
-		const previousCharacterId = this._currentCharacterId;
 		let canonical;
 		try {
 			canonical = await this._characterRepository.pGet({characterId: charId});
@@ -3227,14 +3276,21 @@ class CharacterSheetPage {
 			if (error?.code !== "CHARACTER_CAMPAIGN_MISMATCH") {
 				if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === previousCharacterId) {
 					if (this._selCharacter) this._selCharacter.value = previousCharacterId || "";
-					if (
+					const isTerminalAccessLoss = (
 						previousCharacterId
 						&& this._isHubCharacter
 						&& ["AUTH_REQUIRED", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND", "CAMPAIGN_ARCHIVED"].includes(error?.code)
-					) {
+					);
+					if (isTerminalAccessLoss) {
 						this._endCurrentHubCharacterAccess?.({
 							characterId: previousCharacterId,
 							accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+						});
+					} else {
+						this._reattachRetainedHubCharacterIntegrations?.({
+							characterId: previousCharacterId,
+							generation: loadGeneration,
+							isPartyInventoryAttached: isPreviousPartyInventoryAttached,
 						});
 					}
 				}
@@ -5418,20 +5474,14 @@ class CharacterSheetPage {
 			return true;
 		} catch (err) {
 			if (!isSaveCurrent()) return false;
+			if (this._handleTerminalCharacterCampaignAccessError?.({
+				error: err,
+				characterId: saveFence.characterId,
+			})) return false;
 			// eslint-disable-next-line no-console
 			console.error("Save error:", err);
 			// Leave the sync mirror in place: it is the only surviving copy of this write.
 			this._updateSaveIndicator("error");
-			if ([
-				"AUTH_REQUIRED",
-				"FORBIDDEN",
-				"CAMPAIGN_NOT_FOUND",
-				"MEMBERSHIP_NOT_FOUND",
-				"CAMPAIGN_ARCHIVED",
-			].includes(err?.code)) {
-				await this._hubActiveCampaign?.pRevalidate({trigger: "access_loss"});
-				if (!isSaveCurrent()) return false;
-			}
 			if (!isInteractiveConflict && ["CHARACTER_LIVE_CONFLICT", "CHARACTER_CONFLICT"].includes(err?.code)) {
 				this._characterRepository.clearRetryableLeaseConflict?.({characterId: saveFence.characterId});
 				throw err;
@@ -5550,7 +5600,10 @@ class CharacterSheetPage {
 		const importFence = getCharacterSaveFence(this);
 		const isImportSaved = await this._saveCurrentCharacter();
 		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: importFence})) {
-			if (isImportSaved) await this._pRefreshCharacterRosterAfterCommittedStaleCreate();
+			if (isImportSaved) {
+				await this._pRefreshCharacterRosterAfterCommittedStaleCreate();
+				if (this._selCharacter && this._currentCharacterId) this._selCharacter.value = this._currentCharacterId;
+			}
 			return;
 		}
 		if (!isImportSaved) {
@@ -5565,7 +5618,7 @@ class CharacterSheetPage {
 		}
 		await this._pLoadCharacters();
 		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: importFence})) return;
-		this._selCharacter.value = json.id;
+		this._selCharacter.value = this._currentCharacterId || json.id;
 		this._renderCharacter();
 
 		JqueryUtil.doToast({type: "success", content: `Imported character: ${json.name || "Unnamed"}`});
@@ -7688,15 +7741,24 @@ class CharacterSheetPage {
 			return;
 		}
 
+		if (this.isCurrentCharacterReadOnly()) return;
+		const characterScope = this._getCharacterScopeSnapshot();
+		const isCurrentOwnerScope = () => this._isCharacterScopeSnapshotCurrent(
+			characterScope,
+			{isRequireOwner: true},
+		);
 		const reader = new FileReader();
-		reader.onload = (e) => {
+		reader.onload = async (e) => {
+			if (!isCurrentOwnerScope()) return;
 			const dataUrl = e.target.result;
 			this._state.setAppearance("portraitUrl", dataUrl);
-			this._saveCurrentCharacter();
+			const isSaved = await this._saveCurrentCharacter();
+			if (!isCurrentOwnerScope() || !isSaved) return;
 			this._renderPortrait();
 			JqueryUtil.doToast({type: "success", content: "Portrait updated!"});
 		};
 		reader.onerror = () => {
+			if (!isCurrentOwnerScope()) return;
 			JqueryUtil.doToast({type: "danger", content: "Failed to read image file"});
 		};
 		reader.readAsDataURL(file);
@@ -7706,6 +7768,7 @@ class CharacterSheetPage {
 	 * Remove the current portrait
 	 */
 	_removePortrait () {
+		if (this.isCurrentCharacterReadOnly()) return;
 		this._state.setAppearance("portraitUrl", "");
 		this._saveCurrentCharacter();
 		this._renderPortrait();

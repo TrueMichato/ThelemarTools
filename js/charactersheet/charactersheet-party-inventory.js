@@ -302,6 +302,10 @@ export class CharacterSheetPartyInventory {
 		return this._pActivate(active);
 	}
 
+	isAttachedTo ({characterId}) {
+		return !!this._active && this._active.characterId === characterId;
+	}
+
 	async _pActivate (active) {
 		if (!this._isCurrent(active)) return false;
 		if (active.activationPromise) {

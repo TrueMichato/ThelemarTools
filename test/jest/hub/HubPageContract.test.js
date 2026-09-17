@@ -337,6 +337,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("isActivityAuthorizationFenced = false");
 		expect(source).toContain("isActivityAuthorizationFenced ? [] : liveEvents");
 		expect(source).toContain("[\"AUTH_REQUIRED\", \"FORBIDDEN\", \"CAMPAIGN_NOT_FOUND\", \"MEMBERSHIP_NOT_FOUND\"]");
+		expect(source).toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*signIn\.href = `\/auth\/github\/start\?\$\{new URLSearchParams\(\{returnTo\}\)\}`;[\s\S]*setHidden\(document\.getElementById\("hub-signed-in"\), true\);[\s\S]*setHidden\(document\.getElementById\("hub-signed-out"\), false\);/);
 		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
 		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
 		expect(source).toContain("const isProjectionInvalidation = event.type === \"character.projection.invalidated\"");
@@ -344,7 +345,8 @@ describe("campaign hub pages", () => {
 		expect(source).toMatch(/isProjectionInvalidation[\s\S]*concealCampaignProjectionAuthorization\(\)/);
 		expect(source).toMatch(/pRefreshLiveViews = async \(\) => \{[\s\S]*fillCharacterSelect\([\s\S]*"campaign-action-target"[\s\S]*setFormAvailability\(\{[\s\S]*formId: "campaign-action-form"/);
 		expect(source).toContain("const handleCampaignAuthorizationError = error =>");
-		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{[\s\S]*concealCampaignAuthorization\(\);[\s\S]*stopCampaignLiveUpdates\(\);[\s\S]*renderError\(error, \{isAuthorizationHandled: true\}\);[\s\S]*return true;/);
+		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{[\s\S]*concealCampaignAuthorization\(\);[\s\S]*stopCampaignLiveUpdates\(\);[\s\S]*showSignedOutAfterSessionExpiry\(\);[\s\S]*renderError\(error, \{isAuthorizationHandled: true\}\);[\s\S]*return true;\s*\}\s*concealCampaignAuthorization\(\);\s*stopCampaignLiveUpdates\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);/);
+		expect(source.match(/showSignedOutAfterSessionExpiry\(\)/g)).toHaveLength(1);
 		expect(source).toContain("isPreserveSelection: true");
 		expect(source).toContain("let isTargetSelectionInitialized = false");
 		expect(source).toMatch(/state === "access_lost"[\s\S]*handleCampaignAuthorizationError\(/);

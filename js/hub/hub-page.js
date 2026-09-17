@@ -61,6 +61,17 @@ function concealCampaignAuthorizationSurfaces () {
 	return true;
 }
 
+function showSignedOutAfterSessionExpiry () {
+	const signIn = document.getElementById("hub-sign-in");
+	if (signIn) {
+		const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+		signIn.href = `/auth/github/start?${new URLSearchParams({returnTo})}`;
+		signIn.hidden = false;
+	}
+	setHidden(document.getElementById("hub-signed-in"), true);
+	setHidden(document.getElementById("hub-signed-out"), false);
+}
+
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
  * campaign context or brew merely to persist it (ADR 0013). `isContextHost: false` selects the
@@ -1431,6 +1442,7 @@ async function pInitCampaign ({session}) {
 	let activityAuthorizationGeneration = 0;
 	let isActivityAuthorizationFenced = false;
 	let projectionAuthorizationGeneration = 0;
+	let projectionControlSelectionDraft = null;
 	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
 	let refreshTimer = null;
 	const invalidateActivityAuthorization = () => {
@@ -1458,6 +1470,7 @@ async function pInitCampaign ({session}) {
 		concealActivityAuthorization({isLoading});
 		liveRoster = [];
 		context = null;
+		projectionControlSelectionDraft = null;
 		concealCampaignAuthorizationSurfaces();
 	};
 	const concealProjectionFormControls = () => {
@@ -1473,6 +1486,12 @@ async function pInitCampaign ({session}) {
 		concealActivityAuthorization({isLoading: true});
 		liveRoster = [];
 		captureCampaignTransferDraft();
+		if (!projectionControlSelectionDraft) {
+			projectionControlSelectionDraft = {
+				actionTarget: document.getElementById("campaign-action-target")?.value || "",
+				xpTarget: document.getElementById("campaign-xp-target")?.value || "",
+			};
+		}
 		concealProjectionFormControls();
 		for (const id of [
 			"campaign-party-roster",
@@ -1521,6 +1540,7 @@ async function pInitCampaign ({session}) {
 		if (error.code === "AUTH_REQUIRED") {
 			concealCampaignAuthorization();
 			stopCampaignLiveUpdates();
+			showSignedOutAfterSessionExpiry();
 			renderError(error, {isAuthorizationHandled: true});
 			return true;
 		}
@@ -1705,9 +1725,19 @@ async function pInitCampaign ({session}) {
 			fillCharacterSelect(
 				actionTarget,
 				getTargetableProjections({projections: liveCharacters, roster: liveRoster}),
-				{isPreserveSelection: true},
+				{
+					isPreserveSelection: true,
+					selectionValue: projectionControlSelectionDraft?.actionTarget,
+				},
 			);
-			fillCharacterSelect(xpTarget, charactersNxt, {isPreserveSelection: true});
+			fillCharacterSelect(
+				xpTarget,
+				charactersNxt,
+				{
+					isPreserveSelection: true,
+					selectionValue: projectionControlSelectionDraft?.xpTarget,
+				},
+			);
 			if (!document.getElementById("campaign-action-form")?._hubProjectionControlStates) {
 				if (actionTarget) actionTarget.disabled = !actionTarget.options.length;
 				if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
@@ -1796,6 +1826,7 @@ async function pInitCampaign ({session}) {
 			});
 			refreshItemAwardControlState();
 			refreshActionFields({isRetryConditionCatalog: false});
+			projectionControlSelectionDraft = null;
 			isProjectionRefreshSuccessful = true;
 		} catch (error) {
 			if (!fnIsProjectionCurrent()) {
@@ -2242,10 +2273,13 @@ function fillCharacterSelect (
 		isPreserveSelection = false,
 		partyInventory = null,
 		ownerAccountId = null,
+		selectionValue = undefined,
 	} = {},
 ) {
 	if (!select) return;
-	const selectedValue = isPreserveSelection ? select.value : null;
+	const selectedValue = isPreserveSelection
+		? (selectionValue === undefined ? select.value : selectionValue)
+		: null;
 	select.replaceChildren();
 	for (const character of characters) {
 		// `characters` may be raw owner-scoped documents (the player's own list) or
