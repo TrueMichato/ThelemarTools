@@ -30,8 +30,12 @@ const mkEle = ({tag = "div", children = [], isVisible = true} = {}) => {
 		setAttribute (k, v) { this.attributes[k] = v; },
 		getAttribute (k) { return this.attributes[k] ?? null; },
 		addEventListener (name, fn) { (this.handlers[name] ||= []).push(fn); },
+		removeEventListener (name, fn) {
+			this.handlers[name] = (this.handlers[name] || []).filter(it => it !== fn);
+		},
 		dispatch (name, evt) { (this.handlers[name] || []).forEach(fn => fn(evt)); },
 		contains (other) { return other === this || this.children.includes(other); },
+		remove () { this.isConnected = false; },
 		querySelector (sel) {
 			if (/^h1, h2/.test(sel)) return this.children.find(c => /^h\d$/.test(c.tag)) || null;
 			return null;
@@ -338,6 +342,84 @@ describe("CharacterSheetModal", () => {
 			await CharacterSheetModal.closeCharacterScopeModals();
 
 			await expect(outer).resolves.toBe("cancelled");
+		});
+
+		it("synchronously tears down registered manual body portals and runs their cleanup hook", () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			const portalEl = mkEle();
+			let cleanupCount = 0;
+			const portal = CharacterSheetModal.registerCharacterScopePortal({
+				sheet: page,
+				element: portalEl,
+				cleanup: () => { cleanupCount++; },
+			});
+
+			page._currentCharacterId = "character-b";
+			page._characterLoadGeneration++;
+			CharacterSheetModal.closeCharacterScopeModals();
+
+			expect(portalEl.isConnected).toBe(false);
+			expect(cleanupCount).toBe(1);
+			expect(portal.isCurrent({isRequireOwner: true})).toBe(false);
+			expect(CharacterSheetModal._openCharacterScopePortals.size).toBe(0);
+		});
+
+		it("blocks retained manual-portal controls after character replacement", () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			const portalEl = mkEle();
+			CharacterSheetModal.registerCharacterScopePortal({sheet: page, element: portalEl});
+			page._currentCharacterAccess = "dm_readonly";
+			const evt = mkEvent(" ");
+
+			portalEl.dispatch("keydown", evt);
+
+			expect(evt.isDefaultPrevented).toBe(true);
+			expect(evt.isImmediatePropagationStopped).toBe(true);
+		});
+
+		it("permanently fences retained controls removed by a module reset hook", () => {
+			const portalEl = mkEle();
+			const evt = mkEvent("Enter");
+
+			CharacterSheetModal.fenceStaleCharacterScopeElement(portalEl);
+			portalEl.remove();
+			portalEl.dispatch("click", evt);
+
+			expect(evt.isDefaultPrevented).toBe(true);
+			expect(evt.isImmediatePropagationStopped).toBe(true);
+		});
+
+		it("keeps ordinary close idempotent without running teardown twice", () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			const portalEl = mkEle();
+			let cleanupCount = 0;
+			const portal = CharacterSheetModal.registerCharacterScopePortal({
+				sheet: page,
+				element: portalEl,
+				cleanup: () => { cleanupCount++; },
+			});
+
+			portal.close();
+			portal.close();
+			CharacterSheetModal.closeCharacterScopeModals();
+
+			expect(cleanupCount).toBe(1);
+			expect(CharacterSheetModal._openCharacterScopePortals.size).toBe(0);
 		});
 	});
 

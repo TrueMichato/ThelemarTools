@@ -54,6 +54,7 @@ class CharacterSheetMobile {
 		this._statusModels = null;
 		this._statusSyncQueued = false;
 		this._boundSyncStatus = null;
+		this._isCharacterScopeUiSuspended = false;
 
 		// Bound handlers for cleanup
 		this._boundOnResize = this._onResize.bind(this);
@@ -1007,6 +1008,24 @@ class CharacterSheetMobile {
 		this._elFabBackdrop?.classList.remove("charsheet-mobile--visible");
 	}
 
+	resetCharacterScopeUi () {
+		this._isCharacterScopeUiSuspended = true;
+		this._hideContextMenu();
+		this._elContextMenu?.querySelector?.(".charsheet-mobile__context-menu-items")?.replaceChildren();
+		this._closeFab();
+		this._closeTabSheet();
+		this._statusModels = {};
+		const row = this._elStatusStrip?.querySelector(".charsheet-mobile__status-row");
+		if (row) row.innerHTML = "";
+		this._elStatusStrip?.classList.add("charsheet-mobile__status--empty");
+		document.body.classList.remove("charsheet-mobile__has-status");
+	}
+
+	resumeCharacterScopeUi () {
+		this._isCharacterScopeUiSuspended = false;
+		this._syncStatusStrip();
+	}
+
 	_createFab () {
 		const el = document.createElement("div");
 		el.className = "charsheet-mobile__fab";
@@ -1623,6 +1642,12 @@ class CharacterSheetMobile {
 		if (!strip) return;
 		const row = strip.querySelector(".charsheet-mobile__status-row");
 		if (!row) return;
+		if (this._isCharacterScopeUiSuspended) {
+			row.innerHTML = "";
+			strip.classList.add("charsheet-mobile__status--empty");
+			document.body.classList.remove("charsheet-mobile__has-status");
+			return;
+		}
 
 		this._statusModels = {};
 		let rendered = 0;

@@ -613,6 +613,17 @@ class CharacterSheetDice3d {
 		});
 	}
 
+	/** Conceal and cancel a roll owned by the character scope being replaced. */
+	resetCharacterScopeUi () {
+		this._rollToken++;
+		if (this._activeSettle) {
+			const settle = this._activeSettle;
+			this._activeSettle = null;
+			settle();
+		}
+		this._hideOverlayImmediate();
+	}
+
 	/** Tear down all resources (e.g. on sheet teardown). Safe to call twice. */
 	destroy () {
 		if (this._activeSettle) {

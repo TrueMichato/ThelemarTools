@@ -89,6 +89,22 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 
 		const dmOwnedSheet = new CharacterSheetPage(dm.page);
 		await dmOwnedSheet.gotoCampaignCharacter({campaignId, characterId: dmCharacter.id});
+		await dm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._customAbilities._showAbilityModal(null);
+			const modal = document.querySelector(".custom-abilities__modal")!;
+			(modal.querySelector("[name=name]") as HTMLInputElement).value = "SECRET PRIVATE DRAFT";
+			(globalThis as any).__accessLossCustomAbilitySave = modal.querySelector(".custom-abilities__save-btn");
+			sheet._concealHubPrivateCharacter();
+		});
+		await expect(dm.page.locator(".custom-abilities__modal")).toHaveCount(0);
+		await expect(dm.page.locator("body")).not.toContainText("SECRET PRIVATE DRAFT");
+		await expect(dm.page.locator("main.charsheet-page")).toBeHidden();
+		expect(await dm.page.evaluate(() => {
+			(globalThis as any).__accessLossCustomAbilitySave?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+			return (globalThis as any).charSheet._state.getCustomAbilities().map((it: any) => it.name);
+		})).not.toContain("SECRET PRIVATE DRAFT");
+		await dmOwnedSheet.gotoCampaignCharacter({campaignId, characterId: dmCharacter.id});
 		await dm.page.evaluate(() => (globalThis as any).charSheet._showCustomModifiersModal());
 		await expect(dm.page.locator(".ve-ui-modal__overlay")).toBeVisible();
 		await dm.page.locator("#charsheet-btn-add-modifier").click();
@@ -114,6 +130,36 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 			(globalThis as any).__staleInputUiConfirm = [...overlays.at(-1)!.querySelectorAll("button")]
 				.find(button => button.textContent?.includes("Apply stale mutation"));
 		});
+		await dm.page.evaluate(async () => {
+			const sheet = (globalThis as any).charSheet;
+			sheet._customAbilities._showAbilityModal(null);
+			const customModal = document.querySelector(".custom-abilities__modal")!;
+			(customModal.querySelector("[name=name]") as HTMLInputElement).value = "SECRET REPLACEMENT DRAFT";
+			(globalThis as any).__replacementCustomAbilitySave = customModal.querySelector(".custom-abilities__save-btn");
+
+			const abilityId = sheet._state.addCustomAbility({
+				name: "Stale combat ability",
+				description: "Must remain owned by the character that opened this modal.",
+				mode: "active",
+				uses: {current: 1, max: 1, recharge: "short"},
+				effects: [],
+			});
+			sheet._combat._showAbilityModal(sheet._state.getCustomAbility(abilityId));
+			(globalThis as any).__replacementCombatUseCount = 0;
+			const useCustomAbility = sheet._combat._useCustomAbility.bind(sheet._combat);
+			sheet._combat._useCustomAbility = (...args: any[]) => {
+				(globalThis as any).__replacementCombatUseCount++;
+				return useCustomAbility(...args);
+			};
+			(globalThis as any).__replacementCombatUse = document.querySelector(".charsheet__ability-modal-use");
+
+			await sheet._quickBuild._showWizard();
+			(globalThis as any).__replacementQuickBuildNext = document.querySelector("#quickbuild-next");
+			(globalThis as any).__replacementQuickBuildStep = sheet._quickBuild._currentStep;
+		});
+		await expect(dm.page.locator(".custom-abilities__modal")).toBeVisible();
+		await expect(dm.page.locator(".charsheet__ability-detail-modal")).toBeVisible();
+		await expect(dm.page.locator(".charsheet__quickbuild-overlay")).toBeVisible();
 
 		let releaseProjectionRead!: () => void;
 		let markProjectionReadStarted!: () => void;
@@ -132,12 +178,20 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await dm.page.locator("#charsheet-sel-character").selectOption(character.id);
 		await projectionReadStarted;
 		await expect(dm.page.locator(".ve-ui-modal__overlay")).toHaveCount(0);
+		await expect(dm.page.locator(".custom-abilities__modal")).toHaveCount(0);
+		await expect(dm.page.locator("body")).not.toContainText("SECRET REPLACEMENT DRAFT");
+		await expect(dm.page.locator(".charsheet__ability-detail-modal")).toHaveCount(0);
+		await expect(dm.page.locator(".charsheet__quickbuild-overlay")).toHaveCount(0);
+		expect(await dm.page.evaluate(() => document.body.classList.contains("has-quickbuild-overlay"))).toBe(false);
 		releaseProjectionRead();
 		await expect(dmOwnedSheet.characterName).toHaveValue("Readonly Rowan", {timeout: 20_000});
 		await expect(dmOwnedSheet.characterName).toBeDisabled();
 		await dm.page.evaluate(() => {
 			(globalThis as any).__staleCustomModifierSave?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
 			(globalThis as any).__staleInputUiConfirm?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+			(globalThis as any).__replacementCustomAbilitySave?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+			(globalThis as any).__replacementCombatUse?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+			(globalThis as any).__replacementQuickBuildNext?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
 		});
 		await dm.page.evaluate(() => (globalThis as any).__staleInputUiPrompt);
 		expect(await dm.page.evaluate(() => (globalThis as any).__staleInputUiResult)).toBeNull();
@@ -145,6 +199,11 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 			.not.toContainEqual(expect.objectContaining({name: "Stale cross-character modifier"}));
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._state.getNamedModifiers()))
 			.not.toContainEqual(expect.objectContaining({name: "Stale InputUiUtil modifier"}));
+		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._state.getCustomAbilities().map((it: any) => it.name)))
+			.toEqual(expect.not.arrayContaining(["SECRET REPLACEMENT DRAFT", "Stale combat ability"]));
+		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._quickBuild._currentStep))
+			.toBe(await dm.page.evaluate(() => (globalThis as any).__replacementQuickBuildStep));
+		expect(await dm.page.evaluate(() => (globalThis as any).__replacementCombatUseCount)).toBe(0);
 		await dm.page.unroute(projectionRoute);
 
 		await dm.gotoCampaign(campaignId);

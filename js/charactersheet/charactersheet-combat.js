@@ -7953,6 +7953,8 @@ class CharacterSheetCombat {
 	 * Show a modal with ability details
 	 */
 	_showAbilityModal (ability) {
+		const characterScope = CharacterSheetModal.getCharacterScopeSnapshot(this._page);
+		if (!CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._page, characterScope, {isRequireOwner: true})) return;
 		const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id);
 		const categories = CharacterSheetState.CUSTOM_ABILITY_CATEGORIES || {};
 		const category = categories[ability.category];
@@ -8022,25 +8024,31 @@ class CharacterSheetCombat {
 			</div>
 		`});
 
+		document.body.append(modal);
+		const portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this._page,
+			scope: characterScope,
+			element: modal,
+		});
 		modal.querySelectorAll(".modal-close, .charsheet__ability-modal-close").forEach(el => {
-			el.addEventListener("click", () => {
-				modal.remove();
-			});
+			el.addEventListener("click", () => portal.close());
 		});
 
 		modal.querySelector(".charsheet__ability-modal-use").addEventListener("click", () => {
+			if (!portal.isCurrent({isRequireOwner: true})) {
+				portal.close();
+				return;
+			}
 			this._useCustomAbility(ability);
-			modal.remove();
+			portal.close();
 		});
 
 		// Close on background click
 		modal.addEventListener("click", (/** @type {*} */ e) => {
 			if (e.target.classList.contains("modal-overlay")) {
-				modal.remove();
+				portal.close();
 			}
 		});
-
-		document.body.append(modal);
 	}
 
 	/**

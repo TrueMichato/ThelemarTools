@@ -58,6 +58,8 @@ class CharacterSheetQuickBuild {
 
 		// Modal/overlay reference
 		this._overlay = null;
+		this._scopePortal = null;
+		this._wizardCharacterScope = null;
 		this._isActive = false;
 	}
 
@@ -70,6 +72,8 @@ class CharacterSheetQuickBuild {
 	 * Entry point from the header "Quick Build" button
 	 */
 	async showQuickBuild () {
+		const characterScope = CharacterSheetModal.getCharacterScopeSnapshot(this._page);
+		if (!CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._page, characterScope, {isRequireOwner: true})) return;
 		const totalLevel = this._state.getTotalLevel();
 		if (totalLevel >= 20) {
 			JqueryUtil.doToast({type: "warning", content: "Character is already at maximum level (20)."});
@@ -94,6 +98,7 @@ class CharacterSheetQuickBuild {
 		}));
 
 		this._resetSelections();
+		if (!CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._page, characterScope, {isRequireOwner: true})) return;
 		await this._showWizard();
 	}
 
@@ -106,6 +111,8 @@ class CharacterSheetQuickBuild {
 	 * @param {?Object|string} [opts.subclassChoice] - Preselected subclass choice from Builder
 	 */
 	async showFromBuilder ({classData, targetLevel, subclass = null, subclassChoice = null}) {
+		const characterScope = CharacterSheetModal.getCharacterScopeSnapshot(this._page);
+		if (!CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._page, characterScope, {isRequireOwner: true})) return;
 		const classKey = `${classData.name}_${classData.source}`;
 		const existingClass = this._state.getClasses().find(c => c.name === classData.name && c.source === classData.source);
 		let normalizedSubclassChoice = CharacterSheetClassUtils.normalizeSubclassChoice(subclassChoice)
@@ -122,6 +129,7 @@ class CharacterSheetQuickBuild {
 				zIndex: 10002,
 				htmlDescription: `<div>${prompt?.description || "Choose your subclass path."}</div>`,
 			});
+			if (!CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._page, characterScope, {isRequireOwner: true})) return;
 			// A cancelled handoff must not leave a preselected subclass whose required
 			// nested choice can no longer be opened from the Quick Build subclass step.
 			if (!normalizedSubclassChoice) resolvedSubclass = null;
@@ -822,6 +830,10 @@ class CharacterSheetQuickBuild {
 	// ==========================================
 
 	async _showWizard () {
+		this._scopePortal?.close();
+		const characterScope = CharacterSheetModal.getCharacterScopeSnapshot(this._page);
+		if (!CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._page, characterScope, {isRequireOwner: true})) return;
+		this._wizardCharacterScope = characterScope;
 		this._isActive = true;
 
 		// Build initial steps (just target step; rest built after analysis)
@@ -858,6 +870,7 @@ class CharacterSheetQuickBuild {
 
 		document.body.append(this._overlay);
 		document.body.classList.add("has-quickbuild-overlay");
+		const overlay = this._overlay;
 
 		// Wire events
 		this._overlay.querySelector(".charsheet__quickbuild-close").addEventListener("click", () => this._closeWizard());
@@ -867,6 +880,23 @@ class CharacterSheetQuickBuild {
 		// Escape key closes the wizard
 		this._escapeHandler = (e) => { if (e.key === "Escape") this._closeWizard(); };
 		document.addEventListener("keydown", this._escapeHandler);
+		const escapeHandler = this._escapeHandler;
+		let portal = null;
+		portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this._page,
+			scope: characterScope,
+			element: overlay,
+			cleanup: () => {
+				document.removeEventListener("keydown", escapeHandler);
+				if (this._scopePortal !== portal) return;
+				this._scopePortal = null;
+				this._escapeHandler = null;
+				this._overlay = null;
+				this._isActive = false;
+				document.body.classList.remove("has-quickbuild-overlay");
+			},
+		});
+		this._scopePortal = portal;
 
 		// Render initial step
 		this._renderStepIndicators();
@@ -874,6 +904,8 @@ class CharacterSheetQuickBuild {
 	}
 
 	async _closeWizard ({force = false} = {}) {
+		const portal = this._scopePortal;
+		if (!portal) return;
 		if (!force && this._currentStep > 0) {
 			const confirm = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Close Quick Build?",
@@ -883,17 +915,9 @@ class CharacterSheetQuickBuild {
 				zIndex: 10000,
 			}));
 			if (!confirm) return;
+			if (!portal.isCurrent({isRequireOwner: true})) return;
 		}
-		if (this._escapeHandler) {
-			document.removeEventListener("keydown", this._escapeHandler);
-			this._escapeHandler = null;
-		}
-		if (this._overlay) {
-			this._overlay.remove();
-			this._overlay = null;
-		}
-		document.body.classList.remove("has-quickbuild-overlay");
-		this._isActive = false;
+		portal.close();
 	}
 
 	_renderStepIndicators () {
@@ -1006,6 +1030,11 @@ class CharacterSheetQuickBuild {
 
 	async _nextStep () {
 		if (this._isApplying) return;
+		if (this._wizardCharacterScope && !CharacterSheetModal.isCharacterScopeSnapshotCurrent(
+			this._page,
+			this._wizardCharacterScope,
+			{isRequireOwner: true},
+		)) return;
 		const currentStep = this._steps[this._currentStep];
 		if (currentStep?.validate && !currentStep.validate()) return;
 
@@ -1035,7 +1064,8 @@ class CharacterSheetQuickBuild {
 			const nextBtn = this._overlay?.querySelector("#quickbuild-next");
 			if (nextBtn) nextBtn.disabled = true;
 			try {
-				await this._applyQuickBuild();
+				const didApply = await this._applyQuickBuild();
+				if (didApply === false) return;
 			} finally {
 				if (nextBtn) nextBtn.disabled = false;
 			}
@@ -4794,16 +4824,29 @@ class CharacterSheetQuickBuild {
 		// apply pass twice. The ASI/feat base-score writes are now idempotent on their own,
 		// but a concurrent second pass could still race racial-choice/spell prompts and leave
 		// orphaned modals (CS-BUG #10/#12). Hold a synchronous lock around the whole apply.
-		if (this._isApplying) return;
+		if (this._isApplying) return false;
+		const characterScope = this._scopePortal?.scope
+			|| this._wizardCharacterScope
+			|| CharacterSheetModal.getCharacterScopeSnapshot(this._page);
+		const isOwnerScopeCurrent = this._scopePortal
+			? this._scopePortal.isCurrent({isRequireOwner: true})
+			: CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._page, characterScope, {isRequireOwner: true});
+		if (!isOwnerScopeCurrent) return false;
 		this._isApplying = true;
 		try {
-			await this._applyQuickBuildInner();
+			return await this._applyQuickBuildInner(characterScope);
 		} finally {
 			this._isApplying = false;
 		}
 	}
 
-	async _applyQuickBuildInner () {
+	async _applyQuickBuildInner (characterScope) {
+		const isOwnerScopeCurrent = () => CharacterSheetModal.isCharacterScopeSnapshotCurrent(
+			this._page,
+			characterScope,
+			{isRequireOwner: true},
+		);
+		if (!isOwnerScopeCurrent()) return false;
 		const conMod = this._state.getAbilityMod("con");
 		const pendingHistoryEntries = [];
 
@@ -5179,11 +5222,13 @@ class CharacterSheetQuickBuild {
 		// Process any pending spell choices from feats or features that grant selectable spells
 		if (this._page._spells?.processPendingSpellChoices) {
 			await this._page._spells.processPendingSpellChoices();
+			if (!isOwnerScopeCurrent()) return false;
 		}
 
 		// Resolve prose "either A or B" feature choices (e.g. Arcane Archer Lore)
 		if (this._page.processPendingFeatureChoices) {
 			await this._page.processPendingFeatureChoices();
+			if (!isOwnerScopeCurrent()) return false;
 		}
 
 		// Final recalculations
@@ -5193,7 +5238,9 @@ class CharacterSheetQuickBuild {
 		this._state.recalculateAllCompanions();
 
 		// Save and re-render
+		if (!isOwnerScopeCurrent()) return false;
 		await this._page.saveCharacter();
+		if (!isOwnerScopeCurrent()) return false;
 		this._page.renderCharacter();
 		this._page._updateTabVisibility();
 

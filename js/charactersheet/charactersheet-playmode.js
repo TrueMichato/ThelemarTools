@@ -8,6 +8,7 @@
  */
 
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
+import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
@@ -204,6 +205,8 @@ export class CharacterSheetPlayMode {
 		this._elActionsHub = null;
 		this._elDrawerBackdrop = null;
 		this._elDrawer = null;
+		this._contextMenuPortal = null;
+		this._characterScopeDocumentCleanups = new Set();
 	}
 
 	// ─── Lifecycle ──────────────────────────────────────────────
@@ -3457,8 +3460,10 @@ export class CharacterSheetPlayMode {
 		cancelBtn.addEventListener("click", () => overlay.remove());
 
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-		document.addEventListener("keydown", function onEsc (e) {
-			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
+		const removeEsc = this._addCharacterScopeDocumentListener(document, "keydown", e => {
+			if (e.key !== "Escape") return;
+			overlay.remove();
+			removeEsc();
 		});
 
 		document.body.appendChild(overlay);
@@ -3920,8 +3925,10 @@ export class CharacterSheetPlayMode {
 		closeBtn.addEventListener("click", () => overlay.remove());
 
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-		document.addEventListener("keydown", function esc (e) {
-			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		const removeEsc = this._addCharacterScopeDocumentListener(document, "keydown", e => {
+			if (e.key !== "Escape") return;
+			overlay.remove();
+			removeEsc();
 		});
 		document.body.appendChild(overlay);
 	}
@@ -4092,8 +4099,10 @@ export class CharacterSheetPlayMode {
 		closeBtn.addEventListener("click", () => overlay.remove());
 
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-		document.addEventListener("keydown", function esc (e) {
-			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		const removeEsc = this._addCharacterScopeDocumentListener(document, "keydown", e => {
+			if (e.key !== "Escape") return;
+			overlay.remove();
+			removeEsc();
 		});
 		document.body.appendChild(overlay);
 	}
@@ -4314,8 +4323,10 @@ export class CharacterSheetPlayMode {
 		closeBtn.addEventListener("click", () => overlay.remove());
 
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-		document.addEventListener("keydown", function esc (e) {
-			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		const removeEsc = this._addCharacterScopeDocumentListener(document, "keydown", e => {
+			if (e.key !== "Escape") return;
+			overlay.remove();
+			removeEsc();
 		});
 		document.body.appendChild(overlay);
 	}
@@ -4704,7 +4715,7 @@ export class CharacterSheetPlayMode {
 	/** E2: Show a positioned context menu. items: [{label, icon, onClick, disabled, danger, separator}] */
 	_showContextMenu (e, items, {isReadOnlyAllowed = false} = {}) {
 		if (this._isReadOnly() && !isReadOnlyAllowed) return false;
-		document.querySelectorAll(".pm-context-menu").forEach(m => m.remove());
+		this._contextMenuPortal?.close();
 
 		const menu = this._ce("div", "pm-context-menu");
 		if (isReadOnlyAllowed) menu.dataset.charsheetReadonlyAllowed = "true";
@@ -4722,7 +4733,11 @@ export class CharacterSheetPlayMode {
 			if (item.disabled) {
 				el.disabled = true;
 			} else {
-				el.addEventListener("click", () => { menu.remove(); item.onClick(); });
+				el.addEventListener("click", () => {
+					if (!isReadOnlyAllowed && !portal.isCurrent({isRequireOwner: true})) return;
+					portal.close();
+					item.onClick();
+				});
 			}
 		});
 
@@ -4730,6 +4745,20 @@ export class CharacterSheetPlayMode {
 		menu.style.left = "-9999px";
 		menu.style.top = "-9999px";
 		document.body.appendChild(menu);
+		let closeTimer = null;
+		let portal = null;
+		portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this._page,
+			element: menu,
+			isRequireOwner: !isReadOnlyAllowed,
+			cleanup: () => {
+				if (closeTimer != null) clearTimeout(closeTimer);
+				document.removeEventListener("click", onClose);
+				document.removeEventListener("keydown", onEsc);
+				if (this._contextMenuPortal === portal) this._contextMenuPortal = null;
+			},
+		});
+		this._contextMenuPortal = portal;
 		const menuW = menu.offsetWidth;
 		const menuH = menu.offsetHeight;
 		const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
@@ -4739,19 +4768,15 @@ export class CharacterSheetPlayMode {
 
 		const onClose = (ev) => {
 			if (!menu.contains(ev.target)) {
-				menu.remove();
-				document.removeEventListener("click", onClose);
-				document.removeEventListener("keydown", onEsc);
+				portal.close();
 			}
 		};
 		const onEsc = (ev) => {
 			if (ev.key === "Escape") {
-				menu.remove();
-				document.removeEventListener("click", onClose);
-				document.removeEventListener("keydown", onEsc);
+				portal.close();
 			}
 		};
-		setTimeout(() => {
+		closeTimer = setTimeout(() => {
 			document.addEventListener("click", onClose);
 			document.addEventListener("keydown", onEsc);
 		}, 0);
@@ -4793,10 +4818,28 @@ export class CharacterSheetPlayMode {
 		this._activeStickyDrag = null;
 	}
 
+	_addCharacterScopeDocumentListener (target, type, handler) {
+		const cleanup = () => {
+			target.removeEventListener(type, handler);
+			this._characterScopeDocumentCleanups?.delete(cleanup);
+		};
+		target.addEventListener(type, handler);
+		(this._characterScopeDocumentCleanups ||= new Set()).add(cleanup);
+		return cleanup;
+	}
+
 	resetCharacterScopeUi () {
 		this._cancelActiveStickyDrag();
-		document.getElementById("pm-sticky-overlay")?.remove();
-		for (const overlay of document.querySelectorAll(".pm-modal-overlay")) overlay.remove();
+		this._contextMenuPortal?.close();
+		for (const cleanup of [...(this._characterScopeDocumentCleanups || [])]) cleanup();
+		const staleElements = [
+			document.getElementById("pm-sticky-overlay"),
+			...document.querySelectorAll(".pm-modal-overlay"),
+		].filter(Boolean);
+		for (const element of staleElements) {
+			CharacterSheetModal.fenceStaleCharacterScopeElement(element);
+			element.remove();
+		}
 	}
 
 	/**
@@ -5187,7 +5230,7 @@ export class CharacterSheetPlayMode {
 			el.style.zIndex = "9999";
 			e.preventDefault();
 		});
-		document.addEventListener("mousemove", (e) => {
+		this._addCharacterScopeDocumentListener(document, "mousemove", (e) => {
 			const activeDrag = this._activeStickyDrag;
 			if (!activeDrag || activeDrag.el !== el) return;
 			if (!this._isOwnerCharacterScopeCurrent(activeDrag.characterScope)) {
@@ -5200,7 +5243,7 @@ export class CharacterSheetPlayMode {
 			el.style.left = `${x}px`;
 			el.style.top = `${y}px`;
 		});
-		document.addEventListener("mouseup", () => {
+		this._addCharacterScopeDocumentListener(document, "mouseup", () => {
 			const activeDrag = this._activeStickyDrag;
 			if (!activeDrag || activeDrag.el !== el) return;
 			if (!this._isOwnerCharacterScopeCurrent(activeDrag.characterScope)) {

@@ -3,10 +3,13 @@
  * Unified system for custom features, homebrew abilities, house rules, boons, curses, etc.
  * Uses the same effect system as custom modifiers for consistency.
  */
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+
 class CharacterSheetCustomAbilities {
 	constructor (sheet) {
 		this._sheet = sheet;
 		this._boundAddHandler = null;
+		this._abilityEditorPortal = null;
 	}
 
 	/**
@@ -1252,6 +1255,9 @@ class CharacterSheetCustomAbilities {
 	 * Show the ability create/edit modal
 	 */
 	_showAbilityModal (abilityId) {
+		this._abilityEditorPortal?.close();
+		const characterScope = CharacterSheetModal.getCharacterScopeSnapshot(this._sheet);
+		if (!CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._sheet, characterScope, {isRequireOwner: true})) return;
 		const state = this._sheet.getState();
 		const existingAbility = abilityId ? state.getCustomAbility(abilityId) : null;
 		const isEditing = !!existingAbility;
@@ -1968,6 +1974,16 @@ class CharacterSheetCustomAbilities {
 		`;
 
 		document.body.appendChild(modal);
+		let portal = null;
+		portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this._sheet,
+			scope: characterScope,
+			element: modal,
+			cleanup: () => {
+				if (this._abilityEditorPortal === portal) this._abilityEditorPortal = null;
+			},
+		});
+		this._abilityEditorPortal = portal;
 
 		// State
 		let grants = existingAbility?.grants ? JSON.parse(JSON.stringify(existingAbility.grants)) : {
@@ -2733,7 +2749,7 @@ class CharacterSheetCustomAbilities {
 		});
 
 		// Close handlers
-		const closeModal = () => modal.remove();
+		const closeModal = () => portal.close();
 		(/** @type {*} */ (modal.querySelector(".modal-close"))).addEventListener("click", closeModal);
 		(/** @type {*} */ (modal.querySelector(".custom-abilities__cancel-btn"))).addEventListener("click", closeModal);
 		modal.addEventListener("click", (/** @type {*} */ e) => {
@@ -2757,6 +2773,10 @@ class CharacterSheetCustomAbilities {
 
 			if (!data.name?.trim()) {
 				alert("Please enter a name for the ability.");
+				return;
+			}
+			if (!portal.isCurrent({isRequireOwner: true})) {
+				closeModal();
 				return;
 			}
 

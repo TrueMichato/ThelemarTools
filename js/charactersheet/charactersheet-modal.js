@@ -40,6 +40,15 @@ class CharacterSheetModal {
 	static _uid = 0;
 	static _characterSheet = null;
 	static _openModalMetas = new Set();
+	static _openCharacterScopePortals = new Set();
+	static _staleCharacterScopeElements = new WeakSet();
+	static _GUARDED_PORTAL_EVENTS = [
+		"click", "input", "change", "submit",
+		"keydown", "keyup",
+		"mousedown", "mouseup",
+		"pointerdown", "pointerup",
+		"touchstart", "touchend",
+	];
 
 	/** Elements that can hold focus, in document order. Excludes anything hidden or disabled. */
 	static _FOCUSABLE_SELECTOR = [
@@ -212,8 +221,7 @@ class CharacterSheetModal {
 		};
 	}
 
-	static _getCharacterScopeSnapshot () {
-		const sheet = CharacterSheetModal._characterSheet;
+	static _getCharacterScopeSnapshot (sheet = CharacterSheetModal._characterSheet) {
 		if (!sheet) return null;
 		if (typeof sheet._getCharacterScopeSnapshot === "function") return sheet._getCharacterScopeSnapshot();
 		return {
@@ -223,19 +231,105 @@ class CharacterSheetModal {
 		};
 	}
 
-	static _isCharacterScopeSnapshotCurrent (snapshot) {
+	static _isCharacterScopeSnapshotCurrent (snapshot, {
+		sheet = CharacterSheetModal._characterSheet,
+		isRequireOwner = false,
+	} = {}) {
 		if (!snapshot) return true;
-		const sheet = CharacterSheetModal._characterSheet;
 		if (!sheet) return false;
 		if (typeof sheet._isCharacterScopeSnapshotCurrent === "function") {
-			return sheet._isCharacterScopeSnapshotCurrent(snapshot);
+			return sheet._isCharacterScopeSnapshotCurrent(snapshot, {isRequireOwner});
 		}
-		return snapshot.characterId === (sheet._currentCharacterId ?? null)
+		const isCurrent = snapshot.characterId === (sheet._currentCharacterId ?? null)
 			&& snapshot.loadGeneration === (sheet._characterLoadGeneration ?? 0)
 			&& snapshot.accessMode === (sheet._currentCharacterAccess ?? null);
+		return isCurrent && (!isRequireOwner || snapshot.accessMode == null || snapshot.accessMode === "owner");
+	}
+
+	static getCharacterScopeSnapshot (sheet = CharacterSheetModal._characterSheet) {
+		return CharacterSheetModal._getCharacterScopeSnapshot(sheet);
+	}
+
+	static isCharacterScopeSnapshotCurrent (sheet, snapshot, {isRequireOwner = false} = {}) {
+		return CharacterSheetModal._isCharacterScopeSnapshotCurrent(snapshot, {sheet, isRequireOwner});
+	}
+
+	static registerCharacterScopePortal ({
+		sheet = CharacterSheetModal._characterSheet,
+		element,
+		scope = null,
+		cleanup = null,
+		isRequireOwner = true,
+	} = {}) {
+		if (!element) throw new Error("Character-scoped portal registration requires an element.");
+		const characterScope = scope || CharacterSheetModal._getCharacterScopeSnapshot(sheet);
+		const portalMeta = {
+			sheet,
+			characterScope,
+			element,
+			cleanup,
+			isRequireOwner,
+			isClosed: false,
+			isCharacterScopeTeardown: false,
+			onGuardedEvent: null,
+		};
+		portalMeta.onGuardedEvent = evt => {
+			const isCurrentOwner = !portalMeta.isCharacterScopeTeardown
+				&& CharacterSheetModal._isCharacterScopeSnapshotCurrent(
+					portalMeta.characterScope,
+					{sheet: portalMeta.sheet, isRequireOwner: portalMeta.isRequireOwner},
+				);
+			if (isCurrentOwner) return;
+			evt?.preventDefault?.();
+			evt?.stopPropagation?.();
+			evt?.stopImmediatePropagation?.();
+		};
+		for (const eventName of CharacterSheetModal._GUARDED_PORTAL_EVENTS) {
+			element.addEventListener?.(eventName, portalMeta.onGuardedEvent, true);
+		}
+		CharacterSheetModal._openCharacterScopePortals.add(portalMeta);
+
+		return {
+			scope: characterScope,
+			isCurrent: ({isRequireOwner = false} = {}) => !portalMeta.isClosed
+				&& CharacterSheetModal._isCharacterScopeSnapshotCurrent(
+					portalMeta.characterScope,
+					{sheet: portalMeta.sheet, isRequireOwner},
+				),
+			close: () => CharacterSheetModal._closeCharacterScopePortal(portalMeta),
+		};
+	}
+
+	static _closeCharacterScopePortal (portalMeta, {isCharacterScopeTeardown = false} = {}) {
+		if (!portalMeta || portalMeta.isClosed) return;
+		portalMeta.isClosed = true;
+		portalMeta.isCharacterScopeTeardown = isCharacterScopeTeardown;
+		CharacterSheetModal._openCharacterScopePortals.delete(portalMeta);
+		portalMeta.element?.remove?.();
+		portalMeta.cleanup?.({isCharacterScopeTeardown});
+		if (isCharacterScopeTeardown) return;
+		for (const eventName of CharacterSheetModal._GUARDED_PORTAL_EVENTS) {
+			portalMeta.element?.removeEventListener?.(eventName, portalMeta.onGuardedEvent, true);
+		}
+	}
+
+	static fenceStaleCharacterScopeElement (element) {
+		if (!element || CharacterSheetModal._staleCharacterScopeElements.has(element)) return;
+		CharacterSheetModal._staleCharacterScopeElements.add(element);
+		const blockInteraction = evt => {
+			evt?.preventDefault?.();
+			evt?.stopPropagation?.();
+			evt?.stopImmediatePropagation?.();
+		};
+		for (const eventName of CharacterSheetModal._GUARDED_PORTAL_EVENTS) {
+			element.addEventListener?.(eventName, blockInteraction, true);
+		}
 	}
 
 	static async closeCharacterScopeModals () {
+		for (const portalMeta of [...CharacterSheetModal._openCharacterScopePortals]) {
+			CharacterSheetModal._closeCharacterScopePortal(portalMeta, {isCharacterScopeTeardown: true});
+		}
 		await Promise.all([...CharacterSheetModal._openModalMetas]
 			.map(modalMeta => CharacterSheetModal._pCloseModalMetaForCharacterScope(modalMeta)));
 	}
@@ -264,6 +358,8 @@ class CharacterSheetModal {
 	static _resetForTests () {
 		CharacterSheetModal._characterSheet = null;
 		CharacterSheetModal._openModalMetas.clear();
+		CharacterSheetModal._openCharacterScopePortals.clear();
+		CharacterSheetModal._staleCharacterScopeElements = new WeakSet();
 	}
 
 	/**

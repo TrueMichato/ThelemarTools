@@ -308,9 +308,15 @@ class CharacterSheetPage {
 	}
 
 	_closeCharacterScopedTransientUi () {
+		const closePromise = CharacterSheetModal.closeCharacterScopeModals();
 		this._notes?.cancelActiveDrag?.();
 		this._playMode?.resetCharacterScopeUi?.();
-		void CharacterSheetModal.closeCharacterScopeModals().catch(error => {
+		this._spells?._closeCastOptionsMenu?.();
+		this._rollHistory?.resetCharacterScopeUi?.();
+		this._dice3d?.resetCharacterScopeUi?.();
+		this._builder?.resetCharacterScopeUi?.();
+		globalThis._charsheetMobile?.resetCharacterScopeUi?.();
+		void closePromise.catch(error => {
 			// eslint-disable-next-line no-console
 			console.error("Could not close character-scoped modal state:", error);
 		});
@@ -5632,6 +5638,7 @@ class CharacterSheetPage {
 		}
 		if (isReadOnly) {
 			this._spells?._closeCastOptionsMenu?.();
+			this._activeAbilityMenuPortal?.close();
 			globalThis._charsheetMobile?._cancelLongPress?.();
 			globalThis._charsheetMobile?._hideContextMenu?.();
 			globalThis.ContextUtil?.closeAllMenus?.();
@@ -5642,6 +5649,7 @@ class CharacterSheetPage {
 		}
 		if (isReadOnly) this._updateSaveIndicator("readonly");
 		else if (wasReadOnly) this._updateSaveIndicator("saved");
+		globalThis._charsheetMobile?.resumeCharacterScopeUi?.();
 	}
 
 	_renderBasicInfo () {
@@ -18525,12 +18533,12 @@ class CharacterSheetPage {
 		event.preventDefault();
 		event.stopPropagation();
 		if (this.isCurrentCharacterReadOnly()) {
-			document.querySelector(".charsheet__ability-menu")?.remove();
+			this._activeAbilityMenuPortal?.close();
 			return;
 		}
 
 		// Remove any existing menu
-		document.querySelector(".charsheet__ability-menu")?.remove();
+		this._activeAbilityMenuPortal?.close();
 
 		const abilities = ["str", "dex", "con", "int", "wis", "cha"];
 		const abilityNames = {
@@ -18543,6 +18551,7 @@ class CharacterSheetPage {
 		};
 
 		const menu = e_({outer: `<div class="charsheet__ability-menu"></div>`});
+		let portal = null;
 
 		abilities.forEach(ability => {
 			const isDefault = ability === defaultAbility;
@@ -18556,8 +18565,11 @@ class CharacterSheetPage {
 				</div>
 			`});
 			optionEl.addEventListener("click", (e) => {
-				menu.remove();
-				if (this.isCurrentCharacterReadOnly()) return;
+				if (!portal.isCurrent({isRequireOwner: true})) {
+					portal.close();
+					return;
+				}
+				portal.close();
 				this._rollSkillCheck(skillKey, skillName, e, ability);
 			});
 			this._bindActivate(optionEl, {label: `Roll ${skillName} using ${abilityNames[ability]}`});
@@ -18575,13 +18587,24 @@ class CharacterSheetPage {
 		document.body.append(menu);
 
 		// Close menu when clicking elsewhere
+		let closeTimer = null;
 		const closeMenu = (e) => {
 			if (!(/** @type {*} */ (e.target)).closest(".charsheet__ability-menu")) {
-				menu.remove();
-				document.removeEventListener("click", closeMenu);
+				portal.close();
 			}
 		};
-		setTimeout(() => document.addEventListener("click", closeMenu), 10);
+		portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this,
+			element: menu,
+			cleanup: () => {
+				if (closeTimer != null) clearTimeout(closeTimer);
+				document.removeEventListener("click", closeMenu);
+				if (this._activeAbilityMenuPortal === portal) this._activeAbilityMenuPortal = null;
+			},
+			isRequireOwner: false,
+		});
+		this._activeAbilityMenuPortal = portal;
+		closeTimer = setTimeout(() => document.addEventListener("click", closeMenu), 10);
 	}
 
 	async _rollInitiative (event) {
@@ -19247,6 +19270,10 @@ class CharacterSheetPage {
 		`});
 
 		document.body.append(overlay);
+		const portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this,
+			element: overlay,
+		});
 
 		// Animate random values
 		const dice = overlay.querySelector(".charsheet__dice");
@@ -19309,7 +19336,7 @@ class CharacterSheetPage {
 					setTimeout(() => {
 						overlay.style.transition = "opacity 150ms";
 						overlay.style.opacity = "0";
-						setTimeout(() => { overlay.remove(); resolve(); }, 150);
+						setTimeout(() => { portal.close(); resolve(); }, 150);
 					}, displayTime);
 				}
 			};
@@ -19323,7 +19350,7 @@ class CharacterSheetPage {
 		this._rollHistory?.addRoll({title, total, breakdown, resultClass, resultNote});
 
 		// Remove existing result
-		document.querySelector(".charsheet__dice-result")?.remove();
+		this._dismissDiceResult(document.querySelector(".charsheet__dice-result"));
 
 		const totalClass = resultClass ? ` ${resultClass}` : "";
 		const noteHtml = resultNote ? `<div class="charsheet__dice-result-note">${resultNote}</div>` : "";
@@ -19340,6 +19367,14 @@ class CharacterSheetPage {
 
 		resultEl.querySelector(".charsheet__dice-result-close").addEventListener("click", () => this._dismissDiceResult(resultEl));
 		document.body.append(resultEl);
+		resultEl.__characterScopePortal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this,
+			element: resultEl,
+			cleanup: () => {
+				this._clearDiceResultDismiss(resultEl);
+				if (this._lastDiceResultEl === resultEl) this._lastDiceResultEl = null;
+			},
+		});
 		this._lastDiceResultEl = resultEl;
 
 		this._scheduleDiceResultDismiss(resultEl, duration);
@@ -19357,7 +19392,7 @@ class CharacterSheetPage {
 		if (!el) return;
 		this._clearDiceResultDismiss(el);
 		el.__dismissTimer = setTimeout(() => {
-			el.__dismissTimer = setTimeout(() => el.remove(), 300);
+			el.__dismissTimer = setTimeout(() => this._dismissDiceResult(el), 300);
 		}, duration);
 	}
 
@@ -19369,7 +19404,8 @@ class CharacterSheetPage {
 	/** (R26 #8) Immediately dismiss a dice-result toast (clearing its timer first). */
 	_dismissDiceResult (el) {
 		this._clearDiceResultDismiss(el);
-		el?.remove();
+		el?.__characterScopePortal?.close?.();
+		if (!el?.__characterScopePortal) el?.remove();
 	}
 	// #endregion
 

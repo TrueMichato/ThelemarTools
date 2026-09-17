@@ -473,16 +473,19 @@ Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the r
 4. **`.cs-modal` is not `.cs-adaptive-panel`.** `container-type: inline-size` implies inline-size
    containment, and most sheet modals size to their content, so containerising the shell collapses
    it to zero width. A content root **inside** an `isWidth100` modal may opt in individually.
-5. **Body-portaled dialogs are character-scoped transient UI.** `CharacterSheetPage` closes them
-   immediately when character ID, load generation, or access changes. The wrapper removes the
-   overlay before awaiting UiUtil teardown and capture-blocks retained controls whose origin scope
-   is stale. Its wrapped `pGetResolved` converts a completion into cancellation when the origin scope
-   changed while a generic `InputUiUtil` prompt was open. Mutating handlers still final-check current
-   owner authority before changing state.
+5. **Every body portal is character-scoped transient UI.** Prefer the UiUtil wrappers. A manually
+   rendered overlay or menu must call `CharacterSheetModal.registerCharacterScopePortal` with its
+   root element and a synchronous cleanup callback for document/window listeners, body classes, and
+   module references. Persistent body-mounted infrastructure must instead expose
+   `resetCharacterScopeUi()` and be called from `CharacterSheetPage._closeCharacterScopedTransientUi`.
+   Scope teardown removes portal DOM synchronously and capture-blocks retained controls; async
+   continuations and mutating handlers must also final-check the captured character ID, load
+   generation, and owner authority after every await and immediately before changing state.
+   Wrapped `pGetResolved` completions become cancellation when their originating scope changed.
 
 `CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard,
-ordinary `cbClose` composition, synchronous modal tracking, generic input cancellation, late modal
-creation, stale callback suppression, and retained control fencing.
+ordinary `cbClose` composition, synchronous modal/portal tracking, generic input cancellation, late
+modal creation, cleanup, stale callback suppression, and retained control fencing.
 
 ### Data Validation Patterns
 

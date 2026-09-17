@@ -76,6 +76,88 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 		CharacterSheetClassUtils.updateRacialSpells = originalUpdateRacialSpells;
 	});
 
+	test("does not continue saving or rendering after its originating character is replaced", async () => {
+		const originalUpdateRacialSpells = CharacterSheetClassUtils.updateRacialSpells;
+		CharacterSheetClassUtils.updateRacialSpells = jest.fn();
+		let resolveSpellChoices;
+		const spellChoices = new Promise(resolve => resolveSpellChoices = resolve);
+		const state = {
+			getAbilityMod: jest.fn(() => 2),
+			setWeaponMasteries: jest.fn(),
+			mergeCombatTraditions: jest.fn(),
+			getCombatTraditions: jest.fn(() => []),
+			getWeaponMasteries: jest.fn(() => []),
+			recordLevelChoice: jest.fn(),
+			updateLevelChoice: jest.fn(() => true),
+			addSpell: jest.fn(),
+			addCantrip: jest.fn(),
+			setSpellMasterySpells: jest.fn(),
+			setSignatureSpells: jest.fn(),
+			ensureXpMatchesLevel: jest.fn(),
+			applyClassFeatureEffects: jest.fn(),
+			calculateSpellSlots: jest.fn(),
+			recalculateAllCompanions: jest.fn(),
+			recalculateHp: jest.fn(),
+			setClassFeatureCatalog: jest.fn(),
+			reconcileSubclassFeatureEntries: jest.fn(),
+			getFeatures: jest.fn(() => []),
+		};
+		const page = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: "owner",
+			_spells: {processPendingSpellChoices: jest.fn(() => spellChoices)},
+			getFilteredSpellData: jest.fn(() => []),
+			getOptionalFeatures: jest.fn(() => []),
+			saveCharacter: jest.fn(async () => {}),
+			renderCharacter: jest.fn(),
+			_updateTabVisibility: jest.fn(),
+		};
+		const qb = Object.create(CharacterSheetQuickBuild.prototype);
+		Object.assign(qb, {
+			_state: state,
+			_page: page,
+			_levelAnalysis: [],
+			_classAllocations: [],
+			_targetLevel: 1,
+			_fromLevel: 1,
+			_selections: {
+				subclasses: {},
+				asi: {},
+				optionalFeatures: {},
+				featureOptions: {},
+				expertise: {},
+				languages: {},
+				scholarSkill: null,
+				spellbookSpells: [],
+				spellMasterySpells: [],
+				signatureSpells: [],
+				knownSpells: [],
+				knownCantrips: [],
+				preparedSpells: [],
+				preparedCantrips: [],
+				hpMethod: "average",
+				hpRolls: {},
+				weaponMasteries: [],
+				_combatTraditions: [],
+			},
+		});
+		globalThis.JqueryUtil = {doToast: jest.fn()};
+
+		const pending = qb._applyQuickBuild();
+		await Promise.resolve();
+		expect(page._spells.processPendingSpellChoices).toHaveBeenCalledTimes(1);
+		page._currentCharacterId = "character-b";
+		page._characterLoadGeneration++;
+		resolveSpellChoices();
+
+		await expect(pending).resolves.toBe(false);
+		expect(page.saveCharacter).not.toHaveBeenCalled();
+		expect(page.renderCharacter).not.toHaveBeenCalled();
+		expect(globalThis.JqueryUtil.doToast).not.toHaveBeenCalled();
+		CharacterSheetClassUtils.updateRacialSpells = originalUpdateRacialSpells;
+	});
+
 	test("builds spells step after resetting selections for builder quickbuild sorcerers", () => {
 		const qb = Object.create(CharacterSheetQuickBuild.prototype);
 		qb._state = {

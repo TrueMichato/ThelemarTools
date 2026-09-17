@@ -7555,6 +7555,11 @@ class CharacterSheetBuilder {
 		(typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : (/** @type {*} */ cb) => setTimeout(cb, 0))(() => { region.textContent = message; });
 	}
 
+	resetCharacterScopeUi () {
+		if (typeof document === "undefined") return;
+		document.getElementById("cs-builder-live-region")?.remove();
+	}
+
 	/**
 	 * Standard-array score tray — a sticky group of draggable score chips rendered
 	 * above the ability grid so chips + drop targets stay co-visible. Chips are

@@ -3375,8 +3375,13 @@ class CharacterSheetSpells {
 
 		let closeMenu;
 		let onKey;
+		let closeTimer = null;
+		let portal = null;
 		const cleanup = () => {
-			menu.remove();
+			portal?.close();
+		};
+		const cleanupPortal = () => {
+			if (closeTimer != null) clearTimeout(closeTimer);
 			document.removeEventListener("click", closeMenu);
 			document.removeEventListener("keydown", onKey);
 			if (this._activeCastMenuCleanup === cleanup) this._activeCastMenuCleanup = null;
@@ -3397,8 +3402,9 @@ class CharacterSheetSpells {
 			if (!item.disabled) {
 				optionEl.addEventListener("click", (e) => {
 					e.stopPropagation();
+					const isOwnerScopeCurrent = portal.isCurrent({isRequireOwner: true});
 					cleanup();
-					if (this._page?.isCurrentCharacterReadOnly?.()) return;
+					if (!isOwnerScopeCurrent || this._page?.isCurrentCharacterReadOnly?.()) return;
 					item.onSelect?.();
 				});
 			}
@@ -3409,13 +3415,19 @@ class CharacterSheetSpells {
 		const clientY = event?.clientY ?? (window.innerHeight / 2);
 		Object.assign(menu.style, {position: "fixed", left: `${clientX}px`, top: `${clientY}px`, zIndex: 10000});
 		document.body.append(menu);
+		portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this._page,
+			element: menu,
+			cleanup: cleanupPortal,
+			isRequireOwner: false,
+		});
 
 		// Clamp into the viewport.
 		const rect = menu.getBoundingClientRect();
 		if (rect.right > window.innerWidth) menu.style.left = `${Math.max(0, window.innerWidth - rect.width - 8)}px`;
 		if (rect.bottom > window.innerHeight) menu.style.top = `${Math.max(0, window.innerHeight - rect.height - 8)}px`;
 
-		setTimeout(() => {
+		closeTimer = setTimeout(() => {
 			document.addEventListener("click", closeMenu);
 			document.addEventListener("keydown", onKey);
 		}, 10);
