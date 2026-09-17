@@ -1621,6 +1621,8 @@ class CharacterSheetQuickBuild {
 						onFeatAbilityChanged,
 						null,
 						{
+							className,
+							classSource: analysis.classSource,
 							totalLevel: characterLevel,
 							abilityScores: featScores,
 							ownedFeats: this._getProjectedQuickBuildFeats({excludeSelection: sel}),
@@ -1715,6 +1717,15 @@ class CharacterSheetQuickBuild {
 	_renderFeatSelector (levelKey, sel, isEpicBoon, runningScores = null, onFeatAbilityChanged = null, categoryFilter = null, eligibilityContext = {}) {
 		const container = e_({outer: `<div class="charsheet__quickbuild-feat-select mb-2"></div>`});
 		container.append(e_({outer: `<label class="ve-bold ve-small">${isEpicBoon ? "Epic Boon" : "Feat"} Selection</label>`}));
+		const contextClassName = eligibilityContext.className;
+		const contextClassSource = eligibilityContext.classSource;
+		const activeSubclass = contextClassName
+			? this._resolveSubclassFull(
+				this._getSubclassForClass(contextClassName, contextClassSource),
+				contextClassName,
+				contextClassSource,
+			)
+			: null;
 
 		let feats = this._page.filterByAllowedSources(this._page.getFeats() || [])
 			.filter(f => !CharacterSheetClassUtils.isInterdictBoonEntry(f));
@@ -1830,17 +1841,19 @@ class CharacterSheetQuickBuild {
 					spells: this._state.getSpellsKnown?.() || [],
 					toolProficiencies: this._state.getToolProficiencies?.() || [],
 					state: this._state,
-					levelPrerequisiteClassAliases: CharacterSheetClassUtils.getOptionalFeaturePrerequisiteClassAliases(
-						this._classAllocations.find(alloc => alloc.className === gain.className && (!gain.classSource || alloc.classSource === gain.classSource))?.subclass,
-						gain.featureTypes,
-					),
 				};
 
 				choices.optionalFeatures = featOptSpecs.map(spec => ({
 					...spec,
 					available: CharacterSheetClassUtils.getFeatOptionalFeatureOptions(allOptFeatures, {
 						featureTypes: spec.featureTypes,
-						prereqContext,
+						prereqContext: {
+							...prereqContext,
+							levelPrerequisiteClassAliases: CharacterSheetClassUtils.getOptionalFeaturePrerequisiteClassAliases(
+								activeSubclass,
+								spec.featureTypes,
+							),
+						},
 						alreadyKnown,
 					}),
 				}));
@@ -2345,7 +2358,7 @@ class CharacterSheetQuickBuild {
 						list.querySelectorAll(".charsheet__quickbuild-option").forEach(el => el.classList.remove("selected"));
 						item.classList.add("selected");
 						sel.feat = feat;
-						sel.featChoices = {skills: [], languages: [], tools: [], ability: null, expertise: [], spellList: null, cantrips: [], spells: []};
+						sel.featChoices = {skills: [], languages: [], tools: [], ability: null, expertise: [], spellList: null, cantrips: [], spells: [], optionalFeatures: []};
 						renderFeatChoices();
 					});
 					list.append(item);
@@ -2597,6 +2610,8 @@ class CharacterSheetQuickBuild {
 					null,
 					slot.category,
 					{
+						className: analysis.className,
+						classSource: analysis.classSource,
 						totalLevel: analysis.characterLevel,
 						ownedFeats: this._getProjectedQuickBuildFeats({excludeSelection: slot}),
 						featCatalog: this._page.getFeats() || [],
