@@ -68,6 +68,13 @@ export class HubCampaignPage {
 		};
 	}
 
+	private async getLeaseReleaseHeaders (): Promise<Record<string, string>> {
+		return {
+			...await this.getMutationHeaders(),
+			"x-hub-protocol-version": "5",
+		};
+	}
+
 	async gotoHub (): Promise<void> {
 		await this.page.goto("/hub.html");
 		await expect(this.page.locator("#hub-signed-in")).toBeVisible();
@@ -1012,11 +1019,15 @@ export class HubCampaignPage {
 		}
 		expect(lease).toBeTruthy();
 		const response = await this.page.request.post(`/api/characters/${encodeURIComponent(characterId)}/lease/release`, {
-			headers: await this.getMutationHeaders(),
+			headers: await this.getLeaseReleaseHeaders(),
 			data: {leaseEpoch: lease.epoch, expiresAt: lease.expiresAt},
 		});
-		expect(response.ok()).toBe(true);
-		expect((await response.json()).released).toEqual(expect.any(Boolean));
+		const responseBody = await response.text();
+		expect(
+			response.ok(),
+			`Lease release failed with HTTP ${response.status()}: ${responseBody}`,
+		).toBe(true);
+		expect(JSON.parse(responseBody).released).toEqual(expect.any(Boolean));
 		this._characterLeases.delete(characterId);
 	}
 
