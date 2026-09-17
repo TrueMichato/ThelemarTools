@@ -2225,7 +2225,7 @@ export class HubCampaignPage {
 			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
 			await expect.poll(() => transferPostCount).toBe(1);
 			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
-			const retry = this.page.getByRole("button", {name: "Retry latest balances"});
+			const retry = this.page.getByRole("button", {name: "Retry latest balances", exact: true});
 			await expect(retry).toBeVisible();
 			await expect(retry).toBeEnabled();
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
@@ -2354,7 +2354,7 @@ export class HubCampaignPage {
 			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
 			await expect.poll(() => transferPostCount).toBe(1);
 			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
-			const retry = this.page.getByRole("button", {name: "Retry latest balances"});
+			const retry = this.page.getByRole("button", {name: "Retry latest balances", exact: true});
 			await expect(retry).toBeVisible();
 			await expect(retry).toBeEnabled();
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
@@ -2364,7 +2364,7 @@ export class HubCampaignPage {
 			await pWaitForHeldRefresh(0, Date.now() + 15_000);
 			await onRetryRefreshHeld();
 			await pReleaseUntilRetryRecreated();
-			const deferredRetry = this.page.getByRole("button", {name: "Retry latest balances"});
+			const deferredRetry = this.page.getByRole("button", {name: "Retry latest balances", exact: true});
 			await expect(deferredRetry).toBeVisible();
 			await expect(deferredRetry).toHaveText("Retry latest balances");
 			await expect(deferredRetry).toBeEnabled();
