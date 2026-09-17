@@ -346,7 +346,10 @@ BEM-like naming: `.charsheet__element--modifier`
     been created under older authority. Those callbacks recheck
     `isCurrentCharacterReadOnly()` immediately before acting. Applying read-only
     mode cancels pending long-press, closes portaled spell/mobile/ability/attack
-    menus, and then disables late-rendered controls. Export and Print remain
+    menus, and then disables late-rendered controls. Manual pointer flows which
+    bypass HTML drag events, such as sticky-note movement, capture character ID,
+    load generation, and access at start; they cancel and restore their visible
+    position if any part changes before completion. Export and Print remain
     explicit allowed actions.
 
 Form controls on mobile take a 16px **floor**
@@ -450,25 +453,32 @@ The wrapper adds what no individual dialog should have to remember:
 | A Tab focus trap scoped to `eleModal` | |
 | Focus restored to the element that opened the modal | Without it focus lands on `<body>` and keyboard users restart from the top of the page |
 | `.cs-modal` on `eleModal` | The styling hook that gives modals the sheet's font and muted-text token — modals are portalled to `document.body`, outside `.charsheet-page` |
+| Character ID/load-generation/access ownership | A modal created for one sheet scope must not survive a selector switch, concealment, move/archive, or authority transition and act on the replacement state |
 
 Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the raw `UiUtil` call.
 
-### Four things about it are load-bearing
+### Five things about it are load-bearing
 
 1. **`UiUtil.pGetShowModal` is resolved at call time, never captured at module load.**
    `CharacterSheetSpawnPrompts` monkey-patches that method to auto-answer dialogs during `?spawn=`
    builds and E2E runs; a captured reference silently bypasses the patch and hangs the harness.
 2. **`eleModal` may be absent.** The spawn harness's fallback stub returns only `eleModalInner`,
    `doClose`, `pGetResolved` and `doAutoResize`, so every enhancement is guarded by an early return.
-3. **A caller's `cbClose` is composed with, never replaced** — dozens of sites use it to persist
-   state. Focus restore runs *after* the caller's callback, so a follow-up modal's own trigger
-   capture wins.
+3. **A caller's `cbClose` is composed with, never replaced on an ordinary close** — dozens of
+   sites use it to persist state. Focus restore runs *after* the caller's callback, so a follow-up
+   modal's own trigger capture wins. Character-scope teardown is the deliberate exception: stale
+   close callbacks and focus restoration are suppressed.
 4. **`.cs-modal` is not `.cs-adaptive-panel`.** `container-type: inline-size` implies inline-size
    containment, and most sheet modals size to their content, so containerising the shell collapses
    it to zero width. A content root **inside** an `isWidth100` modal may opt in individually.
+5. **Body-portaled dialogs are character-scoped transient UI.** `CharacterSheetPage` closes them
+   immediately when character ID, load generation, or access changes. The wrapper removes the
+   overlay before awaiting UiUtil teardown and capture-blocks retained controls whose origin scope
+   is stale. Mutating handlers still final-check current owner authority before changing state.
 
-`CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard and
-the `cbClose` composition.
+`CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard,
+ordinary `cbClose` composition, late modal creation, stale callback suppression, and retained
+control fencing.
 
 ### Data Validation Patterns
 

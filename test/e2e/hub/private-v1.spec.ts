@@ -81,7 +81,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 			}),
 		});
 		expect((await player.getCharacter(character.id)).data.xp).toBe(250);
-		const spellcaster = await player.createCharacter({campaignId, name: "Mira"});
+		let spellcaster: Awaited<ReturnType<HubCampaignPage["createCharacter"]>> | null = null;
 		const expectedLongsword = {
 			name: "Longsword",
 			source: "PHB",
@@ -105,6 +105,10 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 			source: "PHB",
 			quantity: 2,
 			note: "For the Ashen Pass",
+			beforeUseSelection: async () => {
+				spellcaster = await player.createCharacter({campaignId, name: "Mira"});
+				await expect(dm.page.locator("#campaign-item-targets .hub-item-award__target", {hasText: "Mira"})).toHaveCount(1);
+			},
 			recipientExpectation: () => player.expectLiveAwardArrival({
 				itemName: "Longsword",
 				source: "PHB",
@@ -122,6 +126,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		expect((await player.getCharacter(character.id)).data.inventory).toEqual(expect.arrayContaining([
 			expect.objectContaining({item: expect.objectContaining(expectedLongsword), quantity: 2}),
 		]));
+		if (!spellcaster) throw new Error("The spellcaster was not created during the item-award refresh regression.");
 		expect((await player.getCharacter(spellcaster.id)).data.inventory).toEqual(expect.arrayContaining([
 			expect.objectContaining({item: expect.objectContaining(expectedLongsword), quantity: 2}),
 		]));

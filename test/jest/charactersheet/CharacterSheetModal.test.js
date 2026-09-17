@@ -52,8 +52,10 @@ const mkEvent = (key, {shiftKey = false} = {}) => ({
 	shiftKey,
 	isDefaultPrevented: false,
 	isPropagationStopped: false,
+	isImmediatePropagationStopped: false,
 	preventDefault () { this.isDefaultPrevented = true; },
 	stopPropagation () { this.isPropagationStopped = true; },
+	stopImmediatePropagation () { this.isImmediatePropagationStopped = true; },
 });
 
 describe("CharacterSheetModal", () => {
@@ -62,6 +64,7 @@ describe("CharacterSheetModal", () => {
 	let body;
 
 	beforeEach(() => {
+		CharacterSheetModal._resetForTests?.();
 		calls = [];
 		body = mkEle({tag: "body"});
 		globalThis.document = {body, activeElement: body};
@@ -173,6 +176,90 @@ describe("CharacterSheetModal", () => {
 			await CharacterSheetModal.pGetShow({title: "X"});
 
 			await expect(calls[0].cbClose(false)).resolves.toBeUndefined();
+		});
+	});
+
+	describe("character-scope teardown", () => {
+		it("closes a body-portaled modal without running its stale character callback", async () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			let closeCount = 0;
+			let callbackCount = 0;
+			nextModal = opts => ({
+				eleModal: mkEle(),
+				eleModalInner: mkEle(),
+				doClose: async (...args) => {
+					closeCount++;
+					await opts.cbClose(...args);
+				},
+			});
+
+			await CharacterSheetModal.pGetShow({
+				title: "Custom Modifiers",
+				cbClose: () => { callbackCount++; },
+			});
+			page._currentCharacterAccess = "dm_readonly";
+
+			await CharacterSheetModal.closeCharacterScopeModals();
+
+			expect(closeCount).toBe(1);
+			expect(callbackCount).toBe(0);
+		});
+
+		it("closes a modal whose creation finishes after its originating character scope ended", async () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			let resolveModal;
+			let closeCount = 0;
+			let callbackCount = 0;
+			globalThis.UiUtil.pGetShowModal = opts => new Promise(resolve => {
+				resolveModal = () => resolve({
+					eleModal: mkEle(),
+					eleModalInner: mkEle(),
+					doClose: async (...args) => {
+						closeCount++;
+						await opts.cbClose(...args);
+					},
+				});
+			});
+
+			const promise = CharacterSheetModal.pGetShow({
+				title: "Slow modal",
+				cbClose: () => { callbackCount++; },
+			});
+			page._currentCharacterId = "character-b";
+			page._characterLoadGeneration++;
+			resolveModal();
+			await promise;
+
+			expect(closeCount).toBe(1);
+			expect(callbackCount).toBe(0);
+		});
+
+		it("blocks retained modal controls after their originating character scope ends", async () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			const modal = await CharacterSheetModal.pGetShow({title: "Custom Modifiers"});
+			page._currentCharacterId = "character-b";
+			page._characterLoadGeneration++;
+			const evt = mkEvent("Enter");
+
+			modal.eleModal.dispatch("click", evt);
+
+			expect(evt.isDefaultPrevented).toBe(true);
+			expect(evt.isImmediatePropagationStopped).toBe(true);
 		});
 	});
 

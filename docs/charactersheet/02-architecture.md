@@ -107,10 +107,15 @@ while deletion was in flight is in that prefix, the sheet conceals it instead of
 DM truth is one explicit `dm_readonly` access mode. Native form controls, contenteditable regions, and custom
 `[role="button"]` controls are disabled before input; the capture guard blocks click, Enter/Space, context-menu,
 drag/drop, and long-press activation while preserving navigation and the safe Character selector, More, Roll Log,
-Export, and Print paths. Body-portaled spell, ability, attack, and mobile menus recheck access inside their action
-callbacks, and entering read-only mode closes any menu which was opened under older authority. Late Play Mode and
-other renders reapply the same access mode. Recipient-framed award notices are owner-only in this view, while
-metadata-only projection/inventory invalidations continue to refresh the authorized DM projection.
+Export, and Print paths. Manual pointer interactions which do not use HTML drag events, including sticky-note
+movement, capture character ID/load generation/access at pointer-down, recheck owner authority during movement and
+completion, and restore their pre-drag DOM position when fenced. `CharacterSheetModal` owns every sheet-created
+body modal: character/access transitions synchronously conceal and close those overlays, suppress stale close
+callbacks, and block retained controls from firing against a replacement character. Mutating modal handlers still
+perform a final current-owner check before changing state. Body-portaled spell, ability, attack, and mobile menus
+likewise recheck access inside their action callbacks. Late Play Mode and other renders reapply the same access
+mode. Recipient-framed award notices are owner-only in this view, while metadata-only projection/inventory
+invalidations continue to refresh the authorized DM projection.
 
 ### Campaign Hub content-policy boundary
 

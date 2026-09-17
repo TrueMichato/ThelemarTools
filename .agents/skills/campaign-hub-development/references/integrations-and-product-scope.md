@@ -48,8 +48,10 @@ When changing Character Sheet internals, also use `charactersheet-development` a
 - Access loss first fences saves and conceals projections/private workspace state, then clears rules/brew.
 - DM truth uses one `dm_readonly` mode across native and custom keyboard controls, including late renders. Capture
   guards cover context-menu/drag/long-press entry, and body-portaled spell, attack, ability, and mobile callbacks
-  recheck access before acting. Export and Print remain reachable through More; recipient notices remain owner-only
-  while invalidations stay live.
+  recheck access before acting. Manual sticky-note movement is character/load/access-fenced, and every
+  Character Sheet-owned generic modal is synchronously concealed and closed on character or authority transition;
+  stale controls/callbacks cannot mutate the replacement projection. Export and Print remain reachable through
+  More; recipient notices remain owner-only while invalidations stay live.
 - Journey Tracker consumes the existing Party Tracker projection and remains system-neutral.
 
 Primary seams: `js/dmscreen/dmscreen-hub-controller.js`, `js/dmscreen.js`,

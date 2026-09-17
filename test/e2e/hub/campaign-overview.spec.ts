@@ -78,6 +78,47 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		const campaignId = await dm.createCampaign("Authority and Conditions E2E");
 		await player.redeemInviteTokenViaApi(await dm.createInviteViaApi(campaignId));
 		const character = await player.createCharacter({campaignId, name: "Readonly Rowan"});
+		const dmCharacter = await dm.createCharacter({campaignId, name: "Authority DM Character"});
+		const playerSheet = new CharacterSheetPage(player.page);
+		await playerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
+
+		const dmOwnedSheet = new CharacterSheetPage(dm.page);
+		await dmOwnedSheet.gotoCampaignCharacter({campaignId, characterId: dmCharacter.id});
+		await dm.page.evaluate(() => (globalThis as any).charSheet._showCustomModifiersModal());
+		await expect(dm.page.locator(".ve-ui-modal__overlay")).toBeVisible();
+		await dm.page.locator("#charsheet-btn-add-modifier").click();
+		await dm.page.locator("#mod-name").fill("Stale cross-character modifier");
+		await dm.page.locator("#mod-value").fill("9");
+		await dm.page.evaluate(() => {
+			(globalThis as any).__staleCustomModifierSave = document.querySelector("#mod-save");
+		});
+
+		let releaseProjectionRead!: () => void;
+		let markProjectionReadStarted!: () => void;
+		const projectionReadGate = new Promise<void>(resolve => { releaseProjectionRead = resolve; });
+		const projectionReadStarted = new Promise<void>(resolve => { markProjectionReadStarted = resolve; });
+		const projectionRoute = `**/api/characters/${character.id}`;
+		await dm.page.route(projectionRoute, async route => {
+			if (route.request().method() !== "GET") {
+				await route.continue();
+				return;
+			}
+			markProjectionReadStarted();
+			await projectionReadGate;
+			await route.continue();
+		});
+		await dm.page.locator("#charsheet-sel-character").selectOption(character.id);
+		await projectionReadStarted;
+		await expect(dm.page.locator(".ve-ui-modal__overlay")).toHaveCount(0);
+		releaseProjectionRead();
+		await expect(dmOwnedSheet.characterName).toHaveValue("Readonly Rowan", {timeout: 20_000});
+		await expect(dmOwnedSheet.characterName).toBeDisabled();
+		await dm.page.evaluate(() => {
+			(globalThis as any).__staleCustomModifierSave?.dispatchEvent(new MouseEvent("click", {bubbles: true}));
+		});
+		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._state.getNamedModifiers()))
+			.not.toContainEqual(expect.objectContaining({name: "Stale cross-character modifier"}));
+		await dm.page.unroute(projectionRoute);
 
 		await dm.gotoCampaign(campaignId);
 		const row = dm.page.locator("#campaign-character-list .hub-data-row", {hasText: "Readonly Rowan"});
@@ -119,6 +160,42 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await expect(dm.page.locator(".charsheet__sharing")).toHaveCount(0);
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet.isCurrentCharacterReadOnly())).toBe(true);
 		expect(await dm.page.evaluate(() => (globalThis as any).charSheet._saveCurrentCharacter())).toBe(true);
+		const stickyNoteId = await dm.page.evaluate(() => {
+			const sheet = (globalThis as any).charSheet;
+			const noteId = sheet._state.addStickyNote({
+				title: "Read-only positioning note",
+				content: "The DM must not move this.",
+				position: {x: 24, y: 64},
+			});
+			sheet._notes._renderStickyNotes();
+			sheet._applyCharacterAccessMode();
+			return noteId;
+		});
+		const stickyNote = dm.page.locator(`[data-note-id="${stickyNoteId}"]`);
+		await expect(stickyNote).toBeVisible();
+		const stickyNotePositionBefore = await stickyNote.evaluate((element: HTMLElement) => ({
+			left: element.style.left,
+			top: element.style.top,
+		}));
+		const stickyNoteStateBefore = await dm.page.evaluate(noteId => {
+			const note = (globalThis as any).charSheet._state.getStickyNote(noteId);
+			return structuredClone(note);
+		}, stickyNoteId);
+		const stickyTitle = stickyNote.locator(".charsheet__sticky-note-title-row");
+		const stickyTitleBox = await stickyTitle.boundingBox();
+		if (!stickyTitleBox) throw new Error("Read-only sticky-note title was not measurable.");
+		await dm.page.mouse.move(stickyTitleBox.x + 4, stickyTitleBox.y + 4);
+		await dm.page.mouse.down();
+		await dm.page.mouse.move(stickyTitleBox.x + 84, stickyTitleBox.y + 64);
+		await dm.page.mouse.up();
+		expect(await stickyNote.evaluate((element: HTMLElement) => ({
+			left: element.style.left,
+			top: element.style.top,
+		}))).toEqual(stickyNotePositionBefore);
+		expect(await dm.page.evaluate(
+			noteId => structuredClone((globalThis as any).charSheet._state.getStickyNote(noteId)),
+			stickyNoteId,
+		)).toEqual(stickyNoteStateBefore);
 		await dmSheet.waitForHubRealtimeLive();
 		await dm.page.evaluate(() => {
 			const sheet = (globalThis as any).charSheet;
@@ -262,8 +339,6 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 				return fnToast(options);
 			};
 		});
-		const playerSheet = new CharacterSheetPage(player.page);
-		await playerSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
 		await dmContext.setOffline(true);
 		try {
 			await dm.page.evaluate(() => (globalThis as any).charSheet?._hubRealtime?._active?.client?._socket?.close());
@@ -312,6 +387,16 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		expect(ownerOnlyRequests).toEqual([]);
 		expect(characterMutations).toEqual([]);
 		expect((await player.getCharacter(character.id)).data.name).toBe("Readonly Rowan Updated");
+		await dm.page.evaluate(async () => {
+			const {eleModalInner} = await (globalThis as any).CharacterSheetModal.pGetShow({
+				title: "Scoped Character Details",
+			});
+			eleModalInner.textContent = "Readonly Rowan Updated";
+		});
+		await expect(dm.page.locator(".ve-ui-modal__overlay")).toContainText("Readonly Rowan Updated");
+		await dm.page.evaluate(() => (globalThis as any).charSheet._concealHubPrivateCharacter());
+		await expect(dm.page.locator(".ve-ui-modal__overlay")).toHaveCount(0);
+		await expect(dm.page.locator("main.charsheet-page")).toBeHidden();
 
 		await dm.gotoCampaign(campaignId);
 		const conditionDataRequests: string[] = [];

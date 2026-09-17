@@ -53,6 +53,25 @@ export function filterAwardItems ({items = [], query = "", isQueryRequired = fal
 		.slice(0, limit);
 }
 
+export function getAwardItemSelectionKey (item) {
+	if (!item) return "";
+	if (item.sourceKind === "party_inventory") return `party_inventory:${item.entryId || ""}`;
+	return `${item.sourceKind || "catalog"}:${item.name || ""}|${item.source || ""}`.toLowerCase();
+}
+
+export function resolveAwardItemSelection ({
+	selectionKey = "",
+	selectedOptionItem = null,
+	visibleItems = [],
+	sourceItems = [],
+} = {}) {
+	if (!selectionKey) return null;
+	if (getAwardItemSelectionKey(selectedOptionItem) === selectionKey) return selectedOptionItem;
+	return [...visibleItems, ...sourceItems]
+		.find(item => getAwardItemSelectionKey(item) === selectionKey)
+		|| null;
+}
+
 export function getAwardSourceRequest (selectedItem) {
 	if (!selectedItem) return null;
 	if (selectedItem.sourceKind === "party_inventory") {

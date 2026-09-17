@@ -41,6 +41,8 @@ import {
 	buildStashAwardItems,
 	filterAwardItems,
 	getAwardCommandFingerprint,
+	getAwardItemSelectionKey,
+	resolveAwardItemSelection,
 } from "./hub-item-award.js";
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
@@ -684,6 +686,7 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	};
 
 	const renderResults = async () => {
+		const previousSelectionKey = results.value;
 		const isCatalogSource = ["catalog", "campaign_item"].includes(sourceKind.value);
 		if (isCatalogSource && (sourceKind.value === "campaign_item" || search.value.trim().length >= 2)) {
 			try {
@@ -700,13 +703,17 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			query: search.value,
 			isQueryRequired: sourceKind.value === "catalog",
 		});
-		results.replaceChildren(...visibleItems.map((item, index) => {
+		results.replaceChildren(...visibleItems.map(item => {
 			const option = document.createElement("option");
-			option.value = `${index}`;
+			option.value = getAwardItemSelectionKey(item);
 			const amount = item.sourceKind === "party_inventory" ? ` · ${item.availableQuantity} available` : "";
 			option.textContent = `${item.name} — ${item.source}${amount}`;
+			option._hubAwardItem = item;
 			return option;
 		}));
+		if ([...results.options].some(option => option.value === previousSelectionKey)) {
+			results.value = previousSelectionKey;
+		}
 		useSelection.disabled = !visibleItems.length;
 		if (sourceKind.value === "catalog" && search.value.trim().length < 2) {
 			resultsStatus.textContent = "Type at least 2 characters to load and search the catalog.";
@@ -725,12 +732,15 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	};
 
 	const applySelection = () => {
-		const item = visibleItems[Number(results.value)];
+		const item = resolveAwardItemSelection({
+			selectionKey: results.value,
+			selectedOptionItem: results.selectedOptions[0]?._hubAwardItem,
+			visibleItems,
+			sourceItems: getSourceItems(),
+		});
 		if (!item) return;
 		selectedItem = item;
-		selectionKey.value = item.sourceKind === "party_inventory"
-			? `${item.sourceKind}:${item.entryId}`
-			: `${item.sourceKind}:${item.name}|${item.source}`;
+		selectionKey.value = getAwardItemSelectionKey(item);
 		selectionSummary.textContent = `Selected: ${item.name} · ${item.source}${item.sourceKind === "party_inventory" ? ` · ${item.availableQuantity} in the party stash` : ""}`;
 		renderPreview();
 	};

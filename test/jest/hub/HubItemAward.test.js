@@ -5,7 +5,9 @@ import {
 	buildStashAwardItems,
 	filterAwardItems,
 	getAwardCommandFingerprint,
+	getAwardItemSelectionKey,
 	getAwardSourceRequest,
+	resolveAwardItemSelection,
 } from "../../../js/hub/hub-item-award.js";
 
 const getTarget = ({
@@ -69,6 +71,23 @@ describe("Hub item award presentation contract", () => {
 		];
 		expect(filterAwardItems({items, query: "l", isQueryRequired: true})).toEqual([]);
 		expect(filterAwardItems({items, query: "mo"})).toEqual([{name: "Moon Blade", source: "TGTT"}]);
+	});
+
+	it("resolves a selected catalog option by stable identity across a projection refresh", () => {
+		const longsword = {name: "Longsword", source: "PHB", sourceKind: "catalog", weight: 3};
+		const selectionKey = getAwardItemSelectionKey(longsword);
+
+		expect(resolveAwardItemSelection({
+			selectionKey,
+			selectedOptionItem: longsword,
+			visibleItems: [],
+			sourceItems: [],
+		})).toEqual(longsword);
+		expect(resolveAwardItemSelection({
+			selectionKey,
+			visibleItems: [{name: "Club", source: "PHB", sourceKind: "catalog"}],
+			sourceItems: [longsword],
+		})).toEqual(longsword);
 	});
 
 	it("keys retries from the normalized ordered award command instead of incidental controls", () => {

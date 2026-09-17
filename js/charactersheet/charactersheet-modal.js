@@ -19,8 +19,10 @@
  *     Escape was dead exactly when the user was most likely to press it.
  *   - A Tab focus trap, and focus returned to whatever opened the modal once it closes. Without
  *     the restore, focus lands on `<body>` and keyboard users start over from the top of the page.
+ *   - Character-scope ownership. A dialog opened for one character is synchronously concealed and
+ *     authoritatively closed when character ID, load generation, or access mode changes.
  *
- * Three things about this file are load-bearing:
+ * Four things about this file are load-bearing:
  *
  *   1. `UiUtil.pGetShowModal` is looked up at call time, never captured at module load.
  *      `CharacterSheetSpawnPrompts` monkey-patches that method to auto-answer dialogs during
@@ -28,11 +30,16 @@
  *      hang the harness on a modal nobody will click.
  *   2. `eleModal` may be absent. The spawn harness's fallback stub returns only `eleModalInner`,
  *      `doClose`, `pGetResolved` and `doAutoResize`, so every enhancement here is guarded.
- *   3. A caller's own `cbClose` is composed with, never replaced. Dozens of call sites rely on it
- *      to persist state.
+ *   3. A caller's own `cbClose` is composed with, never replaced during an ordinary close. A
+ *      character-scope teardown deliberately suppresses it so stale persistence/render callbacks
+ *      cannot target the replacement character.
+ *   4. Scope teardown removes the body-portaled overlay before awaiting UiUtil's close contract,
+ *      so old character data is concealed during a slow replacement load.
  */
 class CharacterSheetModal {
 	static _uid = 0;
+	static _characterSheet = null;
+	static _openModalMetas = new Set();
 
 	/** Elements that can hold focus, in document order. Excludes anything hidden or disabled. */
 	static _FOCUSABLE_SELECTOR = [
@@ -82,29 +89,101 @@ class CharacterSheetModal {
 			optsOut.eleTitleSplit = eleTitleSplit;
 		}
 
+		const characterScope = CharacterSheetModal._getCharacterScopeSnapshot();
+		const modalMeta = {
+			characterScope,
+			isCharacterScopeTeardown: false,
+			isClosing: false,
+			modal: null,
+		};
 		let doRestoreFocus = null;
 		const cbCloseOriginal = opts.cbClose;
 		optsOut.cbClose = async (...args) => {
 			let out;
-			if (cbCloseOriginal) out = await cbCloseOriginal(...args);
+			CharacterSheetModal._openModalMetas.delete(modalMeta);
+			if (cbCloseOriginal && !modalMeta.isCharacterScopeTeardown) out = await cbCloseOriginal(...args);
 			// Restore after the caller's callback — it may itself open a follow-up modal, in which
 			// case that modal's own trigger capture should win.
-			if (doRestoreFocus) doRestoreFocus();
+			if (doRestoreFocus && !modalMeta.isCharacterScopeTeardown) doRestoreFocus();
 			return out;
 		};
 
 		const modal = await CharacterSheetModal._pGetShowModalRaw(optsOut);
+		modalMeta.modal = modal;
+		CharacterSheetModal._openModalMetas.add(modalMeta);
 
 		doRestoreFocus = () => CharacterSheetModal._doRestoreFocus(eleTrigger);
 
 		// The spawn harness's fallback stub has no `eleModal`; there is nothing to enhance.
-		if (!modal?.eleModal) return modal;
+		if (!modal?.eleModal) {
+			if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope)) {
+				await CharacterSheetModal._pCloseModalMetaForCharacterScope(modalMeta);
+			}
+			return modal;
+		}
 
 		if (btnClose) btnClose.addEventListener("click", () => modal.doClose(false));
 
-		CharacterSheetModal._decorate({modal, opts, headerId, isCloseable});
+		CharacterSheetModal._decorate({modal, opts, headerId, isCloseable, characterScope});
+		if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope)) {
+			await CharacterSheetModal._pCloseModalMetaForCharacterScope(modalMeta);
+		}
 
 		return modal;
+	}
+
+	static bindCharacterSheet (characterSheet) {
+		CharacterSheetModal._characterSheet = characterSheet || null;
+	}
+
+	static _getCharacterScopeSnapshot () {
+		const sheet = CharacterSheetModal._characterSheet;
+		if (!sheet) return null;
+		if (typeof sheet._getCharacterScopeSnapshot === "function") return sheet._getCharacterScopeSnapshot();
+		return {
+			characterId: sheet._currentCharacterId ?? null,
+			loadGeneration: sheet._characterLoadGeneration ?? 0,
+			accessMode: sheet._currentCharacterAccess ?? null,
+		};
+	}
+
+	static _isCharacterScopeSnapshotCurrent (snapshot) {
+		if (!snapshot) return true;
+		const sheet = CharacterSheetModal._characterSheet;
+		if (!sheet) return false;
+		if (typeof sheet._isCharacterScopeSnapshotCurrent === "function") {
+			return sheet._isCharacterScopeSnapshotCurrent(snapshot);
+		}
+		return snapshot.characterId === (sheet._currentCharacterId ?? null)
+			&& snapshot.loadGeneration === (sheet._characterLoadGeneration ?? 0)
+			&& snapshot.accessMode === (sheet._currentCharacterAccess ?? null);
+	}
+
+	static async closeCharacterScopeModals () {
+		await Promise.all([...CharacterSheetModal._openModalMetas]
+			.map(modalMeta => CharacterSheetModal._pCloseModalMetaForCharacterScope(modalMeta)));
+	}
+
+	static async _pCloseModalMetaForCharacterScope (modalMeta) {
+		if (!modalMeta || modalMeta.isClosing) return;
+		modalMeta.isClosing = true;
+		modalMeta.isCharacterScopeTeardown = true;
+		CharacterSheetModal._openModalMetas.delete(modalMeta);
+
+		const modal = modalMeta.modal;
+		// Conceal the old character's data synchronously. UiUtil owns the authoritative close and
+		// stack cleanup below, but its callback contract is async.
+		modal?.eleModal?.closest?.(".ve-ui-modal__overlay")?.remove?.();
+		if (typeof modal?.doClose === "function") {
+			await modal.doClose(false);
+			return;
+		}
+		modal?.doTeardown?.();
+	}
+
+	static _resetForTests () {
+		CharacterSheetModal._characterSheet = null;
+		CharacterSheetModal._openModalMetas.clear();
 	}
 
 	/**
@@ -133,7 +212,7 @@ class CharacterSheetModal {
 		return ee`<div class="ve-flex-v-center ve-gap-1"></div>`.appends(eleCaller).appends(btnClose);
 	}
 
-	static _decorate ({modal, opts, headerId, isCloseable}) {
+	static _decorate ({modal, opts, headerId, isCloseable, characterScope}) {
 		const eleModal = modal.eleModal;
 
 		eleModal.setAttribute("role", "dialog");
@@ -150,6 +229,17 @@ class CharacterSheetModal {
 			eleModal.setAttribute("aria-labelledby", headerId);
 		} else if (opts.title) {
 			eleModal.setAttribute("aria-label", opts.title);
+		}
+
+		if (characterScope) {
+			const handleCharacterScopeInteraction = evt => {
+				if (CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope)) return;
+				evt.preventDefault();
+				evt.stopImmediatePropagation();
+			};
+			for (const eventName of ["click", "input", "change", "submit", "keydown", "mousedown", "pointerdown"]) {
+				eleModal.addEventListener(eventName, handleCharacterScopeInteraction, true);
+			}
 		}
 
 		eleModal.addEventListener("keydown", evt => {

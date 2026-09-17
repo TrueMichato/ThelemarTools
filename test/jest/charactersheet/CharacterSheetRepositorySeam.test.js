@@ -84,6 +84,29 @@ describe("Character Sheet repository seam", () => {
 		expect(host._updateCharacterDropdown).toHaveBeenCalledWith(characters);
 	});
 
+	it("ends old character interactions before awaiting a replacement character", async () => {
+		const load = makeDeferred();
+		const host = {
+			_characterLoadGeneration: 4,
+			_currentCharacterId: "character-a",
+			_characterRepository: {
+				isRescueMirrorEnabled: false,
+				pGet: jest.fn(() => load.promise),
+			},
+			_closeCharacterScopedTransientUi: jest.fn(),
+			_detachHubRealtime: jest.fn(),
+			_campaign: {resetCharacterScope: jest.fn()},
+			_reconcilePersistedCharacter: CharacterSheetPage.prototype._reconcilePersistedCharacter,
+		};
+
+		const pending = CharacterSheetPage.prototype._pLoadCharacter.call(host, "character-b");
+
+		expect(host._closeCharacterScopedTransientUi).toHaveBeenCalledTimes(1);
+		expect(host._characterRepository.pGet).toHaveBeenCalledWith({characterId: "character-b"});
+		load.resolve(null);
+		await pending;
+	});
+
 	it("does not erase cloud dropdown options when the current character name changes", () => {
 		const select = {
 			value: "cloud-a",
@@ -633,6 +656,7 @@ describe("Character Sheet repository seam", () => {
 		const host = {
 			_currentCharacterAccess: "dm_readonly",
 			_spells: {_closeCastOptionsMenu: closeCastOptionsMenu},
+			_closeCharacterScopedTransientUi: jest.fn(),
 			_updateSaveIndicator: jest.fn(),
 		};
 		try {
@@ -657,6 +681,7 @@ describe("Character Sheet repository seam", () => {
 		expect(cancelLongPress).toHaveBeenCalledTimes(1);
 		expect(hideMobileContextMenu).toHaveBeenCalledTimes(1);
 		expect(closeAllMenus).toHaveBeenCalledTimes(1);
+		expect(host._closeCharacterScopedTransientUi).toHaveBeenCalledTimes(1);
 		expect(host._updateSaveIndicator).toHaveBeenCalledWith("readonly");
 
 		host._currentCharacterAccess = "owner";

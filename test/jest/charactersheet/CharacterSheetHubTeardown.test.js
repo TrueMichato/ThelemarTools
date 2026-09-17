@@ -209,10 +209,12 @@ describe("Character Sheet hub teardown owners", () => {
 		page._isHubCharacter = true;
 		page._currentCharacterId = "private-character";
 		page._state._data.name = "Private Character";
+		page._closeCharacterScopedTransientUi = jest.fn();
 		const host = page._getHubActiveCampaignHost();
 
 		await host.pTeardownProjections();
 
+		expect(page._closeCharacterScopedTransientUi).toHaveBeenCalledTimes(1);
 		expect(page._currentCharacterId).toBeNull();
 		expect(page._state._data.name).toBe("");
 	});

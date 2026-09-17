@@ -220,6 +220,7 @@ class CharacterSheetPage {
 		this._conditionsData = [];
 		this._languagesData = [];
 		this._dialectParentMap = {};
+		CharacterSheetModal.bindCharacterSheet(this);
 	}
 
 	async _pClaimUnboundLegacyHubRecovery ({characterId = null} = {}) {
@@ -290,6 +291,30 @@ class CharacterSheetPage {
 		return this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
 	}
 
+	_getCharacterScopeSnapshot () {
+		return {
+			characterId: this._currentCharacterId,
+			loadGeneration: this._characterLoadGeneration,
+			accessMode: this._currentCharacterAccess,
+		};
+	}
+
+	_isCharacterScopeSnapshotCurrent (snapshot, {isRequireOwner = false} = {}) {
+		if (!snapshot) return false;
+		return snapshot.characterId === this._currentCharacterId
+			&& snapshot.loadGeneration === this._characterLoadGeneration
+			&& snapshot.accessMode === this._currentCharacterAccess
+			&& (!isRequireOwner || !this.isCurrentCharacterReadOnly());
+	}
+
+	_closeCharacterScopedTransientUi () {
+		this._notes?.cancelActiveDrag?.();
+		void CharacterSheetModal.closeCharacterScopeModals().catch(error => {
+			// eslint-disable-next-line no-console
+			console.error("Could not close character-scoped modal state:", error);
+		});
+	}
+
 	// #region Hub teardown owners (ADR 0013)
 	// Each owner maps to exactly one teardown marker and is idempotent, so the coordinator's
 	// ordering proof is not defeated by one call site doing another stage's work.
@@ -318,6 +343,7 @@ class CharacterSheetPage {
 	_concealHubPrivateCharacter () {
 		if (!this._isHubCharacter) return;
 		this._characterLoadGeneration++;
+		this._closeCharacterScopedTransientUi?.();
 		this._currentCharacterId = null;
 		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
 		this._isCurrentCharacterNew = false;
@@ -3152,6 +3178,7 @@ class CharacterSheetPage {
 	async _pLoadCharacter (charId) {
 		const loadGeneration = (this._characterLoadGeneration || 0) + 1;
 		this._characterLoadGeneration = loadGeneration;
+		this._closeCharacterScopedTransientUi?.();
 		const previousCharacterId = this._currentCharacterId;
 		this._detachHubRealtime?.();
 		this._campaign?.resetCharacterScope?.();
@@ -3259,6 +3286,7 @@ class CharacterSheetPage {
 
 	_createNewCharacter () {
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._closeCharacterScopedTransientUi?.();
 		this._detachHubRealtime?.();
 		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
@@ -3546,6 +3574,7 @@ class CharacterSheetPage {
 		charData.name = `${charData.name || "Character"} (Copy)`;
 
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._closeCharacterScopedTransientUi?.();
 		this._detachHubRealtime?.();
 		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
@@ -3592,6 +3621,7 @@ class CharacterSheetPage {
 
 		// Load the new character
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._closeCharacterScopedTransientUi?.();
 		this._detachHubRealtime?.();
 		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
@@ -5154,6 +5184,7 @@ class CharacterSheetPage {
 		}
 
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._closeCharacterScopedTransientUi?.();
 		this._detachHubRealtime?.({isPreserveRepositoryReconciliation: true});
 		this._currentCharacterId = canonicalId;
 		saveFence.characterId = canonicalId;
@@ -5522,10 +5553,11 @@ class CharacterSheetPage {
 
 	_applyCharacterAccessMode () {
 		if (typeof document === "undefined") return;
+		const isReadOnly = this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
 		const root = document.querySelector?.(".charsheet-page");
 		if (!root) return;
-		const isReadOnly = this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
 		const wasReadOnly = root.getAttribute?.("data-character-access") === "dm-readonly";
+		if (isReadOnly && !wasReadOnly) this._closeCharacterScopedTransientUi?.();
 		root.classList?.toggle("charsheet-page--read-only", isReadOnly);
 		root.setAttribute?.("data-character-access", isReadOnly ? "dm-readonly" : "owner");
 		const allowedIds = new Set([
@@ -21158,15 +21190,23 @@ class CharacterSheetPage {
 	 * Show the custom modifiers management modal
 	 */
 	async _showCustomModifiersModal () {
+		if (this.isCurrentCharacterReadOnly()) return;
+		const characterScope = this._getCharacterScopeSnapshot();
+		const isCurrentOwner = () => this._isCharacterScopeSnapshotCurrent(
+			characterScope,
+			{isRequireOwner: true},
+		);
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🎯 Custom Modifiers",
 			isMinHeight0: true,
 			isWidth100: true,
 			cbClose: () => {
+				if (!isCurrentOwner()) return;
 				this._saveCurrentCharacter();
 				this._renderCharacter();
 			},
 		});
+		if (!isCurrentOwner()) return;
 
 		// Get modifier type options - organized by category with optgroups
 		const skills = this.getSkillsList();
@@ -21363,6 +21403,7 @@ class CharacterSheetPage {
 
 				// Toggle handler
 				rowEl.querySelector("input[type='checkbox']").addEventListener("change", () => {
+					if (!isCurrentOwner()) return;
 					this._state.toggleNamedModifier(mod.id);
 					renderModifiersList();
 					renderSummary();
@@ -21370,17 +21411,20 @@ class CharacterSheetPage {
 
 				// Edit handler
 				rowEl.querySelector(".charsheet__modifier-edit").addEventListener("click", () => {
+					if (!isCurrentOwner()) return;
 					showEditForm(mod);
 				});
 
 				// Delete handler
 				rowEl.querySelector(".charsheet__modifier-delete").addEventListener("click", async () => {
+					if (!isCurrentOwner()) return;
 					const doDelete = await InputUiUtil.pGetUserBoolean({
 						title: "Remove Modifier",
 						htmlDescription: `<p>Remove "${mod.name}" modifier?</p>`,
 						textYes: "Remove",
 						textNo: "Cancel",
 					});
+					if (!isCurrentOwner()) return;
 					if (doDelete) {
 						this._state.removeNamedModifier(mod.id);
 						renderModifiersList();
@@ -21757,16 +21801,21 @@ class CharacterSheetPage {
 		};
 
 		// Add modifier button
-		modalInner.querySelector("#charsheet-btn-add-modifier").addEventListener("click", () => showEditForm());
+		modalInner.querySelector("#charsheet-btn-add-modifier").addEventListener("click", () => {
+			if (!isCurrentOwner()) return;
+			showEditForm();
+		});
 
 		// Bind type change to show/hide custom skill fields
 		modalInner.addEventListener("change", function (e) {
+			if (!isCurrentOwner()) return;
 			if (e.target.id !== "mod-type" && e.target.id !== "mod-skill-calculation") return;
 			updateCustomSkillVisibility(modalInner.querySelector("#charsheet-modifier-form"));
 		});
 
 		// Save modifier
 		modalInner.querySelector("#mod-save").addEventListener("click", () => {
+			if (!isCurrentOwner()) return;
 			const formEl = modalInner.querySelector("#charsheet-modifier-form");
 			const name = formEl.querySelector("#mod-name").value.trim();
 			let type = formEl.querySelector("#mod-type").value;
@@ -21853,6 +21902,7 @@ class CharacterSheetPage {
 
 		// Cancel form
 		modalInner.querySelector("#mod-cancel").addEventListener("click", () => {
+			if (!isCurrentOwner()) return;
 			modalInner.querySelector("#charsheet-modifier-form").style.display = "none";
 		});
 

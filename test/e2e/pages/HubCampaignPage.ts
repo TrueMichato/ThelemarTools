@@ -1747,6 +1747,7 @@ export class HubCampaignPage {
 		source,
 		quantity,
 		note,
+		beforeUseSelection,
 		recipientExpectation,
 	}: {
 		campaignId: string;
@@ -1755,6 +1756,7 @@ export class HubCampaignPage {
 		source: string;
 		quantity: number;
 		note?: string;
+		beforeUseSelection?: () => Promise<void>;
 		recipientExpectation?: () => Promise<void>;
 	}): Promise<void> {
 		await this.gotoCampaign(campaignId);
@@ -1772,6 +1774,7 @@ export class HubCampaignPage {
 		const search = this.page.locator("#campaign-item-search");
 		await search.fill(itemName);
 		await this.page.locator("#campaign-item-results").selectOption({label: `${itemName} — ${source}`});
+		await beforeUseSelection?.();
 		await this.page.locator("#campaign-item-use-selection").click();
 		await expect(this.page.locator("#campaign-item-selection-summary")).toContainText(`${itemName} · ${source}`);
 		await this.selectItemAwardTargets(characterNames);
