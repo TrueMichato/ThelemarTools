@@ -162,15 +162,26 @@ User action → Module event handler → state.setX() → module.render() → pa
 
 No reactive system — renders are explicit. Related modules re-render together (e.g., adding a feature triggers combat + features re-render).
 
-### Cross-Page Item Transfers
+### Cross-Page Entity Transfers
 
-The Items page never rewrites a saved character document directly. It queues a
-targeted operation through `CharacterSheetItemTransfer`; the Character Sheet
-consumes it on character load or via a live `BroadcastChannel` notification,
-normalizes the catalog entity with `CharacterSheetItemUtils`, calls
-`CharacterSheetState.addItem()`, saves, and only then acknowledges the transfer.
-Stable transfer IDs persisted on the character make retries idempotent and avoid
-last-writer-wins data loss from another open tab.
+The Items and Spells pages never rewrite a saved character document directly.
+Their `CharacterSheetItemTransfer` / `CharacterSheetSpellTransfer` adapters use
+the shared `CharacterSheetEntityTransfer` transport for durable queueing,
+locking, `BroadcastChannel` notification, rollback, applied-ID idempotency, and
+acknowledgement. The Character Sheet consumes pending operations on character
+load or live notification, applies them through the appropriate state API,
+re-renders, saves, and only then acknowledges newly applied transfers. Failed or
+malformed operations roll state back and remain queued. Adapters retain separate
+storage keys and channels, so the existing Items-page public behavior is
+unchanged. Live notifications retain their target character ID through the
+serialized worker and apply into an isolated state copy. If the active character
+changes while transfer I/O is pending, the staged result is discarded and the
+queue remains pending. Same-character edits are detected by comparing the live
+state with the staging snapshot; the transfer is rebased onto the latest state
+before commit, with repeated conflicts surfaced while leaving the queue intact.
+Character loading uses the same isolation plus a monotonically increasing load
+generation, so an older load cannot mutate, render, save, or acknowledge after a
+newer load starts.
 
 ### Event Communication
 

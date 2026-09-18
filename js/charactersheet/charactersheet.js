@@ -25,6 +25,7 @@ import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetMaterials} from "./charactersheet-materials.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
 import {CharacterSheetItemTransfer} from "./charactersheet-item-transfer.js";
+import {CharacterSheetSpellTransfer} from "./charactersheet-spell-transfer.js";
 import * as CharacterSheetBuffPickerHelpers from "./charactersheet-buffpicker-helpers.js";
 
 const _dedupeCompositionCatalog = entities => {
@@ -50,6 +51,7 @@ const {e_, ee, Parser, Renderer, JqueryUtil, UiUtil, InputUiUtil, MiscUtil, UrlU
 class CharacterSheetPage {
 	static _STORAGE_KEY_ACTIVE_TAB = "charsheet-active-tab";
 	static _DEFAULT_TAB_ID = "#charsheet-tab-overview";
+	static _LIVE_TRANSFER_MAX_CONFLICT_RETRIES = 3;
 
 	// Small embedded subset of `data/loading-tips.json`, rendered synchronously so a
 	// helpful tip is visible the instant the loading overlay appears (the async JSON
@@ -96,6 +98,7 @@ class CharacterSheetPage {
 
 		this._selCharacter = /** @type {*} */ (null);
 		this._currentCharacterId = null;
+		this._characterLoadGeneration = 0;
 		this._isLevelUpBannerDismissed = false;
 		/** @type {?*} Lazily created on first spawn — see `get spawner`. */
 		this._spawner = null;
@@ -1728,7 +1731,12 @@ class CharacterSheetPage {
 	}
 
 	async _pLoadCharacter (charId) {
+		const loadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._characterLoadGeneration = loadGeneration;
+		const isCurrentLoad = () => this._characterLoadGeneration === loadGeneration;
+
 		const characters = await StorageUtil.pGet("charsheet-characters") || [];
+		if (!isCurrentLoad()) return;
 		const canonical = characters.find(c => c.id === charId) || null;
 
 		// Reconcile against the synchronous rescue mirror: if a mutation was mirrored but its
@@ -1738,25 +1746,16 @@ class CharacterSheetPage {
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
+			const loadState = this._getIsolatedCharacterTransferState({snapshot: character});
+			const transferResults = await this._pApplyPendingCharacterTransfers({
+				characterId: charId,
+				state: loadState,
+			});
+			if (!isCurrentLoad()) return;
+
 			this._currentCharacterId = charId;
 			this._isLevelUpBannerDismissed = false;
-			this._state.loadFromJson(character);
-			let transferResult = {applied: [], acknowledgeIds: [], failed: []};
-			try {
-				transferResult = await CharacterSheetItemTransfer.pApplyPendingToState({
-					characterId: charId,
-					state: this._state,
-				});
-			} catch (error) {
-				// eslint-disable-next-line no-console
-				console.error("[CharSheet] Failed to read pending item transfers:", error);
-				JqueryUtil.doToast({type: "danger", content: "Could not check for items sent from the Items page. Reload to retry."});
-			}
-			if (transferResult.failed.length) {
-				// eslint-disable-next-line no-console
-				console.error("[CharSheet] Some item transfers could not be applied:", transferResult.failed);
-				JqueryUtil.doToast({type: "danger", content: "One or more sent items could not be added. The transfer remains queued for retry."});
-			}
+			this._state.loadFromJson(loadState.toJson());
 
 			// Backfill any class features missing from `_data.features` (e.g. on
 			// saves migrated from older formats). Idempotent. The result tells us whether
@@ -1776,16 +1775,29 @@ class CharacterSheetPage {
 			// concurrent character switch: only save if THIS load is still the active character
 			// (the await above can interleave with another load).
 			const needsSave = mirrorWon
-				|| transferResult.applied.length
+				|| transferResults.some(({result}) => result.applied.length)
 				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
-			if (needsSave && this._currentCharacterId === charId) {
-				const isSaved = await this._saveCurrentCharacter({isReturnStatus: true});
-				if (isSaved) await this._pAcknowledgeItemTransfers(transferResult.acknowledgeIds);
-			} else if (this._currentCharacterId === charId) {
+			if (needsSave && this._isCharacterTransactionCurrent({characterId: charId, loadGeneration})) {
+				const isSaved = await this._saveCurrentCharacter({
+					isReturnStatus: true,
+					expectedCharacterId: charId,
+					expectedLoadGeneration: loadGeneration,
+				});
+				if (isSaved) {
+					await this._pAcknowledgeCharacterTransfers(transferResults, {
+						characterId: charId,
+						loadGeneration,
+					});
+				}
+			} else if (this._isCharacterTransactionCurrent({characterId: charId, loadGeneration})) {
+				await this._pAcknowledgeCharacterTransfers(transferResults, {
+					characterId: charId,
+					loadGeneration,
+				});
 				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
 				this._clearActiveCharacterMirror(charId);
-				await this._pAcknowledgeItemTransfers(transferResult.acknowledgeIds);
 			}
+			if (!this._isCharacterTransactionCurrent({characterId: charId, loadGeneration})) return;
 
 			// Apply saved section layout
 			if (this._layout) {
@@ -2176,7 +2188,8 @@ class CharacterSheetPage {
 		let characters = await StorageUtil.pGet("charsheet-characters") || [];
 		characters = characters.filter(c => c.id !== this._currentCharacterId);
 		await StorageUtil.pSet("charsheet-characters", characters);
-		await CharacterSheetItemTransfer.pRemoveForCharacters({characterIds: [deletedCharacterId]});
+		await Promise.all(this._getCharacterTransferTypes()
+			.map(({Transfer}) => Transfer.pRemoveForCharacters({characterIds: [deletedCharacterId]})));
 
 		this._createNewCharacter();
 		await this._pLoadCharacters();
@@ -2251,7 +2264,8 @@ class CharacterSheetPage {
 		const selectedIds = new Set(selected.map(c => c.id));
 		const remaining = characters.filter(c => !selectedIds.has(c.id));
 		await StorageUtil.pSet("charsheet-characters", remaining);
-		await CharacterSheetItemTransfer.pRemoveForCharacters({characterIds: selectedIds});
+		await Promise.all(this._getCharacterTransferTypes()
+			.map(({Transfer}) => Transfer.pRemoveForCharacters({characterIds: selectedIds})));
 
 		// If the currently loaded character was deleted, switch to a new blank character
 		if (this._currentCharacterId && selectedIds.has(this._currentCharacterId)) {
@@ -3602,14 +3616,23 @@ class CharacterSheetPage {
 		return {chosen: mirrorWon ? mirror : canonical, mirrorWon};
 	}
 
-	async _saveCurrentCharacter ({isReturnStatus = false} = {}) {
-		if (!this._currentCharacterId) return isReturnStatus ? false : undefined;
+	async _saveCurrentCharacter ({
+		isReturnStatus = false,
+		expectedCharacterId = null,
+		expectedLoadGeneration = null,
+	} = {}) {
+		const characterId = this._currentCharacterId;
+		if (!characterId
+			|| (expectedCharacterId && characterId !== expectedCharacterId)
+			|| (expectedLoadGeneration != null && (this._characterLoadGeneration || 0) !== expectedLoadGeneration)) {
+			return isReturnStatus ? false : undefined;
+		}
 
 		// Show saving indicator
 		this._updateSaveIndicator("saving");
 
 		const charData = this._state.toJson();
-		charData.id = this._currentCharacterId;
+		charData.id = characterId;
 		charData._savedAt = Date.now();
 
 		// SYNCHRONOUS rescue mirror FIRST — before any await — so an un-awaited saveCharacter()
@@ -3619,8 +3642,13 @@ class CharacterSheetPage {
 
 		try {
 			let characters = await StorageUtil.pGet("charsheet-characters") || [];
+			if ((expectedCharacterId && this._currentCharacterId !== expectedCharacterId)
+				|| (expectedLoadGeneration != null && (this._characterLoadGeneration || 0) !== expectedLoadGeneration)) {
+				this._clearActiveCharacterMirror(characterId);
+				return isReturnStatus ? false : undefined;
+			}
 
-			const existingIndex = characters.findIndex(c => c.id === this._currentCharacterId);
+			const existingIndex = characters.findIndex(c => c.id === characterId);
 			if (existingIndex >= 0) {
 				characters[existingIndex] = charData;
 			} else {
@@ -3628,10 +3656,14 @@ class CharacterSheetPage {
 			}
 
 			await StorageUtil.pSet("charsheet-characters", characters);
+			if ((expectedCharacterId && this._currentCharacterId !== expectedCharacterId)
+				|| (expectedLoadGeneration != null && (this._characterLoadGeneration || 0) !== expectedLoadGeneration)) {
+				return isReturnStatus ? false : undefined;
+			}
 
 			// Canonical store now agrees with (or supersedes) the mirror — drop the mirror so a
 			// stale copy can never later win reconciliation. Guarded against a concurrent switch.
-			if (this._currentCharacterId === charData.id) this._clearActiveCharacterMirror(charData.id);
+			if (this._currentCharacterId === characterId) this._clearActiveCharacterMirror(characterId);
 
 			// Show saved indicator
 			this._updateSaveIndicator("saved");
@@ -3647,14 +3679,96 @@ class CharacterSheetPage {
 
 	_initItemTransferListener () {
 		this._disposeItemTransferListener?.();
-		this._disposeItemTransferListener = CharacterSheetItemTransfer.subscribe(({characterId}) => {
+		const unsubscribers = this._getCharacterTransferTypes().map(({Transfer}) => Transfer.subscribe(({characterId}) => {
 			if (!characterId || characterId !== this._currentCharacterId) return;
-			this._pApplyLiveItemTransfers().catch(error => {
+			this._pApplyLiveCharacterTransfers({characterId}).catch(error => {
 				// eslint-disable-next-line no-console
-				console.error("[CharSheet] Failed to apply an item transfer:", error);
-				JqueryUtil.doToast({type: "danger", content: "An item was sent to this character, but could not be added. Reload to retry."});
+				console.error("[CharSheet] Failed to apply a character transfer:", error);
+				JqueryUtil.doToast({type: "danger", content: "Something was sent to this character, but could not be added. Reload to retry."});
 			});
-		});
+		}));
+		this._disposeItemTransferListener = () => unsubscribers.forEach(unsubscribe => unsubscribe());
+	}
+
+	_getCharacterTransferTypes () {
+		return [
+			{
+				kind: "item",
+				labelPlural: "items",
+				pageName: "Items",
+				Transfer: CharacterSheetItemTransfer,
+				fnGetName: transfer => transfer.item?.name || "Item",
+			},
+			{
+				kind: "spell",
+				labelPlural: "spells",
+				pageName: "Spells",
+				Transfer: CharacterSheetSpellTransfer,
+				fnGetName: transfer => transfer.spell?.name || "Spell",
+			},
+		];
+	}
+
+	async _pApplyPendingCharacterTransfers ({characterId, state = this._state}) {
+		const out = [];
+		for (const config of this._getCharacterTransferTypes()) {
+			let result = {applied: [], acknowledgeIds: [], failed: []};
+			try {
+				result = await config.Transfer.pApplyPendingToState({
+					characterId,
+					state,
+				});
+			} catch (error) {
+				// eslint-disable-next-line no-console
+				console.error(`[CharSheet] Failed to read pending ${config.kind} transfers:`, error);
+				JqueryUtil.doToast({
+					type: "danger",
+					content: `Could not check for ${config.labelPlural} sent from the ${config.pageName} page. Reload to retry.`,
+				});
+			}
+			if (result.failed.length) {
+				// eslint-disable-next-line no-console
+				console.error(`[CharSheet] Some ${config.kind} transfers could not be applied:`, result.failed);
+				JqueryUtil.doToast({
+					type: "danger",
+					content: `One or more sent ${config.labelPlural} could not be added. The transfer remains queued for retry.`,
+				});
+			}
+			out.push({config, result});
+		}
+		return out;
+	}
+
+	_isCharacterTransactionCurrent ({characterId, loadGeneration = null}) {
+		return this._currentCharacterId === characterId
+			&& (loadGeneration == null || (this._characterLoadGeneration || 0) === loadGeneration);
+	}
+
+	async _pAcknowledgeCharacterTransfers (transferResults, {characterId = null, loadGeneration = null} = {}) {
+		if (characterId && !this._isCharacterTransactionCurrent({characterId, loadGeneration})) return;
+		await Promise.all(transferResults.map(({config, result}) =>
+			this._pAcknowledgeTransfers({
+				Transfer: config.Transfer,
+				transferIds: result.acknowledgeIds,
+				kind: config.kind,
+				characterId,
+				loadGeneration,
+			}),
+		));
+	}
+
+	async _pAcknowledgeTransfers ({Transfer, transferIds, kind, characterId = null, loadGeneration = null}) {
+		const fnIsValid = characterId
+			? () => this._isCharacterTransactionCurrent({characterId, loadGeneration})
+			: null;
+		if (fnIsValid && !fnIsValid()) return false;
+		try {
+			return await Transfer.pAcknowledge({transferIds, fnIsValid}) !== false;
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.warn(`[CharSheet] ${kind.toTitleCase()} transfer was saved, but queue cleanup failed; retry remains idempotent:`, error);
+			return false;
+		}
 	}
 
 	async _pAcknowledgeItemTransfers (transferIds) {
@@ -3668,32 +3782,89 @@ class CharacterSheetPage {
 		}
 	}
 
-	async _pApplyLiveItemTransfers () {
-		if (!this._currentCharacterId) return;
-		const result = await CharacterSheetItemTransfer.pApplyPendingToState({
-			characterId: this._currentCharacterId,
-			state: this._state,
-		});
-		if (result.failed.length) {
-			// eslint-disable-next-line no-console
-			console.error("[CharSheet] Some live item transfers could not be applied:", result.failed);
-			JqueryUtil.doToast({type: "danger", content: "A sent item could not be added. Reload to retry."});
+	async _pApplyLiveItemTransfers ({characterId = this._currentCharacterId} = {}) {
+		return this._pApplyLiveCharacterTransfers({characterId});
+	}
+
+	async _pApplyLiveCharacterTransfers ({characterId = this._currentCharacterId} = {}) {
+		if (!characterId) return;
+		const previous = this._pLiveCharacterTransferLock || Promise.resolve();
+		let unlock;
+		this._pLiveCharacterTransferLock = new Promise(resolve => { unlock = resolve; });
+		await previous;
+		try {
+			if (this._currentCharacterId !== characterId) return;
+			return await this._pApplyLiveCharacterTransfers_({
+				characterId,
+				loadGeneration: this._characterLoadGeneration || 0,
+			});
+		} finally {
+			unlock();
 		}
-		if (!result.acknowledgeIds.length) return;
+	}
 
-		if (result.applied.length) this._renderCharacter();
-		const isSaved = await this._saveCurrentCharacter({isReturnStatus: true});
-		if (!isSaved) return;
-		await this._pAcknowledgeItemTransfers(result.acknowledgeIds);
+	_getIsolatedCharacterTransferState ({snapshot = this._state.toJson()} = {}) {
+		const state = Object.assign(
+			Object.create(Object.getPrototypeOf(this._state)),
+			this._state,
+		);
+		state.loadFromJson(MiscUtil.copyFast(snapshot));
+		return state;
+	}
 
-		if (!result.applied.length) return;
-		const names = result.applied.map(transfer => transfer.item?.name || "Item");
-		JqueryUtil.doToast({
-			type: "success",
-			content: names.length === 1
-				? `${names[0]} was added to this character.`
-				: `${names.length} items were added to this character.`,
-		});
+	async _pApplyLiveCharacterTransfers_ ({characterId, loadGeneration}) {
+		for (let conflictCount = 0; ; conflictCount++) {
+			if (!this._isCharacterTransactionCurrent({characterId, loadGeneration})) return;
+
+			const baseSnapshot = this._state.toJson();
+			const baseSignature = JSON.stringify(baseSnapshot);
+			const transferState = this._getIsolatedCharacterTransferState({snapshot: baseSnapshot});
+			const transferResults = await this._pApplyPendingCharacterTransfers({
+				characterId,
+				state: transferState,
+			});
+			if (!this._isCharacterTransactionCurrent({characterId, loadGeneration})) return;
+
+			if (JSON.stringify(this._state.toJson()) !== baseSignature) {
+				if (conflictCount < CharacterSheetPage._LIVE_TRANSFER_MAX_CONFLICT_RETRIES) continue;
+				// The queue is intentionally left untouched. A later notification or reload
+				// will retry against a quieter state without losing the concurrent edits.
+				JqueryUtil.doToast({
+					type: "warning",
+					content: "This character kept changing while a transfer was being added. The transfer remains queued and will retry on the next notification or reload.",
+				});
+				return;
+			}
+
+			if (!transferResults.some(({result}) => result.acknowledgeIds.length)) return;
+
+			if (transferResults.some(({result}) => result.applied.length)) {
+				this._state.loadFromJson(transferState.toJson());
+				if (!this._isCharacterTransactionCurrent({characterId, loadGeneration})) return;
+				this._renderCharacter();
+			}
+			if (!this._isCharacterTransactionCurrent({characterId, loadGeneration})) return;
+			const isSaved = await this._saveCurrentCharacter({
+				isReturnStatus: true,
+				expectedCharacterId: characterId,
+				expectedLoadGeneration: loadGeneration,
+			});
+			if (!this._isCharacterTransactionCurrent({characterId, loadGeneration}) || !isSaved) return;
+			await this._pAcknowledgeCharacterTransfers(transferResults, {characterId, loadGeneration});
+			if (!this._isCharacterTransactionCurrent({characterId, loadGeneration})) return;
+
+			for (const {config, result} of transferResults) {
+				if (!result.applied.length) continue;
+				const names = result.applied.map(config.fnGetName);
+				JqueryUtil.doToast({
+					type: "success",
+					content: names.length === 1
+						? `${names[0]} was added to this character.`
+						: `${names.length} ${config.labelPlural} were added to this character.`,
+				});
+			}
+			return;
+		}
 	}
 
 	/**

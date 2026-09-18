@@ -116,4 +116,25 @@ describe("Round 37 Bug 7: spell picker class filter broadening (F9)", () => {
 			expect(CU.spellMatchesPickerClassFilter(guidance, sel, divineSoulConfigs, rawClasses(guidance))).toBe(false);
 		});
 	});
+
+	describe("TGTT Gambler defaults use the Warlock list without shrinking the full pool", () => {
+		const hex = mkSpell("Hex", ["Warlock"]);
+		const fireball = mkSpell("Fireball", ["Sorcerer", "Wizard"], {level: 3});
+		const gamblerConfigs = [{
+			className: "Warlock",
+			classSource: "TGTT",
+			subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+			additionalClassNames: [],
+		}];
+
+		test("default Warlock selection shows Warlock spells and excludes unrelated classes", () => {
+			const sel = new Set(["Warlock"]);
+			expect(CU.spellMatchesPickerClassFilter(hex, sel, gamblerConfigs, rawClasses(hex))).toBe(true);
+			expect(CU.spellMatchesPickerClassFilter(fireball, sel, gamblerConfigs, rawClasses(fireball))).toBe(false);
+		});
+
+		test("All Classes can still broaden to a non-Warlock spell", () => {
+			expect(CU.spellMatchesPickerClassFilter(fireball, new Set(), gamblerConfigs, rawClasses(fireball))).toBe(true);
+		});
+	});
 });

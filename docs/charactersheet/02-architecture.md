@@ -125,18 +125,19 @@ User Action (e.g., "Add Class")
 └──────────────────┘
 ```
 
-### 3. Cross-Page Item Transfer
+### 3. Cross-Page Entity Transfers
 
-`items.html` can send the currently viewed item to a saved character without
-rewriting the character document directly:
+`items.html` and `spells.html` can send the currently viewed entity to a saved
+character without rewriting the character document directly:
 
 ```
-ItemsPage
-  → CharacterSheetItemTransfer.pQueue()
+ItemsPage / SpellsPage
+  → CharacterSheetItemTransfer / CharacterSheetSpellTransfer
+  → CharacterSheetEntityTransfer (shared transport)
   → durable per-character transfer record
   → CharacterSheetPage load/live notification
-  → CharacterSheetItemUtils normalization
-  → CharacterSheetState.addItem()
+  → entity adapter normalization
+  → CharacterSheetState.addItem() / addSpell()
   → save character
   → acknowledge transfer
 ```
@@ -146,6 +147,23 @@ editing `charsheet-characters` from another page could be overwritten by an
 already-open sheet with older in-memory state. Transfer IDs are recorded on the
 character until acknowledgement, making consumption idempotent across refreshes,
 retries, and interrupted saves.
+
+`CharacterSheetEntityTransfer` owns locking, persisted queue mutation,
+`BroadcastChannel` notification, snapshot rollback, applied-ID tracking,
+acknowledgement, and target cleanup. Entity adapters keep their own storage
+keys/channels and validate/apply their payloads. This preserves the public item
+transfer contract while avoiding a second copy of the transport lifecycle for
+spells. The sheet consumes all registered transfer types together, renders once,
+saves once, and only then acknowledges newly applied operations. Malformed or
+failed operations remain queued for retry. Live notification processing carries
+the notified character ID through the serialized worker and stages changes in an
+isolated state copy. It rechecks both character ownership and the load generation
+before commit, render, save, and acknowledgement, so switching or reloading leaves
+the original queue pending. If the same character is edited while transfer I/O is
+pending, the staged snapshot is rejected and the operation is replayed against the
+latest state. Repeated conflicts are surfaced and remain queued rather than being
+silently dropped. Load-time transfers are also staged against the loaded character
+and committed only while that load's generation is still current.
 
 ### 4. Calculation Flow
 

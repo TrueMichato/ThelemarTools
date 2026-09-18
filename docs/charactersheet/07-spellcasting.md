@@ -10,9 +10,41 @@ The `CharacterSheetSpells` module handles all spellcasting functionality:
 - Pact magic (Warlock)
 - Spell casting and concentration
 - Ritual casting
+- Durable additions sent from the Spells reference page
 
 **File**: `js/charactersheet/charactersheet-spells.js`  
 **Lines**: ~2,661
+
+## Add from the Spells Reference Page
+
+The Spells page's **Add to Character** action uses the same durable cross-page
+transport architecture as Items. It selects a saved character, computes
+class/subclass availability with `CharacterSheetClassUtils` (including
+`fromSubclass` and supported `additionalSpells` expanded lists), and asks for an
+attribution. A sole eligible attribution is preselected; multiple eligible
+routes remain explicit. Every spellcasting class and **Other / Unattributed**
+remain available as overrides.
+
+All rules in this flow are advisory. Before queueing, it warns about off-list or
+unattributed ownership, no detected eligible class, reached known/prepared or
+cantrip limits, and exact `name|source` duplicates. The user may always continue.
+An exact duplicate is an idempotent merge through `CharacterSheetState.addSpell`
+rather than a second row.
+
+`CharacterSheetSpellTransfer` stores the spell plus the player's resolved
+`sourceFeature` / `sourceClass` / `sourceSubclass` attribution. Cantrips route to
+`cantripsKnown`; leveled spells route to `spellsKnown`; Wizard-attributed leveled
+spells receive spellbook ownership. Intentionally unattributed additions omit
+all three provenance fields. The shared transfer core supplies stable IDs,
+rollback, retry, and live `BroadcastChannel` notification. A closed sheet
+consumes the queue on its next load; a live sheet applies, re-renders spell
+lists/stats, saves, and only then acknowledges.
+
+Exact-duplicate metadata merges preserve spell ownership atomically:
+`sourceFeature`, `sourceClass`, and `sourceSubclass` are one provenance tuple. If
+the stored spell has any ownership attribution, that tuple wins unchanged. The
+incoming tuple is adopted only for a truly unattributed spell; moving a spell
+between owners requires a separate explicit reattribution action.
 
 ---
 
@@ -495,6 +527,26 @@ _addSpell → pickAddedSpellAttribution` so the new spell is stamped with the
 correct `sourceClass`/`sourceFeature`. The primary card keeps the legacy
 `#charsheet-spell-ability/-dc/-attack` ids; all cards carry the
 `.charsheet__spell-ability/-dc/-attack` classes.
+
+The Add-Spell modal receives the full source/edition-eligible spell pool.
+Class/subclass filtering happens only at render time through
+`CharacterSheetClassUtils.spellMatchesPickerClassFilter`; do not pre-restrict
+the candidate pool. Filter defaults are rebuilt for every modal open. Object
+and legacy string subclasses produce the same readable `"Class: Subclass"`
+key, and a TGTT Gambler defaults to the Warlock class list while retaining
+`"Rogue: Gambler"` as its subclass key. Selecting **All Classes** can therefore
+still broaden a Gambler picker to the full pool.
+
+Prepare controls and green prepared-row styling use the same per-spell owner
+resolution. A leveled spell gets those preparation affordances only when its
+`sourceClass`/`sourceSubclass` resolves to a class whose spellcasting model is
+`prepared`. Known-caster rows (Bard, Ranger, Sorcerer, Warlock), incorrectly
+flagged legacy rows, and unattributed rows do not turn green. Multiclass rows
+are evaluated independently by attribution. Always-prepared feature grants
+retain their amber badge and locked controls instead of receiving the green
+prepared-row treatment. The Gambler remains a rolled prepared caster only for
+spells explicitly attributed to `Gambler`; a raw Warlock-list attribution does
+not gain Gambler preparation controls or green styling.
 
 ### Cast-time routing
 

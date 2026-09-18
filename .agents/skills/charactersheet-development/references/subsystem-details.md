@@ -448,6 +448,21 @@ uses its own ability via `getSpellcastingAbilityForClass` /
 badges (mechanic kept backend-only for enforcement). See
 `docs/charactersheet/07-spellcasting.md` → "Per-Class Spell Tracking (Multiclass)".
 
+**Spells-page transfer.** `CharacterSheetSpellTransfer` is the spell adapter over
+the shared `CharacterSheetEntityTransfer` queue. It persists the raw spell plus
+the player's chosen provenance, then applies through `state.addSpell()` so level
+0 entries route to `cantripsKnown`, leveled entries route to `spellsKnown`, and
+exact `name|source` duplicates merge. Eligibility, class-list membership, and
+known/prepared/cantrip caps are warning-only. Transfer failures restore the state
+snapshot and remain pending; successful live/load consumption renders and saves
+before acknowledgement.
+
+Duplicate merges treat `sourceFeature` / `sourceClass` / `sourceSubclass` as one
+ownership tuple. An attributed stored spell keeps its complete tuple; an incoming
+tuple is adopted only when the stored spell has no ownership attribution at all.
+Changing ownership is an explicit reattribution operation, never a side effect of
+adding the same spell again.
+
 ### Innate Spells
 ```javascript
 {

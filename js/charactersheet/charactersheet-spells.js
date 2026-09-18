@@ -580,6 +580,25 @@ class CharacterSheetSpells {
 		});
 	}
 
+	/**
+	 * Build the class/subclass filter defaults for a fresh Add Spell modal.
+	 * Returns new arrays on every call so closing/reopening a picker cannot retain
+	 * mutated filter state. Gambler uses the Warlock spell list while retaining
+	 * its real Rogue subclass key for expanded-list matching/display.
+	 *
+	 * @returns {{characterClasses:Array<*>, characterClassNames:string[], characterSubclassNames:string[]}}
+	 */
+	_getPickerCharacterFilterDefaults () {
+		const characterClasses = this._state.getClasses?.() || [];
+		const characterClassNames = characterClasses.map(c =>
+			this._state._isGamblerClassEntry?.(c) ? "Warlock" : c.name,
+		);
+		const characterSubclassNames = characterClasses
+			.filter(c => c.subclass && (c.subclass.name || typeof c.subclass === "string"))
+			.map(c => `${c.name}: ${typeof c.subclass === "string" ? c.subclass : c.subclass.name}`);
+		return {characterClasses, characterClassNames, characterSubclassNames};
+	}
+
 	_getMaxSpellLevel (classInfo, characterLevel) {
 		// Gambler is a TGTT Rogue subclass, not a reusable name-only caster
 		// progression. Reject same-named entries before honoring persisted
@@ -828,23 +847,9 @@ class CharacterSheetSpells {
 			}
 		});
 
-		// Get character's classes and subclasses for default filtering
-		const characterClasses = this._state.getClasses();
-		// Map class names, substituting the spell list class for Gambler (Rogue→Warlock)
-		const characterClassNames = characterClasses.map(c => {
-			if (this._state._isGamblerClassEntry?.(c)) return "Warlock";
-			return c.name;
-		});
-		// Phase 9 (Bug 7.1 follow-up): `c.subclass` is an object (`{name, source, ...}`),
-		// so the previous `${c.subclass}` coerced to `"[object Object]"` and produced
-		// keys like `"Sorcerer: [object Object]"`. That never matched the picker's
-		// `${className}: ${subclass.name}` keys, so the character's actual subclass
-		// was never auto-checked and any spell only granted via that subclass list
-		// (e.g. Guidance for Divine Soul, Gift of Alacrity for Chronurgy) was hidden
-		// behind a "No Expanded Lists" default.
-		const characterSubclassNames = characterClasses
-			.filter(c => c.subclass && (c.subclass.name || typeof c.subclass === "string"))
-			.map(c => `${c.name}: ${typeof c.subclass === "string" ? c.subclass : c.subclass.name}`);
+		// Fresh per-open defaults prevent stale modal state. The helper also owns
+		// primitive-vs-object subclass keys and Gambler's Rogue→Warlock substitution.
+		const {characterClassNames, characterSubclassNames} = this._getPickerCharacterFilterDefaults();
 
 		// Sort class names - character classes first, then alphabetically
 		const sortedClassNames = [...allSpellClasses].sort((a, b) => {
@@ -8167,6 +8172,10 @@ class CharacterSheetSpells {
 		return this._state._getClassSpellcastingInfo?.(owner)?.type || null;
 	}
 
+	_ownerManagesPreparation (spell) {
+		return this._resolveOwnerSpellcastingType(spell) === "prepared";
+	}
+
 	/**
 	 * Decide whether the per-spell "Prepare" toggle should render. Only prepared casters get
 	 * to prepare/unprepare; known casters (Bard/Ranger/Sorcerer/Warlock, EK/AT) do not, even
@@ -8178,16 +8187,27 @@ class CharacterSheetSpells {
 	 */
 	_shouldShowPrepareToggle (spell) {
 		if (spell.level === 0 || spell.alwaysPrepared) return false;
-		const ownerType = this._resolveOwnerSpellcastingType(spell);
-		if (ownerType === "known") return false;
-		if (ownerType === "prepared") return true;
-		// Unknown owner: rescue legacy prepared spells (feat/item/race/orphan attribution).
-		return spell.prepared === true || spell.sourceFeature === "Prepared Spells";
+		return this._ownerManagesPreparation(spell);
+	}
+
+	/**
+	 * Green prepared-row styling follows the same class-aware rule as the
+	 * Prepare toggle. Raw persisted flags are insufficient: known-caster and
+	 * unresolved rows may carry legacy `prepared` values, and feature-granted
+	 * always-prepared spells keep their amber locked treatment instead.
+	 *
+	 * @param {*} spell
+	 * @returns {boolean}
+	 */
+	_shouldStyleSpellAsPrepared (spell) {
+		if (!spell?.prepared || spell.alwaysPrepared || spell.level === 0) return false;
+		return this._ownerManagesPreparation(spell);
 	}
 
 	_renderSpellItem (spell, showPrepareHint = false) {
 		const schoolFull = spell.school ? Parser.spSchoolAbvToFull(spell.school) : "";
 		const isPrepared = spell.prepared;
+		const isPreparedStyle = this._shouldStyleSpellAsPrepared(spell);
 		const isCantrip = spell.level === 0;
 		const isAlwaysPrepared = spell.alwaysPrepared;
 		const sourceFeature = spell.sourceFeature;
@@ -8357,7 +8377,7 @@ class CharacterSheetSpells {
 		}
 
 		const el = e_({outer: `
-			<div class="charsheet__spell-item ${isPrepared || isAlwaysPrepared ? "prepared" : ""} ${isAlwaysPrepared ? "always-prepared" : ""}" data-spell-id="${spellId}">
+			<div class="charsheet__spell-item ${isPreparedStyle ? "prepared" : ""} ${isAlwaysPrepared ? "always-prepared" : ""}" data-spell-id="${spellId}">
 				<div class="charsheet__spell-item-main">
 					<div class="charsheet__spell-item-header">
 						<span class="charsheet__spell-item-name">${spellLink}</span>

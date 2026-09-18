@@ -1,25 +1,26 @@
 /**
  * Phase 9 — Bug 7.1 follow-up regression test.
  *
- * Verifies that when the playmode "Add Spell" modal builds its default
- * subclass filter selection, the character's subclass NAME (not its
- * stringified object) is used as the key, so the player's actual subclass
- * is auto-checked and subclass-only spells (Guidance via Divine Soul,
- * Gift of Alacrity via Chronurgy, etc.) are visible by default.
- *
- * Mirrors the `characterSubclassNames` derivation from
- * `js/charactersheet/charactersheet-spells.js::_pShowSpellPickerModal`.
+ * Drives the production default-filter helper used by every Add Spell modal
+ * open. This pins the primitive-vs-object subclass key fix and the Gambler's
+ * Rogue → Warlock spell-list substitution across repeated modal opens.
  */
 
-describe("Phase 9: spell picker default subclass selection (Bug 7.1)", () => {
-	function deriveCharacterSubclassNames (characterClasses) {
-		return characterClasses
-			.filter(c => c.subclass && (c.subclass.name || typeof c.subclass === "string"))
-			.map(c => `${c.name}: ${typeof c.subclass === "string" ? c.subclass : c.subclass.name}`);
-	}
+import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 
-	function buildKey (className, subclassName) {
-		return `${className}: ${subclassName}`;
+const CharacterSheetSpells = globalThis.CharacterSheetSpells;
+
+describe("Phase 9: spell picker default subclass selection (Bug 7.1)", () => {
+	function makeSpells (classes, {isGambler = () => false} = {}) {
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = {
+			getClasses: () => classes,
+			_isGamblerClassEntry: isGambler,
+		};
+		return spells;
 	}
 
 	test("Divine Soul Sorcerer derives 'Sorcerer: Divine Soul' (not '[object Object]')", () => {
@@ -32,7 +33,7 @@ describe("Phase 9: spell picker default subclass selection (Bug 7.1)", () => {
 			},
 		];
 
-		const characterSubclassNames = deriveCharacterSubclassNames(classes);
+		const {characterSubclassNames} = makeSpells(classes)._getPickerCharacterFilterDefaults();
 
 		expect(characterSubclassNames).toEqual(["Sorcerer: Divine Soul"]);
 		expect(characterSubclassNames[0]).not.toContain("[object Object]");
@@ -48,25 +49,12 @@ describe("Phase 9: spell picker default subclass selection (Bug 7.1)", () => {
 			},
 		];
 
-		expect(deriveCharacterSubclassNames(classes)).toEqual(["Wizard: Chronurgy Magic"]);
-	});
-
-	test("Derived key matches the picker's per-spell subclass key format", () => {
-		const classes = [
-			{name: "Sorcerer", source: "TGTT", level: 1, subclass: {name: "Divine Soul", source: "XGE"}},
-		];
-
-		const characterSubclassNames = deriveCharacterSubclassNames(classes);
-
-		// This is the key format the picker builds from spell.classes.fromSubclass entries.
-		const spellSideKey = buildKey("Sorcerer", "Divine Soul");
-
-		expect(characterSubclassNames).toContain(spellSideKey);
+		expect(makeSpells(classes)._getPickerCharacterFilterDefaults().characterSubclassNames).toEqual(["Wizard: Chronurgy Magic"]);
 	});
 
 	test("Character with no subclass yields empty list (gracefully)", () => {
 		const classes = [{name: "Sorcerer", source: "TGTT", level: 1, subclass: null}];
-		expect(deriveCharacterSubclassNames(classes)).toEqual([]);
+		expect(makeSpells(classes)._getPickerCharacterFilterDefaults().characterSubclassNames).toEqual([]);
 	});
 
 	test("Multiclass character lists each class's subclass", () => {
@@ -75,7 +63,7 @@ describe("Phase 9: spell picker default subclass selection (Bug 7.1)", () => {
 			{name: "Wizard", source: "TGTT", level: 2, subclass: {name: "Chronurgy Magic", source: "EGW"}},
 		];
 
-		expect(deriveCharacterSubclassNames(classes)).toEqual([
+		expect(makeSpells(classes)._getPickerCharacterFilterDefaults().characterSubclassNames).toEqual([
 			"Sorcerer: Divine Soul",
 			"Wizard: Chronurgy Magic",
 		]);
@@ -85,6 +73,29 @@ describe("Phase 9: spell picker default subclass selection (Bug 7.1)", () => {
 		// Some very-old saves may have stored subclass as a string. The helper
 		// must not crash and should still produce a parseable key.
 		const classes = [{name: "Sorcerer", source: "TGTT", level: 1, subclass: "Divine Soul"}];
-		expect(deriveCharacterSubclassNames(classes)).toEqual(["Sorcerer: Divine Soul"]);
+		expect(makeSpells(classes)._getPickerCharacterFilterDefaults().characterSubclassNames).toEqual(["Sorcerer: Divine Soul"]);
+	});
+
+	test("Gambler defaults to the Warlock class list and a readable Rogue subclass key on every open", () => {
+		const gambler = {
+			name: "Rogue",
+			source: "TGTT",
+			level: 5,
+			subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+		};
+		const spells = makeSpells([gambler], {isGambler: cls => cls === gambler});
+
+		const firstOpen = spells._getPickerCharacterFilterDefaults();
+		expect(firstOpen.characterClassNames).toEqual(["Warlock"]);
+		expect(firstOpen.characterSubclassNames).toEqual(["Rogue: Gambler"]);
+
+		// Modal filter state is per-open. Mutating one returned snapshot must not
+		// leak a stale/default selection into a later open.
+		firstOpen.characterClassNames.push("Wizard");
+		firstOpen.characterSubclassNames[0] = "[object Object]";
+
+		const secondOpen = spells._getPickerCharacterFilterDefaults();
+		expect(secondOpen.characterClassNames).toEqual(["Warlock"]);
+		expect(secondOpen.characterSubclassNames).toEqual(["Rogue: Gambler"]);
 	});
 });
