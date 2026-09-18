@@ -2350,6 +2350,7 @@ export class HubCampaignPage {
 				}
 			}
 			await expect.poll(isRetryProposalObserved, {timeout: 15_000}).toBe(true);
+			await expect(this.page.locator("#campaign-transfer-form")).not.toHaveAttribute("aria-busy", "true", {timeout: 15_000});
 			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
 			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
 			expect(proposalAttempts).toBe(2);
@@ -2388,6 +2389,7 @@ export class HubCampaignPage {
 		let transferPostCount = 0;
 		let failedRefreshCount = 0;
 		let shouldFailRefresh = true;
+		const activeTransferRoutes = new Set<Promise<void>>();
 		const failRefresh = (route: Route) => {
 			if (!shouldFailRefresh) return route.continue();
 			failedRefreshCount++;
@@ -2397,13 +2399,21 @@ export class HubCampaignPage {
 				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
 			});
 		};
-		const observeTransfer = async (route: Route) => {
-			if (route.request().method() === "POST") await this.page.route(partyMatcher, failRefresh);
-			const response = await route.fetch();
-			if (route.request().method() === "POST" && response.ok()) {
-				transferPostCount++;
-			}
-			await route.fulfill({response});
+		const observeTransfer = (route: Route) => {
+			const activeRoute = (async () => {
+				if (route.request().method() === "POST") await this.page.route(partyMatcher, failRefresh);
+				const response = await route.fetch();
+				if (route.request().method() === "POST" && response.ok()) {
+					transferPostCount++;
+				}
+				await route.fulfill({response});
+			})();
+			activeTransferRoutes.add(activeRoute);
+			void activeRoute.then(
+				() => activeTransferRoutes.delete(activeRoute),
+				() => activeTransferRoutes.delete(activeRoute),
+			);
+			return activeRoute;
 		};
 		await this.page.route(transferMatcher, observeTransfer);
 		try {
@@ -2420,6 +2430,7 @@ export class HubCampaignPage {
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
 		} finally {
 			await this.page.unroute(transferMatcher, observeTransfer).catch(() => undefined);
+			await Promise.allSettled([...activeTransferRoutes]);
 			await this.page.unroute(partyMatcher, failRefresh).catch(() => undefined);
 		}
 
