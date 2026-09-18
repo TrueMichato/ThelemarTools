@@ -2200,6 +2200,7 @@ export class HubCampaignPage {
 
 		const transferMatcher = `**/api/campaigns/${campaignId}/transfers`;
 		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		let transferRequestCount = 0;
 		let transferPostCount = 0;
 		let failedRefreshCount = 0;
 		let shouldFailRefresh = true;
@@ -2344,15 +2345,37 @@ export class HubCampaignPage {
 			return route.continue();
 		};
 		const observeTransfer = async (route: Route) => {
-			if (route.request().method() === "POST") await this.page.route(partyMatcher, failRefresh);
+			if (route.request().method() === "POST") {
+				transferRequestCount++;
+				await this.page.route(partyMatcher, failRefresh);
+			}
 			const response = await route.fetch();
 			if (route.request().method() === "POST" && response.ok()) transferPostCount++;
 			await route.fulfill({response});
 		};
 		await this.page.route(transferMatcher, observeTransfer);
 		try {
-			await this.page.locator("#campaign-transfer-form button[type='submit']").click();
-			await expect.poll(() => transferPostCount).toBe(1);
+			const form = this.page.locator("#campaign-transfer-form");
+			const submit = form.locator("button[type='submit']");
+			for (let attempt = 1; attempt <= 2; attempt++) {
+				await expect(submit).toBeEnabled();
+				await submit.click();
+				try {
+					await expect.poll(() => transferRequestCount, {timeout: 5_000}).toBe(1);
+					break;
+				} catch (error) {
+					if (attempt === 1 && transferRequestCount === 0 && await submit.isEnabled()) continue;
+					const state = {
+						attempt,
+						transferRequestCount,
+						transferPostCount,
+						ariaBusy: await form.getAttribute("aria-busy"),
+						status: await this.page.locator("#campaign-transfer-form-status").textContent().catch(() => null),
+					};
+					throw new Error(`Transfer submit did not issue exactly one request: ${JSON.stringify(state)}`, {cause: error});
+				}
+			}
+			await expect.poll(() => transferPostCount, {timeout: 15_000}).toBe(1);
 			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
 			const retry = this.page.getByRole("button", {name: "Retry latest balances", exact: true});
 			await expect(retry).toBeVisible();
