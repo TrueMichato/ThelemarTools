@@ -40,39 +40,44 @@ export class HubCharacterSheetPartyInventoryPage {
 		name: string;
 	}): Promise<void> {
 		const matcher = `**/api/campaigns/${campaignId}/party-inventory`;
-		const handler = (route: Route) => route.fulfill({
-				status: 503,
-				contentType: "application/json",
-				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
-			});
-		await this.page.route(matcher, handler);
-		await this.hub.openCharacterSheet({campaignId, characterId, name});
-		await this.openInventoryTab();
-		const root = this.root();
-		await expect(root).toBeVisible();
-		await expect(root.getByRole("alert")).toContainText("could not be loaded");
-		await this.page.unroute(matcher, handler);
-		const retryDelay = async (route: Route): Promise<void> => {
+		let failedRefreshRequests = 0;
+		let manualRetryRequests = 0;
+		const handler = async (route: Route): Promise<void> => {
+			const isManualRetry = await this.root()
+				.getByText("Retrying party stash sync...", {exact: true})
+				.isVisible()
+				.catch(() => false);
+			if (!isManualRetry) {
+				failedRefreshRequests++;
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+				});
+				return;
+			}
+			manualRetryRequests++;
 			await new Promise(resolve => setTimeout(resolve, 200));
 			await route.continue();
 		};
-		await this.page.route(matcher, retryDelay, {times: 1});
-		let partyRefreshRequests = 0;
-		const onRefreshRequest = (request: Request) => {
-			if (new URL(request.url()).pathname.endsWith("/party-inventory")) partyRefreshRequests++;
-		};
-		this.page.on("request", onRefreshRequest);
+		await this.page.route(matcher, handler);
 		try {
+			await this.hub.openCharacterSheet({campaignId, characterId, name});
+			await this.openInventoryTab();
+			const root = this.root();
+			await expect(root).toBeVisible();
+			await expect(root.getByRole("alert")).toContainText("could not be loaded");
+			expect(failedRefreshRequests, "The initial party-stash refresh must fail before Retry is exercised.").toBeGreaterThan(0);
 			await root.getByRole("button", {name: "Retry", exact: true}).click();
 			await expect(root.getByRole("button", {name: "Refreshing..."})).toBeDisabled();
 			await expect(root).toContainText("Retrying party stash sync...");
 			await expect(root).toContainText("Party stash refreshed.");
-			expect(partyRefreshRequests).toBeGreaterThan(0);
+			expect(manualRetryRequests, "Only the refresh initiated by the real Retry click may succeed.").toBe(1);
+			await expect(root).toContainText("Nothing is stored here yet.");
+			await expect(root.getByRole("alert")).toHaveCount(0);
 		} finally {
-			this.page.off("request", onRefreshRequest);
+			await this.page.unroute(matcher, handler);
 		}
-		await expect(root).toContainText("Nothing is stored here yet.");
-		await expect(root.getByRole("alert")).toHaveCount(0);
 	}
 
 	async openOwnedCharacter ({
