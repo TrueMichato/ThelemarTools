@@ -349,7 +349,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender");
 		expect(source).toContain("if (!signIn) return;");
 		expect(source).toContain("_pSignedOutProvidersRender = null");
-		expect(source).toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*setHidden\(document\.getElementById\("hub-signed-in"\), true\);[\s\S]*setHidden\(document\.getElementById\("hub-signed-out"\), false\);[\s\S]*void pRenderSignedOutProviders\(\)\.catch\(error => renderError\(error\)\)/);
+		expect(source).toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*setHidden\(document\.getElementById\("hub-signed-in"\), false\);[\s\S]*setHidden\(signedOut, false\);[\s\S]*void pRenderSignedOutProviders\(\)\.catch\(error => renderError\(error\)\)/);
 		expect(source).not.toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*\/auth\/github\/start/);
 		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
 		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
@@ -358,7 +358,10 @@ describe("campaign hub pages", () => {
 		expect(source).toMatch(/isProjectionInvalidation[\s\S]*concealCampaignProjectionAuthorization\(\)/);
 		expect(source).toMatch(/pRefreshLiveViews = async \(\) => \{[\s\S]*fillCharacterSelect\([\s\S]*"campaign-action-target"[\s\S]*setFormAvailability\(\{[\s\S]*formId: "campaign-action-form"/);
 		expect(source).toContain("const handleCampaignAuthorizationError = error =>");
-		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{[\s\S]*concealCampaignAuthorization\(\);[\s\S]*stopCampaignLiveUpdates\(\);[\s\S]*showSignedOutAfterSessionExpiry\(\);[\s\S]*renderError\(error, \{isAuthorizationHandled: true\}\);[\s\S]*return true;\s*\}\s*concealCampaignAuthorization\(\);\s*stopCampaignLiveUpdates\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);/);
+		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{\s*stopCampaignLiveUpdates\(\);\s*showSignedOutAfterSessionExpiry\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);\s*return true;\s*\}\s*concealCampaignAuthorization\(\);\s*stopCampaignLiveUpdates\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);/);
+		const sessionExpiryBranch = source.match(/if \(error.code === "AUTH_REQUIRED"\) \{([\s\S]*?)\n\t\t\}/)?.[1];
+		expect(sessionExpiryBranch).toBeDefined();
+		expect(sessionExpiryBranch).not.toContain("concealCampaignAuthorization()");
 		expect(source.match(/showSignedOutAfterSessionExpiry\(\)/g)).toHaveLength(1);
 		expect(source).toContain("isPreserveSelection: true");
 		expect(source).toContain("let isTargetSelectionInitialized = false");

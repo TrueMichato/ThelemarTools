@@ -85,8 +85,13 @@ async function pRenderSignedOutProviders () {
 }
 
 function showSignedOutAfterSessionExpiry () {
-	setHidden(document.getElementById("hub-signed-in"), true);
-	setHidden(document.getElementById("hub-signed-out"), false);
+	setHidden(document.getElementById("hub-signed-in"), false);
+	const signedOut = document.getElementById("hub-signed-out");
+	setHidden(signedOut, false);
+	const title = signedOut?.querySelector(".hub-state__title");
+	const description = signedOut?.querySelector(".hub-state__description");
+	if (title) title.textContent = "Session expired";
+	if (description) description.textContent = "Sign in again to reconnect. Your last loaded campaign remains available read only.";
 	void pRenderSignedOutProviders().catch(error => renderError(error));
 }
 
@@ -1588,7 +1593,6 @@ async function pInitCampaign ({session}) {
 		if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND"].includes(error.code)) return false;
 		isCampaignReloadRequired = true;
 		if (error.code === "AUTH_REQUIRED") {
-			concealCampaignAuthorization();
 			stopCampaignLiveUpdates();
 			showSignedOutAfterSessionExpiry();
 			renderError(error, {isAuthorizationHandled: true});

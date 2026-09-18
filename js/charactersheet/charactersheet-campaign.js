@@ -1,4 +1,4 @@
-import {HubApiClient, HubApiError} from "../hub/hub-api-client.js";
+import {HubApiClient, HubApiError, isMutationOutcomeUncertain} from "../hub/hub-api-client.js";
 import {getCampaignContentPolicy, getCharacterCampaignContentCompliance} from "../hub/hub-content-policy.js";
 import {CharacterSheetSharing} from "./charactersheet-sharing.js";
 import {CharacterSheetState} from "./charactersheet-state.js";
@@ -688,17 +688,23 @@ export class CharacterSheetCampaign {
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();
+		let isCloneRequestSubmitted = false;
 		try {
 			if (!await this._page._saveCurrentCharacter({isInteractiveConflict: false})) throw new Error("CLOUD_SAVE_FAILED");
 			if (!isCurrentCharacter()) return;
-			const target = await this._api.pGetCampaignCompatibility({campaignId});
-			if (!isCurrentCharacter()) return;
-			const result = await this._api.pCloneCharacter({
-				characterId,
-				campaignId,
-				rulesVersionId: target.rulesVersion?.id || null,
-				idempotencyKey: command.idempotencyKey,
-			});
+			let request = this._getCloneCommandRequest({command, characterId, campaignId});
+			if (!request) {
+				const target = await this._api.pGetCampaignCompatibility({campaignId});
+				if (!isCurrentCharacter()) return;
+				request = this._stageCloneCommandRequest({
+					command,
+					characterId,
+					campaignId,
+					rulesVersionId: target.rulesVersion?.id || null,
+				});
+			}
+			isCloneRequestSubmitted = true;
+			const result = await this._api.pCloneCharacter(request);
 			this._markCloneCommandCommitted({characterId, campaignId, character: result.character});
 			if (!isCurrentCharacter()) return;
 			this._feedback = {type: "success", text: "Cloud copy created. This campaign character is unchanged."};
@@ -706,6 +712,11 @@ export class CharacterSheetCampaign {
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
 			this._clearCloneCommand({characterId, campaignId});
 		} catch (error) {
+			if (
+				isCloneRequestSubmitted
+				&& error?.code !== "IDEMPOTENCY_KEY_REUSED"
+				&& !isMutationOutcomeUncertain(error)
+			) this._clearCloneCommand({characterId, campaignId});
 			if (!isCurrentCharacter()) return;
 			this._feedback = {
 				type: "error",
@@ -763,6 +774,45 @@ export class CharacterSheetCampaign {
 		return registry[key];
 	}
 
+	_getCloneCommandRequest ({command, characterId, campaignId}) {
+		if (command.request == null) return null;
+		const request = command.request;
+		const isValid = request
+			&& typeof request === "object"
+			&& !Array.isArray(request)
+			&& request.characterId === characterId
+			&& request.campaignId === campaignId
+			&& request.idempotencyKey === command.idempotencyKey
+			&& (request.rulesVersionId === null || typeof request.rulesVersionId === "string");
+		if (!isValid) throw new Error("Saved cloud-copy recovery data is invalid.");
+		return {
+			characterId,
+			campaignId,
+			rulesVersionId: request.rulesVersionId,
+			idempotencyKey: command.idempotencyKey,
+		};
+	}
+
+	_stageCloneCommandRequest ({command, characterId, campaignId, rulesVersionId}) {
+		const request = {
+			characterId,
+			campaignId,
+			rulesVersionId,
+			idempotencyKey: command.idempotencyKey,
+		};
+		command.request = request;
+		const registry = this._getCloneCommandRegistry();
+		if (!registry) return request;
+		const key = this._getCloneCommandKey({characterId, campaignId});
+		const storedCommand = registry[key];
+		if (!storedCommand || storedCommand.idempotencyKey !== command.idempotencyKey) {
+			throw new Error("Saved cloud-copy recovery data is invalid.");
+		}
+		registry[key] = {...storedCommand, request};
+		this._persistCloneCommandRegistry(registry);
+		return request;
+	}
+
 	_markCloneCommandCommitted ({characterId, campaignId, character}) {
 		const registry = this._getCloneCommandRegistry();
 		if (!registry) return;
@@ -778,7 +828,14 @@ export class CharacterSheetCampaign {
 
 	_clearCloneCommand ({characterId, campaignId}) {
 		const registry = this._getCloneCommandRegistry();
-		if (!registry) return;
+		if (!registry) {
+			if (
+				this._pendingCommand?.kind === "clone-cloud"
+				&& this._pendingCommand.characterId === characterId
+				&& this._pendingCommand.campaignId === campaignId
+			) this._pendingCommand = null;
+			return;
+		}
 		delete registry[this._getCloneCommandKey({characterId, campaignId})];
 		this._persistCloneCommandRegistry(registry);
 	}

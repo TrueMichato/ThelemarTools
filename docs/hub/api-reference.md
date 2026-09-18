@@ -149,10 +149,15 @@ Only the token hash is persisted. The raw token is returned only from creation.
 | `POST /api/characters/:characterId/lease/release` | Owner mutation; current protocol 5 required | Exact `{leaseEpoch, expiresAt}` returned by acquisition/renewal | `{released}`; protocol 3/4 clients receive `426 PROTOCOL_UPDATE_REQUIRED` before body validation |
 | `PATCH /api/characters/:characterId` | Owner mutation + held lease | `baseRevision`, `leaseEpoch`, up to 500 add/remove/replace patches; optional closed `spell.used` activity descriptor | Canonical character or revision/lease conflict |
 | `DELETE /api/characters/:characterId` | Owner mutation | none | Soft archive; blocks outgoing reserved transfer |
-| `POST /api/characters/:characterId/clone` | Owner + target non-spectator membership | `{campaignId}` | Independent character with new id |
+| `POST /api/characters/:characterId/clone` | Owner + target non-spectator membership | `{campaignId, rulesVersionId}` + `Idempotency-Key` | Independent character with new id |
 | `POST /api/characters/:characterId/move` | Owner + target non-spectator membership | `{campaignId}` | Same character moved; active lease/outgoing escrow blocks |
 
 Character data is sanitized/validated and capped at 1.5 MB after the resulting mutation.
+Before submitting a cloud clone, the Character Sheet persists the exact destination campaign, rules pin, and
+idempotency key. An outcome-uncertain retry replays that frozen request even if campaign rules changed while the
+response was missing. A definite non-committing rejection discards the frozen request so the next attempt reads
+current compatibility and uses a new key; an idempotency-key collision remains blocked rather than risking a
+duplicate clone.
 
 `dm_truth` authorizes inspection, not document editing. The Character Sheet preserves that discriminator,
 renders the sheet read-only before accepting input, and does not initialize owner-only leases, sharing policy,

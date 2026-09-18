@@ -475,6 +475,61 @@ describe("Character Sheet campaign control", () => {
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
 	});
 
+	it("replays the exact cloud clone request after an outcome-uncertain response", async () => {
+		const pendingCommandStorage = makeStorage();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pGetCampaignCompatibility.mockResolvedValue({
+			campaignId: "campaign-2",
+			rulesVersion: {id: "rules-original"},
+		});
+		control._api.pCloneCharacter.mockRejectedValue(new HubApiError({code: "REQUEST_FAILED", status: 503}));
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		const originalRequest = control._api.pCloneCharacter.mock.calls[0][0];
+		const {control: fresh, page: freshPage} = getControl({
+			pendingCommandStorage,
+			createResult: {character: {id: "clone-1"}},
+		});
+		freshPage._currentCharacterId = "cloud-source";
+		fresh._api.pGetCampaignCompatibility.mockResolvedValue({
+			campaignId: "campaign-2",
+			rulesVersion: {id: "rules-replacement"},
+		});
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(fresh._api.pGetCampaignCompatibility).not.toHaveBeenCalled();
+		expect(fresh._api.pCloneCharacter).toHaveBeenCalledWith(originalRequest);
+		expect(fresh._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
+	});
+
+	it("starts a new cloud clone command after a definite rejection", async () => {
+		const {control, page} = getControl({createResult: {character: {id: "clone-1"}}});
+		page._currentCharacterId = "cloud-source";
+		control._api.pGetCampaignCompatibility
+			.mockResolvedValueOnce({
+				campaignId: "campaign-2",
+				rulesVersion: {id: "rules-original"},
+			})
+			.mockResolvedValueOnce({
+				campaignId: "campaign-2",
+				rulesVersion: {id: "rules-replacement"},
+			});
+		control._api.pCloneCharacter
+			.mockRejectedValueOnce(new HubApiError({code: "RULES_VERSION_STALE", status: 409}))
+			.mockResolvedValueOnce({character: {id: "clone-1"}});
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		const [first, second] = control._api.pCloneCharacter.mock.calls.map(([request]) => request);
+		expect(first.rulesVersionId).toBe("rules-original");
+		expect(second.rulesVersionId).toBe("rules-replacement");
+		expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+	});
+
 	it("does not continue a cloud clone after its compatibility request becomes stale", async () => {
 		const compatibility = makeDeferred();
 		const {control, page} = getControl({createResult: {character: {id: "clone-1"}}});

@@ -116,5 +116,10 @@ test("session expiry offers only currently available sign-in providers", async (
 	await expect(signInGroup.getByRole("link", {name: "Sign in with Discord"})).toBeVisible();
 	await expect(signInGroup.getByRole("link", {name: "Sign in with Google"})).toBeVisible();
 	await expect(page.getByText("One sign-in provider is temporarily unavailable.")).toBeVisible();
-	await expect(page.locator("#hub-signed-in")).toBeHidden();
+	await expect(page.locator("#hub-signed-in")).toBeVisible();
+	await expect(page.locator("#campaign-content")).toBeVisible();
+	await expect(page.locator("#campaign-name")).toHaveText("Provider Expiry Recovery");
+	await expect(page.locator("#campaign-connection-status")).toHaveText("Signed out · data is read only");
+	await expect(page.locator("#campaign-invite-form button[type='submit']")).toBeDisabled();
+	await expect(page.locator("#hub-logout")).toBeEnabled();
 });
