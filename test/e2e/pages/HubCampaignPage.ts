@@ -2021,7 +2021,7 @@ export class HubCampaignPage {
 			await submit.click();
 			await expect(form).toHaveAttribute("aria-busy", "true");
 			await expect(submit).toBeDisabled();
-			await expect(submit).toHaveText("Awarding items...");
+			await expect(submit).toHaveText("Retry previous award");
 			await expect(search).toBeDisabled();
 			releaseSuccess();
 			await expect(status)
