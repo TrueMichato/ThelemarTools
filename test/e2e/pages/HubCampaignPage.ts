@@ -2182,10 +2182,19 @@ export class HubCampaignPage {
 
 	async expectSessionRevokedWhileOpen ({characterName}: {characterName: string}): Promise<void> {
 		await expect(this.page.locator("#hub-error")).toContainText("session has expired");
-		await expect(this.page.locator("#campaign-content")).toBeHidden();
-		await expect(this.page.locator("#campaign-content")).toHaveAttribute("aria-hidden", "true");
-		await expect(this.page.locator("#campaign-content")).toBeEmpty();
-		await expect(this.page.locator("body")).not.toContainText(characterName);
+		await expect(this.page.locator("#campaign-content")).toBeVisible();
+		await expect(this.page.locator("#campaign-connection-status")).toHaveText("Signed out · data is read only");
+		await expect(this.page.locator("#campaign-content")).toContainText(characterName);
+		const mutationControls = this.page.locator(
+			"#campaign-content button:not(#hub-logout), "
+			+ "#campaign-content input, "
+			+ "#campaign-content select, "
+			+ "#campaign-content textarea",
+		);
+		await expect.poll(
+			() => mutationControls.evaluateAll(controls => controls.every(control => (control as HTMLButtonElement).disabled)),
+		).toBe(true);
+		await expect(this.page.locator("#hub-logout")).toBeEnabled();
 		await expect(this.page.getByRole("group", {name: "Sign-in providers"})).toBeVisible();
 		const signIn = this.page.getByRole("link", {name: "Sign in with GitHub"});
 		await expect(signIn).toBeVisible();
