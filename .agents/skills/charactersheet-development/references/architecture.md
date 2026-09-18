@@ -533,7 +533,9 @@ the captured owner character ID/load generation/document generation/access scope
 successful authoritative same-character adoption advances the document generation, so a staged workflow that
 overlapped a realtime effect, resync, or canonical reconciliation cancels rather than replacing newer live truth
 with its older whole-document snapshot. Advancing that generation also tears down character-scoped modals and
-portals immediately; invalidating a scope without removing its interaction guard would strand a dead overlay.
+portals that opt into document-invalidation teardown immediately; invalidating a guarded full-screen workflow
+such as Quick Build without removing it would strand a dead overlay, while unrelated save-owned UI must not be
+destroyed by its own canonical response.
 Only one staged cast transaction may run at a time, so sibling casts cannot commit independent snapshots from the
 same starting document. Related costs must be applied to
 the staged state before its JSON is captured, so one adopted snapshot contains the complete mutation. Once that

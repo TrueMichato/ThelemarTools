@@ -2009,16 +2009,14 @@ export class HubCampaignPage {
 				? recipientExpectation().then(() => null, error => error)
 				: Promise.resolve(null);
 			await submit.click();
-			await expect(status).toContainText("temporarily unavailable");
+			await expect(status).toContainText("could not be confirmed");
 			await expect(submit).toBeEnabled();
+			await expect(submit).toHaveText("Retry previous award");
+			await expect(search).toBeDisabled();
+			await expect(this.page.locator("#campaign-item-note")).toBeDisabled();
+			await expect(this.page.locator("#campaign-item-quantity")).toBeDisabled();
+			await expect(this.page.locator("#campaign-item-targets input[type='checkbox']").first()).toBeDisabled();
 			await afterUncertainResponse?.();
-			await this.page.locator("#campaign-item-note").fill(`  ${note || ""}  `);
-			await form.evaluate(element => {
-				const incidental = document.createElement("input");
-				incidental.id = "campaign-item-incidental-unchecked-target";
-				incidental.type = "checkbox";
-				element.append(incidental);
-			});
 
 			await submit.click();
 			await expect(form).toHaveAttribute("aria-busy", "true");

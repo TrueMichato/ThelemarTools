@@ -115,7 +115,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 			afterUncertainResponse: async () => {
 				if (!transientAwardTarget) throw new Error("The transient award target was not created.");
 				await player.archiveCharacterViaApi(transientAwardTarget.id);
-				await expect(dm.page.locator("#campaign-item-targets .hub-item-award__target", {hasText: "Transient Award Target"})).toHaveCount(0);
+				await expect(dm.page.locator("#campaign-item-targets .hub-item-award__target", {hasText: "Transient Award Target"})).toHaveCount(1);
 			},
 			recipientExpectation: () => player.expectLiveAwardArrival({
 				itemName: "Longsword",

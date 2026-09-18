@@ -262,6 +262,7 @@ class CharacterSheetModal {
 		scope = null,
 		cleanup = null,
 		isRequireOwner = true,
+		isCloseOnDocumentInvalidation = false,
 	} = {}) {
 		if (!element) throw new Error("Character-scoped portal registration requires an element.");
 		const characterScope = scope || CharacterSheetModal._getCharacterScopeSnapshot(sheet);
@@ -271,6 +272,7 @@ class CharacterSheetModal {
 			element,
 			cleanup,
 			isRequireOwner,
+			isCloseOnDocumentInvalidation,
 			isClosed: false,
 			isCharacterScopeTeardown: false,
 			onGuardedEvent: null,
@@ -300,6 +302,20 @@ class CharacterSheetModal {
 				),
 			close: () => CharacterSheetModal._closeCharacterScopePortal(portalMeta),
 		};
+	}
+
+	static closeDocumentInvalidatedCharacterScopePortals ({sheet} = {}) {
+		for (const portalMeta of [...CharacterSheetModal._openCharacterScopePortals]) {
+			if (
+				!portalMeta.isCloseOnDocumentInvalidation
+				|| portalMeta.sheet !== sheet
+				|| CharacterSheetModal._isCharacterScopeSnapshotCurrent(
+					portalMeta.characterScope,
+					{sheet: portalMeta.sheet, isRequireOwner: portalMeta.isRequireOwner},
+				)
+			) continue;
+			CharacterSheetModal._closeCharacterScopePortal(portalMeta, {isCharacterScopeTeardown: true});
+		}
 	}
 
 	static _closeCharacterScopePortal (portalMeta, {isCharacterScopeTeardown = false} = {}) {

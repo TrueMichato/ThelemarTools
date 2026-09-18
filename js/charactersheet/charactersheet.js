@@ -79,10 +79,7 @@ const _getHubComparableCharacterDocument = ({document, repairItems, pristineItem
 };
 const _advanceCharacterDocumentGeneration = page => {
 	page._characterDocumentGeneration = (page._characterDocumentGeneration || 0) + 1;
-	void CharacterSheetModal.closeCharacterScopeModals().catch(error => {
-		// eslint-disable-next-line no-console
-		console.error("Failed to close stale character-scoped UI:", error);
-	});
+	CharacterSheetModal.closeDocumentInvalidatedCharacterScopePortals({sheet: page});
 };
 
 /**

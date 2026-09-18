@@ -1062,15 +1062,18 @@ describe("Applicable maximum through live reconciliation", () => {
 		expect(host._characterDocumentGeneration).toBe(5);
 	});
 
-	it("closes character-scoped portals when authoritative live adoption invalidates them", () => {
+	it("closes only document-sensitive character portals when authoritative live adoption invalidates them", () => {
 		CharacterSheetModal._resetForTests();
 		const state = new CharacterSheetState();
-		const element = {
+		const makeElement = () => ({
 			addEventListener: jest.fn(),
 			removeEventListener: jest.fn(),
 			remove: jest.fn(),
-		};
+		});
+		const documentSensitiveElement = makeElement();
+		const ordinaryElement = makeElement();
 		const cleanup = jest.fn();
+		const ordinaryCleanup = jest.fn();
 		const host = {
 			_state: state,
 			_currentCharacterId: "character-1",
@@ -1079,12 +1082,24 @@ describe("Applicable maximum through live reconciliation", () => {
 			_currentCharacterAccess: "owner",
 			_reconcileClassFeatures: jest.fn(),
 		};
-		CharacterSheetModal.registerCharacterScopePortal({sheet: host, element, cleanup});
+		CharacterSheetModal.registerCharacterScopePortal({
+			sheet: host,
+			element: documentSensitiveElement,
+			cleanup,
+			isCloseOnDocumentInvalidation: true,
+		});
+		CharacterSheetModal.registerCharacterScopePortal({
+			sheet: host,
+			element: ordinaryElement,
+			cleanup: ordinaryCleanup,
+		});
 
 		CharacterSheetPage.prototype._adoptHubLiveCharacterData.call(host, state.toJson());
 
-		expect(element.remove).toHaveBeenCalledTimes(1);
+		expect(documentSensitiveElement.remove).toHaveBeenCalledTimes(1);
 		expect(cleanup).toHaveBeenCalledWith({isCharacterScopeTeardown: true});
+		expect(ordinaryElement.remove).not.toHaveBeenCalled();
+		expect(ordinaryCleanup).not.toHaveBeenCalled();
 		CharacterSheetModal._resetForTests();
 	});
 });

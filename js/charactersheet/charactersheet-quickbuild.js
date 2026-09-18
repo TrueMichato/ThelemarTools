@@ -886,6 +886,7 @@ class CharacterSheetQuickBuild {
 			sheet: this._page,
 			scope: characterScope,
 			element: overlay,
+			isCloseOnDocumentInvalidation: true,
 			cleanup: () => {
 				document.removeEventListener("keydown", escapeHandler);
 				if (this._scopePortal !== portal) return;
