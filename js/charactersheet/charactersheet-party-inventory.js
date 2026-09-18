@@ -302,6 +302,10 @@ export class CharacterSheetPartyInventory {
 		return this._pActivate(active);
 	}
 
+	isAttachedTo ({characterId}) {
+		return !!this._active && this._active.characterId === characterId;
+	}
+
 	async _pActivate (active) {
 		if (!this._isCurrent(active)) return false;
 		if (active.activationPromise) {
@@ -733,6 +737,11 @@ export class CharacterSheetPartyInventory {
 		const active = this._active;
 		if (!this._isCurrent(active) || !active?.isOwner) return Promise.resolve(false);
 		this._manualRefreshPromise = (async () => {
+			const pendingRefresh = this._refreshPromise?.active === active
+				? this._refreshPromise.promise
+				: null;
+			if (pendingRefresh) await pendingRefresh;
+			if (!this._isCurrent(active) || !active.isOwner) return false;
 			if (errorSource === "reconcile") this._reconcileError = null;
 			else if (errorSource === "party") this._partyError = null;
 			else if (errorSource === "action") this._error = null;

@@ -401,7 +401,7 @@ describe("picker select-mode — source guard (charactersheet.js)", () => {
 		const src = fs.readFileSync(path.join(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
 		// The select-mode branch must exist and return before the default add path.
 		expect(src).toMatch(/onSelectCreature\s*=\s*null/);
-		expect(src).toMatch(/if\s*\(typeof onSelectCreature === "function"\)\s*\{\s*\n\s*onSelectCreature\(selectedCreature\);\s*\n\s*return;/);
+		expect(src).toMatch(/if\s*\(typeof onSelectCreature === "function"\)\s*\{\s*\n\s*if\s*\(!isCurrentOwnerScope\(\)\)\s*return;\s*\n\s*onSelectCreature\(selectedCreature\);\s*\n\s*return;/);
 		// The default path still calls addCompanionFromBestiary positionally.
 		expect(src).toMatch(/addCompanionFromBestiary\?\.\(selectedCreature, type, origin\)/);
 	});

@@ -289,7 +289,7 @@ export function evaluateCampaignRules (input = {}) {
 		return blocked({surface, personalSettings, rulesVersion: normalizedRulesVersion, code: "RULES_CATALOG_UNSUPPORTED"});
 	}
 	if (schemaVersion === CAMPAIGN_RULES_POLICY_SCHEMA_VERSION) {
-		if (Number(input.protocolVersion) !== CAMPAIGN_RULE_PROTOCOL_VERSION) {
+		if (!isCampaignRuleProtocolVersion(input.protocolVersion)) {
 			return blocked({surface, personalSettings, rulesVersion, code: "RULES_PROTOCOL_UNSUPPORTED"});
 		}
 		if (!Array.isArray(input.capabilities) || !input.capabilities.includes(CAMPAIGN_RULES_POLICY_CAPABILITY)) {
@@ -423,4 +423,7 @@ export function getCampaignSettingsOverlayFromRulesVersion (rulesVersion) {
 		surface: "characterOpen",
 	});
 	return getCampaignSettingsOverlay(legacyDecision);
+}
+export function isCampaignRuleProtocolVersion (protocolVersion) {
+	return [CAMPAIGN_RULE_PROTOCOL_VERSION, 5].includes(Number(protocolVersion));
 }

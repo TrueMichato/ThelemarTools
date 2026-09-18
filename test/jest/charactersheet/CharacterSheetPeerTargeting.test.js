@@ -55,6 +55,7 @@ describe("Character Sheet peer targeting", () => {
 	let controller;
 	let capability;
 	let characterId;
+	let isOwner;
 	let rulesVersionId;
 	let refreshCampaignContext;
 
@@ -80,6 +81,7 @@ describe("Character Sheet peer targeting", () => {
 		};
 		capability = {...CAPABILITY, resourceKinds: [...CAPABILITY.resourceKinds]};
 		characterId = "source-character";
+		isOwner = true;
 		rulesVersionId = "rules-version-1";
 		refreshCampaignContext = jest.fn(async () => true);
 		fnPickTarget = jest.fn(async ({targets}) => ({kind: "target", targetRef: targets.find(target => !target.isSelf).targetRef}));
@@ -89,6 +91,7 @@ describe("Character Sheet peer targeting", () => {
 			api,
 			root,
 			fnGetCharacterId: () => characterId,
+			fnIsOwner: () => isOwner,
 			fnGetRulesVersionId: () => rulesVersionId,
 			fnGetCapability: () => capability,
 			fnRefreshCampaignContext: refreshCampaignContext,
@@ -174,6 +177,36 @@ describe("Character Sheet peer targeting", () => {
 			sourceCostState: "pending",
 			canCancel: true,
 		});
+	});
+
+	it("settles an awaited target picker when character-scope teardown wins modal creation", async () => {
+		const pGetShowOriginal = globalThis.CharacterSheetModal.pGetShow;
+		let modalOptions;
+		let resolveModal;
+		globalThis.CharacterSheetModal.pGetShow = jest.fn(options => {
+			modalOptions = options;
+			return new Promise(resolve => { resolveModal = resolve; });
+		});
+
+		try {
+			const pending = controller._pPickTarget({
+				spell: {name: "Cure Wounds"},
+				slotLevel: 1,
+				targets: [{name: "Bram", targetRef: "opaque-target", isSelf: false}],
+			});
+			await Promise.resolve();
+			modalOptions.cbCharacterScopeTeardown();
+
+			await expect(pending).resolves.toEqual({kind: "cancel"});
+
+			resolveModal({
+				eleModalInner: globalThis.e_({tag: "div"}),
+				doClose: jest.fn(),
+			});
+			await pFlush();
+		} finally {
+			globalThis.CharacterSheetModal.pGetShow = pGetShowOriginal;
+		}
 	});
 
 	it("routes self-target through the same approval proposal", async () => {
@@ -707,5 +740,20 @@ describe("Character Sheet peer targeting", () => {
 		await pFlush();
 		expect(controller._characterId).toBe("source-character");
 		expect(api.pListCharacterOutgoingActions).toHaveBeenCalledTimes(beforeReconnect + 1);
+	});
+
+	it("cannot reactivate after authority changes to DM read-only", async () => {
+		await pFlush();
+		const readsBeforeAuthorityChange = api.pListCharacterOutgoingActions.mock.calls.length;
+		isOwner = false;
+		controller.deactivate();
+
+		expect(controller.activate({characterId: "source-character"})).toBe(false);
+		controller.onConnectionState({state: "live"});
+		await pFlush();
+
+		expect(controller._characterId).toBeNull();
+		expect(root.hidden).toBe(true);
+		expect(api.pListCharacterOutgoingActions).toHaveBeenCalledTimes(readsBeforeAuthorityChange);
 	});
 });

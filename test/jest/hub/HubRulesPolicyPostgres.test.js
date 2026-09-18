@@ -556,6 +556,72 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 
 	afterAll(async () => pool.end());
 
+	it("matches memory behavior when a stale same-session release races a renewed lease", async () => {
+		const pRun = async (store, prefix) => {
+			const account = await store.pUpsertOAuthAccount({
+				provider: "github",
+				providerSubject: `${prefix}-${crypto.randomUUID()}`,
+				login: `${prefix}-lease-owner`,
+				displayName: "Lease Owner",
+			});
+			const session = await store.pCreateSession({
+				accountId: account.id,
+				tokenHash: crypto.randomBytes(32).toString("hex"),
+				expiresAt: new Date(Date.now() + 180_000),
+			});
+			const created = await store.pCreateCharacter({
+				accountId: account.id,
+				campaignId: null,
+				clientImportId: `${prefix}-lease-character`,
+				schemaVersion: 1,
+				data: {name: "Lease Character"},
+				idempotencyKey: command(`${prefix}-lease-create`),
+			});
+			const first = await store.pAcquireCharacterLease({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				ttlMs: 60_000,
+			});
+			const renewed = await store.pAcquireCharacterLease({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				ttlMs: 120_000,
+			});
+			const staleRelease = await store.pReleaseCharacterLease({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				leaseEpoch: first.epoch,
+				expiresAt: first.expiresAt,
+			});
+			const activeRelease = await store.pReleaseCharacterLease({
+				accountId: account.id,
+				sessionId: session.id,
+				characterId: created.character.id,
+				leaseEpoch: renewed.epoch,
+				expiresAt: renewed.expiresAt,
+			});
+			return {
+				isSameEpoch: first.epoch === renewed.epoch,
+				isRenewed: new Date(renewed.expiresAt) > new Date(first.expiresAt),
+				staleRelease,
+				activeRelease,
+			};
+		};
+
+		const memory = await pRun(new MemoryHubStore(), "memory");
+		const postgres = await pRun(new PostgresHubStore({pool}), "postgres");
+		expect(postgres).toEqual(memory);
+		expect(postgres).toEqual({
+			isSameEpoch: true,
+			isRenewed: true,
+			staleRelease: {released: false},
+			activeRelease: {released: true},
+		});
+	});
+
 	it("matches memory response, compatibility, audit, ordered-event, and outbox behavior exactly", async () => {
 		const memoryStore = new MemoryHubStore();
 		const postgresStore = new PostgresHubStore({pool});
@@ -814,6 +880,8 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			accountId: account.id,
 			sessionId: session.id,
 			characterId: created.character.id,
+			leaseEpoch: lease.epoch,
+			expiresAt: lease.expiresAt.toISOString(),
 		});
 		const cloned = await store.pCloneCharacter({
 			accountId: account.id,
@@ -822,6 +890,20 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			idempotencyKey: command("rules-destination-clone"),
 		});
 		expect(cloned.character.data.carry).toBeUndefined();
+		const cloneInvalidation = await pool.query(`
+			SELECT aggregate_type, campaign_id, event_type, payload, visible_account_ids
+			FROM hub.domain_events
+			WHERE campaign_id = $1 AND event_type = 'character.projection.invalidated'
+			ORDER BY sequence DESC
+			LIMIT 1
+		`, [destination.id]);
+		expect(cloneInvalidation.rows[0]).toEqual(expect.objectContaining({
+			aggregate_type: "campaign",
+			campaign_id: destination.id,
+			event_type: "character.projection.invalidated",
+			payload: {},
+		}));
+		expect(cloneInvalidation.rows[0].visible_account_ids).toContain(account.id);
 		const moved = await store.pMoveCharacter({
 			accountId: account.id,
 			characterId: cloned.character.id,
@@ -829,6 +911,31 @@ describePostgres("Campaign rules policy PostgreSQL parity", () => {
 			idempotencyKey: command("rules-destination-move"),
 		});
 		expect(moved.character.data.carry).toBeUndefined();
+		const moveInvalidations = await pool.query(`
+			SELECT campaign_id, event_type, payload
+			FROM hub.domain_events
+			WHERE campaign_id = ANY($1::uuid[]) AND event_type = 'character.projection.invalidated'
+			ORDER BY sequence DESC
+			LIMIT 2
+		`, [[destination.id, campaign.id]]);
+		expect(moveInvalidations.rows.map(row => row.campaign_id).sort()).toEqual([campaign.id, destination.id].sort());
+		expect(moveInvalidations.rows.every(row => row.event_type === "character.projection.invalidated" && !Object.keys(row.payload).length)).toBe(true);
+		const invalidationsBeforeArchive = await pool.query(`
+			SELECT count(*)::integer AS count
+			FROM hub.domain_events
+			WHERE campaign_id = $1 AND event_type = 'character.projection.invalidated'
+		`, [campaign.id]);
+		await store.pArchiveCharacter({
+			accountId: account.id,
+			characterId: moved.character.id,
+			idempotencyKey: command("rules-destination-archive"),
+		});
+		const invalidationsAfterArchive = await pool.query(`
+			SELECT count(*)::integer AS count
+			FROM hub.domain_events
+			WHERE campaign_id = $1 AND event_type = 'character.projection.invalidated'
+		`, [campaign.id]);
+		expect(invalidationsAfterArchive.rows[0].count).toBe(invalidationsBeforeArchive.rows[0].count + 1);
 	});
 
 	it("serializes concurrent policy-fenced character creates without lock upgrades", async () => {

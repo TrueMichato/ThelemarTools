@@ -14,8 +14,11 @@ function makeElement (className = "") {
 	return {
 		className,
 		children: [],
+		dataset: {},
+		style: {},
 		_handlers: {},
 		classList: {add: jest.fn()},
+		_attributes: new Map(),
 		appendChild (child) {
 			this.children.push(child);
 			child.parentNode = this;
@@ -26,6 +29,12 @@ function makeElement (className = "") {
 		},
 		addEventListener (type, handler) {
 			this._handlers[type] = handler;
+		},
+		setAttribute (name, value) {
+			this._attributes.set(name, `${value}`);
+		},
+		getAttribute (name) {
+			return this._attributes.get(name) ?? null;
 		},
 		remove: jest.fn(),
 	};
@@ -55,6 +64,181 @@ describe("CharacterSheetPlayMode", () => {
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
+	});
+
+	it("reapplies the current character access mode after every late render", () => {
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {_applyCharacterAccessMode: jest.fn()};
+		playMode._elRoot = {};
+		playMode._renderStatusBar = jest.fn();
+		playMode._renderCharacterPanel = jest.fn();
+		playMode._renderActionsHub = jest.fn();
+
+		playMode.render();
+
+		expect(playMode._page._applyCharacterAccessMode).toHaveBeenCalledTimes(1);
+	});
+
+	it("exposes only Export and Print through the read-only Play Mode overflow", () => {
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {
+			_currentCharacterAccess: "dm_readonly",
+			_export: {_showNpcExportDialog: jest.fn()},
+		};
+		playMode._state = {getCompanions: () => []};
+		playMode._showContextMenu = jest.fn();
+		playMode._exportCharacter = jest.fn();
+		const anchor = {getBoundingClientRect: () => ({right: 100, bottom: 40})};
+
+		playMode._openToolsMenu({}, anchor);
+
+		const items = playMode._showContextMenu.mock.calls[0][1];
+		expect(items.map(item => item.label).filter(Boolean)).toEqual(["Export", "Print"]);
+		expect(playMode._showContextMenu.mock.calls[0][2]).toEqual({isReadOnlyAllowed: true});
+	});
+
+	it("blocks play-mode shortcuts and direct custom controls in a read-only DM view", () => {
+		const documentPrevious = globalThis.document;
+		const listeners = {};
+		globalThis.document = {
+			addEventListener: jest.fn((type, listener) => listeners[type] = listener),
+		};
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {_currentCharacterAccess: "dm_readonly"};
+		playMode.toggle = jest.fn();
+		try {
+			playMode._bindKeyboard();
+			const shortcut = {
+				ctrlKey: true,
+				shiftKey: true,
+				key: "P",
+				preventDefault: jest.fn(),
+			};
+			listeners.keydown(shortcut);
+			expect(shortcut.preventDefault).toHaveBeenCalledTimes(1);
+			expect(playMode.toggle).not.toHaveBeenCalled();
+
+			const handler = jest.fn();
+			const control = makeElement();
+			playMode._makeClickable(control, "Mutate", handler);
+			const activation = {
+				key: "Enter",
+				preventDefault: jest.fn(),
+				stopImmediatePropagation: jest.fn(),
+			};
+			control._handlers.keydown(activation);
+			expect(handler).not.toHaveBeenCalled();
+			expect(activation.stopImmediatePropagation).toHaveBeenCalledTimes(1);
+
+			playMode._page._currentCharacterAccess = "owner";
+			listeners.keydown(shortcut);
+			expect(playMode.toggle).toHaveBeenCalledTimes(1);
+			control._handlers.keydown(activation);
+			expect(handler).toHaveBeenCalledTimes(1);
+		} finally {
+			globalThis.document = documentPrevious;
+		}
+	});
+
+	it("does not open mutation context menus in a read-only DM view", () => {
+		const documentPrevious = globalThis.document;
+		globalThis.document = {querySelectorAll: jest.fn(() => [])};
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._page = {_currentCharacterAccess: "dm_readonly"};
+		playMode._ce = jest.fn();
+		try {
+			expect(playMode._showContextMenu({clientX: 0, clientY: 0}, [{label: "Mutate"}])).toBe(false);
+		} finally {
+			globalThis.document = documentPrevious;
+		}
+		expect(playMode._ce).not.toHaveBeenCalled();
+	});
+
+	it("removes character-scoped overlays and restores an active sticky drag on scope change", () => {
+		const documentPrevious = globalThis.document;
+		const overlay = {remove: jest.fn()};
+		const modal = {remove: jest.fn()};
+		const dragged = {style: {left: "55px", top: "70px", zIndex: "9999"}};
+		globalThis.document = {
+			getElementById: jest.fn(() => overlay),
+			querySelectorAll: jest.fn(() => [modal]),
+		};
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._activeStickyDrag = {
+			el: dragged,
+			originalLeft: "10px",
+			originalTop: "20px",
+			originalZIndex: "",
+		};
+		try {
+			playMode.resetCharacterScopeUi();
+		} finally {
+			globalThis.document = documentPrevious;
+		}
+
+		expect(dragged.style).toMatchObject({left: "10px", top: "20px", zIndex: ""});
+		expect(playMode._activeStickyDrag).toBeNull();
+		expect(overlay.remove).toHaveBeenCalledTimes(1);
+		expect(modal.remove).toHaveBeenCalledTimes(1);
+	});
+
+	it("blocks retained Play Mode sticky callbacks after switching owner characters", () => {
+		const documentPrevious = globalThis.document;
+		const listeners = {};
+		const overlay = makeElement("pm-sticky-overlay");
+		overlay.querySelector = jest.fn(() => null);
+		overlay.insertBefore = jest.fn();
+		overlay.getBoundingClientRect = () => ({left: 0, top: 0});
+		globalThis.document = {
+			addEventListener: jest.fn((type, listener) => listeners[type] = listener),
+		};
+		const {elements, playMode} = makePlayModeDomHarness();
+		const scope = {characterId: "character-a", loadGeneration: 1, accessMode: "owner"};
+		playMode._page = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: "owner",
+			_getCharacterScopeSnapshot: jest.fn(() => ({...scope})),
+			_isCharacterScopeSnapshotCurrent: jest.fn(token => token.characterId === playMode._page._currentCharacterId),
+		};
+		playMode._state = {
+			updateStickyNote: jest.fn(),
+			removeStickyNote: jest.fn(),
+		};
+		playMode._logActivity = jest.fn();
+		playMode._setIcon = jest.fn();
+		let renderedNote;
+		try {
+			playMode._renderStickyNote(overlay, {
+				id: "shared-note-id",
+				title: "Old title",
+				content: "Old content",
+				color: "yellow",
+				position: {x: 10, y: 20},
+			});
+			const titleInput = elements.find(element => element.className === "pm-sticky__title-input");
+			const titleBar = elements.find(element => element.className === "pm-sticky__title-bar");
+			renderedNote = elements.find(element => element.className === "pm-sticky");
+			renderedNote.getBoundingClientRect = () => ({left: 10, top: 20});
+
+			playMode._page._currentCharacterId = "character-b";
+			titleInput.value = "Stale overwrite";
+			titleInput._handlers.blur();
+			titleBar._handlers.mousedown({
+				target: titleBar,
+				clientX: 15,
+				clientY: 25,
+				preventDefault: jest.fn(),
+			});
+			listeners.mousemove({clientX: 100, clientY: 120});
+			listeners.mouseup({});
+		} finally {
+			globalThis.document = documentPrevious;
+		}
+
+		expect(playMode._state.updateStickyNote).not.toHaveBeenCalled();
+		expect(renderedNote.style.left).toBe("10px");
+		expect(renderedNote.style.top).toBe("20px");
 	});
 
 	it("persists play-mode cantrips with the same closed spell activity descriptor", () => {

@@ -54,6 +54,7 @@ class CharacterSheetMobile {
 		this._statusModels = null;
 		this._statusSyncQueued = false;
 		this._boundSyncStatus = null;
+		this._isCharacterScopeUiSuspended = false;
 
 		// Bound handlers for cleanup
 		this._boundOnResize = this._onResize.bind(this);
@@ -510,6 +511,11 @@ class CharacterSheetMobile {
 	}
 
 	_onLongPressStart (e) {
+		if (this._page?.isCurrentCharacterReadOnly?.()) {
+			this._cancelLongPress();
+			this._hideContextMenu();
+			return;
+		}
 		const target = e.target.closest(CharacterSheetMobile.LONG_PRESS_SELECTOR);
 		if (!target) return;
 
@@ -584,6 +590,7 @@ class CharacterSheetMobile {
 
 	_showContextMenu (target, touch) {
 		this._hideContextMenu();
+		if (this._page?.isCurrentCharacterReadOnly?.()) return;
 
 		if (!this._elContextMenu) {
 			this._elContextMenu = this._createContextMenu();
@@ -663,6 +670,7 @@ class CharacterSheetMobile {
 			} else {
 				el.addEventListener("click", () => {
 					this._hideContextMenu();
+					if (this._page?.isCurrentCharacterReadOnly?.()) return;
 					item.action();
 				});
 			}
@@ -757,6 +765,7 @@ class CharacterSheetMobile {
 	}
 
 	_getContextMenuItems (target) {
+		if (this._page?.isCurrentCharacterReadOnly?.()) return [];
 		const items = [];
 		// Skill/Save row
 		if (target.matches(".charsheet__skill-row, .charsheet__save-row")) {
@@ -997,6 +1006,24 @@ class CharacterSheetMobile {
 		const mainBtn = this._elFab?.querySelector(".charsheet-mobile__fab-main");
 		mainBtn?.classList.remove("charsheet-mobile__fab--open");
 		this._elFabBackdrop?.classList.remove("charsheet-mobile--visible");
+	}
+
+	resetCharacterScopeUi () {
+		this._isCharacterScopeUiSuspended = true;
+		this._hideContextMenu();
+		this._elContextMenu?.querySelector?.(".charsheet-mobile__context-menu-items")?.replaceChildren();
+		this._closeFab();
+		this._closeTabSheet();
+		this._statusModels = {};
+		const row = this._elStatusStrip?.querySelector(".charsheet-mobile__status-row");
+		if (row) row.innerHTML = "";
+		this._elStatusStrip?.classList.add("charsheet-mobile__status--empty");
+		document.body.classList.remove("charsheet-mobile__has-status");
+	}
+
+	resumeCharacterScopeUi () {
+		this._isCharacterScopeUiSuspended = false;
+		this._syncStatusStrip();
 	}
 
 	_createFab () {
@@ -1615,6 +1642,12 @@ class CharacterSheetMobile {
 		if (!strip) return;
 		const row = strip.querySelector(".charsheet-mobile__status-row");
 		if (!row) return;
+		if (this._isCharacterScopeUiSuspended) {
+			row.innerHTML = "";
+			strip.classList.add("charsheet-mobile__status--empty");
+			document.body.classList.remove("charsheet-mobile__has-status");
+			return;
+		}
 
 		this._statusModels = {};
 		let rendered = 0;

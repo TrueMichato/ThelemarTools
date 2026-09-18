@@ -3,9 +3,63 @@ import {
 	getProjectionName,
 	getProjectionView,
 } from "./hub-character-view.js";
+import {HUB_COMMAND_REPLAY_WINDOW_MS} from "./hub-api-client.js";
 import {getHubItemSummary} from "./hub-item-catalog.js";
 
 const REQUEST_ITEM_FIELDS = Object.freeze(["name", "source", "page", "rarity", "weight", "value", "typeCode", "edition"]);
+
+export function createGenerationFencedCatalogLoader ({pLoadCatalog, campaignBrewContent = null} = {}) {
+	let generation = 0;
+	let catalog = null;
+	let catalogLoad = null;
+	let currentCampaignBrewContent = campaignBrewContent;
+
+	return {
+		getCatalog: () => catalog,
+		getCampaignBrewContent: () => currentCampaignBrewContent,
+		getGeneration: () => generation,
+		async pEnsureCatalog () {
+			if (catalog) return catalog;
+			if (catalogLoad) return catalogLoad;
+			const loadGeneration = generation;
+			const loadContent = currentCampaignBrewContent;
+			const load = Promise.resolve()
+				.then(() => pLoadCatalog(loadContent))
+				.then(loaded => {
+					if (loadGeneration !== generation) return null;
+					catalog = loaded;
+					return catalog;
+				})
+				.catch(error => {
+					if (loadGeneration !== generation) return null;
+					throw error;
+				})
+				.finally(() => {
+					if (catalogLoad === load) catalogLoad = null;
+				});
+			catalogLoad = load;
+			return load;
+		},
+		setCampaignBrewContent (content) {
+			generation++;
+			currentCampaignBrewContent = content;
+			catalog = null;
+			catalogLoad = null;
+		},
+	};
+}
+
+export function createCatalogRenderFence ({getCatalogGeneration}) {
+	let renderGeneration = 0;
+	return {
+		begin () {
+			const currentRenderGeneration = ++renderGeneration;
+			const currentCatalogGeneration = getCatalogGeneration();
+			return () => currentRenderGeneration === renderGeneration
+				&& currentCatalogGeneration === getCatalogGeneration();
+		},
+	};
+}
 
 function getItemUid (item) {
 	return `${item?.name || ""}|${item?.source || ""}`.toLowerCase();
@@ -33,6 +87,20 @@ export function buildRecentAwardItems (events = []) {
 	return [...byUid.values()];
 }
 
+export function buildAwardSuccessEvent ({result, events = []}) {
+	const awarded = result?.source?.item;
+	if (!awarded) return null;
+	return {
+		id: `local-${result.awardId}`,
+		sequence: Math.max(0, ...events.map(event => event.sequence || 0)) + 1,
+		type: "item.granted",
+		payload: {
+			sourceKind: result.source.kind,
+			entry: {item: awarded},
+		},
+	};
+}
+
 export function buildStashAwardItems (partyInventory) {
 	return (Array.isArray(partyInventory?.inventory) ? partyInventory.inventory : [])
 		.map(entry => {
@@ -51,6 +119,25 @@ export function filterAwardItems ({items = [], query = "", isQueryRequired = fal
 	return items
 		.filter(item => !normalizedQuery || item.name.toLowerCase().includes(normalizedQuery) || item.source.toLowerCase().includes(normalizedQuery))
 		.slice(0, limit);
+}
+
+export function getAwardItemSelectionKey (item) {
+	if (!item) return "";
+	if (item.sourceKind === "party_inventory") return `party_inventory:${item.entryId || ""}`;
+	return `${item.sourceKind || "catalog"}:${item.name || ""}|${item.source || ""}`.toLowerCase();
+}
+
+export function resolveAwardItemSelection ({
+	selectionKey = "",
+	selectedOptionItem = null,
+	visibleItems = [],
+	sourceItems = [],
+} = {}) {
+	if (!selectionKey) return null;
+	if (getAwardItemSelectionKey(selectedOptionItem) === selectionKey) return selectedOptionItem;
+	return [...visibleItems, ...sourceItems]
+		.find(item => getAwardItemSelectionKey(item) === selectionKey)
+		|| null;
 }
 
 export function getAwardSourceRequest (selectedItem) {
@@ -93,8 +180,59 @@ export function buildAwardSubmission ({
 	};
 }
 
-export function getAwardCommandFingerprint ({source, targetCharacterIds, quantity, note}) {
-	return JSON.stringify({source, targetCharacterIds, quantity, note});
+export function getAwardCommandFingerprint ({source, targetCharacterIds, quantity, note, rulesVersionId = null}) {
+	return JSON.stringify({source, targetCharacterIds, quantity, note, rulesVersionId});
+}
+
+export function stageAwardMutationDraft ({
+	draft = null,
+	submission,
+	rulesVersionId = null,
+	idempotencyKey = crypto.randomUUID(),
+	fnNow = () => Date.now(),
+	replayWindowMs = HUB_COMMAND_REPLAY_WINDOW_MS,
+} = {}) {
+	if (draft) return draft;
+	const request = structuredClone({...submission, rulesVersionId});
+	return {
+		request,
+		fingerprint: getAwardCommandFingerprint(request),
+		idempotencyKey,
+		replayUntil: fnNow() + replayWindowMs,
+	};
+}
+
+export function getOrStageAwardMutationDraft ({
+	draft = null,
+	fnGetSubmission,
+	rulesVersionId = null,
+	idempotencyKey = undefined,
+	fnNow = undefined,
+	replayWindowMs = undefined,
+} = {}) {
+	if (draft) return draft;
+	return stageAwardMutationDraft({
+		submission: fnGetSubmission(),
+		rulesVersionId,
+		...(idempotencyKey === undefined ? {} : {idempotencyKey}),
+		...(fnNow === undefined ? {} : {fnNow}),
+		...(replayWindowMs === undefined ? {} : {replayWindowMs}),
+	});
+}
+
+export function parseAwardMutationDraft (raw) {
+	let draft;
+	try {
+		draft = typeof raw === "string" ? JSON.parse(raw) : structuredClone(raw);
+	} catch {
+		return null;
+	}
+	if (!draft || typeof draft !== "object" || Array.isArray(draft)) return null;
+	if (!draft.request || typeof draft.request !== "object" || Array.isArray(draft.request)) return null;
+	if (typeof draft.fingerprint !== "string" || draft.fingerprint !== getAwardCommandFingerprint(draft.request)) return null;
+	if (typeof draft.idempotencyKey !== "string" || !draft.idempotencyKey) return null;
+	if (!Number.isSafeInteger(draft.replayUntil) || draft.replayUntil < 1) return null;
+	return draft;
 }
 
 export function buildAwardPreview ({

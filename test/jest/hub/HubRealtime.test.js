@@ -139,6 +139,77 @@ describe("hub realtime", () => {
 		expect(current.sent).toContainEqual(expect.objectContaining({type: "event"}));
 	});
 
+	it("never delivers a protocol-5 campaign-scoped projection invalidation to a protocol-4 socket", async () => {
+		const realtime = new HubRealtime({store: {
+			pGetMembership: async () => ({role: "player"}),
+			pGetSessionById: async () => ({session: {}, account: {}}),
+		}});
+		const legacy = new FakeSocket();
+		const current = new FakeSocket();
+		for (const [socket, protocolVersion] of [[legacy, "4"], [current, "5"]]) {
+			realtime.addConnection({
+				socket,
+				account: {id: protocolVersion, displayName: protocolVersion},
+				session: {id: protocolVersion},
+				membership: {id: protocolVersion, role: "player"},
+				campaignId: "cmp",
+				protocolVersion,
+			});
+			socket.sent.length = 0;
+		}
+		await realtime.pPublishEvent({
+			campaignId: "cmp",
+			aggregateType: "campaign",
+			aggregateId: "cmp",
+			visibility: "explicit_accounts",
+			visibleAccountIds: ["4", "5"],
+			type: "character.projection.invalidated",
+			payload: {},
+		});
+		expect(legacy.closeEvents).toContainEqual({code: 1008, reason: "Protocol update required"});
+		expect(current.sent).toContainEqual(expect.objectContaining({type: "event"}));
+	});
+
+	it("closes a protocol-4 socket instead of replaying a campaign-scoped projection invalidation", async () => {
+		const event = {
+			id: "projection-invalidation",
+			sequence: 1,
+			campaignId: "cmp",
+			aggregateType: "campaign",
+			aggregateId: "cmp",
+			visibility: "explicit_accounts",
+			visibleAccountIds: ["4"],
+			type: "character.projection.invalidated",
+			payload: {},
+		};
+		const realtime = new HubRealtime({store: {
+			pGetSessionById: async () => ({session: {}, account: {}}),
+			pGetMembership: async () => ({role: "player"}),
+			pGetCampaignCursor: async () => ({sequence: 1}),
+			pListVisibleEventPage: async () => ({
+				events: [event],
+				replay: {hasMore: false, scannedThroughSequence: 1},
+			}),
+		}});
+		const socket = new FakeSocket();
+		realtime.addConnection({
+			socket,
+			account: {id: "4", displayName: "4"},
+			session: {id: "4"},
+			membership: {id: "4", role: "player"},
+			campaignId: "cmp",
+			protocolVersion: "4",
+		});
+
+		await realtime._pHandleMessage({
+			connection: realtime._connections.get(socket),
+			raw: JSON.stringify({type: "resync", afterSequence: 0}),
+		});
+
+		expect(socket.closeEvents).toContainEqual({code: 1008, reason: "Protocol update required"});
+		expect(socket.sent).not.toContainEqual(expect.objectContaining({type: "resync_complete"}));
+	});
+
 	it("closes sockets whose session was revoked before publication", async () => {
 		const realtime = new HubRealtime({store: {
 			pGetSessionById: async () => null,
@@ -148,6 +219,40 @@ describe("hub realtime", () => {
 		realtime.addConnection({socket, account: {id: "p", displayName: "P"}, session: {id: "revoked"}, membership: {id: "m", role: "player"}, campaignId: "cmp"});
 		await realtime.pPublishEvent({campaignId: "cmp", visibility: "all_members"});
 		expect(socket.readyState).toBe(3);
+	});
+
+	it("preserves session-versus-membership authority causes during presence revalidation", async () => {
+		const sessions = new Map([
+			["session-member-gone", {id: "session-member-gone"}],
+		]);
+		const memberships = new Map([
+			["session-expired", {role: "player"}],
+		]);
+		const realtime = new HubRealtime({store: {
+			pGetSessionById: async ({sessionId}) => sessions.get(sessionId) || null,
+			pGetMembership: async ({accountId}) => memberships.get(accountId) || null,
+		}});
+		const sessionExpired = new FakeSocket();
+		const membershipRevoked = new FakeSocket();
+		realtime.addConnection({
+			socket: sessionExpired,
+			account: {id: "session-expired", displayName: "Expired"},
+			session: {id: "missing-session"},
+			membership: {id: "m1", role: "player"},
+			campaignId: "cmp",
+		});
+		realtime.addConnection({
+			socket: membershipRevoked,
+			account: {id: "membership-revoked", displayName: "Removed"},
+			session: {id: "session-member-gone"},
+			membership: {id: "m2", role: "player"},
+			campaignId: "cmp",
+		});
+
+		await realtime.pBroadcastPresence({campaignId: "cmp"});
+
+		expect(sessionExpired.closeEvents).toContainEqual({code: 1008, reason: "Session expired"});
+		expect(membershipRevoked.closeEvents).toContainEqual({code: 1008, reason: "Membership revoked"});
 	});
 
 	it("uses a reconnectable close code when a client exceeds the message rate limit", async () => {

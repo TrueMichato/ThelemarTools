@@ -68,7 +68,7 @@ const makeApi = ({character, events = []} = {}) => {
 	const state = {character: structuredClone(character), patches: [], events: structuredClone(events)};
 	return {
 		state,
-		pGetSession: jest.fn(async () => ({signedIn: true})),
+		pGetSession: jest.fn(async () => ({signedIn: true, account: {id: "account-1"}})),
 		pGetCharacter: jest.fn(async () => structuredClone(state.character)),
 		pAcquireCharacterLease: jest.fn(async () => ({epoch: 1})),
 		pPatchCharacter: jest.fn(async ({patches}) => {
@@ -266,6 +266,7 @@ describe("Repository operation reconciliation", () => {
 		// `pGet` stores canonical revision 2 (already damaged) but returns the pre-damage draft as live state.
 		const sessionStorage = makeSessionStorage({
 			[RECOVERY_KEY("character-1")]: JSON.stringify({
+				ownerAccountId: "account-1",
 				version: 1,
 				base: makeCharacterData(),
 				snapshot: makeCharacterData({name: "Draft"}),
@@ -308,6 +309,7 @@ describe("Repository operation reconciliation", () => {
 	it("treats a recovery blob written without coverage metadata as unproven", async () => {
 		const sessionStorage = makeSessionStorage({
 			[RECOVERY_KEY("character-1")]: JSON.stringify({
+				ownerAccountId: "account-1",
 				version: 1,
 				base: makeCharacterData(),
 				snapshot: makeCharacterData({name: "Legacy draft"}),

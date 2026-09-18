@@ -163,6 +163,15 @@ export class CharacterSheetRollHistory {
 		this._renderList();
 	}
 
+	resetCharacterScopeUi () {
+		this._isOpen = false;
+		this._rolls = [];
+		this._unreadCount = 0;
+		this._panelEl?.classList.remove("charsheet__roll-history--open");
+		this._updateBadge();
+		this._renderList();
+	}
+
 	/**
 	 * Toggle the side panel open/closed.
 	 */

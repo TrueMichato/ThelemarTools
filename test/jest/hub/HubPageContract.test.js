@@ -13,6 +13,7 @@ describe("campaign hub pages", () => {
 	const scss = read("scss/hub.scss");
 	const navigation = read("js/navigation.js");
 	const rulesPolicyManager = read("js/hub/hub-rules-policy-manager.js");
+	const hubCampaignPage = read("test/e2e/pages/HubCampaignPage.ts");
 
 	it("exposes signed-out, loading, error, and signed-in states", () => {
 		for (const id of ["hub-loading", "hub-error", "hub-signed-out", "hub-signed-in"]) {
@@ -26,6 +27,18 @@ describe("campaign hub pages", () => {
 		expect(hubHtml).toContain("for=\"hub-campaign-name\"");
 		expect(hubHtml).toContain("id=\"hub-create-submit\"");
 		expect(hubHtml).not.toContain("<dialog");
+	});
+
+	it("waits for both empty and populated campaign-list render states before creating another campaign", () => {
+		expect(hubCampaignPage).toContain("#hub-campaign-list .hub-campaign-row, #hub-campaign-empty:not(.ve-hidden)");
+		expect(hubCampaignPage).not.toContain("#hub-campaign-list .hub-data-row, #hub-campaign-empty:not(.ve-hidden)");
+	});
+
+	it("keeps legacy mutation coverage while releasing leases with the current protocol", () => {
+		expect(hubCampaignPage).toMatch(/private async getMutationHeaders[\s\S]*?"x-hub-protocol-version": "3"/);
+		expect(hubCampaignPage).toMatch(/private async getLeaseReleaseHeaders[\s\S]*?getMutationHeaders\(\)[\s\S]*?"x-hub-protocol-version": "5"/);
+		expect(hubCampaignPage).toMatch(/async releaseCharacterLease[\s\S]*?headers: await this\.getLeaseReleaseHeaders\(\)/);
+		expect(hubCampaignPage).toMatch(/Lease release failed with HTTP \$\{response\.status\(\)\}: \$\{responseBody\}/);
 	});
 
 	it("exposes account/session/deletion and campaign lifecycle controls", () => {
@@ -124,13 +137,19 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("form._hubMutationKey = null");
 		expect(source).toContain("form._hubMutationFingerprint = null");
 		expect(source).toContain("setTransferRefreshFailure");
+		expect(source).toContain("if (!form?.isConnected) return;");
+		expect(source).toContain("form._hubTransferRefreshRecovery");
+		expect(source).toContain("applyTransferRefreshRecoverySuccess");
 		expect(source).toContain("const form = event.currentTarget;");
 		expect(source).toContain("Retry latest balances");
 		expect(source).toContain("Latest balances loaded. You can send another transfer.");
+		expect(source).toContain("retry.dataset.hubProjectionRecoveryControl = \"true\"");
+		expect(source).toContain("concealProjectionFormControl");
 		expect(source).toContain("const latestSelections = readSelections();");
 		expect(source).toContain("selectionsToRestore");
 		expect(source).toContain("if (sourceKind !== \"character\") return false;");
 		expect(source).toContain("Request sent. A DM must approve before anything leaves the party inventory.");
+		expect(source).toMatch(/applyTransferSuccessUi\(\);\s+try \{\s+await pRefreshTransferState\(\{fnIsCurrent\}\);\s+\} catch \{\s+setTransferRefreshFailure\(/);
 		expect(source).not.toContain("Reload the campaign before sending another transfer.");
 		expect(source).not.toContain("event.currentTarget.querySelector(\"button[type='submit']\").disabled = true");
 	});
@@ -153,7 +172,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("const isDefinitiveWithoutPending = error instanceof HubApiError");
 		expect(source).toContain("&& !isTransferOutcomeUncertain(error)");
 		expect(source).toContain("if (isDefinitiveWithoutPending) {");
-		expect(source).toContain("await pRefreshTransferState();");
+		expect(source).toContain("await pRefreshTransferState({fnIsCurrent})");
 		expect(source).toContain("The latest balances could not be loaded.");
 		expect(source).toContain("setTransferProposalControls");
 		expect(source).toContain("form._hubTransferControlStates");
@@ -169,15 +188,46 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("The committed outcome is safe");
 		expect(source).toContain("The transfer outcome is not yet confirmed.");
 		expect(source).toContain("Retry inbox refresh");
+		expect(source).toContain("fnIsCurrentAtAdmission = refresh.fnIsCurrent || captureProjectionAuthorization()");
+		expect(source).toContain("if (!fnIsCurrent() || transferState.isFenced) return {pendingTransferIds: [], isFenced: true}");
+		expect(source).toMatch(/const restoreTransferControlState = \(\) => \{[\s\S]*if \(!fnIsCurrent\(\)\) return false;[\s\S]*delete form\?\._hubProjectionTransferDraft/);
+		expect(source).toContain("button.disabled = isCampaignReloadRequired || !!form._hubProjectionControlStates");
 		expect(source).not.toMatch(/pResolveTransfer\([\s\S]{0,300}idempotencyKey: crypto\.randomUUID\(\)/);
 	});
 
 	it("requires an explicit source identity for condition effects", () => {
 		const source = read("js/hub/hub-page.js");
-		expect(campaignHtml).toContain("id=\"campaign-action-condition-source\"");
-		expect(campaignHtml).toContain("value=\"XPHB\"");
-		expect(source).toContain("arguments: {condition: {name: rawValue, source: conditionSource}}");
+		const topLevelImports = source.slice(0, source.indexOf("const api = new HubApiClient();"));
+		expect(campaignHtml).toContain("id=\"campaign-action-condition\"");
+		expect(campaignHtml).not.toContain("id=\"campaign-action-condition-source\"");
+		expect(topLevelImports).not.toContain("hub-condition-catalog.js");
+		expect(source).toContain("const CONDITION_CATALOG_MODULE_URLS = Object.freeze([");
+		expect(source).toContain("\"./hub-condition-catalog.js?retry=2\"");
+		expect(source).toContain("let conditionCatalogModuleAttemptIndex = 0;");
+		expect(source).toContain("conditionCatalogModule = await import(conditionCatalogModuleUrl);");
+		expect(source).toContain("CONDITION_CATALOG_MODULE_URLS[conditionCatalogModuleAttemptIndex++]");
+		expect(source).toMatch(/conditionCatalogModuleAttemptIndex\s*<\s*CONDITION_CATALOG_MODULE_URLS\.length/);
+		expect(source).toContain("\"module_failed\"");
+		expect(source).toContain("conditionCatalogState = \"module_exhausted\"");
+		expect(source).toContain("conditionCatalogState = \"data_failed\"");
+		expect(source).not.toContain("conditionCatalogState === \"failed\"");
+		expect(source).not.toContain("await pRefreshConditionCatalog({campaignBrewContent: context.brewBundle?.content});");
+		expect(source).toMatch(/if \(isRetryConditionCatalog && \["idle", "module_failed", "data_failed"\]\.includes\(conditionCatalogState\)\) \{\s+void pRefreshConditionCatalog/);
+		expect(source).toContain("pLoadCampaignConditionCatalog");
+		expect(source).toContain("conditionCatalogByUid");
+		expect(source).toContain("getCurrentTargetConditions");
+		expect(source).toContain("event.type === \"brew.activated\"");
+		expect(source).toContain("pRefreshContextBoundControls");
 		expect(source).not.toContain("source: \"PHB\"");
+	});
+
+	it("labels another member's canonical sheet as DM inspection rather than editing", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("function renderCharacterList ({campaignId, characters, session, isDm})");
+		expect(source).toContain("const isReadOnlyDm = isDm && character.ownerAccountId !== session.account.id");
+		expect(source).toContain("Open this character in a read-only DM view");
+		expect(source).toContain("\"Inspect sheet\" : \"Open sheet\"");
+		expect(source).toContain("document.createElement(canOpen ? \"a\" : \"summary\")");
 	});
 
 	it("keeps loaded campaign data visible while offline and requires a refresh after reconnecting", () => {
@@ -223,7 +273,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("characterSetup.href = hasCharacterChoices ? \"#campaign-character-list\" : \"#campaign-upload-local\"");
 		expect(source).toContain("setHidden(characterSetup, campaign.status !== \"active\" || campaign.role !== \"player\" || playerCharacters.length === 1)");
 		expect(source).toContain("setHidden(readonlyPrimary, !isSpectator && campaign.status === \"active\")");
-		expect(source).toContain("renderCharacterList({campaignId, characters: charactersNxt});");
+		expect(source).toContain("characters: charactersNxt,\n\t\t\t\tsession,\n\t\t\t\tisDm: [\"dm\", \"co_dm\"].includes(campaign.role)");
 		expect(source).toContain("applyCampaignRoleLayout({campaign, characters: charactersNxt});");
 		for (const id of [
 			"campaign-open-primary-character",
@@ -270,22 +320,53 @@ describe("campaign hub pages", () => {
 		// invalidation is coalesced into an authorization-scoped HTTP refetch.
 		expect(source).not.toContain("event.payload?.character");
 		expect(source).not.toContain("character.projection.updated");
-		expect(source).toContain("const reloadForAuthorityChange = () =>");
+		expect(source).toMatch(/const reloadForAuthorityChange = createCampaignAuthorityChangeHandler\(\{[\s\S]*fnConcealAuthorization: concealCampaignAuthorization,[\s\S]*fnStopLiveUpdates: stopCampaignLiveUpdates,[\s\S]*fnReload: \(\) => window\.location\.reload\(\),[\s\S]*\}\)/);
+		expect(source).toMatch(/realtime\.on\("event", event =>[\s\S]*reloadForAuthorityChange\(\)/);
+		expect(source).toMatch(/realtime\.on\("cursor", baseline =>[\s\S]*reloadForAuthorityChange\(\)/);
 		expect(source).toContain("let activityAuthorizationGeneration = 0");
+		expect(source).toContain("getProjectionAuthorizationGeneration: () => projectionAuthorizationGeneration");
+		expect(source).toContain("const captureProjectionAuthorization = () =>");
+		expect(source).toContain("let projectionSnapshotLastSequence = snapshot.lastSequence;");
+		expect(source).toContain("baselineSequence: projectionSnapshotLastSequence");
+		expect(source).toContain("const deferMutationUi = ({form, fnApply}) =>");
+		expect(source).toContain("requestProjectionRefresh()");
+		expect(source).toMatch(/else if \(isProjectionRefreshSuccessful && refreshTimer == null\) \{\s+flushDeferredMutationUi\(\)/);
+		expect(source).toContain("const isProjectionInvalidationCoveredByBaseline = isProjectionInvalidation");
+		expect(source).toContain("if (isProjectionInvalidationCoveredByBaseline) return;");
 		expect(source).toContain("let isActivityAuthorizationFenced = false");
 		expect(source).toContain("const invalidateActivityAuthorization = () =>");
+		expect(source).toContain("const concealCampaignAuthorization = ({isLoading = false} = {}) =>");
+		expect(source).toContain("const concealCampaignProjectionAuthorization = () =>");
+		expect(source).toMatch(/const concealCampaignAuthorization = \(\{isLoading = false\} = \{\}\) => \{[\s\S]*liveRoster = \[\];[\s\S]*concealCampaignAuthorizationSurfaces\(\)/);
+		expect(source).toMatch(/function concealCampaignAuthorizationSurfaces \(\) \{[\s\S]*content\.replaceChildren\(\);[\s\S]*content\.classList\.add\("ve-hidden"\);[\s\S]*content\.setAttribute\("aria-hidden", "true"\)/);
 		expect(source).toContain("const concealActivityAuthorization = ({isLoading = false} = {}) =>");
 		expect(source).toMatch(/const concealActivityAuthorization = \(\{isLoading = false\} = \{\}\) => \{[\s\S]*liveEvents = \[\];[\s\S]*liveMembers = \[\];[\s\S]*renderRecentActivity\(\{[\s\S]*events: \[\],[\s\S]*isLoading,[\s\S]*isAuthorizationFenced: true/);
 		expect(source).toContain("isActivityAuthorizationFenced = true");
 		expect(source).toContain("isActivityAuthorizationFenced = false");
 		expect(source).toContain("isActivityAuthorizationFenced ? [] : liveEvents");
-		expect(source).toContain("[\"AUTH_REQUIRED\", \"FORBIDDEN\", \"CAMPAIGN_NOT_FOUND\"]");
+		expect(source).toContain("[\"AUTH_REQUIRED\", \"FORBIDDEN\", \"CAMPAIGN_NOT_FOUND\", \"MEMBERSHIP_NOT_FOUND\"]");
+		expect(source).toMatch(/async function pRenderSignedOutProviders \(\) \{[\s\S]*import\("\.\/hub-auth-providers\.js"\)[\s\S]*pRenderHubAuthProviders\(\{signIn, returnTo\}\)/);
+		expect(source).toContain("if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender");
+		expect(source).toContain("if (!signIn) return;");
+		expect(source).toContain("_pSignedOutProvidersRender = null");
+		expect(source).toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*setHidden\(document\.getElementById\("hub-signed-in"\), false\);[\s\S]*setHidden\(signedOut, false\);[\s\S]*void pRenderSignedOutProviders\(\)\.catch\(error => renderError\(error\)\)/);
+		expect(source).not.toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*\/auth\/github\/start/);
 		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
 		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
 		expect(source).toContain("const isProjectionInvalidation = event.type === \"character.projection.invalidated\"");
-		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
-		expect(source).toMatch(/onAuthorizationError:[\s\S]*concealActivityAuthorization\(\)/);
-		expect(source).toMatch(/state === "access_lost"[\s\S]*concealActivityAuthorization\(\)/);
+		expect(source).toContain("if (!targetCharacterId) throw new Error(\"Choose a target character.\")");
+		expect(source).toMatch(/isProjectionInvalidation[\s\S]*concealCampaignProjectionAuthorization\(\)/);
+		expect(source).toMatch(/pRefreshLiveViews = async \(\) => \{[\s\S]*fillCharacterSelect\([\s\S]*"campaign-action-target"[\s\S]*setFormAvailability\(\{[\s\S]*formId: "campaign-action-form"/);
+		expect(source).toContain("const handleCampaignAuthorizationError = error =>");
+		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{\s*stopCampaignLiveUpdates\(\);\s*showSignedOutAfterSessionExpiry\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);\s*return true;\s*\}\s*concealCampaignAuthorization\(\);\s*stopCampaignLiveUpdates\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);/);
+		const sessionExpiryBranch = source.match(/if \(error.code === "AUTH_REQUIRED"\) \{([\s\S]*?)\n\t\t\}/)?.[1];
+		expect(sessionExpiryBranch).toBeDefined();
+		expect(sessionExpiryBranch).not.toContain("concealCampaignAuthorization()");
+		expect(source.match(/showSignedOutAfterSessionExpiry\(\)/g)).toHaveLength(1);
+		expect(source).toContain("isPreserveSelection: true");
+		expect(source).toContain("let isTargetSelectionInitialized = false");
+		expect(source).toMatch(/state === "access_lost"[\s\S]*handleCampaignAuthorizationError\(/);
+		expect(source).toMatch(/onAuthorizationError:[\s\S]*handleCampaignAuthorizationError\(error\)/);
 		expect(source).toContain("concealActivityAuthorization({isLoading: true})");
 		expect(source).toMatch(/const \[membersNxt, charactersNxt, snapshotNxt, activityRefresh\] = await Promise\.all[\s\S]*if \(isCampaignReloadRequired\) return;/);
 		expect(activitySource).toContain("requestAuthorizationGeneration === getAuthorizationGeneration()");
@@ -512,8 +593,29 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("import(\"./hub-item-catalog.js\")");
 		expect(source).toContain("ownerAccountId: session.account.id");
 		expect(source).toContain("itemAward.setCampaignBrewContent");
+		expect(source).toMatch(/sourceKind\.value === "campaign_item" \|\| selectedItem\?\.sourceKind === "campaign_item"/);
 		expect(source).toContain("api.pAwardItems");
-		expect(source).toContain("fingerprint: getAwardCommandFingerprint(submission)");
+		expect(source).toContain("getOrStageAwardMutationDraft");
+		expect(source).toContain("form._hubAwardMutationDraft");
+		expect(source).toContain("sessionStorage.setItem");
+		expect(source).toContain("pFindAwardEventByCommandId");
+		expect(source).toContain("actorCommandId: awardDraft.idempotencyKey");
+		expect(source).toContain("fnGetSubmission: () => itemAward.getSubmission()");
+		expect(source).toContain("isMutationOutcomeUncertain");
+		expect(source).toContain("Retry previous award");
+		expect(source).toMatch(/isAwardRetryRequired = isMutationOutcomeUncertain\(error\)/);
+		expect(source).toMatch(/itemAward\.setPending\(isAwardRetryRequired, \{isRetry: isAwardRetryRequired\}\)/);
+		expect(source).toMatch(/if \(isRetry\) submit\.disabled = false;\s+applyPendingControlState\(\)/);
+		expect(source).toMatch(/if \(!result\) return;\s+itemAward\.setPending\(true\);\s+clearAwardDraftState\(\)/);
+		expect(source).toMatch(/setTargets \(nextTargets\) \{\s+if \(isRetryPending\) return;/);
+		expect(source).toContain("form._hubItemAwardRetryPending = isRetryPending");
+		expect(source).toMatch(/isItemAwardRetryPending[\s\S]*\? \[\] : \["campaign-item-targets", "campaign-item-preview-list"\]/);
+		expect(source).toContain("form._hubProjectionControlRestores.add(restorePendingControlStates)");
+		expect(source).toMatch(/delete form\._hubProjectionControlRestores;\s+for \(const fnRestore of deferredControlRestores\) fnRestore\(\)/);
+		expect(source).toMatch(/const deferAwardCompletionUi = \(\{isApplySuccessUi = false\} = \{\}\) => \{[\s\S]*if \(isApplySuccessUi\) applyAwardSuccessUi\(\);[\s\S]*itemAward\.focusPrimary\(\)/);
+		expect(source).toMatch(/if \(!fnIsCurrent\(\)\) \{\s+deferAwardCompletionUi\(\{isApplySuccessUi: true\}\);\s+return;\s+\}\s+applyAwardSuccessUi\(\)/);
+		expect(source).toContain("if (!fnIsCurrent() || refreshResult?.isFenced) {");
+		expect(source).toContain("deferAwardCompletionUi();");
 		expect(source).toContain(".sort(([idA], [idB]) => idA.localeCompare(idB))");
 		expect(source).toContain("getTransferContentsDescription(transfer)");
 		expect(campaignHtml).not.toContain("Item entry ID");
@@ -532,6 +634,15 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("import(\"./hub-local-character-adapter.js\")");
 		expect(source).not.toContain("globalThis.StorageUtil");
 		expect(source).not.toContain("globalThis.InputUiUtil");
+	});
+
+	it("uses the latest campaign context for long-lived mutation forms", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toMatch(/async function pInitCampaignForms \(\{[\s\S]*\}\) \{[\s\S]*let currentContext = context;/);
+		expect(source).toMatch(/const pRefreshContextBoundControls = async \(\{context: contextNxt\}\) => \{\s*currentContext = contextNxt;/);
+		expect(source).toMatch(/pCreateCharacter\(\{[\s\S]*rulesVersionId: currentContext\.rulesVersion\?\.id \|\| null/);
+		expect(source).toMatch(/getOrStageAwardMutationDraft\(\{[\s\S]*rulesVersionId: currentContext\.rulesVersion\?\.id \|\| null/);
+		expect(source).toMatch(/const contextNxt = await api\.pGetCampaignContext\(\{campaignId\}\);\s*renderCampaignContext\(contextNxt\);\s*await pRefreshContextBoundControls\(\{context: contextNxt\}\)/);
 	});
 
 	it("preserves the complete hub URL through signed-out OAuth", () => {

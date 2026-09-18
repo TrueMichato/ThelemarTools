@@ -38,15 +38,23 @@ import {CharacterSheetDruidResources} from "./charactersheet-druid-resources.js"
 import {CharacterSheetIoun} from "./charactersheet-ioun.js";
 import {CharacterSheetSpawnSpec, CharacterSheetSpawnRng} from "./charactersheet-spawn.js";
 import {CharacterSheetSpawner} from "./charactersheet-spawn-drivers.js";
-import {CharacterSheetCampaign, getCloudCharacterUrl} from "./charactersheet-campaign.js";
+import {
+	CharacterSheetCampaign,
+	getCloudCharacterUrl,
+	isTerminalCharacterCampaignAccessError,
+} from "./charactersheet-campaign.js";
 import {LocalCharacterRepository} from "../hub/hub-character-repository.js";
 import {HubHttpCharacterRepository} from "../hub/hub-http-character-repository.js";
 import {HubActiveCampaignCoordinator} from "../hub/hub-active-campaign-coordinator.js";
 import {HubApiClient} from "../hub/hub-api-client.js";
+import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 import {HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT} from "../hub/hub-capabilities.js";
 import {getCampaignSurfaceDefaultUrl} from "../hub/hub-surface-defaults.js";
 import {HubRollLogAdapter} from "../hub/hub-roll-log-adapter.js";
-import {CharacterSheetRealtimeCoordinator} from "./charactersheet-realtime.js";
+import {
+	CHARACTER_REALTIME_ACCESS_END_CAUSES,
+	CharacterSheetRealtimeCoordinator,
+} from "./charactersheet-realtime.js";
 import {CharacterSheetHubEffects} from "./charactersheet-hub-effects.js";
 import {CharacterSheetPeerTargeting} from "./charactersheet-peer-targeting.js";
 import {CharacterSheetPartyInventory} from "./charactersheet-party-inventory.js";
@@ -68,6 +76,10 @@ const _getHubComparableCharacterDocument = ({document, repairItems, pristineItem
 	});
 	if (out && typeof out === "object" && !Array.isArray(out)) delete out.carry;
 	return out;
+};
+const _advanceCharacterDocumentGeneration = page => {
+	page._characterDocumentGeneration = (page._characterDocumentGeneration || 0) + 1;
+	CharacterSheetModal.closeDocumentInvalidatedCharacterScopePortals({sheet: page});
 };
 
 /**
@@ -117,7 +129,12 @@ class CharacterSheetPage {
 		this._fnCreateRealtimeCoordinator = fnCreateRealtimeCoordinator;
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
+		this._characterDocumentGeneration = 0;
 		this._hubRealtimeGeneration = 0;
+		this._hubReadOnlyRefreshGeneration = 0;
+		this._hubReadOnlyRefreshRequest = null;
+		this._hubReadOnlyRefreshPromise = null;
+		this._isHubReadOnlyRefreshRequired = false;
 		this._hubAuthoritativeReconcileRequest = null;
 		this._hubAuthoritativeReconcilePromise = null;
 		this._isHubAuthoritativeReconcileScheduled = false;
@@ -127,6 +144,9 @@ class CharacterSheetPage {
 		this._isHubContextRefreshing = false;
 		this._isHubContextUnavailable = false;
 		this._isHubContextRevalidationRequired = false;
+		this._hubRoleRosterGeneration = 0;
+		this._isHubRoleRosterUnavailable = false;
+		this._isHubRoleRosterRevalidationRequired = false;
 		this._hubRulesRefreshGeneration = 0;
 		this._hubRulesRefreshBlocked = false;
 		this._hubRulesPendingVersionId = null;
@@ -160,6 +180,8 @@ class CharacterSheetPage {
 
 		this._selCharacter = /** @type {*} */ (null);
 		this._currentCharacterId = null;
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = false;
 		this._lastSavedAt = 0;
 		this._isLevelUpBannerDismissed = false;
 		/** @type {?*} Lazily created on first spawn — see `get spawner`. */
@@ -212,6 +234,7 @@ class CharacterSheetPage {
 		this._conditionsData = [];
 		this._languagesData = [];
 		this._dialectParentMap = {};
+		CharacterSheetModal.bindCharacterSheet(this);
 	}
 
 	async _pClaimUnboundLegacyHubRecovery ({characterId = null} = {}) {
@@ -258,17 +281,82 @@ class CharacterSheetPage {
 
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
 		this._hubRealtimeGeneration++;
-		this._hubEffects?.activate({characterId});
-		this._peerTargeting?.activate({
+		this._hubReadOnlyRefreshRequest = null;
+		this._isHubReadOnlyRefreshRequired = false;
+		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
+			this._hubEffects?.deactivate();
+			this._peerTargeting?.deactivate();
+			this._partyInventory?.detach();
+		} else {
+			this._hubEffects?.activate({characterId});
+			this._peerTargeting?.activate({
+				characterId,
+				membershipRole: this._hubContext?.membership?.role,
+			});
+			void this._partyInventory?.pAttach({
+				characterId,
+				generation: this._characterLoadGeneration,
+			});
+		}
+		const isAttached = this._hubRealtime?.attach({
 			characterId,
 			membershipRole: this._hubContext?.membership?.role,
-		});
-		const isAttached = this._hubRealtime?.attach({characterId}) || false;
-		void this._partyInventory?.pAttach({
-			characterId,
-			generation: this._characterLoadGeneration,
-		});
+		}) || false;
 		return isAttached;
+	}
+
+	_reattachRetainedHubCharacterIntegrations ({characterId, generation, isPartyInventoryAttached = false}) {
+		if (
+			!characterId
+			|| !this._isHubCharacter
+			|| this.isCurrentCharacterReadOnly()
+			|| !isPartyInventoryAttached
+		) return;
+		void this._partyInventory?.pAttach({characterId, generation});
+	}
+
+	isCurrentCharacterReadOnly () {
+		return this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+	}
+
+	_getCharacterScopeSnapshot () {
+		return {
+			characterId: this._currentCharacterId,
+			loadGeneration: this._characterLoadGeneration,
+			documentGeneration: this._characterDocumentGeneration ?? 0,
+			accessMode: this._currentCharacterAccess,
+		};
+	}
+
+	_isCharacterScopeSnapshotCurrent (snapshot, {
+		isRequireOwner = false,
+		isIgnoreDocumentGeneration = false,
+	} = {}) {
+		if (!snapshot) return false;
+		return snapshot.characterId === this._currentCharacterId
+			&& snapshot.loadGeneration === this._characterLoadGeneration
+			&& (
+				isIgnoreDocumentGeneration
+				|| (snapshot.documentGeneration ?? 0) === (this._characterDocumentGeneration ?? 0)
+			)
+			&& snapshot.accessMode === this._currentCharacterAccess
+			&& (!isRequireOwner || !this.isCurrentCharacterReadOnly());
+	}
+
+	_closeCharacterScopedTransientUi ({isRetainCurrentCharacterUi = false} = {}) {
+		const closePromise = CharacterSheetModal.closeCharacterScopeModals();
+		this._notes?.cancelActiveDrag?.();
+		this._playMode?.resetCharacterScopeUi?.();
+		this._spells?._closeCastOptionsMenu?.();
+		this._dice3d?.resetCharacterScopeUi?.();
+		this._builder?.resetCharacterScopeUi?.();
+		void closePromise.catch(error => {
+			// eslint-disable-next-line no-console
+			console.error("Could not close character-scoped modal state:", error);
+		});
+		if (isRetainCurrentCharacterUi) return;
+		this._rollHistory?.resetCharacterScopeUi?.();
+		globalThis._charsheetMobile?.resetCharacterScopeUi?.();
 	}
 
 	// #region Hub teardown owners (ADR 0013)
@@ -278,6 +366,8 @@ class CharacterSheetPage {
 	/** `teardown-generation`: fence in-flight realtime work. */
 	_fenceHubGeneration () {
 		this._hubRealtimeGeneration++;
+		this._hubReadOnlyRefreshRequest = null;
+		this._isHubReadOnlyRefreshRequired = false;
 	}
 
 	/** `teardown-realtime`: detach the realtime client only. */
@@ -298,7 +388,10 @@ class CharacterSheetPage {
 	_concealHubPrivateCharacter () {
 		if (!this._isHubCharacter) return;
 		this._characterLoadGeneration++;
+		this._closeCharacterScopedTransientUi?.();
 		this._currentCharacterId = null;
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = false;
 		this._state.reset();
 		const doc = globalThis.document;
 		if (!doc?.body) return;
@@ -342,6 +435,10 @@ class CharacterSheetPage {
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
 		this._isHubContextRevalidationRequired = false;
+		this._hubRoleRosterGeneration++;
+		this._isHubRoleRosterUnavailable = false;
+		this._isHubRoleRosterRevalidationRequired = false;
+		this._characterRepository?.invalidateRoleScopedCharacterAccess?.();
 		this._clearHubRules({isUnavailable: true});
 	}
 
@@ -357,27 +454,142 @@ class CharacterSheetPage {
 	// #region Live semantic-operation reconciliation (ADR 0012)
 
 	/**
-	 * Register the production consumers for server-authoritative campaign effects. Handlers run synchronously
-	 * inside the repository's realtime delivery queue, so they must not await: the coordinator emits to listeners
-	 * without awaiting them, and any async work would escape the serialization window that keeps an incoming
-	 * operation ordered against an in-flight save.
+	 * Register the production consumers for server-authoritative campaign effects. Semantic handlers run
+	 * synchronously inside the repository's realtime delivery queue. DM read-only document invalidations are the
+	 * exception: they perform a scoped HTTP refetch with character, load, realtime, and refresh-generation fences,
+	 * and cannot race an owner write because this surface has no lease or save authority.
 	 */
 	_initHubRealtimeListeners () {
 		if (!this._hubRealtime || this._isHubRealtimeListenersBound) return false;
 		this._isHubRealtimeListenersBound = true;
 		this._hubRealtime.on("cursor", metadata => this._onHubRealtimeCursor(metadata));
+		this._hubRealtime.on("projectionInvalidated", event => {
+			if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
+				void this._pRefreshHubReadOnlyCharacter({characterId: event?.characterId});
+				return;
+			}
+			this._onHubProjectionInvalidated(event);
+		});
 		this._hubRealtime.on("semanticOperation", event => this._onHubSemanticOperation(event));
 		this._hubRealtime.on("connectionState", state => this._onHubRealtimeConnectionState(state));
 		this._hubRealtime.on("campaignContextChanged", event => this._onHubCampaignContextChanged(event));
 		this._hubRealtime.on("membershipChanged", event => this._onHubMembershipChanged(event));
-		this._hubRealtime.on("projectionInvalidated", event => this._onHubProjectionInvalidated(event));
 		this._hubRealtime.on("deliveryError", detail => this._onHubRealtimeDeliveryError(detail));
 		this._hubRealtime.on("recipientNotice", notice => this._onHubRecipientNotice(notice));
 		this._hubRealtime.on("rulesChanged", event => { void this._pRefreshHubRules(event); });
 		return true;
 	}
 
+	// Reuse the owner reconciliation pattern: one active read plus one replaceable trailing demand.
+	_pRefreshHubReadOnlyCharacter ({characterId = this._currentCharacterId} = {}) {
+		if (
+			!characterId
+			|| characterId !== this._currentCharacterId
+			|| this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY
+			|| typeof this._characterRepository?.pGet !== "function"
+		) return Promise.resolve(false);
+		this._isHubReadOnlyRefreshRequired = true;
+		this._hubReadOnlyRefreshRequest = {
+			characterId,
+			campaignId: this._hubCampaignId,
+			characterLoadGeneration: this._characterLoadGeneration,
+			realtimeGeneration: this._hubRealtimeGeneration,
+		};
+		return this._pStartHubReadOnlyRefresh();
+	}
+
+	_pStartHubReadOnlyRefresh () {
+		if (this._hubReadOnlyRefreshPromise) return this._hubReadOnlyRefreshPromise;
+		if (!this._hubReadOnlyRefreshRequest) return Promise.resolve(false);
+		const promise = this._pDrainHubReadOnlyRefresh()
+			.catch(error => {
+				this._isHubReadOnlyRefreshRequired = true;
+				// eslint-disable-next-line no-console
+				console.error("Read-only character refresh failed:", error);
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "Could not refresh this read-only character. Reconnect or reload before relying on its current values.",
+				});
+				return false;
+			});
+		this._hubReadOnlyRefreshPromise = promise;
+		void promise.finally(() => {
+			if (this._hubReadOnlyRefreshPromise === promise) this._hubReadOnlyRefreshPromise = null;
+			if (this._hubReadOnlyRefreshRequest) void this._pStartHubReadOnlyRefresh();
+		});
+		return promise;
+	}
+
+	async _pDrainHubReadOnlyRefresh () {
+		let isApplied = false;
+		while (this._hubReadOnlyRefreshRequest) {
+			const request = this._hubReadOnlyRefreshRequest;
+			this._hubReadOnlyRefreshRequest = null;
+			isApplied = await this._pRunHubReadOnlyRefresh(request) || isApplied;
+		}
+		return isApplied;
+	}
+
+	async _pRunHubReadOnlyRefresh ({
+		characterId,
+		campaignId,
+		characterLoadGeneration,
+		realtimeGeneration,
+	}) {
+		const isScopeCurrent = () => (
+			characterLoadGeneration === this._characterLoadGeneration
+			&& realtimeGeneration === this._hubRealtimeGeneration
+			&& campaignId === this._hubCampaignId
+			&& characterId === this._currentCharacterId
+			&& this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY
+		);
+		if (!isScopeCurrent()) return false;
+		const refreshGeneration = ++this._hubReadOnlyRefreshGeneration;
+		const isCurrent = () => (
+			refreshGeneration === this._hubReadOnlyRefreshGeneration
+			&& isScopeCurrent()
+		);
+		try {
+			const character = await this._characterRepository.pGet({characterId});
+			if (!isCurrent()) return false;
+			if (
+				character?.id !== characterId
+				|| this._characterRepository.getCharacterAccess?.({characterId}) !== CHARACTER_ACCESS_MODES.DM_READ_ONLY
+			) {
+				throw Object.assign(new Error("Character inspection access changed."), {code: "CHARACTER_PROJECTION_SCOPED"});
+			}
+			this._clearLastHpChange?.();
+			this._state.loadFromJson(character);
+			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
+			this._reconcileClassFeatures();
+			_advanceCharacterDocumentGeneration(this);
+			this._renderCharacter();
+			if (!this._hubReadOnlyRefreshRequest) this._isHubReadOnlyRefreshRequired = false;
+			return true;
+		} catch (error) {
+			if (!isCurrent()) return false;
+			if (
+				error?.code === "CHARACTER_PROJECTION_SCOPED"
+				|| !this._canRestoreHubRealtimeAfterError(error)
+			) {
+				this._isHubReadOnlyRefreshRequired = false;
+				this._onHubRealtimeConnectionState({
+					state: "closed",
+					reason: "Character is no longer available in this campaign.",
+					isCharacterAccessEnded: true,
+				});
+				return false;
+			}
+			JqueryUtil.doToast({
+				type: "danger",
+				content: "Could not refresh this read-only character. Reconnect or reload before relying on its current values.",
+			});
+			return false;
+		}
+	}
+
 	async _pRefreshHubRules ({rulesVersionId = null, isUseLatest = false} = {}) {
+		const campaignId = this._hubCampaignId;
 		const expectedRulesVersionId = isUseLatest ? null : rulesVersionId ?? this._hubRulesPendingVersionId;
 		const generation = ++this._hubRulesRefreshGeneration;
 		const contextGeneration = ++this._hubContextGeneration;
@@ -417,6 +629,10 @@ class CharacterSheetPage {
 				generation !== this._hubRulesRefreshGeneration
 				|| contextGeneration !== this._hubContextGeneration
 			) return false;
+			if (this._handleTerminalCharacterCampaignAccessError?.({
+				error,
+				campaignId,
+			})) return false;
 			this._clearHubRules({
 				isUnavailable: true,
 				isFenceRefresh: false,
@@ -448,10 +664,26 @@ class CharacterSheetPage {
 
 	_onHubRealtimeConnectionState (state) {
 		this._hubEffects?.onConnectionState(state);
-		this._peerTargeting?.onConnectionState(state);
-		if (state?.state === "live" && this._isHubContextRevalidationRequired && this._hubCampaignContext) {
+		const isReadOnly = this.isCurrentCharacterReadOnly?.();
+		if (isReadOnly) this._peerTargeting?.deactivate();
+		else this._peerTargeting?.onConnectionState(state);
+		if (state?.state === "live" && isReadOnly && this._isHubReadOnlyRefreshRequired) {
+			void this._pRefreshHubReadOnlyCharacter();
+		}
+		const isRefreshRoleRoster = state?.state === "live"
+			&& this._isHubRoleRosterRevalidationRequired
+			&& this._hubCampaignContext;
+		if (
+			state?.state === "live"
+			&& (this._isHubContextRevalidationRequired || isRefreshRoleRoster)
+			&& this._hubCampaignContext
+		) {
 			this._isHubContextRevalidationRequired = false;
-			this._onHubCampaignContextChanged({type: "reconnected"});
+			this._isHubRoleRosterRevalidationRequired = false;
+			this._onHubCampaignContextChanged({
+				type: "reconnected",
+				...(isRefreshRoleRoster ? {roleRosterGeneration: this._hubRoleRosterGeneration} : {}),
+			});
 		} else if (state?.state === "live" && this._hubRulesRefreshBlocked) {
 			void this._pRefreshHubRules();
 		}
@@ -477,6 +709,23 @@ class CharacterSheetPage {
 			}
 			return;
 		}
+		if (state?.state === "closed" && state.isCharacterAccessEnded) {
+			this._endCurrentHubCharacterAccess({
+				characterId: this._currentCharacterId,
+				accessEndCause: state.accessEndCause,
+			});
+			const pCoordinatorTeardown = state.accessEndCause === CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN
+				? this._hubActiveCampaign?.pHandleAccessLoss?.({campaignId: this._hubCampaignId})
+				: state.accessEndCause === CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE
+					? this._hubActiveCampaign?.pHandleSurfaceRoleLoss?.()
+					: null;
+			if (pCoordinatorTeardown) {
+				void pCoordinatorTeardown
+					// eslint-disable-next-line no-console
+					.catch(error => console.error("Failed to tear down ended campaign character access:", error));
+			}
+			return;
+		}
 		if (!["closed", "reconnecting"].includes(state?.state)) return;
 		this._hubRealtimeGeneration++;
 		this._hubContextGeneration++;
@@ -491,6 +740,39 @@ class CharacterSheetPage {
 		this._campaign?.render();
 	}
 
+	_endCurrentHubCharacterAccess ({
+		characterId = this._currentCharacterId,
+		accessEndCause = CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+	} = {}) {
+		if (!characterId || this._currentCharacterId !== characterId) return false;
+		this._fenceHubGeneration();
+		this._detachHubRealtimeClient();
+		this._detachHubProjections();
+		this._concealHubPrivateCharacter();
+		this._teardownHubRules();
+		this._campaign?.resetCharacterScope?.();
+		this._campaign?.render();
+		return true;
+	}
+
+	_handleTerminalCharacterCampaignAccessError ({
+		error,
+		campaignId = this._hubCampaignId,
+	} = {}) {
+		if (!this._isHubCharacter || !isTerminalCharacterCampaignAccessError(error)) return false;
+		if (campaignId !== this._hubCampaignId) return false;
+		const isEnded = this._endCurrentHubCharacterAccess({
+			characterId: this._currentCharacterId,
+			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+		});
+		if (!isEnded) return false;
+		void Promise.resolve()
+			.then(() => this._hubActiveCampaign?.pRevalidate?.({trigger: "access_loss"}))
+			// eslint-disable-next-line no-console
+			.catch(revalidationError => console.error("Failed to revalidate inaccessible campaign context:", revalidationError));
+		return true;
+	}
+
 	_onHubProjectionInvalidated (event) {
 		if (!this._currentCharacterId || event?.characterId !== this._currentCharacterId) return false;
 		return this._scheduleHubAuthoritativeReconcile({characterId: this._currentCharacterId});
@@ -498,12 +780,100 @@ class CharacterSheetPage {
 
 	_onHubMembershipChanged (event) {
 		if (event?.campaignId && event.campaignId !== this._hubCampaignId) return false;
+		const roleRosterGeneration = this._beginHubRoleScopedRosterRefresh();
 		if (!this._hubCampaignContext) {
 			this._peerTargeting?.deactivate();
+			this._isHubRoleRosterUnavailable = true;
+			this._isHubRoleRosterRevalidationRequired = true;
+			this._setHubRoleRosterStatus("unavailable");
 			return false;
 		}
-		this._onHubCampaignContextChanged({type: "membership.changed"});
+		this._onHubCampaignContextChanged({
+			type: "membership.changed",
+			roleRosterGeneration,
+		});
 		return true;
+	}
+
+	_setHubRoleRosterStatus (status = null) {
+		if (!this._selCharacter) return;
+		for (const option of [...(this._selCharacter.options || [])]) {
+			if (option.dataset?.hubRoleRosterStatus === "true") option.remove();
+		}
+		this._selCharacter.setAttribute?.("aria-busy", status === "refreshing" ? "true" : "false");
+		if (!status) return;
+		const option = document.createElement("option");
+		option.disabled = true;
+		option.dataset.hubRoleRosterStatus = "true";
+		option.value = "__hub-role-roster-status";
+		option.textContent = status === "refreshing"
+			? "Refreshing authorized characters..."
+			: "Authorized character list unavailable";
+		this._selCharacter.append(option);
+	}
+
+	_beginHubRoleScopedRosterRefresh () {
+		const characterId = this._currentCharacterId;
+		const isPartyInventoryAttached = this._partyInventory?.isAttachedTo?.({characterId}) === true;
+		const generation = ++this._hubRoleRosterGeneration;
+		this._characterLoadGeneration++;
+		this._isHubRoleRosterUnavailable = false;
+		this._isHubRoleRosterRevalidationRequired = false;
+		if (this._selCharacter) {
+			for (const option of [...(this._selCharacter.options || [])]) {
+				if (!option.value || option.dataset?.hubRoleRosterStatus === "true") continue;
+				const access = this._characterRepository.getCharacterAccess?.({characterId: option.value});
+				if (access !== CHARACTER_ACCESS_MODES.OWNER) option.remove();
+			}
+			const isCurrentOwnerVisible = [...(this._selCharacter.options || [])]
+				.some(option => option.value === this._currentCharacterId);
+			this._selCharacter.value = isCurrentOwnerVisible ? this._currentCharacterId : "";
+		}
+		this._characterRepository.invalidateRoleScopedCharacterAccess?.();
+		this._setHubRoleRosterStatus("refreshing");
+		this._reattachRetainedHubCharacterIntegrations?.({
+			characterId,
+			generation: this._characterLoadGeneration,
+			isPartyInventoryAttached,
+		});
+		return generation;
+	}
+
+	async _pRefreshHubRoleScopedCharacterRoster ({
+		campaignId,
+		characterId,
+		characterLoadGeneration,
+		contextGeneration,
+		membershipRole,
+		roleRosterGeneration,
+	}) {
+		const isCurrent = () => (
+			roleRosterGeneration === this._hubRoleRosterGeneration
+			&& contextGeneration === this._hubContextGeneration
+			&& campaignId === this._hubCampaignId
+			&& characterId === this._currentCharacterId
+			&& characterLoadGeneration === this._characterLoadGeneration
+			&& membershipRole === this._hubContext?.membership?.role
+		);
+		try {
+			const characters = await this._characterRepository.pList({fnIsCurrent: isCurrent});
+			if (!characters || !isCurrent()) return false;
+			this._isHubRoleRosterUnavailable = false;
+			this._isHubRoleRosterRevalidationRequired = false;
+			this._updateCharacterDropdown(characters);
+			return true;
+		} catch (error) {
+			if (!isCurrent()) return false;
+			if (this._handleTerminalCharacterCampaignAccessError?.({error, campaignId})) return false;
+			this._isHubRoleRosterUnavailable = true;
+			this._isHubRoleRosterRevalidationRequired = true;
+			this._setHubRoleRosterStatus("unavailable");
+			JqueryUtil.doToast({
+				type: "danger",
+				content: "Your campaign role changed, but the authorized character list could not be loaded. Other campaign characters remain hidden until you reconnect or reload.",
+			});
+			return false;
+		}
 	}
 
 	_applyHubContext (context) {
@@ -538,6 +908,13 @@ class CharacterSheetPage {
 				? this._hubContext?.brewBundle?.id
 				: null;
 		if (event?.aggregateId && event.aggregateId === activeContextId) return;
+		const campaignId = this._hubCampaignId;
+		const characterId = this._currentCharacterId;
+		const characterLoadGeneration = this._characterLoadGeneration;
+		const roleRosterGeneration = Number.isInteger(event?.roleRosterGeneration)
+			? event.roleRosterGeneration
+			: null;
+		if (roleRosterGeneration != null) this._setHubRoleRosterStatus("refreshing");
 		const generation = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = generation;
 		this._isHubContextRefreshing = true;
@@ -546,15 +923,35 @@ class CharacterSheetPage {
 		void this._hubCampaignContext.pRefresh({
 			fnIsCurrent: () => generation === this._hubContextGeneration,
 		})
-			.then(context => {
+			.then(async context => {
 				if (!context || generation !== this._hubContextGeneration) return;
 				this._applyHubContext(context);
 				this._isHubContextUnavailable = false;
+				if (roleRosterGeneration != null) {
+					await this._pRefreshHubRoleScopedCharacterRoster({
+						campaignId,
+						characterId,
+						characterLoadGeneration,
+						contextGeneration: generation,
+						membershipRole: context?.membership?.role,
+						roleRosterGeneration,
+					});
+					if (generation !== this._hubContextGeneration) return;
+				}
 				this._renderCharacter();
 				this._campaign?.render();
 			})
-			.catch(() => {
+			.catch(error => {
 				if (generation !== this._hubContextGeneration) return;
+				if (this._handleTerminalCharacterCampaignAccessError?.({
+					error,
+					campaignId,
+				})) return;
+				if (roleRosterGeneration != null && roleRosterGeneration === this._hubRoleRosterGeneration) {
+					this._isHubRoleRosterUnavailable = true;
+					this._isHubRoleRosterRevalidationRequired = true;
+					this._setHubRoleRosterStatus("unavailable");
+				}
 				this._isHubContextUnavailable = true;
 				this._isHubContextRevalidationRequired = true;
 				JqueryUtil.doToast({
@@ -579,6 +976,11 @@ class CharacterSheetPage {
 
 	_onHubRecipientNotice (notice) {
 		if (!notice || !this._currentCharacterId) return false;
+		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
+			if (notice.kind !== "xp_award") return false;
+			void this._pRefreshHubReadOnlyCharacter({characterId: this._currentCharacterId});
+			return true;
+		}
 		if (notice.kind === "xp_award") {
 			const total = Number.isFinite(notice.totalXp) ? ` (${notice.totalXp} XP total)` : "";
 			const content = e_({tag: "span", txt: `Received ${notice.amount || 0} XP${total}${notice.reason ? ` — ${notice.reason}` : ""}.`});
@@ -619,6 +1021,7 @@ class CharacterSheetPage {
 		try {
 			this._state.loadFromJson({...liveNext, id: this._currentCharacterId});
 			this._reconcileClassFeatures();
+			_advanceCharacterDocumentGeneration(this);
 		} catch (error) {
 			try {
 				this._state.loadFromJson(liveBefore);
@@ -802,6 +1205,10 @@ class CharacterSheetPage {
 				});
 				return false;
 			case "failed":
+				if (this._handleTerminalCharacterCampaignAccessError?.({
+					error: result.error,
+					characterId,
+				})) return false;
 				this._updateSaveIndicator("error");
 				JqueryUtil.doToast({
 					type: "danger",
@@ -891,6 +1298,10 @@ class CharacterSheetPage {
 				this._updateSaveIndicator("error");
 				return this._pResolveHubCharacterConflict({characterId, fnIsCurrent});
 			case "failed":
+				if (this._handleTerminalCharacterCampaignAccessError?.({
+					error: result.error,
+					characterId,
+				})) return false;
 				this._updateSaveIndicator("error");
 				JqueryUtil.doToast({
 					type: "danger",
@@ -944,6 +1355,7 @@ class CharacterSheetPage {
 				isIdentityChanged ||= identity.isChanged;
 				this._state.loadFromJson(resolved);
 				this._reconcileClassFeatures();
+				_advanceCharacterDocumentGeneration(this);
 				this._renderCharacter();
 				isResolutionAdopted = true;
 				return true;
@@ -1033,6 +1445,7 @@ class CharacterSheetPage {
 			isIdentityChanged ||= identity.isChanged;
 			this._state.loadFromJson(resolved);
 			this._reconcileClassFeatures();
+			_advanceCharacterDocumentGeneration(this);
 			this._renderCharacter();
 			isResolutionAdopted = true;
 			return true;
@@ -1254,6 +1667,7 @@ class CharacterSheetPage {
 						this._state.loadFromJson(data);
 						this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 						this._reconcileClassFeatures();
+						_advanceCharacterDocumentGeneration(this);
 						this._renderCharacter();
 					},
 					fnSaveCharacter: () => this._saveCurrentCharacter({isInteractiveConflict: false}),
@@ -1340,6 +1754,7 @@ class CharacterSheetPage {
 					api: this._hubCampaignContext.api,
 					root: document.getElementById("charsheet-peer-targeting"),
 					fnGetCharacterId: () => this._currentCharacterId,
+					fnIsOwner: () => !this.isCurrentCharacterReadOnly(),
 					fnGetRulesVersionId: () => this._hubContext?.rulesVersion?.id ?? null,
 					fnGetCapability: () => this._hubCampaignContext?.context?.capabilities?.peerSourceCosts ?? null,
 					fnRefreshCampaignContext: () => this._pRefreshHubRules({isUseLatest: true}),
@@ -2585,6 +3000,7 @@ class CharacterSheetPage {
 	}
 
 	_initEventListeners () {
+		this._initReadOnlyInteractionGuard();
 		const bind = (elementOrId, eventName, handler) => {
 			const element = typeof elementOrId === "string"
 				? document.getElementById(elementOrId)
@@ -2598,10 +3014,18 @@ class CharacterSheetPage {
 
 		// Header buttons
 		bind("charsheet-btn-new", "click", () => this._onNewCharacter());
-		bind("charsheet-btn-new", "contextmenu", (e) => { e.preventDefault(); this._pOpenSpawnDialog(); });
+		bind("charsheet-btn-new", "contextmenu", (e) => {
+			e.preventDefault();
+			if (this.isCurrentCharacterReadOnly()) return;
+			this._pOpenSpawnDialog();
+		});
 		bind("charsheet-btn-duplicate", "click", () => this._onDuplicateCharacter());
 		bind("charsheet-btn-delete", "click", () => this._onDeleteCharacter());
-		bind("charsheet-btn-delete", "contextmenu", (e) => { e.preventDefault(); this._onManageCharacters(); });
+		bind("charsheet-btn-delete", "contextmenu", (e) => {
+			e.preventDefault();
+			if (this.isCurrentCharacterReadOnly()) return;
+			this._onManageCharacters();
+		});
 		bind("charsheet-btn-modifiers", "click", () => this._showCustomModifiersModal());
 		bind("charsheet-btn-settings", "click", () => this._showSettingsModal());
 		// Import/Export/Print handled by CharacterSheetExport module
@@ -2859,20 +3283,147 @@ class CharacterSheetPage {
 		bind("charsheet-edit-masteries", "click", () => this._showEditWeaponMasteriesModal());
 	}
 
+	_initReadOnlyInteractionGuard () {
+		const root = document.querySelector?.(".charsheet-page");
+		if (!root || root.dataset.charsheetReadOnlyGuardBound === "true") return;
+		root.dataset.charsheetReadOnlyGuardBound = "true";
+		const handle = event => {
+			if (this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY) return;
+			if (
+				event.type === "keydown"
+				&& !["Enter", " ", "Spacebar"].includes(event.key)
+			) return;
+			const target = event.target?.closest?.(
+				"a[href], [data-charsheet-readonly-allowed=\"true\"], #charsheet-sel-character, #charsheet-btn-export, #charsheet-btn-print, #charsheet-btn-rolllog, #charsheet-btn-more",
+			);
+			if (target) return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+		};
+		for (const eventName of ["click", "input", "change", "submit", "keydown", "contextmenu", "dragstart", "dragover", "drop"]) {
+			root.addEventListener(eventName, handle, true);
+		}
+	}
+
 	// #region Character Management
 	async _pLoadCharacters () {
 		let characters = await this._characterRepository.pList();
+		if (!characters) {
+			this._updateCharacterDropdown(null);
+			return;
+		}
 		if (await this._pClaimUnboundLegacyHubRecovery?.() === true) {
 			characters = await this._characterRepository.pList();
 		}
 		this._updateCharacterDropdown(characters);
 	}
 
+	_getCharacterDropdownLabel (character) {
+		const name = character?.name || "Unnamed Character";
+		const totalLevel = character?.classes?.reduce((sum, cls) => sum + (cls.level || 0), 0) || 0;
+		const classNames = character?.classes?.map(cls => cls.name).join("/") || "";
+		const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
+		const access = this._characterRepository.getCharacterAccess?.({characterId: character?.id});
+		const suffix = access === CHARACTER_ACCESS_MODES.DM_READ_ONLY ? " (read-only)" : "";
+		return `${classInfo ? `${name} — ${classInfo}` : name}${suffix}`;
+	}
+
+	_syncCurrentCharacterDropdownOption ({previousCharacterId = null, character = null} = {}) {
+		if (!this._selCharacter || !this._currentCharacterId) return;
+		const options = [...(this._selCharacter.options || [])];
+		let option = options.find(it => it.value === this._currentCharacterId)
+			|| (previousCharacterId ? options.find(it => it.value === previousCharacterId) : null);
+		if (!option && globalThis.document?.createElement && this._selCharacter.append) {
+			if (!options.some(it => it.disabled)) {
+				const divider = document.createElement("option");
+				divider.disabled = true;
+				divider.textContent = "────── Saved Characters ──────";
+				this._selCharacter.append(divider);
+			}
+			option = document.createElement("option");
+			this._selCharacter.append(option);
+		}
+		if (option) {
+			const current = character || {
+				id: this._currentCharacterId,
+				name: this._state.getName?.(),
+				classes: this._state.getClasses?.(),
+			};
+			option.value = this._currentCharacterId;
+			option.textContent = this._getCharacterDropdownLabel({...current, id: this._currentCharacterId});
+		}
+		this._selCharacter.value = this._currentCharacterId;
+	}
+
+	async _pRefreshPersistedCharacterUi ({characterId, previousCharacterId = null, character = null, fnIsCurrent = null}) {
+		const isCurrent = () => fnIsCurrent ? fnIsCurrent() : this._currentCharacterId === characterId;
+		this._syncCurrentCharacterDropdownOption({previousCharacterId, character});
+		const failures = [];
+		try {
+			await this._pLoadCharacters();
+		} catch (error) {
+			failures.push({surface: "character list", error});
+		}
+		if (!isCurrent()) return;
+		if (isCurrent() && this._selCharacter) this._selCharacter.value = characterId;
+		if (isCurrent()) {
+			try {
+				await this._campaign?.pRefreshCurrentCharacter?.();
+			} catch (error) {
+				if (isTerminalCharacterCampaignAccessError(error)) {
+					this._endCurrentHubCharacterAccess?.({
+						characterId,
+						accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+					});
+					throw error;
+				}
+				failures.push({surface: "campaign controls", error});
+			}
+		}
+		if (!isCurrent()) return;
+		this._syncCurrentCharacterDropdownOption({previousCharacterId, character});
+		if (failures.length) {
+			// eslint-disable-next-line no-console
+			console.warn("Character was saved, but some UI state could not refresh:", failures);
+			JqueryUtil.doToast({
+				type: "warning",
+				content: "Character saved, but some campaign controls could not refresh. Reload this page to retry.",
+			});
+		}
+	}
+
+	async _pRefreshCharacterRosterAfterCommittedStaleCreate () {
+		try {
+			await this._pLoadCharacters();
+		} catch (error) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `Character created, but the character list could not refresh: ${error.message}`,
+			});
+		}
+	}
+
 	_updateCharacterDropdown (characters) {
 		if (!characters) {
+			if (this._isHubCharacter) {
+				const currentOption = [...(this._selCharacter?.options || [])]
+					.find(option => option.value === this._currentCharacterId);
+				if (!currentOption) return;
+				currentOption.textContent = this._getCharacterDropdownLabel({
+					id: this._currentCharacterId,
+					name: this._state.getName?.(),
+					classes: this._state.getClasses?.(),
+				});
+				return;
+			}
 			characters = this._state.getAllCharacters();
 		}
 
+		if (this._isHubCharacter) {
+			this._isHubRoleRosterUnavailable = false;
+			this._isHubRoleRosterRevalidationRequired = false;
+			this._selCharacter?.setAttribute?.("aria-busy", "false");
+		}
 		this._selCharacter.innerHTML = "";
 		this._selCharacter.insertAdjacentHTML("beforeend", `<option value="">➕ Create New Character</option>`);
 
@@ -2884,12 +3435,7 @@ class CharacterSheetPage {
 		}
 
 		characters.forEach(char => {
-			const name = char.name || "Unnamed Character";
-			// Show class info with total level
-			const totalLevel = char.classes?.reduce((sum, c) => sum + (c.level || 0), 0) || 0;
-			const classNames = char.classes?.map(c => c.name).join("/") || "";
-			const classInfo = classNames ? `${classNames} ${totalLevel}` : "";
-			const label = classInfo ? `${name} — ${classInfo}` : name;
+			const label = this._getCharacterDropdownLabel(char);
 			const option = document.createElement("option");
 			option.value = char.id;
 			option.textContent = label;
@@ -2903,14 +3449,22 @@ class CharacterSheetPage {
 
 	async _onCharacterSelect () {
 		const charId = this._selCharacter.value;
+		const sourceFence = getCharacterSaveFence(this);
 
 		// Save current character before switching to prevent data loss
 		if (this._currentCharacterId) {
 			const isSaved = await this._saveCurrentCharacter();
 			if (!isSaved) {
-				this._selCharacter.value = this._currentCharacterId;
+				if (
+					isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})
+					&& this._selCharacter.value === charId
+				) this._selCharacter.value = this._currentCharacterId;
 				return;
 			}
+			if (
+				!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})
+				|| this._selCharacter.value !== charId
+			) return;
 		}
 		this._clearLastHpChange();
 
@@ -2922,22 +3476,56 @@ class CharacterSheetPage {
 	}
 
 	async _pLoadCharacter (charId) {
+		const previousCharacterId = this._currentCharacterId;
+		const previousCharacterAccess = this._currentCharacterAccess;
+		const isPreviousPartyInventoryAttached = this._partyInventory?.isAttachedTo?.({
+			characterId: previousCharacterId,
+		}) === true;
 		const loadGeneration = (this._characterLoadGeneration || 0) + 1;
 		this._characterLoadGeneration = loadGeneration;
-		const previousCharacterId = this._currentCharacterId;
-		this._detachHubRealtime?.();
+		this._closeCharacterScopedTransientUi?.({isRetainCurrentCharacterUi: true});
 		let canonical;
 		try {
 			canonical = await this._characterRepository.pGet({characterId: charId});
 		} catch (error) {
 			if (error?.code !== "CHARACTER_CAMPAIGN_MISMATCH") {
-				if (
-					loadGeneration === this._characterLoadGeneration
-					&& previousCharacterId
-					&& this._canRestoreHubRealtimeAfterError?.(error) !== false
-				) this._attachHubRealtime?.({characterId: previousCharacterId});
+				if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === previousCharacterId) {
+					const isReadOnlySurfaceRoleLoss = (
+						previousCharacterId
+						&& this._isHubCharacter
+						&& previousCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY
+						&& error?.code === "CHARACTER_PROJECTION_SCOPED"
+					);
+					const isTerminalAccessLoss = (
+						previousCharacterId
+						&& this._isHubCharacter
+						&& ["AUTH_REQUIRED", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND", "CAMPAIGN_ARCHIVED"].includes(error?.code)
+					);
+					if (isReadOnlySurfaceRoleLoss) {
+						this._onHubRealtimeConnectionState?.({
+							state: "closed",
+							reason: "Character inspection access is no longer available.",
+							isCharacterAccessEnded: true,
+							accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
+						});
+					} else if (isTerminalAccessLoss) {
+						if (this._selCharacter) this._selCharacter.value = previousCharacterId || "";
+						this._endCurrentHubCharacterAccess?.({
+							characterId: previousCharacterId,
+							accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+						});
+					} else {
+						if (this._selCharacter) this._selCharacter.value = previousCharacterId || "";
+						this._reattachRetainedHubCharacterIntegrations?.({
+							characterId: previousCharacterId,
+							generation: loadGeneration,
+							isPartyInventoryAttached: isPreviousPartyInventoryAttached,
+						});
+					}
+				}
 				throw error;
 			}
+			if (loadGeneration !== this._characterLoadGeneration || this._currentCharacterId !== previousCharacterId) return false;
 			window.location.replace(getCloudCharacterUrl({
 				campaignId: error.campaignId,
 				characterId: error.characterId || charId,
@@ -2955,8 +3543,15 @@ class CharacterSheetPage {
 		const {chosen: character, mirrorWon} = this._reconcilePersistedCharacter(canonical, mirror);
 
 		if (character) {
+			this._closeCharacterScopedTransientUi?.();
+			this._detachHubRealtime?.();
+			this._campaign?.resetCharacterScope?.();
 			const resolvedId = canonical?.id || charId;
 			this._currentCharacterId = resolvedId;
+			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({characterId: resolvedId})
+				|| CHARACTER_ACCESS_MODES.OWNER;
+			this._isCurrentCharacterNew = false;
+			if (this._selCharacter) this._selCharacter.value = resolvedId;
 			this._isLevelUpBannerDismissed = false;
 			this._state.clearCampaignSettingsOverlay();
 			this._state.loadFromJson(character);
@@ -2987,6 +3582,7 @@ class CharacterSheetPage {
 				// Nothing to persist, but the mirror (if any) now agrees with canonical — clear it.
 				this._clearActiveCharacterMirror(charId);
 			}
+			if (loadGeneration !== this._characterLoadGeneration || this._currentCharacterId !== resolvedId) return false;
 
 			// Apply saved section layout
 			if (this._layout) {
@@ -2999,7 +3595,7 @@ class CharacterSheetPage {
 			this._updateThemePickerSelection(currentTheme);
 
 			// Restore Play Mode if it was active
-			if (this._playMode && this._state.getViewMode() === "play") {
+			if (this._playMode && this._state.getViewMode() === "play" && !this.isCurrentCharacterReadOnly()) {
 				this._playMode.activate();
 			} else if (this._playMode) {
 				this._playMode.deactivate();
@@ -3010,6 +3606,22 @@ class CharacterSheetPage {
 			url.searchParams.set("id", resolvedId);
 			window.history.replaceState({}, "", url);
 			if (loadGeneration === this._characterLoadGeneration && this._currentCharacterId === resolvedId) {
+				try {
+					await this._campaign?.pRefreshCurrentCharacter?.();
+				} catch (error) {
+					if (
+						loadGeneration === this._characterLoadGeneration
+						&& this._currentCharacterId === resolvedId
+						&& isTerminalCharacterCampaignAccessError(error)
+					) {
+						this._endCurrentHubCharacterAccess?.({
+							characterId: resolvedId,
+							accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+						});
+					}
+					throw error;
+				}
+				if (loadGeneration !== this._characterLoadGeneration || this._currentCharacterId !== resolvedId) return false;
 				this._attachHubRealtime({characterId: resolvedId});
 			}
 		}
@@ -3018,9 +3630,13 @@ class CharacterSheetPage {
 
 	_createNewCharacter () {
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._closeCharacterScopedTransientUi?.();
 		this._detachHubRealtime?.();
+		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = CryptUtil.uid();
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = true;
 		this._isLevelUpBannerDismissed = false;
 		this._state.clearCampaignSettingsOverlay();
 		this._state.reset();
@@ -3117,9 +3733,11 @@ class CharacterSheetPage {
 	// #endregion
 
 	async _onNewCharacter () {
+		const sourceFence = getCharacterSaveFence(this);
 		// Save current character before creating new to prevent data loss
 		if (this._currentCharacterId) {
 			if (!await this._saveCurrentCharacter()) return;
+			if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) return;
 		}
 
 		this._createNewCharacter();
@@ -3149,7 +3767,7 @@ class CharacterSheetPage {
 		const backgrounds = this.filterByAllowedSources(this._backgrounds || []);
 		const byName = (/** @type {*} */ a, /** @type {*} */ b) => SortUtil.ascSortLower(a.name, b.name);
 
-		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner: modalInner, doClose} = CharacterSheetModal.getShow({
 			title: "⚡ Spawn Character",
 			isMinHeight0: true,
 		});
@@ -3290,9 +3908,11 @@ class CharacterSheetPage {
 
 	async _onDuplicateCharacter () {
 		if (!this._currentCharacterId) return;
+		const sourceFence = getCharacterSaveFence(this);
 
 		// Save current character first to preserve any unsaved changes
 		if (!await this._saveCurrentCharacter()) return;
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) return;
 
 		const newId = CryptUtil.uid();
 		const sourceId = this._currentCharacterId;
@@ -3302,23 +3922,41 @@ class CharacterSheetPage {
 		charData.name = `${charData.name || "Character"} (Copy)`;
 
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._closeCharacterScopedTransientUi?.();
 		this._detachHubRealtime?.();
+		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = newId;
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = true;
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(charData);
 		this._reconcileClassFeatures();
-		if (!await this._saveCurrentCharacter()) {
+		const duplicateFence = getCharacterSaveFence(this);
+		const isDuplicateSaved = await this._saveCurrentCharacter();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: duplicateFence})) {
+			if (isDuplicateSaved) await this._pRefreshCharacterRosterAfterCommittedStaleCreate();
+			return;
+		}
+		if (!isDuplicateSaved) {
 			this._currentCharacterId = sourceId;
+			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({characterId: sourceId})
+				|| CHARACTER_ACCESS_MODES.OWNER;
+			this._isCurrentCharacterNew = false;
 			this._state.loadFromJson(sourceData);
 			this._reconcileClassFeatures();
 			this._renderCharacter();
 			this._selCharacter.value = sourceId;
+			await this._pRefreshPersistedCharacterUi({
+				characterId: sourceId,
+				character: sourceData,
+			});
 			this._attachHubRealtime?.({characterId: sourceId});
 			return;
 		}
 		await this._pLoadCharacters();
-		this._selCharacter.value = newId;
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: duplicateFence})) return;
+		this._selCharacter.value = this._currentCharacterId;
 	}
 
 	/**
@@ -3326,27 +3964,45 @@ class CharacterSheetPage {
 	 * @param {CharacterSheetState} state - The state object to add as a new character
 	 */
 	async addCharacter (state) {
-		if (this._currentCharacterId && !await this._saveCurrentCharacter()) {
-			JqueryUtil.doToast({type: "danger", content: "Could not save the current character; import was cancelled."});
-			return false;
+		const sourceFence = getCharacterSaveFence(this);
+		if (this._currentCharacterId) {
+			if (!await this._saveCurrentCharacter()) {
+				JqueryUtil.doToast({type: "danger", content: "Could not save the current character; import was cancelled."});
+				return false;
+			}
+			if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) return false;
 		}
 		const newId = CryptUtil.uid();
 		const charData = state.toJson();
 		charData.id = newId;
 
-		const persisted = await this._characterRepository.pUpsert({character: charData});
+		const persisted = await this._characterRepository.pUpsert({character: charData, isCreate: true});
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) {
+			await this._pRefreshCharacterRosterAfterCommittedStaleCreate();
+			return true;
+		}
 
 		// Load the new character
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._closeCharacterScopedTransientUi?.();
 		this._detachHubRealtime?.();
+		this._campaign?.resetCharacterScope?.();
 		this._clearLastHpChange();
 		this._currentCharacterId = persisted?.id || newId;
+		this._currentCharacterAccess = CHARACTER_ACCESS_MODES.OWNER;
+		this._isCurrentCharacterNew = false;
 		this._isLevelUpBannerDismissed = false;
 		this._state.loadFromJson(persisted || charData);
 		this._reconcileClassFeatures();
-		await this._pLoadCharacters();
-		this._selCharacter.value = this._currentCharacterId;
+		const url = new URL(window.location.href);
+		url.searchParams.set("id", this._currentCharacterId);
+		window.history?.replaceState?.({}, "", url);
 		this._attachHubRealtime?.({characterId: this._currentCharacterId});
+		await this._pRefreshPersistedCharacterUi({
+			characterId: this._currentCharacterId,
+			previousCharacterId: newId,
+			character: persisted || charData,
+		});
 		return true;
 	}
 
@@ -3388,7 +4044,8 @@ class CharacterSheetPage {
 	}
 
 	async _onDeleteCharacter () {
-		if (!this._currentCharacterId) return;
+		const characterId = this._currentCharacterId;
+		if (!characterId) return;
 
 		const confirm = await InputUiUtil.pGetUserBoolean({
 			title: "Delete Character",
@@ -3396,25 +4053,37 @@ class CharacterSheetPage {
 			textYes: "Delete",
 			textNo: "Cancel",
 		});
-
 		if (!confirm) return;
 
-		const characterId = this._currentCharacterId;
-		this._detachHubRealtime();
+		if (this._currentCharacterId === characterId) this._detachHubRealtime();
 		try {
 			await this._characterRepository.pDelete({characterId});
 		} catch (error) {
-			if (this._canRestoreHubRealtimeAfterError(error)) this._attachHubRealtime({characterId});
+			if (this._currentCharacterId === characterId) {
+				if (this._canRestoreHubRealtimeAfterError(error)) this._attachHubRealtime({characterId});
+				else if (this._isHubCharacter) {
+					this._endCurrentHubCharacterAccess({
+						characterId,
+						accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+					});
+				}
+			}
 			throw error;
 		}
 
-		this._createNewCharacter();
+		if (this._currentCharacterId === characterId) {
+			this._createNewCharacter();
+			this._selCharacter.value = "";
+		}
 		await this._pLoadCharacters();
-		this._selCharacter.value = "";
 	}
 
 	async _onManageCharacters () {
 		const characters = await this._characterRepository.pList();
+		if (!characters) {
+			JqueryUtil.doToast({type: "warning", content: "The authorized character list changed. Try again."});
+			return;
+		}
 
 		if (characters.length === 0) {
 			JqueryUtil.doToast({type: "warning", content: "No saved characters to manage."});
@@ -3486,8 +4155,28 @@ class CharacterSheetPage {
 		try {
 			await this._characterRepository.pDeleteMany({characterIds: [...selectedIds]});
 		} catch (error) {
-			if (activeDeletedId && this._canRestoreHubRealtimeAfterError(error)) {
-				this._attachHubRealtime({characterId: activeDeletedId});
+			const currentDeletedId = error?.deletedCharacterIds?.includes(this._currentCharacterId)
+				? this._currentCharacterId
+				: null;
+			if (currentDeletedId) {
+				this._endCurrentHubCharacterAccess({
+					characterId: currentDeletedId,
+					accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+				});
+			} else if (activeDeletedId && this._currentCharacterId === activeDeletedId) {
+				if (error?.deletedCharacterIds?.includes(activeDeletedId)) {
+					this._endCurrentHubCharacterAccess({
+						characterId: activeDeletedId,
+						accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+					});
+				} else if (this._canRestoreHubRealtimeAfterError(error)) {
+					this._attachHubRealtime({characterId: activeDeletedId});
+				} else if (this._isHubCharacter) {
+					this._endCurrentHubCharacterAccess({
+						characterId: activeDeletedId,
+						accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CHARACTER,
+					});
+				}
 			}
 			throw error;
 		}
@@ -4556,9 +5245,20 @@ class CharacterSheetPage {
 	 * Generic beast picker from bestiary
 	 */
 	async _pShowBeastPicker (options = {}) {
-		const {maxCr = 1, canFly = false, canSwim = true, origin, type, onSelectCreature = null} = options;
+		const {
+			maxCr = 1,
+			canFly = false,
+			canSwim = true,
+			origin,
+			type,
+			onSelectCreature = null,
+			characterScope: suppliedCharacterScope = null,
+		} = options;
+		const characterScope = suppliedCharacterScope || this._getCharacterScopeSnapshot();
+		const isCurrentOwnerScope = () => this._isCharacterScopeSnapshotCurrent(characterScope, {isRequireOwner: true});
 
 		const validCreatures = await this._pGetWildShapeBeastCandidates(options);
+		if (!isCurrentOwnerScope()) return;
 		if (validCreatures == null) return; // load failed (toast already shown)
 		if (validCreatures.length === 0) {
 			JqueryUtil.doToast({type: "warning", content: "No valid creatures found for this companion type."});
@@ -4572,7 +5272,7 @@ class CharacterSheetPage {
 			values: validCreatures.map(c => `${c.name} (CR ${typeof c.cr === "object" ? c.cr.cr : c.cr})`),
 			isResolveItem: true,
 		});
-		if (!choice) return;
+		if (!choice || !isCurrentOwnerScope()) return;
 
 		const selectedName = choice.split(" (CR")[0];
 		const selectedCreature = validCreatures.find(c => c.name === selectedName);
@@ -4584,6 +5284,7 @@ class CharacterSheetPage {
 		// any state mutation / messaging. Returning here keeps the existing
 		// positional addCompanionFromBestiary contract intact for the other callers.
 		if (typeof onSelectCreature === "function") {
+			if (!isCurrentOwnerScope()) return;
 			onSelectCreature(selectedCreature);
 			return;
 		}
@@ -4594,6 +5295,7 @@ class CharacterSheetPage {
 		// `companion.type`, which never matches the string COMPANION_TYPES constants, so the
 		// companion is mis-typed (Wild Shape forms then never register, the use is never spent,
 		// and Beast Master / Mount companions are mis-bucketed too).
+		if (!isCurrentOwnerScope()) return;
 		this._state.addCompanionFromBestiary?.(selectedCreature, type, origin);
 
 		JqueryUtil.doToast({type: "success", content: `Added ${selectedCreature.name} as ${origin || "companion"}!`});
@@ -4861,6 +5563,7 @@ class CharacterSheetPage {
 		}
 
 		this._characterLoadGeneration = (this._characterLoadGeneration || 0) + 1;
+		this._closeCharacterScopedTransientUi?.();
 		this._detachHubRealtime?.({isPreserveRepositoryReconciliation: true});
 		this._currentCharacterId = canonicalId;
 		saveFence.characterId = canonicalId;
@@ -4893,6 +5596,10 @@ class CharacterSheetPage {
 
 	async _saveCurrentCharacter ({isInteractiveConflict = true, activity = null} = {}) {
 		if (!this._currentCharacterId) return;
+		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
+			this._updateSaveIndicator("readonly");
+			return true;
+		}
 		const saveFence = getCharacterSaveFence(this);
 		const isSaveCurrent = () => isCharacterSaveFenceCurrent({sheet: this, saveFence});
 
@@ -4926,13 +5633,28 @@ class CharacterSheetPage {
 		if (this._characterRepository.isRescueMirrorEnabled) this._writeActiveCharacterMirror(charData);
 
 		try {
-			const persisted = await this._characterRepository.pUpsert({character: charData, activity});
-			if (!isSaveCurrent()) return false;
+			const persisted = await this._characterRepository.pUpsert({
+				character: charData,
+				activity,
+				isCreate: !!this._isCurrentCharacterNew,
+			});
+			if (!isSaveCurrent()) return true;
 			if (persisted?.id && persisted.id !== charData.id && this._currentCharacterId === charData.id) {
+				const previousCharacterId = charData.id;
 				const identity = this._adoptCanonicalCharacterIdentity({canonicalId: persisted.id, saveFence});
-				if (!identity.isCurrent) return false;
-				if (identity.isChanged && !await this._pRefreshCanonicalCharacterRoster({canonicalId: persisted.id, saveFence})) return false;
+				if (!identity.isCurrent) return true;
+				await this._pRefreshPersistedCharacterUi({
+					characterId: persisted.id,
+					previousCharacterId,
+					character: persisted,
+					fnIsCurrent: isSaveCurrent,
+				});
+				if (!isSaveCurrent()) return true;
 			}
+			this._currentCharacterAccess = this._characterRepository.getCharacterAccess?.({
+				characterId: persisted?.id || this._currentCharacterId,
+			}) || CHARACTER_ACCESS_MODES.OWNER;
+			this._isCurrentCharacterNew = false;
 			if (persisted) {
 				const getClean = data => {
 					const out = MiscUtil.copyFast(data);
@@ -4966,6 +5688,7 @@ class CharacterSheetPage {
 					const livePatches = getJsonPatchesWithDocumentValues({patches: rebased.patches, document: live});
 					this._state.loadFromJson({...applyJsonPatch(canonical, livePatches), id: persisted.id});
 					this._reconcileClassFeatures();
+					_advanceCharacterDocumentGeneration(this);
 					this._renderCharacter();
 				}
 			}
@@ -4984,20 +5707,14 @@ class CharacterSheetPage {
 			return true;
 		} catch (err) {
 			if (!isSaveCurrent()) return false;
+			if (this._handleTerminalCharacterCampaignAccessError?.({
+				error: err,
+				characterId: saveFence.characterId,
+			})) return false;
 			// eslint-disable-next-line no-console
 			console.error("Save error:", err);
 			// Leave the sync mirror in place: it is the only surviving copy of this write.
 			this._updateSaveIndicator("error");
-			if ([
-				"AUTH_REQUIRED",
-				"FORBIDDEN",
-				"CAMPAIGN_NOT_FOUND",
-				"MEMBERSHIP_NOT_FOUND",
-				"CAMPAIGN_ARCHIVED",
-			].includes(err?.code)) {
-				await this._hubActiveCampaign?.pRevalidate({trigger: "access_loss"});
-				if (!isSaveCurrent()) return false;
-			}
 			if (!isInteractiveConflict && ["CHARACTER_LIVE_CONFLICT", "CHARACTER_CONFLICT"].includes(err?.code)) {
 				this._characterRepository.clearRetryableLeaseConflict?.({characterId: saveFence.characterId});
 				throw err;
@@ -5029,6 +5746,7 @@ class CharacterSheetPage {
 				if (choice) return this._saveCurrentCharacter({activity: null});
 				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
+				_advanceCharacterDocumentGeneration(this);
 				this._renderCharacter();
 				this._updateSaveIndicator("saved");
 				return true;
@@ -5047,28 +5765,37 @@ class CharacterSheetPage {
 
 	/**
 	 * Update the save indicator UI
-	 * @param {"saving"|"saved"|"error"} status
+	 * @param {"saving"|"saved"|"error"|"readonly"} status
 	 */
 	_updateSaveIndicator (status) {
 		const indicator = document.getElementById("charsheet-save-indicator");
 		if (!indicator) return;
 
-		indicator.classList.remove("charsheet__save-indicator--saving", "charsheet__save-indicator--error");
+		indicator.classList.remove("charsheet__save-indicator--saving", "charsheet__save-indicator--error", "charsheet__save-indicator--readonly");
 
 		switch (status) {
 			case "saving":
+				indicator.title = "Auto-save status";
 				indicator.classList.add("charsheet__save-indicator--saving");
 				if (indicator.querySelector(".charsheet__save-icon")) indicator.querySelector(".charsheet__save-icon").textContent = "⟳";
 				if (indicator.querySelector(".charsheet__save-text")) indicator.querySelector(".charsheet__save-text").textContent = "Saving...";
 				break;
 			case "saved":
+				indicator.title = "Auto-save status";
 				if (indicator.querySelector(".charsheet__save-icon")) indicator.querySelector(".charsheet__save-icon").textContent = "✓";
 				if (indicator.querySelector(".charsheet__save-text")) indicator.querySelector(".charsheet__save-text").textContent = "Saved";
 				break;
 			case "error":
+				indicator.title = "Auto-save error";
 				indicator.classList.add("charsheet__save-indicator--error");
 				if (indicator.querySelector(".charsheet__save-icon")) indicator.querySelector(".charsheet__save-icon").textContent = "✗";
 				if (indicator.querySelector(".charsheet__save-text")) indicator.querySelector(".charsheet__save-text").textContent = "Error";
+				break;
+			case "readonly":
+				indicator.classList.add("charsheet__save-indicator--readonly");
+				indicator.title = "Read-only DM view";
+				if (indicator.querySelector(".charsheet__save-icon")) indicator.querySelector(".charsheet__save-icon").textContent = "🔒";
+				if (indicator.querySelector(".charsheet__save-text")) indicator.querySelector(".charsheet__save-text").textContent = "Read only";
 				break;
 		}
 	}
@@ -5090,7 +5817,11 @@ class CharacterSheetPage {
 			return;
 		}
 
-		if (this._currentCharacterId && !await this._saveCurrentCharacter()) return;
+		const sourceFence = getCharacterSaveFence(this);
+		if (this._currentCharacterId) {
+			if (!await this._saveCurrentCharacter()) return;
+			if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: sourceFence})) return;
+		}
 		const sourceId = this._currentCharacterId;
 		const sourceData = sourceId ? this._state.toJson() : null;
 
@@ -5100,7 +5831,16 @@ class CharacterSheetPage {
 		this._currentCharacterId = json.id;
 		this._state.loadFromJson(json);
 		this._reconcileClassFeatures();
-		if (!await this._saveCurrentCharacter()) {
+		const importFence = getCharacterSaveFence(this);
+		const isImportSaved = await this._saveCurrentCharacter();
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: importFence})) {
+			if (isImportSaved) {
+				await this._pRefreshCharacterRosterAfterCommittedStaleCreate();
+				if (this._selCharacter && this._currentCharacterId) this._selCharacter.value = this._currentCharacterId;
+			}
+			return;
+		}
+		if (!isImportSaved) {
 			this._currentCharacterId = sourceId;
 			if (sourceData) {
 				this._state.loadFromJson(sourceData);
@@ -5111,7 +5851,8 @@ class CharacterSheetPage {
 			return;
 		}
 		await this._pLoadCharacters();
-		this._selCharacter.value = json.id;
+		if (!isCharacterSaveFenceCurrent({sheet: this, saveFence: importFence})) return;
+		this._selCharacter.value = this._currentCharacterId || json.id;
 		this._renderCharacter();
 
 		JqueryUtil.doToast({type: "success", content: `Imported character: ${json.name || "Unnamed"}`});
@@ -5196,6 +5937,88 @@ class CharacterSheetPage {
 
 		// Update tab visibility based on character state
 		this._updateTabVisibility();
+		this._applyCharacterAccessMode();
+	}
+
+	_applyCharacterAccessMode () {
+		if (typeof document === "undefined") return;
+		const isReadOnly = this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+		const root = document.querySelector?.(".charsheet-page");
+		if (!root) return;
+		const wasReadOnly = root.getAttribute?.("data-character-access") === "dm-readonly";
+		if (isReadOnly && !wasReadOnly) this._closeCharacterScopedTransientUi?.();
+		root.classList?.toggle("charsheet-page--read-only", isReadOnly);
+		root.setAttribute?.("data-character-access", isReadOnly ? "dm-readonly" : "owner");
+		const allowedIds = new Set([
+			"charsheet-sel-character",
+			"charsheet-btn-export",
+			"charsheet-btn-print",
+			"charsheet-btn-rolllog",
+			"charsheet-btn-more",
+		]);
+		for (
+			const control of root.querySelectorAll?.(
+				"button, input, select, textarea, [contenteditable=\"true\"], [role=\"button\"], [draggable]",
+			) || []
+		) {
+			if (allowedIds.has(control.id) || control.dataset?.charsheetReadonlyAllowed === "true") continue;
+			const isCustomButton = control.matches?.("[role=\"button\"]") === true;
+			const isDraggable = control.getAttribute?.("draggable") === "true";
+			if (isReadOnly) {
+				if (control.getAttribute?.("contenteditable") === "true") {
+					control.dataset.charsheetReadOnlyWasContenteditable = "true";
+					control.setAttribute("contenteditable", "false");
+				}
+				if (isDraggable && control.dataset.charsheetReadOnlyWasDraggable == null) {
+					control.dataset.charsheetReadOnlyWasDraggable = "true";
+					control.setAttribute("draggable", "false");
+				}
+				if (isCustomButton && control.dataset.charsheetReadOnlyWasTabindex == null) {
+					control.dataset.charsheetReadOnlyWasTabindex = control.getAttribute?.("tabindex") ?? "";
+					control.setAttribute?.("tabindex", "-1");
+				}
+				if (control.dataset.charsheetReadOnlyWasDisabled == null) {
+					control.dataset.charsheetReadOnlyWasDisabled = control.disabled ? "true" : "false";
+				}
+				control.disabled = true;
+				control.setAttribute?.("aria-disabled", "true");
+				continue;
+			}
+			if (control.dataset.charsheetReadOnlyWasDisabled == null) continue;
+			control.disabled = control.dataset.charsheetReadOnlyWasDisabled === "true";
+			control.removeAttribute?.("aria-disabled");
+			delete control.dataset.charsheetReadOnlyWasDisabled;
+			if (control.dataset.charsheetReadOnlyWasTabindex != null) {
+				if (control.dataset.charsheetReadOnlyWasTabindex) {
+					control.setAttribute?.("tabindex", control.dataset.charsheetReadOnlyWasTabindex);
+				} else {
+					control.removeAttribute?.("tabindex");
+				}
+				delete control.dataset.charsheetReadOnlyWasTabindex;
+			}
+			if (control.dataset.charsheetReadOnlyWasContenteditable === "true") {
+				control.setAttribute("contenteditable", "true");
+				delete control.dataset.charsheetReadOnlyWasContenteditable;
+			}
+			if (control.dataset.charsheetReadOnlyWasDraggable === "true") {
+				control.setAttribute("draggable", "true");
+				delete control.dataset.charsheetReadOnlyWasDraggable;
+			}
+		}
+		if (isReadOnly) {
+			this._spells?._closeCastOptionsMenu?.();
+			this._activeAbilityMenuPortal?.close();
+			globalThis._charsheetMobile?._cancelLongPress?.();
+			globalThis._charsheetMobile?._hideContextMenu?.();
+			globalThis.ContextUtil?.closeAllMenus?.();
+			document.querySelectorAll?.(".pm-context-menu, .pm-modal-overlay, #pm-sticky-overlay")
+				?.forEach?.(element => element.remove());
+			document.querySelectorAll?.(".charsheet__ability-menu")
+				?.forEach?.(element => element.remove());
+		}
+		if (isReadOnly) this._updateSaveIndicator("readonly");
+		else if (wasReadOnly) this._updateSaveIndicator("saved");
+		globalThis._charsheetMobile?.resumeCharacterScopeUi?.();
 	}
 
 	_renderBasicInfo () {
@@ -7152,15 +7975,24 @@ class CharacterSheetPage {
 			return;
 		}
 
+		if (this.isCurrentCharacterReadOnly()) return;
+		const characterScope = this._getCharacterScopeSnapshot();
+		const isCurrentOwnerScope = () => this._isCharacterScopeSnapshotCurrent(
+			characterScope,
+			{isRequireOwner: true},
+		);
 		const reader = new FileReader();
-		reader.onload = (e) => {
+		reader.onload = async (e) => {
+			if (!isCurrentOwnerScope()) return;
 			const dataUrl = e.target.result;
 			this._state.setAppearance("portraitUrl", dataUrl);
-			this._saveCurrentCharacter();
+			const isSaved = await this._saveCurrentCharacter();
+			if (!isCurrentOwnerScope() || !isSaved) return;
 			this._renderPortrait();
 			JqueryUtil.doToast({type: "success", content: "Portrait updated!"});
 		};
 		reader.onerror = () => {
+			if (!isCurrentOwnerScope()) return;
 			JqueryUtil.doToast({type: "danger", content: "Failed to read image file"});
 		};
 		reader.readAsDataURL(file);
@@ -7170,6 +8002,7 @@ class CharacterSheetPage {
 	 * Remove the current portrait
 	 */
 	_removePortrait () {
+		if (this.isCurrentCharacterReadOnly()) return;
 		this._state.setAppearance("portraitUrl", "");
 		this._saveCurrentCharacter();
 		this._renderPortrait();
@@ -7353,7 +8186,7 @@ class CharacterSheetPage {
 			this._renderPortrait();
 		};
 
-		const {eleModalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner, doClose} = CharacterSheetModal.getShow({
 			title: "Frame Portrait",
 			isMinHeight0: true,
 			cbClose: () => commit(),
@@ -10942,7 +11775,7 @@ class CharacterSheetPage {
 			}))
 			.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = UiUtil.getShowModal({
+		const {eleModalInner: modalInner, eleModalFooter: modalFooter, doClose} = CharacterSheetModal.getShow({
 			title: "✨ Apply Buff",
 			isMinHeight0: true,
 			isHeight100: true,
@@ -13070,7 +13903,7 @@ class CharacterSheetPage {
 			return true;
 		}
 
-		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+		const {eleModalInner: modalInner, doClose} = CharacterSheetModal.getShow({
 			title: "👅 Forked Tongue — Swap a Language",
 			isMinHeight0: true,
 		});
@@ -14917,8 +15750,10 @@ class CharacterSheetPage {
 	 * @param {number} damageTaken - The amount of damage taken
 	 */
 	async _promptConcentrationCheck (damageTaken) {
+		const characterScope = this._getCharacterScopeSnapshot();
+		const isCurrentOwnerScope = () => this._isCharacterScopeSnapshotCurrent(characterScope, {isRequireOwner: true});
 		const concentration = this._state.getConcentration?.();
-		if (!concentration) return;
+		if (!concentration || !isCurrentOwnerScope()) return;
 
 		const spellName = this._state.getConcentrationLabel?.() || concentration.spellName || "Unknown Spell";
 		const checkInfo = this._state.makeConcentrationCheck(damageTaken);
@@ -14937,6 +15772,10 @@ class CharacterSheetPage {
 			let pendingBreak = false;
 			let maintained = false;
 			const finalize = () => {
+				if (!isCurrentOwnerScope()) {
+					pendingBreak = false;
+					return;
+				}
 				if (pendingBreak && !maintained) {
 					this._state.breakConcentration();
 					this._combatModule?.renderCombatStates?.();
@@ -14947,10 +15786,11 @@ class CharacterSheetPage {
 				pendingBreak = false;
 			};
 
-			const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
+			const {eleModalInner: modalInner, doClose} = CharacterSheetModal.getShow({
 				title: "Concentration Check",
 				isMinHeight0: true,
 				cbClose: () => { finalize(); resolve(); },
+				cbCharacterScopeTeardown: resolve,
 			});
 
 			const rollResult = e_({outer: `<div class="charsheet__concentration-result ve-hidden"></div>`});
@@ -15015,6 +15855,7 @@ class CharacterSheetPage {
 
 				// Show animated dice — adv shows both physical d20s.
 				await this.pAnimateD20({roll: effectiveRoll, roll1, roll2: roll2 ?? roll1, mode: advantage ? "advantage" : "normal"});
+				if (!isCurrentOwnerScope()) return;
 
 				const rollText = advantage
 					? `Rolls: ${roll1}, ${roll2} (took ${effectiveRoll}) + ${bonus} = <strong>${total}</strong> vs DC ${currentDc}`
@@ -15050,7 +15891,7 @@ class CharacterSheetPage {
 							</div>`;
 						rollResult.querySelector("#charsheet-strain-maintain")?.addEventListener("click", async () => {
 							const track = await this._pPickStrainTrack(`Keeping ${quote.powers.join(", ")} active costs ${quote.cost} strain. Take it as:`);
-							if (!track) return;
+							if (!track || !isCurrentOwnerScope()) return;
 							const paid = this._state.payStrainToMaintain({track});
 							rollResult.querySelector("#charsheet-strain-maintain")?.remove();
 							if (paid.ok) {
@@ -15088,6 +15929,7 @@ class CharacterSheetPage {
 			const btnBreak = e_({
 				outer: `<button class="ve-btn ve-btn-danger">Break Concentration</button>`,
 				click: () => {
+					if (!isCurrentOwnerScope()) return;
 					pendingBreak = false;
 					this._state.breakConcentration();
 					this._combatModule?.renderCombatStates?.();
@@ -15190,7 +16032,7 @@ class CharacterSheetPage {
 		this._renderDeathSaves();
 		this._renderConditions(); // Update bloodied condition display
 
-		await this.pAnimateD20({roll, mode: "normal"});
+		if (await this.pAnimateD20({roll, mode: "normal"}) === false) return;
 		this._showDiceResult("Death Save", roll, result);
 	}
 
@@ -16618,6 +17460,16 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter({appliedConditionalIds: new Set(), applied: [], cancelled: true});
+		};
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Conditional Modifiers — ${rollLabel}`,
 			isMinHeight0: true,
@@ -16626,15 +17478,17 @@ class CharacterSheetPage {
 				// button handler has already resolved. Button handlers below
 				// call resolve() before doClose(), so this is a no-op in the
 				// normal flow.
-				if (resolveOuter && !isResolved) {
-					isResolved = true;
-					resolveOuter({appliedConditionalIds: new Set(), applied: [], cancelled: true});
-				}
+				cancel();
 			},
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		return new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = (/** @type {Set<string>} */ ids, /** @type {boolean} */ cancelled) => {
 				if (isResolved) return;
 				isResolved = true;
@@ -16791,6 +17645,16 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter(null);
+		};
 		// When a wizard overlay is up (QuickBuild z-index 9999), a default-z-index modal
 		// renders BEHIND it — invisible and unclickable ("Finish does nothing" + orphan;
 		// CS-BUG #10). Stack above the overlay so the pick is always reachable. Mirrors the
@@ -16800,13 +17664,16 @@ class CharacterSheetPage {
 			title: `${choice.featureName || "Feature"} — Choose ${kindLabel}`,
 			isMinHeight0: true,
 			...(isOverlayUp ? {zIndex: 10001} : {}),
-			cbClose: () => {
-				if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(null); }
-			},
+			cbClose: cancel,
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		return new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = (val) => {
 				if (isResolved) return;
 				isResolved = true;
@@ -16980,20 +17847,32 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter(false);
+		};
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Red Cant",
 			isMinHeight0: true,
 			cbClose: () => {
 				// Backdrop / X dismissal == decline (only if no button already resolved).
-				if (resolveOuter && !isResolved) {
-					isResolved = true;
-					resolveOuter(false);
-				}
+				cancel();
 			},
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		return new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = (/** @type {boolean} */ val) => {
 				if (isResolved) return;
 				isResolved = true;
@@ -17184,19 +18063,31 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter(null);
+		};
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Press Your Luck",
 			isMinHeight0: true,
 			cbClose: () => {
-				if (resolveOuter && !isResolved) {
-					isResolved = true;
-					resolveOuter(null);
-				}
+				cancel();
 			},
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		return new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = (val) => {
 				if (isResolved) return;
 				isResolved = true;
@@ -17396,7 +18287,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 
 		const acBreakdown = this._formatD20BreakdownWithCustom(rollResult, baseMod, customBonus, exhaustionStr, minimumApplied ? aggregated.minimum : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr;
 		this._showDiceResult(
@@ -17577,7 +18468,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
@@ -17813,7 +18704,7 @@ class CharacterSheetPage {
 		const indomNote = `🛡️ Indomitable: rerolled d20 [${reroll.roll}]${bonus ? ` + ${bonus}` : ""} → save total ${newTotal} (${left} use${left === 1 ? "" : "s"} left)`;
 		const mergedNote = resultNote ? `${resultNote}\n${indomNote}` : indomNote;
 
-		await this.pAnimateD20(reroll);
+		if (await this.pAnimateD20(reroll) === false) return;
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(reroll.mode)}${stateEffectStr} [Indomitable]`,
 			newTotal,
@@ -17997,7 +18888,7 @@ class CharacterSheetPage {
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		// Show animated dice if enabled
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 
 		const skillBreakdown = this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr;
 		this._showDiceResult(
@@ -18069,9 +18960,13 @@ class CharacterSheetPage {
 	_showSkillAbilityMenu (event, skillKey, skillName, defaultAbility) {
 		event.preventDefault();
 		event.stopPropagation();
+		if (this.isCurrentCharacterReadOnly()) {
+			this._activeAbilityMenuPortal?.close();
+			return;
+		}
 
 		// Remove any existing menu
-		document.querySelector(".charsheet__ability-menu")?.remove();
+		this._activeAbilityMenuPortal?.close();
 
 		const abilities = ["str", "dex", "con", "int", "wis", "cha"];
 		const abilityNames = {
@@ -18084,6 +18979,7 @@ class CharacterSheetPage {
 		};
 
 		const menu = e_({outer: `<div class="charsheet__ability-menu"></div>`});
+		let portal = null;
 
 		abilities.forEach(ability => {
 			const isDefault = ability === defaultAbility;
@@ -18097,7 +18993,11 @@ class CharacterSheetPage {
 				</div>
 			`});
 			optionEl.addEventListener("click", (e) => {
-				menu.remove();
+				if (!portal.isCurrent({isRequireOwner: true})) {
+					portal.close();
+					return;
+				}
+				portal.close();
 				this._rollSkillCheck(skillKey, skillName, e, ability);
 			});
 			this._bindActivate(optionEl, {label: `Roll ${skillName} using ${abilityNames[ability]}`});
@@ -18115,13 +19015,24 @@ class CharacterSheetPage {
 		document.body.append(menu);
 
 		// Close menu when clicking elsewhere
+		let closeTimer = null;
 		const closeMenu = (e) => {
 			if (!(/** @type {*} */ (e.target)).closest(".charsheet__ability-menu")) {
-				menu.remove();
-				document.removeEventListener("click", closeMenu);
+				portal.close();
 			}
 		};
-		setTimeout(() => document.addEventListener("click", closeMenu), 10);
+		portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this,
+			element: menu,
+			cleanup: () => {
+				if (closeTimer != null) clearTimeout(closeTimer);
+				document.removeEventListener("click", closeMenu);
+				if (this._activeAbilityMenuPortal === portal) this._activeAbilityMenuPortal = null;
+			},
+			isRequireOwner: false,
+		});
+		this._activeAbilityMenuPortal = portal;
+		closeTimer = setTimeout(() => document.addEventListener("click", closeMenu), 10);
 	}
 
 	async _rollInitiative (event) {
@@ -18154,7 +19065,7 @@ class CharacterSheetPage {
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
 			+ (maneuverBonus ? ` + ${maneuverBonus.roll} [${maneuverBonus.name}]` : "");
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 		this._showDiceResult(
 			`Initiative${this._getModeLabel(rollResult.mode)}`,
 			totalWithDice,
@@ -18275,7 +19186,7 @@ class CharacterSheetPage {
 		const bladesongDamageStr = bladesongBonus > 0 ? ` + ${bladesongBonus} (Bladesong INT)` : "";
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
-		await this.pAnimateD20(rollResult);
+		if (await this.pAnimateD20(rollResult) === false) return;
 		this._showDiceResult(
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			attackTotalWithDice,
@@ -18394,7 +19305,7 @@ class CharacterSheetPage {
 	 * @param {number} finalValue - The value the die should land on
 	 * @param {boolean} isAdvantage - Whether rolling with advantage
 	 * @param {boolean} isDisadvantage - Whether rolling with disadvantage
-	 * @returns {Promise} Resolves when animation is complete
+	 * @returns {Promise<void|false>} False when character-scope teardown cancels it.
 	 */
 	async _showAnimatedDice (diceType, finalValue, isAdvantage = false, isDisadvantage = false) {
 		return this.pAnimateDiceSpec({
@@ -18425,16 +19336,18 @@ class CharacterSheetPage {
 	 * @param {Array<{sides:number, values:number[]}>} opts.groups
 	 * @param {boolean} [opts.isAdvantage]
 	 * @param {boolean} [opts.isDisadvantage]
-	 * @returns {Promise} Resolves when the animation is complete.
+	 * @returns {Promise<void|false>} False when character-scope teardown cancels it.
 	 */
 	async pAnimateDiceSpec ({groups, isAdvantage = false, isDisadvantage = false} = {}) {
+		const characterScope = this._getCharacterScopeSnapshot();
+		const isCharacterScopeCurrent = () => this._isCharacterScopeSnapshotCurrent(characterScope);
 		const settings = /** @type {*} */ (this._state?.getSettings?.()) || {};
-		if (!settings.animatedDice) return;
+		if (!settings.animatedDice) return isCharacterScopeCurrent() ? undefined : false;
 
 		const cleanGroups = (Array.isArray(groups) ? groups : [])
 			.map(g => g ? {sides: Number(g.sides), values: (Array.isArray(g.values) ? g.values : []).map(Number).filter(Number.isFinite)} : null)
 			.filter(g => g && Number.isFinite(g.sides) && g.values.length);
-		if (!cleanGroups.length) return;
+		if (!cleanGroups.length) return isCharacterScopeCurrent() ? undefined : false;
 
 		const Dice3d = (/** @type {*} */ (globalThis)).CharacterSheetDice3d;
 
@@ -18447,7 +19360,7 @@ class CharacterSheetPage {
 
 		// Honour reduced-motion: skip the visual entirely (sound already played).
 		if (Dice3d && typeof Dice3d.isReducedMotion === "function" && Dice3d.isReducedMotion()) {
-			return;
+			return isCharacterScopeCurrent() ? undefined : false;
 		}
 
 		const theme = settings.diceTheme || "standard";
@@ -18457,10 +19370,12 @@ class CharacterSheetPage {
 		try {
 			const dice3d = this._getDice3d();
 			if (dice3d && cleanGroups.every(g => dice3d.canRender(g.sides))) {
-				await dice3d.pRollMany({groups: cleanGroups, theme, appearance});
+				const animationResult = await dice3d.pRollMany({groups: cleanGroups, theme, appearance});
+				if (animationResult === false || !isCharacterScopeCurrent()) return false;
 				return;
 			}
 		} catch (e) {
+			if (!isCharacterScopeCurrent()) return false;
 			// Fall through to the legacy animation on any 3D failure.
 			// eslint-disable-next-line no-console
 			console.warn("3D dice unavailable, falling back to legacy animation", e);
@@ -18469,7 +19384,8 @@ class CharacterSheetPage {
 		// Legacy fallback: animate a single representative die (the first one of
 		// the first renderable-or-any group). Multi-die fidelity is a 3D-only win.
 		const primary = cleanGroups.find(g => g.sides !== 100) || cleanGroups[0];
-		await this._showLegacyDice(primary.sides, primary.values[0], isAdvantage, isDisadvantage);
+		const animationResult = await this._showLegacyDice(primary.sides, primary.values[0], isAdvantage, isDisadvantage);
+		if (animationResult === false || !isCharacterScopeCurrent()) return false;
 	}
 
 	/**
@@ -18477,7 +19393,7 @@ class CharacterSheetPage {
 	 * groups (no advantage semantics). Accepts the same `{sides, values}` group
 	 * shape as {@link pAnimateDiceSpec}.
 	 * @param {Array<{sides:number, values:number[]}>} groups
-	 * @returns {Promise}
+	 * @returns {Promise<void|false>}
 	 */
 	async pAnimateDamageDice (groups) {
 		return this.pAnimateDiceSpec({groups});
@@ -18787,6 +19703,23 @@ class CharacterSheetPage {
 		`});
 
 		document.body.append(overlay);
+		let resolveAnimation = null;
+		let isSettled = false;
+		const timeoutIds = new Set();
+		const settle = ({isCancelled = false} = {}) => {
+			if (isSettled) return;
+			isSettled = true;
+			for (const timeoutId of timeoutIds) clearTimeout(timeoutId);
+			timeoutIds.clear();
+			resolveAnimation?.(isCancelled ? false : undefined);
+		};
+		const portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this,
+			element: overlay,
+			cleanup: ({isCharacterScopeTeardown}) => {
+				if (isCharacterScopeTeardown) settle({isCancelled: true});
+			},
+		});
 
 		// Animate random values
 		const dice = overlay.querySelector(".charsheet__dice");
@@ -18811,6 +19744,14 @@ class CharacterSheetPage {
 		};
 
 		return new Promise(resolve => {
+			resolveAnimation = resolve;
+			const schedule = (fn, delay) => {
+				const timeoutId = setTimeout(() => {
+					timeoutIds.delete(timeoutId);
+					fn();
+				}, delay);
+				timeoutIds.add(timeoutId);
+			};
 			const animate = () => {
 				if (animationCycles < maxCycles) {
 					const randomVal = diceType === 100
@@ -18828,7 +19769,7 @@ class CharacterSheetPage {
 						delay = 120 + (animationCycles - 8) * 40;
 					}
 
-					setTimeout(animate, delay);
+					schedule(animate, delay);
 				} else {
 					// Show final value with landing animation
 					updateFace(finalValue);
@@ -18846,15 +19787,18 @@ class CharacterSheetPage {
 
 					// Remove after delay
 					const displayTime = (finalValue === 20 || finalValue === 1) && diceType === 20 ? 1000 : 700;
-					setTimeout(() => {
+					schedule(() => {
 						overlay.style.transition = "opacity 150ms";
 						overlay.style.opacity = "0";
-						setTimeout(() => { overlay.remove(); resolve(); }, 150);
+						schedule(() => {
+							portal.close();
+							settle();
+						}, 150);
 					}, displayTime);
 				}
 			};
 
-			setTimeout(animate, 50);
+			schedule(animate, 50);
 		});
 	}
 
@@ -18863,7 +19807,7 @@ class CharacterSheetPage {
 		this._rollHistory?.addRoll({title, total, breakdown, resultClass, resultNote});
 
 		// Remove existing result
-		document.querySelector(".charsheet__dice-result")?.remove();
+		this._dismissDiceResult(document.querySelector(".charsheet__dice-result"));
 
 		const totalClass = resultClass ? ` ${resultClass}` : "";
 		const noteHtml = resultNote ? `<div class="charsheet__dice-result-note">${resultNote}</div>` : "";
@@ -18880,6 +19824,14 @@ class CharacterSheetPage {
 
 		resultEl.querySelector(".charsheet__dice-result-close").addEventListener("click", () => this._dismissDiceResult(resultEl));
 		document.body.append(resultEl);
+		resultEl.__characterScopePortal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this,
+			element: resultEl,
+			cleanup: () => {
+				this._clearDiceResultDismiss(resultEl);
+				if (this._lastDiceResultEl === resultEl) this._lastDiceResultEl = null;
+			},
+		});
 		this._lastDiceResultEl = resultEl;
 
 		this._scheduleDiceResultDismiss(resultEl, duration);
@@ -18897,7 +19849,7 @@ class CharacterSheetPage {
 		if (!el) return;
 		this._clearDiceResultDismiss(el);
 		el.__dismissTimer = setTimeout(() => {
-			el.__dismissTimer = setTimeout(() => el.remove(), 300);
+			el.__dismissTimer = setTimeout(() => this._dismissDiceResult(el), 300);
 		}, duration);
 	}
 
@@ -18909,7 +19861,8 @@ class CharacterSheetPage {
 	/** (R26 #8) Immediately dismiss a dice-result toast (clearing its timer first). */
 	_dismissDiceResult (el) {
 		this._clearDiceResultDismiss(el);
-		el?.remove();
+		el?.__characterScopePortal?.close?.();
+		if (!el?.__characterScopePortal) el?.remove();
 	}
 	// #endregion
 
@@ -20753,15 +21706,23 @@ class CharacterSheetPage {
 	 * Show the custom modifiers management modal
 	 */
 	async _showCustomModifiersModal () {
+		if (this.isCurrentCharacterReadOnly()) return;
+		const characterScope = this._getCharacterScopeSnapshot();
+		const isCurrentOwner = () => this._isCharacterScopeSnapshotCurrent(
+			characterScope,
+			{isRequireOwner: true},
+		);
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "🎯 Custom Modifiers",
 			isMinHeight0: true,
 			isWidth100: true,
 			cbClose: () => {
+				if (!isCurrentOwner()) return;
 				this._saveCurrentCharacter();
 				this._renderCharacter();
 			},
 		});
+		if (!isCurrentOwner()) return;
 
 		// Get modifier type options - organized by category with optgroups
 		const skills = this.getSkillsList();
@@ -20958,6 +21919,7 @@ class CharacterSheetPage {
 
 				// Toggle handler
 				rowEl.querySelector("input[type='checkbox']").addEventListener("change", () => {
+					if (!isCurrentOwner()) return;
 					this._state.toggleNamedModifier(mod.id);
 					renderModifiersList();
 					renderSummary();
@@ -20965,17 +21927,20 @@ class CharacterSheetPage {
 
 				// Edit handler
 				rowEl.querySelector(".charsheet__modifier-edit").addEventListener("click", () => {
+					if (!isCurrentOwner()) return;
 					showEditForm(mod);
 				});
 
 				// Delete handler
 				rowEl.querySelector(".charsheet__modifier-delete").addEventListener("click", async () => {
+					if (!isCurrentOwner()) return;
 					const doDelete = await InputUiUtil.pGetUserBoolean({
 						title: "Remove Modifier",
 						htmlDescription: `<p>Remove "${mod.name}" modifier?</p>`,
 						textYes: "Remove",
 						textNo: "Cancel",
 					});
+					if (!isCurrentOwner()) return;
 					if (doDelete) {
 						this._state.removeNamedModifier(mod.id);
 						renderModifiersList();
@@ -21352,16 +22317,21 @@ class CharacterSheetPage {
 		};
 
 		// Add modifier button
-		modalInner.querySelector("#charsheet-btn-add-modifier").addEventListener("click", () => showEditForm());
+		modalInner.querySelector("#charsheet-btn-add-modifier").addEventListener("click", () => {
+			if (!isCurrentOwner()) return;
+			showEditForm();
+		});
 
 		// Bind type change to show/hide custom skill fields
 		modalInner.addEventListener("change", function (e) {
+			if (!isCurrentOwner()) return;
 			if (e.target.id !== "mod-type" && e.target.id !== "mod-skill-calculation") return;
 			updateCustomSkillVisibility(modalInner.querySelector("#charsheet-modifier-form"));
 		});
 
 		// Save modifier
 		modalInner.querySelector("#mod-save").addEventListener("click", () => {
+			if (!isCurrentOwner()) return;
 			const formEl = modalInner.querySelector("#charsheet-modifier-form");
 			const name = formEl.querySelector("#mod-name").value.trim();
 			let type = formEl.querySelector("#mod-type").value;
@@ -21448,6 +22418,7 @@ class CharacterSheetPage {
 
 		// Cancel form
 		modalInner.querySelector("#mod-cancel").addEventListener("click", () => {
+			if (!isCurrentOwner()) return;
 			modalInner.querySelector("#charsheet-modifier-form").style.display = "none";
 		});
 
@@ -22008,6 +22979,7 @@ class CharacterSheetPage {
 					isMinHeight0: true,
 					isWidth100: true,
 					cbClose: () => resolve(selectedLanguages.length === count ? selectedLanguages : null),
+					cbCharacterScopeTeardown: () => resolve(null),
 				});
 
 				modalInner.insertAdjacentHTML("beforeend", `
@@ -22569,6 +23541,7 @@ class CharacterSheetPage {
 			title: "Lore Mastery — Choose",
 			isMinHeight0: true,
 			cbClose: () => resolveOnce(null),
+			cbCharacterScopeTeardown: () => resolveOnce(null),
 		});
 		const finish = (value) => {
 			resolveOnce(value);

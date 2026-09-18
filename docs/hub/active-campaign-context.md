@@ -172,6 +172,39 @@ rules and brew teardown, so no private projection remains visible during cleanup
 cancel pending debounced Board persistence before clearing panels, preventing concealment from being saved
 as an empty authoritative workspace.
 
+Realtime closure preserves a structured lifecycle cause instead of collapsing every event into generic character
+loss. `character.archived` and `character.moved_out` close only the resource and retain the campaign selection;
+`campaign.archived` additionally runs full campaign teardown, clears the matching selection, and disposes temporary
+rules/brew; a DM/co-DM demotion closes the private surface through role-loss teardown while retaining the campaign
+for ordinary player surfaces. Every path first uses the same fail-closed presentation, discards character-scoped
+campaign/sharing state, and conceals the document. Switching characters also clears the old sharing controller
+before the new policy loads, and each controller is permanently bound to the character whose policy it fetched.
+Terminal character DELETE/archive failures use that same ordered resource teardown when the failed request still
+names the open character; a response that settles after a selector switch cannot conceal or reattach the replacement.
+Campaign moves and compatibility previews additionally capture the character-load generation, so navigating
+`A → B → A` cannot make an older operation current merely because the character id matches again.
+
+The campaign overview distinguishes authentication continuity from campaign authority. Session expiry stops
+realtime/timers and disables mutation controls but preserves the last-known campaign as an explicitly signed-out,
+read-only fallback. Membership removal, role/access loss, and campaign concealment errors instead invalidate
+activity, clear live roster/context state, destroy the complete authorized campaign surface, and only then render
+the non-enumerating error outside that surface. Previously visible members, character/profile projections,
+inventory, pending actions/transfers, and administration controls therefore cannot remain readable after campaign
+authority ends. The same full concealment path handles HTTP-first authorization failures when realtime is delayed.
+
+Projection-policy writes snapshot their invalidation audience from members authorized by either the previous or
+next policy. A peer losing a shared profile therefore receives one campaign-scoped, metadata-only,
+actor-redacted invalidation needed to conceal stale rows; the event carries no character id, and later members or
+peers excluded by both policies do not receive it.
+
+While a replacement projection is loading, Campaign Overview fences the complete refresh generation: deferred
+action/transfer inbox responses cannot repopulate concealed names, and mutation controls remain disabled until the
+sequence-current snapshot and its dependent inbox reads are accepted. Transfer drafts are preserved across that
+concealment only when their source, destination, and item remain authorized; a committed transfer whose refresh
+fails is represented by a generic recovery row without retaining character names. Session expiry keeps Sign out as
+the sole enabled campaign-content control while every mutation control stays disabled, including after an
+in-flight request settles.
+
 A cancellation is classified as `REQUEST_ABORTED` across the whole request path — including the
 response body read — so it is never mistaken for connectivity loss. Personal brew and local
 documents are never cleared by a campaign-context failure.
@@ -215,6 +248,31 @@ unrelated open campaign Y.
 
 Only a non-persisted `pagehide` disposes the coordinator.
 
+## Surface-entry consistency
+
+Character Sheet and DM Screen use one precedence contract regardless of where navigation starts:
+
+1. an explicit resource URL (`hubCampaign`, `hubCharacter`, or `local=1`) wins;
+2. otherwise a verified active campaign decorates ordinary navigation and redirects a bare eligible surface;
+3. explicit local and deep-link character URLs are never silently retargeted.
+
+Campaign Overview links remain explicit because they identify a specific campaign resource. A DM opening another
+member's character receives the same campaign rules/content context as the owner but a distinct `dm_readonly`
+authority mode: the roster says **Inspect sheet**, the sheet announces **Read-only DM view**, mutation controls
+are disabled before input, and authorized changes stay in Campaign Overview's semantic operations. The guard
+also covers Play Mode's keyboard, drag, custom-role-button, and body-portaled menu entry points; its read-only
+overflow contains only Export and Print. Server-authored XP changes trigger a fresh scoped `dm_truth` read without
+showing the awarding DM a player-recipient toast.
+
+The remaining long-term cleanup is intentionally phased rather than a broad entry-flow rewrite:
+
+1. **Current:** shared URL precedence and surface-default helper, explicit local mode, authority-preserving
+   Character Sheet repository, and consistent read-only DM affordances.
+2. **Next:** expose a shared launch descriptor (`surface`, campaign id, resource id, authority) so Campaign
+   Overview, global navigation, bookmarks, and future deep links produce one normalized destination.
+3. **Later:** reuse that descriptor for pre-navigation capability summaries and cross-surface breadcrumbs without
+   moving authorization decisions out of the BFF.
+
 ## Files
 
 | File | Role |
@@ -245,6 +303,7 @@ two-script boot graph. The coordinator graph's combined transfer size is asserte
 | `HubCampaignNavigation.test.js` | URL decoration, explicit local routes, and surface defaults |
 | `HubContentBootstrap.test.js` / `HubSiteContext.test.js` | Pre-data activation, temporary-only brew, capability failure |
 | `CharacterSheetHubTeardown.test.js` / `CharacterSheetPersistenceBackend.test.js` | Ordered rules cleanup and in-flight character-save conflict fencing |
+| `HubHttpCharacterRepository.test.js` / `CharacterSheetRepositorySeam.test.js` | Canonical-id adoption, explicit create intent, owner/DM authority preservation, and pre-input read-only guards |
 | `DmScreenCampaignPrivacy.test.js` / `DmScreenWorkspacePersistence.test.js` | Private Board concealment and conflict/panel-hydration fencing |
 | `HubActiveCampaignJourney.test.js` | Real BFF integration: reload, device independence, request counts, logout ordering, pinned convergence |
 | `test/e2e/hub/active-campaign-context.spec.ts` | Production stack: switcher/reselection, native storage/channel, defaults/local routes, pinning, in-flight conflict/access-loss order, BFCache, revoke/archive |

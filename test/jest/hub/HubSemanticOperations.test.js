@@ -297,7 +297,9 @@ describe("semantic character operations", () => {
 		expect(JSON.stringify(applied.payload)).not.toContain(IDENTITIES.dm.providerSubject);
 		expect(events).toContainEqual(expect.objectContaining({
 			type: "character.projection.invalidated",
-			payload: {projectionRevision: expect.any(Number)},
+			aggregateType: "campaign",
+			aggregateId: campaign.id,
+			payload: {},
 		}));
 	});
 

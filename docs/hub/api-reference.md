@@ -146,12 +146,27 @@ Only the token hash is persisted. The raw token is returned only from creation.
 | `GET /api/characters/:characterId/projection-policy` | Owner only; protocol-versioned | none | `{policy, projectionRevision, preview}`; `preview` is the server-computed peer profile, and `error` reports `PROJECTION_POLICY_INVALID`. A character owned by somebody else and one that does not exist both return `404 PROJECTION_POLICY_NOT_AVAILABLE`, so the endpoint cannot confirm an id |
 | `PUT /api/characters/:characterId/projection-policy` | Owner mutation | `{policy, expectedProjectionRevision}` + `Idempotency-Key` | Updated policy/preview, `409 PROJECTION_POLICY_CONFLICT` with the current safe state, or `422 PROJECTION_POLICY_INVALID` |
 | `POST /api/characters/:characterId/lease` | Owner mutation | `{takeover?}` | Lease session, monotonic epoch, expiry |
+| `POST /api/characters/:characterId/lease/release` | Owner mutation; current protocol 5 required | Exact `{leaseEpoch, expiresAt}` returned by acquisition/renewal | `{released}`; protocol 3/4 clients receive `426 PROTOCOL_UPDATE_REQUIRED` before body validation |
 | `PATCH /api/characters/:characterId` | Owner mutation + held lease | `baseRevision`, `leaseEpoch`, up to 500 add/remove/replace patches; optional closed `spell.used` activity descriptor | Canonical character or revision/lease conflict |
 | `DELETE /api/characters/:characterId` | Owner mutation | none | Soft archive; blocks outgoing reserved transfer |
-| `POST /api/characters/:characterId/clone` | Owner + target non-spectator membership | `{campaignId}` | Independent character with new id |
+| `POST /api/characters/:characterId/clone` | Owner + target non-spectator membership | `{campaignId, rulesVersionId}` + `Idempotency-Key` | Independent character with new id |
 | `POST /api/characters/:characterId/move` | Owner + target non-spectator membership | `{campaignId}` | Same character moved; active lease/outgoing escrow blocks |
 
 Character data is sanitized/validated and capped at 1.5 MB after the resulting mutation.
+Before submitting a cloud clone, the Character Sheet persists the exact destination campaign, rules pin, and
+idempotency key, a 23-hour replay deadline, and the destination's existing clone IDs for that source character.
+An outcome-uncertain retry before the deadline replays that frozen request even if campaign rules changed while
+the response was missing. After the deadline, the client never resubmits the expired key: it lists authoritative
+destination characters and compares them with the saved baseline. Exactly one new matching clone is adopted,
+authoritative absence clears the old command but requires a new explicit copy attempt, and multiple matches keep
+the command locked for manual resolution. Older recovery records without a deadline and baseline fail closed.
+A definite non-committing rejection discards the frozen request so the next attempt reads current compatibility
+and uses a new key; an idempotency-key collision remains blocked rather than risking a duplicate clone.
+
+`dm_truth` authorizes inspection, not document editing. The Character Sheet preserves that discriminator,
+renders the sheet read-only before accepting input, and does not initialize owner-only leases, sharing policy,
+pending-action approval, peer-targeting, or party-inventory controls. DMs change player characters through the
+explicit semantic action and grant routes below; they never acquire the owner's document lease.
 
 The optional spell activity descriptor contains only `type:"spell.used"`, bounded `spellName`/`spellSource`,
 integer `spellLevel`/`slotLevel` (0-9), and mode `cantrip|ritual|spell_slot|pact_slot|resource|free`. It is never
@@ -195,6 +210,13 @@ list or route through it.
 Every semantic command uses a UUID `commandId` equal to `Idempotency-Key`. Exact retries return the stored
 operation and event ids; any actor/body reuse returns `IDEMPOTENCY_KEY_REUSED`.
 
+The Campaign Overview condition action uses the canonical site condition catalog plus the active campaign brew
+catalog. The submitted operation always carries the selected `name` and `source`; there is no free-form source
+fallback. Removal choices additionally include exact conditions already present on an authorized canonical
+target, including legacy bare-string conditions normalized to their established `XPHB` identity, so retiring a
+brew version cannot strand an applied condition. Remote `brew.activated` events refresh the catalog; a later
+live refresh retries a transient catalog-load failure.
+
 The item-award source is either `{kind:"party_inventory",entryId}` or
 `{kind:"catalog"|"recent"|"campaign_item",item}`. A browser-supplied item is restricted to `name`, `source`,
 `page`, `rarity`, `weight`, `value`, `typeCode`, and `edition`; unknown/rich/executable content is rejected and
@@ -216,6 +238,16 @@ contain only the bounded summary even though authoritative inventory retains the
 Those returned/event/audit summaries are derived from the resolved authoritative item, so browser-supplied
 display metadata cannot disagree with the persisted object. Event and audit `sourceKind` identify the resolved
 authority; the response source continues to describe the normalized submitted command for retry identity.
+Before submission, the browser persists the exact award body, idempotency key, fingerprint, and 23-hour replay
+deadline in account/campaign-scoped session storage. After an outcome-uncertain failure or reload, it locks the
+item and recipient controls to that command and labels the only available submission action `Retry previous
+award`. Before the deadline it replays the exact command. Each committed `item.granted` event records the actor's
+command ID; that field is redacted from every other viewer. After the deadline, the browser never resubmits the
+expired key: it scans authoritative campaign history for that actor-only correlation. A match proves the atomic
+award committed and refreshes inventories; a complete scan with no match clears the old command but requires a
+new explicit submission; an incomplete or failed scan remains locked. The composer otherwise unlocks only after
+a definitive failure or confirmed success, so it never presents editable award B while submission would replay
+retained award A.
 
 Direct DM/co-DM body:
 

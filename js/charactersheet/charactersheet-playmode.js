@@ -8,6 +8,8 @@
  */
 
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
+import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CHARACTER_ACCESS_MODES} from "../hub/hub-character-view.js";
 
 const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"];
 const ABILITY_NAMES = {str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA"};
@@ -203,6 +205,8 @@ export class CharacterSheetPlayMode {
 		this._elActionsHub = null;
 		this._elDrawerBackdrop = null;
 		this._elDrawer = null;
+		this._contextMenuPortal = null;
+		this._characterScopeDocumentCleanups = new Set();
 	}
 
 	// ─── Lifecycle ──────────────────────────────────────────────
@@ -228,6 +232,7 @@ export class CharacterSheetPlayMode {
 		this._renderStatusBar();
 		this._renderCharacterPanel();
 		this._renderActionsHub();
+		this._page?._applyCharacterAccessMode?.();
 	}
 
 	/**
@@ -607,13 +612,28 @@ export class CharacterSheetPlayMode {
 		// Secondary tools folded into a single overflow menu so the status row
 		// never overflows (was 17 buttons > viewport at 1440px). The menu is
 		// body-appended + fixed-positioned so it escapes any overflow clipping.
-		const moreBtn = this._makeToolBtn(tools, "more", "More", (e) => this._openToolsMenu(e, moreBtn));
+		const moreBtn = this._makeToolBtn(
+			tools,
+			"more",
+			"More",
+			(e) => this._openToolsMenu(e, moreBtn),
+			{isReadOnlyAllowed: true},
+		);
 		moreBtn.classList.add("pm-status__tool-btn--more");
 		moreBtn.setAttribute("aria-haspopup", "true");
 	}
 
 	/** Overflow menu holding the secondary Alt View tools. */
 	_openToolsMenu (e, anchorBtn) {
+		const isReadOnly = this._page._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+		if (isReadOnly) {
+			const rect = anchorBtn.getBoundingClientRect();
+			this._showContextMenu({clientX: rect.right, clientY: rect.bottom + 4}, [
+				{icon: "save", label: "Export", onClick: () => this._exportCharacter()},
+				{icon: "print", label: "Print", onClick: () => window.print()},
+			], {isReadOnlyAllowed: true});
+			return;
+		}
 		const items = [
 			{icon: "notes", label: "Reference", onClick: () => this._openDrawerByType("reference")},
 			{icon: "edit", label: "Notes", onClick: () => this._openDrawerByType("notes")},
@@ -1437,7 +1457,11 @@ export class CharacterSheetPlayMode {
 			this._makeClickable(el, `Use favorite: ${fav.name}`, () => this._useFavorite(fav));
 
 			// E1: Drag-drop reorder
-			el.addEventListener("dragstart", () => {
+			el.addEventListener("dragstart", (e) => {
+				if (this._isReadOnly()) {
+					e.preventDefault();
+					return;
+				}
 				dragSrcIdx = idx;
 				el.classList.add("pm-favorite--dragging");
 			});
@@ -1452,6 +1476,7 @@ export class CharacterSheetPlayMode {
 			el.addEventListener("dragleave", () => el.classList.remove("pm-favorite--drag-over"));
 			el.addEventListener("drop", (e) => {
 				e.preventDefault();
+				if (this._isReadOnly()) return;
 				el.classList.remove("pm-favorite--drag-over");
 				if (dragSrcIdx === null || dragSrcIdx === idx) return;
 				const reordered = [...favorites];
@@ -3435,8 +3460,10 @@ export class CharacterSheetPlayMode {
 		cancelBtn.addEventListener("click", () => overlay.remove());
 
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-		document.addEventListener("keydown", function onEsc (e) {
-			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
+		const removeEsc = this._addCharacterScopeDocumentListener(document, "keydown", e => {
+			if (e.key !== "Escape") return;
+			overlay.remove();
+			removeEsc();
 		});
 
 		document.body.appendChild(overlay);
@@ -3898,8 +3925,10 @@ export class CharacterSheetPlayMode {
 		closeBtn.addEventListener("click", () => overlay.remove());
 
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-		document.addEventListener("keydown", function esc (e) {
-			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		const removeEsc = this._addCharacterScopeDocumentListener(document, "keydown", e => {
+			if (e.key !== "Escape") return;
+			overlay.remove();
+			removeEsc();
 		});
 		document.body.appendChild(overlay);
 	}
@@ -4070,8 +4099,10 @@ export class CharacterSheetPlayMode {
 		closeBtn.addEventListener("click", () => overlay.remove());
 
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-		document.addEventListener("keydown", function esc (e) {
-			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		const removeEsc = this._addCharacterScopeDocumentListener(document, "keydown", e => {
+			if (e.key !== "Escape") return;
+			overlay.remove();
+			removeEsc();
 		});
 		document.body.appendChild(overlay);
 	}
@@ -4292,8 +4323,10 @@ export class CharacterSheetPlayMode {
 		closeBtn.addEventListener("click", () => overlay.remove());
 
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-		document.addEventListener("keydown", function esc (e) {
-			if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", esc); }
+		const removeEsc = this._addCharacterScopeDocumentListener(document, "keydown", e => {
+			if (e.key !== "Escape") return;
+			overlay.remove();
+			removeEsc();
 		});
 		document.body.appendChild(overlay);
 	}
@@ -4516,6 +4549,7 @@ export class CharacterSheetPlayMode {
 			// Ctrl+Shift+P to toggle play mode
 			if (e.ctrlKey && e.shiftKey && e.key === "P") {
 				e.preventDefault();
+				if (this._isReadOnly()) return;
 				this.toggle();
 			}
 			// Escape to close drawer
@@ -4679,10 +4713,12 @@ export class CharacterSheetPlayMode {
 	}
 
 	/** E2: Show a positioned context menu. items: [{label, icon, onClick, disabled, danger, separator}] */
-	_showContextMenu (e, items) {
-		document.querySelectorAll(".pm-context-menu").forEach(m => m.remove());
+	_showContextMenu (e, items, {isReadOnlyAllowed = false} = {}) {
+		if (this._isReadOnly() && !isReadOnlyAllowed) return false;
+		this._contextMenuPortal?.close();
 
 		const menu = this._ce("div", "pm-context-menu");
+		if (isReadOnlyAllowed) menu.dataset.charsheetReadonlyAllowed = "true";
 		items.forEach(item => {
 			if (item.separator) {
 				this._ce("div", "pm-context-menu__separator", menu);
@@ -4697,7 +4733,11 @@ export class CharacterSheetPlayMode {
 			if (item.disabled) {
 				el.disabled = true;
 			} else {
-				el.addEventListener("click", () => { menu.remove(); item.onClick(); });
+				el.addEventListener("click", () => {
+					if (!isReadOnlyAllowed && !portal.isCurrent({isRequireOwner: true})) return;
+					portal.close();
+					item.onClick();
+				});
 			}
 		});
 
@@ -4705,6 +4745,20 @@ export class CharacterSheetPlayMode {
 		menu.style.left = "-9999px";
 		menu.style.top = "-9999px";
 		document.body.appendChild(menu);
+		let closeTimer = null;
+		let portal = null;
+		portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this._page,
+			element: menu,
+			isRequireOwner: !isReadOnlyAllowed,
+			cleanup: () => {
+				if (closeTimer != null) clearTimeout(closeTimer);
+				document.removeEventListener("click", onClose);
+				document.removeEventListener("keydown", onEsc);
+				if (this._contextMenuPortal === portal) this._contextMenuPortal = null;
+			},
+		});
+		this._contextMenuPortal = portal;
 		const menuW = menu.offsetWidth;
 		const menuH = menu.offsetHeight;
 		const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
@@ -4714,37 +4768,102 @@ export class CharacterSheetPlayMode {
 
 		const onClose = (ev) => {
 			if (!menu.contains(ev.target)) {
-				menu.remove();
-				document.removeEventListener("click", onClose);
-				document.removeEventListener("keydown", onEsc);
+				portal.close();
 			}
 		};
 		const onEsc = (ev) => {
 			if (ev.key === "Escape") {
-				menu.remove();
-				document.removeEventListener("click", onClose);
-				document.removeEventListener("keydown", onEsc);
+				portal.close();
 			}
 		};
-		setTimeout(() => {
+		closeTimer = setTimeout(() => {
 			document.addEventListener("click", onClose);
 			document.addEventListener("keydown", onEsc);
 		}, 0);
+		return true;
+	}
+
+	_isReadOnly () {
+		return this._page?._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+	}
+
+	_getOwnerCharacterScope () {
+		if (this._isReadOnly()) return null;
+		if (typeof this._page?._getCharacterScopeSnapshot === "function") {
+			return this._page._getCharacterScopeSnapshot();
+		}
+		return {
+			characterId: this._page?._currentCharacterId ?? null,
+			loadGeneration: this._page?._characterLoadGeneration ?? 0,
+			accessMode: this._page?._currentCharacterAccess ?? null,
+		};
+	}
+
+	_isOwnerCharacterScopeCurrent (scope) {
+		if (!scope || this._isReadOnly()) return false;
+		if (typeof this._page?._isCharacterScopeSnapshotCurrent === "function") {
+			return this._page._isCharacterScopeSnapshotCurrent(scope, {isRequireOwner: true});
+		}
+		return scope.characterId === (this._page?._currentCharacterId ?? null)
+			&& scope.loadGeneration === (this._page?._characterLoadGeneration ?? 0)
+			&& scope.accessMode === (this._page?._currentCharacterAccess ?? null);
+	}
+
+	_cancelActiveStickyDrag () {
+		const activeDrag = this._activeStickyDrag;
+		if (!activeDrag) return;
+		activeDrag.el.style.left = activeDrag.originalLeft;
+		activeDrag.el.style.top = activeDrag.originalTop;
+		activeDrag.el.style.zIndex = activeDrag.originalZIndex;
+		this._activeStickyDrag = null;
+	}
+
+	_addCharacterScopeDocumentListener (target, type, handler) {
+		const cleanup = () => {
+			target.removeEventListener(type, handler);
+			this._characterScopeDocumentCleanups?.delete(cleanup);
+		};
+		target.addEventListener(type, handler);
+		(this._characterScopeDocumentCleanups ||= new Set()).add(cleanup);
+		return cleanup;
+	}
+
+	resetCharacterScopeUi () {
+		this._cancelActiveStickyDrag();
+		this._contextMenuPortal?.close();
+		for (const cleanup of [...(this._characterScopeDocumentCleanups || [])]) cleanup();
+		const staleElements = [
+			document.getElementById("pm-sticky-overlay"),
+			...document.querySelectorAll(".pm-modal-overlay"),
+		].filter(Boolean);
+		for (const element of staleElements) {
+			CharacterSheetModal.fenceStaleCharacterScopeElement(element);
+			element.remove();
+		}
 	}
 
 	/**
 	 * Make an element clickable with full accessibility support.
 	 * Sets role="button", tabindex="0", aria-label, wires click + Enter/Space.
 	 */
-	_makeClickable (el, label, handler) {
+	_makeClickable (el, label, handler, {isReadOnlyAllowed = false} = {}) {
+		const guardedHandler = (e) => {
+			if (this._isReadOnly() && !isReadOnlyAllowed) {
+				e?.preventDefault?.();
+				e?.stopImmediatePropagation?.();
+				return;
+			}
+			handler(e);
+		};
 		el.setAttribute("role", "button");
 		el.setAttribute("tabindex", "0");
 		if (label) el.setAttribute("aria-label", label);
-		el.addEventListener("click", handler);
+		if (isReadOnlyAllowed) el.dataset.charsheetReadonlyAllowed = "true";
+		el.addEventListener("click", guardedHandler);
 		el.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") {
 				e.preventDefault();
-				handler(e);
+				guardedHandler(e);
 			}
 		});
 		return el;
@@ -4761,11 +4880,19 @@ export class CharacterSheetPlayMode {
 	}
 
 	/** Create a toolbar button */
-	_makeToolBtn (parent, icon, label, onClick) {
+	_makeToolBtn (parent, icon, label, onClick, {isReadOnlyAllowed = false} = {}) {
 		const btn = this._ce("button", "pm-status__tool-btn", parent);
 		this._icon(icon, {cls: "pm-status__tool-icon", parent: btn});
 		btn.appendChild(document.createTextNode(label));
-		btn.addEventListener("click", onClick);
+		if (isReadOnlyAllowed) btn.dataset.charsheetReadonlyAllowed = "true";
+		btn.addEventListener("click", (e) => {
+			if (this._isReadOnly() && !isReadOnlyAllowed) {
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				return;
+			}
+			onClick(e);
+		});
 		return btn;
 	}
 
@@ -4982,6 +5109,8 @@ export class CharacterSheetPlayMode {
 	// ─── Phase A2: Sticky Notes Overlay ─────────────────────────
 
 	_toggleStickyNotesOverlay () {
+		const characterScope = this._getOwnerCharacterScope();
+		if (!characterScope) return;
 		let overlay = document.getElementById("pm-sticky-overlay");
 		if (overlay) {
 			overlay.classList.toggle("pm-sticky-overlay--hidden");
@@ -5001,6 +5130,7 @@ export class CharacterSheetPlayMode {
 		fab.textContent = "＋ Sticky";
 		fab.title = "Add a new sticky note";
 		fab.addEventListener("click", () => {
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			const id = this._state.addStickyNote({
 				title: "Note",
 				content: "",
@@ -5016,6 +5146,8 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderStickyNote (overlayEl, note) {
+		const characterScope = this._getOwnerCharacterScope();
+		if (!characterScope) return;
 		const COLORS = {yellow: "#fef08a", pink: "#fbcfe8", blue: "#bfdbfe", green: "#bbf7d0", purple: "#e9d5ff"};
 		const existing = overlayEl.querySelector(`[data-note-id="${note.id}"]`);
 		if (existing) existing.remove();
@@ -5035,6 +5167,7 @@ export class CharacterSheetPlayMode {
 		const titleInput = this._ce("input", "pm-sticky__title-input", titleBar);
 		titleInput.value = note.title || "Note";
 		titleInput.addEventListener("blur", () => {
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			this._state.updateStickyNote(note.id, {title: titleInput.value});
 		});
 		titleInput.addEventListener("click", (e) => e.stopPropagation());
@@ -5049,6 +5182,7 @@ export class CharacterSheetPlayMode {
 		colorPicker.value = note.color || "yellow";
 		colorPicker.addEventListener("change", (e) => {
 			e.stopPropagation();
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			this._state.updateStickyNote(note.id, {color: colorPicker.value});
 			el.style.background = COLORS[colorPicker.value] || COLORS.yellow;
 		});
@@ -5059,6 +5193,7 @@ export class CharacterSheetPlayMode {
 		delBtn.title = "Delete note";
 		delBtn.addEventListener("click", (e) => {
 			e.stopPropagation();
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			this._state.removeStickyNote(note.id);
 			el.remove();
 			this._logActivity("notes", `Deleted sticky note: ${note.title || "Note"}`);
@@ -5069,33 +5204,54 @@ export class CharacterSheetPlayMode {
 		content.value = note.content || "";
 		content.placeholder = "Write something…";
 		content.addEventListener("blur", () => {
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) return;
 			this._state.updateStickyNote(note.id, {content: content.value});
 		});
 		content.addEventListener("click", (e) => e.stopPropagation());
 
 		// Drag to reposition
-		let dragging = false; let dragOffX = 0; let dragOffY = 0;
 		titleBar.addEventListener("mousedown", (e) => {
+			if (!this._isOwnerCharacterScopeCurrent(characterScope)) {
+				e.preventDefault();
+				return;
+			}
 			if (e.target === titleInput || e.target === colorPicker || e.target === delBtn) return;
-			dragging = true;
 			const rect = el.getBoundingClientRect();
-			dragOffX = e.clientX - rect.left;
-			dragOffY = e.clientY - rect.top;
+			this._activeStickyDrag = {
+				characterScope,
+				el,
+				overlayEl,
+				dragOffX: e.clientX - rect.left,
+				dragOffY: e.clientY - rect.top,
+				originalLeft: el.style.left,
+				originalTop: el.style.top,
+				originalZIndex: el.style.zIndex,
+			};
 			el.style.zIndex = "9999";
 			e.preventDefault();
 		});
-		document.addEventListener("mousemove", (e) => {
-			if (!dragging) return;
-			const parentRect = overlayEl.getBoundingClientRect();
-			const x = Math.max(0, e.clientX - parentRect.left - dragOffX);
-			const y = Math.max(0, e.clientY - parentRect.top - dragOffY);
+		this._addCharacterScopeDocumentListener(document, "mousemove", (e) => {
+			const activeDrag = this._activeStickyDrag;
+			if (!activeDrag || activeDrag.el !== el) return;
+			if (!this._isOwnerCharacterScopeCurrent(activeDrag.characterScope)) {
+				this._cancelActiveStickyDrag();
+				return;
+			}
+			const parentRect = activeDrag.overlayEl.getBoundingClientRect();
+			const x = Math.max(0, e.clientX - parentRect.left - activeDrag.dragOffX);
+			const y = Math.max(0, e.clientY - parentRect.top - activeDrag.dragOffY);
 			el.style.left = `${x}px`;
 			el.style.top = `${y}px`;
 		});
-		document.addEventListener("mouseup", () => {
-			if (!dragging) return;
-			dragging = false;
-			el.style.zIndex = "";
+		this._addCharacterScopeDocumentListener(document, "mouseup", () => {
+			const activeDrag = this._activeStickyDrag;
+			if (!activeDrag || activeDrag.el !== el) return;
+			if (!this._isOwnerCharacterScopeCurrent(activeDrag.characterScope)) {
+				this._cancelActiveStickyDrag();
+				return;
+			}
+			this._activeStickyDrag = null;
+			el.style.zIndex = activeDrag.originalZIndex;
 			const x = parseFloat(el.style.left) || 0;
 			const y = parseFloat(el.style.top) || 0;
 			this._state.updateStickyNote(note.id, {position: {x, y}});

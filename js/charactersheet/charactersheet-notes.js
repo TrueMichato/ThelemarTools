@@ -13,6 +13,7 @@ export class CharacterSheetNotes {
 		this._page = page;
 		this._state = page.getState();
 		this._activeTab = null;
+		this._activeDrag = null;
 
 		// Tab ID to name mapping
 		this._tabMap = {
@@ -76,6 +77,9 @@ export class CharacterSheetNotes {
 				setTimeout(() => this._renderStickyNotes(), 50);
 			}
 		});
+
+		document.addEventListener("mousemove", e => this._handleStickyNoteDragMove(e));
+		document.addEventListener("mouseup", () => this._handleStickyNoteDragEnd());
 	}
 
 	/**
@@ -363,58 +367,100 @@ export class CharacterSheetNotes {
 	 * Make a sticky note draggable
 	 */
 	_makeDraggable (noteEl, noteId) {
-		let isDragging = false;
-		let startX, startY, startLeft, startTop;
-
 		const header = noteEl.querySelector(".charsheet__sticky-note-header");
 
 		header.style.cursor = "move";
 
 		header.addEventListener("mousedown", (e) => {
 			if (e.target.closest("button")) return; // Don't drag when clicking buttons
+			if (this._page.isCurrentCharacterReadOnly?.()) return;
 
-			isDragging = true;
-			startX = e.clientX;
-			startY = e.clientY;
-			startLeft = parseInt(noteEl.style.left) || 0;
-			startTop = parseInt(noteEl.style.top) || 0;
+			this.cancelActiveDrag();
+			const startLeft = parseInt(noteEl.style.left) || 0;
+			const startTop = parseInt(noteEl.style.top) || 0;
+			this._activeDrag = {
+				noteEl,
+				noteId,
+				characterScope: this._page._getCharacterScopeSnapshot?.() || null,
+				startX: e.clientX,
+				startY: e.clientY,
+				startLeft,
+				startTop,
+				originalLeft: noteEl.style.left,
+				originalTop: noteEl.style.top,
+			};
 
 			noteEl.classList.add("charsheet__sticky-note--dragging");
 			e.preventDefault();
 		});
+	}
 
-		const onMouseMove = (e) => {
-			if (!isDragging) return;
+	_isActiveDragCurrentOwner () {
+		const activeDrag = this._activeDrag;
+		if (!activeDrag || this._page.isCurrentCharacterReadOnly?.()) return false;
+		if (!activeDrag.characterScope) return true;
+		return this._page._isCharacterScopeSnapshotCurrent?.(
+			activeDrag.characterScope,
+			{isRequireOwner: true},
+		) !== false;
+	}
 
-			const dx = e.clientX - startX;
-			const dy = e.clientY - startY;
+	_isOwnerScopeCurrent (characterScope) {
+		if (this._page.isCurrentCharacterReadOnly?.()) return false;
+		if (!characterScope) return true;
+		return this._page._isCharacterScopeSnapshotCurrent?.(
+			characterScope,
+			{isRequireOwner: true},
+		) !== false;
+	}
 
-			noteEl.style.left = `${Math.max(0, startLeft + dx)}px`;
-			noteEl.style.top = `${Math.max(0, startTop + dy)}px`;
+	_handleStickyNoteDragMove (e) {
+		const activeDrag = this._activeDrag;
+		if (!activeDrag) return;
+		if (!this._isActiveDragCurrentOwner()) {
+			this.cancelActiveDrag();
+			return;
+		}
+
+		const dx = e.clientX - activeDrag.startX;
+		const dy = e.clientY - activeDrag.startY;
+
+		activeDrag.noteEl.style.left = `${Math.max(0, activeDrag.startLeft + dx)}px`;
+		activeDrag.noteEl.style.top = `${Math.max(0, activeDrag.startTop + dy)}px`;
+	}
+
+	_handleStickyNoteDragEnd () {
+		const activeDrag = this._activeDrag;
+		if (!activeDrag) return;
+		if (!this._isActiveDragCurrentOwner()) {
+			this.cancelActiveDrag();
+			return;
+		}
+
+		this._activeDrag = null;
+		activeDrag.noteEl.classList.remove("charsheet__sticky-note--dragging");
+		const newPosition = {
+			x: parseInt(activeDrag.noteEl.style.left) || 0,
+			y: parseInt(activeDrag.noteEl.style.top) || 0,
 		};
+		this._state.updateStickyNote(activeDrag.noteId, {position: newPosition});
+		this._page.saveCharacter();
+	}
 
-		const onMouseUp = () => {
-			if (!isDragging) return;
-			isDragging = false;
-			noteEl.classList.remove("charsheet__sticky-note--dragging");
-
-			// Save new position
-			const newPosition = {
-				x: parseInt(noteEl.style.left) || 0,
-				y: parseInt(noteEl.style.top) || 0,
-			};
-			this._state.updateStickyNote(noteId, {position: newPosition});
-			this._page.saveCharacter();
-		};
-
-		document.addEventListener("mousemove", onMouseMove);
-		document.addEventListener("mouseup", onMouseUp);
+	cancelActiveDrag () {
+		const activeDrag = this._activeDrag;
+		if (!activeDrag) return;
+		this._activeDrag = null;
+		activeDrag.noteEl.classList.remove("charsheet__sticky-note--dragging");
+		activeDrag.noteEl.style.left = activeDrag.originalLeft;
+		activeDrag.noteEl.style.top = activeDrag.originalTop;
 	}
 
 	/**
 	 * Toggle note collapsed state
 	 */
 	_toggleNoteCollapse (noteId) {
+		if (this._page.isCurrentCharacterReadOnly?.()) return;
 		const note = this._state.getStickyNote(noteId);
 		if (!note) return;
 
@@ -427,6 +473,8 @@ export class CharacterSheetNotes {
 	 * Delete a sticky note
 	 */
 	async _deleteStickyNote (noteId) {
+		if (this._page.isCurrentCharacterReadOnly?.()) return;
+		const characterScope = this._page._getCharacterScopeSnapshot?.() || null;
 		const confirmed = await InputUiUtil.pGetUserBoolean({
 			title: "Delete Note",
 			htmlDescription: "Are you sure you want to delete this note?",
@@ -434,7 +482,7 @@ export class CharacterSheetNotes {
 			textNo: "Cancel",
 		});
 
-		if (!confirmed) return;
+		if (!confirmed || !this._isOwnerScopeCurrent(characterScope)) return;
 
 		this._state.removeStickyNote(noteId);
 		this._page.saveCharacter();
@@ -454,6 +502,9 @@ export class CharacterSheetNotes {
 	 * @param {string|null} noteId - ID of note to edit, or null for new note
 	 */
 	async _showEditStickyNoteModal (noteId) {
+		if (this._page.isCurrentCharacterReadOnly?.()) return;
+		const characterScope = this._page._getCharacterScopeSnapshot?.() || null;
+		const isCurrentOwner = () => this._isOwnerScopeCurrent(characterScope);
 		const existingNote = noteId ? this._state.getStickyNote(noteId) : null;
 		const isNew = !existingNote;
 
@@ -462,6 +513,7 @@ export class CharacterSheetNotes {
 			isMinHeight0: true,
 			isWidth100: true,
 		});
+		if (!isCurrentOwner()) return;
 
 		// Get tab options for dropdown
 		const tabOptions = [
@@ -521,6 +573,7 @@ export class CharacterSheetNotes {
 			colorBtn.textContent = (isSelected ? "✓ " : "") + colorName.charAt(0).toUpperCase() + colorName.slice(1);
 
 			colorBtn.addEventListener("click", (e) => {
+				if (!isCurrentOwner()) return;
 				e.preventDefault();
 				selectedColor = colorName;
 				colorRow.querySelectorAll("button").forEach(btn => {
@@ -562,6 +615,7 @@ export class CharacterSheetNotes {
 			clazz: "ve-btn ve-btn-primary",
 			txt: isNew ? "Add Note" : "Save Changes",
 			click: () => {
+				if (!isCurrentOwner()) return;
 				const title = titleInput.value.trim() || "Note";
 				const content = contentArea.value;
 				const tab = tabSelect.value || null;

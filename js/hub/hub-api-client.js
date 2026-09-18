@@ -1,4 +1,5 @@
 import {isCanonicalProjection} from "./hub-character-view.js";
+import {HUB_PROTOCOL_VERSION} from "./hub-capabilities.js";
 
 export class HubApiError extends Error {
 	constructor ({code, status, message = null, details = null, cause = null}) {
@@ -14,8 +15,12 @@ export class HubApiError extends Error {
 export const HUB_COMMAND_REPLAY_WINDOW_MS = 23 * 60 * 60 * 1000;
 export const HUB_TRANSFER_REPLAY_WINDOW_MS = HUB_COMMAND_REPLAY_WINDOW_MS;
 
-export function isTransferOutcomeUncertain (error) {
+export function isMutationOutcomeUncertain (error) {
 	return ["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code) || error?.status >= 500;
+}
+
+export function isTransferOutcomeUncertain (error) {
+	return isMutationOutcomeUncertain(error);
 }
 
 export class HubTransferRefreshQueue {
@@ -257,7 +262,7 @@ export class HubApiClient {
 	}
 
 	async _pRequest (path, {method = "GET", body = null, isMutation = false, idempotencyKey = null, signal = null} = {}) {
-		const headers = {accept: "application/json", "x-hub-protocol-version": "4"};
+		const headers = {accept: "application/json", "x-hub-protocol-version": HUB_PROTOCOL_VERSION};
 		if (body != null) headers["content-type"] = "application/json";
 		if (isMutation) {
 			if (!this._csrfToken) throw new HubApiError({code: "CSRF_NOT_READY", status: 0});
@@ -528,10 +533,10 @@ export class HubApiClient {
 		})).lease;
 	}
 
-	async pReleaseCharacterLease ({characterId}) {
+	async pReleaseCharacterLease ({characterId, leaseEpoch, expiresAt}) {
 		return this._pRequest(`/api/characters/${encodeURIComponent(characterId)}/lease/release`, {
 			method: "POST",
-			body: {},
+			body: {leaseEpoch, expiresAt},
 			isMutation: true,
 		});
 	}

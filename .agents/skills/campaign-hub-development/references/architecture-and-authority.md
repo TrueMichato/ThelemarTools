@@ -121,12 +121,21 @@ workspace repository tests.
 - The projector has three outcomes: `owner_truth`, `dm_truth`, and recipient-independent `peer_profile`.
 - `character.projection.invalidated` contains metadata only. Consumers batch/coalesce invalidations, refetch the
   authorization-scoped projection over HTTP, sequence-fence responses, and replace the prior view.
+- Select invalidation recipients from old-or-new visibility of any projection field, not identity-only activity
+  visibility. A peer with hidden identity but shared HP still needs the metadata-only invalidation when that
+  partial profile changes or disappears.
 - Never send projected fields in invalidation/resync payloads or merge fragments from different authorization
   scopes.
+- Campaign Overview mutations, nested action/transfer refreshes, and queued transfer work capture the projection
+  authorization generation before their first await. Stale completions do not write rows/status/errors, clear
+  drafts, or restore controls. Delete a concealed transfer draft only after a current refresh restores and reveals
+  it.
 - Replay may return zero visible rows while `hasMore` is true. Continue with `scannedThroughSequence`.
 - On reconnect or resync, replay to the raw cursor, refetch the complete authorized projection, and apply it only
   if the campaign/access generation and request sequence still match.
 - Revocation or role/access loss closes the client and makes previously loaded private state inaccessible.
+  Presence revalidation distinguishes `Session expired` from `Membership revoked` so clients choose the correct
+  signed-out versus campaign-access-loss teardown.
 
 Primary sources: ADR 0011, `server/src/character-projection.js`, `server/src/realtime.js`,
 `js/hub/hub-realtime-client.js`, `docs/hub/event-catalog.md`.

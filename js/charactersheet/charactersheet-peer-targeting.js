@@ -44,6 +44,7 @@ export class CharacterSheetPeerTargeting {
 		api,
 		root = null,
 		fnGetCharacterId,
+		fnIsOwner,
 		fnGetRulesVersionId,
 		fnGetCapability,
 		fnRefreshCampaignContext = null,
@@ -55,6 +56,7 @@ export class CharacterSheetPeerTargeting {
 		this._api = api;
 		this._root = root;
 		this._fnGetCharacterId = fnGetCharacterId;
+		this._fnIsOwner = fnIsOwner;
 		this._fnGetRulesVersionId = fnGetRulesVersionId;
 		this._fnGetCapability = fnGetCapability;
 		this._fnRefreshCampaignContext = fnRefreshCampaignContext;
@@ -81,7 +83,7 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	init () {
-		if (!this._campaignId || !this._api || !this._fnGetCharacterId || !this._fnGetCapability) return false;
+		if (!this._campaignId || !this._api || !this._fnGetCharacterId || !this._fnIsOwner || !this._fnGetCapability) return false;
 		window.addEventListener("focus", this._onFocus);
 		document.addEventListener("visibilitychange", this._onVisibilityChange);
 		this._render();
@@ -95,7 +97,7 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	activate ({characterId, membershipRole}) {
-		if (!characterId || membershipRole !== "player" || !this._hasCapability()) {
+		if (!characterId || membershipRole !== "player" || !this._hasOwnerAuthority() || !this._hasCapability()) {
 			this.deactivate();
 			return false;
 		}
@@ -144,6 +146,10 @@ export class CharacterSheetPeerTargeting {
 			this.deactivate();
 			return;
 		}
+		if (!this._hasOwnerAuthority()) {
+			this.deactivate();
+			return;
+		}
 		if (state?.state === "reconnecting") {
 			this.suspend();
 			return;
@@ -155,6 +161,10 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	onRealtimeOperation (event) {
+		if (!this._hasOwnerAuthority()) {
+			this.deactivate();
+			return false;
+		}
 		if (!this._characterId || !event?.operationId) return false;
 		const current = this._outgoing.get(event.operationId);
 		if (!current && event.status === "proposed") return false;
@@ -172,7 +182,8 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	isSupportedSpellCast ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
-		return !this._isSuspended
+		return this._hasOwnerAuthority()
+			&& !this._isSuspended
 			&& this._hasCapability()
 			&& this._characterId
 			&& this._membershipRole === "player"
@@ -246,12 +257,22 @@ export class CharacterSheetPeerTargeting {
 	}
 
 	async pRefresh () {
+		if (!this._hasOwnerAuthority()) {
+			if (this._characterId) this.deactivate();
+			return false;
+		}
 		if (this._hasDraftAwaitingAuthoritativeReconciliation()) return this._pRecoverDefinitiveProposalRejections();
 		return this._pRefreshOutgoingActions();
 	}
 
 	async _pRefreshOutgoingActions () {
-		if (this._isSuspended || !this._characterId || !this._hasCapability() || typeof this._api.pListCharacterOutgoingActions !== "function") return false;
+		if (
+			!this._hasOwnerAuthority()
+			|| this._isSuspended
+			|| !this._characterId
+			|| !this._hasCapability()
+			|| typeof this._api.pListCharacterOutgoingActions !== "function"
+		) return false;
 		const token = {
 			generation: this._generation,
 			characterId: this._characterId,
@@ -456,6 +477,10 @@ export class CharacterSheetPeerTargeting {
 			&& capability.resourceKinds.includes("spell_slot");
 	}
 
+	_hasOwnerAuthority () {
+		return this._fnIsOwner?.() === true;
+	}
+
 	_isSupportedSpellShape ({spell, selectedSlot, hasMetamagic = false, hasVariantComponent = false} = {}) {
 		return String(spell?.name || "").toLowerCase() === "cure wounds"
 			&& _SOURCE_VERSIONS.has(spell?.source)
@@ -566,7 +591,9 @@ export class CharacterSheetPeerTargeting {
 				isMinHeight0: true,
 				isWidth100: true,
 				cbClose: () => doResolve({kind: "cancel"}),
+				cbCharacterScopeTeardown: () => doResolve({kind: "cancel"}),
 			}).then(({eleModalInner, doClose}) => {
+				if (isResolved) return;
 				const body = e_({tag: "div", clazz: "charsheet__peer-target-picker cs-adaptive-panel"});
 				const help = e_({
 					tag: "p",

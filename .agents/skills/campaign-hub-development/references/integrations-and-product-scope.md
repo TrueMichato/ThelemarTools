@@ -27,6 +27,8 @@ Never expose old private state under a new context. Primary sources:
   JSON.
 - Clone creates an independent character. Move preserves identity, requires compatibility review, saves first,
   releases only this browser's lease, and is idempotent. Another device's lease blocks the move.
+- Character-scoped async workflows revalidate their captured character after every await and before lease,
+  realtime, reconciliation, feedback, or navigation side effects; a stale completion never acts on a replacement.
 - Campaign rules/brew are runtime overlays and serialization strips them.
 - Cloud writes, semantic reconciliation, party inventory, and peer targeting must go through the HTTP repository
   mutation queue; do not mutate two authoritative documents in the browser.
@@ -44,6 +46,16 @@ When changing Character Sheet internals, also use `charactersheet-development` a
 - Live Party Tracker projections are read-only and stay outside serialized Board state.
 - Shared stash detail is not copied into the Board; only the authorized in-memory summary is exposed.
 - Access loss first fences saves and conceals projections/private workspace state, then clears rules/brew.
+- DM truth uses one `dm_readonly` mode across native and custom keyboard controls, including late renders. Capture
+  guards cover context-menu/drag/long-press entry, and body-portaled spell, attack, ability, and mobile callbacks
+  recheck access before acting. Manual sticky-note movement is character/load/access-fenced, and every
+  Character Sheet-owned synchronous, asynchronous, and `InputUiUtil` modal is synchronously concealed and closed
+  on character or authority transition; stale controls/callbacks cannot mutate the replacement projection. Export
+  and Print remain reachable through More; recipient notices remain owner-only while invalidations stay live.
+- Projection invalidations are payload-free campaign control events sent explicitly to active accounts currently
+  authorized for any projected field. Policy changes use the old/new audience union; ordinary mutations use the
+  current audience. Identity-hidden peers therefore still refetch shared HP/conditions without receiving character
+  identity in the event.
 - Journey Tracker consumes the existing Party Tracker projection and remains system-neutral.
 
 Primary seams: `js/dmscreen/dmscreen-hub-controller.js`, `js/dmscreen.js`,

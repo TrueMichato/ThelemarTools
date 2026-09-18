@@ -30,7 +30,7 @@
  * source of truth alongside the JS.
  */
 
-import {describe, expect, it} from "@jest/globals";
+import {describe, expect, it, jest} from "@jest/globals";
 import fs from "fs";
 import path from "path";
 import {fileURLToPath} from "url";
@@ -176,6 +176,26 @@ describe("Long-press action-label derivation", () => {
 		expect(Cls.deriveLabelFromClassName("charsheet__resource-restore-btn")).toBe("Restore");
 		expect(Cls.deriveLabelFromClassName("charsheet__item-equip")).toBe("Equip");
 		expect(Cls.deriveLabelFromClassName("charsheet__spell-remove")).toBe("Remove");
+	});
+
+	it("does not arm long-press actions for a DM read-only projection", () => {
+		const mobile = Object.assign(Object.create(Cls.prototype), {
+			_cancelLongPress: jest.fn(),
+			_hideContextMenu: jest.fn(),
+		});
+		Object.defineProperty(mobile, "_page", {value: {isCurrentCharacterReadOnly: () => true}});
+
+		mobile._onLongPressStart({target: {closest: jest.fn()}});
+
+		expect(mobile._cancelLongPress).toHaveBeenCalledTimes(1);
+		expect(mobile._hideContextMenu).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not generate mobile context actions for a DM read-only projection", () => {
+		const mobile = Object.create(Cls.prototype);
+		Object.defineProperty(mobile, "_page", {value: {isCurrentCharacterReadOnly: () => true}});
+
+		expect(mobile._getContextMenuItems({})).toEqual([]);
 	});
 
 	it("returns null for an unlabelable button so the caller can drop it", () => {

@@ -56,10 +56,15 @@ describe("hub performance budgets", () => {
 		]) expect(html).not.toContain(forbidden);
 	});
 
-	it("loads provider controls only from the signed-out branch", () => {
+	it("loads provider controls only through the lazy signed-out helper", () => {
 		const source = read("js/hub/hub-page.js");
+		const providerHelper = source.slice(
+			source.indexOf("async function pRenderSignedOutProviders"),
+			source.indexOf("function showSignedOutAfterSessionExpiry"),
+		);
 		const signedOutBranch = source.slice(source.indexOf("if (!session.signedIn)"), source.indexOf("setHidden(signedIn, false)"));
-		expect(signedOutBranch).toContain(`import("./hub-auth-providers.js")`);
+		expect(providerHelper).toContain(`import("./hub-auth-providers.js")`);
+		expect(signedOutBranch).toContain("await pRenderSignedOutProviders()");
 		expect(source.split(`import("./hub-auth-providers.js")`)).toHaveLength(2);
 	});
 

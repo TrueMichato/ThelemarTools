@@ -1,6 +1,7 @@
 import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
 import {CharacterSheetRealtimeCoordinator} from "../../../js/charactersheet/charactersheet-realtime.js";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
 import {LocalCharacterRepository} from "../../../js/hub/hub-character-repository.js";
@@ -141,7 +142,7 @@ const makeApi = character => {
  * Wire the real coordinator, the real HTTP repository and the real sheet handlers together so the assertions
  * exercise the merged PR #222 seam rather than a stand-in.
  */
-const pMakeHarness = async ({seed = {}} = {}) => {
+const pMakeHarness = async ({seed = {}, access = "owner"} = {}) => {
 	const previousStorage = globalThis.sessionStorage;
 	globalThis.sessionStorage = makeSessionStorage();
 
@@ -161,6 +162,12 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 	const seedData = structuredClone(state.toJson());
 	delete seedData.id;
 	const api = makeApi(makeCharacterDocument(seedData));
+	if (access === "dm_readonly") {
+		api.pGetCharacterProjection = jest.fn(async () => ({
+			kind: "dm_truth",
+			character: structuredClone(api.state.character),
+		}));
+	}
 	const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
 	if (previousStorage === undefined) delete globalThis.sessionStorage;
 	else globalThis.sessionStorage = previousStorage;
@@ -200,7 +207,12 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		_hubActiveCampaign: {pHandleAccessLoss: jest.fn(async () => {})},
 		_teardownHubRules: jest.fn(),
 		_currentCharacterId: "character-1",
+		_currentCharacterAccess: access,
 		_characterLoadGeneration: 0,
+		_hubReadOnlyRefreshGeneration: 0,
+		_hubReadOnlyRefreshRequest: null,
+		_hubReadOnlyRefreshPromise: null,
+		_isHubReadOnlyRefreshRequired: false,
 		_hubRealtimeGeneration: 0,
 		_isHubRealtimeListenersBound: false,
 		_renderCount: 0,
@@ -217,6 +229,10 @@ const pMakeHarness = async ({seed = {}} = {}) => {
 		"_onHubRealtimeConnectionState",
 		"_onHubRealtimeDeliveryError",
 		"_onHubRecipientNotice",
+		"_pRefreshHubReadOnlyCharacter",
+		"_pStartHubReadOnlyRefresh",
+		"_pDrainHubReadOnlyRefresh",
+		"_pRunHubReadOnlyRefresh",
 		"_onHubSemanticOperation",
 		"_getHubLiveCharacterData",
 		"_adoptHubLiveCharacterData",
@@ -290,6 +306,58 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		]);
 		expect(state.toJson().xp).toBe(9000);
 		expect(api.pGetCharacter).toHaveBeenCalled();
+	});
+
+	it("keeps item invalidation live without showing recipient notices to a DM inspector", async () => {
+		const {clients, coordinator, toasts} = await pMakeHarness({access: "dm_readonly"});
+		const inventoryEvents = [];
+		coordinator.on("inventoryTransfer", event => inventoryEvents.push(event));
+
+		clients[0].emit("event", {
+			id: "dm-visible-item-award",
+			campaignId: "campaign-1",
+			sequence: 22,
+			type: "item.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {
+				entry: {item: {name: "Longsword", source: "PHB"}, quantity: 1},
+				note: "For the player",
+			},
+		});
+		await pFlush();
+
+		expect(toasts).toEqual([]);
+		expect(inventoryEvents).toEqual([expect.objectContaining({
+			eventId: "dm-visible-item-award",
+			type: "item.granted",
+			isCurrentCharacterAffected: true,
+		})]);
+	});
+
+	it("refreshes DM truth for XP awards without showing the player recipient notice", async () => {
+		const {api, clients, host, state, toasts} = await pMakeHarness({access: "dm_readonly"});
+		api.state.character = makeCharacterDocument({
+			...api.state.character.data,
+			xp: 9_000,
+		}, 2);
+
+		clients[0].emit("event", {
+			id: "dm-visible-xp-award",
+			campaignId: "campaign-1",
+			sequence: 23,
+			type: "xp.granted",
+			aggregateType: "character",
+			aggregateId: "character-1",
+			payload: {amount: 250, xp: 9_000, reason: "For the player"},
+		});
+		await pFlush();
+		await pFlush();
+
+		expect(toasts).toEqual([]);
+		expect(state.toJson().xp).toBe(9_000);
+		expect(api.pGetCharacterProjection).toHaveBeenCalledTimes(2);
+		expect(host._renderCount).toBe(1);
 	});
 
 	it("commits spell activity once when Keep Local retries a post-save live conflict", async () => {
@@ -973,5 +1041,65 @@ describe("Applicable maximum through live reconciliation", () => {
 		await repository.pUpsert({character: {...state.toJson(), id: "character-1"}});
 		expect(api.state.patches.filter(patch => patch.path === "/hp/current")).toEqual([]);
 		expect(state.getCurrentHp()).toBe(60);
+	});
+
+	it("advances the character document generation after authoritative live adoption", () => {
+		const state = new CharacterSheetState();
+		state.setName("Before Adoption");
+		const host = {
+			_state: state,
+			_currentCharacterId: "character-1",
+			_characterDocumentGeneration: 4,
+			_reconcileClassFeatures: jest.fn(),
+		};
+
+		CharacterSheetPage.prototype._adoptHubLiveCharacterData.call(host, {
+			...state.toJson(),
+			name: "After Adoption",
+		});
+
+		expect(state.getName()).toBe("After Adoption");
+		expect(host._characterDocumentGeneration).toBe(5);
+	});
+
+	it("closes only document-sensitive character portals when authoritative live adoption invalidates them", () => {
+		CharacterSheetModal._resetForTests();
+		const state = new CharacterSheetState();
+		const makeElement = () => ({
+			addEventListener: jest.fn(),
+			removeEventListener: jest.fn(),
+			remove: jest.fn(),
+		});
+		const documentSensitiveElement = makeElement();
+		const ordinaryElement = makeElement();
+		const cleanup = jest.fn();
+		const ordinaryCleanup = jest.fn();
+		const host = {
+			_state: state,
+			_currentCharacterId: "character-1",
+			_characterLoadGeneration: 2,
+			_characterDocumentGeneration: 4,
+			_currentCharacterAccess: "owner",
+			_reconcileClassFeatures: jest.fn(),
+		};
+		CharacterSheetModal.registerCharacterScopePortal({
+			sheet: host,
+			element: documentSensitiveElement,
+			cleanup,
+			isCloseOnDocumentInvalidation: true,
+		});
+		CharacterSheetModal.registerCharacterScopePortal({
+			sheet: host,
+			element: ordinaryElement,
+			cleanup: ordinaryCleanup,
+		});
+
+		CharacterSheetPage.prototype._adoptHubLiveCharacterData.call(host, state.toJson());
+
+		expect(documentSensitiveElement.remove).toHaveBeenCalledTimes(1);
+		expect(cleanup).toHaveBeenCalledWith({isCharacterScopeTeardown: true});
+		expect(ordinaryElement.remove).not.toHaveBeenCalled();
+		expect(ordinaryCleanup).not.toHaveBeenCalled();
+		CharacterSheetModal._resetForTests();
 	});
 });

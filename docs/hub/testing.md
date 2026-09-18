@@ -15,9 +15,9 @@
 | Authorization/security | `HubAuthorizationMatrix.test.js`, `HubXssContract.test.js`, `HubInviteRoleSafety.test.js`, `HubRouteContract.test.js` | Tenancy, roles, XSS, schemas, route policy |
 | Realtime | `HubRealtime.test.js`, `HubWebSocket.test.js`, `HubBroadcastSync.test.js` | Visibility, replay, presence, observable connection state, stale-socket fencing, terminal policy closure, sockets, tabs |
 | Operation reconciliation | `HubCharacterOperationReconciler.test.js`, `HubCharacterOperationReconciliation.test.js`, `CharacterSheetRealtimeApply.test.js` | Pure per-source/target/combined-leg `B/L -> R/F` transition, coverage classification, prepare/adopt/commit atomicity, dirty/in-flight save rebasing, dedupe, and no-reload resync recovery |
-| Integration seams | `CharacterSheetRealtime.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, remote removal and access-loss fencing, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
+| Integration seams | `CharacterSheetRealtime.test.js`, `CharacterSheetHubTeardown.test.js`, `CharacterSheetCampaign.test.js`, Character Sheet repository/rules/roll-history tests; `DmScreenHubController.test.js`; `HubPartyTrackerProjection.test.js` | Authenticated/canonical sheet subscription gates, target filtering, save-queue delivery, archive/move/demotion concealment, character-scoped sharing refresh, BFCache suspend/resume, fail-safe move recovery, existing page behavior, Campaign DM Screen access/recovery, live/manual Party Tracker separation, and local/Hub isolation |
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
-| Campaign Overview/authority | `HubPageContract.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
+| Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
 | Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, real Cure Wounds reject/cancel/accept/self-target effects, leases, reconnect, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
@@ -287,6 +287,21 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   idempotency-key reuse, concurrent writers, and rollback evidence.
 - The Character Sheet campaign flow verifies that opening the campaign panel moves focus to its destination
   picker and closing it restores focus to the replacement toggle.
+- Character lifecycle regressions verify that known-new Builder/import saves create directly, adopt the canonical
+  id, refresh/select the cloud roster before realtime attachment, and do not emit a deliberate missing-character
+  probe. Projection regressions preserve `owner_truth` versus `dm_truth`; a DM view keeps live reads but disables
+  mutation controls and skips owner-only sharing, pending-action, targeting, lease, and party-inventory calls.
+  Deferred-read coverage bursts projection invalidations and live signals around slow DM reads, proving one active
+  request, replaceable trailing demand, eventual newest-projection adoption, lifecycle fencing, and live retry
+  after a transient failure.
+  Same-tab account-switch coverage proves a failed owner draft is account-scoped, cannot replace a later DM's
+  projection, and cannot stale a subsequent invalidation refetch. Selector, New, Duplicate, file-import, and
+  programmatic-create barriers prove a save/create completion from A cannot replace a newer B selection.
+- Campaign action contracts verify that condition add/remove uses the canonical core plus active campaign-brew
+  catalog and submits the selected `name|source` identity rather than accepting free-form condition text. The
+  browser journeys recover module and data failures through ordinary realtime refresh, reuse a loaded module for
+  data retry, and prove persistent module failures stop after the finite fresh-URL budget without moving the
+  catalog into lightweight page boot.
 - Failure-state hardening classifies fetch rejection, malformed success, and unreadable 503 responses without
   exposing browser-specific errors. Campaign UI contracts cover offline retention, reconnect refresh, direct
   protocol reload, terminal read-only access state, size/safety validation, insufficient transfer/resource,
@@ -296,12 +311,51 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   after live session and membership revocation.
 - Realtime campaign coverage proves that accepted Character Sheet HP edits and initiative rolls reach the DM
   roster/activity view, a second device is initially read-only, lease takeover fences the stale writer, and
-  campaign pages react immediately to session or membership revocation.
+  campaign pages react immediately to session or membership revocation. DM truth coverage keeps an inspection
+  sheet open while the owner performs an ordinary document save, proves the disabled sheet converges without a
+  reload, fails the scoped projection reads on one reconnect, reconnects again against the same cursor, proves
+  the pending refresh converges, forces a later resync, and verifies no owner-only lease, sharing, pending-action, targeting,
+  inventory, or document-mutation request escapes. The browser journey also exercises Enter/Space against a late
+  Play Mode role-button, blocks its global toggle shortcut, context menus, and favorite drag reorder, and keeps
+  More/Export/Print reachable. Realtime seams prove item invalidation remains live without a DM recipient toast
+  and DM-visible XP awards perform a scoped truth refresh without presenting the awarding DM as the recipient.
+- Character Sheet repository regressions prove that canonical create/import commits remain successful when roster
+  or campaign-control refreshes fail, realtime binds to the canonical id before those reads, and a genuinely failed
+  duplicate restores the source character's campaign controls. Realtime teardown regressions preserve structured
+  lifecycle causes, including cursor-then-replay cause upgrades, so campaign archive clears the selected campaign and
+  temporary context, DM-role loss closes only the private surface, and character archive/move remains resource-scoped.
+  Repository ordering coverage proves a delayed stale roster cannot replace a newer accepted realtime revision.
+  Deferred move and terminal-delete races switch to a second character before settlement and prove the old operation
+  cannot detach, restore, reconcile, navigate over, or conceal the selected character.
+- Campaign-move regressions advance the load generation through `A → B → A` while a save is deferred and prove the
+  stale move cannot release a lease, detach realtime, mutate the campaign, navigate, or bind an old compatibility
+  preview merely because the original character id is selected again.
+- Campaign overview revocation coverage removes the active membership over the real socket and proves the entire
+  previously authorized DOM is destroyed immediately, not merely disabled while private roster/profile/member,
+  inventory, pending-action, transfer, or administration content remains present. A separate HTTP-first journey
+  blocks realtime and proves a rejected mutation performs the same concealment, while session revocation retains
+  the established last-known signed-out read-only fallback. Character Sheet campaign refreshes separately prove
+  signed-out or terminal campaign authority loss propagates, conceals the loaded Hub document, and prevents a
+  realtime subscription from attaching to already-invalidated authority.
 - Campaign snapshot consumers coalesce `character.projection.invalidated` metadata into one authorization-scoped HTTP refetch and fence older
   in-flight snapshot responses with the campaign event sequence, so an authoritative refresh cannot regress a
-  newer visible projection. A single 10-second client watchdog requests an authoritative snapshot while the
+  newer visible projection. Policy-change invalidations snapshot the old-or-new authorized audience and redact
+  peer actor identity while remaining campaign-scoped and character-id-free, allowing a previously shared row to
+  disappear before the replacement snapshot without exposing it to later or never-authorized peers. A single
+  10-second client watchdog requests an authoritative snapshot while the
   socket remains live. During replay it allows a full unchanged interval before reconnecting, so advancing
   continuation pages are not interrupted while a stalled chain still recovers.
+- Memory, PostgreSQL, and real-browser lifecycle coverage verifies clone destination, move source/destination, and
+  archive removal invalidations. The browser keeps both source and destination campaigns live while an owner
+  changes an identity-hidden, HP-shared character, proving peers converge only through campaign-scoped,
+  character-id-free invalidations. Campaign action/XP selections survive authorized label refreshes, while a
+  deliberately empty item-recipient set stays empty and disabled rather than silently retargeting.
+- Browser coverage defers an old pending-action response across a newer sharing-policy invalidation, fails the
+  replacement snapshot, and proves the stale response cannot repopulate concealed identity. The transfer journey
+  separately proves source/target/item/currency drafts survive an authorized refresh, transient submitting state
+  does not permanently disable retry, and committed refresh failures retain only a generic recovery row.
+- Session-revocation coverage holds a transfer POST in flight while another device revokes the session, then proves
+  its late cleanup cannot re-enable any campaign mutation control; Sign out remains the sole enabled control.
 - Character Sheet realtime regressions use deterministic fake sockets and repository barriers to prove stale
   socket messages/closes cannot advance the cursor, replay/live duplicates collapse, lifecycle states remain
   ordered across owner/DM watermarks, in-flight saves finish before callbacks, and switch/reopen/access-loss

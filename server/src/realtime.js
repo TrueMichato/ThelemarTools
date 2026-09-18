@@ -19,6 +19,11 @@ export function requiresHubProtocol4Event (event) {
 		&& event.payload.targetCharacterId == null;
 }
 
+export function requiresHubProtocol5Event (event) {
+	return event?.type === "character.projection.invalidated"
+		&& event?.aggregateType === "campaign";
+}
+
 function isMessageRateLimitExceeded ({connection, isReplayContinuation = false}) {
 	const now = Date.now();
 	if (now - connection.messageWindowStartedAt >= 1000) {
@@ -171,8 +176,15 @@ export class HubRealtime {
 				limit: 500,
 			});
 			if (
-				connection.protocolVersion !== "4"
+				!["4", "5"].includes(connection.protocolVersion)
 				&& eventPage.events.some(requiresHubProtocol4Event)
+			) {
+				connection.socket.close(1008, "Protocol update required");
+				return;
+			}
+			if (
+				connection.protocolVersion !== "5"
+				&& eventPage.events.some(requiresHubProtocol5Event)
 			) {
 				connection.socket.close(1008, "Protocol update required");
 				return;
@@ -210,7 +222,11 @@ export class HubRealtime {
 				: event;
 			// A null outcome means this viewer may not see the event at all.
 			if (!viewerEvent) continue;
-			if (connection.protocolVersion !== "4" && requiresHubProtocol4Event(viewerEvent)) {
+			if (!["4", "5"].includes(connection.protocolVersion) && requiresHubProtocol4Event(viewerEvent)) {
+				connection.socket.close(1008, "Protocol update required");
+				continue;
+			}
+			if (connection.protocolVersion !== "5" && requiresHubProtocol5Event(viewerEvent)) {
 				connection.socket.close(1008, "Protocol update required");
 				continue;
 			}
@@ -227,7 +243,7 @@ export class HubRealtime {
 				this._store.pGetMembership({accountId: connection.accountId, campaignId}),
 			]);
 			if (!session || !membership) {
-				connection.socket.close(1008, "Authorization revoked");
+				connection.socket.close(1008, session ? "Membership revoked" : "Session expired");
 				continue;
 			}
 			connection.role = membership.role;

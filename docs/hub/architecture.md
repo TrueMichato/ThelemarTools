@@ -239,12 +239,47 @@ is not treated as a delivery guarantee. Projection
 HTTP responses are request-sequence and attachment-generation fenced, so a slower old response or a response
 from a detached DM workspace cannot replace newer scoped truth.
 
+Campaign Overview uses a separate projection-authorization generation for roster, action-inbox, transfer-inbox,
+item-award, and grant controls. User mutations capture that generation before their first asynchronous operation
+and carry it through nested refreshes and queued transfer work. A stale completion cannot replace rows, clear form
+state, publish status text, or re-enable concealed controls. Transfer drafts captured during invalidation remain
+owned by the concealed generation until a current authorized refresh successfully restores and reveals them.
+Authorization-scoped refreshes preserve an explicitly selected action or XP target only while that target remains
+available. A removed target leaves the picker empty and submission disabled rather than silently choosing another
+character. Item-award recipients use the same rule: the first authorized render may initialize a default, but a
+deliberately cleared or later-invalidated recipient set stays empty until the DM selects it again.
+Presence revalidation closes missing sessions as `Session expired` and missing memberships as
+`Membership revoked`, preserving the browser's signed-out fallback versus campaign-access-loss boundary.
+
 An authenticated campaign-backed Character Sheet attaches a focused realtime coordinator only after its
 canonical character has loaded. Socket-generation fencing makes stale messages, closes, and watchdog timers
 inert. The coordinator routes metadata-only projection invalidations and the frozen
 `character.operation.*` lifecycle allowlist through the HTTP repository's existing mutation queue, so a
 delivery cannot overtake an in-flight save. Character/campaign switch, canonical-id replacement, detach,
 revocation, logout, and terminal page hide all fence the subscription generation.
+DM read-only projection refetches are single-flight. A burst of character- or campaign-scoped invalidations,
+periodic live signals, and reconnect recovery may replace one pending trailing demand, but never starts a second
+HTTP read while one is active. The active read may apply when its character, campaign, role, load, realtime, and
+refresh-generation fences still match; a queued trailing read then fetches any newer canonical projection.
+Transient failure keeps refresh-required state latched for the next live signal, while terminal projection loss
+uses the ordinary synchronous access teardown.
+An authoritative membership-role event also fails the role-derived Character Sheet roster closed before any
+network work: it fences in-flight character loads, removes non-owner selector entries, and invalidates cached
+DM-only character access. Old-scope character or roster responses cannot repopulate repository state. Only a
+generation-, character-, campaign-, role-, and account-fenced repository list may repopulate the selector.
+Failed or stale refreshes leave the old privileged roster concealed, expose an unavailable state, and retry from
+fresh authority on the next live connection signal.
+Character selection, New, Duplicate, import, and programmatic create continuations also capture the source
+character/load fence before their first save. Every later await must still belong to that source before it can
+reset state, adopt a created character, update navigation, or render. A committed create that finishes after a
+newer selection remains committed remotely but is not adopted over the newer sheet.
+
+Clone, move, and archive append `character.projection.invalidated` inside the same lifecycle command before its
+receipt commits. Clone invalidates the destination audience; move invalidates audiences captured from both the
+pre-move source projection and the post-move destination projection; archive invalidates the pre-archive
+audience so an identity-hidden shared row can disappear. These events remain campaign-scoped, explicit-audience,
+metadata-only notifications with no character identifier or display name. Memory and PostgreSQL preserve the
+same audit → lifecycle event → invalidation → receipt order.
 
 Applied operations are reconciled in the repository under ADR 0012. `rebaseJsonChanges` treats identical
 same-path edits as convergence while preserving unequal and ancestor/descendant overlaps as conflicts. The

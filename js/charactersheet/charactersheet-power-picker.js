@@ -253,7 +253,9 @@ class CharacterSheetPowerPicker {
 				title: `🧠 ${title}`,
 				isMinHeight0: true,
 				cbClose: () => { if (!settled) { settled = true; resolve(null); } },
+				cbCharacterScopeTeardown: () => { if (!settled) { settled = true; resolve(null); } },
 			}).then(({eleModalInner, doClose}) => {
+				if (settled) return;
 				const wrp = e_({outer: `<div class="cs-power-picker-modal">
 					${swap ? `<label class="cs-power-picker__swap">
 						<span class="cs-power-picker__swap-label">Give up</span>

@@ -31,8 +31,9 @@ Re-establish these facts from `docs/hub/roadmap.md`, `docs/hub/implementation-st
 
 Verify these rather than copying the nearest heading:
 
-- Current client protocol is `4` (`js/hub/hub-api-client.js`, `js/hub/hub-realtime-client.js`,
-  `server/src/app.js`, `js/hub/hub-source-costs.js`). Protocol `3` is a restricted legacy lane. At the creation
+- Current client protocol is `5` (`js/hub/hub-api-client.js`, `js/hub/hub-realtime-client.js`,
+  `server/src/app.js`, `js/hub/hub-capabilities.js`). Protocol `3` is a restricted legacy lane; protocol `4`
+  remains compatible with its source-cost contract but is closed before protocol-5-only projection events. At the creation
   baseline, the top of `docs/hub/api-reference.md` still says `3`.
 - Current schema includes migrations `0001` through `0007`. At the creation baseline, the opening line of
   `docs/hub/domain-model.md` still says through `0006`.

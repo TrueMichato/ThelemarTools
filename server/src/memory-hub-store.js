@@ -13,6 +13,7 @@ import {
 	getPolicyNotAvailableError,
 	assertPeerTargetable,
 	canViewCharacterEventActor,
+	canViewSharedCharacterProjection,
 	canViewSharedCharacterEvent,
 	redactEventActor,
 	stripProjectionPolicy,
@@ -62,12 +63,14 @@ import {
 	enrichEventPayload,
 	getTransferCharacterDisplaySnapshot,
 	projectTransferForViewer,
+	redactActorCommandEventForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 import {
 	applySourceCost,
 	hasSourceCostBindingChanged,
+	isPeerSourceCostsProtocolVersion,
 	PEER_SOURCE_COSTS_CONTRACT_VERSION,
 	PEER_SOURCE_COSTS_TEMPLATE_REGISTRY_VERSION,
 } from "../../js/hub/hub-source-costs.js";
@@ -1103,18 +1106,45 @@ export class MemoryHubStore {
 	 *
 	 * Callers that only change the sharing policy pass `isRevisionBump: false`.
 	 */
-	_commitCharacterMutation ({character, actorAccountId, isRevisionBump = true}) {
+	_commitCharacterMutation ({
+		character,
+		actorAccountId,
+		isRevisionBump = true,
+		projectionInvalidationVisibleAccountIds = null,
+	}) {
 		if (isRevisionBump) character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
-		if (!character.campaignId) return null;
+		return this._appendCharacterProjectionInvalidation({
+			character,
+			actorAccountId,
+			visibleAccountIds: projectionInvalidationVisibleAccountIds,
+		});
+	}
+
+	_appendCharacterProjectionInvalidation ({
+		character,
+		actorAccountId,
+		visibleAccountIds = null,
+	}) {
+		if (!character?.campaignId) return null;
+		visibleAccountIds ??= [...this._memberships.values()]
+			.filter(membership => membership.campaignId === character.campaignId && membership.status === "active")
+			.filter(membership => canViewSharedCharacterProjection({
+				character,
+				accountId: membership.accountId,
+				role: membership.role,
+			}))
+			.map(membership => membership.accountId);
 		return this._appendEvent({
 			campaignId: character.campaignId,
 			actorAccountId,
 			type: "character.projection.invalidated",
-			aggregateType: "character",
-			aggregateId: character.id,
-			aggregateRevision: character.revision,
-			payload: {projectionRevision: character.projectionRevision},
+			aggregateType: "campaign",
+			aggregateId: character.campaignId,
+			aggregateRevision: null,
+			visibility: "explicit_accounts",
+			visibleAccountIds,
+			payload: {},
 		});
 	}
 
@@ -1269,9 +1299,30 @@ export class MemoryHubStore {
 		}
 		// Validate before any mutation so a rejected write leaves the last valid policy intact.
 		const validated = validateProjectionPolicy(policy);
+		const previousProjectionPolicy = structuredClone(character.projectionPolicy);
 		character.projectionPolicy = validated;
 		character.projectionRevision++;
-		this._commitCharacterMutation({character, actorAccountId: accountId, isRevisionBump: false});
+		const projectionInvalidationVisibleAccountIds = [...this._memberships.values()]
+			.filter(membership => membership.campaignId === character.campaignId && membership.status === "active")
+			.filter(membership => (
+				canViewSharedCharacterProjection({
+					character: {...character, projectionPolicy: previousProjectionPolicy},
+					accountId: membership.accountId,
+					role: membership.role,
+				})
+				|| canViewSharedCharacterProjection({
+					character,
+					accountId: membership.accountId,
+					role: membership.role,
+				})
+			))
+			.map(membership => membership.accountId);
+		this._commitCharacterMutation({
+			character,
+			actorAccountId: accountId,
+			isRevisionBump: false,
+			projectionInvalidationVisibleAccountIds,
+		});
 		this._appendAudit({
 			campaignId: character.campaignId,
 			actorAccountId: accountId,
@@ -1417,7 +1468,7 @@ export class MemoryHubStore {
 		return copy(lease);
 	}
 
-	async pReleaseCharacterLease ({accountId, sessionId, characterId}) {
+	async pReleaseCharacterLease ({accountId, sessionId, characterId, leaseEpoch, expiresAt}) {
 		const character = this._getCharacterOrThrow(characterId);
 		if (character.ownerAccountId !== accountId) throw new HubStoreError("FORBIDDEN", `Only the owner can release this character editor.`, {status: 403});
 		const lease = this._characterLeases.get(characterId);
@@ -1432,6 +1483,7 @@ export class MemoryHubStore {
 				details: {expiresAt: lease.expiresAt},
 			});
 		}
+		if (lease.epoch !== leaseEpoch || lease.expiresAt !== new Date(expiresAt).toISOString()) return {released: false};
 		this._characterLeases.delete(characterId);
 		return {released: true};
 	}
@@ -1598,6 +1650,7 @@ export class MemoryHubStore {
 		this._characters.set(clone.id, clone);
 		this._appendAudit({campaignId, actorAccountId: accountId, action: "character.cloned", targetType: "character", targetId: clone.id, details: {sourceCharacterId: source.id}});
 		this._appendEvent({campaignId, actorAccountId: accountId, type: "character.created", aggregateType: "character", aggregateId: clone.id, aggregateRevision: 1, payload: {clonedFromCharacterId: source.id}});
+		this._appendCharacterProjectionInvalidation({character: clone, actorAccountId: accountId});
 		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(clone)}});
 	}
 
@@ -1650,6 +1703,7 @@ export class MemoryHubStore {
 			}
 		}
 		const sourceCampaignId = character.campaignId;
+		const sourceProjectionCharacter = copy(character);
 		const characterNameSnapshot = createCharacterDisplayNameSnapshot(character.data?.name);
 		character.campaignId = campaignId;
 		character.data = normalizeCharacterInventory(destinationData);
@@ -1679,6 +1733,13 @@ export class MemoryHubStore {
 			aggregateRevision: character.revision,
 			payload: {sourceCampaignId, characterNameSnapshot},
 		});
+		if (sourceCampaignId && sourceCampaignId !== campaignId) {
+			this._appendCharacterProjectionInvalidation({
+				character: sourceProjectionCharacter,
+				actorAccountId: accountId,
+			});
+		}
+		this._appendCharacterProjectionInvalidation({character, actorAccountId: accountId});
 		return this._setReceipt({accountId, idempotencyKey, response: {character: stripProjectionPolicy(character)}});
 	}
 
@@ -1699,6 +1760,7 @@ export class MemoryHubStore {
 				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
 			}
 		}
+		const projectionCharacter = copy(character);
 		character.status = "archived";
 		character.revision++;
 		character.updatedAt = this._fnNow().toISOString();
@@ -1706,6 +1768,10 @@ export class MemoryHubStore {
 		this._appendAudit({campaignId: character.campaignId, actorAccountId: accountId, action: "character.archived", targetType: "character", targetId: character.id});
 		if (character.campaignId) {
 			this._appendEvent({campaignId: character.campaignId, actorAccountId: accountId, type: "character.archived", aggregateType: "character", aggregateId: character.id, aggregateRevision: character.revision});
+			this._appendCharacterProjectionInvalidation({
+				character: projectionCharacter,
+				actorAccountId: accountId,
+			});
 		}
 		return this._setReceipt({accountId, idempotencyKey, response: {ok: true}});
 	}
@@ -2211,6 +2277,7 @@ export class MemoryHubStore {
 	 * HTTP read hides.
 	 */
 	redactEventForViewer ({event, accountId, role}) {
+		event = redactActorCommandEventForViewer({event, accountId});
 		const transferEvent = redactTransferEventForViewer({
 			event,
 			accountId,
@@ -2218,6 +2285,14 @@ export class MemoryHubStore {
 			getCharacterOwnerId: characterId => this._characters.get(characterId)?.ownerAccountId,
 		});
 		if (transferEvent !== event) return transferEvent;
+		if (
+			event.type === "character.projection.invalidated"
+			&& event.visibility === "explicit_accounts"
+		) {
+			const sanitized = {...event, visibleAccountIds: null};
+			if (["dm", "co_dm"].includes(role) || event.actorAccountId === accountId) return sanitized;
+			return redactEventActor(sanitized);
+		}
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const character = this._characters.get(event.aggregateId) || null;
 		// A hidden character contributes no shared rows at all, so no adjacent membership
@@ -2596,8 +2671,8 @@ export class MemoryHubStore {
 		} catch {
 			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 		}
-		if (isCostBearing && `${protocolVersion}` !== "4") {
-			throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+		if (isCostBearing && !isPeerSourceCostsProtocolVersion(protocolVersion)) {
+			throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 or newer is required.`, {status: 426});
 		}
 		if (isCostBearing && (
 			contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
@@ -2768,8 +2843,8 @@ export class MemoryHubStore {
 		if (!isDm && !isProposer && !isTargetOwner) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
 		if (operation.sourceCost && (
 			contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
-			|| `${protocolVersion}` !== "4"
-		)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+			|| !isPeerSourceCostsProtocolVersion(protocolVersion)
+		)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 or newer is required.`, {status: 426});
 		if (decision === "accept" && (!isTargetOwner || membership.role !== "player")) {
 			throw new HubStoreError("OPERATION_FORBIDDEN", `Only an active player target owner may approve.`, {status: 403});
 		}
@@ -3453,6 +3528,7 @@ export class MemoryHubStore {
 				visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
 				payload: {
 					awardId,
+					actorCommandId: commandIdempotencyKey.key,
 					index,
 					targetCount: stagedCharacters.length,
 					sourceKind: resolvedSourceKind,

@@ -26,6 +26,13 @@ function evaluate (version, overrides = {}) {
 }
 
 describe("campaign rule evaluator", () => {
+	it("accepts current Hub transport protocol 5 without changing the rules contract version", () => {
+		expect(evaluate(rulesVersion(), {protocolVersion: 5})).toMatchObject({
+			status: "compliant",
+			blocking: false,
+		});
+	});
+
 	it("applies supported enforced rules over personal defaults without mutating them", () => {
 		const personalSettings = {enableTgtt: true, thelemar_jumping: true};
 		const version = rulesVersion(policy => {

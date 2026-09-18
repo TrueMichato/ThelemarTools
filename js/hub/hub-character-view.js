@@ -160,12 +160,23 @@ export const PROJECTION_FIELD_LABELS = Object.freeze({
 	carrySummary: "Carried weight",
 });
 
+export const CHARACTER_ACCESS_MODES = Object.freeze({
+	OWNER: "owner",
+	DM_READ_ONLY: "dm_readonly",
+});
+
 export function isProjectionEnvelope (value) {
 	return !!value && typeof value === "object" && ENVELOPE_KINDS.has(value.kind);
 }
 
 export function isCanonicalProjection (projection) {
 	return projection?.kind === "owner_truth" || projection?.kind === "dm_truth";
+}
+
+export function getCanonicalProjectionAccess (projection) {
+	if (projection?.kind === "owner_truth") return CHARACTER_ACCESS_MODES.OWNER;
+	if (projection?.kind === "dm_truth") return CHARACTER_ACCESS_MODES.DM_READ_ONLY;
+	return null;
 }
 
 /**

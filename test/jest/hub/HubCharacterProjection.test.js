@@ -1,6 +1,7 @@
 import {
 	applyProjectionPolicy,
 	buildCharacterViewModel,
+	canViewSharedCharacterProjection,
 	computePeerProfile,
 	getDefaultProjectionPolicy,
 	getPolicyManagementResponse,
@@ -77,6 +78,25 @@ function getCharacter (overrides = {}) {
 }
 
 describe("authorization-scoped character projections", () => {
+	it("authorizes invalidation for identity-hidden partial projections", () => {
+		const character = {
+			...getCharacter(),
+			projectionPolicy: {
+				version: 1,
+				preset: "private",
+				overrides: {hp: {mode: "share"}},
+			},
+		};
+		expect(canViewSharedCharacterProjection({character, accountId: "peer", role: "player"})).toBe(true);
+		expect(canViewSharedCharacterProjection({
+			character: {...character, projectionPolicy: {version: 1, preset: "private", overrides: {}}},
+			accountId: "peer",
+			role: "player",
+		})).toBe(false);
+		expect(canViewSharedCharacterProjection({character, accountId: character.ownerAccountId, role: "player"})).toBe(true);
+		expect(canViewSharedCharacterProjection({character, accountId: "dm", role: "dm"})).toBe(true);
+	});
+
 	describe("field catalog", () => {
 		it("derives typed values from truth instead of copying source objects", () => {
 			const viewModel = buildCharacterViewModel(getCharacterData());

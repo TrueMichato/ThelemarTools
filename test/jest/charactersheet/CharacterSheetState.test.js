@@ -51,6 +51,33 @@ describe("CharacterSheetState", () => {
 			expect(deathSaves.failures).toBe(0);
 		});
 
+		it("creates an isolated transaction clone without losing authoritative runtime context", () => {
+			const allSpells = [{name: "Fireball", source: "PHB"}];
+			const allItems = [{name: "Dagger", source: "PHB"}];
+			const classFeatures = [{name: "Second Wind", source: "PHB"}];
+			state.setName("Source");
+			state.setCampaignSettingsOverlay({enableTgtt: true});
+			state.setCarryAuthorityContext({rulesVersionId: "rules-2", brewBundleHash: "brew-2"});
+			state.setSpellData(allSpells);
+			state.setItemCatalog(allItems);
+			state.setClassFeatureCatalog(classFeatures, [], []);
+
+			const clone = state.createTransactionClone();
+
+			expect(globalThis.__csState).toBe(state);
+			expect(clone).not.toBe(state);
+			expect(clone._data).not.toBe(state._data);
+			expect(clone.getSettings().enableTgtt).toBe(true);
+			expect(clone.getCarryAuthorityBasis()).toEqual(state.getCarryAuthorityBasis());
+			expect(clone._allSpells).toBe(allSpells);
+			expect(clone._allItems).toBe(allItems);
+			expect(clone._classFeatureCatalog).toBe(classFeatures);
+			clone.setName("Staged");
+			clone._campaignSettingsOverlay.enableTgtt = false;
+			expect(state.getName()).toBe("Source");
+			expect(state.getSettings().enableTgtt).toBe(true);
+		});
+
 		it("should initialize inspiration to false", () => {
 			expect(state.hasInspiration()).toBe(false);
 		});

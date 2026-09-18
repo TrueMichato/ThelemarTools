@@ -2821,6 +2821,9 @@ SearchWidget.P_LOADING_INDICES = {};
 
 class InputUiUtil {
 	static async _pGetShowModal (getShowModalOpts) {
+		if (globalThis.CharacterSheetModal?.hasBoundCharacterSheet?.()) {
+			return globalThis.CharacterSheetModal.pGetShow(getShowModalOpts);
+		}
 		return UiUtil.getShowModal(getShowModalOpts);
 	}
 

@@ -4340,6 +4340,22 @@ class CharacterSheetState {
 		globalThis.__csState = this;
 	}
 
+	createTransactionClone () {
+		const clone = Object.create(Object.getPrototypeOf(this));
+		Object.assign(clone, this);
+		clone._data = MiscUtil.copyFast(this._data);
+		clone._campaignSettingsOverlay = this._campaignSettingsOverlay
+			? MiscUtil.copyFast(this._campaignSettingsOverlay)
+			: null;
+		clone._campaignSettingsBase = this._campaignSettingsBase
+			? MiscUtil.copyFast(this._campaignSettingsBase)
+			: null;
+		clone._carryAuthorityContext = this._carryAuthorityContext
+			? MiscUtil.copyFast(this._carryAuthorityContext)
+			: null;
+		return clone;
+	}
+
 	/**
 	 * Inject the full spell database so subclass-granted spells (domain, oath,
 	 * circle, sorcerer origin, patron, etc.) can be enriched with their real

@@ -30,6 +30,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Hub pages | `hub.html`, `campaign.html`, `scss/hub.scss`, `js/hub/hub-page.js` | Session state, campaign list/detail, membership/invite forms, campaign content, actions, grants, transfers |
 | Browser API | `js/hub/hub-api-client.js` | Same-origin JSON requests, CSRF/protocol/idempotency headers, stable API errors |
 | Character persistence | `js/hub/hub-http-character-repository.js`, `js/hub/hub-character-repository.js` | Cloud snapshots, patches, leases, queued bases, conflict recovery, canonical-id adoption |
+| Character read authority | `js/hub/hub-character-view.js`, `js/hub/hub-http-character-repository.js`, `js/charactersheet/charactersheet.js` | Preserves `owner_truth` versus `dm_truth`; owner sheets edit, DM truth renders as live read-only inspection |
 | Party inventory | `js/charactersheet/charactersheet-party-inventory.js`, `js/hub/hub-inventory-contract.js` | Owner-only Character Sheet stash presentation, authoritative transfer coordination, shared eligibility and weight summaries |
 | DM workspace persistence | `js/hub/hub-http-dm-workspace-repository.js`, `js/hub/hub-dm-workspace-repository.js` | Private Board blobs, leases, recovery drafts, conflict handling |
 | Campaign context | `js/hub/hub-campaign-context.js`, `js/hub/hub-brew-context.js` | Rules and immutable campaign brew activation without personal-brew writes |
@@ -84,15 +85,37 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 
 - Repository: `HubHttpCharacterRepository`.
 - One canonical server document per character.
+- Builder/import creation uses explicit create intent, so a temporary client id is not probed through a guaranteed
+  `CHARACTER_NOT_FOUND` read before canonical-id adoption.
+- A successful create treats canonical-id adoption as the persistence commit point: it immediately finalizes the
+  character identity, direct URL, selector option, owner mode, and realtime binding before independently refreshing
+  the cloud roster and campaign controls. A failed post-create read is surfaced as a retryable UI warning and never
+  reports the committed create/import as failed or invites a duplicate retry. A later no-argument sheet render only
+  updates that option in place instead of rebuilding the cloud selector from local storage. Delayed roster responses
+  cannot replace a higher accepted revision already delivered through realtime.
 - The client holds the last accepted base, computes path patches, and serializes writes.
 - A write requires the current `revision` and lease `epoch`.
+- `owner_truth` and `dm_truth` remain distinct after loading. DM truth may stay live for inspection but cannot
+  acquire a lease, save/archive the document, open sharing/pending-action controls, or use owner-only targeting
+  and party-inventory integrations. Character-document invalidations trigger a generation- and character-fenced
+  `dm_truth` refetch and full manual render, so an already-open DM inspection converges after ordinary owner saves
+  without becoming editable. A transient failed refetch remains pending and retries when realtime returns live,
+  even if the reconnect cursor itself is unchanged. Realtime live/resync states cannot reactivate owner-only
+  targeting.
 - Lease takeover increments the epoch; a stale device is fenced even if it reconnects.
 - Disjoint local changes may rebase over a server result. Overlapping changes require explicit local/server
   recovery.
+- Persisted character recovery is scoped by campaign/detached scope, authenticated account, and character.
+  Recovery is restored only after the fetched projection confirms owner access; `dm_truth` always returns the
+  freshly authorized server projection. Legacy unscoped recovery is discarded because it cannot be attributed
+  safely after an account switch in the same tab.
 - When the server replaces a temporary local id with a canonical UUID, repository maps, recovery keys, live
   state, selector state, and the page URL are migrated.
 - Cloud characters do not use the local rescue mirror; unresolved cloud conflicts produce explicit recovery
   artifacts instead of pretending to save locally.
+- **P1 convergence dependency:** recovery of an initial create that fails before any canonical server document is
+  reachable remains owned by the offline revision/reconnect/conflict workstream. This game-day fix deliberately
+  does not change that machinery.
 - Owner/DM truth carries `operationWatermark`, which says which applied-operation event sequence is already
   reflected in the canonical revision. Peer profiles and peer refs never carry it.
 
@@ -127,6 +150,9 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
   and relevant `transfer.*` invalidations to the open target. Delivery is serialized behind saves and fenced on
   switch, detach, revocation, logout, and terminal page hide. Transfer presentation receives only relevance
   booleans and event metadata; raw account, transfer, inventory, and character ids are not passed to the stash UI.
+- Character archive/move, campaign archive, and a DM/co-DM demotion while inspecting another member's character
+  are resource-level access endings: the coordinator closes the subscription and the sheet conceals canonical
+  data before clearing projections and campaign rules.
 - The open owner sheet reads pending approvals from
   `GET /api/campaigns/:campaignId/characters/:characterId/pending-actions`. The route fails closed for a DM,
   co-DM, peer, or other character owner and projects only an opaque action id, expiry, resolve capability and
@@ -144,6 +170,10 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 
 - Protocol-4 semantic operations support damage, healing, condition add/remove, and spell-slot spend/restore.
   Generic typed operations are DM/co-DM-only and apply immediately with one revision/event/outbox transaction.
+- Condition add choices come from the canonical site plus active campaign-brew catalog. Condition removal also
+  includes exact conditions currently present on an authorized truth projection, so a retired-brew or legacy
+  condition is still removable. Brew activation refreshes the catalog and a later live refresh retries a
+  transient catalog-load failure.
 - Player effects are source-derived from a closed server registry and always proposed for later explicit
   target-owner approval, including self-target. The state machine supports reject/cancel/24-hour expiry and
   lifecycle cleanup.
@@ -233,6 +263,8 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - immediate DM/co-DM semantic effects and inline target-owner peer approvals/effect notices on an open Character
   Sheet; the first production peer template supports one-player PHB/XPHB Cure Wounds with an atomic standard-slot
   cost, while broader abilities, resources, party/multi-target, and NPC/monster targeting remain unavailable;
+- canonical condition add/remove pickers whose catalog remains outside lightweight boot, retries module and data
+  failures through realtime/cursor refresh, and stops module retries after a fixed set of fresh URLs until reload;
 - XP and item grants;
 - party inventory summary, player requests to take stash items with DM approval, explicit DM/same-owner
   immediate moves, peer/deposit escrow, and recoverable transfer-state refresh/retry.

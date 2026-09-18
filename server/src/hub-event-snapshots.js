@@ -210,3 +210,10 @@ export function redactTransferEventForViewer ({event, accountId, role, getCharac
 	}
 	return out;
 }
+
+export function redactActorCommandEventForViewer ({event, accountId}) {
+	if (!event?.payload?.actorCommandId || event.actorAccountId === accountId) return event;
+	const payload = {...event.payload};
+	delete payload.actorCommandId;
+	return {...event, payload};
+}

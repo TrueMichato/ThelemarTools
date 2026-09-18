@@ -452,6 +452,11 @@ class CharacterSheetCombat {
 			const item = e.target.closest(".charsheet__attack-item");
 			if (!item) return;
 			if (e.target.closest("a")) return; // keep real link context menus working
+			if (this._page?.isCurrentCharacterReadOnly?.()) {
+				e.preventDefault();
+				ContextUtil.closeAllMenus();
+				return;
+			}
 			const attackId = item.dataset.attackId;
 			if (!attackId) return;
 			const gs = this._page?._resolveGuidedStrikeAbility?.();
@@ -460,7 +465,10 @@ class CharacterSheetCombat {
 			const menu = ContextUtil.getMenu([
 				new ContextUtil.Action(
 					"⚔️ Guided Strike (+10)",
-					() => this._page?._pUseGuidedStrikeOnAttack?.(attackId),
+					() => {
+						if (this._page?.isCurrentCharacterReadOnly?.()) return;
+						return this._page?._pUseGuidedStrikeOnAttack?.(attackId);
+					},
 				),
 			]);
 			void ContextUtil.pOpenMenu(e, menu);
@@ -2258,15 +2266,30 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter();
+		};
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Arcane Shot — ${ctx.attack?.name || "Ranged Attack"}`,
 			isMinHeight0: true,
-			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
+			cbClose: () => { cancel(); csRestoreModalFocus(trigger); },
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		await new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = () => { if (isResolved) return false; isResolved = true; resolve(); return true; };
 
 			const remaining = this._state.getArcaneShotRemaining?.() || 0;
@@ -2436,15 +2459,30 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter();
+		};
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Critical Hit Effect — ${ctx.attack?.name || "Weapon"}`,
 			isMinHeight0: true,
-			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
+			cbClose: () => { cancel(); csRestoreModalFocus(trigger); },
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		await new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = () => { if (isResolved) return false; isResolved = true; resolve(); return true; };
 
 			const rowsHtml = riders.map((r, i) => {
@@ -3034,6 +3072,10 @@ class CharacterSheetCombat {
 	}
 
 	async _rollDamage (attackId, isCrit = false) {
+		const characterScope = this._page?._getCharacterScopeSnapshot?.() || null;
+		const isCurrentOwnerScope = () => !characterScope
+			|| this._page?._isCharacterScopeSnapshotCurrent?.(characterScope, {isRequireOwner: true}) !== false;
+		if (!isCurrentOwnerScope()) return;
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
 		if (!attack && this._cachedAttacks?.length) {
@@ -3069,6 +3111,7 @@ class CharacterSheetCombat {
 			const harmBlocked = inCombat && this._handOfHarmUsedThisTurn;
 			if (harmCalc.hasHandOfHarm && !harmBlocked) {
 				const accepted = await this._promptHandOfHarm(harmCalc);
+				if (!isCurrentOwnerScope()) return;
 				if (accepted) {
 					handOfHarmFormula = harmCalc.handOfHarmDamage;
 					const harmRoll = this._parseDamage(handOfHarmFormula);
@@ -3083,17 +3126,21 @@ class CharacterSheetCombat {
 		const activeMethodEffect = (this._state.getActiveCombatMethodEffects?.() || []).find(e => e.weaponId === attack.id);
 		if (activeMethodEffect) {
 			const accepted = await this._promptApplyMethodEffect(activeMethodEffect);
+			if (!isCurrentOwnerScope()) return;
 			if (accepted) {
 				methodEffectApplied = activeMethodEffect;
 			}
 		} else {
 			// No active effect yet — check for weapon-modifier methods targeting this weapon
 			methodEffectApplied = await this._promptUseCombatMethod(attack);
+			if (!isCurrentOwnerScope()) return;
 		}
 		const juggernautTarget = await this._pChooseJuggernautTargetContext(attack);
+		if (!isCurrentOwnerScope()) return;
 		// One target question, pooled across every rider on this attack that gates on
 		// creature type (gemstones and materials both do).
 		const targetTypes = await this._pChooseTargetTypeContext(attack);
+		if (!isCurrentOwnerScope()) return;
 
 		// Resolve auto-generated weapon damage live so a hands-used change cannot leave a
 		// stale cached die. Explicit/custom attack damage remains authoritative.
@@ -3110,6 +3157,7 @@ class CharacterSheetCombat {
 				fnDisplay: it => it.charAt(0).toUpperCase() + it.slice(1),
 				isResolveItem: true,
 			});
+			if (!isCurrentOwnerScope()) return;
 			if (!weaponDamageType) return;
 		}
 		let destructiveWrathApplied = false;
@@ -3150,6 +3198,7 @@ class CharacterSheetCombat {
 		// (`getDoubleshotRiderForAttack` → `_isMeleeWeaponAttack`); the helper still
 		// self-gates (melee/spell/damage-format) and owns the one-shot consume.
 		if (this._getAttackRollKind(attack).isRanged && !attack.isSpell) {
+			if (!isCurrentOwnerScope()) return;
 			doubleshotDie = this._consumePendingWeaponDamageDie?.(attack);
 			if (doubleshotDie) {
 				doubleshotRoll = this._parseDamage(doubleshotDie, isCrit);
@@ -3212,6 +3261,7 @@ class CharacterSheetCombat {
 				}));
 			}
 
+			if (!isCurrentOwnerScope()) return;
 			this._markSneakAttackUsedThisTurn();
 		}
 
@@ -3242,7 +3292,10 @@ class CharacterSheetCombat {
 				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
 				usedRiderIds.push(rider.id);
-				if (oncePerTurn) this._markRiderUsedThisTurn(rider.id);
+				if (oncePerTurn) {
+					if (!isCurrentOwnerScope()) return;
+					this._markRiderUsedThisTurn(rider.id);
+				}
 			}
 
 			if (juggernautTarget === "construct") {
@@ -3317,7 +3370,10 @@ class CharacterSheetCombat {
 				riderParts.push({name: rider.sourceName, dice: rider.dice, total: riderRoll.total, type: damageType});
 				riderRollsForAnim.push(riderRoll);
 				usedRiderIds.push(riderId);
-				if (rider.perTurn) this._markRiderUsedThisTurn(riderId);
+				if (rider.perTurn) {
+					if (!isCurrentOwnerScope()) return;
+					this._markRiderUsedThisTurn(riderId);
+				}
 			}
 
 			// Active ammunition damage (Bug #3): the selected quiver ammo's bonuses
@@ -3368,6 +3424,7 @@ class CharacterSheetCombat {
 			if (entry.isCrimsonRite && this._state.canUseSanguineMasteryReroll?.()) {
 				const reroll = this._parseDamage(entry.dice, isCrit);
 				if (reroll.total > extraRoll.total) extraRoll = reroll;
+				if (!isCurrentOwnerScope()) return;
 				this._state.markSanguineMasteryRerollUsed?.();
 			}
 			extraDamageTotal += extraRoll.total;
@@ -3388,6 +3445,7 @@ class CharacterSheetCombat {
 		// Channeled-spell on-hit rider (Booming/Green-Flame Blade). Armed by the per-weapon
 		// ✨ button AFTER its attack roll; consumed by the FIRST matching weapon damage roll.
 		// Added as a SEPARATE damage type (its own crit handling + display), like Hand of Harm.
+		if (!isCurrentOwnerScope()) return;
 		const {
 			channelSpell,
 			channelSpellRoll,
@@ -3410,6 +3468,7 @@ class CharacterSheetCombat {
 		}
 		const riderDiffTypeTotal = riderDamageTotal - riderSameTypeTotal;
 
+		if (!isCurrentOwnerScope()) return;
 		const {damage: battleMasterDamage, name: battleMasterName} = this._consumeBattleMasterDamage(attackId, isCrit);
 		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage + battleMasterDamage;
 		const totalBeforeTargetMultiplier = baseDamageTotal + riderDiffTypeTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
@@ -3418,6 +3477,7 @@ class CharacterSheetCombat {
 			: 1;
 		const total = totalBeforeTargetMultiplier * targetMultiplier;
 		const juggernautOutcome = await this._pResolveJuggernautHitEffects(attack);
+		if (!isCurrentOwnerScope()) return;
 
 		// Build subtitle with breakdown
 		let subtitle = `${damageExpression}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
@@ -3490,7 +3550,8 @@ class CharacterSheetCombat {
 		this._pushDiceGroup(diceGroups, handOfHarmRollForAnim);
 		this._pushDiceGroup(diceGroups, methodRollForAnim);
 		this._pushDiceGroup(diceGroups, channelSpellRoll);
-		await this._page.pAnimateDamageDice?.(diceGroups);
+		if (await this._page.pAnimateDamageDice?.(diceGroups) === false) return;
+		if (!isCurrentOwnerScope()) return;
 
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
@@ -3523,7 +3584,10 @@ class CharacterSheetCombat {
 
 		// Consume the channeled-spell on-hit rider — it rides exactly ONE damage roll for its
 		// weapon. Clear whenever it matched this attack, even below level 5 (no on-hit dice yet).
-		if (riderMatched) this._clearPendingSpellRider();
+		if (riderMatched) {
+			if (!isCurrentOwnerScope()) return;
+			this._clearPendingSpellRider();
+		}
 
 		// Active ammunition (Bug #3): a selected quiver ammo is consumed EXACTLY ONCE
 		// here — on the damage roll, never on the attack roll. If that empties the
@@ -3531,12 +3595,14 @@ class CharacterSheetCombat {
 		// silently re-fired. Persist + refresh the Inventory tab and quiver so counts
 		// don't look stale / reset on reload.
 		if (ammoForDamage) {
+			if (!isCurrentOwnerScope()) return;
 			const weaponId = attack.sourceItem?.id;
 			if (this._state.consumeAmmunition?.(ammoForDamage.id, 1)) {
 				const remaining = this._state.getEffectiveAmmoCount?.(
 					this._state.getItems?.().find(i => i.id === ammoForDamage.id),
 				) ?? 0;
 				if (remaining <= 0) this._state.setSelectedAmmoId?.(weaponId, null);
+				if (!isCurrentOwnerScope()) return;
 				this._page?.saveCharacter?.();
 				this._page?._inventory?.render?.();
 				this.renderCombatQuiver?.();
@@ -5080,6 +5146,12 @@ class CharacterSheetCombat {
 	 * @returns {Promise<boolean>}
 	 */
 	async pChannelSpellFromCast (choice, event = {}) {
+		const prepared = await this.pPrepareChannelSpellFromCast(choice, event);
+		if (!prepared) return false;
+		return this.commitPreparedChannelSpellFromCast(prepared);
+	}
+
+	async pPrepareChannelSpellFromCast (choice, event = {}) {
 		if (!choice?.spell || !choice?.spellData) return false;
 		if (!this._cachedAttacks?.length) this.renderAttacks();
 
@@ -5102,10 +5174,19 @@ class CharacterSheetCombat {
 			if (picked == null) return false;
 			attack = eligibleAttacks[picked];
 		}
+		if (!this._canRollAttackActionAttack(attack)) {
+			JqueryUtil.doToast({type: "warning", content: "No attacks remain in this Attack action."});
+			return false;
+		}
 
-		const didRoll = this._rollAttack(attack.id, event);
+		return {attackId: attack.id, choice, event};
+	}
+
+	commitPreparedChannelSpellFromCast (prepared) {
+		if (!prepared?.attackId || !prepared.choice?.spell || !prepared.choice?.spellData) return false;
+		const didRoll = this._rollAttack(prepared.attackId, prepared.event || {});
 		if (didRoll === false) return false;
-		this._armChannelSpellRider(attack.id, choice);
+		this._armChannelSpellRider(prepared.attackId, prepared.choice);
 		return true;
 	}
 
@@ -5218,14 +5299,29 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isCancelPending = false;
+		const cancel = () => {
+			if (isResolved) return;
+			if (!resolveOuter) {
+				isCancelPending = true;
+				return;
+			}
+			isResolved = true;
+			resolveOuter();
+		};
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Baleful Interdict — ${ctx.attack?.name || "Weapon Attack"}`,
 			isMinHeight0: true,
-			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
+			cbClose: cancel,
+			cbCharacterScopeTeardown: cancel,
 		});
 
 		await new Promise((resolve) => {
 			resolveOuter = resolve;
+			if (isCancelPending) {
+				cancel();
+				return;
+			}
 			const finalize = () => { if (isResolved) return; isResolved = true; resolve(); };
 
 			const placeholder = ctx.attack?.name ? `creature hit by ${ctx.attack.name}` : "creature";
@@ -7945,6 +8041,8 @@ class CharacterSheetCombat {
 	 * Show a modal with ability details
 	 */
 	_showAbilityModal (ability) {
+		const characterScope = CharacterSheetModal.getCharacterScopeSnapshot(this._page);
+		if (!CharacterSheetModal.isCharacterScopeSnapshotCurrent(this._page, characterScope, {isRequireOwner: true})) return;
 		const uses = this._state.getCustomAbilityUsesDisplay?.(ability.id);
 		const categories = CharacterSheetState.CUSTOM_ABILITY_CATEGORIES || {};
 		const category = categories[ability.category];
@@ -8014,25 +8112,31 @@ class CharacterSheetCombat {
 			</div>
 		`});
 
+		document.body.append(modal);
+		const portal = CharacterSheetModal.registerCharacterScopePortal({
+			sheet: this._page,
+			scope: characterScope,
+			element: modal,
+		});
 		modal.querySelectorAll(".modal-close, .charsheet__ability-modal-close").forEach(el => {
-			el.addEventListener("click", () => {
-				modal.remove();
-			});
+			el.addEventListener("click", () => portal.close());
 		});
 
 		modal.querySelector(".charsheet__ability-modal-use").addEventListener("click", () => {
+			if (!portal.isCurrent({isRequireOwner: true})) {
+				portal.close();
+				return;
+			}
 			this._useCustomAbility(ability);
-			modal.remove();
+			portal.close();
 		});
 
 		// Close on background click
 		modal.addEventListener("click", (/** @type {*} */ e) => {
 			if (e.target.classList.contains("modal-overlay")) {
-				modal.remove();
+				portal.close();
 			}
 		});
-
-		document.body.append(modal);
 	}
 
 	/**

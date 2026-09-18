@@ -1,4 +1,5 @@
 import {expect, test} from "@playwright/test";
+import {HubCampaignPage} from "../pages/HubCampaignPage";
 
 const providers = [
 	{slug: "github", label: "GitHub", subject: "101", handle: "hub-e2e-github"},
@@ -10,7 +11,7 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 	const meta = await page.request.get("/api/meta");
 	expect(meta.ok()).toBe(true);
 	expect(await meta.json()).toEqual(expect.objectContaining({
-		protocolVersion: "4",
+		protocolVersion: "5",
 		capabilities: [
 			"auth.provider_registry.v1",
 			"campaign.active_context.v1",
@@ -70,3 +71,55 @@ for (const provider of providers) {
 		expect((await page.request.get("/api/session")).json()).resolves.toEqual({signedIn: false});
 	});
 }
+
+test("session expiry offers only currently available sign-in providers", async ({page}) => {
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+	const hub = new HubCampaignPage(page);
+	await hub.signInSynthetic({
+		providerSubject: "provider-expiry-dm",
+		displayName: "Provider Expiry DM",
+		secret,
+	});
+	const campaignId = await hub.createCampaign("Provider Expiry Recovery");
+
+	await page.route("**/api/meta", route => route.fulfill({
+		status: 200,
+		contentType: "application/json",
+		body: JSON.stringify({
+			authProviders: providers.map(provider => ({
+				slug: provider.slug,
+				label: provider.label,
+				startPath: `/auth/${provider.slug}/start`,
+				status: provider.slug === "github" ? "configuration_error" : "available",
+			})),
+		}),
+	}));
+	await page.route(`**/api/campaigns/${campaignId}/invites`, route => {
+		if (route.request().method() !== "POST") return route.continue();
+		return route.fulfill({
+			status: 401,
+			contentType: "application/json",
+			body: JSON.stringify({error: "AUTH_REQUIRED"}),
+		});
+	});
+
+	const people = page.locator(".hub-disclosure").filter({
+		has: page.locator(":scope > summary").filter({hasText: "People and invitations"}),
+	});
+	await people.locator(":scope > summary").click();
+	await page.locator("#campaign-invite-form button[type='submit']").click();
+
+	const signInGroup = page.getByRole("group", {name: "Sign-in providers"});
+	await expect(signInGroup).toBeVisible();
+	await expect(signInGroup.getByRole("link", {name: "Sign in with GitHub"})).toHaveCount(0);
+	await expect(signInGroup.getByRole("link", {name: "Sign in with Discord"})).toBeVisible();
+	await expect(signInGroup.getByRole("link", {name: "Sign in with Google"})).toBeVisible();
+	await expect(page.getByText("One sign-in provider is temporarily unavailable.")).toBeVisible();
+	await expect(page.locator("#hub-signed-in")).toBeVisible();
+	await expect(page.locator("#campaign-content")).toBeVisible();
+	await expect(page.locator("#campaign-name")).toHaveText("Provider Expiry Recovery");
+	await expect(page.locator("#campaign-connection-status")).toHaveText("Signed out · data is read only");
+	await expect(page.locator("#campaign-invite-form button[type='submit']")).toBeDisabled();
+	await expect(page.locator("#hub-logout")).toBeEnabled();
+});

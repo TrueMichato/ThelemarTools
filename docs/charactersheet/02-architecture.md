@@ -96,6 +96,30 @@ sheet has implemented the later operation-aware `B/L -> R/F` live-edit reconcili
 coordination, banners, or peer approval UI. Until that client slice lands, ordinary local behavior and existing
 Hub repository save/rebase behavior remain unchanged.
 
+Character-scoped asynchronous workflows capture the character ID they started with and revalidate it after every
+`await` before releasing a lease, detaching or restoring realtime, navigating, reconciling inventory/effects, or
+showing operation feedback. A stale completion may finish its already-issued server request, but it must not mutate
+the newly selected character's client lifecycle. A completed move preview is authority-bearing state: it is bound
+to the character ID, character-load generation, source campaign, and destination campaign, and character-scope
+reset clears it. Partial bulk deletion uses the server-confirmed committed-prefix IDs; if the character selected
+while deletion was in flight is in that prefix, the sheet conceals it instead of restoring realtime.
+
+DM truth is one explicit `dm_readonly` access mode. Native form controls, contenteditable regions, and custom
+`[role="button"]` controls are disabled before input; the capture guard blocks click, Enter/Space, context-menu,
+drag/drop, and long-press activation while preserving navigation and the safe Character selector, More, Roll Log,
+Export, and Print paths. Manual pointer interactions which do not use HTML drag events, including sticky-note
+movement, capture character ID/load generation/access at pointer-down, recheck owner authority during movement and
+completion, and restore their pre-drag DOM position when fenced. Character-scope teardown also removes Play Mode's
+sticky overlay and cancels an active drag, so an owner-to-owner selector switch cannot overwrite a duplicated note
+ID. `CharacterSheetModal` owns every sheet-created body modal through both its async and synchronous wrappers;
+`InputUiUtil` automatically enters the same ownership seam. Character/access transitions synchronously conceal
+and close those overlays, suppress stale close callbacks, convert stale generic-input completions into cancellation,
+and block retained controls from firing against a replacement character. Mutating modal handlers still perform a
+final current-owner check before changing state. Body-portaled spell, ability, attack, and mobile menus
+likewise recheck access inside their action callbacks. Late Play Mode and other renders reapply the same access
+mode. Recipient-framed award notices are owner-only in this view, while metadata-only projection/inventory
+invalidations continue to refresh the authorized DM projection.
+
 ### Campaign Hub content-policy boundary
 
 An authenticated campaign Character Sheet receives typed content-policy version 1 plus the generated site and

@@ -227,6 +227,17 @@ describe("Spells-tab weapon-channel bridge", () => {
 		}));
 	});
 
+	it("rejects preparation when the selected weapon cannot make another Attack-action attack", async () => {
+		const combat = makeCombat();
+		combat._cachedAttacks = [{id: "sword", name: "Longsword", isMelee: true, damage: "1d8", damageType: "slashing"}];
+		combat._canRollAttackActionAttack = jest.fn(() => false);
+		combat._rollAttack = jest.fn();
+
+		await expect(combat.pPrepareChannelSpellFromCast(choice)).resolves.toBe(false);
+		expect(combat._canRollAttackActionAttack).toHaveBeenCalledWith(combat._cachedAttacks[0]);
+		expect(combat._rollAttack).not.toHaveBeenCalled();
+	});
+
 	it("does not consume cast resources when the weapon bridge is cancelled", async () => {
 		const spells = Object.create(CharacterSheetSpells.prototype);
 		spells._state = {

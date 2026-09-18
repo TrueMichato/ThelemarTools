@@ -5,6 +5,7 @@ import {
 	getPeerSourceCostsCapability,
 	getSourceCostMutationFootprint,
 	hasSourceCostBindingChanged,
+	isPeerSourceCostsProtocolVersion,
 	normalizeSourceCost,
 	resolveSourceCost,
 	SOURCE_COST_KINDS,
@@ -20,6 +21,13 @@ describe("Hub shared source-cost contract", () => {
 			resourceKinds: SOURCE_COST_KINDS,
 			templateRegistryVersion: "peer-effects-v1",
 		});
+	});
+
+	it("accepts source-cost requests from protocol 4 and the current protocol 5 only", () => {
+		expect(isPeerSourceCostsProtocolVersion("3")).toBe(false);
+		expect(isPeerSourceCostsProtocolVersion("4")).toBe(true);
+		expect(isPeerSourceCostsProtocolVersion("5")).toBe(true);
+		expect(isPeerSourceCostsProtocolVersion("6")).toBe(false);
 	});
 
 	it("normalizes, combines, and canonically orders closed descriptors", () => {

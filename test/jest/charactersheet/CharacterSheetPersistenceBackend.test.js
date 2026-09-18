@@ -775,6 +775,7 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 			_renderCharacter: jest.fn(),
 			_applyBackgroundTheme: jest.fn(),
 			_updateThemePickerSelection: jest.fn(),
+			_pRefreshPersistedCharacterUi: jest.fn(async () => {}),
 			_createNewCharacter: jest.fn(function () {
 				this._currentCharacterId = "new-character-id";
 				this._state.reset();
@@ -834,8 +835,7 @@ describe("Persistence backend — Fix 1 rescue mirror", () => {
 
 			host._state.setName("Later Save");
 			await expect(host._saveCurrentCharacter()).resolves.toBe(true);
-			expect(getCharacter).toHaveBeenCalledTimes(2);
-			expect(getCharacter).toHaveBeenLastCalledWith({characterId: "new-character-id"});
+			expect(getCharacter).toHaveBeenCalledTimes(1);
 			expect(createCharacter).toHaveBeenCalledTimes(1);
 			expect(createCharacter).toHaveBeenCalledWith(expect.objectContaining({
 				clientImportId: "new-character-id",

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
+import {HUB_PROTOCOL_VERSION} from "../../../js/hub/hub-capabilities.js";
 
 const DOCS_ROOT = fileURLToPath(new URL("../../../docs/hub/", import.meta.url));
 
@@ -86,7 +87,7 @@ describe("Campaign Hub documentation contract", () => {
 			"authorization-scoped",
 			"HTTP fetch",
 			"editable owner Character Sheet must never",
-			"{\"projectionRevision\": 4}",
+			"payload is empty",
 			"carries no projected character",
 			"PROJECTION_POLICY_INVALID",
 			"Implementation: Shipped.",
@@ -177,6 +178,27 @@ describe("Campaign Hub documentation contract", () => {
 			"rejection of peer-authored `kind`",
 			"Implementation: The original protocol-v3 server/store/API/event substrate is implemented.",
 		]) expect(markdown).toContain(anchor);
+	});
+
+	it("keeps current realtime and operator probes pinned to the runtime protocol", () => {
+		const realtime = fs.readFileSync(path.join(DOCS_ROOT, "realtime-protocol.md"), "utf8");
+		const connection = realtime.slice(
+			realtime.indexOf("## Connection"),
+			realtime.indexOf("## Initial server message"),
+		);
+		const authProviderRunbook = fs.readFileSync(
+			path.join(DOCS_ROOT, "runbooks/auth-provider-registry.md"),
+			"utf8",
+		);
+
+		expect(realtime).toContain(`> **Protocol version:** \`${HUB_PROTOCOL_VERSION}\``);
+		expect(connection).toContain(`GET /ws/campaign/{campaignId}?v=${HUB_PROTOCOL_VERSION}`);
+		expect(connection).toContain(`query protocol \`v=${HUB_PROTOCOL_VERSION}\``);
+		expect(connection).not.toContain("?v=4");
+		expect(connection).not.toContain("query protocol `v=4`");
+		expect(realtime).toMatch(/Protocol 4 remains accepted for the\s+source-cost event shapes it introduced\./);
+		expect(authProviderRunbook).toContain(`must advertise protocol ${HUB_PROTOCOL_VERSION},`);
+		expect(authProviderRunbook).not.toContain("must advertise protocol 4,");
 	});
 
 	it("does not contain broken relative Markdown links", () => {

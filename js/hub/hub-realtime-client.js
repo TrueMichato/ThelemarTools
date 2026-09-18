@@ -1,7 +1,39 @@
+import {HUB_PROTOCOL_VERSION} from "./hub-capabilities.js";
+
 export function isRealtimeEventCoveredByBaseline ({event, baselineSequence}) {
 	return Number.isSafeInteger(event?.sequence)
 		&& Number.isSafeInteger(baselineSequence)
 		&& event.sequence <= baselineSequence;
+}
+
+export function createCampaignAuthorityChangeHandler ({
+	fnIsReloadRequired,
+	fnSetReloadRequired,
+	fnConcealAuthorization,
+	fnStopLiveUpdates,
+	fnReload,
+}) {
+	return () => {
+		const isReloadAlreadyRequired = fnIsReloadRequired();
+		fnConcealAuthorization();
+		fnSetReloadRequired();
+		fnStopLiveUpdates();
+		if (isReloadAlreadyRequired) return;
+		fnReload();
+	};
+}
+
+export function concealProjectionFormControl ({
+	control,
+	controlStates,
+	mutationControlStates = null,
+	isCampaignReloadRequired = false,
+}) {
+	if (!controlStates.has(control)) {
+		controlStates.set(control, mutationControlStates?.get(control) ?? control.disabled);
+	}
+	if (control.dataset?.hubProjectionRecoveryControl === "true" && !isCampaignReloadRequired) return;
+	control.disabled = true;
 }
 
 export class HubRealtimeClient {
@@ -109,7 +141,7 @@ export class HubRealtimeClient {
 			this._hasBaseline = false;
 			if (this._resyncStartSequence == null) this._bufferedEvents = [];
 			const protocol = this._location.protocol === "https:" ? "wss:" : "ws:";
-			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=4`;
+			const url = `${protocol}//${this._location.host}/ws/campaign/${encodeURIComponent(this._campaignId)}?v=${HUB_PROTOCOL_VERSION}`;
 			const socket = this._fnCreateSocket(url);
 			this._socket = socket;
 			let isOpened = false;

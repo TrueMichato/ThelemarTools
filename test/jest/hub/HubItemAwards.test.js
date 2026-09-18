@@ -408,6 +408,7 @@ describe("Campaign Hub item award domain", () => {
 			visibleAccountIds: expect.arrayContaining([ctx.accounts.dm.id, ctx.accounts.playerB.id]),
 			payload: {
 				awardId: result.awardId,
+				actorCommandId: "award-order",
 				index: 0,
 				targetCount: 2,
 				sourceKind: "recent",
@@ -416,6 +417,16 @@ describe("Campaign Hub item award domain", () => {
 				characterNameSnapshot: expect.any(Object),
 			},
 		});
+		const dmGrant = (await ctx.store.pListVisibleEvents({
+			accountId: ctx.accounts.dm.id,
+			campaignId: ctx.campaign.id,
+		})).find(event => event.type === "item.granted" && event.payload?.awardId === result.awardId);
+		const playerGrant = (await ctx.store.pListVisibleEvents({
+			accountId: ctx.accounts.playerB.id,
+			campaignId: ctx.campaign.id,
+		})).find(event => event.type === "item.granted" && event.payload?.awardId === result.awardId);
+		expect(dmGrant.payload.actorCommandId).toBe("award-order");
+		expect(playerGrant.payload).not.toHaveProperty("actorCommandId");
 	});
 
 	it("persists trusted campaign-item metadata while keeping command and event summaries bounded", async () => {

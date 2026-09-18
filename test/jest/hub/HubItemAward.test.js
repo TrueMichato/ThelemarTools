@@ -1,11 +1,20 @@
+import {jest} from "@jest/globals";
 import {
 	buildAwardSubmission,
 	buildAwardPreview,
+	buildAwardSuccessEvent,
 	buildRecentAwardItems,
 	buildStashAwardItems,
+	createCatalogRenderFence,
+	createGenerationFencedCatalogLoader,
 	filterAwardItems,
 	getAwardCommandFingerprint,
+	getAwardItemSelectionKey,
+	getOrStageAwardMutationDraft,
 	getAwardSourceRequest,
+	parseAwardMutationDraft,
+	resolveAwardItemSelection,
+	stageAwardMutationDraft,
 } from "../../../js/hub/hub-item-award.js";
 
 const getTarget = ({
@@ -62,6 +71,47 @@ describe("Hub item award presentation contract", () => {
 		expect(getAwardSourceRequest(stash[0])).toEqual({kind: "party_inventory", entryId: "entry-1"});
 	});
 
+	it("keeps locally synthesized award provenance when authoritative refresh is unavailable", () => {
+		const events = [{sequence: 4, type: "campaign.updated", payload: {}}];
+		const stashEvent = buildAwardSuccessEvent({
+			result: {
+				awardId: "award-stash",
+				source: {
+					kind: "party_inventory",
+					item: {name: "Private Stash Relic", source: "TST", weight: 2},
+				},
+			},
+			events,
+		});
+		const catalogEvent = buildAwardSuccessEvent({
+			result: {
+				awardId: "award-catalog",
+				source: {
+					kind: "catalog",
+					item: {name: "Torch", source: "PHB", weight: 1},
+				},
+			},
+			events: [...events, stashEvent],
+		});
+
+		expect(stashEvent).toMatchObject({
+			id: "local-award-stash",
+			sequence: 5,
+			payload: {sourceKind: "party_inventory"},
+		});
+		expect(catalogEvent).toMatchObject({
+			id: "local-award-catalog",
+			sequence: 6,
+			payload: {sourceKind: "catalog"},
+		});
+		expect(buildRecentAwardItems([...events, stashEvent, catalogEvent])).toEqual([{
+			name: "Torch",
+			source: "PHB",
+			sourceKind: "catalog",
+			weight: 1,
+		}]);
+	});
+
 	it("filters source choices predictably and keeps catalog search lazy", () => {
 		const items = [
 			{name: "Longsword", source: "PHB"},
@@ -69,6 +119,77 @@ describe("Hub item award presentation contract", () => {
 		];
 		expect(filterAwardItems({items, query: "l", isQueryRequired: true})).toEqual([]);
 		expect(filterAwardItems({items, query: "mo"})).toEqual([{name: "Moon Blade", source: "TGTT"}]);
+	});
+
+	it("resolves a selected catalog option by stable identity across a projection refresh", () => {
+		const longsword = {name: "Longsword", source: "PHB", sourceKind: "catalog", weight: 3};
+		const selectionKey = getAwardItemSelectionKey(longsword);
+
+		expect(resolveAwardItemSelection({
+			selectionKey,
+			selectedOptionItem: longsword,
+			visibleItems: [],
+			sourceItems: [],
+		})).toEqual(longsword);
+		expect(resolveAwardItemSelection({
+			selectionKey,
+			visibleItems: [{name: "Club", source: "PHB", sourceKind: "catalog"}],
+			sourceItems: [longsword],
+		})).toEqual(longsword);
+	});
+
+	it("does not let an older campaign catalog request overwrite newer brew content", async () => {
+		const pending = [];
+		const loader = createGenerationFencedCatalogLoader({
+			pLoadCatalog: content => new Promise(resolve => pending.push({content, resolve})),
+		});
+		loader.setCampaignBrewContent([{name: "Old Item"}]);
+		const oldLoad = loader.pEnsureCatalog();
+		loader.setCampaignBrewContent([{name: "New Item"}]);
+		const newLoad = loader.pEnsureCatalog();
+		await Promise.resolve();
+
+		pending[1].resolve([{name: "New Item", source: "NEW"}]);
+		await expect(newLoad).resolves.toEqual([{name: "New Item", source: "NEW"}]);
+		pending[0].resolve([{name: "Old Item", source: "OLD"}]);
+		await expect(oldLoad).resolves.toBeNull();
+
+		expect(loader.getCatalog()).toEqual([{name: "New Item", source: "NEW"}]);
+		expect(loader.getCampaignBrewContent()).toEqual([{name: "New Item"}]);
+		expect(loader.getGeneration()).toBe(2);
+	});
+
+	it("ignores an obsolete catalog failure after a newer generation succeeds", async () => {
+		const pending = [];
+		const loader = createGenerationFencedCatalogLoader({
+			pLoadCatalog: content => new Promise((resolve, reject) => pending.push({content, resolve, reject})),
+		});
+		loader.setCampaignBrewContent([{name: "Old Item"}]);
+		const oldLoad = loader.pEnsureCatalog();
+		loader.setCampaignBrewContent([{name: "New Item"}]);
+		const newLoad = loader.pEnsureCatalog();
+		await Promise.resolve();
+
+		pending[1].resolve([{name: "New Item", source: "NEW"}]);
+		await expect(newLoad).resolves.toEqual([{name: "New Item", source: "NEW"}]);
+		pending[0].reject(new Error("stale catalog failure"));
+
+		await expect(oldLoad).resolves.toBeNull();
+		expect(loader.getCatalog()).toEqual([{name: "New Item", source: "NEW"}]);
+	});
+
+	it("fences obsolete result renders across both render and catalog generations", () => {
+		let catalogGeneration = 0;
+		const fence = createCatalogRenderFence({getCatalogGeneration: () => catalogGeneration});
+		const firstRender = fence.begin();
+		const secondRender = fence.begin();
+
+		expect(firstRender()).toBe(false);
+		expect(secondRender()).toBe(true);
+
+		catalogGeneration++;
+		expect(secondRender()).toBe(false);
+		expect(fence.begin()()).toBe(true);
 	});
 
 	it("keys retries from the normalized ordered award command instead of incidental controls", () => {
@@ -103,6 +224,108 @@ describe("Hub item award presentation contract", () => {
 		expect(getAwardCommandFingerprint(incidentalTarget)).toBe(getAwardCommandFingerprint(first));
 		expect(reordered.targetCharacterIds).toEqual(["b", "a"]);
 		expect(getAwardCommandFingerprint(reordered)).not.toBe(getAwardCommandFingerprint(first));
+	});
+
+	it("replays the exact staged award request across projection reorder or removal", () => {
+		const selectedItem = {name: "Torch", source: "PHB", sourceKind: "catalog", weight: 1};
+		const targets = [
+			getTarget({id: "a", name: "A"}),
+			getTarget({id: "b", name: "B"}),
+			getTarget({id: "c", name: "C"}),
+		];
+		const firstSubmission = buildAwardSubmission({
+			selectedItem,
+			targets,
+			selectedTargetIds: new Set(["a", "b", "c"]),
+			quantity: "2",
+			note: "For the road",
+		});
+		const firstDraft = stageAwardMutationDraft({
+			submission: firstSubmission,
+			rulesVersionId: "rules-1",
+		});
+		const replacementSubmission = buildAwardSubmission({
+			selectedItem,
+			targets: [targets[1], targets[0]],
+			selectedTargetIds: new Set(["a", "b"]),
+			quantity: "2",
+			note: "For the road",
+		});
+		const retryDraft = stageAwardMutationDraft({
+			draft: firstDraft,
+			submission: replacementSubmission,
+			rulesVersionId: "rules-2",
+		});
+
+		expect(retryDraft).toBe(firstDraft);
+		expect(retryDraft.request).toEqual({
+			...firstSubmission,
+			rulesVersionId: "rules-1",
+		});
+		expect(retryDraft.fingerprint).toBe(getAwardCommandFingerprint(retryDraft.request));
+	});
+
+	it("replays a retained award draft and idempotency key without reading invalidated form state", async () => {
+		const draft = stageAwardMutationDraft({
+			submission: {
+				source: {kind: "party_inventory", entryId: "stash-entry"},
+				targetCharacterIds: ["a"],
+				quantity: 1,
+				note: null,
+			},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "award-key",
+			fnNow: () => 1_000,
+			replayWindowMs: 23_000,
+		});
+		const fnGetSubmission = jest.fn(() => {
+			throw new Error("The refreshed form no longer has a selected item.");
+		});
+		const pAwardItems = jest.fn(async request => request);
+		const originalIdempotencyKey = "award-key";
+
+		const retryDraft = getOrStageAwardMutationDraft({
+			draft,
+			fnGetSubmission,
+			rulesVersionId: "rules-2",
+		});
+		const result = await pAwardItems({
+			campaignId: "campaign-a",
+			...retryDraft.request,
+			idempotencyKey: originalIdempotencyKey,
+		});
+
+		expect(retryDraft).toBe(draft);
+		expect(fnGetSubmission).not.toHaveBeenCalled();
+		expect(pAwardItems).toHaveBeenCalledWith({
+			campaignId: "campaign-a",
+			...draft.request,
+			idempotencyKey: originalIdempotencyKey,
+		});
+		expect(result.idempotencyKey).toBe(originalIdempotencyKey);
+	});
+
+	it("persists and validates the exact award command through its conservative replay deadline", () => {
+		const draft = stageAwardMutationDraft({
+			submission: {
+				source: {kind: "catalog", item: {name: "Torch", source: "PHB"}},
+				targetCharacterIds: ["a", "b"],
+				quantity: 2,
+				note: "For the road",
+			},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "award-key",
+			fnNow: () => 1_000,
+			replayWindowMs: 23_000,
+		});
+
+		expect(draft).toMatchObject({
+			idempotencyKey: "award-key",
+			replayUntil: 24_000,
+		});
+		expect(parseAwardMutationDraft(JSON.stringify(draft))).toEqual(draft);
+		expect(parseAwardMutationDraft(JSON.stringify({...draft, fingerprint: "tampered"}))).toBeNull();
+		expect(parseAwardMutationDraft(JSON.stringify({...draft, replayUntil: null}))).toBeNull();
 	});
 
 	it("distinguishes exact, lower-bound, unavailable, and policy-blocked previews", () => {

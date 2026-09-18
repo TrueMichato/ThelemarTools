@@ -1,14 +1,14 @@
 # Campaign Hub realtime protocol
 
 > **Status:** Current private-V1 wire protocol
-> **Protocol version:** `4`
-> **Last verified:** 2026-09-04
+> **Protocol version:** `5`
+> **Last verified:** 2026-09-17
 > **Owner:** Campaign Hub maintainers
 
 ## Connection
 
 ```text
-GET /ws/campaign/{campaignId}?v=4
+GET /ws/campaign/{campaignId}?v=5
 Origin: <exact HUB_APP_ORIGIN>
 Cookie: __Host-hub_session=...
 ```
@@ -16,7 +16,7 @@ Cookie: __Host-hub_session=...
 Upgrade requires:
 
 - UUID campaign id;
-- query protocol `v=4`;
+- query protocol `v=5`;
 - exact Origin;
 - valid signed/unexpired session;
 - active campaign membership.
@@ -169,16 +169,22 @@ Presence is ephemeral and not written to the event log.
     "sequence": 43,
     "type": "character.projection.invalidated",
     "actorAccountId": "uuid",
-    "aggregateType": "character",
-    "aggregateId": "uuid",
-    "aggregateRevision": 8,
-    "visibility": "all_members",
+    "aggregateType": "campaign",
+    "aggregateId": "campaign-uuid",
+    "aggregateRevision": null,
+    "visibility": "explicit_accounts",
     "visibleAccountIds": null,
-    "payload": {"projectionRevision": 3},
+    "payload": {},
     "createdAt": "ISO-8601"
   }
 }
 ```
+
+Campaign-scoped `character.projection.invalidated` is a protocol-5-only envelope. Its empty payload and
+explicit account audience intentionally avoid disclosing the changed character to viewers whose projection
+hides identity. Protocol-3 and protocol-4 sockets are closed with `1008 Protocol update required` rather than
+receiving an event shape that their clients would silently ignore. Protocol 4 remains accepted for the
+source-cost event shapes it introduced.
 
 ### Character semantic-operation lifecycle
 
@@ -346,6 +352,16 @@ cursor, partial replay chain, buffered live events, and in-memory dedupe state.
 Snapshot-covered event types are suppressed only when at/before the snapshot sequence. Semantic lifecycle
 events are not discarded solely because they are at/below `operationWatermark`; durable roll/operation history
 may still replay because it is not fully represented by current state.
+Character Sheet read-only projections additionally treat the cursor membership as the current authority
+baseline: a current non-DM role ends the private surface immediately, while replayed role changes at or below the
+cursor sequence cannot override a later DM/co-DM promotion. A newer live demotion still ends the surface. An
+invalid authority cursor is reported through the existing realtime unavailable/delivery-error path rather than
+being interpreted as a valid sequence-zero baseline.
+
+Campaign Overview may retain its last authorized rendering while connectivity alone is unknown. Once a cursor or
+newer live event confirms a role change, however, it synchronously destroys the retained campaign surfaces and
+closes realtime even when an offline warning has already marked reload as required. That flag suppresses only
+duplicate navigation; it never suppresses privacy teardown.
 
 ## Protocol evolution
 

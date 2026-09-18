@@ -12,17 +12,46 @@ import {
 } from "../../../js/charactersheet/charactersheet-campaign.js";
 import {HubApiError} from "../../../js/hub/hub-api-client.js";
 
+const makeDeferred = () => {
+	let resolve;
+	let reject;
+	const promise = new Promise((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return {promise, resolve, reject};
+};
+
+function makeStorage () {
+	const data = new Map();
+	return {
+		getItem: key => data.get(key) ?? null,
+		setItem: (key, value) => data.set(key, `${value}`),
+	};
+}
+
+function expireStoredCloneCommand (storage) {
+	const key = "charsheet-campaign-clone-commands:account-1";
+	const registry = JSON.parse(storage.getItem(key));
+	const [commandKey] = Object.keys(registry);
+	registry[commandKey].replayUntil = 1;
+	storage.setItem(key, JSON.stringify(registry));
+}
+
 function getControl ({
 	saveResult = true,
 	createResult = {character: {id: "cloud-1"}},
 	currentCampaignId = "campaign-1",
+	pendingCommandStorage = makeStorage(),
 } = {}) {
 	const page = {
 		_currentCharacterId: "local-1",
+		_characterLoadGeneration: 0,
 		_saveCurrentCharacter: jest.fn(async () => saveResult),
 		_characterRepository: {
 			pReleaseLease: jest.fn(async () => ({released: true})),
 		},
+		isCurrentCharacterReadOnly: jest.fn(() => false),
 		_canRestoreHubRealtimeAfterError: jest.fn(error => ![
 			"AUTH_REQUIRED",
 			"CAMPAIGN_NOT_FOUND",
@@ -68,6 +97,7 @@ function getControl ({
 					? {id: "brew-1", version: 2, contentHash: "source", documentCount: 3}
 					: {id: "brew-2", version: 1, contentHash: "destination", documentCount: 1},
 			})),
+			pListCharacters: jest.fn(async () => []),
 			pMoveCharacter: jest.fn(async ({characterId, campaignId}) => ({
 				character: {id: characterId, campaignId},
 			})),
@@ -89,13 +119,144 @@ function getControl ({
 		_isBusy: false,
 		_feedback: null,
 		_pendingCommand: null,
+		_pendingCommandStorage: pendingCommandStorage,
+		_session: {account: {id: "account-1"}},
 		_fnNavigate: jest.fn(),
 		render: jest.fn(),
 	});
 	return {control, page};
 }
 
+function setCurrentMovePreview ({control, page, campaignId = "campaign-2", rulesVersionId = null, report = {}}) {
+	control._movePreview = {
+		characterId: page._currentCharacterId,
+		characterLoadGeneration: page._characterLoadGeneration,
+		sourceCampaignId: control._currentCharacter?.campaignId || null,
+		campaignId,
+		report,
+		rulesVersionId,
+	};
+}
+
 describe("Character Sheet campaign control", () => {
+	it("does not load owner-only sharing controls for a DM read-only sheet", async () => {
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_page: {
+				_isHubCharacter: true,
+				_currentCharacterId: "player-character",
+				isCurrentCharacterReadOnly: () => true,
+			},
+			_currentCharacter: {id: "player-character", campaignId: "campaign-1"},
+			_sharing: {pLoad: jest.fn()},
+			render: jest.fn(),
+		});
+
+		await control.pRefreshSharing();
+
+		expect(control._sharing).toBeNull();
+	});
+
+	it("describes DM truth as read-only instead of implying edits will sync", () => {
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_isLoading: false,
+			_currentCharacter: {id: "player-character", campaignId: "campaign-1"},
+			_currentCampaign: {id: "campaign-1", name: "Ashen March"},
+			_page: {
+				_currentCharacterId: "player-character",
+				_characterRepository: {hasPendingWrites: () => false},
+				isCurrentCharacterReadOnly: () => true,
+			},
+		});
+
+		expect(control._getDetail({isCloud: true}))
+			.toBe("Read-only DM view · use campaign actions to make authorized changes");
+	});
+
+	it("reloads character-scoped campaign state and binds sharing writes to the loaded character", async () => {
+		const page = {
+			_isHubCharacter: true,
+			_currentCharacterId: "character-a",
+			isCurrentCharacterReadOnly: () => false,
+		};
+		const policy = {
+			policy: {version: 1, preset: "table", overrides: {}},
+			projectionRevision: 1,
+			preview: null,
+		};
+		const api = {
+			pGetSession: jest.fn(async () => ({signedIn: true})),
+			pListCampaigns: jest.fn(async () => [{id: "campaign-1", name: "Ashen March"}]),
+			pGetCharacter: jest.fn(async ({characterId}) => ({id: characterId, campaignId: "campaign-1"})),
+			pGetProjectionPolicy: jest.fn(async () => policy),
+			pSetProjectionPolicy: jest.fn(async ({characterId}) => ({...policy, characterId})),
+		};
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_page: page,
+			_api: api,
+			_root: null,
+			_isInitialized: true,
+			_refreshGeneration: 0,
+			_session: null,
+			_campaigns: [],
+			_currentCharacter: null,
+			_currentCampaign: null,
+			_isLoading: false,
+			_feedback: null,
+			_sharing: null,
+			render: jest.fn(),
+		});
+
+		await control.pRefreshCurrentCharacter();
+		const sharingA = control._sharing;
+		page._currentCharacterId = "character-b";
+		await control.pRefreshCurrentCharacter();
+
+		expect(control._sharing).not.toBe(sharingA);
+		expect(api.pGetProjectionPolicy.mock.calls.map(([{characterId}]) => characterId))
+			.toEqual(["character-a", "character-b"]);
+
+		await sharingA.pSave();
+		expect(api.pSetProjectionPolicy).toHaveBeenCalledWith(expect.objectContaining({
+			characterId: "character-a",
+		}));
+	});
+
+	it("propagates signed-out authority loss while refreshing a loaded Hub character", async () => {
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_page: {
+				_isHubCharacter: true,
+				_currentCharacterId: "character-a",
+				isCurrentCharacterReadOnly: () => false,
+			},
+			_api: {
+				pGetSession: jest.fn(async () => ({signedIn: false})),
+				pListCampaigns: jest.fn(),
+				pGetCharacter: jest.fn(),
+			},
+			_root: null,
+			_isInitialized: true,
+			_refreshGeneration: 0,
+			_session: null,
+			_campaigns: [],
+			_currentCharacter: null,
+			_currentCampaign: null,
+			_isLoading: false,
+			_feedback: null,
+			_sharing: null,
+			render: jest.fn(),
+		});
+
+		await expect(control.pRefreshCurrentCharacter()).rejects.toMatchObject({
+			code: "AUTH_REQUIRED",
+		});
+		expect(control._api.pListCampaigns).not.toHaveBeenCalled();
+		expect(control._api.pGetCharacter).not.toHaveBeenCalled();
+		expect(control._feedback).toEqual(expect.objectContaining({
+			type: "error",
+			text: expect.stringContaining("sign-in has expired"),
+		}));
+	});
+
 	it("uses the full source-edition catalog when deciding whether to show policy warnings", () => {
 		const root = {append: jest.fn()};
 		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
@@ -254,6 +415,46 @@ describe("Character Sheet campaign control", () => {
 		}));
 	});
 
+	it("does not continue a local copy after a stale save succeeds", async () => {
+		const save = makeDeferred();
+		const {control, page} = getControl();
+		page._saveCurrentCharacter.mockReturnValue(save.promise);
+
+		const pending = control._pCopyLocalCharacter({campaignId: "campaign-1"});
+		page._currentCharacterId = "local-2";
+		page._characterLoadGeneration++;
+		page._state.toJson = () => ({id: "local-2", name: "Replacement"});
+		save.resolve(true);
+		await pending;
+
+		expect(control._api.pGetCampaignContext).not.toHaveBeenCalled();
+		expect(control._api.pCreateCharacter).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it("keeps a committed local copy bound to its originating document after a selector switch", async () => {
+		const create = makeDeferred();
+		const {control, page} = getControl();
+		control._api.pCreateCharacter.mockReturnValue(create.promise);
+
+		const pending = control._pCopyLocalCharacter({campaignId: "campaign-1"});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(control._api.pCreateCharacter).toHaveBeenCalledWith(expect.objectContaining({
+			clientImportId: "local-1",
+			data: expect.objectContaining({name: "Mira"}),
+		}));
+		page._currentCharacterId = "local-2";
+		page._characterLoadGeneration++;
+		page._state.toJson = () => ({id: "local-2", name: "Replacement"});
+		create.resolve({character: {id: "cloud-1"}});
+		await pending;
+
+		expect(control._api.pCreateCharacter.mock.calls[0][0].data).not.toEqual(expect.objectContaining({name: "Replacement"}));
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+		expect(control._feedback).not.toEqual(expect.objectContaining({type: "success"}));
+	});
+
 	it("reuses the same idempotency key when a local copy is retried", async () => {
 		const {control} = getControl();
 		control._api.pCreateCharacter
@@ -281,6 +482,237 @@ describe("Character Sheet campaign control", () => {
 			rulesVersionId: "rules-campaign-2",
 		});
 		expect(control._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
+	});
+
+	it("replays the exact cloud clone request after an outcome-uncertain response", async () => {
+		const pendingCommandStorage = makeStorage();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pGetCampaignCompatibility.mockResolvedValue({
+			campaignId: "campaign-2",
+			rulesVersion: {id: "rules-original"},
+		});
+		control._api.pCloneCharacter.mockRejectedValue(new HubApiError({code: "REQUEST_FAILED", status: 503}));
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		const originalRequest = control._api.pCloneCharacter.mock.calls[0][0];
+		const {control: fresh, page: freshPage} = getControl({
+			pendingCommandStorage,
+			createResult: {character: {id: "clone-1"}},
+		});
+		freshPage._currentCharacterId = "cloud-source";
+		fresh._api.pGetCampaignCompatibility.mockResolvedValue({
+			campaignId: "campaign-2",
+			rulesVersion: {id: "rules-replacement"},
+		});
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(fresh._api.pGetCampaignCompatibility).not.toHaveBeenCalled();
+		expect(fresh._api.pCloneCharacter).toHaveBeenCalledWith(originalRequest);
+		expect(fresh._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
+	});
+
+	it("starts a new cloud clone command after a definite rejection", async () => {
+		const {control, page} = getControl({createResult: {character: {id: "clone-1"}}});
+		page._currentCharacterId = "cloud-source";
+		control._api.pGetCampaignCompatibility
+			.mockResolvedValueOnce({
+				campaignId: "campaign-2",
+				rulesVersion: {id: "rules-original"},
+			})
+			.mockResolvedValueOnce({
+				campaignId: "campaign-2",
+				rulesVersion: {id: "rules-replacement"},
+			});
+		control._api.pCloneCharacter
+			.mockRejectedValueOnce(new HubApiError({code: "RULES_VERSION_STALE", status: 409}))
+			.mockResolvedValueOnce({character: {id: "clone-1"}});
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		const [first, second] = control._api.pCloneCharacter.mock.calls.map(([request]) => request);
+		expect(first.rulesVersionId).toBe("rules-original");
+		expect(second.rulesVersionId).toBe("rules-replacement");
+		expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+	});
+
+	it("adopts the one authoritative clone created after the replay deadline without resubmitting", async () => {
+		const pendingCommandStorage = makeStorage();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockRejectedValueOnce(new HubApiError({code: "REQUEST_FAILED", status: 503}));
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		expireStoredCloneCommand(pendingCommandStorage);
+
+		const {control: fresh, page: freshPage} = getControl({pendingCommandStorage});
+		freshPage._currentCharacterId = "cloud-source";
+		fresh._api.pListCharacters.mockResolvedValue([
+			{id: "clone-committed", clonedFromCharacterId: "cloud-source"},
+		]);
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(fresh._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(fresh._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-committed&hubCampaign=campaign-2");
+	});
+
+	it("clears an expired clone only after authoritative absence and requires a new explicit attempt", async () => {
+		const pendingCommandStorage = makeStorage();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockRejectedValueOnce(new HubApiError({code: "REQUEST_FAILED", status: 503}));
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		const originalKey = control._api.pCloneCharacter.mock.calls[0][0].idempotencyKey;
+		expireStoredCloneCommand(pendingCommandStorage);
+
+		const {control: fresh, page: freshPage} = getControl({
+			pendingCommandStorage,
+			createResult: {character: {id: "clone-new"}},
+		});
+		freshPage._currentCharacterId = "cloud-source";
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+		expect(fresh._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(fresh._fnNavigate).not.toHaveBeenCalled();
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+		expect(fresh._api.pCloneCharacter).toHaveBeenCalledTimes(1);
+		expect(fresh._api.pCloneCharacter.mock.calls[0][0].idempotencyKey).not.toBe(originalKey);
+		expect(fresh._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-new&hubCampaign=campaign-2");
+	});
+
+	it("keeps an expired clone locked when authoritative reconciliation is ambiguous", async () => {
+		const pendingCommandStorage = makeStorage();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockRejectedValueOnce(new HubApiError({code: "REQUEST_FAILED", status: 503}));
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		expireStoredCloneCommand(pendingCommandStorage);
+
+		const {control: fresh, page: freshPage} = getControl({pendingCommandStorage});
+		freshPage._currentCharacterId = "cloud-source";
+		fresh._api.pListCharacters.mockResolvedValue([
+			{id: "clone-a", clonedFromCharacterId: "cloud-source"},
+			{id: "clone-b", clonedFromCharacterId: "cloud-source"},
+		]);
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(fresh._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(fresh._fnNavigate).not.toHaveBeenCalled();
+		expect(fresh._feedback).toEqual(expect.objectContaining({
+			type: "error",
+			text: expect.stringMatching(/multiple matching copies/i),
+		}));
+	});
+
+	it("fails closed on an older persisted clone request without recovery metadata", async () => {
+		const pendingCommandStorage = makeStorage();
+		const key = "charsheet-campaign-clone-commands:account-1";
+		pendingCommandStorage.setItem(key, JSON.stringify({
+			[JSON.stringify(["clone-cloud", "cloud-source", "campaign-2"])]: {
+				kind: "clone-cloud",
+				characterId: "cloud-source",
+				campaignId: "campaign-2",
+				idempotencyKey: "legacy-clone-key",
+				request: {
+					characterId: "cloud-source",
+					campaignId: "campaign-2",
+					rulesVersionId: "rules-original",
+					idempotencyKey: "legacy-clone-key",
+				},
+			},
+		}));
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(control._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(control._api.pListCharacters).not.toHaveBeenCalled();
+		expect(control._feedback).toEqual(expect.objectContaining({
+			type: "error",
+			text: expect.stringMatching(/cannot be replayed safely/i),
+		}));
+	});
+
+	it("does not continue a cloud clone after its compatibility request becomes stale", async () => {
+		const compatibility = makeDeferred();
+		const {control, page} = getControl({createResult: {character: {id: "clone-1"}}});
+		page._currentCharacterId = "cloud-source";
+		control._api.pGetCampaignCompatibility.mockReturnValue(compatibility.promise);
+
+		const pending = control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-replacement";
+		page._characterLoadGeneration++;
+		compatibility.resolve({campaignId: "campaign-2", rulesVersion: {id: "rules-campaign-2"}});
+		await pending;
+
+		expect(control._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it("does not navigate when a clone commits after its originating character was replaced", async () => {
+		const clone = makeDeferred();
+		const {control, page} = getControl();
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockReturnValue(clone.promise);
+
+		const pending = control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		for (let i = 0; i < 5; ++i) await Promise.resolve();
+		expect(control._api.pCloneCharacter).toHaveBeenCalledWith(expect.objectContaining({
+			characterId: "cloud-source",
+		}));
+		page._currentCharacterId = "cloud-replacement";
+		page._characterLoadGeneration++;
+		clone.resolve({character: {id: "clone-1"}});
+		await pending;
+
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+		expect(control._feedback).not.toEqual(expect.objectContaining({type: "success"}));
+	});
+
+	it("reconciles a committed clone after a scope switch and reload without creating a duplicate", async () => {
+		const pendingCommandStorage = makeStorage();
+		const clone = makeDeferred();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockReturnValue(clone.promise);
+
+		const pending = control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		for (let i = 0; i < 5; ++i) await Promise.resolve();
+		const originalKey = control._api.pCloneCharacter.mock.calls[0][0].idempotencyKey;
+		page._currentCharacterId = "cloud-replacement";
+		page._characterLoadGeneration++;
+		clone.resolve({character: {id: "clone-1"}});
+		await pending;
+
+		const {control: fresh, page: freshPage} = getControl({pendingCommandStorage});
+		freshPage._currentCharacterId = "cloud-source";
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(control._api.pCloneCharacter).toHaveBeenCalledWith(expect.objectContaining({idempotencyKey: originalKey}));
+		expect(fresh._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(fresh._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
+
+		const {control: subsequent, page: subsequentPage} = getControl({
+			pendingCommandStorage,
+			createResult: {character: {id: "clone-2"}},
+		});
+		subsequentPage._currentCharacterId = "cloud-source";
+		await subsequent._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(subsequent._api.pCloneCharacter).toHaveBeenCalledTimes(1);
+		expect(subsequent._api.pCloneCharacter.mock.calls[0][0].idempotencyKey).not.toBe(originalKey);
+		expect(subsequent._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-2&hubCampaign=campaign-2");
 	});
 
 	it("summarizes rule and homebrew differences without exposing documents", () => {
@@ -325,7 +757,7 @@ describe("Character Sheet campaign control", () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}, rulesVersionId: "rules-campaign-2"};
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
 
@@ -345,7 +777,7 @@ describe("Character Sheet campaign control", () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}};
+		setCurrentMovePreview({control, page});
 		control._api.pMoveCharacter.mockRejectedValueOnce(new HubApiError({code: "CHARACTER_BUSY", status: 409}));
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
@@ -355,6 +787,135 @@ describe("Character Sheet campaign control", () => {
 		expect(control._fnNavigate).not.toHaveBeenCalled();
 	});
 
+	it("does not detach the newly selected character when the source save settles after a switch", async () => {
+		const {control, page} = getControl();
+		const save = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		page._saveCurrentCharacter.mockImplementationOnce(() => save.promise);
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
+		control._api.pMoveCharacter.mockRejectedValueOnce(new HubApiError({code: "CHARACTER_BUSY", status: 409}));
+
+		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		save.resolve(true);
+		await pending;
+
+		expect(page._characterRepository.pReleaseLease).not.toHaveBeenCalled();
+		expect(page._detachHubRealtime).not.toHaveBeenCalled();
+		expect(control._api.pMoveCharacter).not.toHaveBeenCalled();
+		expect(page._attachHubRealtime).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+		expect(page._currentCharacterId).toBe("cloud-other");
+	});
+
+	it("does not resume a stale move after navigating from A to B and back to A", async () => {
+		const {control, page} = getControl();
+		const save = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration = 7;
+		page._saveCurrentCharacter.mockImplementationOnce(() => save.promise);
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
+
+		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		page._characterLoadGeneration++;
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration++;
+		save.resolve(true);
+		await pending;
+
+		expect(page._characterRepository.pReleaseLease).not.toHaveBeenCalled();
+		expect(page._detachHubRealtime).not.toHaveBeenCalled();
+		expect(control._api.pMoveCharacter).not.toHaveBeenCalled();
+		expect(page._attachHubRealtime).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+	});
+
+	it("does not bind a compatibility preview to a later load of the same character", async () => {
+		const {control, page} = getControl();
+		const sourceCompatibility = makeDeferred();
+		const targetCompatibility = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration = 3;
+		control._api.pGetCampaignCompatibility
+			.mockImplementationOnce(() => sourceCompatibility.promise)
+			.mockImplementationOnce(() => targetCompatibility.promise);
+
+		const pending = control._pPrepareMove({sourceCampaignId: "campaign-1", campaignId: "campaign-2"});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		page._characterLoadGeneration++;
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration++;
+		sourceCompatibility.resolve({campaignId: "campaign-1", rulesVersion: null, brewBundle: null});
+		targetCompatibility.resolve({campaignId: "campaign-2", rulesVersion: null, brewBundle: null});
+		await pending;
+
+		expect(control._movePreview).toBeNull();
+	});
+
+	it("does not show a compatibility error from an earlier load of the same character", async () => {
+		const {control, page} = getControl();
+		const sourceCompatibility = makeDeferred();
+		const targetCompatibility = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration = 3;
+		control._api.pGetCampaignCompatibility
+			.mockImplementationOnce(() => sourceCompatibility.promise)
+			.mockImplementationOnce(() => targetCompatibility.promise);
+
+		const pending = control._pPrepareMove({sourceCampaignId: "campaign-1", campaignId: "campaign-2"});
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		page._characterLoadGeneration++;
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration++;
+		sourceCompatibility.reject(new Error("stale compatibility failure"));
+		targetCompatibility.resolve({campaignId: "campaign-2", rulesVersion: null, brewBundle: null});
+		await pending;
+
+		expect(control._feedback).toBeNull();
+	});
+
+	it("clears a completed move preview when character scope changes", () => {
+		const {control, page} = getControl();
+		page._currentCharacterId = "cloud-source";
+		page._characterLoadGeneration = 4;
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		control._selectedCampaignId = "campaign-2";
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
+
+		control.resetCharacterScope();
+
+		expect(control._movePreview).toBeNull();
+		expect(control._selectedCampaignId).toBeNull();
+	});
+
+	it("does not restore the source subscription when a rejected move settles after a switch", async () => {
+		const {control, page} = getControl();
+		const move = makeDeferred();
+		page._currentCharacterId = "cloud-source";
+		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
+		setCurrentMovePreview({control, page, rulesVersionId: "rules-campaign-2"});
+		control._api.pMoveCharacter.mockImplementationOnce(() => move.promise);
+
+		const pending = control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});
+		await Promise.resolve();
+		await Promise.resolve();
+		page._currentCharacterId = "cloud-other";
+		move.reject(new HubApiError({code: "CHARACTER_BUSY", status: 409}));
+		await pending;
+
+		expect(page._detachHubRealtime).toHaveBeenCalledTimes(1);
+		expect(page._attachHubRealtime).not.toHaveBeenCalled();
+		expect(control._fnNavigate).not.toHaveBeenCalled();
+		expect(page._currentCharacterId).toBe("cloud-other");
+	});
+
 	it.each([
 		new HubApiError({code: "NETWORK_UNAVAILABLE", status: 0}),
 		new HubApiError({code: "AUTH_REQUIRED", status: 401}),
@@ -362,7 +923,7 @@ describe("Character Sheet campaign control", () => {
 		const {control, page} = getControl();
 		page._currentCharacterId = "cloud-source";
 		control._currentCharacter = {id: "cloud-source", campaignId: "campaign-1", data: {name: "Mira"}};
-		control._movePreview = {campaignId: "campaign-2", report: {}};
+		setCurrentMovePreview({control, page});
 		control._api.pMoveCharacter.mockRejectedValueOnce(error);
 
 		await control._pMoveCloudCharacter({campaignId: "campaign-2", isDetached: false});

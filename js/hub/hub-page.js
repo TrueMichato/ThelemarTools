@@ -1,9 +1,11 @@
 import {
+	HUB_COMMAND_REPLAY_WINDOW_MS,
 	HubApiClient,
 	HubApiError,
 	HubTransferProposalDrafts,
 	HubTransferRefreshQueue,
 	HubTransferResolutionDrafts,
+	isMutationOutcomeUncertain,
 	isTransferOutcomeUncertain,
 	pResolveTransferFromDraft,
 	pResolveTransferAndRefresh,
@@ -15,7 +17,12 @@ import {
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
 	pLoadHubCapabilityModule,
 } from "./hub-capabilities.js";
-import {HubRealtimeClient, isRealtimeEventCoveredByBaseline} from "./hub-realtime-client.js";
+import {
+	concealProjectionFormControl,
+	createCampaignAuthorityChangeHandler,
+	HubRealtimeClient,
+	isRealtimeEventCoveredByBaseline,
+} from "./hub-realtime-client.js";
 import {
 	bindHubActivityHistoryPagination,
 	hasHubActivityAuthorizationChanged,
@@ -23,6 +30,7 @@ import {
 	renderHubActivityRows,
 } from "./hub-activity-render.js";
 import {
+	getCanonicalCharacter,
 	getOwnerMembershipId,
 	getProjectionId,
 	getProjectionOwnerAccountId,
@@ -36,14 +44,101 @@ import {
 import {
 	buildAwardSubmission,
 	buildAwardPreview,
+	buildAwardSuccessEvent,
 	buildRecentAwardItems,
 	buildStashAwardItems,
+	createCatalogRenderFence,
+	createGenerationFencedCatalogLoader,
 	filterAwardItems,
-	getAwardCommandFingerprint,
+	getAwardItemSelectionKey,
+	getOrStageAwardMutationDraft,
+	parseAwardMutationDraft,
+	resolveAwardItemSelection,
 } from "./hub-item-award.js";
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
+let campaignAuthorizationErrorHandler = null;
+
+function getAwardDraftStorageKey ({accountId, campaignId}) {
+	return `hub-item-award-draft:${accountId}:${campaignId}`;
+}
+
+function loadAwardMutationDraft ({storageKey}) {
+	const raw = sessionStorage.getItem(storageKey);
+	if (!raw) return null;
+	const draft = parseAwardMutationDraft(raw);
+	if (!draft) throw new Error("Saved item-award recovery data is invalid. The award remains blocked to prevent a duplicate.");
+	return draft;
+}
+
+function persistAwardMutationDraft ({storageKey, draft}) {
+	sessionStorage.setItem(storageKey, JSON.stringify(draft));
+}
+
+function clearAwardMutationDraft ({storageKey}) {
+	sessionStorage.removeItem(storageKey);
+}
+
+async function pFindAwardEventByCommandId ({campaignId, actorCommandId}) {
+	const snapshot = await api.pGetCampaignSnapshot({campaignId});
+	let beforeSequence = Number(snapshot?.lastSequence || 0) + 1;
+	while (beforeSequence > 1) {
+		const page = await api.pListEventPage({
+			campaignId,
+			beforeSequence,
+			limit: 200,
+		});
+		const match = page.events.find(event =>
+			event.type === "item.granted"
+			&& event.payload?.actorCommandId === actorCommandId);
+		if (match) return match;
+		if (!page.history?.hasMore) return null;
+		const nextBeforeSequence = Number(page.history.scannedBackThroughSequence);
+		if (!Number.isSafeInteger(nextBeforeSequence) || nextBeforeSequence >= beforeSequence) {
+			throw new Error("Item-award history could not be reconciled safely.");
+		}
+		beforeSequence = nextBeforeSequence;
+	}
+	return null;
+}
+
+function concealCampaignAuthorizationSurfaces () {
+	const content = document.getElementById("campaign-content");
+	if (!content) return false;
+	content.replaceChildren();
+	content.classList.add("ve-hidden");
+	content.setAttribute("aria-hidden", "true");
+	return true;
+}
+
+let _pSignedOutProvidersRender = null;
+async function pRenderSignedOutProviders () {
+	if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender;
+	const signIn = document.getElementById("hub-sign-in");
+	if (!signIn) return;
+	const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+	_pSignedOutProvidersRender = (async () => {
+		const {pRenderHubAuthProviders} = await import("./hub-auth-providers.js");
+		await pRenderHubAuthProviders({signIn, returnTo});
+	})();
+	try {
+		await _pSignedOutProvidersRender;
+	} finally {
+		_pSignedOutProvidersRender = null;
+	}
+}
+
+function showSignedOutAfterSessionExpiry () {
+	setHidden(document.getElementById("hub-signed-in"), false);
+	const signedOut = document.getElementById("hub-signed-out");
+	setHidden(signedOut, false);
+	const title = signedOut?.querySelector(".hub-state__title");
+	const description = signedOut?.querySelector(".hub-state__description");
+	if (title) title.textContent = "Session expired";
+	if (description) description.textContent = "Sign in again to reconnect. Your last loaded campaign remains available read only.";
+	void pRenderSignedOutProviders().catch(error => renderError(error));
+}
 
 /**
  * Lightweight Hub shells keep a device-local active campaign selection, but must never fetch the
@@ -97,6 +192,11 @@ window.addEventListener("pageshow", event => {
 	if (event.persisted) activeCampaign.pResume().catch(err => console.warn("Failed to resume campaign selection:", err));
 });
 const CURRENCY_TYPES = ["cp", "sp", "ep", "gp", "pp"];
+const CONDITION_CATALOG_MODULE_URLS = Object.freeze([
+	"./hub-condition-catalog.js",
+	"./hub-condition-catalog.js?retry=1",
+	"./hub-condition-catalog.js?retry=2",
+]);
 let isCampaignReloadRequired = false;
 
 function setHidden (element, isHidden) {
@@ -185,10 +285,14 @@ function setCampaignReadOnlyAfterAccessChange (error) {
 		});
 }
 
-function renderError (messageOrError, {actionLabel = null, fnAction = null} = {}) {
+function renderError (
+	messageOrError,
+	{actionLabel = null, fnAction = null, isAuthorizationHandled = false} = {},
+) {
 	const wrp = document.getElementById("hub-error");
 	if (!wrp) return;
 	const error = messageOrError instanceof HubApiError ? messageOrError : null;
+	if (!isAuthorizationHandled && error && campaignAuthorizationErrorHandler?.(error)) return;
 	const message = error ? getErrorMessage(error) : messageOrError;
 	wrp.replaceChildren();
 	if (message) {
@@ -449,6 +553,10 @@ function setTransferProposalControls ({form, proposalRequest, characters, partyI
 	if (!form) return;
 	if (!form._hubTransferControlStates) form._hubTransferControlStates = new Map();
 	if (!isLocked) {
+		if (isCampaignReloadRequired) {
+			for (const control of form.querySelectorAll("button, input, select, textarea")) control.disabled = true;
+			return;
+		}
 		for (const option of form.querySelectorAll("option[data-hub-frozen-proposal]")) option.remove();
 		for (const [control, wasDisabled] of form._hubTransferControlStates) control.disabled = wasDisabled;
 		form._hubTransferControlStates.clear();
@@ -528,18 +636,53 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 		};
 	}
 
-	let campaignBrewContent = context.brewBundle?.content;
-	let catalog = null;
-	let catalogLoad = null;
+	const catalogLoader = createGenerationFencedCatalogLoader({
+		campaignBrewContent: context.brewBundle?.content,
+		pLoadCatalog: async campaignBrewContent => {
+			const {pLoadHubItemCatalog} = await import("./hub-item-catalog.js");
+			return pLoadHubItemCatalog({campaignBrewContent});
+		},
+	});
 	let selectedItem = null;
 	let currentPartyInventory = partyInventory;
 	let currentTargets = targetCharacters;
 	let currentEvents = events;
 	let visibleItems = [];
+	let isTargetSelectionInitialized = false;
+	const catalogRenderFence = createCatalogRenderFence({
+		getCatalogGeneration: () => catalogLoader.getGeneration(),
+	});
 	const selectedTargetIds = new Set();
 	const pendingDisabledStates = new Map();
+	const submitDefaultText = submit.textContent;
+	let isPending = false;
+	let isRetryPending = false;
+	const applyPendingControlState = () => {
+		if (!isPending) return;
+		for (const control of form.querySelectorAll("input, textarea, select, button")) {
+			if (control === submit) continue;
+			if (!pendingDisabledStates.has(control)) pendingDisabledStates.set(control, control.disabled);
+			control.disabled = true;
+		}
+	};
+	const restorePendingControlStates = () => {
+		if (isCampaignReloadRequired) {
+			pendingDisabledStates.clear();
+			for (const control of form.querySelectorAll("input, textarea, select, button")) control.disabled = true;
+			return;
+		}
+		if (form._hubProjectionControlStates) {
+			if (!form._hubProjectionControlRestores) form._hubProjectionControlRestores = new Set();
+			form._hubProjectionControlRestores.add(restorePendingControlStates);
+			for (const control of form.querySelectorAll("input, textarea, select, button")) control.disabled = true;
+			return;
+		}
+		for (const [control, wasDisabled] of pendingDisabledStates) control.disabled = wasDisabled;
+		pendingDisabledStates.clear();
+	};
 
 	const getSourceItems = () => {
+		const catalog = catalogLoader.getCatalog();
 		switch (sourceKind.value) {
 			case "recent": return buildRecentAwardItems(currentEvents);
 			case "campaign_item": return (catalog || []).filter(item => item.sourceKind === "campaign_item");
@@ -549,15 +692,8 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	};
 
 	const pEnsureCatalog = async () => {
-		if (catalog) return catalog;
-		if (!catalogLoad) {
-			resultsStatus.textContent = "Loading item catalog...";
-			catalogLoad = import("./hub-item-catalog.js")
-				.then(({pLoadHubItemCatalog}) => pLoadHubItemCatalog({campaignBrewContent}))
-				.then(loaded => catalog = loaded)
-				.finally(() => catalogLoad = null);
-		}
-		return catalogLoad;
+		resultsStatus.textContent = "Loading item catalog...";
+		return catalogLoader.pEnsureCatalog();
 	};
 
 	const getSelectedTargets = () => currentTargets.filter(target => selectedTargetIds.has(getProjectionId(target)));
@@ -614,7 +750,10 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 		for (const id of [...selectedTargetIds]) {
 			if (!availableIds.has(id)) selectedTargetIds.delete(id);
 		}
-		if (!selectedTargetIds.size && currentTargets[0]) selectedTargetIds.add(getProjectionId(currentTargets[0]));
+		if (!isTargetSelectionInitialized && currentTargets[0]) {
+			selectedTargetIds.add(getProjectionId(currentTargets[0]));
+		}
+		isTargetSelectionInitialized = true;
 		targetsRoot.replaceChildren(...currentTargets.map(target => {
 			const characterId = getProjectionId(target);
 			const label = document.createElement("label");
@@ -642,32 +781,41 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			? `${selectedTargetIds.size} of ${currentTargets.length} eligible character${currentTargets.length === 1 ? "" : "s"} selected.`
 			: "No eligible campaign characters are available.";
 		renderPreview();
+		applyPendingControlState();
 	};
 
 	const renderResults = async () => {
+		const isCurrentRender = catalogRenderFence.begin();
+		const previousSelectionKey = results.value;
 		const isCatalogSource = ["catalog", "campaign_item"].includes(sourceKind.value);
 		if (isCatalogSource && (sourceKind.value === "campaign_item" || search.value.trim().length >= 2)) {
 			try {
 				await pEnsureCatalog();
 			} catch (error) {
+				if (!isCurrentRender()) return;
 				results.replaceChildren();
 				resultsStatus.textContent = error.message || "The item catalog could not be loaded.";
 				setFormStatus({formId: "campaign-item-form", message: resultsStatus.textContent, isError: true});
 				return;
 			}
+			if (!isCurrentRender()) return;
 		}
 		visibleItems = filterAwardItems({
 			items: getSourceItems(),
 			query: search.value,
 			isQueryRequired: sourceKind.value === "catalog",
 		});
-		results.replaceChildren(...visibleItems.map((item, index) => {
+		results.replaceChildren(...visibleItems.map(item => {
 			const option = document.createElement("option");
-			option.value = `${index}`;
+			option.value = getAwardItemSelectionKey(item);
 			const amount = item.sourceKind === "party_inventory" ? ` · ${item.availableQuantity} available` : "";
 			option.textContent = `${item.name} — ${item.source}${amount}`;
+			option._hubAwardItem = item;
 			return option;
 		}));
+		if ([...results.options].some(option => option.value === previousSelectionKey)) {
+			results.value = previousSelectionKey;
+		}
 		useSelection.disabled = !visibleItems.length;
 		if (sourceKind.value === "catalog" && search.value.trim().length < 2) {
 			resultsStatus.textContent = "Type at least 2 characters to load and search the catalog.";
@@ -686,12 +834,15 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	};
 
 	const applySelection = () => {
-		const item = visibleItems[Number(results.value)];
+		const item = resolveAwardItemSelection({
+			selectionKey: results.value,
+			selectedOptionItem: results.selectedOptions[0]?._hubAwardItem,
+			visibleItems,
+			sourceItems: getSourceItems(),
+		});
 		if (!item) return;
 		selectedItem = item;
-		selectionKey.value = item.sourceKind === "party_inventory"
-			? `${item.sourceKind}:${item.entryId}`
-			: `${item.sourceKind}:${item.name}|${item.source}`;
+		selectionKey.value = getAwardItemSelectionKey(item);
 		selectionSummary.textContent = `Selected: ${item.name} · ${item.source}${item.sourceKind === "party_inventory" ? ` · ${item.availableQuantity} in the party stash` : ""}`;
 		renderPreview();
 	};
@@ -761,15 +912,8 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			});
 		},
 		onSuccess (result) {
-			const awarded = result?.source?.item;
-			if (awarded) {
-				currentEvents = [...currentEvents, {
-					id: `local-${result.awardId}`,
-					sequence: Math.max(0, ...currentEvents.map(event => event.sequence || 0)) + 1,
-					type: "item.granted",
-					payload: {entry: {item: awarded}},
-				}];
-			}
+			const successEvent = buildAwardSuccessEvent({result, events: currentEvents});
+			if (successEvent) currentEvents = [...currentEvents, successEvent];
 			selectedItem = null;
 			selectionKey.value = "";
 			selectionSummary.textContent = "No item selected.";
@@ -780,19 +924,20 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			renderPreview();
 		},
 		setCampaignBrewContent (content) {
-			campaignBrewContent = content;
-			catalog = null;
-			catalogLoad = null;
-			if (sourceKind.value === "campaign_item") {
-				clearSelection();
+			if (isRetryPending) return;
+			catalogLoader.setCampaignBrewContent(content);
+			if (["catalog", "campaign_item"].includes(sourceKind.value)) {
+				if (sourceKind.value === "campaign_item" || selectedItem?.sourceKind === "campaign_item") clearSelection();
 				void renderResults();
 			}
 		},
 		setEvents (nextEvents) {
+			if (isRetryPending) return;
 			currentEvents = nextEvents;
 			if (sourceKind.value === "recent") void renderResults();
 		},
 		setPartyInventory (nextPartyInventory) {
+			if (isRetryPending) return;
 			currentPartyInventory = nextPartyInventory;
 			if (sourceKind.value === "party_inventory") {
 				const refreshedSelection = selectedItem?.sourceKind === "party_inventory"
@@ -809,20 +954,21 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 				void renderResults();
 			}
 		},
-		setPending (isPending) {
+		setPending (isPendingNxt, {isRetry = false} = {}) {
+			isPending = !!isPendingNxt;
+			isRetryPending = isPending && isRetry;
+			form._hubItemAwardRetryPending = isRetryPending;
+			submit.textContent = isRetry ? "Retry previous award" : submitDefaultText;
 			if (isPending) {
-				pendingDisabledStates.clear();
-				for (const control of form.querySelectorAll("input, textarea, select, button")) {
-					if (control === submit) continue;
-					pendingDisabledStates.set(control, control.disabled);
-					control.disabled = true;
-				}
+				if (isRetry) submit.disabled = false;
+				applyPendingControlState();
 				return;
 			}
-			for (const [control, wasDisabled] of pendingDisabledStates) control.disabled = wasDisabled;
-			pendingDisabledStates.clear();
+			restorePendingControlStates();
+			renderPreview();
 		},
 		setTargets (nextTargets) {
+			if (isRetryPending) return;
 			currentTargets = nextTargets;
 			renderTargets();
 		},
@@ -920,28 +1066,50 @@ function setFormStatus ({formId, message = "", isError = false}) {
 	status.classList.toggle("hub-inline-status--error", isError);
 }
 
+function applyTransferRefreshRecoverySuccess ({form}) {
+	if (!form?.isConnected || !form._hubTransferRefreshRecovery || isCampaignReloadRequired) return false;
+	delete form._hubTransferRefreshRecovery;
+	const submit = form.querySelector("button[type='submit']");
+	if (submit) submit.disabled = false;
+	setFormStatus({
+		formId: "campaign-transfer-form",
+		message: "Latest balances loaded. You can send another transfer.",
+	});
+	return true;
+}
+
 function setTransferRefreshFailure ({form, message, pRetry}) {
 	const status = document.getElementById("campaign-transfer-form-status");
+	if (!form?.isConnected) return;
 	const submit = form?.querySelector("button[type='submit']");
 	if (!status || !submit) return;
 	submit.disabled = true;
 	status.classList.add("hub-inline-status--error");
-	status.replaceChildren(document.createTextNode(`${message} `));
+	status.replaceChildren(document.createTextNode(isCampaignReloadRequired ? message : `${message} `));
+	if (isCampaignReloadRequired) {
+		delete form._hubTransferRefreshRecovery;
+		return;
+	}
+	form._hubTransferRefreshRecovery = {message, pRetry};
 	const retry = document.createElement("button");
 	retry.type = "button";
 	retry.className = "hub-button hub-button--inline";
 	retry.textContent = "Retry latest balances";
+	retry.dataset.hubProjectionRecoveryControl = "true";
 	retry.addEventListener("click", async () => {
+		if (isCampaignReloadRequired) return;
 		retry.disabled = true;
 		retry.textContent = "Retrying...";
 		try {
-			await pRetry();
-			submit.disabled = false;
-			setFormStatus({
-				formId: "campaign-transfer-form",
-				message: "Latest balances loaded. You can send another transfer.",
-			});
+			const result = await pRetry();
+			if (!form.isConnected || isCampaignReloadRequired) return;
+			if (result?.isFenced) {
+				setTransferRefreshFailure({form, message, pRetry});
+				return;
+			}
+			applyTransferRefreshRecoverySuccess({form});
 		} catch {
+			if (!form.isConnected || isCampaignReloadRequired) return;
 			setTransferRefreshFailure({form, message, pRetry});
 		}
 	});
@@ -960,16 +1128,19 @@ function setTransferProposalReplayExpired ({
 	if (!status || !submit) return;
 	submit.disabled = true;
 	status.classList.add("hub-inline-status--error");
-	status.replaceChildren(document.createTextNode(`${message} `));
+	status.replaceChildren(document.createTextNode(isCampaignReloadRequired ? message : `${message} `));
+	if (isCampaignReloadRequired) return;
 	const refresh = document.createElement("button");
 	refresh.type = "button";
 	refresh.className = "hub-button hub-button--inline";
 	refresh.textContent = "Refresh latest balances";
 	refresh.addEventListener("click", async () => {
+		if (isCampaignReloadRequired) return;
 		refresh.disabled = true;
 		refresh.textContent = "Refreshing...";
 		try {
 			const refreshResult = await pRefresh();
+			if (isCampaignReloadRequired) return;
 			if (refreshResult?.isFenced || !Array.isArray(refreshResult?.transfers)) {
 				throw new HubApiError({code: "TRANSFER_REFRESH_FAILED", status: 0});
 			}
@@ -1016,6 +1187,7 @@ function setTransferProposalReplayExpired ({
 					|| "No matching transfer was found. Latest balances are loaded; inspect the destination before starting another.",
 			});
 		} catch {
+			if (isCampaignReloadRequired) return;
 			setTransferProposalReplayExpired({
 				form,
 				proposalRef,
@@ -1033,19 +1205,26 @@ function setTransferInboxRefreshFailure ({controls, meta, message, pRetry, isRes
 	const decisionButtons = [...controls.querySelectorAll("[data-transfer-decision]")];
 	const priorRetry = controls.querySelector("[data-transfer-refresh-retry]");
 	priorRetry?.remove();
+	if (isCampaignReloadRequired) {
+		for (const button of decisionButtons) button.disabled = true;
+		return;
+	}
 	const retry = document.createElement("button");
 	retry.type = "button";
 	retry.className = "hub-button hub-button--inline";
 	retry.textContent = "Retry inbox refresh";
 	retry.dataset.transferRefreshRetry = "true";
 	retry.addEventListener("click", async () => {
+		if (isCampaignReloadRequired) return;
 		for (const control of controls.querySelectorAll("button")) control.disabled = true;
 		retry.textContent = "Refreshing...";
 		try {
-			await pRetry();
+			const result = await pRetry();
+			if (isCampaignReloadRequired || result?.isFenced) return;
 			renderError("");
 		} catch (error) {
 			renderError(error);
+			if (isCampaignReloadRequired) return;
 			setTransferInboxRefreshFailure({controls, meta, message, pRetry, isResolutionKnown, pendingDecision});
 		}
 	});
@@ -1054,6 +1233,26 @@ function setTransferInboxRefreshFailure ({controls, meta, message, pRetry, isRes
 		for (const button of decisionButtons) button.disabled = button.dataset.transferDecision !== pendingDecision;
 		controls.append(retry);
 	}
+	const list = document.getElementById("campaign-pending-transfers");
+	if (list?.isConnected) {
+		list._hubTransferInboxRecovery = {meta, controls};
+		renderTransferInboxRecovery(list);
+	}
+}
+
+function renderTransferInboxRecovery (list = document.getElementById("campaign-pending-transfers")) {
+	const recovery = list?._hubTransferInboxRecovery;
+	if (!list?.isConnected || !recovery) return false;
+	const row = document.createElement("div");
+	row.className = "hub-data-row";
+	const main = document.createElement("span");
+	main.className = "hub-data-row__main";
+	main.append(recovery.meta);
+	row.append(main, recovery.controls);
+	list.replaceChildren(row);
+	setHidden(document.getElementById("campaign-pending-transfers-empty"), true);
+	updateInboxCount({kind: "transfers", count: 1});
+	return true;
 }
 
 function setFormAvailability ({formId, isAvailable, message}) {
@@ -1061,6 +1260,55 @@ function setFormAvailability ({formId, isAvailable, message}) {
 	if (!form) return;
 	for (const button of form.querySelectorAll("button[type='submit']")) button.disabled = !isAvailable;
 	if (!isAvailable) setFormStatus({formId, message});
+}
+
+function setProjectionFormControlsConcealed ({form, isConcealed}) {
+	if (!form) return;
+	if (isConcealed) {
+		if (!form._hubProjectionControlStates) form._hubProjectionControlStates = new Map();
+		if (form.contains(document.activeElement)) form._hubProjectionFocusedControl = document.activeElement;
+		for (const control of form.querySelectorAll("button, input, select, textarea")) {
+			concealProjectionFormControl({
+				control,
+				controlStates: form._hubProjectionControlStates,
+				mutationControlStates: form._hubMutationControlStates,
+				isCampaignReloadRequired,
+			});
+		}
+		return;
+	}
+	if (isCampaignReloadRequired) return;
+	const focusedControl = form._hubProjectionFocusedControl;
+	const deferredControlRestores = [...(form._hubProjectionControlRestores || [])];
+	for (const [control, wasDisabled] of form._hubProjectionControlStates || []) {
+		if (control.isConnected) control.disabled = wasDisabled;
+	}
+	delete form._hubProjectionControlStates;
+	delete form._hubProjectionFocusedControl;
+	delete form._hubProjectionControlRestores;
+	for (const fnRestore of deferredControlRestores) fnRestore();
+	if (
+		focusedControl?.isConnected
+		&& !focusedControl.disabled
+		&& [document.body, focusedControl].includes(document.activeElement)
+	) focusedControl.focus({preventScroll: true});
+}
+
+function getCampaignTransferDraft () {
+	const getValue = id => document.getElementById(id)?.value || "";
+	return {
+		source: getValue("campaign-transfer-source"),
+		target: getValue("campaign-transfer-target"),
+		item: getValue("campaign-transfer-entry"),
+		quantity: getValue("campaign-transfer-quantity"),
+		currency: Object.fromEntries(CURRENCY_TYPES.map(type => [type, getValue(`campaign-transfer-${type}`)])),
+	};
+}
+
+function captureCampaignTransferDraft () {
+	const form = document.getElementById("campaign-transfer-form");
+	if (!form || form._hubProjectionTransferDraft) return;
+	form._hubProjectionTransferDraft = getCampaignTransferDraft();
 }
 
 function renderAccountDeletionPending (deletion) {
@@ -1270,7 +1518,12 @@ async function pInitCampaign ({session}) {
 	document.getElementById("campaign-account").textContent = session.account.displayName;
 	renderMemberList({campaign, campaignId, members, session, pRefresh: pRefreshMembers});
 	if (["dm", "co_dm"].includes(campaign.role)) await pRefreshInvites();
-	renderCharacterList({campaignId, characters});
+	renderCharacterList({
+		campaignId,
+		characters,
+		session,
+		isDm: ["dm", "co_dm"].includes(campaign.role),
+	});
 	renderPartyRoster({
 		campaignId,
 		characters: snapshot.characters,
@@ -1287,8 +1540,13 @@ async function pInitCampaign ({session}) {
 	let activityHistory = eventPage.history;
 	let liveMembers = members;
 	let liveCharacters = snapshot.characters;
+	let liveRoster = snapshot.roster || [];
 	let activityAuthorizationGeneration = 0;
 	let isActivityAuthorizationFenced = false;
+	let projectionAuthorizationGeneration = 0;
+	let projectionControlSelectionDraft = null;
+	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
+	let refreshTimer = null;
 	const invalidateActivityAuthorization = () => {
 		activityAuthorizationGeneration++;
 		isActivityAuthorizationFenced = true;
@@ -1310,6 +1568,89 @@ async function pInitCampaign ({session}) {
 			isAuthorizationFenced: true,
 		});
 	};
+	const concealCampaignAuthorization = ({isLoading = false} = {}) => {
+		concealActivityAuthorization({isLoading});
+		liveRoster = [];
+		context = null;
+		projectionControlSelectionDraft = null;
+		concealCampaignAuthorizationSurfaces();
+	};
+	const concealProjectionFormControls = () => {
+		for (const formId of ["campaign-action-form", "campaign-transfer-form", "campaign-xp-form", "campaign-item-form"]) {
+			setProjectionFormControlsConcealed({
+				form: document.getElementById(formId),
+				isConcealed: true,
+			});
+		}
+	};
+	const concealCampaignProjectionAuthorization = () => {
+		projectionAuthorizationGeneration++;
+		concealActivityAuthorization({isLoading: true});
+		liveRoster = [];
+		captureCampaignTransferDraft();
+		if (!projectionControlSelectionDraft) {
+			projectionControlSelectionDraft = {
+				actionTarget: document.getElementById("campaign-action-target")?.value || "",
+				xpTarget: document.getElementById("campaign-xp-target")?.value || "",
+			};
+		}
+		concealProjectionFormControls();
+		const isItemAwardRetryPending = !!document.getElementById("campaign-item-form")?._hubItemAwardRetryPending;
+		for (const id of [
+			"campaign-party-roster",
+			"campaign-pending-actions",
+			"campaign-pending-transfers",
+			...(isItemAwardRetryPending ? [] : ["campaign-item-targets", "campaign-item-preview-list"]),
+		]) document.getElementById(id)?.replaceChildren();
+		renderTransferInboxRecovery();
+		for (const id of [
+			"campaign-action-target",
+			"campaign-transfer-source",
+			"campaign-transfer-target",
+			"campaign-transfer-entry",
+			"campaign-xp-target",
+		]) {
+			const select = document.getElementById(id);
+			select?.replaceChildren();
+			if (select) select.disabled = true;
+		}
+		const partyCount = document.getElementById("campaign-party-count");
+		if (partyCount) partyCount.textContent = "0";
+		const partyEmpty = document.getElementById("campaign-party-empty");
+		if (partyEmpty) partyEmpty.textContent = "Refreshing authorized party details...";
+		setHidden(partyEmpty, false);
+		const attentionSummary = document.getElementById("campaign-attention-summary");
+		if (attentionSummary) attentionSummary.textContent = "Refreshing authorized requests...";
+		const attentionCount = document.getElementById("campaign-inbox-count");
+		if (attentionCount) attentionCount.textContent = "0";
+		const previewSummary = document.getElementById("campaign-item-preview-summary");
+		if (previewSummary) previewSummary.textContent = "Refreshing authorized recipients...";
+		const transferBalance = document.getElementById("campaign-transfer-balance");
+		if (transferBalance) transferBalance.textContent = "";
+	};
+	const stopCampaignLiveUpdates = () => {
+		if (refreshTimer != null) {
+			window.clearTimeout(refreshTimer);
+			refreshTimer = null;
+		}
+		realtime.close();
+	};
+	const handleCampaignAuthorizationError = error => {
+		if (!(error instanceof HubApiError)) return false;
+		if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND", "MEMBERSHIP_NOT_FOUND"].includes(error.code)) return false;
+		isCampaignReloadRequired = true;
+		if (error.code === "AUTH_REQUIRED") {
+			stopCampaignLiveUpdates();
+			showSignedOutAfterSessionExpiry();
+			renderError(error, {isAuthorizationHandled: true});
+			return true;
+		}
+		concealCampaignAuthorization();
+		stopCampaignLiveUpdates();
+		renderError(error, {isAuthorizationHandled: true});
+		return true;
+	};
+	campaignAuthorizationErrorHandler = handleCampaignAuthorizationError;
 	bindHubActivityHistoryPagination({
 		button: document.getElementById("campaign-activity-load-earlier"),
 		pListEventPage: ({beforeSequence, limit}) => api.pListEventPage({campaignId, beforeSequence, limit}),
@@ -1328,10 +1669,7 @@ async function pInitCampaign ({session}) {
 		getAuthorizationGeneration: () => activityAuthorizationGeneration,
 		isAuthorizationFenced: () => isActivityAuthorizationFenced,
 		onAuthorizationError: error => {
-			if (!["AUTH_REQUIRED", "FORBIDDEN", "CAMPAIGN_NOT_FOUND"].includes(error?.code)) return false;
-			concealActivityAuthorization();
-			isCampaignReloadRequired = true;
-			return true;
+			return handleCampaignAuthorizationError(error);
 		},
 		isTerminal: () => isCampaignReloadRequired,
 	});
@@ -1354,7 +1692,15 @@ async function pInitCampaign ({session}) {
 		document.title = `${campaign.name} - Campaign Hub - ThelemarTools`;
 		return;
 	}
-	const {pRefreshTransferState, rulesPolicyManagerPromise} = await pInitCampaignForms({
+	const {
+		pRefreshTransferState,
+		rulesPolicyManagerPromise,
+		refreshActionFields,
+		refreshItemAwardControlState,
+		pRefreshContextBoundControls,
+		isConditionCatalogRetryNeeded,
+		flushDeferredMutationUi,
+	} = await pInitCampaignForms({
 		campaign,
 		campaignId,
 		session,
@@ -1363,14 +1709,14 @@ async function pInitCampaign ({session}) {
 		members,
 		context,
 		events,
+		getProjectionAuthorizationGeneration: () => projectionAuthorizationGeneration,
+		requestProjectionRefresh: () => queueLiveRefresh(),
 		pRefreshInvites,
 		roster: snapshot.roster || [],
 	});
-	const realtime = new HubRealtimeClient({campaignId, initialLastSequence: snapshot.lastSequence});
-	let liveRoster = snapshot.roster || [];
 	let liveLastSequence = snapshot.lastSequence;
+	let projectionSnapshotLastSequence = snapshot.lastSequence;
 	let authorityBaselineSequence = snapshot.lastSequence || 0;
-	let refreshTimer = null;
 	let isRefreshing = false;
 	let isRefreshQueued = false;
 	let isCampaignContextRefreshQueued = false;
@@ -1381,6 +1727,12 @@ async function pInitCampaign ({session}) {
 			return;
 		}
 		const isRefreshCampaignContext = isCampaignContextRefreshQueued;
+		const refreshProjectionGeneration = projectionAuthorizationGeneration;
+		const fnIsProjectionCurrent = () => (
+			!isCampaignReloadRequired
+			&& projectionAuthorizationGeneration === refreshProjectionGeneration
+		);
+		let isProjectionRefreshSuccessful = false;
 		isCampaignContextRefreshQueued = false;
 		isRefreshing = true;
 		try {
@@ -1419,8 +1771,9 @@ async function pInitCampaign ({session}) {
 				snapshotNxt: pSnapshotNxt,
 				membersNxt: pMembersNxt,
 				eventsNxt: pActivityRefresh.then(({events}) => events),
-				fnIsCurrent: () => !isCampaignReloadRequired,
+				fnIsCurrent: fnIsProjectionCurrent,
 				fnIsSnapshotCurrent: snapshotNxt => snapshotNxt.lastSequence >= liveLastSequence,
+				isProjectionControlRestoreDeferred: true,
 			}).then(
 				value => ({value}),
 				error => ({error}),
@@ -1431,22 +1784,34 @@ async function pInitCampaign ({session}) {
 				pSnapshotNxt,
 				pActivityRefresh,
 			]);
-			if (isCampaignReloadRequired) return;
+			if (!fnIsProjectionCurrent()) {
+				concealProjectionFormControls();
+				isRefreshQueued = true;
+				return;
+			}
 			const isSnapshotCurrent = snapshotNxt.lastSequence >= liveLastSequence;
+			if (!isSnapshotCurrent) {
+				isRefreshQueued = true;
+				return;
+			}
 			liveEvents = activityRefresh.events;
 			if (activityRefresh.isAuthorizationChanged) {
 				if (!isActivityAuthorizationFenced) invalidateActivityAuthorization();
 				activityHistory = activityRefresh.history;
 			}
 			liveMembers = membersNxt;
-			if (isSnapshotCurrent) {
-				// Replacement, not a merge: a field the owner has just stopped sharing must
-				// disappear rather than survive from the previous, broader projection.
-				liveCharacters = snapshotNxt.characters;
-				liveRoster = snapshotNxt.roster || [];
-				liveLastSequence = snapshotNxt.lastSequence;
-			}
-			renderCharacterList({campaignId, characters: charactersNxt});
+			// Replacement, not a merge: a field the owner has just stopped sharing must
+			// disappear rather than survive from the previous, broader projection.
+			liveCharacters = snapshotNxt.characters;
+			liveRoster = snapshotNxt.roster || [];
+			liveLastSequence = snapshotNxt.lastSequence;
+			projectionSnapshotLastSequence = Math.max(projectionSnapshotLastSequence, snapshotNxt.lastSequence);
+			renderCharacterList({
+				campaignId,
+				characters: charactersNxt,
+				session,
+				isDm: ["dm", "co_dm"].includes(campaign.role),
+			});
 			applyCampaignRoleLayout({campaign, characters: charactersNxt});
 			renderPartyRoster({
 				campaignId,
@@ -1456,6 +1821,35 @@ async function pInitCampaign ({session}) {
 				isDm: ["dm", "co_dm"].includes(campaign.role),
 				roster: liveRoster,
 			});
+			const actionTarget = document.getElementById("campaign-action-target");
+			const xpTarget = document.getElementById("campaign-xp-target");
+			fillCharacterSelect(
+				actionTarget,
+				getTargetableProjections({projections: liveCharacters, roster: liveRoster}),
+				{
+					isPreserveSelection: true,
+					selectionValue: projectionControlSelectionDraft?.actionTarget,
+				},
+			);
+			fillCharacterSelect(
+				xpTarget,
+				charactersNxt,
+				{
+					isPreserveSelection: true,
+					selectionValue: projectionControlSelectionDraft?.xpTarget,
+				},
+			);
+			if (!document.getElementById("campaign-action-form")?._hubProjectionControlStates) {
+				if (actionTarget) actionTarget.disabled = !actionTarget.options.length;
+				if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
+				setFormAvailability({
+					formId: "campaign-action-form",
+					isAvailable: !!actionTarget?.value,
+					message: actionTarget?.options.length
+						? "Choose a target character before proposing an effect."
+						: "Add a campaign character before proposing an effect.",
+				});
+			}
 			if (activityRefresh.isAuthorizationChanged) isActivityAuthorizationFenced = false;
 			renderRecentActivity({
 				events: isActivityAuthorizationFenced ? [] : liveEvents,
@@ -1466,23 +1860,89 @@ async function pInitCampaign ({session}) {
 				isAuthorizationFenced: isActivityAuthorizationFenced,
 			});
 			if (isRefreshCampaignContext) {
-				context = await api.pGetCampaignContext({campaignId});
-				renderCampaignContext(context);
-				void rulesPolicyManagerPromise.then(manager => manager?.replaceContext(context));
+				const contextNxt = await api.pGetCampaignContext({campaignId});
+				if (!fnIsProjectionCurrent()) {
+					concealProjectionFormControls();
+					isRefreshQueued = true;
+					return;
+				}
+				context = contextNxt;
+				renderCampaignContext(contextNxt);
+				void rulesPolicyManagerPromise.then(manager => {
+					if (fnIsProjectionCurrent()) manager?.replaceContext(contextNxt);
+				});
+				await pRefreshContextBoundControls({context: contextNxt});
+			} else if (isConditionCatalogRetryNeeded()) {
+				await pRefreshContextBoundControls({context});
 			}
-			if (isCampaignReloadRequired) return;
-			const [, transferRefreshResult] = await Promise.all([
-				renderPendingActions({campaign, campaignId, session, targetCharacters: liveCharacters, members: membersNxt, roster: liveRoster}),
+			if (!fnIsProjectionCurrent()) {
+				concealProjectionFormControls();
+				isRefreshQueued = true;
+				return;
+			}
+			const [actionRefreshResult, transferRefreshResult] = await Promise.all([
+				renderPendingActions({
+					campaign,
+					campaignId,
+					session,
+					targetCharacters: liveCharacters,
+					members: membersNxt,
+					roster: liveRoster,
+					fnIsCurrent: fnIsProjectionCurrent,
+				}),
 				pTransferStateRefresh,
 			]);
+			if (
+				!fnIsProjectionCurrent()
+				|| actionRefreshResult?.isFenced
+				|| transferRefreshResult.value?.isFenced
+			) {
+				concealProjectionFormControls();
+				isRefreshQueued = true;
+				return;
+			}
 			if (transferRefreshResult.error) throw transferRefreshResult.error;
+			for (const formId of ["campaign-action-form", "campaign-transfer-form", "campaign-xp-form", "campaign-item-form"]) {
+				setProjectionFormControlsConcealed({
+					form: document.getElementById(formId),
+					isConcealed: false,
+				});
+			}
+			transferRefreshResult.value?.restoreTransferControlState?.();
+			if (actionTarget) actionTarget.disabled = !actionTarget.options.length;
+			if (xpTarget) xpTarget.disabled = !xpTarget.options.length;
+			setFormAvailability({
+				formId: "campaign-action-form",
+				isAvailable: !!actionTarget?.value,
+				message: actionTarget?.options.length
+					? "Choose a target character before proposing an effect."
+					: "Add a campaign character before proposing an effect.",
+			});
+			setFormAvailability({
+				formId: "campaign-xp-form",
+				isAvailable: !!xpTarget?.value,
+				message: xpTarget?.options.length
+					? "Choose a target character before using this grant."
+					: "Add a campaign character before using this grant.",
+			});
+			refreshItemAwardControlState();
+			refreshActionFields({isRetryConditionCatalog: false});
+			projectionControlSelectionDraft = null;
+			isProjectionRefreshSuccessful = true;
 		} catch (error) {
+			if (!fnIsProjectionCurrent()) {
+				concealProjectionFormControls();
+				isRefreshQueued = true;
+				return;
+			}
 			renderError(error);
 		} finally {
 			isRefreshing = false;
 			if (isRefreshQueued) {
 				isRefreshQueued = false;
 				void pRefreshLiveViews();
+			} else if (isProjectionRefreshSuccessful && refreshTimer == null) {
+				flushDeferredMutationUi();
 			}
 		}
 	};
@@ -1495,17 +1955,13 @@ async function pInitCampaign ({session}) {
 			void pRefreshLiveViews();
 		}, 250);
 	};
-	const reloadForAuthorityChange = () => {
-		if (isCampaignReloadRequired) return;
-		concealActivityAuthorization();
-		isCampaignReloadRequired = true;
-		if (refreshTimer != null) {
-			window.clearTimeout(refreshTimer);
-			refreshTimer = null;
-		}
-		realtime.close();
-		window.location.reload();
-	};
+	const reloadForAuthorityChange = createCampaignAuthorityChangeHandler({
+		fnIsReloadRequired: () => isCampaignReloadRequired,
+		fnSetReloadRequired: () => isCampaignReloadRequired = true,
+		fnConcealAuthorization: concealCampaignAuthorization,
+		fnStopLiveUpdates: stopCampaignLiveUpdates,
+		fnReload: () => window.location.reload(),
+	});
 	realtime.on("event", event => {
 		const isOwnRoleChange = event.type === "membership.role_changed"
 			&& event.payload?.accountId === session.account.id
@@ -1519,9 +1975,15 @@ async function pInitCampaign ({session}) {
 			return;
 		}
 		const isProjectionInvalidation = event.type === "character.projection.invalidated";
-		if (isProjectionInvalidation) {
-			concealActivityAuthorization({isLoading: true});
+		const isProjectionInvalidationCoveredByBaseline = isProjectionInvalidation
+			&& isRealtimeEventCoveredByBaseline({
+				event,
+				baselineSequence: projectionSnapshotLastSequence,
+			});
+		if (isProjectionInvalidation && !isProjectionInvalidationCoveredByBaseline) {
+			concealCampaignProjectionAuthorization();
 		}
+		if (isProjectionInvalidationCoveredByBaseline) return;
 		if (!isCampaignReloadRequired && navigator.onLine) {
 			liveLastSequence = Math.max(liveLastSequence, event.sequence || 0);
 			if (!isProjectionInvalidation) {
@@ -1540,7 +2002,9 @@ async function pInitCampaign ({session}) {
 		// event, including an invalidation, is coalesced into one authorization-scoped
 		// HTTP refetch that *replaces* the roster rather than merging into it, so a
 		// previously broader projection cannot survive a narrowed sharing policy.
-		queueLiveRefresh({isCampaignContextRefresh: event.type === "rules.activated"});
+		const isCampaignContextRefresh = event.type === "rules.activated"
+			|| event.type === "brew.activated";
+		queueLiveRefresh({isCampaignContextRefresh});
 	});
 	realtime.on("cursor", baseline => {
 		authorityBaselineSequence = Math.max(authorityBaselineSequence, baseline?.cursor?.lastSequence || 0);
@@ -1558,14 +2022,17 @@ async function pInitCampaign ({session}) {
 		if (state === "live") setCampaignConnectionStatus({label: "Live updates connected", state: "connected"});
 		else if (state === "reconnecting") setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
 		else if (state === "access_lost") {
-			concealActivityAuthorization();
-			isCampaignReloadRequired = true;
-			if (/session|account deletion/i.test(reason || "")) renderError(new HubApiError({code: "AUTH_REQUIRED", status: 401}));
-			else if (/membership|authorization/i.test(reason || "")) renderError(new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}));
-			else setCampaignConnectionStatus({label: "Live updates stopped · reload required", state: "warning"});
+			handleCampaignAuthorizationError(
+				/session|account deletion/i.test(reason || "")
+					? new HubApiError({code: "AUTH_REQUIRED", status: 401})
+					: new HubApiError({code: "CAMPAIGN_NOT_FOUND", status: 404}),
+			);
 		}
 	});
-	window.addEventListener("beforeunload", () => realtime.close(), {once: true});
+	window.addEventListener("beforeunload", () => {
+		if (campaignAuthorizationErrorHandler === handleCampaignAuthorizationError) campaignAuthorizationErrorHandler = null;
+		realtime.close();
+	}, {once: true});
 	await realtime.pConnect().catch(() => {
 		if (!isCampaignReloadRequired) setCampaignConnectionStatus({label: "Live updates reconnecting", state: "warning"});
 	});
@@ -1692,7 +2159,7 @@ function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
 						await pRefresh();
 					} catch (error) {
 						renderError(error);
-						select.disabled = false;
+						if (!isCampaignReloadRequired) select.disabled = false;
 						select.value = member.role;
 					}
 				});
@@ -1711,7 +2178,7 @@ function renderMemberList ({campaign, campaignId, members, session, pRefresh}) {
 						await pRefresh();
 					} catch (error) {
 						renderError(error);
-						button.disabled = false;
+						if (!isCampaignReloadRequired) button.disabled = false;
 					}
 				});
 				controls.append(button);
@@ -1749,7 +2216,7 @@ function renderInviteList ({campaignId, invites, pRefresh}) {
 					await pRefresh();
 				} catch (error) {
 					renderError(error);
-					button.disabled = false;
+					if (!isCampaignReloadRequired) button.disabled = false;
 				}
 			});
 			row.append(button);
@@ -1758,7 +2225,7 @@ function renderInviteList ({campaignId, invites, pRefresh}) {
 	}));
 }
 
-function renderCharacterList ({campaignId, characters}) {
+function renderCharacterList ({campaignId, characters, session, isDm}) {
 	const list = document.getElementById("campaign-character-list");
 	if (!list) return;
 	setCount({id: "campaign-character-count", count: characters.length});
@@ -1771,6 +2238,8 @@ function renderCharacterList ({campaignId, characters}) {
 		const link = document.createElement("a");
 		link.className = "hub-data-row";
 		link.href = `charactersheet.html?id=${encodeURIComponent(character.id)}&hubCampaign=${encodeURIComponent(campaignId)}`;
+		const isReadOnlyDm = isDm && character.ownerAccountId !== session.account.id;
+		if (isReadOnlyDm) link.title = "Open this character in a read-only DM view";
 		const main = document.createElement("span");
 		main.className = "hub-data-row__main";
 		const name = document.createElement("span");
@@ -1782,7 +2251,7 @@ function renderCharacterList ({campaignId, characters}) {
 		main.append(name, status);
 		const open = document.createElement("span");
 		open.className = "hub-data-row__open";
-		open.textContent = "Open sheet";
+		open.textContent = isReadOnlyDm ? "Inspect sheet" : "Open sheet";
 		link.append(main, open);
 		return link;
 	}));
@@ -1795,11 +2264,13 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 	setHidden(document.getElementById("campaign-party-empty"), !!characters.length);
 	list.replaceChildren(...characters.map(character => {
 		const characterId = getProjectionId(character);
-		const canOpen = isCanonicalProjection(character) && (isDm || getProjectionOwnerAccountId(character) === session.account.id);
+		const isOwner = getProjectionOwnerAccountId(character) === session.account.id;
+		const canOpen = isCanonicalProjection(character) && (isDm || isOwner);
 		const row = document.createElement(canOpen ? "a" : "summary");
 		row.className = "hub-data-row";
 		if (canOpen) {
 			row.href = `charactersheet.html?id=${encodeURIComponent(characterId)}&hubCampaign=${encodeURIComponent(campaignId)}`;
+			if (isDm && !isOwner) row.title = "Open this character in a read-only DM view";
 		}
 		const main = document.createElement("span");
 		main.className = "hub-data-row__main";
@@ -1817,7 +2288,7 @@ function renderPartyRoster ({campaignId, characters, members, session, isDm, ros
 		if (canOpen) {
 			const open = document.createElement("span");
 			open.className = "hub-data-row__open";
-			open.textContent = "Open sheet";
+			open.textContent = isDm && !isOwner ? "Inspect sheet" : "Open sheet";
 			row.append(open);
 			return row;
 		}
@@ -1895,8 +2366,21 @@ function renderRecentActivity ({
 	return rows;
 }
 
-function fillCharacterSelect (select, characters, {includeParty = false, partyInventory = null, ownerAccountId = null} = {}) {
+function fillCharacterSelect (
+	select,
+	characters,
+	{
+		includeParty = false,
+		isPreserveSelection = false,
+		partyInventory = null,
+		ownerAccountId = null,
+		selectionValue = undefined,
+	} = {},
+) {
 	if (!select) return;
+	const selectedValue = isPreserveSelection
+		? (selectionValue === undefined ? select.value : selectionValue)
+		: null;
 	select.replaceChildren();
 	for (const character of characters) {
 		// `characters` may be raw owner-scoped documents (the player's own list) or
@@ -1912,6 +2396,11 @@ function fillCharacterSelect (select, characters, {includeParty = false, partyIn
 		option.value = `party_inventory:${partyInventory.id}`;
 		option.textContent = "Party inventory";
 		select.append(option);
+	}
+	if (isPreserveSelection) {
+		select.value = [...select.options].some(option => option.value === selectedValue)
+			? selectedValue
+			: "";
 	}
 }
 
@@ -1931,10 +2420,19 @@ function updateInboxCount ({kind, count}) {
 	}
 }
 
-async function renderPendingActions ({campaign, campaignId, session, targetCharacters, members, roster = null}) {
+async function renderPendingActions ({
+	campaign,
+	campaignId,
+	session,
+	targetCharacters,
+	members,
+	roster = null,
+	fnIsCurrent = () => true,
+}) {
 	const list = document.getElementById("campaign-pending-actions");
 	if (!list) return;
 	const actions = await api.pListPendingActions({campaignId});
+	if (!fnIsCurrent()) return {isFenced: true};
 	const pending = actions.filter(action => action.status === "proposed");
 	updateInboxCount({kind: "actions", count: pending.length});
 	setHidden(document.getElementById("campaign-pending-actions-empty"), !!pending.length);
@@ -1969,10 +2467,12 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 					button.disabled = true;
 					try {
 						await api.pResolveStructuredAction({campaignId, actionId: action.operationId, decision, idempotencyKey: crypto.randomUUID()});
-						await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
+						if (!fnIsCurrent()) return;
+						await renderPendingActions({campaign, campaignId, session, targetCharacters, members, roster, fnIsCurrent});
 					} catch (error) {
+						if (!fnIsCurrent()) return;
 						renderError(error);
-						button.disabled = false;
+						if (!isCampaignReloadRequired) button.disabled = false;
 					}
 				});
 				controls.append(button);
@@ -1981,6 +2481,7 @@ async function renderPendingActions ({campaign, campaignId, session, targetChara
 		}
 		return row;
 	}));
+	return {isFenced: false};
 }
 
 async function renderPendingTransfers ({
@@ -1996,6 +2497,8 @@ async function renderPendingTransfers ({
 	if (!list) return {pendingTransferIds: []};
 	const transfers = await api.pListTransfers({campaignId});
 	if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
+	const pRefreshCurrentTransferState = refresh => pRefreshTransferState({...refresh, fnIsCurrent});
+	delete list._hubTransferInboxRecovery;
 	const pending = transfers.filter(transfer => ["proposed", "reserved"].includes(transfer.status));
 	const pendingTransferIds = pending.map(transfer => transfer.id);
 	transferResolutionDrafts.reconcilePending({campaignId, pendingTransferIds});
@@ -2069,9 +2572,13 @@ async function renderPendingTransfers ({
 							currentContext = decision === "accept"
 								? await api.pGetCampaignContext({campaignId})
 								: null;
+							if (!fnIsCurrent()) return;
 						} catch (error) {
-							for (const control of controls.querySelectorAll("button")) control.disabled = false;
+							if (!fnIsCurrent()) return;
 							renderError(error);
+							if (!isCampaignReloadRequired) {
+								for (const control of controls.querySelectorAll("button")) control.disabled = false;
+							}
 							return;
 						}
 						resolutionRequest = transferResolutionDrafts.stage({
@@ -2102,8 +2609,9 @@ async function renderPendingTransfers ({
 								throw error;
 							}
 						},
-						pRefresh: pRefreshTransferState,
+						pRefresh: pRefreshCurrentTransferState,
 					});
+					if (!fnIsCurrent()) return;
 					if (outcome.state === "resolved_refreshed") {
 						transferResolutionDrafts.clear(resolutionRequest);
 						renderError("");
@@ -2121,7 +2629,7 @@ async function renderPendingTransfers ({
 							controls,
 							meta,
 							message: `${decision === "accept" ? "Transfer applied." : "Transfer declined."} The committed outcome is safe, but the latest transfer state could not be loaded.`,
-							pRetry: pRefreshTransferState,
+							pRetry: pRefreshCurrentTransferState,
 							isResolutionKnown: true,
 						});
 						return;
@@ -2134,7 +2642,7 @@ async function renderPendingTransfers ({
 						message: isOutcomeUncertain
 							? "The transfer outcome is not yet confirmed. Refresh the inbox or retry the same decision."
 							: "The decision was not applied, and the latest transfer state could not be loaded. Refresh the inbox before acting again.",
-						pRetry: pRefreshTransferState,
+						pRetry: pRefreshCurrentTransferState,
 						isResolutionKnown: !isOutcomeUncertain,
 						pendingDecision: resolutionRequest.decision,
 					});
@@ -2149,7 +2657,7 @@ async function renderPendingTransfers ({
 					message: isReplayable
 						? "The transfer outcome is not yet confirmed. Refresh the inbox or retry the same decision."
 						: "This decision retry is too old to replay safely. Refresh the inbox before acting again.",
-					pRetry: pRefreshTransferState,
+					pRetry: pRefreshCurrentTransferState,
 					isResolutionKnown: !isReplayable,
 					pendingDecision: pendingResolutionRequest.decision,
 				});
@@ -2175,14 +2683,23 @@ function getFormFingerprint (form) {
 		.sort(([idA], [idB]) => idA.localeCompare(idB)));
 }
 
-async function pRunFormMutation ({form, fingerprint, fnMutate}) {
+async function pRunFormMutation ({form, fingerprint, fnMutate, idempotencyKey = null}) {
 	if (form._hubIsSubmitting) return null;
 	if (typeof fingerprint !== "string") throw new TypeError("A mutation fingerprint is required.");
 	if (form._hubMutationFingerprint !== fingerprint) {
 		form._hubMutationFingerprint = fingerprint;
-		form._hubMutationKey = crypto.randomUUID();
+		form._hubMutationKey = idempotencyKey || crypto.randomUUID();
+	} else if (idempotencyKey) {
+		if (form._hubMutationKey && form._hubMutationKey !== idempotencyKey) {
+			throw new Error("Saved mutation recovery data does not match the pending command.");
+		}
+		form._hubMutationKey = idempotencyKey;
 	}
 	form._hubIsSubmitting = true;
+	form._hubMutationControlStates = new Map(
+		[...form.querySelectorAll("button, input, select, textarea")]
+			.map(control => [control, control.disabled]),
+	);
 	const buttons = [...form.querySelectorAll("button[type='submit']")];
 	const buttonStates = buttons.map(button => ({
 		button,
@@ -2203,15 +2720,55 @@ async function pRunFormMutation ({form, fingerprint, fnMutate}) {
 		form._hubIsSubmitting = false;
 		form.removeAttribute("aria-busy");
 		buttonStates.forEach(({button, disabled, text}) => {
-			button.disabled = disabled;
+			button.disabled = isCampaignReloadRequired || !!form._hubProjectionControlStates
+				? true
+				: disabled;
 			button.textContent = text;
 		});
+		delete form._hubMutationControlStates;
 	}
 }
 
-async function pInitCampaignForms ({campaign, campaignId, session, characters, targetCharacters, members, context, events = [], pRefreshInvites, roster = []}) {
+async function pInitCampaignForms ({
+	campaign,
+	campaignId,
+	session,
+	characters,
+	targetCharacters,
+	members,
+	context,
+	events = [],
+	getProjectionAuthorizationGeneration = () => 0,
+	requestProjectionRefresh = () => {},
+	pRefreshInvites,
+	roster = [],
+}) {
+	let currentContext = context;
 	// Roster metadata travels beside the projections and is refreshed with them.
 	const rosterRef = {current: roster};
+	const captureProjectionAuthorization = () => {
+		const generation = getProjectionAuthorizationGeneration();
+		return () => (
+			!isCampaignReloadRequired
+			&& getProjectionAuthorizationGeneration() === generation
+		);
+	};
+	const deferredMutationUi = [];
+	const deferMutationUi = ({form, fnApply}) => {
+		if (typeof fnApply !== "function") return;
+		deferredMutationUi.push({form, fnApply});
+		requestProjectionRefresh();
+	};
+	const flushDeferredMutationUi = () => {
+		const deferred = deferredMutationUi.splice(0);
+		for (const entry of deferred) {
+			if (entry.form?._hubIsSubmitting || entry.form?._hubProjectionControlStates) {
+				deferredMutationUi.push(entry);
+				continue;
+			}
+			entry.fnApply();
+		}
+	};
 	const inviteForm = document.getElementById("campaign-invite-form");
 	const inviteOutput = document.getElementById("campaign-invite-output");
 	const inviteResult = document.getElementById("campaign-invite-result");
@@ -2282,7 +2839,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			window.location.assign("hub.html");
 		} catch (error) {
 			renderError(error);
-			leave.disabled = false;
+			if (!isCampaignReloadRequired) leave.disabled = false;
 		}
 	});
 
@@ -2330,18 +2887,23 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				clientImportId: character.id,
 				campaignId,
 				data: character,
-				rulesVersionId: context.rulesVersion?.id || null,
+				rulesVersionId: currentContext.rulesVersion?.id || null,
 				idempotencyKey: crypto.randomUUID(),
 			});
 			const charactersNxt = await api.pListCharacters({campaignId});
-			renderCharacterList({campaignId, characters: charactersNxt});
+			renderCharacterList({
+				campaignId,
+				characters: charactersNxt,
+				session,
+				isDm: ["dm", "co_dm"].includes(campaign.role),
+			});
 			applyCampaignRoleLayout({campaign, characters: charactersNxt});
 			setHidden(uploadControls, true);
 			if (uploadStatus) uploadStatus.textContent = `${character.name || "Character"} was added as a cloud copy. The local original is unchanged.`;
 		} catch (error) {
 			renderError(error);
 		} finally {
-			uploadConfirm.disabled = false;
+			if (!isCampaignReloadRequired) uploadConfirm.disabled = false;
 		}
 	});
 
@@ -2351,8 +2913,49 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	if (dmScreenLink) dmScreenLink.href = `dmscreen.html?hubCampaign=${encodeURIComponent(campaignId)}`;
 	let partyInventory = await api.pGetPartyInventory({campaignId});
 	const itemAward = await pInitItemAwardComposer({context, partyInventory, targetCharacters, events});
+	const itemAwardForm = document.getElementById("campaign-item-form");
+	const itemAwardDraftStorageKey = getAwardDraftStorageKey({
+		accountId: session.account.id,
+		campaignId,
+	});
+	const clearAwardDraftState = () => {
+		clearAwardMutationDraft({storageKey: itemAwardDraftStorageKey});
+		if (!itemAwardForm) return;
+		delete itemAwardForm._hubAwardMutationDraft;
+		itemAwardForm._hubMutationKey = null;
+		itemAwardForm._hubMutationFingerprint = null;
+	};
+	let restoredAwardDraft = null;
+	let itemAwardRecoveryError = null;
+	try {
+		restoredAwardDraft = loadAwardMutationDraft({storageKey: itemAwardDraftStorageKey});
+	} catch (error) {
+		itemAwardRecoveryError = error;
+	}
+	if (itemAwardForm && restoredAwardDraft) {
+		itemAwardForm._hubAwardMutationDraft = restoredAwardDraft;
+		itemAwardForm._hubMutationKey = restoredAwardDraft.idempotencyKey;
+		itemAwardForm._hubMutationFingerprint = restoredAwardDraft.fingerprint;
+		itemAward.setPending(true, {isRetry: true});
+		setFormStatus({
+			formId: "campaign-item-form",
+			message: "The previous award outcome is unknown. Retry before the recovery deadline, or reconcile it from campaign history afterward.",
+		});
+	}
+	if (itemAwardForm && itemAwardRecoveryError) {
+		for (const control of itemAwardForm.querySelectorAll("input, textarea, select, button")) control.disabled = true;
+		setFormStatus({
+			formId: "campaign-item-form",
+			message: `${itemAwardRecoveryError.message} Clear this site's saved data only after checking campaign inventories.`,
+			isError: true,
+		});
+	}
+	const itemAwardSubmissionForm = itemAwardRecoveryError ? null : itemAwardForm;
 	const transferRefreshQueue = new HubTransferRefreshQueue();
-	const pRefreshTransferState = (refresh = {}) => transferRefreshQueue.pRun(async () => {
+	const pRefreshTransferState = (
+		refresh = {},
+		fnIsCurrentAtAdmission = refresh.fnIsCurrent || captureProjectionAuthorization(),
+	) => transferRefreshQueue.pRun(async () => {
 		let {
 			charactersNxt = null,
 			targetCharactersNxt = null,
@@ -2360,9 +2963,10 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			membersNxt = null,
 			partyInventoryNxt = null,
 			eventsNxt = null,
-			fnIsCurrent = () => true,
 			fnIsSnapshotCurrent = () => true,
+			isProjectionControlRestoreDeferred = false,
 		} = refresh;
+		const fnIsCurrent = fnIsCurrentAtAdmission;
 		[charactersNxt, targetCharactersNxt, snapshotNxt, membersNxt, partyInventoryNxt, eventsNxt] = await Promise.all([
 			charactersNxt,
 			targetCharactersNxt,
@@ -2374,27 +2978,38 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		const source = document.getElementById("campaign-transfer-source");
 		const target = document.getElementById("campaign-transfer-target");
 		const item = document.getElementById("campaign-transfer-entry");
+		const form = document.getElementById("campaign-transfer-form");
 		const readSelections = () => ({
 			source: source?.value,
 			target: target?.value,
 			item: item?.value,
 			quantity: document.getElementById("campaign-transfer-quantity")?.value,
+			currency: Object.fromEntries(CURRENCY_TYPES.map(type => [
+				type,
+				document.getElementById(`campaign-transfer-${type}`)?.value || "",
+			])),
 		});
-		const selections = readSelections();
+		const concealedSelections = form?._hubProjectionTransferDraft || null;
+		const selections = concealedSelections || readSelections();
 		const [charactersLatest, snapshotLatest, partyInventoryLatest] = await Promise.all([
 			charactersNxt ? null : api.pListCharacters({campaignId}),
 			targetCharactersNxt || snapshotNxt ? null : api.pGetCampaignSnapshot({campaignId}),
 			partyInventoryNxt ? null : api.pGetPartyInventory({campaignId}),
 		]);
 		if (!fnIsCurrent()) return {pendingTransferIds: [], isFenced: true};
+		if (snapshotNxt && !fnIsSnapshotCurrent(snapshotNxt)) return {pendingTransferIds: [], isFenced: true};
+		if (!isProjectionControlRestoreDeferred) {
+			setProjectionFormControlsConcealed({form, isConcealed: false});
+		}
 		const acceptedSnapshot = snapshotNxt && fnIsSnapshotCurrent(snapshotNxt)
 			? snapshotNxt
 			: snapshotLatest;
 		const latestSelections = readSelections();
-		const selectionsToRestore = Object.keys(selections)
-			.some(key => latestSelections[key] !== selections[key])
-			? latestSelections
-			: selections;
+		const selectionsToRestore = concealedSelections || (
+			JSON.stringify(latestSelections) !== JSON.stringify(selections)
+				? latestSelections
+				: selections
+		);
 		characters.splice(0, characters.length, ...(charactersNxt || charactersLatest));
 		const targetCharactersReplacement = targetCharactersNxt || acceptedSnapshot?.characters;
 		if (targetCharactersReplacement) targetCharacters.splice(0, targetCharacters.length, ...targetCharactersReplacement);
@@ -2413,16 +3028,40 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		// A character whose identity the owner hid is absent from roster metadata and is
 		// therefore not peer-targetable.
 		fillCharacterSelect(target, getTargetableProjections({projections: targetCharacters, roster: rosterRef.current}), {includeParty: true, partyInventory});
-		if ([...source.options].some(option => option.value === selectionsToRestore.source)) source.value = selectionsToRestore.source;
-		if ([...target.options].some(option => option.value === selectionsToRestore.target)) target.value = selectionsToRestore.target;
+		if (!isProjectionControlRestoreDeferred) {
+			if (source) source.disabled = !source.options.length;
+			if (target) target.disabled = !target.options.length;
+		}
+		const isSourceRestored = [...source.options].some(option => option.value === selectionsToRestore.source);
+		const isTargetRestored = [...target.options].some(option => option.value === selectionsToRestore.target);
+		if (isSourceRestored) source.value = selectionsToRestore.source;
+		if (isTargetRestored) target.value = selectionsToRestore.target;
 		syncTransferItemPicker({characters, partyInventory});
-		if ([...item.options].some(option => option.value === selectionsToRestore.item)) {
+		if (
+			isSourceRestored
+			&& isTargetRestored
+			&& [...item.options].some(option => option.value === selectionsToRestore.item)
+		) {
 			item.value = selectionsToRestore.item;
 			syncTransferQuantity();
 			const maximum = Number(item.selectedOptions[0]?.dataset.quantity);
 			if (Number(selectionsToRestore.quantity) > 0 && Number(selectionsToRestore.quantity) <= maximum) {
 				document.getElementById("campaign-transfer-quantity").value = selectionsToRestore.quantity;
 			}
+		}
+		for (const type of CURRENCY_TYPES) {
+			const input = document.getElementById(`campaign-transfer-${type}`);
+			if (!input) continue;
+			input.value = isSourceRestored && isTargetRestored
+				? selectionsToRestore.currency?.[type] || "0"
+				: "0";
+		}
+		if (isProjectionControlRestoreDeferred) {
+			setProjectionFormControlsConcealed({form, isConcealed: true});
+			setProjectionFormControlsConcealed({
+				form: document.getElementById("campaign-item-form"),
+				isConcealed: true,
+			});
 		}
 		renderPartyInventoryStatus(partyInventory);
 		const transferState = await renderPendingTransfers({
@@ -2434,20 +3073,60 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 			pRefreshTransferState,
 			fnIsCurrent,
 		});
+		if (!fnIsCurrent() || transferState.isFenced) return {pendingTransferIds: [], isFenced: true};
 		const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
-		if (pendingProposal) {
-			setTransferProposalControls({
-				form: document.getElementById("campaign-transfer-form"),
-				proposalRequest: pendingProposal,
-				characters,
-				partyInventory,
-				isLocked: true,
-			});
+		const restoreTransferControlState = () => {
+			if (!fnIsCurrent()) return false;
+			if (pendingProposal) {
+				setTransferProposalControls({
+					form,
+					proposalRequest: pendingProposal,
+					characters,
+					partyInventory,
+					isLocked: true,
+				});
+				const submit = form?.querySelector("button[type='submit']");
+				if (submit && !isCampaignReloadRequired) {
+					submit.disabled = false;
+					submit.textContent = "Retry transfer";
+				}
+				delete form?._hubProjectionTransferDraft;
+				applyTransferRefreshRecoverySuccess({form});
+				return true;
+			}
+			setTransferProposalControls({form, isLocked: false});
+			if (source) source.disabled = !source.options.length;
+			if (target) target.disabled = !target.options.length;
+			const submit = form?.querySelector("button[type='submit']");
+			if (submit && !isCampaignReloadRequired) {
+				submit.disabled = !source?.options.length;
+				submit.textContent = "Submit transfer";
+			}
+			delete form?._hubProjectionTransferDraft;
+			applyTransferRefreshRecoverySuccess({form});
+			return true;
+		};
+		if (!isProjectionControlRestoreDeferred) {
+			restoreTransferControlState();
 		}
-		return transferState;
+		if (isProjectionControlRestoreDeferred) {
+			setProjectionFormControlsConcealed({form, isConcealed: true});
+		}
+		return {
+			...transferState,
+			restoreTransferControlState,
+		};
 	});
 
-	await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
+	await renderPendingActions({
+		campaign,
+		campaignId,
+		session,
+		targetCharacters,
+		members,
+		roster: rosterRef.current,
+		fnIsCurrent: captureProjectionAuthorization(),
+	});
 	await pRefreshTransferState({
 		charactersNxt: characters,
 		targetCharactersNxt: targetCharacters,
@@ -2513,24 +3192,73 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 	const actionType = document.getElementById("campaign-action-type");
 	const actionValue = document.getElementById("campaign-action-value");
 	const actionValueLabel = document.getElementById("campaign-action-value-label");
-	const actionConditionSourceField = document.getElementById("campaign-action-condition-source-field");
-	const actionConditionSource = document.getElementById("campaign-action-condition-source");
+	const actionConditionField = document.getElementById("campaign-action-condition-field");
+	const actionCondition = document.getElementById("campaign-action-condition");
 	const actionSlotFields = document.getElementById("campaign-action-slot-fields");
-	const syncActionFields = () => {
+	const conditionCatalogByUid = new Map();
+	let conditionCatalogModule = null;
+	let conditionCatalogState = "idle";
+	let conditionCatalogGeneration = 0;
+	let conditionCatalogModuleAttemptIndex = 0;
+	let campaignConditionBrewContent = context.brewBundle?.content;
+	let activeConditionCatalog = [];
+	const getCurrentTargetConditions = () => {
+		if (actionType.value !== "condition_remove") return [];
+		const targetId = document.getElementById("campaign-action-target")?.value?.split(":")[1];
+		if (!targetId) return [];
+		const target = getCharacterById(targetCharacters, targetId);
+		if (!isCanonicalProjection(target)) return [];
+		const conditions = getCanonicalCharacter(target)?.data?.conditions;
+		return Array.isArray(conditions) ? conditions : [];
+	};
+	const pRefreshConditionOptions = () => {
+		const previousValue = actionCondition.value;
+		conditionCatalogByUid.clear();
+		if (conditionCatalogState !== "ready" || !conditionCatalogModule) {
+			const option = document.createElement("option");
+			option.value = "";
+			option.textContent = ["module_failed", "module_exhausted", "data_failed"].includes(conditionCatalogState)
+				? "Condition catalog unavailable"
+				: "Loading conditions...";
+			actionCondition.replaceChildren(option);
+			return;
+		}
+		const conditions = conditionCatalogModule.getCampaignConditionCatalog({
+			siteData: {condition: activeConditionCatalog},
+			additionalConditions: getCurrentTargetConditions(),
+		});
+		actionCondition.replaceChildren(...conditions.map(condition => {
+			const option = document.createElement("option");
+			option.value = conditionCatalogModule.getCampaignConditionUid(condition);
+			option.textContent = `${condition.name} (${condition.source})`;
+			conditionCatalogByUid.set(option.value, condition);
+			return option;
+		}));
+		if (conditionCatalogByUid.has(previousValue)) actionCondition.value = previousValue;
+	};
+	const syncActionFields = ({isRetryConditionCatalog = true} = {}) => {
 		const type = actionType.value;
 		const isSlot = ["spell_slot_spend", "spell_slot_restore"].includes(type);
 		const isCondition = ["condition_add", "condition_remove"].includes(type);
 		setHidden(actionSlotFields, !isSlot);
-		setHidden(actionConditionSourceField, !isCondition);
-		actionConditionSource.disabled = !isCondition;
-		actionValue.disabled = isSlot;
-		actionValue.required = !isSlot;
-		if (isSlot) return;
+		setHidden(actionConditionField, !isCondition);
+		setHidden(actionValueLabel, isSlot || isCondition);
+		setHidden(actionValue, isSlot || isCondition);
+		if (isCondition) {
+			pRefreshConditionOptions();
+			if (isRetryConditionCatalog && ["idle", "module_failed", "data_failed"].includes(conditionCatalogState)) {
+				void pRefreshConditionCatalog({
+					campaignBrewContent: campaignConditionBrewContent,
+				});
+			}
+		}
+		actionCondition.disabled = !isCondition || !conditionCatalogByUid.size;
+		actionValue.disabled = isSlot || isCondition;
+		actionValue.required = !isSlot && !isCondition;
+		if (isSlot || isCondition) return;
 		const configuration = {
 			damage: {label: "Damage amount", type: "number", placeholder: "1"},
 			healing: {label: "Healing amount", type: "number", placeholder: "1"},
-			condition_add: {label: "Condition to add", type: "text", placeholder: "Poisoned"},
-			condition_remove: {label: "Condition to remove", type: "text", placeholder: "Poisoned"},
 		}[type];
 		actionValueLabel.textContent = configuration.label;
 		actionValue.type = configuration.type;
@@ -2538,11 +3266,86 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		actionValue.placeholder = configuration.placeholder;
 		actionValue.min = configuration.type === "number" ? "1" : "";
 	};
+	const pRefreshConditionCatalog = async ({campaignBrewContent}) => {
+		const generation = ++conditionCatalogGeneration;
+		campaignConditionBrewContent = campaignBrewContent;
+		conditionCatalogState = conditionCatalogModule ? "loading_data" : "loading_module";
+		pRefreshConditionOptions();
+		actionCondition.disabled = true;
+		let module = conditionCatalogModule;
+		if (!module) {
+			const conditionCatalogModuleUrl = CONDITION_CATALOG_MODULE_URLS[conditionCatalogModuleAttemptIndex++];
+			if (!conditionCatalogModuleUrl) {
+				conditionCatalogState = "module_exhausted";
+				pRefreshConditionOptions();
+				setFormStatus({
+					formId: "campaign-action-form",
+					message: "Condition options are unavailable until this page is reloaded.",
+					isError: true,
+				});
+				actionCondition.disabled = true;
+				return false;
+			}
+			try {
+				conditionCatalogModule = await import(conditionCatalogModuleUrl);
+				module = conditionCatalogModule;
+			} catch (error) {
+				if (generation !== conditionCatalogGeneration) return false;
+				activeConditionCatalog = [];
+				conditionCatalogState = conditionCatalogModuleAttemptIndex < CONDITION_CATALOG_MODULE_URLS.length
+					? "module_failed"
+					: "module_exhausted";
+				pRefreshConditionOptions();
+				setFormStatus({
+					formId: "campaign-action-form",
+					message: conditionCatalogState === "module_exhausted"
+						? "Condition options are unavailable until this page is reloaded."
+						: getErrorMessage(error),
+					isError: true,
+				});
+				actionCondition.disabled = true;
+				return false;
+			}
+			if (generation !== conditionCatalogGeneration) return false;
+		}
+		conditionCatalogState = "loading_data";
+		try {
+			const catalog = await module.pLoadCampaignConditionCatalog({campaignBrewContent});
+			if (generation !== conditionCatalogGeneration) return false;
+			activeConditionCatalog = catalog;
+			conditionCatalogState = "ready";
+			setFormStatus({formId: "campaign-action-form"});
+			syncActionFields();
+			return true;
+		} catch (error) {
+			if (generation !== conditionCatalogGeneration) return false;
+			activeConditionCatalog = [];
+			conditionCatalogState = "data_failed";
+			pRefreshConditionOptions();
+			setFormStatus({
+				formId: "campaign-action-form",
+				message: getErrorMessage(error),
+				isError: true,
+			});
+			actionCondition.disabled = true;
+			return false;
+		}
+	};
 	actionType?.addEventListener("change", syncActionFields);
+	document.getElementById("campaign-action-target")?.addEventListener("change", syncActionFields);
 	syncActionFields();
+	const pRefreshContextBoundControls = async ({context: contextNxt}) => {
+		currentContext = contextNxt;
+		campaignConditionBrewContent = contextNxt.brewBundle?.content;
+		itemAward.setCampaignBrewContent(campaignConditionBrewContent);
+		if (conditionCatalogState === "idle") return true;
+		if (conditionCatalogState === "module_exhausted") return false;
+		return pRefreshConditionCatalog({campaignBrewContent: campaignConditionBrewContent});
+	};
 
 	document.getElementById("campaign-action-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
+		const fnIsCurrent = captureProjectionAuthorization();
 		const formId = "campaign-action-form";
 		setFormStatus({formId});
 		try {
@@ -2550,17 +3353,14 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const type = document.getElementById("campaign-action-type").value;
+					const targetCharacterId = document.getElementById("campaign-action-target").value.split(":")[1];
+					if (!targetCharacterId) throw new Error("Choose a target character.");
 					const rawValue = document.getElementById("campaign-action-value").value.trim();
 					if (["damage", "healing"].includes(type) && !(Number(rawValue) > 0)) {
 						throw new Error("Enter a positive amount.");
 					}
-					if (["condition_add", "condition_remove"].includes(type) && !rawValue) {
-						throw new Error("Enter a condition.");
-					}
-					const conditionSource = document.getElementById("campaign-action-condition-source").value.trim();
-					if (["condition_add", "condition_remove"].includes(type) && !conditionSource) {
-						throw new Error("Enter the condition source code.");
-					}
+					const condition = conditionCatalogByUid.get(actionCondition.value) || null;
+					if (["condition_add", "condition_remove"].includes(type) && !condition) throw new Error("Choose a condition.");
 					const slotLevel = Number(document.getElementById("campaign-action-slot-level").value);
 					const slotAmount = Number(document.getElementById("campaign-action-slot-amount").value);
 					if (["spell_slot_spend", "spell_slot_restore"].includes(type) && (!Number.isInteger(slotLevel) || slotLevel < 1 || slotLevel > 9)) {
@@ -2585,20 +3385,40 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 								? {
 									kind: type === "condition_add" ? "condition.add" : "condition.remove",
 									version: 1,
-									arguments: {condition: {name: rawValue, source: conditionSource}},
+									arguments: {condition},
 								}
 								: null;
 					await api.pCreateStructuredAction({
 						campaignId,
-						targetCharacterId: document.getElementById("campaign-action-target").value.split(":")[1],
+						targetCharacterId,
 						operation,
 						idempotencyKey,
 					});
+					if (!fnIsCurrent()) {
+						deferMutationUi({
+							form: event.currentTarget,
+							fnApply: () => {
+								document.getElementById("campaign-action-value").value = "";
+								setFormStatus({formId, message: "Effect applied."});
+							},
+						});
+						return;
+					}
+					await renderPendingActions({
+						campaign,
+						campaignId,
+						session,
+						targetCharacters,
+						members,
+						roster: rosterRef.current,
+						fnIsCurrent,
+					});
+					if (!fnIsCurrent()) return;
 					document.getElementById("campaign-action-value").value = "";
 					setFormStatus({formId, message: "Effect applied."});
-					await renderPendingActions({campaign, campaignId, session, targetCharacters, members});
 				}});
 		} catch (error) {
+			if (!fnIsCurrent()) return;
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
 			setFormStatus({formId, message, isError: true});
 			if (error instanceof HubApiError) renderError(error);
@@ -2607,76 +3427,193 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 
 	document.getElementById("campaign-xp-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
+		const fnIsCurrent = captureProjectionAuthorization();
 		const formId = "campaign-xp-form";
 		setFormStatus({formId});
 		try {
 			await pRunFormMutation({form: event.currentTarget,
 				fingerprint: getFormFingerprint(event.currentTarget),
-				fnMutate: idempotencyKey => api.pGrantXp({
-					campaignId,
-					characterId: document.getElementById("campaign-xp-target").value.split(":")[1],
-					amount: Number(document.getElementById("campaign-xp-amount").value),
-					reason: document.getElementById("campaign-xp-reason").value || null,
-					idempotencyKey,
-				})});
+				fnMutate: async idempotencyKey => {
+					await api.pGrantXp({
+						campaignId,
+						characterId: document.getElementById("campaign-xp-target").value.split(":")[1],
+						amount: Number(document.getElementById("campaign-xp-amount").value),
+						reason: document.getElementById("campaign-xp-reason").value || null,
+						idempotencyKey,
+					});
+				}});
+			if (!fnIsCurrent()) {
+				deferMutationUi({
+					form: event.currentTarget,
+					fnApply: () => {
+						setFormStatus({formId, message: "XP granted."});
+						document.getElementById("campaign-xp-amount").value = "";
+						document.getElementById("campaign-xp-reason").value = "";
+					},
+				});
+				return;
+			}
 			setFormStatus({formId, message: "XP granted."});
 			document.getElementById("campaign-xp-amount").value = "";
 			document.getElementById("campaign-xp-reason").value = "";
 		} catch (error) {
+			if (!fnIsCurrent()) return;
 			setFormStatus({formId, message: getErrorMessage(error), isError: true});
 			if (error instanceof HubApiError) renderError(error);
 		}
 	});
 
-	document.getElementById("campaign-item-form")?.addEventListener("submit", async event => {
+	itemAwardSubmissionForm?.addEventListener("submit", async event => {
 		event.preventDefault();
+		const form = event.currentTarget;
+		const fnIsCurrent = captureProjectionAuthorization();
 		const formId = "campaign-item-form";
 		setFormStatus({formId});
 		renderError(null);
 		let isAwardComplete = false;
+		let isAwardRetryRequired = false;
 		try {
-			const submission = itemAward.getSubmission();
+			const isAwardRetry = !!form._hubAwardMutationDraft;
+			const awardDraft = getOrStageAwardMutationDraft({
+				draft: form._hubAwardMutationDraft,
+				fnGetSubmission: () => itemAward.getSubmission(),
+				rulesVersionId: currentContext.rulesVersion?.id || null,
+				idempotencyKey: form._hubMutationKey || crypto.randomUUID(),
+				replayWindowMs: HUB_COMMAND_REPLAY_WINDOW_MS,
+			});
+			form._hubAwardMutationDraft = awardDraft;
+			if (!isAwardRetry) {
+				persistAwardMutationDraft({
+					storageKey: itemAwardDraftStorageKey,
+					draft: awardDraft,
+				});
+			}
+			if (Date.now() >= awardDraft.replayUntil) {
+				isAwardRetryRequired = true;
+				itemAward.setPending(true, {isRetry: true});
+				let committedEvent;
+				try {
+					committedEvent = await pFindAwardEventByCommandId({
+						campaignId,
+						actorCommandId: awardDraft.idempotencyKey,
+					});
+				} catch (error) {
+					setFormStatus({
+						formId,
+						message: error.message || "The previous award could not be reconciled safely.",
+						isError: true,
+					});
+					return;
+				}
+				clearAwardDraftState();
+				isAwardRetryRequired = false;
+				itemAward.setPending(false);
+				if (!committedEvent) {
+					setFormStatus({
+						formId,
+						message: "No committed award was found after the safe retry window. Review current inventories, then submit again to create a new command.",
+					});
+					return;
+				}
+				itemAward.onSuccess({
+					awardId: committedEvent.payload.awardId,
+					source: {
+						kind: committedEvent.payload.sourceKind,
+						item: committedEvent.payload.entry?.item,
+					},
+					targets: [],
+				});
+				const refreshResult = await pRefreshTransferState({fnIsCurrent});
+				if (fnIsCurrent() && !refreshResult?.isFenced) {
+					setFormStatus({
+						formId,
+						message: "The previously submitted award was already committed. Latest inventories are loaded.",
+					});
+					itemAward.focusPrimary();
+				}
+				return;
+			}
+			const submission = awardDraft.request;
 			let result;
 			await pRunFormMutation({
-				form: event.currentTarget,
-				fingerprint: getAwardCommandFingerprint(submission),
+				form,
+				fingerprint: awardDraft.fingerprint,
+				idempotencyKey: awardDraft.idempotencyKey,
 				fnMutate: async idempotencyKey => {
-					itemAward.setPending(true);
+					itemAward.setPending(true, {isRetry: isAwardRetry});
 					result = await api.pAwardItems({
 						campaignId,
 						...submission,
-						rulesVersionId: context.rulesVersion?.id || null,
 						idempotencyKey,
 					});
 				},
 			});
-			itemAward.onSuccess(result);
-			setFormStatus({
-				formId,
-				message: `${submission.quantity} × ${result.source.item.name} awarded to ${result.targets.length} character${result.targets.length === 1 ? "" : "s"}.`,
-			});
+			if (!result) return;
+			itemAward.setPending(true);
+			clearAwardDraftState();
+			const applyAwardSuccessUi = () => {
+				itemAward.onSuccess(result);
+				setFormStatus({
+					formId,
+					message: `${submission.quantity} × ${result.source.item.name} awarded to ${result.targets.length} character${result.targets.length === 1 ? "" : "s"}.`,
+				});
+			};
+			const deferAwardCompletionUi = ({isApplySuccessUi = false} = {}) => {
+				deferMutationUi({
+					form,
+					fnApply: () => {
+						itemAward.setPending(false);
+						if (isApplySuccessUi) applyAwardSuccessUi();
+						itemAward.focusPrimary();
+					},
+				});
+			};
+			if (!fnIsCurrent()) {
+				deferAwardCompletionUi({isApplySuccessUi: true});
+				return;
+			}
+			applyAwardSuccessUi();
+			isAwardComplete = true;
 			try {
-				await pRefreshTransferState();
+				const refreshResult = await pRefreshTransferState({fnIsCurrent});
+				if (!fnIsCurrent() || refreshResult?.isFenced) {
+					isAwardComplete = false;
+					deferAwardCompletionUi();
+				}
 			} catch {
+				if (!fnIsCurrent()) {
+					isAwardComplete = false;
+					deferAwardCompletionUi();
+					return;
+				}
 				setFormStatus({
 					formId,
 					message: "Items awarded, but the latest campaign balances could not be loaded. Reload before awarding from the party stash again.",
 					isError: true,
 				});
 			}
-			isAwardComplete = true;
 		} catch (error) {
-			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
+			isAwardRetryRequired = isMutationOutcomeUncertain(error);
+			if (!isAwardRetryRequired) {
+				clearAwardDraftState();
+				form._hubMutationKey = null;
+				form._hubMutationFingerprint = null;
+			}
+			if (!fnIsCurrent()) return;
+			const message = isAwardRetryRequired
+				? "The award outcome could not be confirmed. The original item and recipients are locked; retry the previous award to reconcile it safely."
+				: error instanceof HubApiError ? getErrorMessage(error) : error.message;
 			setFormStatus({formId, message, isError: true});
 			if (error instanceof HubApiError) renderError(error);
 		} finally {
-			itemAward.setPending(false);
+			itemAward.setPending(isAwardRetryRequired, {isRetry: isAwardRetryRequired});
 			if (isAwardComplete) itemAward.focusPrimary();
 		}
 	});
 
 	document.getElementById("campaign-transfer-form")?.addEventListener("submit", async event => {
 		event.preventDefault();
+		const fnIsCurrent = captureProjectionAuthorization();
 		const form = event.currentTarget;
 		const formId = "campaign-transfer-form";
 		setFormStatus({formId});
@@ -2689,7 +3626,11 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						drafts: transferResolutionDrafts,
 						campaignId,
 						transferId: transfer.id,
-						pGetRulesVersionId: async () => (await api.pGetCampaignContext({campaignId})).rulesVersion?.id || null,
+						pGetRulesVersionId: async () => {
+							const contextCurrent = await api.pGetCampaignContext({campaignId});
+							if (!fnIsCurrent()) throw new HubApiError({code: "REQUEST_ABORTED", status: 0});
+							return contextCurrent.rulesVersion?.id || null;
+						},
 						pResolve: request => api.pResolveTransfer(request),
 					});
 					let proposalRequest = transferProposalDrafts.get(proposalRef);
@@ -2700,6 +3641,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						let proposed;
 						try {
 							proposed = await api.pProposeTransfer(proposalRequest);
+							if (!fnIsCurrent()) return null;
 						} catch (error) {
 							if (!isTransferOutcomeUncertain(error)) {
 								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
@@ -2707,6 +3649,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 							throw error;
 						}
 						const transfers = await api.pListTransfers({campaignId});
+						if (!fnIsCurrent()) return null;
 						const currentTransfer = transfers.find(it => it.id === proposed.transfer.id);
 						if (!currentTransfer) throw new HubApiError({code: "TRANSFER_NOT_FOUND", status: 404});
 						proposed = {...proposed, transfer: currentTransfer};
@@ -2726,6 +3669,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						let resolved;
 						try {
 							resolved = await pResolveAutoTransfer(proposed.transfer);
+							if (!fnIsCurrent()) return null;
 						} catch (error) {
 							if (!isTransferOutcomeUncertain(error) && error?.code !== "RULES_VERSION_STALE") {
 								transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
@@ -2770,6 +3714,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					const currentContext = isAutoResolved && targetKind === "character"
 						? await api.pGetCampaignContext({campaignId})
 						: null;
+					if (!fnIsCurrent()) return null;
 					proposalRequest = transferProposalDrafts.stage({
 						...proposalRef,
 						request: {
@@ -2792,6 +3737,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					let proposed;
 					try {
 						proposed = await api.pProposeTransfer(proposalRequest);
+						if (!fnIsCurrent()) return null;
 					} catch (error) {
 						if (!isTransferOutcomeUncertain(error)) {
 							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
@@ -2809,6 +3755,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					let resolved;
 					try {
 						resolved = await pResolveAutoTransfer(proposed.transfer);
+						if (!fnIsCurrent()) return null;
 					} catch (error) {
 						if (!isTransferOutcomeUncertain(error) && error?.code !== "RULES_VERSION_STALE") {
 							transferProposalDrafts.clear({...proposalRef, idempotencyKey: proposalRequest.idempotencyKey});
@@ -2819,8 +3766,6 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					return {transfer: resolved.transfer, isAutoResolved: true, targetKind};
 				}});
 			if (!result) return;
-			setTransferProposalControls({form, isLocked: false});
-			for (const type of CURRENCY_TYPES) document.getElementById(`campaign-transfer-${type}`).value = "0";
 			const terminalMessages = {
 				rejected: "Transfer declined. The authoritative inventories are unchanged.",
 				cancelled: "Transfer cancelled. The authoritative inventories are up to date.",
@@ -2834,17 +3779,27 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						: result.targetKind === "party_inventory"
 							? "Transfer reserved. A DM can accept it from the inbox."
 							: "Transfer reserved. The recipient can accept it from the inbox.");
-			setFormStatus({formId, message: successMessage});
+			const applyTransferSuccessUi = () => {
+				setTransferProposalControls({form, isLocked: false});
+				for (const type of CURRENCY_TYPES) document.getElementById(`campaign-transfer-${type}`).value = "0";
+				setFormStatus({formId, message: successMessage});
+			};
+			if (!fnIsCurrent()) {
+				deferMutationUi({form, fnApply: applyTransferSuccessUi});
+				return;
+			}
+			applyTransferSuccessUi();
 			try {
-				await pRefreshTransferState();
+				await pRefreshTransferState({fnIsCurrent});
 			} catch {
 				setTransferRefreshFailure({
 					form,
 					message: `${successMessage} The latest balances could not be loaded.`,
-					pRetry: pRefreshTransferState,
+					pRetry: refresh => pRefreshTransferState({...refresh, fnIsCurrent: captureProjectionAuthorization()}),
 				});
 			}
 		} catch (error) {
+			if (!fnIsCurrent()) return;
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
 			const pendingProposal = transferProposalDrafts.get({accountId: session.account.id, campaignId});
 			const isRulesVersionStale = error instanceof HubApiError && error.code === "RULES_VERSION_STALE";
@@ -2856,12 +3811,14 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 				form._hubMutationFingerprint = null;
 				setTransferProposalControls({form, isLocked: false});
 				try {
-					await pRefreshTransferState();
+					const refreshResult = await pRefreshTransferState({fnIsCurrent});
+					if (!fnIsCurrent() || refreshResult?.isFenced) return;
 				} catch {
+					if (!fnIsCurrent()) return;
 					setTransferRefreshFailure({
 						form,
 						message: `${message} The latest balances could not be loaded.`,
-						pRetry: pRefreshTransferState,
+						pRetry: refresh => pRefreshTransferState({...refresh, fnIsCurrent: captureProjectionAuthorization()}),
 					});
 					renderError(error);
 					return;
@@ -2872,7 +3829,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					form,
 					proposalRef: {accountId: session.account.id, campaignId},
 					proposalRequest: pendingProposal,
-					pRefresh: pRefreshTransferState,
+					pRefresh: refresh => pRefreshTransferState({...refresh, fnIsCurrent: captureProjectionAuthorization()}),
 				});
 				if (error instanceof HubApiError && error.code !== "IDEMPOTENCY_WINDOW_EXPIRED") renderError(error);
 				return;
@@ -2933,7 +3890,7 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 					});
 					const contextNxt = await api.pGetCampaignContext({campaignId});
 					renderCampaignContext(contextNxt);
-					itemAward.setCampaignBrewContent(contextNxt.brewBundle?.content);
+					await pRefreshContextBoundControls({context: contextNxt});
 					setFormStatus({formId: "campaign-brew-form", message: "Campaign homebrew published."});
 				}});
 		} catch (error) {
@@ -2970,7 +3927,9 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 						versionId: created.rulesVersion.id,
 						idempotencyKey: `${idempotencyKey}:activate`,
 					});
-					renderCampaignContext(await api.pGetCampaignContext({campaignId}));
+					const contextNxt = await api.pGetCampaignContext({campaignId});
+					renderCampaignContext(contextNxt);
+					await pRefreshContextBoundControls({context: contextNxt});
 					setFormStatus({formId: "campaign-rules-form", message: "Campaign rules published."});
 				}});
 		} catch (error) {
@@ -2980,7 +3939,19 @@ async function pInitCampaignForms ({campaign, campaignId, session, characters, t
 		}
 	});
 
-	return {pRefreshTransferState, rulesPolicyManagerPromise};
+	return {
+		pRefreshTransferState,
+		rulesPolicyManagerPromise,
+		refreshActionFields: syncActionFields,
+		refreshItemAwardControlState: () => itemAward.setTargets(targetCharacters),
+		pRefreshContextBoundControls,
+		flushDeferredMutationUi,
+		isConditionCatalogRetryNeeded: () => conditionCatalogState === "data_failed"
+			|| (
+				conditionCatalogState === "module_failed"
+				&& conditionCatalogModuleAttemptIndex < CONDITION_CATALOG_MODULE_URLS.length
+			),
+	};
 }
 
 async function pInit () {
@@ -3001,10 +3972,7 @@ async function pInit () {
 			// campaign context stays active in this browser.
 			await activeCampaign.pResolve({trigger: "logout", session});
 			await pRenderActiveCampaignSwitcher();
-			const signIn = document.getElementById("hub-sign-in");
-			const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-			const {pRenderHubAuthProviders} = await import("./hub-auth-providers.js");
-			await pRenderHubAuthProviders({signIn, returnTo});
+			await pRenderSignedOutProviders();
 			setHidden(signedOut, false);
 			return;
 		}

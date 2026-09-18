@@ -137,6 +137,7 @@ export class CharacterSheetPage {
 		await this.page.goto(`/charactersheet.html?hubCampaign=${encodeURIComponent(campaignId)}&id=${encodeURIComponent(characterId)}`);
 		await waitForToolsLoaded(this.page);
 		await expect(this.characterName).toBeVisible();
+		await this.waitForHubRealtimeLive();
 	}
 
 	async gotoCampaignBuilder (campaignId: string): Promise<void> {
@@ -197,9 +198,42 @@ export class CharacterSheetPage {
 	}
 
 	async renameCharacter (name: string): Promise<void> {
-		await this.characterName.fill(name);
-		await this.characterName.press("Enter");
+		await expect(this.characterName).toBeEditable();
+		await this.characterName.evaluate((input: HTMLInputElement, value) => {
+			input.value = value;
+			input.dispatchEvent(new Event("change", {bubbles: true}));
+		}, name);
+		await expect.poll(
+			() => this.page.evaluate(() => (globalThis as any).charSheet?._state?.getName?.()),
+			{timeout: 20_000},
+		).toBe(name);
 		await expect(this.characterName).toHaveValue(name);
+	}
+
+	async waitForHubRealtimeLive (): Promise<void> {
+		await this.page.waitForFunction(() => {
+			const client = (globalThis as any).charSheet?._hubRealtime?._active?.client;
+			return client?._hasBaseline === true && client?._connectionState?.state === "live";
+		}, undefined, {timeout: 30_000});
+	}
+
+	async requestHubRealtimeResyncAndWait (): Promise<void> {
+		await this.page.evaluate(async () => {
+			const client = (globalThis as any).charSheet?._hubRealtime?._active?.client;
+			if (!client?.requestResync || !client?.on) throw new Error("Character Sheet realtime client is unavailable.");
+			await new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(() => {
+					unsubscribe?.();
+					reject(new Error("Timed out waiting for Character Sheet realtime resync."));
+				}, 15_000);
+				const unsubscribe = client.on("cursor", () => {
+					clearTimeout(timer);
+					unsubscribe();
+					resolve();
+				});
+				client.requestResync(null);
+			});
+		});
 	}
 
 	async expectMulticlassSources ({allowed, denied}: {allowed: string; denied: string}): Promise<void> {

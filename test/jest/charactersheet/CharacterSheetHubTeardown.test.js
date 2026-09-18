@@ -11,7 +11,10 @@ import {jest} from "@jest/globals";
 import {CAMPAIGN_RULE_PROTOCOL_VERSION, evaluateCampaignRules} from "../../../js/hub/hub-campaign-rule-evaluator.js";
 import {CAMPAIGN_RULES_POLICY_CAPABILITY, createDefaultCampaignRulesPolicy} from "../../../js/hub/hub-campaign-rules.js";
 import {CharacterSheetPeerTargeting} from "../../../js/charactersheet/charactersheet-peer-targeting.js";
-import {CharacterSheetRealtimeCoordinator} from "../../../js/charactersheet/charactersheet-realtime.js";
+import {
+	CHARACTER_REALTIME_ACCESS_END_CAUSES,
+	CharacterSheetRealtimeCoordinator,
+} from "../../../js/charactersheet/charactersheet-realtime.js";
 
 const CAMPAIGN_RULES = {thelemar_carryWeight: false, thelemar_criticalRolls: false};
 const PEER_SOURCE_COST_CAPABILITY = Object.freeze({
@@ -206,10 +209,12 @@ describe("Character Sheet hub teardown owners", () => {
 		page._isHubCharacter = true;
 		page._currentCharacterId = "private-character";
 		page._state._data.name = "Private Character";
+		page._closeCharacterScopedTransientUi = jest.fn();
 		const host = page._getHubActiveCampaignHost();
 
 		await host.pTeardownProjections();
 
+		expect(page._closeCharacterScopedTransientUi).toHaveBeenCalledTimes(1);
 		expect(page._currentCharacterId).toBeNull();
 		expect(page._state._data.name).toBe("");
 	});
@@ -252,6 +257,120 @@ describe("Character Sheet hub teardown owners", () => {
 		expect(calls).toContainEqual(["setAttribute", "role", "alert"]);
 		expect(calls).toContainEqual(["before", message]);
 		expect(calls).not.toContainEqual(["append", message]);
+	});
+
+	it("conceals a character when its resource-level realtime access ends", () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._isHubCharacter = true;
+		page._currentCharacterId = "private-character";
+		page._state._data.name = "Private Character";
+		page._hubEffects = {onConnectionState: jest.fn(), deactivate: jest.fn()};
+		page._peerTargeting = {onConnectionState: jest.fn(), deactivate: jest.fn()};
+		page._partyInventory = {detach: jest.fn()};
+		page._characterRepository = {clearRealtimeReconciliation: jest.fn()};
+		page._hubRealtime = {detach: jest.fn()};
+		page._campaign = {render: jest.fn()};
+		const previousDocument = globalThis.document;
+		globalThis.document = {
+			body: {append: jest.fn()},
+			createElement: () => ({setAttribute: jest.fn()}),
+			getElementById: () => null,
+			querySelector: () => ({replaceChildren: jest.fn(), before: jest.fn(), hidden: false}),
+		};
+
+		try {
+			page._onHubRealtimeConnectionState({
+				state: "closed",
+				reason: "Character is no longer available in this campaign.",
+				isCharacterAccessEnded: true,
+			});
+		} finally {
+			globalThis.document = previousDocument;
+		}
+
+		expect(page._currentCharacterId).toBeNull();
+		expect(page._state._data.name).toBe("");
+		expect(page._partyInventory.detach).toHaveBeenCalled();
+		expect(page._hubEffects.deactivate).toHaveBeenCalled();
+		expect(page._campaign.render).toHaveBeenCalled();
+	});
+
+	it("clears campaign context when campaign archive closes the character stream", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._isHubCharacter = true;
+		page._currentCharacterId = "private-character";
+		page._state._data.name = "Private Character";
+		page._hubEffects = {onConnectionState: jest.fn(), deactivate: jest.fn()};
+		page._peerTargeting = {onConnectionState: jest.fn(), deactivate: jest.fn()};
+		page._partyInventory = {detach: jest.fn()};
+		page._characterRepository = {clearRealtimeReconciliation: jest.fn()};
+		page._hubRealtime = {detach: jest.fn()};
+		page._campaign = {resetCharacterScope: jest.fn(), render: jest.fn()};
+		page._hubActiveCampaign = {
+			pHandleAccessLoss: jest.fn(async () => {}),
+			pHandleSurfaceRoleLoss: jest.fn(async () => {}),
+		};
+		const previousDocument = globalThis.document;
+		globalThis.document = {
+			body: {append: jest.fn()},
+			createElement: () => ({setAttribute: jest.fn()}),
+			getElementById: () => null,
+			querySelector: () => ({replaceChildren: jest.fn(), before: jest.fn(), hidden: false}),
+		};
+
+		try {
+			page._onHubRealtimeConnectionState({
+				state: "closed",
+				reason: "Campaign is no longer active.",
+				isCharacterAccessEnded: true,
+				accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
+			});
+			await Promise.resolve();
+		} finally {
+			globalThis.document = previousDocument;
+		}
+
+		expect(page._hubActiveCampaign.pHandleAccessLoss).toHaveBeenCalledWith({campaignId: page._hubCampaignId});
+		expect(page._hubActiveCampaign.pHandleSurfaceRoleLoss).not.toHaveBeenCalled();
+	});
+
+	it("preserves campaign selection when DM role loss closes a read-only character stream", async () => {
+		const page = new CharacterSheetPage({characterRepository: {}});
+		page._isHubCharacter = true;
+		page._currentCharacterId = "private-character";
+		page._state._data.name = "Private Character";
+		page._hubEffects = {onConnectionState: jest.fn(), deactivate: jest.fn()};
+		page._peerTargeting = {onConnectionState: jest.fn(), deactivate: jest.fn()};
+		page._partyInventory = {detach: jest.fn()};
+		page._characterRepository = {clearRealtimeReconciliation: jest.fn()};
+		page._hubRealtime = {detach: jest.fn()};
+		page._campaign = {resetCharacterScope: jest.fn(), render: jest.fn()};
+		page._hubActiveCampaign = {
+			pHandleAccessLoss: jest.fn(async () => {}),
+			pHandleSurfaceRoleLoss: jest.fn(async () => {}),
+		};
+		const previousDocument = globalThis.document;
+		globalThis.document = {
+			body: {append: jest.fn()},
+			createElement: () => ({setAttribute: jest.fn()}),
+			getElementById: () => null,
+			querySelector: () => ({replaceChildren: jest.fn(), before: jest.fn(), hidden: false}),
+		};
+
+		try {
+			page._onHubRealtimeConnectionState({
+				state: "closed",
+				reason: "Your campaign role no longer permits this character view.",
+				isCharacterAccessEnded: true,
+				accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.SURFACE_ROLE,
+			});
+			await Promise.resolve();
+		} finally {
+			globalThis.document = previousDocument;
+		}
+
+		expect(page._hubActiveCampaign.pHandleSurfaceRoleLoss).toHaveBeenCalledTimes(1);
+		expect(page._hubActiveCampaign.pHandleAccessLoss).not.toHaveBeenCalled();
 	});
 });
 
@@ -476,6 +595,7 @@ describe("Character Sheet campaign content context lifecycle", () => {
 			campaignId: "campaign-1",
 			api: {pListCharacterOutgoingActions: jest.fn(async () => [])},
 			fnGetCharacterId: () => page._currentCharacterId,
+			fnIsOwner: () => true,
 			fnGetRulesVersionId: () => page._hubContext?.rulesVersion?.id,
 			fnGetCapability: () => page._hubContext?.capabilities?.peerSourceCosts,
 		});
@@ -494,6 +614,13 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page._initHubRealtimeListeners()).toBe(true);
 		expect(realtime.attach({characterId: "source-character"})).toBe(true);
 
+		clientListeners.get("cursor")({
+			cursor: {campaignId: "campaign-1", lastSequence: 17},
+			membership: {accountId: "viewer-account", role: "player"},
+			characterRefs: [{id: "source-character", revision: 4, projectionRevision: 2}],
+		});
+		await pFlushPromises();
+
 		clientListeners.get("event")({
 			id: "role-change",
 			campaignId: "campaign-1",
@@ -501,6 +628,7 @@ describe("Character Sheet campaign content context lifecycle", () => {
 			type: "membership.role_changed",
 			aggregateType: "membership",
 			aggregateId: "opaque-membership",
+			payload: {accountId: "viewer-account", role},
 		});
 		await pFlushPromises();
 		expect(targeting._isSuspended).toBe(true);

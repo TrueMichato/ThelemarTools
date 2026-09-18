@@ -277,7 +277,9 @@ describe("R25 S7 — source-pin: Red Cant uses the polished modal, not a plain c
 		expect(body).toMatch(/data-act="confirm"/);
 		expect(body).toMatch(/data-act="decline"/);
 		// Backdrop/X dismissal must resolve as a decline (false).
-		expect(body).toMatch(/cbClose[\s\S]*?resolveOuter\(false\)/);
+		expect(body).toMatch(/const cancel = \(\) => \{[\s\S]*?resolveOuter\(false\)/);
+		expect(body).toMatch(/cbClose[\s\S]*?cancel\(\)/);
+		expect(body).toMatch(/cbCharacterScopeTeardown: cancel/);
 	});
 
 	it("the preview helper is a pure static (testable without a DOM)", () => {

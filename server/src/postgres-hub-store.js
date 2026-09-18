@@ -13,6 +13,7 @@ import {
 	getPolicyNotAvailableError,
 	assertPeerTargetable,
 	canViewCharacterEventActor,
+	canViewSharedCharacterProjection,
 	canViewSharedCharacterEvent,
 	redactEventActor,
 	stripProjectionPolicy,
@@ -63,11 +64,13 @@ import {
 	enrichEventPayload,
 	getTransferCharacterDisplaySnapshot,
 	projectTransferForViewer,
+	redactActorCommandEventForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
 import {
 	applySourceCost,
+	isPeerSourceCostsProtocolVersion,
 	PEER_SOURCE_COSTS_CONTRACT_VERSION,
 	PEER_SOURCE_COSTS_TEMPLATE_REGISTRY_VERSION,
 } from "../../js/hub/hub-source-costs.js";
@@ -1593,17 +1596,35 @@ export class PostgresHubStore {
 	 * announces that a character's projection may have changed, so a new mutation cannot
 	 * silently leave peers holding stale data.
 	 */
-	async _pAppendProjectionInvalidation ({client, character, actorAccountId}) {
+	async _pAppendProjectionInvalidation ({
+		client,
+		character,
+		actorAccountId,
+		visibleAccountIds = null,
+	}) {
 		if (!character.campaignId) return null;
+		visibleAccountIds ??= (await client.query(`
+			SELECT account_id, role
+			FROM hub.memberships
+			WHERE campaign_id = $1 AND status = 'active'
+		`, [character.campaignId])).rows
+			.filter(membership => canViewSharedCharacterProjection({
+				character,
+				accountId: membership.account_id,
+				role: membership.role,
+			}))
+			.map(membership => membership.account_id);
 		return this._pAppendEvent({
 			client,
 			campaignId: character.campaignId,
 			actorAccountId,
 			type: "character.projection.invalidated",
-			aggregateType: "character",
-			aggregateId: character.id,
-			aggregateRevision: character.revision,
-			payload: {projectionRevision: character.projectionRevision},
+			aggregateType: "campaign",
+			aggregateId: character.campaignId,
+			aggregateRevision: null,
+			visibility: "explicit_accounts",
+			visibleAccountIds,
+			payload: {},
 		});
 	}
 
@@ -1704,6 +1725,11 @@ export class PostgresHubStore {
 			}
 			// Validate before any write so a rejected policy leaves the last valid one intact.
 			const validated = validateProjectionPolicy(policy);
+			const invalidationMemberships = (await client.query(`
+				SELECT account_id, role
+				FROM hub.memberships
+				WHERE campaign_id = $1 AND status = 'active'
+			`, [character.campaignId])).rows;
 			const updated = await client.query(`
 				UPDATE hub.characters
 				SET projection_policy = $2::jsonb, projection_revision = projection_revision + 1, updated_at = now()
@@ -1712,7 +1738,26 @@ export class PostgresHubStore {
 			`, [characterId, JSON.stringify(validated)]);
 			const characterNxt = getCharacter(updated.rows[0]);
 			await this._pAppendAudit({client, campaignId: characterNxt.campaignId, actorAccountId: accountId, action: "character.projection_policy.updated", targetType: "character", targetId: characterId});
-			await this._pAppendProjectionInvalidation({client, character: characterNxt, actorAccountId: accountId});
+			const visibleAccountIds = invalidationMemberships
+				.filter(membership => (
+					canViewSharedCharacterProjection({
+						character,
+						accountId: membership.account_id,
+						role: membership.role,
+					})
+					|| canViewSharedCharacterProjection({
+						character: characterNxt,
+						accountId: membership.account_id,
+						role: membership.role,
+					})
+				))
+				.map(membership => membership.account_id);
+			await this._pAppendProjectionInvalidation({
+				client,
+				character: characterNxt,
+				actorAccountId: accountId,
+				visibleAccountIds,
+			});
 			const response = getPolicyManagementResponse(characterNxt, {
 				expectedBasis: getExpectedCarryBasis({character: characterNxt, ...(await this._pGetCarryBasisContext(characterNxt.campaignId))}),
 			});
@@ -1917,7 +1962,7 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pReleaseCharacterLease ({accountId, sessionId, characterId}) {
+	async pReleaseCharacterLease ({accountId, sessionId, characterId, leaseEpoch, expiresAt}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
@@ -1933,7 +1978,7 @@ export class PostgresHubStore {
 				throw new HubStoreError("FORBIDDEN", `Only the owner can release this character editor.`, {status: 403});
 			}
 			const leaseResult = await client.query(`
-				SELECT session_id, expires_at
+				SELECT session_id, epoch, expires_at
 				FROM hub.character_leases
 				WHERE character_id = $1
 				FOR UPDATE
@@ -1949,6 +1994,10 @@ export class PostgresHubStore {
 					status: 409,
 					details: {expiresAt: lease.expires_at},
 				});
+			}
+			if (Number(lease.epoch) !== leaseEpoch || lease.expires_at.toISOString() !== new Date(expiresAt).toISOString()) {
+				await client.query("COMMIT");
+				return {released: false};
 			}
 			await client.query(`DELETE FROM hub.character_leases WHERE character_id = $1`, [characterId]);
 			await client.query("COMMIT");
@@ -2248,6 +2297,14 @@ export class PostgresHubStore {
 					...(isMove ? {characterNameSnapshot} : {}),
 				},
 			});
+			if (isMove && source.campaignId && source.campaignId !== campaignId) {
+				await this._pAppendProjectionInvalidation({
+					client,
+					character: source,
+					actorAccountId: accountId,
+				});
+			}
+			await this._pAppendProjectionInvalidation({client, character, actorAccountId: accountId});
 			const response = {character: stripProjectionPolicy(character)};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: action, response});
 			await client.query("COMMIT");
@@ -2295,6 +2352,11 @@ export class PostgresHubStore {
 			await this._pAppendAudit({client, campaignId: character.campaignId, actorAccountId: accountId, action: "character.archived", targetType: "character", targetId: characterId});
 			if (character.campaignId) {
 				await this._pAppendEvent({client, campaignId: character.campaignId, actorAccountId: accountId, type: "character.archived", aggregateType: "character", aggregateId: characterId, aggregateRevision: character.revision});
+				await this._pAppendProjectionInvalidation({
+					client,
+					character: characterBefore,
+					actorAccountId: accountId,
+				});
 			}
 			const response = {ok: true};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "character.archive", response});
@@ -3248,6 +3310,23 @@ export class PostgresHubStore {
 	 * envelope cannot map a hidden character back to its named owner.
 	 */
 	_redactRowForViewer ({row, accountId, role, character}) {
+		if (row.payload?.actorCommandId && row.actor_account_id !== accountId) {
+			const payload = {...row.payload};
+			delete payload.actorCommandId;
+			row = {...row, payload};
+		}
+		if (
+			row.event_type === "character.projection.invalidated"
+			&& row.visibility === "explicit_accounts"
+		) {
+			return {
+				...row,
+				visible_account_ids: null,
+				...(["dm", "co_dm"].includes(role) || row.actor_account_id === accountId
+					? {}
+					: {actor_account_id: null, actor_display_name: null}),
+			};
+		}
 		if (row.visibility !== "all_members" || row.aggregate_type !== "character") return row;
 		// A hidden character contributes no shared rows at all, so no adjacent membership
 		// event can be composed with one to recover the owner association.
@@ -3258,6 +3337,7 @@ export class PostgresHubStore {
 
 	/** Realtime fanout shares the HTTP read's redaction rather than duplicating it. */
 	async redactEventForViewer ({event, accountId, role}) {
+		event = redactActorCommandEventForViewer({event, accountId});
 		if (event.aggregateType === "transfer" && `${event.type || ""}`.startsWith("transfer.")) {
 			const characterIds = [
 				event.payload?.sourceKind === "character" ? event.payload.sourceId : null,
@@ -3273,6 +3353,14 @@ export class PostgresHubStore {
 				role,
 				getCharacterOwnerId: characterId => ownerById.get(characterId),
 			});
+		}
+		if (
+			event.type === "character.projection.invalidated"
+			&& event.visibility === "explicit_accounts"
+		) {
+			const sanitized = {...event, visibleAccountIds: null};
+			if (["dm", "co_dm"].includes(role) || event.actorAccountId === accountId) return sanitized;
+			return redactEventActor(sanitized);
 		}
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const result = await this._pool.query(`SELECT owner_account_id, projection_policy FROM hub.characters WHERE id = $1`, [event.aggregateId]);
@@ -3870,8 +3958,8 @@ export class PostgresHubStore {
 			} catch {
 				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
 			}
-			if (isCostBearing && `${protocolVersion}` !== "4") {
-				throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+			if (isCostBearing && !isPeerSourceCostsProtocolVersion(protocolVersion)) {
+				throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 or newer is required.`, {status: 426});
 			}
 			if (isCostBearing && (
 				contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
@@ -4297,8 +4385,8 @@ export class PostgresHubStore {
 
 			if (operation.sourceCost && (
 				contractVersion !== PEER_SOURCE_COSTS_CONTRACT_VERSION
-				|| `${protocolVersion}` !== "4"
-			)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 is required.`, {status: 426});
+				|| !isPeerSourceCostsProtocolVersion(protocolVersion)
+			)) throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 4 or newer is required.`, {status: 426});
 			const isDm = ["dm", "co_dm"].includes(membership.role);
 			const isTargetOwner = targetOwnerAccountId === accountId;
 			const isProposer = operation.originActorAccountId === accountId;
@@ -5035,6 +5123,7 @@ export class PostgresHubStore {
 					visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
 					payload: {
 						awardId,
+						actorCommandId: commandIdempotencyKey.key,
 						index,
 						targetCount: updatedTargets.length,
 						sourceKind: resolvedSourceKind,

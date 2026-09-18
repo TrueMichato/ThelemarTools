@@ -1,7 +1,14 @@
 import "./setup.js"; // Import first to set up mocks
+import fs from "node:fs";
+import path from "node:path";
+import {fileURLToPath} from "node:url";
 
 let CharacterSheetState;
 let charState;
+const customAbilitiesSource = fs.readFileSync(
+	path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../js/charactersheet/charactersheet-customabilities.js"),
+	"utf8",
+);
 
 beforeAll(async () => {
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
@@ -22,6 +29,14 @@ describe("Character Sheet Custom Abilities", () => {
 	// ===================================================================
 	// Basic CRUD Tests
 	// ===================================================================
+	test("the snapshot-backed ability editor closes on authoritative document adoption", () => {
+		const registrationStart = customAbilitiesSource.indexOf("portal = CharacterSheetModal.registerCharacterScopePortal({");
+		expect(registrationStart).toBeGreaterThan(-1);
+		const registration = customAbilitiesSource.slice(registrationStart, registrationStart + 500);
+
+		expect(registration).toContain("isCloseOnDocumentInvalidation: true");
+	});
+
 	describe("Custom Ability CRUD Operations", () => {
 		test("should add a new custom ability", () => {
 			const abilityId = charState.addCustomAbility({

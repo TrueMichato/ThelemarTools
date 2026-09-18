@@ -97,6 +97,7 @@ class CharacterSheetDice3d {
 		this._pendingTheme = null;
 		this._pendingAppearance = null;
 		this._rollToken = 0;
+		this._characterScopeToken = 0;
 		// Settle fn for the in-flight roll, used to force-resolve a previous
 		// roll if a new one starts while it is still animating.
 		this._activeSettle = null;
@@ -503,7 +504,7 @@ class CharacterSheetDice3d {
 	 * @param {number} opts.diceType
 	 * @param {number} opts.finalValue
 	 * @param {string} [opts.theme]
-	 * @returns {Promise<void>}
+	 * @returns {Promise<void|false>} False when character-scope teardown cancels it.
 	 */
 	async pRoll ({diceType, finalValue, theme, appearance} = {}) {
 		return this.pRollMany({groups: [{sides: diceType, values: [finalValue]}], theme, appearance});
@@ -519,7 +520,7 @@ class CharacterSheetDice3d {
 	 * @param {Array<{sides:number, values:number[]}>} opts.groups
 	 * @param {string} [opts.theme]
 	 * @param {{background?:string, foreground?:string, outline?:string, texture?:string, material?:string}} [opts.appearance]
-	 * @returns {Promise<void>}
+	 * @returns {Promise<void|false>} False when character-scope teardown cancels it.
 	 */
 	async pRollMany ({groups, theme, appearance} = {}) {
 		const normalized = CharacterSheetDice3d.normalizeGroups(groups);
@@ -534,6 +535,7 @@ class CharacterSheetDice3d {
 			this._activeSettle = null;
 			prev();
 		}
+		const characterScopeToken = this._characterScopeToken;
 
 		// Remember the requested look so a fresh init (if needed) builds with it.
 		this._pendingTheme = CharacterSheetDice3d.THEMES[theme] ? theme : "standard";
@@ -541,30 +543,42 @@ class CharacterSheetDice3d {
 
 		await this._pInit(); // may throw -> caller falls back
 		await this._applyTheme(theme, appearance);
-
+		if (characterScopeToken !== this._characterScopeToken) return false;
 		const token = ++this._rollToken;
 
 		return new Promise((resolve) => {
-			let settled = false;
+			let isSettling = false;
+			let isFinalized = false;
+			let isCancelled = false;
 			let timeoutId = null;
 			let fadeId = null;
 
 			const cleanup = () => {
 				if (timeoutId != null) { clearTimeout(timeoutId); timeoutId = null; }
+				if (fadeId != null) { clearTimeout(fadeId); fadeId = null; }
 				if (this._overlay) this._overlay.removeEventListener("click", onClick);
 			};
 
 			const finalize = () => {
+				if (isFinalized) return;
+				isFinalized = true;
+				cleanup();
 				// Only the roll that is still current may hide the shared overlay;
 				// a superseded roll's late fade must not blank a newer roll.
 				if (token === this._rollToken) this._hideOverlayImmediate();
 				if (this._activeSettle === settle) this._activeSettle = null;
-				resolve();
+				resolve(isCancelled ? false : undefined);
 			};
 
-			const settle = () => {
-				if (settled) return;
-				settled = true;
+			const settle = ({isCancelled: isCancelledNext = false} = {}) => {
+				if (isFinalized) return;
+				if (isCancelledNext) {
+					isCancelled = true;
+					finalize();
+					return;
+				}
+				if (isSettling) return;
+				isSettling = true;
 				cleanup();
 				// Fade out, then resolve once the overlay is fully inert so the
 				// result toast never appears behind an interactive layer.
@@ -613,12 +627,26 @@ class CharacterSheetDice3d {
 		});
 	}
 
+	/** Conceal and cancel a roll owned by the character scope being replaced. */
+	resetCharacterScopeUi () {
+		this._characterScopeToken++;
+		this._rollToken++;
+		if (this._activeSettle) {
+			const settle = this._activeSettle;
+			this._activeSettle = null;
+			settle({isCancelled: true});
+		}
+		this._hideOverlayImmediate();
+	}
+
 	/** Tear down all resources (e.g. on sheet teardown). Safe to call twice. */
 	destroy () {
+		this._characterScopeToken++;
+		this._rollToken++;
 		if (this._activeSettle) {
 			const prev = this._activeSettle;
 			this._activeSettle = null;
-			try { prev(); } catch (e) { /* ignore */ }
+			try { prev({isCancelled: true}); } catch (e) { /* ignore */ }
 		}
 		try {
 			if (this._box && typeof this._box.destroy === "function") this._box.destroy();

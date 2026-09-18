@@ -1,10 +1,22 @@
-import {HubApiClient, HubApiError} from "../hub/hub-api-client.js";
+import {
+	HUB_COMMAND_REPLAY_WINDOW_MS,
+	HubApiClient,
+	HubApiError,
+	isMutationOutcomeUncertain,
+} from "../hub/hub-api-client.js";
 import {getCampaignContentPolicy, getCharacterCampaignContentCompliance} from "../hub/hub-content-policy.js";
 import {CharacterSheetSharing} from "./charactersheet-sharing.js";
 import {CharacterSheetState} from "./charactersheet-state.js";
 import {getCampaignSettingsOverlayFromRulesVersion} from "../hub/hub-campaign-rule-evaluator.js";
 
 const _CAMPAIGN_ROLES = new Set(["dm", "co_dm", "player"]);
+const _TERMINAL_CHARACTER_ACCESS_ERROR_CODES = new Set([
+	"AUTH_REQUIRED",
+	"FORBIDDEN",
+	"CAMPAIGN_NOT_FOUND",
+	"MEMBERSHIP_NOT_FOUND",
+	"CAMPAIGN_ARCHIVED",
+]);
 const _RULE_LABELS = {
 	enableTgtt: "Thelemar rules",
 	exhaustionRules: "Exhaustion rules",
@@ -14,6 +26,10 @@ const _RULE_LABELS = {
 	thelemar_linguisticsBonus: "Thelemar linguistics bonus",
 	thelemar_criticalRolls: "Thelemar critical rolls",
 };
+
+export function isTerminalCharacterCampaignAccessError (error) {
+	return _TERMINAL_CHARACTER_ACCESS_ERROR_CODES.has(error?.code);
+}
 
 export function getEligibleCharacterCampaigns (campaigns, {excludeCampaignId = null} = {}) {
 	return (campaigns || [])
@@ -82,6 +98,7 @@ export function getCampaignControlErrorMessage (error) {
 		case "REVISION_CONFLICT": return "This character changed elsewhere. Resolve the sync conflict before changing campaigns.";
 		case "RULES_VERSION_STALE": return "Campaign content rules changed before this update finished. Reload the campaign context and try again.";
 		case "CONTENT_POLICY_VIOLATION": return "That update adds content the campaign does not allow. Existing off-policy choices remain usable and removable.";
+		case "CLONE_RECOVERY_INVALID": return "This copy has recovery data that cannot be replayed safely. The command remains blocked to prevent a duplicate; preserve the source character and clear the saved recovery record only after checking the destination campaign.";
 		default: return "The Campaign Hub could not complete that request. Your current character was not changed; try again.";
 	}
 }
@@ -125,7 +142,7 @@ function createElement (tagName, {className = "", text = "", attrs = {}} = {}) {
 }
 
 export class CharacterSheetCampaign {
-	constructor ({page, api = new HubApiClient(), root = null, fnNavigate = null}) {
+	constructor ({page, api = new HubApiClient(), root = null, fnNavigate = null, pendingCommandStorage = globalThis.sessionStorage || null}) {
 		this._page = page;
 		this._api = api;
 		this._root = root || document.getElementById("charsheet-campaign");
@@ -142,45 +159,90 @@ export class CharacterSheetCampaign {
 		this._movePreview = null;
 		this._feedback = null;
 		this._pendingCommand = null;
+		this._pendingCommandStorage = pendingCommandStorage;
+		this._fnNow = () => Date.now();
+		this._commandReplayWindowMs = HUB_COMMAND_REPLAY_WINDOW_MS;
 		this._sharing = null;
+		this._isInitialized = false;
+		this._refreshGeneration = 0;
 	}
 
 	async pInit () {
 		if (!this._root) return;
+		this._isInitialized = true;
 		window.addEventListener?.("online", () => this.render());
 		window.addEventListener?.("offline", () => this.render());
 		this.render();
 		await this._pRefresh();
 	}
 
-	async _pRefresh () {
-		this._isLoading = true;
+	resetCharacterScope () {
+		this._refreshGeneration++;
+		this._currentCharacter = null;
+		this._currentCampaign = null;
+		this._sharing = null;
+		this._selectedCampaignId = null;
+		this._movePreview = null;
 		this._feedback = null;
 		this.render();
+	}
+
+	async pRefreshCurrentCharacter () {
+		this.resetCharacterScope();
+		if (!this._isInitialized) return;
+		await this._pRefresh();
+	}
+
+	async _pRefresh () {
+		const generation = ++this._refreshGeneration;
+		const characterId = this._page._currentCharacterId || null;
+		const isCurrent = () => (
+			generation === this._refreshGeneration
+			&& characterId === (this._page._currentCharacterId || null)
+		);
+		this._isLoading = true;
+		this._feedback = null;
+		this._currentCharacter = null;
+		this._currentCampaign = null;
+		this._sharing = null;
+		this.render();
 		try {
-			this._session = await this._api.pGetSession();
-			this._campaigns = this._session.signedIn
+			const session = await this._api.pGetSession();
+			if (!session.signedIn && this._page._isHubCharacter && characterId) {
+				throw new HubApiError({code: "AUTH_REQUIRED", status: 401});
+			}
+			const campaigns = session.signedIn
 				? await this._api.pListCampaigns()
 				: [];
-			this._currentCharacter = this._session.signedIn && this._page._isHubCharacter && this._page._currentCharacterId
-				? await this._api.pGetCharacter({characterId: this._page._currentCharacterId})
+			const currentCharacter = session.signedIn && this._page._isHubCharacter && characterId
+				? await this._api.pGetCharacter({characterId})
 				: null;
-			const currentCampaignId = this._currentCharacter?.campaignId || null;
-			this._currentCampaign = this._session.signedIn && currentCampaignId
-				? this._campaigns.find(campaign => campaign.id === currentCampaignId)
+			const currentCampaignId = currentCharacter?.campaignId || null;
+			const currentCampaign = session.signedIn && currentCampaignId
+				? campaigns.find(campaign => campaign.id === currentCampaignId)
 					|| await this._api.pGetCampaign({campaignId: currentCampaignId})
 				: null;
+			if (!isCurrent()) return;
+			this._session = session;
+			this._campaigns = campaigns;
+			this._currentCharacter = currentCharacter;
+			this._currentCampaign = currentCampaign;
 		} catch (error) {
+			if (!isCurrent()) return;
 			this._session = null;
 			this._campaigns = [];
 			this._currentCharacter = null;
 			this._currentCampaign = null;
 			this._feedback = {type: "error", text: getCampaignControlErrorMessage(error)};
+			if (isTerminalCharacterCampaignAccessError(error)) throw error;
 		} finally {
-			this._isLoading = false;
-			this.render();
+			if (isCurrent()) {
+				this._isLoading = false;
+				this.render();
+			}
 		}
-		await this.pRefreshSharing();
+		if (!isCurrent()) return;
+		await this.pRefreshSharing({characterId, generation});
 	}
 
 	render () {
@@ -261,17 +323,26 @@ export class CharacterSheetCampaign {
 	}
 
 	/** Load the owner's sharing policy once the character's campaign context is known. */
-	async pRefreshSharing () {
-		if (!this._page._isHubCharacter || !this._currentCharacter?.campaignId) {
+	async pRefreshSharing ({
+		characterId = this._page._currentCharacterId,
+		generation = this._refreshGeneration,
+	} = {}) {
+		if (
+			!this._page._isHubCharacter
+			|| !this._currentCharacter?.campaignId
+			|| this._page.isCurrentCharacterReadOnly?.()
+		) {
 			this._sharing = null;
 			return;
 		}
-		this._sharing ||= new CharacterSheetSharing({
+		const sharing = new CharacterSheetSharing({
 			api: this._api,
-			fnGetCharacterId: () => this._page._currentCharacterId,
+			fnGetCharacterId: () => characterId,
 			fnGetErrorMessage: getCampaignControlErrorMessage,
 		});
-		await this._sharing.pLoad();
+		await sharing.pLoad();
+		if (generation !== this._refreshGeneration || characterId !== this._page._currentCharacterId) return;
+		this._sharing = sharing;
 		this.render();
 	}
 
@@ -284,6 +355,7 @@ export class CharacterSheetCampaign {
 	_getDetail ({isCloud}) {
 		if (this._isLoading) return "Checking availability…";
 		if (isCloud) {
+			if (this._page.isCurrentCharacterReadOnly?.()) return "Read-only DM view · use campaign actions to make authorized changes";
 			if (typeof navigator !== "undefined" && !navigator.onLine) return "Offline view · changes will retry when the connection returns";
 			if (this._page._characterRepository?.hasPendingWrites?.()) return "Sync needs attention · export before leaving if retry keeps failing";
 			if (!this._currentCharacter?.campaignId) return "Online · not attached to a campaign";
@@ -333,6 +405,16 @@ export class CharacterSheetCampaign {
 					text: "Return to campaign",
 					attrs: {href: `campaign.html?id=${encodeURIComponent(this._currentCampaign.id)}`},
 				}));
+			}
+			if (this._page.isCurrentCharacterReadOnly?.()) {
+				if (!this._currentCampaign) {
+					actions.append(createElement("a", {
+						className: "charsheet__campaign-button",
+						text: "Open Campaign Hub",
+						attrs: {href: "hub.html"},
+					}));
+				}
+				return;
 			}
 			const sourceCampaignId = this._currentCharacter?.campaignId || null;
 			const destinations = getEligibleCharacterCampaigns(this._campaigns, {excludeCampaignId: sourceCampaignId});
@@ -455,7 +537,12 @@ export class CharacterSheetCampaign {
 			panel.append(createElement("div", {className: "charsheet__campaign-loading", text: "Comparing campaign rules and homebrew…"}));
 			return;
 		}
-		if (!this._movePreview || this._movePreview.campaignId !== campaignId) {
+		const isCurrentMovePreview = this._movePreview
+			&& this._movePreview.characterId === this._page._currentCharacterId
+			&& this._movePreview.characterLoadGeneration === this._page._characterLoadGeneration
+			&& this._movePreview.sourceCampaignId === sourceCampaignId
+			&& this._movePreview.campaignId === campaignId;
+		if (!isCurrentMovePreview) {
 			const review = createElement("button", {
 				className: "charsheet__campaign-button",
 				text: "Review move instead",
@@ -508,6 +595,12 @@ export class CharacterSheetCampaign {
 
 	async _pPrepareMove ({sourceCampaignId, campaignId}) {
 		if (!sourceCampaignId || !campaignId || this._isMovePreviewLoading || this._isBusy) return;
+		const characterId = this._page._currentCharacterId;
+		const characterLoadGeneration = this._page._characterLoadGeneration;
+		const isCurrentCharacter = () => (
+			this._page._currentCharacterId === characterId
+			&& this._page._characterLoadGeneration === characterLoadGeneration
+		);
 		this._isMovePreviewLoading = true;
 		this._feedback = null;
 		this.render();
@@ -516,12 +609,17 @@ export class CharacterSheetCampaign {
 				this._api.pGetCampaignCompatibility({campaignId: sourceCampaignId}),
 				this._api.pGetCampaignCompatibility({campaignId}),
 			]);
+			if (!isCurrentCharacter()) return;
 			this._movePreview = {
+				characterId,
+				characterLoadGeneration,
+				sourceCampaignId,
 				campaignId,
 				report: getCampaignCompatibilityReport({source, target}),
 				rulesVersionId: target.rulesVersion?.id || null,
 			};
 		} catch (error) {
+			if (!isCurrentCharacter()) return;
 			this._feedback = {type: "error", text: getCampaignControlErrorMessage(error)};
 		} finally {
 			this._isMovePreviewLoading = false;
@@ -531,28 +629,40 @@ export class CharacterSheetCampaign {
 
 	async _pCopyLocalCharacter ({campaignId}) {
 		const characterId = this._page._currentCharacterId;
+		const characterLoadGeneration = this._page._characterLoadGeneration;
+		const accessMode = this._page._currentCharacterAccess;
+		const isCurrentCharacter = () => (
+			this._page._currentCharacterId === characterId
+			&& this._page._characterLoadGeneration === characterLoadGeneration
+			&& this._page._currentCharacterAccess === accessMode
+		);
 		if (!characterId || !campaignId || this._isBusy) return;
+		const sourceData = this._page._state.toJson();
+		const command = this._getPendingCommand({kind: "copy-local", characterId, campaignId});
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();
 		try {
 			if (!await this._page._saveCurrentCharacter()) throw new Error("LOCAL_SAVE_FAILED");
-			const command = this._getPendingCommand({kind: "copy-local", characterId, campaignId});
+			if (!isCurrentCharacter()) return;
 			const context = await this._api.pGetCampaignContext({campaignId});
+			if (!isCurrentCharacter()) return;
 			const result = await this._api.pCreateCharacter({
 				clientImportId: characterId,
 				campaignId,
 				data: getCampaignPreparedCharacterData({
-					data: this._page._state.toJson(),
+					data: sourceData,
 					context,
 				}),
 				rulesVersionId: context.rulesVersion?.id || null,
 				idempotencyKey: command.idempotencyKey,
 			});
+			if (!isCurrentCharacter()) return;
 			this._feedback = {type: "success", text: "Cloud copy created. Your local original is unchanged."};
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
 		} catch (error) {
+			if (!isCurrentCharacter()) return;
 			this._feedback = {
 				type: "error",
 				text: error?.message === "LOCAL_SAVE_FAILED"
@@ -567,24 +677,97 @@ export class CharacterSheetCampaign {
 
 	async _pCloneCloudCharacter ({campaignId}) {
 		const characterId = this._page._currentCharacterId;
+		const characterLoadGeneration = this._page._characterLoadGeneration;
+		const accessMode = this._page._currentCharacterAccess;
+		const isCurrentCharacter = () => (
+			this._page._currentCharacterId === characterId
+			&& this._page._characterLoadGeneration === characterLoadGeneration
+			&& this._page._currentCharacterAccess === accessMode
+		);
 		if (!characterId || !campaignId || this._isBusy) return;
+		let command;
+		try {
+			command = this._getCloneCommand({characterId, campaignId});
+		} catch (error) {
+			this._feedback = {type: "error", text: getCampaignControlErrorMessage(error)};
+			this.render();
+			return;
+		}
+		if (command.committedCharacterId) {
+			this._feedback = {type: "success", text: "Cloud copy created. This campaign character is unchanged."};
+			this.render();
+			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: command.committedCharacterId}));
+			this._clearCloneCommand({characterId, campaignId});
+			return;
+		}
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();
+		let isCloneRequestSubmitted = false;
 		try {
+			let request = this._getCloneCommandRequest({command, characterId, campaignId});
+			if (request && this._getNow() >= command.replayUntil) {
+				const characters = await this._api.pListCharacters({campaignId});
+				if (!isCurrentCharacter()) return;
+				const baselineCloneIds = new Set(command.baselineCloneIds);
+				const candidates = characters.filter(character =>
+					character?.clonedFromCharacterId === characterId
+					&& !baselineCloneIds.has(character.id));
+				if (candidates.length === 1) {
+					this._markCloneCommandCommitted({characterId, campaignId, character: candidates[0]});
+					this._feedback = {type: "success", text: "The previously submitted cloud copy was found."};
+					this.render();
+					this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: candidates[0].id}));
+					this._clearCloneCommand({characterId, campaignId});
+					return;
+				}
+				if (!candidates.length) {
+					this._clearCloneCommand({characterId, campaignId});
+					this._feedback = {
+						type: "warning",
+						text: "No committed copy was found after the safe retry window. Review the destination, then choose copy again to start a new command.",
+					};
+					return;
+				}
+				this._feedback = {
+					type: "error",
+					text: "Multiple matching copies were found after the safe retry window. The copy remains locked to prevent another duplicate.",
+				};
+				return;
+			}
 			if (!await this._page._saveCurrentCharacter({isInteractiveConflict: false})) throw new Error("CLOUD_SAVE_FAILED");
-			const command = this._getPendingCommand({kind: "clone-cloud", characterId, campaignId});
-			const target = await this._api.pGetCampaignCompatibility({campaignId});
-			const result = await this._api.pCloneCharacter({
-				characterId,
-				campaignId,
-				rulesVersionId: target.rulesVersion?.id || null,
-				idempotencyKey: command.idempotencyKey,
-			});
+			if (!isCurrentCharacter()) return;
+			if (!request) {
+				const target = await this._api.pGetCampaignCompatibility({campaignId});
+				if (!isCurrentCharacter()) return;
+				const destinationCharacters = await this._api.pListCharacters({campaignId});
+				if (!isCurrentCharacter()) return;
+				request = this._stageCloneCommandRequest({
+					command,
+					characterId,
+					campaignId,
+					rulesVersionId: target.rulesVersion?.id || null,
+					baselineCloneIds: destinationCharacters
+						.filter(character => character?.clonedFromCharacterId === characterId)
+						.map(character => character.id)
+						.sort(),
+				});
+			}
+			isCloneRequestSubmitted = true;
+			const result = await this._api.pCloneCharacter(request);
+			this._markCloneCommandCommitted({characterId, campaignId, character: result.character});
+			if (!isCurrentCharacter()) return;
 			this._feedback = {type: "success", text: "Cloud copy created. This campaign character is unchanged."};
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
+			this._clearCloneCommand({characterId, campaignId});
 		} catch (error) {
+			if (
+				isCloneRequestSubmitted
+				&& error?.code !== "IDEMPOTENCY_KEY_REUSED"
+				&& !isMutationOutcomeUncertain(error)
+			) this._clearCloneCommand({characterId, campaignId});
+			if (!isCurrentCharacter()) return;
 			this._feedback = {
 				type: "error",
 				text: error?.message === "CLOUD_SAVE_FAILED"
@@ -597,30 +780,172 @@ export class CharacterSheetCampaign {
 		}
 	}
 
+	_getCloneCommandStorageKey () {
+		const accountId = this._session?.account?.id;
+		if (!accountId) return null;
+		return `charsheet-campaign-clone-commands:${accountId}`;
+	}
+
+	_getCloneCommandKey ({characterId, campaignId}) {
+		return JSON.stringify(["clone-cloud", characterId, campaignId]);
+	}
+
+	_getCloneCommandRegistry () {
+		const storageKey = this._getCloneCommandStorageKey();
+		if (!storageKey || !this._pendingCommandStorage) return null;
+		try {
+			const raw = this._pendingCommandStorage.getItem(storageKey);
+			if (!raw) return {};
+			const parsed = JSON.parse(raw);
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+			return parsed;
+		} catch {
+			throw new HubApiError({code: "CLONE_RECOVERY_INVALID", status: 0});
+		}
+	}
+
+	_persistCloneCommandRegistry (registry) {
+		const storageKey = this._getCloneCommandStorageKey();
+		if (!storageKey || !this._pendingCommandStorage) return;
+		this._pendingCommandStorage.setItem(storageKey, JSON.stringify(registry));
+	}
+
+	_getCloneCommand ({characterId, campaignId}) {
+		const registry = this._getCloneCommandRegistry();
+		if (!registry) throw new HubApiError({code: "CLONE_RECOVERY_INVALID", status: 0});
+		const key = this._getCloneCommandKey({characterId, campaignId});
+		if (!registry[key]) {
+			registry[key] = {
+				kind: "clone-cloud",
+				characterId,
+				campaignId,
+				idempotencyKey: crypto.randomUUID(),
+			};
+			this._persistCloneCommandRegistry(registry);
+		}
+		return registry[key];
+	}
+
+	_getCloneCommandRequest ({command, characterId, campaignId}) {
+		if (command.request == null) return null;
+		const request = command.request;
+		const isValid = request
+			&& typeof request === "object"
+			&& !Array.isArray(request)
+			&& request.characterId === characterId
+			&& request.campaignId === campaignId
+			&& request.idempotencyKey === command.idempotencyKey
+			&& (request.rulesVersionId === null || typeof request.rulesVersionId === "string");
+		const isRecoveryValid = Number.isSafeInteger(command.replayUntil)
+			&& command.replayUntil > 0
+			&& Array.isArray(command.baselineCloneIds)
+			&& command.baselineCloneIds.every(id => typeof id === "string" && id)
+			&& new Set(command.baselineCloneIds).size === command.baselineCloneIds.length;
+		if (!isValid || !isRecoveryValid) throw new HubApiError({code: "CLONE_RECOVERY_INVALID", status: 0});
+		return {
+			characterId,
+			campaignId,
+			rulesVersionId: request.rulesVersionId,
+			idempotencyKey: command.idempotencyKey,
+		};
+	}
+
+	_stageCloneCommandRequest ({command, characterId, campaignId, rulesVersionId, baselineCloneIds}) {
+		const request = {
+			characterId,
+			campaignId,
+			rulesVersionId,
+			idempotencyKey: command.idempotencyKey,
+		};
+		command.request = request;
+		command.replayUntil = this._getNow() + (this._commandReplayWindowMs ?? HUB_COMMAND_REPLAY_WINDOW_MS);
+		command.baselineCloneIds = [...baselineCloneIds];
+		const registry = this._getCloneCommandRegistry();
+		if (!registry) return request;
+		const key = this._getCloneCommandKey({characterId, campaignId});
+		const storedCommand = registry[key];
+		if (!storedCommand || storedCommand.idempotencyKey !== command.idempotencyKey) {
+			throw new Error("Saved cloud-copy recovery data is invalid.");
+		}
+		registry[key] = {
+			...storedCommand,
+			request,
+			replayUntil: command.replayUntil,
+			baselineCloneIds: command.baselineCloneIds,
+		};
+		this._persistCloneCommandRegistry(registry);
+		return request;
+	}
+
+	_getNow () {
+		return this._fnNow?.() ?? Date.now();
+	}
+
+	_markCloneCommandCommitted ({characterId, campaignId, character}) {
+		const registry = this._getCloneCommandRegistry();
+		if (!registry) return;
+		const key = this._getCloneCommandKey({characterId, campaignId});
+		const command = registry[key];
+		if (!command || !character?.id) throw new Error("The committed cloud copy could not be reconciled.");
+		registry[key] = {
+			...command,
+			committedCharacterId: character.id,
+		};
+		this._persistCloneCommandRegistry(registry);
+	}
+
+	_clearCloneCommand ({characterId, campaignId}) {
+		const registry = this._getCloneCommandRegistry();
+		if (!registry) {
+			if (
+				this._pendingCommand?.kind === "clone-cloud"
+				&& this._pendingCommand.characterId === characterId
+				&& this._pendingCommand.campaignId === campaignId
+			) this._pendingCommand = null;
+			return;
+		}
+		delete registry[this._getCloneCommandKey({characterId, campaignId})];
+		this._persistCloneCommandRegistry(registry);
+	}
+
 	async _pMoveCloudCharacter ({campaignId, isDetached}) {
 		const characterId = this._page._currentCharacterId;
+		const characterLoadGeneration = this._page._characterLoadGeneration;
 		const sourceCampaignId = this._currentCharacter?.campaignId || null;
+		const isCurrentCharacter = () => (
+			this._page._currentCharacterId === characterId
+			&& this._page._characterLoadGeneration === characterLoadGeneration
+		);
 		if (!characterId || !campaignId || this._isBusy) return;
-		if (!isDetached && (!sourceCampaignId || this._movePreview?.campaignId !== campaignId)) return;
+		const isCurrentMovePreview = this._movePreview
+			&& this._movePreview.characterId === characterId
+			&& this._movePreview.characterLoadGeneration === characterLoadGeneration
+			&& this._movePreview.sourceCampaignId === sourceCampaignId
+			&& this._movePreview.campaignId === campaignId;
+		if (!isDetached && (!sourceCampaignId || !isCurrentMovePreview)) return;
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();
 		let isRealtimeDetached = false;
 		try {
 			if (!await this._page._saveCurrentCharacter({isInteractiveConflict: false})) throw new Error("CLOUD_SAVE_FAILED");
-			await this._page._characterRepository.pReleaseLease?.({characterId});
-			this._page._detachHubRealtime?.();
-			isRealtimeDetached = true;
+			if (!isCurrentCharacter()) return;
 			const command = this._getPendingCommand({kind: isDetached ? "attach-cloud" : "move-cloud", characterId, campaignId});
 			const targetRulesVersionId = isDetached
 				? (await this._api.pGetCampaignCompatibility({campaignId})).rulesVersion?.id || null
 				: this._movePreview?.rulesVersionId || null;
+			if (!isCurrentCharacter()) return;
+			await this._page._characterRepository.pReleaseLease?.({characterId});
+			if (!isCurrentCharacter()) return;
+			this._page._detachHubRealtime?.();
+			isRealtimeDetached = true;
 			const result = await this._api.pMoveCharacter({
 				characterId,
 				campaignId,
 				rulesVersionId: targetRulesVersionId,
 				idempotencyKey: command.idempotencyKey,
 			});
+			if (!isCurrentCharacter()) return;
 			this._feedback = {
 				type: "success",
 				text: isDetached
@@ -630,6 +955,7 @@ export class CharacterSheetCampaign {
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
 		} catch (error) {
+			if (!isCurrentCharacter()) return;
 			const isDefiniteRejection = Number.isInteger(error?.status)
 				&& error.status >= 400
 				&& error.status < 500;

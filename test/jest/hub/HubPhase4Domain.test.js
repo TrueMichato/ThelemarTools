@@ -416,13 +416,30 @@ describe("Phase 4 actions, grants, and transfers", () => {
 		})).json().transfers.find(transfer => transfer.id === playerToPeer.json().transfer.id);
 		expect(dmViewAfterSourceAlias.sourceDisplaySnapshot).toEqual({version: 1, displayName: "A"});
 
+		const partialPolicy = await store.pSetProjectionPolicy({
+			accountId: a.session.account.id,
+			characterId: a.character.id,
+			policy: {
+				version: 1,
+				preset: "private",
+				overrides: {hp: {mode: "share"}},
+			},
+			expectedProjectionRevision: aliasPolicy.projectionRevision,
+			idempotencyKey: "share-a-hp-without-identity",
+		});
+		const invalidationsBeforePrivate = store.getDomainEvents()
+			.filter(event => event.type === "character.projection.invalidated");
 		const privatePolicy = await store.pSetProjectionPolicy({
 			accountId: a.session.account.id,
 			characterId: a.character.id,
 			policy: {version: 1, preset: "private", overrides: {}},
-			expectedProjectionRevision: aliasPolicy.projectionRevision,
+			expectedProjectionRevision: partialPolicy.projectionRevision,
 			idempotencyKey: "hide-a-after-transfer",
 		});
+		const invalidationsAfterPrivate = store.getDomainEvents()
+			.filter(event => event.type === "character.projection.invalidated");
+		expect(invalidationsAfterPrivate).toHaveLength(invalidationsBeforePrivate.length + 1);
+		expect(invalidationsAfterPrivate.at(-1).visibleAccountIds).toContain(b.session.account.id);
 		const targetViewAfterSourceHide = (await app.inject({
 			method: "GET",
 			url: `/api/campaigns/${campaign.id}/transfers`,

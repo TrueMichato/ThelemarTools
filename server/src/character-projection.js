@@ -728,6 +728,30 @@ export function canViewSharedCharacterEvent ({character, accountId, role}) {
 	return isPeerVisibleIdentity(character);
 }
 
+/**
+ * Whether a viewer can receive any field from this character's peer projection.
+ *
+ * Projection invalidations use this broader check instead of shared-event visibility:
+ * identity may be hidden while HP, conditions, or another field remains shared.
+ */
+export function canViewSharedCharacterProjection ({character, accountId, role}) {
+	if (["dm", "co_dm"].includes(role)) return true;
+	if (!character) return false;
+	if (character.ownerAccountId === accountId) return true;
+	try {
+		const policy = validateProjectionPolicy(character.projectionPolicy);
+		const presetFields = new Set(PROJECTION_PRESETS[policy.preset]);
+		return PROJECTION_FIELD_KEYS.some(field => {
+			const mode = policy.overrides?.[field]?.mode;
+			if (mode === "hide") return false;
+			if (["replace", "share"].includes(mode)) return true;
+			return presetFields.has(field);
+		});
+	} catch {
+		return false;
+	}
+}
+
 /** True when peers can see who this character is, and therefore may target it. */export function isPeerVisibleIdentity (character) {
 	try {
 		const policy = validateProjectionPolicy(character.projectionPolicy);

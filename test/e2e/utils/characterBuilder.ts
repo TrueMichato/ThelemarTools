@@ -2,6 +2,7 @@ import {Page} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 import {BuilderWizardPage} from "../pages/BuilderWizardPage";
 import {LevelUpPage} from "../pages/LevelUpPage";
+import {waitForToolsLoaded} from "./waitHelpers";
 
 /**
  * Character build presets for use across E2E tests.
@@ -1191,11 +1192,15 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 export async function createCharacterViaWizard (
 	page: Page,
 	preset: CharacterPreset = PRESET_FIGHTER,
+	{campaignId = null}: {campaignId?: string | null} = {},
 ): Promise<{charSheet: CharacterSheetPage; builder: BuilderWizardPage}> {
 	const charSheet = new CharacterSheetPage(page);
 	const builder = new BuilderWizardPage(page);
 
-	await charSheet.goto();
+	if (campaignId) {
+		await page.goto(`/charactersheet.html?hubCampaign=${encodeURIComponent(campaignId)}`);
+		await waitForToolsLoaded(page);
+	} else await charSheet.goto();
 
 	// CRITICAL: the wizard must run against an actual character record.
 	// Just switching to the builder tab does NOT create a character — the
@@ -1203,7 +1208,7 @@ export async function createCharacterViaWizard (
 	// "+" New Character button (or selects an existing one). Without an
 	// id, `_saveCurrentCharacter()` early-returns, so the wizard's final
 	// "Finish" never persists. The sheet then renders the in-memory state
-	// (so L1 assertions pass) but `#charsheet-name-select` remains on the
+	// (so L1 assertions pass) but `#charsheet-sel-character` remains on the
 	// "Create New Character" placeholder, breaking every later flow that
 	// depends on a loaded character (Level Up, Multiclass, etc.).
 	await page.locator("#charsheet-btn-new").click();
@@ -1333,10 +1338,6 @@ export async function createCharacterViaWizard (
 	// `_finishCharacter` calls `saveCharacter()` then switches to the
 	// overview tab — both async. Without this wait, downstream steps
 	// (Level Up, etc.) operate against a not-yet-loaded character.
-	// (Note: the builder doesn't refresh `#charsheet-sel-character` after
-	// save, so we don't assert on the dropdown here — only on the
-	// in-memory state, which is what every other module reads.)
-	//
 	// The class check matters: the name is set by the wizard's FIRST step, so
 	// a name-only guard also passes when the wizard silently stalled partway
 	// (e.g. blocked by an unfilled required picker) and never finished.
@@ -1350,7 +1351,6 @@ export async function createCharacterViaWizard (
 		preset.name,
 		{timeout: 10_000},
 	);
-
 	return {charSheet, builder};
 }
 

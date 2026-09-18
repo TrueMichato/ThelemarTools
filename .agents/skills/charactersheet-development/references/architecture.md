@@ -340,6 +340,17 @@ BEM-like naming: `.charsheet__element--modifier`
     skips spent/disabled rows, and delegates activation to its existing control.
     Synthetic combat resources use the same contract; the mobile module never
     branches on class, subclass, or feature names.
+15. **`dm_readonly` is checked at menu entry and action time.** The page capture
+    guard blocks desktop context-menu and long-press entry, but spell/mobile menus
+    are portaled to `document.body`, and `ContextUtil` callbacks may already have
+    been created under older authority. Those callbacks recheck
+    `isCurrentCharacterReadOnly()` immediately before acting. Applying read-only
+    mode cancels pending long-press, closes portaled spell/mobile/ability/attack
+    menus, and then disables late-rendered controls. Manual pointer flows which
+    bypass HTML drag events, such as sticky-note movement, capture character ID,
+    load generation, and access at start; they cancel and restore their visible
+    position if any part changes before completion. Export and Print remain
+    explicit allowed actions.
 
 Form controls on mobile take a 16px **floor**
 (`max(16px, calc(var(--cs-text-sm) * var(--cs-text-scale)))`) rather than a flat
@@ -428,9 +439,11 @@ pad by that value rather than re-stacking shared site chrome.
 
 ## Modals
 
-**Never call `UiUtil.pGetShowModal` from character-sheet code.** Use
-`CharacterSheetModal.pGetShow` (`js/charactersheet/charactersheet-modal.js`) — identical signature
-and return shape, so migrating a call site is a rename and nothing else.
+**Never call `UiUtil.pGetShowModal` or `UiUtil.getShowModal` from character-sheet code.** Use
+`CharacterSheetModal.pGetShow` or synchronous `CharacterSheetModal.getShow`
+(`js/charactersheet/charactersheet-modal.js`) — identical signatures and return shapes, so migrating a call
+site is a rename and nothing else. `InputUiUtil` automatically routes its dialogs through the async wrapper
+while a Character Sheet is bound.
 
 The wrapper adds what no individual dialog should have to remember:
 
@@ -442,25 +455,61 @@ The wrapper adds what no individual dialog should have to remember:
 | A Tab focus trap scoped to `eleModal` | |
 | Focus restored to the element that opened the modal | Without it focus lands on `<body>` and keyboard users restart from the top of the page |
 | `.cs-modal` on `eleModal` | The styling hook that gives modals the sheet's font and muted-text token — modals are portalled to `document.body`, outside `.charsheet-page` |
+| Character ID/load-generation/access ownership | A modal created for one sheet scope must not survive a selector switch, concealment, move/archive, or authority transition and act on the replacement state |
 
 Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the raw `UiUtil` call.
 
-### Four things about it are load-bearing
+### Five things about it are load-bearing
 
 1. **`UiUtil.pGetShowModal` is resolved at call time, never captured at module load.**
    `CharacterSheetSpawnPrompts` monkey-patches that method to auto-answer dialogs during `?spawn=`
    builds and E2E runs; a captured reference silently bypasses the patch and hangs the harness.
 2. **`eleModal` may be absent.** The spawn harness's fallback stub returns only `eleModalInner`,
    `doClose`, `pGetResolved` and `doAutoResize`, so every enhancement is guarded by an early return.
-3. **A caller's `cbClose` is composed with, never replaced** — dozens of sites use it to persist
-   state. Focus restore runs *after* the caller's callback, so a follow-up modal's own trigger
-   capture wins.
+3. **A caller's `cbClose` is composed with, never replaced on an ordinary close** — dozens of
+   sites use it to persist state. Focus restore runs *after* the caller's callback, so a follow-up
+   modal's own trigger capture wins. Character-scope teardown is the deliberate exception: stale
+   close callbacks and focus restoration are suppressed.
 4. **`.cs-modal` is not `.cs-adaptive-panel`.** `container-type: inline-size` implies inline-size
    containment, and most sheet modals size to their content, so containerising the shell collapses
    it to zero width. A content root **inside** an `isWidth100` modal may opt in individually.
+5. **Every body portal is character-scoped transient UI.** Prefer the UiUtil wrappers. A manually
+   rendered overlay or menu must call `CharacterSheetModal.registerCharacterScopePortal` with its
+   root element and a synchronous cleanup callback for document/window listeners, body classes, and
+   module references. Persistent body-mounted infrastructure must instead expose
+   `resetCharacterScopeUi()` and be called from `CharacterSheetPage._closeCharacterScopedTransientUi`.
+   Scope teardown removes portal DOM synchronously and capture-blocks retained controls; async
+   continuations and mutating handlers must also final-check the captured character ID, load
+   generation, and owner authority after every await and immediately before changing state.
+   Wrapped `pGetResolved` completions become cancellation when their originating scope changed.
+   An authoritative same-character document adoption does not make ordinary modals or portals inert:
+   their interaction ownership ignores document generation, while awaited completions and explicit
+   staged-workflow scope checks remain document-generation fenced. Portals that own a staged
+   whole-document snapshot opt into `isCloseOnDocumentInvalidation` and are removed immediately.
+   The custom-ability editor is one such snapshot owner: it preserves fields such as limited-use
+   counters while open, so authoritative adoption must close it before stale form data can be saved.
+6. **Awaited caller-owned modal promises must settle on scope teardown.** Pass a cancellation-only
+   `cbCharacterScopeTeardown`; do not reuse a mutating ordinary `cbClose`. Create the outer resolver
+   before opening the modal, or explicitly handle teardown that occurs while asynchronous modal
+   creation is still completing. Animated dice use the same rule: scope teardown returns `false`,
+   clears timers/listeners immediately, and every awaited result/mutation continuation stops on it.
 
-`CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard and
-the `cbClose` composition.
+When replacing a loaded Hub character, immediately close unsafe portals and cancel pending
+character-scoped continuations, but retain the current character's session roll history, mobile
+status strip, realtime subscription, and campaign controls until the target projection has fetched
+successfully under the current load-generation fence. Only then run the destructive display-scope
+reset before adopting the replacement. A target-specific 404/forbidden response restores the
+selector to the still-authorized character; proven session/campaign loss conceals it.
+Post-load campaign-control refresh is part of that authority proof: signed-out or terminal
+campaign-access results propagate instead of becoming a warning, synchronously end the adopted Hub
+character scope, and prevent realtime attachment. Character selection, New, Duplicate, import, and
+programmatic create flows capture a save fence before their first await and recheck it after every
+save/create/roster await before changing state, selection, navigation, or rendering; a remote create
+may remain committed after supersession, but it must not replace the newer local selection.
+
+`CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard,
+ordinary `cbClose` composition, synchronous modal/portal tracking, generic input cancellation, late
+modal creation, cleanup, stale callback suppression, and retained control fencing.
 
 ### Data Validation Patterns
 
@@ -479,6 +528,31 @@ the `cbClose` composition.
   and a non-positive stored `hp.max` (`_migrateHpMax`, which must run last so every input to
   `_calculateMaxHp()` is already restored)
 
+### Transaction Staging
+
+Awaited character mutations such as Quick Build and spell casting run against
+`CharacterSheetState.createTransactionClone()`. The clone is constructor-free, so it does not replace
+`globalThis.__csState`; it deep-copies mutable character data plus campaign/carry authority context while
+sharing read-only spell, item, and feature catalogs. Staged workflows must use detached module/page proxies,
+never rewire the live page or module across an await, and must suppress saves, roll logging, and rendering until
+the captured owner character ID/load generation/document generation/access scope is still current. Every
+successful authoritative same-character adoption advances the document generation, so a staged workflow that
+overlapped a realtime effect, resync, or canonical reconciliation cancels rather than replacing newer live truth
+with its older whole-document snapshot. Advancing that generation also tears down character-scoped modals and
+portals that opt into document-invalidation teardown immediately; invalidating a guarded full-screen workflow
+such as Quick Build without removing it would strand a dead overlay, while unrelated save-owned UI must not be
+destroyed by its own canonical response.
+Only one staged cast transaction may run at a time, so sibling casts cannot commit independent snapshots from the
+same starting document. Related costs must be applied to
+the staged state before its JSON is captured, so one adopted snapshot contains the complete mutation. Once that
+snapshot is adopted, deferred callback surfaces are rebound to the live state/page and buffered rolls plus the
+single live render are replayed synchronously before awaiting network persistence; a scope change during that
+save only suppresses later source UI. Cancellation before adoption discards the clone. Non-serialized combat
+transients are not shallow-cloned or inferred from state JSON: weapon-channel casts require a prepare plus
+synchronous commit contract, prepare their weapon choice while staged, then roll and arm the rider on the live
+combat module immediately before state adoption. A legacy async one-step channel method must not be invoked from
+the staged transaction because it can resume after the live combat references have been restored.
+
 ## Live Campaign Effects (ADR 0012)
 
 An applied server operation reaches an open campaign sheet through
@@ -496,6 +570,11 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   value equality, so advancing only one side produces a spurious conflict on identical values.
 - Adoption reuses the existing `loadFromJson` → `_reconcileClassFeatures()` → `_renderCharacter()` path.
   Rendering runs after the repository commits, so a paint failure never rolls back coherent state.
+- DM read-only invalidations use the same single-flight/trailing shape as owner reconciliation: one active
+  authorization-scoped `pGet`, one replaceable pending demand, and no generation bump merely for queuing demand.
+  The active response may apply under the captured character/campaign/role/load/realtime fences, then the trailing
+  read obtains the newest canonical projection. Transient failure leaves refresh-required latched for a later live
+  signal; terminal projection loss runs the ordinary access teardown.
 - Coverage is tracked per document track, not by one accepted revision, because `pGet` can store fresh canonical
   truth containing the operation while returning an older recovery draft as live state.
 - An unprovable delivery blocks autosave and schedules a serialized no-reload recovery

@@ -281,6 +281,13 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		expect(event.payload.entry.item).not.toHaveProperty("entries");
 		expect(event.payload.entry.item).not.toHaveProperty("_baseSource");
 		expect(event.payload.sourceKind).toBe("catalog");
+		expect(event.payload.actorCommandId).toBe(`${prefix}-rich-award`);
+		const dmGrant = (await store.pListVisibleEvents({accountId: dm.id, campaignId: campaign.id}))
+			.find(it => it.type === "item.granted" && it.payload?.awardId === result.awardId);
+		const playerGrant = (await store.pListVisibleEvents({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(it => it.type === "item.granted" && it.payload?.awardId === result.awardId);
+		expect(dmGrant.payload.actorCommandId).toBe(`${prefix}-rich-award`);
+		expect(playerGrant.payload).not.toHaveProperty("actorCommandId");
 		const audit = (await pool.query(`
 			SELECT details
 			FROM hub.audit_entries
@@ -654,13 +661,93 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 			.find(transfer => transfer.id === directPass.transfer.id);
 		expect(dmViewAfterSourceAlias.sourceDisplaySnapshot).toEqual({version: 1, displayName: "Source"});
 
+		const partialPolicy = await store.pSetProjectionPolicy({
+			accountId: sourceOwner.id,
+			characterId: sourceCharacter.id,
+			policy: {
+				version: 1,
+				preset: "private",
+				overrides: {hp: {mode: "share"}},
+			},
+			expectedProjectionRevision: aliasPolicy.projectionRevision,
+			idempotencyKey: `${prefix}-share-source-hp-without-identity`,
+		});
+		const invalidationsBeforePrivate = (await store.pListVisibleEventPage({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			limit: 500,
+		})).events.filter(
+			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
+		);
+		const sourceForPatch = await pReadCharacter(sourceOwner.id, sourceCharacter.id);
+		const sourceSession = await store.pCreateSession({
+			accountId: sourceOwner.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const sourceLease = await store.pAcquireCharacterLease({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			characterId: sourceCharacter.id,
+		});
+		await store.pPatchCharacter({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			characterId: sourceCharacter.id,
+			baseRevision: sourceForPatch.revision,
+			leaseEpoch: sourceLease.epoch,
+			patches: [{op: "add", path: "/hp", value: {current: 7, max: 12}}],
+			idempotencyKey: `${prefix}-shared-hp-with-hidden-identity`,
+		});
+		await store.pReleaseCharacterLease({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			characterId: sourceCharacter.id,
+			leaseEpoch: sourceLease.epoch,
+			expiresAt: sourceLease.expiresAt.toISOString(),
+		});
+		const invalidationsAfterSharedHp = (await store.pListVisibleEventPage({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			limit: 500,
+		})).events.filter(
+			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
+		);
+		expect(invalidationsAfterSharedHp).toHaveLength(invalidationsBeforePrivate.length + 1);
+		expect(invalidationsAfterSharedHp.at(-1)).toMatchObject({
+			actorAccountId: null,
+			aggregateType: "campaign",
+			payload: {},
+		});
+		const targetSharedHp = await store.pGetCharacter({accountId: targetOwner.id, characterId: sourceCharacter.id});
+		expect(targetSharedHp.kind).toBe("peer_profile");
+		expect(targetSharedHp.data.identity).toBeUndefined();
+		expect(targetSharedHp.data.hp.current).toBe(7);
 		const privatePolicy = await store.pSetProjectionPolicy({
 			accountId: sourceOwner.id,
 			characterId: sourceCharacter.id,
 			policy: {version: 1, preset: "private", overrides: {}},
-			expectedProjectionRevision: aliasPolicy.projectionRevision,
+			expectedProjectionRevision: partialPolicy.projectionRevision,
 			idempotencyKey: `${prefix}-hide-source-after-transfer`,
 		});
+		const targetInvalidations = (await store.pListVisibleEventPage({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			limit: 500,
+		})).events.filter(
+			event => event.aggregateId === campaign.id && event.type === "character.projection.invalidated",
+		);
+		expect(targetInvalidations).toHaveLength(invalidationsAfterSharedHp.length + 1);
+		expect(targetInvalidations.at(-1)).toMatchObject({
+			actorAccountId: null,
+			aggregateId: campaign.id,
+			aggregateType: "campaign",
+			payload: {},
+			visibleAccountIds: null,
+		});
+		expect(JSON.stringify(targetInvalidations.at(-1))).not.toContain(sourceOwner.id);
+		expect(JSON.stringify(targetInvalidations.at(-1))).not.toContain(sourceCharacter.id);
+		expect(JSON.stringify(targetInvalidations.at(-1))).not.toContain("Source");
 		const targetViewAfterSourceHide = (await store.pListTransfers({accountId: targetOwner.id, campaignId: campaign.id}))
 			.find(transfer => transfer.id === directPass.transfer.id);
 		expect(targetViewAfterSourceHide).not.toHaveProperty("sourceDisplaySnapshot");

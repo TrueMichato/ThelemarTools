@@ -71,7 +71,7 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(provenanceWriter).toContain("migration: HUB_REQUIRED_MIGRATION_VERSION");
 		expect(provenanceWriter).not.toMatch(/protocol: "\d+"/);
 		expect(provenanceWriter).not.toMatch(/migration: "\d+"/);
-		expect(HUB_PROTOCOL_VERSION).toBe("4");
+		expect(HUB_PROTOCOL_VERSION).toBe("5");
 		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0007");
 	});
 

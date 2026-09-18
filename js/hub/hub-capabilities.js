@@ -1,3 +1,4 @@
+export const HUB_PROTOCOL_VERSION = "5";
 export const HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT = "campaign.active_context.v1";
 export const HUB_CAPABILITY_CAMPAIGN_RULES_POLICY = "campaign.rules_policy.v1";
 
