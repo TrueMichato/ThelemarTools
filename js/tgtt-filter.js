@@ -669,7 +669,7 @@ class TgttFilterModalUI {
 			return;
 		}
 
-		const modalScroller = document.querySelector(".ve-ui-modal__scroller");
+		const modalScroller = this._getSpellFilterModalScroller();
 		if (!modalScroller) return;
 
 		// Create filter sections
@@ -699,6 +699,17 @@ class TgttFilterModalUI {
 
 		this._updatePillStates();
 		this._injected = true;
+	}
+
+	_getSpellFilterModalScroller () {
+		return [...document.querySelectorAll(".ve-ui-modal__scroller")]
+			.findLast(modalScroller => this.constructor.isSpellFilterModalTitle(
+				modalScroller.parentElement?.querySelector("h4")?.textContent?.trim() || "",
+			));
+	}
+
+	static isSpellFilterModalTitle (title) {
+		return /^Filter\/Search for Spells?$/.test(title);
 	}
 
 	/**
