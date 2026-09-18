@@ -278,6 +278,46 @@ describe("CharacterSheetQuickBuild _applyQuickBuild", () => {
 		}
 	});
 
+	test("same-character authoritative adoption cancels a stale staged Quick Build", async () => {
+		const state = new CharacterSheetState();
+		state.setName("Before Quick Build");
+		const page = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_characterDocumentGeneration: 0,
+			_currentCharacterAccess: "owner",
+			_state: state,
+			_spells: null,
+			saveCharacter: jest.fn(async () => {}),
+			renderCharacter: jest.fn(),
+			_updateTabVisibility: jest.fn(),
+		};
+		let releaseChoice;
+		const choiceGate = new Promise(resolve => releaseChoice = resolve);
+		const qb = Object.create(CharacterSheetQuickBuild.prototype);
+		Object.assign(qb, {
+			_state: state,
+			_page: page,
+			_applyQuickBuildInner: jest.fn(async function () {
+				this._state.setName("Staged Quick Build");
+				await choiceGate;
+				return true;
+			}),
+		});
+		const characterScope = CharacterSheetModal.getCharacterScopeSnapshot(page);
+
+		const pending = qb._pApplyQuickBuildStaged(characterScope);
+		await Promise.resolve();
+		state.setName("Authoritative Realtime Effect");
+		page._characterDocumentGeneration++;
+		releaseChoice();
+
+		await expect(pending).resolves.toBe(false);
+		expect(state.getName()).toBe("Authoritative Realtime Effect");
+		expect(page.saveCharacter).not.toHaveBeenCalled();
+		expect(page.renderCharacter).not.toHaveBeenCalled();
+	});
+
 	test("character-scope teardown cancels a pending choice and clears the apply lock", async () => {
 		const originalUpdateRacialSpells = CharacterSheetClassUtils.updateRacialSpells;
 		const originalUiUtil = globalThis.UiUtil;

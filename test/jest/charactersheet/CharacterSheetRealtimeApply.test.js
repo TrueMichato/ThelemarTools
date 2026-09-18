@@ -1041,4 +1041,23 @@ describe("Applicable maximum through live reconciliation", () => {
 		expect(api.state.patches.filter(patch => patch.path === "/hp/current")).toEqual([]);
 		expect(state.getCurrentHp()).toBe(60);
 	});
+
+	it("advances the character document generation after authoritative live adoption", () => {
+		const state = new CharacterSheetState();
+		state.setName("Before Adoption");
+		const host = {
+			_state: state,
+			_currentCharacterId: "character-1",
+			_characterDocumentGeneration: 4,
+			_reconcileClassFeatures: jest.fn(),
+		};
+
+		CharacterSheetPage.prototype._adoptHubLiveCharacterData.call(host, {
+			...state.toJson(),
+			name: "After Adoption",
+		});
+
+		expect(state.getName()).toBe("After Adoption");
+		expect(host._characterDocumentGeneration).toBe(5);
+	});
 });

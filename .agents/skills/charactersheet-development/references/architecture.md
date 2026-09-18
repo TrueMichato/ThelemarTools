@@ -529,7 +529,10 @@ Awaited character mutations such as Quick Build and spell casting run against
 `globalThis.__csState`; it deep-copies mutable character data plus campaign/carry authority context while
 sharing read-only spell, item, and feature catalogs. Staged workflows must use detached module/page proxies,
 never rewire the live page or module across an await, and must suppress saves, roll logging, and rendering until
-the captured owner character ID/load generation/access scope is still current. Related costs must be applied to
+the captured owner character ID/load generation/document generation/access scope is still current. Every
+successful authoritative same-character adoption advances the document generation, so a staged workflow that
+overlapped a realtime effect, resync, or canonical reconciliation cancels rather than replacing newer live truth
+with its older whole-document snapshot. Related costs must be applied to
 the staged state before its JSON is captured, so one adopted snapshot contains the complete mutation. Once that
 snapshot is adopted, deferred callback surfaces are rebound to the live state/page and buffered rolls plus the
 single live render are replayed synchronously before awaiting network persistence; a scope change during that

@@ -147,11 +147,13 @@ class CharacterSheetSpells {
 		const characterScope = {
 			characterId: livePage._currentCharacterId ?? null,
 			loadGeneration: livePage._characterLoadGeneration ?? 0,
+			documentGeneration: livePage._characterDocumentGeneration ?? 0,
 			accessMode: livePage._currentCharacterAccess ?? null,
 		};
 		const isCharacterScopeCurrent = () => (
 			characterScope.characterId === (livePage._currentCharacterId ?? null)
 			&& characterScope.loadGeneration === (livePage._characterLoadGeneration ?? 0)
+			&& characterScope.documentGeneration === (livePage._characterDocumentGeneration ?? 0)
 			&& characterScope.accessMode === (livePage._currentCharacterAccess ?? null)
 		);
 		const stagedState = liveState.createTransactionClone();

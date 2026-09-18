@@ -324,6 +324,33 @@ describe("Wizard Signature Spells", () => {
 		expect(spells._page._combat.renderCombatStates).not.toHaveBeenCalled();
 	});
 
+	test("same-character authoritative adoption cancels a stale staged cast", async () => {
+		const state = makeState();
+		state.setName("Before Cast");
+		const spells = makeSpellsModule(state, []);
+		let releaseChoice;
+		const choiceGate = new Promise(resolve => releaseChoice = resolve);
+
+		const transaction = spells._pRunCastTransaction({
+			fn: async stagedModule => {
+				stagedModule._state.setName("Staged Cast");
+				await stagedModule._page.saveCharacter({activity: {type: "spell.cast"}});
+				await choiceGate;
+				return true;
+			},
+		});
+		await Promise.resolve();
+
+		state.setName("Authoritative Realtime Effect");
+		spells._page._characterDocumentGeneration = 1;
+		releaseChoice();
+
+		await expect(transaction).resolves.toBe(false);
+		expect(state.getName()).toBe("Authoritative Realtime Effect");
+		expect(spells._page.saveCharacter).not.toHaveBeenCalled();
+		expect(spells.renderSlots).not.toHaveBeenCalled();
+	});
+
 	test("private-only staged saves are subsumed by the item caller's final save", async () => {
 		const state = makeState();
 		const spells = makeSpellsModule(state, []);

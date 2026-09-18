@@ -125,6 +125,7 @@ class CharacterSheetPage {
 		this._fnCreateRealtimeCoordinator = fnCreateRealtimeCoordinator;
 		this._partyInventory = null;
 		this._characterLoadGeneration = 0;
+		this._characterDocumentGeneration = 0;
 		this._hubRealtimeGeneration = 0;
 		this._hubReadOnlyRefreshGeneration = 0;
 		this._hubReadOnlyRefreshRequest = null;
@@ -318,6 +319,7 @@ class CharacterSheetPage {
 		return {
 			characterId: this._currentCharacterId,
 			loadGeneration: this._characterLoadGeneration,
+			documentGeneration: this._characterDocumentGeneration ?? 0,
 			accessMode: this._currentCharacterAccess,
 		};
 	}
@@ -326,6 +328,7 @@ class CharacterSheetPage {
 		if (!snapshot) return false;
 		return snapshot.characterId === this._currentCharacterId
 			&& snapshot.loadGeneration === this._characterLoadGeneration
+			&& (snapshot.documentGeneration ?? 0) === (this._characterDocumentGeneration ?? 0)
 			&& snapshot.accessMode === this._currentCharacterAccess
 			&& (!isRequireOwner || !this.isCurrentCharacterReadOnly());
 	}
@@ -549,6 +552,7 @@ class CharacterSheetPage {
 			this._state.loadFromJson(character);
 			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 			this._reconcileClassFeatures();
+			this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
 			this._renderCharacter();
 			if (!this._hubReadOnlyRefreshRequest) this._isHubReadOnlyRefreshRequired = false;
 			return true;
@@ -1007,6 +1011,7 @@ class CharacterSheetPage {
 		try {
 			this._state.loadFromJson({...liveNext, id: this._currentCharacterId});
 			this._reconcileClassFeatures();
+			this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
 		} catch (error) {
 			try {
 				this._state.loadFromJson(liveBefore);
@@ -1340,6 +1345,7 @@ class CharacterSheetPage {
 				isIdentityChanged ||= identity.isChanged;
 				this._state.loadFromJson(resolved);
 				this._reconcileClassFeatures();
+				this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
 				this._renderCharacter();
 				isResolutionAdopted = true;
 				return true;
@@ -1429,6 +1435,7 @@ class CharacterSheetPage {
 			isIdentityChanged ||= identity.isChanged;
 			this._state.loadFromJson(resolved);
 			this._reconcileClassFeatures();
+			this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
 			this._renderCharacter();
 			isResolutionAdopted = true;
 			return true;
@@ -1650,6 +1657,7 @@ class CharacterSheetPage {
 						this._state.loadFromJson(data);
 						this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 						this._reconcileClassFeatures();
+						this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
 						this._renderCharacter();
 					},
 					fnSaveCharacter: () => this._saveCurrentCharacter({isInteractiveConflict: false}),
@@ -5670,6 +5678,7 @@ class CharacterSheetPage {
 					const livePatches = getJsonPatchesWithDocumentValues({patches: rebased.patches, document: live});
 					this._state.loadFromJson({...applyJsonPatch(canonical, livePatches), id: persisted.id});
 					this._reconcileClassFeatures();
+					this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
 					this._renderCharacter();
 				}
 			}
@@ -5727,6 +5736,7 @@ class CharacterSheetPage {
 				if (choice) return this._saveCurrentCharacter({activity: null});
 				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
+				this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
 				this._renderCharacter();
 				this._updateSaveIndicator("saved");
 				return true;

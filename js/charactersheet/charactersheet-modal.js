@@ -227,6 +227,7 @@ class CharacterSheetModal {
 		return {
 			characterId: sheet._currentCharacterId ?? null,
 			loadGeneration: sheet._characterLoadGeneration ?? 0,
+			documentGeneration: sheet._characterDocumentGeneration ?? 0,
 			accessMode: sheet._currentCharacterAccess ?? null,
 		};
 	}
@@ -242,6 +243,7 @@ class CharacterSheetModal {
 		}
 		const isCurrent = snapshot.characterId === (sheet._currentCharacterId ?? null)
 			&& snapshot.loadGeneration === (sheet._characterLoadGeneration ?? 0)
+			&& (snapshot.documentGeneration ?? 0) === (sheet._characterDocumentGeneration ?? 0)
 			&& snapshot.accessMode === (sheet._currentCharacterAccess ?? null);
 		return isCurrent && (!isRequireOwner || snapshot.accessMode == null || snapshot.accessMode === "owner");
 	}
