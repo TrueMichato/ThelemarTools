@@ -2164,15 +2164,29 @@ export class HubCampaignPage {
 			await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
 			await expect(this.page.locator("#campaign-transfer-quantity")).toBeDisabled();
 			await expect(this.page.locator("#campaign-transfer-quantity")).toHaveValue(`${quantity}`);
+			const isRetryProposalObserved = () => {
+				if (proposalAttempts > 2) {
+					throw new Error(`Transfer retry issued duplicate proposals (proposals=${proposalAttempts}).`);
+				}
+				return proposalAttempts === 2;
+			};
+			const pWaitForRetryProposalOrReplacement = async () => {
+				await expect.poll(
+					async () => isRetryProposalObserved() || await retry.isEnabled().catch(() => false),
+					{timeout: 5_000},
+				).toBe(true);
+				return isRetryProposalObserved();
+			};
 			for (let attempt = 1; attempt <= 2; attempt++) {
-				if (attempt === 2 && proposalAttempts >= 2) break;
-				await expect(retry).toBeEnabled();
-				if (attempt === 2 && proposalAttempts >= 2) break;
+				if (attempt === 2 && isRetryProposalObserved()) break;
+				if (await pWaitForRetryProposalOrReplacement()) break;
+				if (attempt === 2 && isRetryProposalObserved()) break;
 				try {
 					await retry.click({timeout: 5_000});
 				} catch (error) {
+					if (isRetryProposalObserved()) break;
+					if (attempt === 1 && await pWaitForRetryProposalOrReplacement()) break;
 					const isEnabled = await retry.isEnabled().catch(() => false);
-					if (proposalAttempts >= 2) break;
 					if (attempt === 1 && isEnabled) continue;
 					throw new Error(
 						`Transfer retry click did not issue a second proposal `
@@ -2181,11 +2195,12 @@ export class HubCampaignPage {
 					);
 				}
 				try {
-					await expect.poll(() => proposalAttempts, {timeout: 5_000}).toBeGreaterThanOrEqual(2);
+					await expect.poll(isRetryProposalObserved, {timeout: 5_000}).toBe(true);
 					break;
 				} catch (error) {
+					if (isRetryProposalObserved()) break;
+					if (attempt === 1 && await pWaitForRetryProposalOrReplacement()) break;
 					const isEnabled = await retry.isEnabled().catch(() => false);
-					if (proposalAttempts >= 2) break;
 					if (attempt === 1 && isEnabled) continue;
 					throw new Error(
 						`Transfer retry did not issue a second proposal `
@@ -2194,10 +2209,10 @@ export class HubCampaignPage {
 					);
 				}
 			}
-			await expect.poll(() => proposalAttempts, {timeout: 15_000}).toBeGreaterThanOrEqual(2);
+			await expect.poll(isRetryProposalObserved, {timeout: 15_000}).toBe(true);
 			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
 			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
-			expect(proposalAttempts).toBeGreaterThanOrEqual(2);
+			expect(proposalAttempts).toBe(2);
 			expect(new Set(proposalBodies)).toEqual(new Set([proposalBodies[0]]));
 			expect(new Set(proposalKeys)).toEqual(new Set([proposalKeys[0]]));
 			expect(resolutionCount).toBe(0);
