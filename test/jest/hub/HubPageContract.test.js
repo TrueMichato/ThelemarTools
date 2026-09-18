@@ -600,6 +600,8 @@ describe("campaign hub pages", () => {
 		expect(source).toMatch(/itemAward\.setPending\(isAwardRetryRequired, \{isRetry: isAwardRetryRequired\}\)/);
 		expect(source).toMatch(/if \(!result\) return;\s+itemAward\.setPending\(true\);\s+delete form\._hubAwardMutationDraft/);
 		expect(source).toMatch(/setTargets \(nextTargets\) \{\s+if \(isRetryPending\) return;/);
+		expect(source).toContain("form._hubItemAwardRetryPending = isRetryPending");
+		expect(source).toMatch(/isItemAwardRetryPending[\s\S]*\? \[\] : \["campaign-item-targets", "campaign-item-preview-list"\]/);
 		expect(source).toContain("form._hubProjectionControlRestores.add(restorePendingControlStates)");
 		expect(source).toMatch(/delete form\._hubProjectionControlRestores;\s+for \(const fnRestore of deferredControlRestores\) fnRestore\(\)/);
 		expect(source).toMatch(/const deferAwardCompletionUi = \(\{isApplySuccessUi = false\} = \{\}\) => \{[\s\S]*if \(isApplySuccessUi\) applyAwardSuccessUi\(\);[\s\S]*itemAward\.focusPrimary\(\)/);

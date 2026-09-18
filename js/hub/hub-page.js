@@ -907,6 +907,7 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 		setPending (isPendingNxt, {isRetry = false} = {}) {
 			isPending = !!isPendingNxt;
 			isRetryPending = isPending && isRetry;
+			form._hubItemAwardRetryPending = isRetryPending;
 			submit.textContent = isRetry ? "Retry previous award" : submitDefaultText;
 			if (isPending) {
 				applyPendingControlState();
@@ -1542,12 +1543,12 @@ async function pInitCampaign ({session}) {
 			};
 		}
 		concealProjectionFormControls();
+		const isItemAwardRetryPending = !!document.getElementById("campaign-item-form")?._hubItemAwardRetryPending;
 		for (const id of [
 			"campaign-party-roster",
 			"campaign-pending-actions",
 			"campaign-pending-transfers",
-			"campaign-item-targets",
-			"campaign-item-preview-list",
+			...(isItemAwardRetryPending ? [] : ["campaign-item-targets", "campaign-item-preview-list"]),
 		]) document.getElementById(id)?.replaceChildren();
 		renderTransferInboxRecovery();
 		for (const id of [
