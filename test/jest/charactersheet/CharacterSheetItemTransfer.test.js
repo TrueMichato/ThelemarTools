@@ -275,6 +275,38 @@ describe("CharacterSheetItemTransfer", () => {
 		})).rejects.toThrow("malformed");
 	});
 
+	it("leaves acknowledgement pending when ownership changes during queue access", async () => {
+		const storage = getStorage([{id: "char-1", name: "Aelar"}]);
+		storage.data.set(CharacterSheetItemTransfer.STORAGE_KEY, [{id: "transfer-1", characterId: "char-1"}]);
+		const originalPGet = storage.pGet.bind(storage);
+		let releaseRead;
+		let markReadStarted;
+		const readStarted = new Promise(resolve => { markReadStarted = resolve; });
+		const readGate = new Promise(resolve => { releaseRead = resolve; });
+		storage.pGet = async key => {
+			if (key === CharacterSheetItemTransfer.STORAGE_KEY) {
+				markReadStarted();
+				await readGate;
+			}
+			return originalPGet(key);
+		};
+		let isOwner = true;
+
+		const acknowledgement = CharacterSheetItemTransfer.pAcknowledge({
+			storage,
+			transferIds: ["transfer-1"],
+			fnIsValid: () => isOwner,
+		});
+		await readStarted;
+		isOwner = false;
+		releaseRead();
+
+		await expect(acknowledgement).resolves.toBe(false);
+		expect(await originalPGet(CharacterSheetItemTransfer.STORAGE_KEY)).toEqual([
+			{id: "transfer-1", characterId: "char-1"},
+		]);
+	});
+
 	it("formats character labels with multiclass totals", () => {
 		expect(CharacterSheetItemTransfer.getCharacterLabel({
 			name: "Bree",

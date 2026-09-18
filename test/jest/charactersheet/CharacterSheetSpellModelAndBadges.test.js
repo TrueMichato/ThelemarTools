@@ -161,6 +161,172 @@ describe("#4 state classification (_getClassSpellcastingInfo / getSpellcastingIn
 	});
 });
 
+describe("duplicate spell ownership attribution", () => {
+	let state;
+
+	beforeEach(() => {
+		state = new CharacterSheetState();
+		state.addClass({
+			name: "Cleric",
+			source: "PHB",
+			level: 3,
+			casterProgression: "full",
+			spellcastingAbility: "wis",
+			preparedSpells: "<$level$> + <$wis_mod$>",
+		});
+		state.addClass({
+			name: "Sorcerer",
+			source: "PHB",
+			level: 3,
+			casterProgression: "full",
+			spellcastingAbility: "cha",
+			spellsKnownProgression: [2, 3, 4],
+			subclass: {name: "Divine Soul", shortName: "Divine Soul", source: "XGE"},
+		});
+	});
+
+	test("preserves Cleric ownership and casting ability when Charisma-granted duplicates arrive", () => {
+		state.addSpell({
+			name: "Bless",
+			source: "PHB",
+			level: 1,
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Cleric",
+		}, true);
+		state.addSpell({
+			name: "Bless",
+			source: "PHB",
+			level: 1,
+			sourceFeature: "Divine Soul Spells",
+			sourceClass: "Sorcerer",
+			sourceSubclass: "Divine Soul",
+			spellcastingAbility: "cha",
+			alwaysPrepared: true,
+		}, true);
+		state.addCantrip({
+			name: "Guidance",
+			source: "PHB",
+			level: 0,
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Cleric",
+		});
+		state.addCantrip({
+			name: "Guidance",
+			source: "PHB",
+			level: 0,
+			sourceFeature: "Divine Soul Spells",
+			sourceClass: "Sorcerer",
+			sourceSubclass: "Divine Soul",
+			spellcastingAbility: "cha",
+		});
+
+		const [bless] = state.getSpellsKnown().filter(spell => spell.name === "Bless" && spell.source === "PHB");
+		expect(bless).toMatchObject({
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Cleric",
+			sourceSubclass: null,
+			spellcastingAbility: null,
+			alwaysPrepared: true,
+			prepared: true,
+		});
+		expect(state.getSpellcastingCardForSpell(bless)?.className).toBe("Cleric");
+		expect(state.getSpellcastingAbilityForSpell(bless)).toBe("wis");
+
+		const [guidance] = state.getCantripsKnown().filter(spell => spell.name === "Guidance" && spell.source === "PHB");
+		expect(guidance).toMatchObject({
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Cleric",
+			sourceSubclass: null,
+			spellcastingAbility: null,
+		});
+		expect(state.getSpellcastingCardForSpell(guidance)?.className).toBe("Cleric");
+		expect(state.getSpellcastingAbilityForSpell(guidance)).toBe("wis");
+	});
+
+	test("adopts the complete incoming tuple only when the existing spell is unattributed", () => {
+		state.addSpell({name: "Bless", source: "PHB", level: 1});
+		state.addSpell({
+			name: "Bless",
+			source: "PHB",
+			level: 1,
+			sourceFeature: "Divine Soul Spells",
+			sourceClass: "Sorcerer",
+			sourceSubclass: "Divine Soul",
+			spellcastingAbility: "cha",
+		});
+
+		const [bless] = state.getSpellsKnown().filter(spell => spell.name === "Bless" && spell.source === "PHB");
+		expect(bless).toMatchObject({
+			sourceFeature: "Divine Soul Spells",
+			sourceClass: "Sorcerer",
+			sourceSubclass: "Divine Soul",
+			spellcastingAbility: "cha",
+		});
+		expect(state.getSpellcastingCardForSpell(bless)?.className).toBe("Sorcerer");
+		expect(state.getSpellcastingAbilityForSpell(bless)).toBe("cha");
+	});
+
+	test("keeps first-stored ownership when load-time coalescing selects a richer duplicate", () => {
+		const [bless] = state._coalesceSpellDuplicates([
+			{
+				name: "Bless",
+				source: "PHB",
+				level: 1,
+				sourceFeature: "Prepared Spells",
+				sourceClass: "Cleric",
+				sourceSubclass: null,
+			},
+			{
+				name: "bless",
+				source: "phb",
+				level: 1,
+				school: "E",
+				castingTime: "1 action",
+				sourceFeature: "Divine Soul Spells",
+				sourceClass: "Sorcerer",
+				sourceSubclass: "Divine Soul",
+				spellcastingAbility: "cha",
+			},
+		]);
+
+		expect(bless).toMatchObject({
+			school: "E",
+			castingTime: "1 action",
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Cleric",
+			sourceSubclass: null,
+			spellcastingAbility: null,
+		});
+		expect(state.getSpellcastingCardForSpell(bless)?.className).toBe("Cleric");
+		expect(state.getSpellcastingAbilityForSpell(bless)).toBe("wis");
+	});
+
+	test("load-time coalescing adopts the incoming tuple for a truly unattributed spell", () => {
+		const [bless] = state._coalesceSpellDuplicates([
+			{name: "Bless", source: "PHB", level: 1},
+			{
+				name: "bless",
+				source: "phb",
+				level: 1,
+				school: "E",
+				sourceFeature: "Divine Soul Spells",
+				sourceClass: "Sorcerer",
+				sourceSubclass: "Divine Soul",
+				spellcastingAbility: "cha",
+			},
+		]);
+
+		expect(bless).toMatchObject({
+			sourceFeature: "Divine Soul Spells",
+			sourceClass: "Sorcerer",
+			sourceSubclass: "Divine Soul",
+			spellcastingAbility: "cha",
+		});
+		expect(state.getSpellcastingCardForSpell(bless)?.className).toBe("Sorcerer");
+		expect(state.getSpellcastingAbilityForSpell(bless)).toBe("cha");
+	});
+});
+
 describe("#5 source badge + Prepare-button gating", () => {
 	let state;
 	let spells;
@@ -199,9 +365,10 @@ describe("#5 source badge + Prepare-button gating", () => {
 			expect(spells._shouldShowPrepareToggle({name: "Entangle", level: 1, sourceClass: "Druid"})).toBe(true);
 		});
 
-		test("Gambler (rolled-prepared subclass) shows the toggle", () => {
+		test("Gambler-attributed spells (rolled-prepared subclass) show the toggle", () => {
 			state.addClass({name: "Rogue", source: "TGTT", level: 3, subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}});
 			expect(spells._shouldShowPrepareToggle({name: "Hex", level: 1, sourceClass: "Gambler"})).toBe(true);
+			expect(spells._shouldShowPrepareToggle({name: "Hex", level: 1, sourceClass: "Warlock", prepared: true})).toBe(false);
 		});
 
 		test("cantrips and always-prepared spells never show the toggle", () => {
@@ -215,9 +382,9 @@ describe("#5 source badge + Prepare-button gating", () => {
 			expect(spells._shouldShowPrepareToggle({name: "Barkskin", level: 2, sourceFeature: "Plantmender"})).toBe(false);
 		});
 
-		test("orphan legacy prepared spell (unknown owner) is rescued", () => {
+		test("orphan legacy prepared spell (unknown owner) hides the toggle", () => {
 			state.addClass(makeDruidXPHB());
-			expect(spells._shouldShowPrepareToggle({name: "Mystery", level: 1, prepared: true})).toBe(true);
+			expect(spells._shouldShowPrepareToggle({name: "Mystery", level: 1, prepared: true})).toBe(false);
 		});
 	});
 
@@ -233,14 +400,59 @@ describe("#5 source badge + Prepare-button gating", () => {
 			state.addClass(makeRangerTGTT());
 			const el = spells._renderSpellItem({name: "Cure Wounds", source: "PHB", level: 1, school: "V", sourceClass: "Ranger", prepared: true, sourceFeature: "Spells Known"});
 			expect(el.outerHTML).not.toContain("charsheet__spell-prepared");
+			expect(el.outerHTML).not.toMatch(/charsheet__spell-item[^"]*\bprepared\b/);
 			// Still shows a source badge
 			expect(el.outerHTML).toContain("charsheet__spell-source-badge");
 		});
 
 		test("prepared-caster spell renders the Prepare button", () => {
 			state.addClass(makeDruidXPHB());
-			const el = spells._renderSpellItem({name: "Entangle", source: "PHB", level: 1, school: "C", sourceClass: "Druid"});
+			const el = spells._renderSpellItem({name: "Entangle", source: "PHB", level: 1, school: "C", sourceClass: "Druid", prepared: true});
 			expect(el.outerHTML).toContain("charsheet__spell-prepared");
+			expect(el.outerHTML).toMatch(/charsheet__spell-item[^"]*\bprepared\b/);
+		});
+
+		test("always-prepared known-caster grants keep their badge/lock without green prepared styling", () => {
+			state.addClass({name: "Sorcerer", source: "PHB", level: 5});
+			const el = spells._renderSpellItem({
+				name: "Bless",
+				source: "PHB",
+				level: 1,
+				school: "E",
+				sourceClass: "Sorcerer",
+				sourceFeature: "Divine Soul Spells",
+				prepared: true,
+				alwaysPrepared: true,
+			});
+			const rowClasses = el.outerHTML.match(/<div class="([^"]*charsheet__spell-item[^"]*)"/)?.[1].split(/\s+/) || [];
+			expect(el.outerHTML).toContain("charsheet__spell-always-prepared");
+			expect(rowClasses).toContain("always-prepared");
+			expect(rowClasses).not.toContain("prepared");
+			expect(el.outerHTML).toContain("Locked");
+		});
+
+		test("multiclass prepared styling follows each spell's class attribution", () => {
+			state.addClass({name: "Wizard", source: "PHB", level: 5});
+			state.addClass({name: "Sorcerer", source: "PHB", level: 5});
+			const wizard = spells._renderSpellItem({name: "Shield", source: "PHB", level: 1, school: "A", sourceClass: "Wizard", prepared: true});
+			const sorcerer = spells._renderSpellItem({name: "Magic Missile", source: "PHB", level: 1, school: "V", sourceClass: "Sorcerer", prepared: true});
+			expect(wizard.outerHTML).toMatch(/charsheet__spell-item[^"]*\bprepared\b/);
+			expect(sorcerer.outerHTML).not.toMatch(/charsheet__spell-item[^"]*\bprepared\b/);
+		});
+
+		test("Gambler styling requires Gambler attribution, not a raw Warlock-list owner", () => {
+			state.addClass({name: "Rogue", source: "TGTT", level: 5, subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"}});
+			const gambler = spells._renderSpellItem({name: "Hex", source: "PHB", level: 1, school: "E", sourceClass: "Gambler", prepared: true});
+			const rawWarlock = spells._renderSpellItem({name: "Armor of Agathys", source: "PHB", level: 1, school: "A", sourceClass: "Warlock", prepared: true});
+			expect(gambler.outerHTML).toMatch(/charsheet__spell-item[^"]*\bprepared\b/);
+			expect(rawWarlock.outerHTML).not.toMatch(/charsheet__spell-item[^"]*\bprepared\b/);
+			expect(rawWarlock.outerHTML).not.toContain("charsheet__spell-prepared");
+		});
+
+		test("unattributed prepared flags do not create a green row", () => {
+			state.addClass(makeDruidXPHB());
+			const el = spells._renderSpellItem({name: "Mystery", source: "PHB", level: 1, school: "I", prepared: true});
+			expect(el.outerHTML).not.toMatch(/charsheet__spell-item[^"]*\bprepared\b/);
 		});
 	});
 });

@@ -1,4 +1,12 @@
 import {RenderSpells, RenderSpellsSettings} from "./render-spells.js";
+import {CharacterSheetSpellTransfer} from "./charactersheet/charactersheet-spell-transfer.js";
+
+const _escapeHtml = value => String(value ?? "")
+	.replace(/&/g, "&amp;")
+	.replace(/</g, "&lt;")
+	.replace(/>/g, "&gt;")
+	.replace(/"/g, "&quot;")
+	.replace(/'/g, "&#39;");
 
 class SpellsSublistManager extends SublistManager {
 	static _getRowTemplate () {
@@ -395,6 +403,154 @@ class SpellsPage extends ListPageMultiSource {
 
 	_renderStats_doBuildStatsTab ({ent}) {
 		this._pgContent.vee.empty().vee.appends(RenderSpells.getRenderedSpell(ent, {subclassLookup: this._subclassLookup, settings: this._compSettings.getValues()}));
+		this._bindAddToCharacterButton();
+	}
+
+	_bindAddToCharacterButton () {
+		const btn = this._getOrTabRightButton(
+			"add-to-character",
+			"glyphicon-user",
+			{title: "Add this spell to a saved character"},
+		);
+		btn.classList.add("ve-spell__btn-add-character");
+		if (!btn.querySelector(".ve-spell__btn-add-character-label")) {
+			btn.append(veE({
+				tag: "span",
+				clazz: "ve-spell__btn-add-character-label",
+				txt: "Add to Character",
+			}));
+		}
+		if (btn.dataset.isSpellTransferBound) return;
+		btn.dataset.isSpellTransferBound = "true";
+		btn.addEventListener("click", () => this._pAddCurrentSpellToCharacter({btn}));
+	}
+
+	async _pAddCurrentSpellToCharacter ({btn}) {
+		const spell = this._lastRender?.entity;
+		if (!spell) return;
+
+		btn.disabled = true;
+		btn.setAttribute("aria-busy", "true");
+		try {
+			const characters = await CharacterSheetSpellTransfer.pGetCharacters();
+			if (!characters.length) {
+				const isCreate = await InputUiUtil.pGetUserBoolean({
+					title: "No Saved Characters",
+					htmlDescription: `<div>Create a character before adding <b>${_escapeHtml(spell.name)}</b> to a spell list.</div>`,
+					textYes: "Create Character",
+					textNo: "Cancel",
+				});
+				if (isCreate) window.open("charactersheet.html", "_blank", "noopener");
+				return;
+			}
+
+			const character = await InputUiUtil.pGetUserEnum({
+				title: `Add ${spell.name} to...`,
+				htmlDescription: "Choose the character who should receive this spell.",
+				values: characters,
+				fnDisplay: CharacterSheetSpellTransfer.getCharacterLabel,
+				isResolveItem: true,
+			});
+			if (!character) return;
+
+			const {CharacterSheetState} = await import("./charactersheet/charactersheet-state.js");
+			const state = new CharacterSheetState();
+			state.setSpellData(this._dataList);
+			state.loadFromJson(character);
+			const classData = await this._pGetTransferClassData();
+			const attributionModel = CharacterSheetSpellTransfer.getAttributionModel({spell, state, classData});
+			const defaultOption = attributionModel.recommendedOption || attributionModel.eligibleOptions[0] || attributionModel.options.at(-1);
+			const option = await InputUiUtil.pGetUserEnum({
+				title: `Attribute ${spell.name}`,
+				values: attributionModel.options,
+				default: defaultOption,
+				fnDisplay: it => {
+					if (it.isUnattributed) return it.label;
+					if (it.isEligible) return `${it.label} — eligible`;
+					return `${it.label} — off-list`;
+				},
+				isResolveItem: true,
+				elePost: veE({outer: this._getAttributionDescription(attributionModel)}),
+			});
+			if (!option) return;
+
+			const warnings = CharacterSheetSpellTransfer.getAdvisoryWarnings({
+				spell,
+				state,
+				option,
+				eligibleOptions: attributionModel.eligibleOptions,
+			});
+			if (warnings.length) {
+				const isConfirmed = await InputUiUtil.pGetUserBoolean({
+					title: `Add ${spell.name}?`,
+					htmlDescription: `<div>
+						<p>The spell can still be added. Review the following advisory warnings:</p>
+						<ul>${warnings.map(warning => `<li>${_escapeHtml(warning.message)}</li>`).join("")}</ul>
+					</div>`,
+					textYes: "Add Anyway",
+					textNo: "Cancel",
+				});
+				if (!isConfirmed) return;
+			}
+
+			await CharacterSheetSpellTransfer.pQueue({
+				characterId: character.id,
+				spell,
+				attribution: option.attribution,
+			});
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Added ${spell.name} to ${character.name || "Unnamed Character"}.`,
+			});
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[Spells] Failed to add spell to character:", error);
+			JqueryUtil.doToast({
+				type: "danger",
+				content: `Could not add ${spell.name} to the character. ${error.message || VeCt.STR_SEE_CONSOLE}`,
+			});
+		} finally {
+			btn.disabled = false;
+			btn.removeAttribute("aria-busy");
+		}
+	}
+
+	_getAttributionDescription ({eligibleOptions}) {
+		if (eligibleOptions.length === 1) {
+			return `<div><b>${_escapeHtml(eligibleOptions[0].label)}</b> is selected because the spell is available to that class or subclass. You may choose a different spellcasting class or leave it unattributed.</div>`;
+		}
+		if (eligibleOptions.length > 1) {
+			return "<div>This spell is available through more than one of the character's classes or subclasses. Choose which one receives it.</div>";
+		}
+		return "<div>No eligible class or subclass was detected. You may still choose any spellcasting class or leave the spell unattributed.</div>";
+	}
+
+	async _pGetTransferClassData () {
+		this._pTransferClassData ||= Promise.all([
+			DataUtil.class.loadRawJSON(),
+			PrereleaseUtil.pGetBrewProcessed().catch(() => ({})),
+			BrewUtil2.pGetBrewProcessed().catch(() => ({})),
+		]).then(([site, prerelease, brew]) => {
+			const classes = MiscUtil.copyFast([
+				...(site.class || []),
+				...(prerelease.class || []),
+				...(brew.class || []),
+			]);
+			const subclasses = [
+				...(site.subclass || []),
+				...(prerelease.subclass || []),
+				...(brew.subclass || []),
+			];
+			classes.forEach(cls => {
+				cls.subclasses = subclasses.filter(sc =>
+					sc.className === cls.name
+					&& (!sc.classSource || !cls.source || sc.classSource === cls.source
+						|| [sc.classSource, cls.source].every(src => [Parser.SRC_PHB, Parser.SRC_XPHB].includes(src))),
+				);
+			});
+			return classes;
+		});
+		return this._pTransferClassData;
 	}
 
 	async _pOnLoad_pPreDataLoad () {

@@ -4506,11 +4506,16 @@ class CharacterSheetState {
 			&& Array.isArray(src.subschools) && src.subschools.length) {
 			target.subschools = src.subschools;
 		}
-		if (!target.sourceFeature && src.sourceFeature) target.sourceFeature = src.sourceFeature;
-		if (!target.sourceClass && src.sourceClass) target.sourceClass = src.sourceClass;
+		const provenanceKeys = ["sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"];
+		const hasOwnershipAttribution = provenanceKeys.some(key => target[key] != null && target[key] !== "");
+		const hasIncomingOwnershipAttribution = provenanceKeys.some(key => src[key] != null && src[key] !== "");
+		if (!hasOwnershipAttribution && hasIncomingOwnershipAttribution) {
+			for (const key of provenanceKeys) {
+				target[key] = src[key] ?? null;
+			}
+		}
 		if (src.alwaysPrepared && !target.alwaysPrepared) { target.alwaysPrepared = true; target.prepared = true; }
 		if (src.prepared && !target.prepared) target.prepared = true;
-		if (src.spellcastingAbility && !target.spellcastingAbility) target.spellcastingAbility = src.spellcastingAbility;
 		if (src.isDivineSoulAffinity && !target.isDivineSoulAffinity) target.isDivineSoulAffinity = true;
 		if (src.isSubclassChoiceSpell && !target.isSubclassChoiceSpell) target.isSubclassChoiceSpell = true;
 		if (src.inSpellbook && !target.inSpellbook) target.inSpellbook = true;
@@ -4647,9 +4652,17 @@ class CharacterSheetState {
 			const key = this._spellIdentityKey(entry);
 			if (!byKey.has(key)) { byKey.set(key, entry); order.push(key); continue; }
 			const kept = byKey.get(key);
+			const provenanceKeys = ["sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"];
+			const keptHasOwnershipAttribution = provenanceKeys.some(provenanceKey =>
+				kept[provenanceKey] != null && kept[provenanceKey] !== "",
+			);
+			const keptProvenance = keptHasOwnershipAttribution
+				? Object.fromEntries(provenanceKeys.map(provenanceKey => [provenanceKey, kept[provenanceKey] ?? null]))
+				: null;
 			const winner = this._richerSpellEntry(kept, entry);
 			const loser = winner === kept ? entry : kept;
 			this._mergeSpellMetadata(winner, loser);
+			if (keptProvenance) Object.assign(winner, keptProvenance);
 			byKey.set(key, winner);
 		}
 		return order.map(k => byKey.get(k));
@@ -17558,6 +17571,7 @@ class CharacterSheetState {
 				components: spell.components || "",
 				sourceFeature: spell.sourceFeature || null,
 				sourceClass: spell.sourceClass || null,
+				sourceSubclass: spell.sourceSubclass || null,
 				subschools: spell.subschools || [],
 				spellcastingAbility: spell.spellcastingAbility || null,
 				isDivineSoulAffinity: spell.isDivineSoulAffinity || false,
@@ -17577,9 +17591,6 @@ class CharacterSheetState {
 			// Coalesce a case/edition-casing variant into the existing cantrip, filling
 			// missing enrichment + grant metadata (including a per-cantrip casting ability).
 			this._mergeSpellMetadata(existing, spell);
-			if (spell.spellcastingAbility && !existing.spellcastingAbility) {
-				existing.spellcastingAbility = spell.spellcastingAbility;
-			}
 		} else {
 			this._data.spellcasting.cantripsKnown.push({
 				id: CryptUtil.uid(),
@@ -17593,6 +17604,7 @@ class CharacterSheetState {
 				components: spell.components || "",
 				sourceFeature: spell.sourceFeature || null,
 				sourceClass: spell.sourceClass || null,
+				sourceSubclass: spell.sourceSubclass || null,
 				spellcastingAbility: spell.spellcastingAbility || null,
 				subschools: spell.subschools || [],
 				isSubclassChoiceSpell: spell.isSubclassChoiceSpell || false,
