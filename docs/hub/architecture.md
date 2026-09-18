@@ -263,6 +263,12 @@ HTTP read while one is active. The active read may apply when its character, cam
 refresh-generation fences still match; a queued trailing read then fetches any newer canonical projection.
 Transient failure keeps refresh-required state latched for the next live signal, while terminal projection loss
 uses the ordinary synchronous access teardown.
+An authoritative membership-role event also fails the role-derived Character Sheet roster closed before any
+network work: it fences in-flight character loads, removes non-owner selector entries, and invalidates cached
+DM-only character access. Old-scope character or roster responses cannot repopulate repository state. Only a
+generation-, character-, campaign-, role-, and account-fenced repository list may repopulate the selector.
+Failed or stale refreshes leave the old privileged roster concealed, expose an unavailable state, and retry from
+fresh authority on the next live connection signal.
 Character selection, New, Duplicate, import, and programmatic create continuations also capture the source
 character/load fence before their first save. Every later await must still belong to that source before it can
 reset state, adopt a created character, update navigation, or render. A committed create that finishes after a

@@ -90,6 +90,7 @@ export class HubHttpCharacterRepository {
 		this._pSession = null;
 		this._accepted = new Map();
 		this._access = new Map();
+		this._roleScopedListGeneration = 0;
 		this._canonicalIds = new Map();
 		this._recoveryOnlyIds = new Set();
 		this._leases = new Map();
@@ -170,6 +171,46 @@ export class HubHttpCharacterRepository {
 		return this.getCharacterAccess({characterId}) === CHARACTER_ACCESS_MODES.DM_READ_ONLY;
 	}
 
+	invalidateRoleScopedCharacterAccess () {
+		this._roleScopedListGeneration++;
+		const characterIds = new Set([...this._access]
+			.filter(([, access]) => access === CHARACTER_ACCESS_MODES.DM_READ_ONLY)
+			.map(([characterId]) => characterId));
+		const accountId = this._session?.account?.id || null;
+		if (accountId) {
+			for (const [characterId, character] of this._accepted) {
+				if (
+					(character.campaignId || null) === this._campaignId
+					&& character.ownerAccountId
+					&& character.ownerAccountId !== accountId
+				) characterIds.add(characterId);
+			}
+		}
+		if (!characterIds.size) return [];
+		const maps = [
+			this._accepted,
+			this._access,
+			this._leases,
+			this._coverage,
+			this._appliedEventIds,
+			this._appliedOperationLegIds,
+			this._pendingResync,
+			this._realtimeCursors,
+			this._saveBlocks,
+			this._operationConflicts,
+			this._liveConflicts,
+		];
+		for (const characterId of characterIds) {
+			for (const map of maps) map.delete(characterId);
+			this._recoveryOnlyIds.delete(characterId);
+			this._resyncInFlight.delete(characterId);
+			for (const [aliasId, canonicalId] of [...this._canonicalIds]) {
+				if (aliasId === characterId || canonicalId === characterId) this._canonicalIds.delete(aliasId);
+			}
+		}
+		return [...characterIds];
+	}
+
 	_assertCharacterEditable ({characterId}) {
 		if (!this.isCharacterReadOnly({characterId})) return;
 		const error = new Error(`This character is open as a read-only DM view.`);
@@ -204,17 +245,34 @@ export class HubHttpCharacterRepository {
 		return character.campaignId || null;
 	}
 
-	async pList () {
+	async pList ({fnIsCurrent = null} = {}) {
+		if (fnIsCurrent != null && typeof fnIsCurrent !== "function") throw new TypeError(`fnIsCurrent must be a function or null.`);
+		const roleScopedListGeneration = this._roleScopedListGeneration;
 		await this._pEnsureSession();
-		return this._pRunMutation(() => this._pListCharactersAndRecover());
+		const accountId = this._session?.account?.id || null;
+		return this._pRunMutation(() => this._pListCharactersAndRecover({
+			accountId,
+			fnIsCurrent,
+			roleScopedListGeneration,
+		}));
 	}
 
-	async _pListCharactersAndRecover () {
+	async _pListCharactersAndRecover ({
+		accountId = this._session?.account?.id || null,
+		fnIsCurrent = null,
+		roleScopedListGeneration = this._roleScopedListGeneration,
+	} = {}) {
+		const isCurrent = () => (
+			roleScopedListGeneration === this._roleScopedListGeneration
+			&& accountId === (this._session?.account?.id || null)
+			&& (!fnIsCurrent || fnIsCurrent())
+		);
+		if (!isCurrent()) return null;
 		const characters = (await this._api.pListCharacters({campaignId: this._campaignId}))
 			.filter(character => this._campaignId || character.campaignId == null);
+		if (!isCurrent()) return null;
 		const out = [];
 		const listedIds = new Set();
-		const accountId = this._session?.account?.id || null;
 		this._recoveryOnlyIds.clear();
 		for (const character of characters) {
 			const accepted = this._accepted.get(character.id);
@@ -261,6 +319,7 @@ export class HubHttpCharacterRepository {
 	}
 
 	async pGet ({characterId}) {
+		const roleScopedListGeneration = this._roleScopedListGeneration;
 		await this._pEnsureSession();
 		const canonicalId = this._canonicalIds.get(characterId) || characterId;
 		if (this._recoveryOnlyIds.has(canonicalId)) {
@@ -280,8 +339,16 @@ export class HubHttpCharacterRepository {
 			? getCanonicalCharacter(projection)
 			: await this._api.pGetCharacter({characterId: canonicalId});
 		this._assertCharacterScope(character);
-		this._accepted.set(canonicalId, character);
 		const access = getCanonicalProjectionAccess(projection) || this._getListedCharacterAccess(character);
+		if (
+			roleScopedListGeneration !== this._roleScopedListGeneration
+			&& (
+				access !== CHARACTER_ACCESS_MODES.OWNER
+				|| !this._session?.account?.id
+				|| character.ownerAccountId !== this._session.account.id
+			)
+		) return null;
+		this._accepted.set(canonicalId, character);
 		this._access.set(canonicalId, access);
 		if (access === CHARACTER_ACCESS_MODES.OWNER) {
 			this._bindUnboundLegacyRecoveryOwner({

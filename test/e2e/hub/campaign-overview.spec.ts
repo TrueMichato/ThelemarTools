@@ -651,9 +651,81 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		).toContainEqual({name: "Blinded", source: "PHB"});
 
 		const coDmSheet = new CharacterSheetPage(coDm.page);
+		const coDmCharacter = await coDm.createCharacter({campaignId, name: "Authority Co-DM Character"});
+		await coDmSheet.gotoCampaignCharacter({campaignId, characterId: coDmCharacter.id});
+		await coDmSheet.waitForHubRealtimeLive();
+		await expect(coDm.page.locator("#charsheet-sel-character")).toContainText("Readonly Rowan");
+		await expect(coDm.page.locator("#charsheet-sel-character")).toContainText("Authority DM Character");
+
+		let releaseDemotedRosterRead!: () => void;
+		let markDemotedRosterReadStarted!: () => void;
+		let markDemotedRosterReadFinished!: () => void;
+		const demotedRosterReadGate = new Promise<void>(resolve => { releaseDemotedRosterRead = resolve; });
+		const demotedRosterReadStarted = new Promise<void>(resolve => { markDemotedRosterReadStarted = resolve; });
+		const demotedRosterReadFinished = new Promise<void>(resolve => { markDemotedRosterReadFinished = resolve; });
+		const rosterRoute = "**/api/characters?**";
+		await coDm.page.route(rosterRoute, async route => {
+			if (
+				route.request().method() !== "GET"
+				|| new URL(route.request().url()).searchParams.get("campaignId") !== campaignId
+			) {
+				await route.continue();
+				return;
+			}
+			markDemotedRosterReadStarted();
+			await demotedRosterReadGate;
+			try {
+				await route.continue();
+			} finally {
+				markDemotedRosterReadFinished();
+			}
+		});
+		try {
+			await dm.changeMemberRoleViaApi({
+				campaignId,
+				displayName: "Authority Co-DM",
+				role: "player",
+			});
+			await Promise.race([
+				demotedRosterReadStarted,
+				new Promise<never>((_resolve, reject) => setTimeout(
+					() => reject(new Error("Timed out waiting for the demoted Character Sheet roster refresh.")),
+					20_000,
+				)),
+			]);
+			await expect(coDm.page.locator("#charsheet-sel-character")).not.toContainText("Readonly Rowan");
+			await expect(coDm.page.locator("#charsheet-sel-character")).not.toContainText("Authority DM Character");
+			await expect(coDm.page.locator("#charsheet-sel-character")).toContainText("Authority Co-DM Character");
+			await expect(coDm.page.locator("#charsheet-sel-character")).toContainText("Refreshing authorized characters");
+		} finally {
+			releaseDemotedRosterRead();
+			await Promise.race([
+				demotedRosterReadFinished,
+				new Promise<never>((_resolve, reject) => setTimeout(
+					() => reject(new Error("Timed out completing the demoted Character Sheet roster refresh.")),
+					20_000,
+				)),
+			]);
+			await coDm.page.unroute(rosterRoute);
+		}
+		await expect(coDm.page.locator("#charsheet-sel-character")).not.toContainText("Refreshing authorized characters");
+		await expect(coDm.page.locator("#charsheet-sel-character option[value]:not([value=''])")).toHaveCount(1);
+		await expect(coDm.page.locator("#charsheet-sel-character option:checked")).toContainText("Authority Co-DM Character");
+
+		await dm.changeMemberRoleViaApi({
+			campaignId,
+			displayName: "Authority Co-DM",
+			role: "co_dm",
+		});
+		await expect(coDm.page.locator("#charsheet-sel-character")).toContainText("Readonly Rowan", {timeout: 20_000});
+		await expect(coDm.page.locator("#charsheet-sel-character")).toContainText("Authority DM Character");
+		await expect(coDm.page.locator("#charsheet-sel-character option:checked")).toContainText("Authority Co-DM Character");
+
 		await coDmSheet.gotoCampaignCharacter({campaignId, characterId: character.id});
 		await expect(coDmSheet.characterName).toHaveValue("Readonly Rowan Recovered");
 		expect(await coDm.page.evaluate(() => (globalThis as any).charSheet._currentCharacterAccess)).toBe("dm_readonly");
+		await expect(coDm.page.locator("#charsheet-sel-character"))
+			.toContainText("Authority DM Character", {timeout: 20_000});
 		expect(await coDm.page.evaluate(
 			characterId => [...(globalThis as any).charSheet._selCharacter.options]
 				.some((option: HTMLOptionElement) => option.value === characterId),

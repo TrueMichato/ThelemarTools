@@ -139,6 +139,9 @@ class CharacterSheetPage {
 		this._isHubContextRefreshing = false;
 		this._isHubContextUnavailable = false;
 		this._isHubContextRevalidationRequired = false;
+		this._hubRoleRosterGeneration = 0;
+		this._isHubRoleRosterUnavailable = false;
+		this._isHubRoleRosterRevalidationRequired = false;
 		this._hubRulesRefreshGeneration = 0;
 		this._hubRulesRefreshBlocked = false;
 		this._hubRulesPendingVersionId = null;
@@ -416,6 +419,10 @@ class CharacterSheetPage {
 		this._hubContextRefreshActiveGeneration = null;
 		this._isHubContextRefreshing = false;
 		this._isHubContextRevalidationRequired = false;
+		this._hubRoleRosterGeneration++;
+		this._isHubRoleRosterUnavailable = false;
+		this._isHubRoleRosterRevalidationRequired = false;
+		this._characterRepository?.invalidateRoleScopedCharacterAccess?.();
 		this._clearHubRules({isUnavailable: true});
 	}
 
@@ -646,9 +653,20 @@ class CharacterSheetPage {
 		if (state?.state === "live" && isReadOnly && this._isHubReadOnlyRefreshRequired) {
 			void this._pRefreshHubReadOnlyCharacter();
 		}
-		if (state?.state === "live" && this._isHubContextRevalidationRequired && this._hubCampaignContext) {
+		const isRefreshRoleRoster = state?.state === "live"
+			&& this._isHubRoleRosterRevalidationRequired
+			&& this._hubCampaignContext;
+		if (
+			state?.state === "live"
+			&& (this._isHubContextRevalidationRequired || isRefreshRoleRoster)
+			&& this._hubCampaignContext
+		) {
 			this._isHubContextRevalidationRequired = false;
-			this._onHubCampaignContextChanged({type: "reconnected"});
+			this._isHubRoleRosterRevalidationRequired = false;
+			this._onHubCampaignContextChanged({
+				type: "reconnected",
+				...(isRefreshRoleRoster ? {roleRosterGeneration: this._hubRoleRosterGeneration} : {}),
+			});
 		} else if (state?.state === "live" && this._hubRulesRefreshBlocked) {
 			void this._pRefreshHubRules();
 		}
@@ -745,12 +763,93 @@ class CharacterSheetPage {
 
 	_onHubMembershipChanged (event) {
 		if (event?.campaignId && event.campaignId !== this._hubCampaignId) return false;
+		const roleRosterGeneration = this._beginHubRoleScopedRosterRefresh();
 		if (!this._hubCampaignContext) {
 			this._peerTargeting?.deactivate();
+			this._isHubRoleRosterUnavailable = true;
+			this._isHubRoleRosterRevalidationRequired = true;
+			this._setHubRoleRosterStatus("unavailable");
 			return false;
 		}
-		this._onHubCampaignContextChanged({type: "membership.changed"});
+		this._onHubCampaignContextChanged({
+			type: "membership.changed",
+			roleRosterGeneration,
+		});
 		return true;
+	}
+
+	_setHubRoleRosterStatus (status = null) {
+		if (!this._selCharacter) return;
+		for (const option of [...(this._selCharacter.options || [])]) {
+			if (option.dataset?.hubRoleRosterStatus === "true") option.remove();
+		}
+		this._selCharacter.setAttribute?.("aria-busy", status === "refreshing" ? "true" : "false");
+		if (!status) return;
+		const option = document.createElement("option");
+		option.disabled = true;
+		option.dataset.hubRoleRosterStatus = "true";
+		option.value = "__hub-role-roster-status";
+		option.textContent = status === "refreshing"
+			? "Refreshing authorized characters..."
+			: "Authorized character list unavailable";
+		this._selCharacter.append(option);
+	}
+
+	_beginHubRoleScopedRosterRefresh () {
+		const generation = ++this._hubRoleRosterGeneration;
+		this._characterLoadGeneration++;
+		this._isHubRoleRosterUnavailable = false;
+		this._isHubRoleRosterRevalidationRequired = false;
+		if (this._selCharacter) {
+			for (const option of [...(this._selCharacter.options || [])]) {
+				if (!option.value || option.dataset?.hubRoleRosterStatus === "true") continue;
+				const access = this._characterRepository.getCharacterAccess?.({characterId: option.value});
+				if (access !== CHARACTER_ACCESS_MODES.OWNER) option.remove();
+			}
+			const isCurrentOwnerVisible = [...(this._selCharacter.options || [])]
+				.some(option => option.value === this._currentCharacterId);
+			this._selCharacter.value = isCurrentOwnerVisible ? this._currentCharacterId : "";
+		}
+		this._characterRepository.invalidateRoleScopedCharacterAccess?.();
+		this._setHubRoleRosterStatus("refreshing");
+		return generation;
+	}
+
+	async _pRefreshHubRoleScopedCharacterRoster ({
+		campaignId,
+		characterId,
+		characterLoadGeneration,
+		contextGeneration,
+		membershipRole,
+		roleRosterGeneration,
+	}) {
+		const isCurrent = () => (
+			roleRosterGeneration === this._hubRoleRosterGeneration
+			&& contextGeneration === this._hubContextGeneration
+			&& campaignId === this._hubCampaignId
+			&& characterId === this._currentCharacterId
+			&& characterLoadGeneration === this._characterLoadGeneration
+			&& membershipRole === this._hubContext?.membership?.role
+		);
+		try {
+			const characters = await this._characterRepository.pList({fnIsCurrent: isCurrent});
+			if (!characters || !isCurrent()) return false;
+			this._isHubRoleRosterUnavailable = false;
+			this._isHubRoleRosterRevalidationRequired = false;
+			this._updateCharacterDropdown(characters);
+			return true;
+		} catch (error) {
+			if (!isCurrent()) return false;
+			if (this._handleTerminalCharacterCampaignAccessError?.({error, campaignId})) return false;
+			this._isHubRoleRosterUnavailable = true;
+			this._isHubRoleRosterRevalidationRequired = true;
+			this._setHubRoleRosterStatus("unavailable");
+			JqueryUtil.doToast({
+				type: "danger",
+				content: "Your campaign role changed, but the authorized character list could not be loaded. Other campaign characters remain hidden until you reconnect or reload.",
+			});
+			return false;
+		}
 	}
 
 	_applyHubContext (context) {
@@ -786,6 +885,12 @@ class CharacterSheetPage {
 				: null;
 		if (event?.aggregateId && event.aggregateId === activeContextId) return;
 		const campaignId = this._hubCampaignId;
+		const characterId = this._currentCharacterId;
+		const characterLoadGeneration = this._characterLoadGeneration;
+		const roleRosterGeneration = Number.isInteger(event?.roleRosterGeneration)
+			? event.roleRosterGeneration
+			: null;
+		if (roleRosterGeneration != null) this._setHubRoleRosterStatus("refreshing");
 		const generation = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = generation;
 		this._isHubContextRefreshing = true;
@@ -794,10 +899,21 @@ class CharacterSheetPage {
 		void this._hubCampaignContext.pRefresh({
 			fnIsCurrent: () => generation === this._hubContextGeneration,
 		})
-			.then(context => {
+			.then(async context => {
 				if (!context || generation !== this._hubContextGeneration) return;
 				this._applyHubContext(context);
 				this._isHubContextUnavailable = false;
+				if (roleRosterGeneration != null) {
+					await this._pRefreshHubRoleScopedCharacterRoster({
+						campaignId,
+						characterId,
+						characterLoadGeneration,
+						contextGeneration: generation,
+						membershipRole: context?.membership?.role,
+						roleRosterGeneration,
+					});
+					if (generation !== this._hubContextGeneration) return;
+				}
 				this._renderCharacter();
 				this._campaign?.render();
 			})
@@ -807,6 +923,11 @@ class CharacterSheetPage {
 					error,
 					campaignId,
 				})) return;
+				if (roleRosterGeneration != null && roleRosterGeneration === this._hubRoleRosterGeneration) {
+					this._isHubRoleRosterUnavailable = true;
+					this._isHubRoleRosterRevalidationRequired = true;
+					this._setHubRoleRosterStatus("unavailable");
+				}
 				this._isHubContextUnavailable = true;
 				this._isHubContextRevalidationRequired = true;
 				JqueryUtil.doToast({
@@ -3159,6 +3280,10 @@ class CharacterSheetPage {
 	// #region Character Management
 	async _pLoadCharacters () {
 		let characters = await this._characterRepository.pList();
+		if (!characters) {
+			this._updateCharacterDropdown(null);
+			return;
+		}
 		if (await this._pClaimUnboundLegacyHubRecovery?.() === true) {
 			characters = await this._characterRepository.pList();
 		}
@@ -3266,6 +3391,11 @@ class CharacterSheetPage {
 			characters = this._state.getAllCharacters();
 		}
 
+		if (this._isHubCharacter) {
+			this._isHubRoleRosterUnavailable = false;
+			this._isHubRoleRosterRevalidationRequired = false;
+			this._selCharacter?.setAttribute?.("aria-busy", "false");
+		}
 		this._selCharacter.innerHTML = "";
 		this._selCharacter.insertAdjacentHTML("beforeend", `<option value="">➕ Create New Character</option>`);
 
@@ -3923,6 +4053,10 @@ class CharacterSheetPage {
 
 	async _onManageCharacters () {
 		const characters = await this._characterRepository.pList();
+		if (!characters) {
+			JqueryUtil.doToast({type: "warning", content: "The authorized character list changed. Try again."});
+			return;
+		}
 
 		if (characters.length === 0) {
 			JqueryUtil.doToast({type: "warning", content: "No saved characters to manage."});

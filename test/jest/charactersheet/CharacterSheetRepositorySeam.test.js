@@ -37,10 +37,71 @@ const makeDeferred = () => {
 	return {promise, resolve, reject};
 };
 
+const makeSelectOption = () => ({
+	value: "",
+	textContent: "",
+	disabled: false,
+	dataset: {},
+	_parentSelect: null,
+	remove () {
+		if (!this._parentSelect) return;
+		const index = this._parentSelect.options.indexOf(this);
+		if (~index) this._parentSelect.options.splice(index, 1);
+		if (this._parentSelect.value === this.value) this._parentSelect.value = "";
+		this._parentSelect = null;
+	},
+});
+
+const makeCharacterSelect = characters => {
+	const attributes = new Map();
+	const select = {
+		options: [],
+		value: "",
+		append (option) {
+			option._parentSelect = this;
+			this.options.push(option);
+		},
+		insertAdjacentHTML (_position, html) {
+			const option = makeSelectOption();
+			option.value = html.match(/value="([^"]*)"/)?.[1] || "";
+			option.textContent = html.replace(/<[^>]+>/g, "");
+			this.append(option);
+		},
+		setAttribute (name, value) {
+			attributes.set(name, `${value}`);
+		},
+		getAttribute (name) {
+			return attributes.get(name) ?? null;
+		},
+	};
+	Object.defineProperty(select, "innerHTML", {
+		set: () => {
+			select.options.splice(0, select.options.length);
+			select.value = "";
+		},
+	});
+	const create = makeSelectOption();
+	create.value = "";
+	create.textContent = "Create New Character";
+	select.append(create);
+	const divider = makeSelectOption();
+	divider.disabled = true;
+	divider.textContent = "Saved Characters";
+	select.append(divider);
+	for (const character of characters) {
+		const option = makeSelectOption();
+		option.value = character.id;
+		option.textContent = character.label || character.name;
+		select.append(option);
+	}
+	return select;
+};
+
 describe("Character Sheet repository seam", () => {
 	beforeAll(async () => {
 		globalThis.window = globalThis.window || {addEventListener: () => {}, location: {search: "", href: "http://test/"}};
 		globalThis.document = globalThis.document || {getElementById: () => null, querySelector: () => null, addEventListener: () => {}};
+		globalThis.document.createElement ||= () => makeSelectOption();
 		CharacterSheetPage = (await import(`${REPO_ROOT}js/charactersheet/charactersheet.js`)).CharacterSheetPage;
 		CharacterSheetModal = globalThis.CharacterSheetModal;
 	});
@@ -85,6 +146,21 @@ describe("Character Sheet repository seam", () => {
 
 		expect(repository.pList).toHaveBeenCalledTimes(1);
 		expect(host._updateCharacterDropdown).toHaveBeenCalledWith(characters);
+	});
+
+	it("does not claim recovery or clear the retained Hub selector after a fenced roster cancellation", async () => {
+		const repository = makeRepository();
+		repository.pList.mockResolvedValueOnce(null);
+		const host = {
+			_characterRepository: repository,
+			_pClaimUnboundLegacyHubRecovery: jest.fn(),
+			_updateCharacterDropdown: jest.fn(),
+		};
+
+		await CharacterSheetPage.prototype._pLoadCharacters.call(host);
+
+		expect(host._pClaimUnboundLegacyHubRecovery).not.toHaveBeenCalled();
+		expect(host._updateCharacterDropdown).toHaveBeenCalledWith(null);
 	});
 
 	it("ends unsafe old character interactions before awaiting a replacement character", async () => {
@@ -140,6 +216,282 @@ describe("Character Sheet repository seam", () => {
 			["cloud-b", "Other — Wizard 2"],
 		]);
 		expect(select.value).toBe("cloud-a");
+	});
+
+	it("conceals role-scoped selector metadata before an authoritative demotion roster resolves", async () => {
+		const contextRefresh = makeDeferred();
+		const rosterRefresh = makeDeferred();
+		const access = new Map([
+			["owned", CHARACTER_ACCESS_MODES.OWNER],
+			["private", CHARACTER_ACCESS_MODES.DM_READ_ONLY],
+		]);
+		const select = makeCharacterSelect([
+			{id: "owned", label: "Owned — Fighter 3"},
+			{id: "private", label: "Hidden Player — Wizard 5 (read-only)"},
+		]);
+		select.value = "owned";
+		const repository = {
+			getCharacterAccess: jest.fn(({characterId}) => access.get(characterId) || null),
+			invalidateRoleScopedCharacterAccess: jest.fn(() => {
+				access.delete("private");
+				return ["private"];
+			}),
+			pList: jest.fn(() => rosterRefresh.promise),
+		};
+		const host = {
+			_hubCampaignId: "campaign-1",
+			_isHubCharacter: true,
+			_hubCampaignContext: {pRefresh: jest.fn(() => contextRefresh.promise)},
+			_hubContext: {membership: {role: "dm"}, rulesVersion: null, brewBundle: null},
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_isHubContextUnavailable: false,
+			_isHubContextRevalidationRequired: false,
+			_hubRoleRosterGeneration: 0,
+			_isHubRoleRosterUnavailable: false,
+			_isHubRoleRosterRevalidationRequired: false,
+			_currentCharacterId: "owned",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterLoadGeneration: 2,
+			_characterRepository: repository,
+			_selCharacter: select,
+			_state: {
+				getName: () => "Owned",
+				getClasses: () => [{name: "Fighter", level: 3}],
+			},
+			_campaign: {render: jest.fn()},
+			_clearHubRules: jest.fn(),
+			_applyHubContext: jest.fn(function (context) {
+				this._hubContext = context;
+			}),
+			_renderCharacter: jest.fn(),
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
+			_updateCharacterDropdown: CharacterSheetPage.prototype._updateCharacterDropdown,
+			_setHubRoleRosterStatus: CharacterSheetPage.prototype._setHubRoleRosterStatus,
+			_beginHubRoleScopedRosterRefresh: CharacterSheetPage.prototype._beginHubRoleScopedRosterRefresh,
+			_pRefreshHubRoleScopedCharacterRoster: CharacterSheetPage.prototype._pRefreshHubRoleScopedCharacterRoster,
+			_onHubCampaignContextChanged: CharacterSheetPage.prototype._onHubCampaignContextChanged,
+		};
+
+		expect(CharacterSheetPage.prototype._onHubMembershipChanged.call(host, {
+			campaignId: "campaign-1",
+			role: "player",
+		})).toBe(true);
+
+		expect(repository.invalidateRoleScopedCharacterAccess).toHaveBeenCalledTimes(1);
+		expect([...select.options].map(option => option.textContent).join(" ")).not.toContain("Hidden Player");
+		expect(select.getAttribute("aria-busy")).toBe("true");
+		expect(host._characterLoadGeneration).toBe(3);
+
+		contextRefresh.resolve({membership: {role: "player"}, rulesVersion: null, brewBundle: null});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(repository.pList).toHaveBeenCalledWith({fnIsCurrent: expect.any(Function)});
+
+		rosterRefresh.resolve([{id: "owned", name: "Owned", classes: [{name: "Fighter", level: 3}]}]);
+		await new Promise(resolve => setTimeout(resolve, 0));
+		expect([...select.options].map(option => option.textContent).join(" ")).not.toContain("Hidden Player");
+		expect(select.value).toBe("owned");
+		expect(select.getAttribute("aria-busy")).toBe("false");
+	});
+
+	it("keeps the role-scoped selector fail-closed when the post-demotion roster refresh fails", async () => {
+		const rosterFailure = Object.assign(new Error("offline"), {code: "NETWORK_UNAVAILABLE"});
+		const access = new Map([
+			["owned", CHARACTER_ACCESS_MODES.OWNER],
+			["private", CHARACTER_ACCESS_MODES.DM_READ_ONLY],
+		]);
+		const select = makeCharacterSelect([
+			{id: "owned", label: "Owned — Fighter 3"},
+			{id: "private", label: "Hidden Player — Wizard 5 (read-only)"},
+		]);
+		select.value = "owned";
+		const host = {
+			_hubCampaignId: "campaign-1",
+			_isHubCharacter: true,
+			_hubCampaignContext: {
+				pRefresh: jest.fn(async () => ({membership: {role: "player"}, rulesVersion: null, brewBundle: null})),
+			},
+			_hubContext: {membership: {role: "dm"}, rulesVersion: null, brewBundle: null},
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_isHubContextUnavailable: false,
+			_isHubContextRevalidationRequired: false,
+			_hubRoleRosterGeneration: 0,
+			_isHubRoleRosterUnavailable: false,
+			_isHubRoleRosterRevalidationRequired: false,
+			_currentCharacterId: "owned",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterLoadGeneration: 2,
+			_characterRepository: {
+				getCharacterAccess: jest.fn(({characterId}) => access.get(characterId) || null),
+				invalidateRoleScopedCharacterAccess: jest.fn(() => {
+					access.delete("private");
+					return ["private"];
+				}),
+				pList: jest.fn(async () => { throw rosterFailure; }),
+			},
+			_selCharacter: select,
+			_state: {
+				getName: () => "Owned",
+				getClasses: () => [{name: "Fighter", level: 3}],
+			},
+			_campaign: {render: jest.fn()},
+			_clearHubRules: jest.fn(),
+			_applyHubContext: jest.fn(function (context) {
+				this._hubContext = context;
+			}),
+			_renderCharacter: jest.fn(),
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
+			_updateCharacterDropdown: CharacterSheetPage.prototype._updateCharacterDropdown,
+			_setHubRoleRosterStatus: CharacterSheetPage.prototype._setHubRoleRosterStatus,
+			_beginHubRoleScopedRosterRefresh: CharacterSheetPage.prototype._beginHubRoleScopedRosterRefresh,
+			_pRefreshHubRoleScopedCharacterRoster: CharacterSheetPage.prototype._pRefreshHubRoleScopedCharacterRoster,
+			_onHubCampaignContextChanged: CharacterSheetPage.prototype._onHubCampaignContextChanged,
+			_handleTerminalCharacterCampaignAccessError: jest.fn(() => false),
+		};
+
+		CharacterSheetPage.prototype._onHubMembershipChanged.call(host, {
+			campaignId: "campaign-1",
+			role: "player",
+		});
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		const labels = [...select.options].map(option => option.textContent);
+		expect(labels.join(" ")).not.toContain("Hidden Player");
+		expect(labels).toContain("Authorized character list unavailable");
+		expect(host._isHubRoleRosterUnavailable).toBe(true);
+		expect(host._isHubRoleRosterRevalidationRequired).toBe(true);
+		expect(select.value).toBe("owned");
+	});
+
+	it("repopulates newly authorized DM selector entries after promotion", async () => {
+		const access = new Map([["owned", CHARACTER_ACCESS_MODES.OWNER]]);
+		const select = makeCharacterSelect([{id: "owned", label: "Owned — Fighter 3"}]);
+		select.value = "owned";
+		const promotedCharacters = [
+			{id: "owned", name: "Owned", classes: [{name: "Fighter", level: 3}]},
+			{id: "private", name: "Hidden Player", classes: [{name: "Wizard", level: 5}]},
+		];
+		const host = {
+			_hubCampaignId: "campaign-1",
+			_isHubCharacter: true,
+			_hubCampaignContext: {
+				pRefresh: jest.fn(async () => ({membership: {role: "dm"}, rulesVersion: null, brewBundle: null})),
+			},
+			_hubContext: {membership: {role: "player"}, rulesVersion: null, brewBundle: null},
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_isHubContextUnavailable: false,
+			_isHubContextRevalidationRequired: false,
+			_hubRoleRosterGeneration: 0,
+			_isHubRoleRosterUnavailable: false,
+			_isHubRoleRosterRevalidationRequired: false,
+			_currentCharacterId: "owned",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterLoadGeneration: 2,
+			_characterRepository: {
+				getCharacterAccess: jest.fn(({characterId}) => access.get(characterId) || null),
+				invalidateRoleScopedCharacterAccess: jest.fn(() => []),
+				pList: jest.fn(async () => {
+					access.set("private", CHARACTER_ACCESS_MODES.DM_READ_ONLY);
+					return promotedCharacters;
+				}),
+			},
+			_selCharacter: select,
+			_state: {
+				getName: () => "Owned",
+				getClasses: () => [{name: "Fighter", level: 3}],
+			},
+			_campaign: {render: jest.fn()},
+			_clearHubRules: jest.fn(),
+			_applyHubContext: jest.fn(function (context) {
+				this._hubContext = context;
+			}),
+			_renderCharacter: jest.fn(),
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
+			_updateCharacterDropdown: CharacterSheetPage.prototype._updateCharacterDropdown,
+			_setHubRoleRosterStatus: CharacterSheetPage.prototype._setHubRoleRosterStatus,
+			_beginHubRoleScopedRosterRefresh: CharacterSheetPage.prototype._beginHubRoleScopedRosterRefresh,
+			_pRefreshHubRoleScopedCharacterRoster: CharacterSheetPage.prototype._pRefreshHubRoleScopedCharacterRoster,
+			_onHubCampaignContextChanged: CharacterSheetPage.prototype._onHubCampaignContextChanged,
+		};
+
+		CharacterSheetPage.prototype._onHubMembershipChanged.call(host, {
+			campaignId: "campaign-1",
+			role: "dm",
+		});
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		expect([...select.options].map(option => option.textContent)).toContain("Hidden Player — Wizard 5 (read-only)");
+		expect(select.value).toBe("owned");
+	});
+
+	it("does not let a stale role roster completion overwrite a newer character scope", async () => {
+		const rosterRefresh = makeDeferred();
+		const access = new Map([["owned", CHARACTER_ACCESS_MODES.OWNER]]);
+		const select = makeCharacterSelect([{id: "owned", label: "Owned — Fighter 3"}]);
+		select.value = "owned";
+		const host = {
+			_hubCampaignId: "campaign-1",
+			_isHubCharacter: true,
+			_hubCampaignContext: {
+				pRefresh: jest.fn(async () => ({membership: {role: "dm"}, rulesVersion: null, brewBundle: null})),
+			},
+			_hubContext: {membership: {role: "player"}, rulesVersion: null, brewBundle: null},
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_isHubContextUnavailable: false,
+			_isHubContextRevalidationRequired: false,
+			_hubRoleRosterGeneration: 0,
+			_isHubRoleRosterUnavailable: false,
+			_isHubRoleRosterRevalidationRequired: false,
+			_currentCharacterId: "owned",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterLoadGeneration: 2,
+			_characterRepository: {
+				getCharacterAccess: jest.fn(({characterId}) => access.get(characterId) || null),
+				invalidateRoleScopedCharacterAccess: jest.fn(() => []),
+				pList: jest.fn(() => rosterRefresh.promise),
+			},
+			_selCharacter: select,
+			_state: {
+				getName: () => "Owned",
+				getClasses: () => [{name: "Fighter", level: 3}],
+			},
+			_campaign: {render: jest.fn()},
+			_clearHubRules: jest.fn(),
+			_applyHubContext: jest.fn(function (context) {
+				this._hubContext = context;
+			}),
+			_renderCharacter: jest.fn(),
+			_getCharacterDropdownLabel: CharacterSheetPage.prototype._getCharacterDropdownLabel,
+			_updateCharacterDropdown: CharacterSheetPage.prototype._updateCharacterDropdown,
+			_setHubRoleRosterStatus: CharacterSheetPage.prototype._setHubRoleRosterStatus,
+			_beginHubRoleScopedRosterRefresh: CharacterSheetPage.prototype._beginHubRoleScopedRosterRefresh,
+			_pRefreshHubRoleScopedCharacterRoster: CharacterSheetPage.prototype._pRefreshHubRoleScopedCharacterRoster,
+			_onHubCampaignContextChanged: CharacterSheetPage.prototype._onHubCampaignContextChanged,
+		};
+
+		CharacterSheetPage.prototype._onHubMembershipChanged.call(host, {
+			campaignId: "campaign-1",
+			role: "dm",
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+		host._currentCharacterId = "replacement";
+		host._characterLoadGeneration++;
+		rosterRefresh.resolve([
+			{id: "owned", name: "Owned"},
+			{id: "private", name: "Hidden Player"},
+		]);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		expect([...select.options].map(option => option.textContent).join(" ")).not.toContain("Hidden Player");
 	});
 
 	it("syncs state-bound Roll History controls on every full character render", () => {

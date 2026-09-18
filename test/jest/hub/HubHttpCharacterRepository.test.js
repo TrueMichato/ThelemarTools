@@ -1,5 +1,6 @@
 import {jest} from "@jest/globals";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
+import {CHARACTER_ACCESS_MODES} from "../../../js/hub/hub-character-view.js";
 
 class MemoryStorage {
 	constructor () {
@@ -66,6 +67,16 @@ const makeCarry = rulesVersionId => ({
 	bodyCapacity: 100,
 	bodyLoad: 10,
 });
+
+const makeDeferred = () => {
+	let resolve;
+	let reject;
+	const promise = new Promise((resolve_, reject_) => {
+		resolve = resolve_;
+		reject = reject_;
+	});
+	return {promise, resolve, reject};
+};
 
 describe("HTTP character repository", () => {
 	it("reports the committed prefix when bulk archive stops on an error", async () => {
@@ -380,6 +391,153 @@ describe("HTTP character repository", () => {
 
 		expect(repository.getCharacterAccess({characterId: "owned"})).toBe("owner");
 		expect(repository.getCharacterAccess({characterId: "player"})).toBe("dm_readonly");
+	});
+
+	it("synchronously removes role-scoped character state without deleting owner state", async () => {
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pListCharacters: async () => [
+				{id: "owned", ownerAccountId: "dm-1", campaignId: "campaign-1", revision: 1, data: {name: "Owned"}},
+				{id: "player", ownerAccountId: "player-1", campaignId: "campaign-1", revision: 1, data: {name: "Player"}},
+			],
+			pGetCharacterProjection: jest.fn(async () => {
+				const error = new Error("not found");
+				error.code = "CHARACTER_NOT_FOUND";
+				throw error;
+			}),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+		await repository.pList();
+		repository._leases.set("player", {epoch: 1});
+		repository._realtimeCursors.set("player", {sequence: 4});
+		repository._pendingResync.set("player", {sequence: 4});
+		repository._coverage.set("player", {live: {revision: 1}});
+		repository._accepted.set("unrelated", {
+			id: "unrelated",
+			ownerAccountId: "dm-1",
+			campaignId: "campaign-2",
+			revision: 1,
+			data: {name: "Unrelated"},
+		});
+		repository._access.set("unrelated", CHARACTER_ACCESS_MODES.OWNER);
+		repository._accepted.set("missing-access", {
+			id: "missing-access",
+			ownerAccountId: "player-2",
+			campaignId: "campaign-1",
+			revision: 1,
+			data: {name: "Missing Access"},
+		});
+
+		expect(repository.invalidateRoleScopedCharacterAccess()).toEqual(["player", "missing-access"]);
+
+		expect(repository.getCharacterAccess({characterId: "owned"})).toBe(CHARACTER_ACCESS_MODES.OWNER);
+		expect(repository._accepted.has("owned")).toBe(true);
+		expect(repository.getCharacterAccess({characterId: "player"})).toBeNull();
+		expect(repository._accepted.has("player")).toBe(false);
+		expect(repository._leases.has("player")).toBe(false);
+		expect(repository._realtimeCursors.has("player")).toBe(false);
+		expect(repository._pendingResync.has("player")).toBe(false);
+		expect(repository._coverage.has("player")).toBe(false);
+		expect(repository._accepted.has("missing-access")).toBe(false);
+		expect(repository._accepted.has("unrelated")).toBe(true);
+		expect(repository.getCharacterAccess({characterId: "unrelated"})).toBe(CHARACTER_ACCESS_MODES.OWNER);
+		await expect(repository.pGet({characterId: "player"})).rejects.toMatchObject({code: "CHARACTER_NOT_FOUND"});
+		expect(api.pGetCharacterProjection).toHaveBeenCalledWith({characterId: "player"});
+	});
+
+	it("does not admit an old-scope roster response after role-scoped access is invalidated", async () => {
+		const oldRoster = makeDeferred();
+		let activeRoster = oldRoster.promise;
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pListCharacters: jest.fn(() => activeRoster),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		const pendingOldRoster = repository.pList();
+		repository.invalidateRoleScopedCharacterAccess();
+		oldRoster.resolve([
+			{id: "player", ownerAccountId: "player-1", campaignId: "campaign-1", revision: 1, data: {name: "Private"}},
+		]);
+
+		await expect(pendingOldRoster).resolves.toBeNull();
+		expect(repository.getCharacterAccess({characterId: "player"})).toBeNull();
+		expect(repository._accepted.has("player")).toBe(false);
+
+		activeRoster = Promise.resolve([
+			{id: "owned", ownerAccountId: "dm-1", campaignId: "campaign-1", revision: 1, data: {name: "Owned"}},
+		]);
+		await expect(repository.pList()).resolves.toEqual([{id: "owned", name: "Owned"}]);
+		expect(repository.getCharacterAccess({characterId: "owned"})).toBe(CHARACTER_ACCESS_MODES.OWNER);
+	});
+
+	it("does not recache an old-scope DM projection that resolves after role invalidation", async () => {
+		const projection = makeDeferred();
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pGetCharacterProjection: jest.fn(() => projection.promise),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		const pendingCharacter = repository.pGet({characterId: "player"});
+		await Promise.resolve();
+		await Promise.resolve();
+		repository.invalidateRoleScopedCharacterAccess();
+		projection.resolve({
+			kind: "dm_truth",
+			character: {
+				id: "player",
+				ownerAccountId: "player-1",
+				campaignId: "campaign-1",
+				revision: 1,
+				data: {name: "Private"},
+			},
+		});
+
+		await expect(pendingCharacter).resolves.toBeNull();
+		expect(repository.getCharacterAccess({characterId: "player"})).toBeNull();
+		expect(repository._accepted.has("player")).toBe(false);
+	});
+
+	it("does not commit a roster when the caller authority fence expires during the request", async () => {
+		const roster = makeDeferred();
+		let isCurrent = true;
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pListCharacters: jest.fn(() => roster.promise),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		const pendingRoster = repository.pList({fnIsCurrent: () => isCurrent});
+		isCurrent = false;
+		roster.resolve([
+			{id: "player", ownerAccountId: "player-1", campaignId: "campaign-1", revision: 1, data: {name: "Private"}},
+		]);
+
+		await expect(pendingRoster).resolves.toBeNull();
+		expect(repository.getCharacterAccess({characterId: "player"})).toBeNull();
+		expect(repository._accepted.has("player")).toBe(false);
+	});
+
+	it("does not commit a roster after the repository session account changes", async () => {
+		const roster = makeDeferred();
+		const api = {
+			pGetSession: async () => ({signedIn: true, account: {id: "dm-1"}}),
+			pListCharacters: jest.fn(() => roster.promise),
+		};
+		const repository = new HubHttpCharacterRepository({campaignId: "campaign-1", api});
+
+		const pendingRoster = repository.pList();
+		await new Promise(resolve => setTimeout(resolve, 0));
+		expect(api.pListCharacters).toHaveBeenCalledTimes(1);
+		repository._session = {signedIn: true, account: {id: "dm-2"}};
+		roster.resolve([
+			{id: "player", ownerAccountId: "player-1", campaignId: "campaign-1", revision: 1, data: {name: "Private"}},
+		]);
+
+		await expect(pendingRoster).resolves.toBeNull();
+		expect(repository.getCharacterAccess({characterId: "player"})).toBeNull();
+		expect(repository._accepted.has("player")).toBe(false);
 	});
 
 	it("does not let a delayed roster response replace newer accepted realtime truth", async () => {
