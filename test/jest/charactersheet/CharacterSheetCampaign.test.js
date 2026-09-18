@@ -30,6 +30,14 @@ function makeStorage () {
 	};
 }
 
+function expireStoredCloneCommand (storage) {
+	const key = "charsheet-campaign-clone-commands:account-1";
+	const registry = JSON.parse(storage.getItem(key));
+	const [commandKey] = Object.keys(registry);
+	registry[commandKey].replayUntil = 1;
+	storage.setItem(key, JSON.stringify(registry));
+}
+
 function getControl ({
 	saveResult = true,
 	createResult = {character: {id: "cloud-1"}},
@@ -89,6 +97,7 @@ function getControl ({
 					? {id: "brew-1", version: 2, contentHash: "source", documentCount: 3}
 					: {id: "brew-2", version: 1, contentHash: "destination", documentCount: 1},
 			})),
+			pListCharacters: jest.fn(async () => []),
 			pMoveCharacter: jest.fn(async ({characterId, campaignId}) => ({
 				character: {id: characterId, campaignId},
 			})),
@@ -530,6 +539,110 @@ describe("Character Sheet campaign control", () => {
 		expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
 	});
 
+	it("adopts the one authoritative clone created after the replay deadline without resubmitting", async () => {
+		const pendingCommandStorage = makeStorage();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockRejectedValueOnce(new HubApiError({code: "REQUEST_FAILED", status: 503}));
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		expireStoredCloneCommand(pendingCommandStorage);
+
+		const {control: fresh, page: freshPage} = getControl({pendingCommandStorage});
+		freshPage._currentCharacterId = "cloud-source";
+		fresh._api.pListCharacters.mockResolvedValue([
+			{id: "clone-committed", clonedFromCharacterId: "cloud-source"},
+		]);
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(fresh._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(fresh._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-committed&hubCampaign=campaign-2");
+	});
+
+	it("clears an expired clone only after authoritative absence and requires a new explicit attempt", async () => {
+		const pendingCommandStorage = makeStorage();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockRejectedValueOnce(new HubApiError({code: "REQUEST_FAILED", status: 503}));
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		const originalKey = control._api.pCloneCharacter.mock.calls[0][0].idempotencyKey;
+		expireStoredCloneCommand(pendingCommandStorage);
+
+		const {control: fresh, page: freshPage} = getControl({
+			pendingCommandStorage,
+			createResult: {character: {id: "clone-new"}},
+		});
+		freshPage._currentCharacterId = "cloud-source";
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+		expect(fresh._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(fresh._fnNavigate).not.toHaveBeenCalled();
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+		expect(fresh._api.pCloneCharacter).toHaveBeenCalledTimes(1);
+		expect(fresh._api.pCloneCharacter.mock.calls[0][0].idempotencyKey).not.toBe(originalKey);
+		expect(fresh._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-new&hubCampaign=campaign-2");
+	});
+
+	it("keeps an expired clone locked when authoritative reconciliation is ambiguous", async () => {
+		const pendingCommandStorage = makeStorage();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockRejectedValueOnce(new HubApiError({code: "REQUEST_FAILED", status: 503}));
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		expireStoredCloneCommand(pendingCommandStorage);
+
+		const {control: fresh, page: freshPage} = getControl({pendingCommandStorage});
+		freshPage._currentCharacterId = "cloud-source";
+		fresh._api.pListCharacters.mockResolvedValue([
+			{id: "clone-a", clonedFromCharacterId: "cloud-source"},
+			{id: "clone-b", clonedFromCharacterId: "cloud-source"},
+		]);
+
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(fresh._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(fresh._fnNavigate).not.toHaveBeenCalled();
+		expect(fresh._feedback).toEqual(expect.objectContaining({
+			type: "error",
+			text: expect.stringMatching(/multiple matching copies/i),
+		}));
+	});
+
+	it("fails closed on an older persisted clone request without recovery metadata", async () => {
+		const pendingCommandStorage = makeStorage();
+		const key = "charsheet-campaign-clone-commands:account-1";
+		pendingCommandStorage.setItem(key, JSON.stringify({
+			[JSON.stringify(["clone-cloud", "cloud-source", "campaign-2"])]: {
+				kind: "clone-cloud",
+				characterId: "cloud-source",
+				campaignId: "campaign-2",
+				idempotencyKey: "legacy-clone-key",
+				request: {
+					characterId: "cloud-source",
+					campaignId: "campaign-2",
+					rulesVersionId: "rules-original",
+					idempotencyKey: "legacy-clone-key",
+				},
+			},
+		}));
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+
+		await control._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(control._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(control._api.pListCharacters).not.toHaveBeenCalled();
+		expect(control._feedback).toEqual(expect.objectContaining({
+			type: "error",
+			text: expect.stringMatching(/cannot be replayed safely/i),
+		}));
+	});
+
 	it("does not continue a cloud clone after its compatibility request becomes stale", async () => {
 		const compatibility = makeDeferred();
 		const {control, page} = getControl({createResult: {character: {id: "clone-1"}}});
@@ -554,8 +667,7 @@ describe("Character Sheet campaign control", () => {
 		control._api.pCloneCharacter.mockReturnValue(clone.promise);
 
 		const pending = control._pCloneCloudCharacter({campaignId: "campaign-2"});
-		await Promise.resolve();
-		await Promise.resolve();
+		for (let i = 0; i < 5; ++i) await Promise.resolve();
 		expect(control._api.pCloneCharacter).toHaveBeenCalledWith(expect.objectContaining({
 			characterId: "cloud-source",
 		}));
@@ -576,8 +688,7 @@ describe("Character Sheet campaign control", () => {
 		control._api.pCloneCharacter.mockReturnValue(clone.promise);
 
 		const pending = control._pCloneCloudCharacter({campaignId: "campaign-2"});
-		await Promise.resolve();
-		await Promise.resolve();
+		for (let i = 0; i < 5; ++i) await Promise.resolve();
 		const originalKey = control._api.pCloneCharacter.mock.calls[0][0].idempotencyKey;
 		page._currentCharacterId = "cloud-replacement";
 		page._characterLoadGeneration++;

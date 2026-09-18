@@ -1,4 +1,9 @@
-import {HubApiClient, HubApiError, isMutationOutcomeUncertain} from "../hub/hub-api-client.js";
+import {
+	HUB_COMMAND_REPLAY_WINDOW_MS,
+	HubApiClient,
+	HubApiError,
+	isMutationOutcomeUncertain,
+} from "../hub/hub-api-client.js";
 import {getCampaignContentPolicy, getCharacterCampaignContentCompliance} from "../hub/hub-content-policy.js";
 import {CharacterSheetSharing} from "./charactersheet-sharing.js";
 import {CharacterSheetState} from "./charactersheet-state.js";
@@ -93,6 +98,7 @@ export function getCampaignControlErrorMessage (error) {
 		case "REVISION_CONFLICT": return "This character changed elsewhere. Resolve the sync conflict before changing campaigns.";
 		case "RULES_VERSION_STALE": return "Campaign content rules changed before this update finished. Reload the campaign context and try again.";
 		case "CONTENT_POLICY_VIOLATION": return "That update adds content the campaign does not allow. Existing off-policy choices remain usable and removable.";
+		case "CLONE_RECOVERY_INVALID": return "This copy has recovery data that cannot be replayed safely. The command remains blocked to prevent a duplicate; preserve the source character and clear the saved recovery record only after checking the destination campaign.";
 		default: return "The Campaign Hub could not complete that request. Your current character was not changed; try again.";
 	}
 }
@@ -154,6 +160,8 @@ export class CharacterSheetCampaign {
 		this._feedback = null;
 		this._pendingCommand = null;
 		this._pendingCommandStorage = pendingCommandStorage;
+		this._fnNow = () => Date.now();
+		this._commandReplayWindowMs = HUB_COMMAND_REPLAY_WINDOW_MS;
 		this._sharing = null;
 		this._isInitialized = false;
 		this._refreshGeneration = 0;
@@ -677,7 +685,14 @@ export class CharacterSheetCampaign {
 			&& this._page._currentCharacterAccess === accessMode
 		);
 		if (!characterId || !campaignId || this._isBusy) return;
-		const command = this._getCloneCommand({characterId, campaignId});
+		let command;
+		try {
+			command = this._getCloneCommand({characterId, campaignId});
+		} catch (error) {
+			this._feedback = {type: "error", text: getCampaignControlErrorMessage(error)};
+			this.render();
+			return;
+		}
 		if (command.committedCharacterId) {
 			this._feedback = {type: "success", text: "Cloud copy created. This campaign character is unchanged."};
 			this.render();
@@ -690,17 +705,52 @@ export class CharacterSheetCampaign {
 		this.render();
 		let isCloneRequestSubmitted = false;
 		try {
+			let request = this._getCloneCommandRequest({command, characterId, campaignId});
+			if (request && this._getNow() >= command.replayUntil) {
+				const characters = await this._api.pListCharacters({campaignId});
+				if (!isCurrentCharacter()) return;
+				const baselineCloneIds = new Set(command.baselineCloneIds);
+				const candidates = characters.filter(character =>
+					character?.clonedFromCharacterId === characterId
+					&& !baselineCloneIds.has(character.id));
+				if (candidates.length === 1) {
+					this._markCloneCommandCommitted({characterId, campaignId, character: candidates[0]});
+					this._feedback = {type: "success", text: "The previously submitted cloud copy was found."};
+					this.render();
+					this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: candidates[0].id}));
+					this._clearCloneCommand({characterId, campaignId});
+					return;
+				}
+				if (!candidates.length) {
+					this._clearCloneCommand({characterId, campaignId});
+					this._feedback = {
+						type: "warning",
+						text: "No committed copy was found after the safe retry window. Review the destination, then choose copy again to start a new command.",
+					};
+					return;
+				}
+				this._feedback = {
+					type: "error",
+					text: "Multiple matching copies were found after the safe retry window. The copy remains locked to prevent another duplicate.",
+				};
+				return;
+			}
 			if (!await this._page._saveCurrentCharacter({isInteractiveConflict: false})) throw new Error("CLOUD_SAVE_FAILED");
 			if (!isCurrentCharacter()) return;
-			let request = this._getCloneCommandRequest({command, characterId, campaignId});
 			if (!request) {
 				const target = await this._api.pGetCampaignCompatibility({campaignId});
+				if (!isCurrentCharacter()) return;
+				const destinationCharacters = await this._api.pListCharacters({campaignId});
 				if (!isCurrentCharacter()) return;
 				request = this._stageCloneCommandRequest({
 					command,
 					characterId,
 					campaignId,
 					rulesVersionId: target.rulesVersion?.id || null,
+					baselineCloneIds: destinationCharacters
+						.filter(character => character?.clonedFromCharacterId === characterId)
+						.map(character => character.id)
+						.sort(),
 				});
 			}
 			isCloneRequestSubmitted = true;
@@ -743,13 +793,15 @@ export class CharacterSheetCampaign {
 	_getCloneCommandRegistry () {
 		const storageKey = this._getCloneCommandStorageKey();
 		if (!storageKey || !this._pendingCommandStorage) return null;
-		const raw = this._pendingCommandStorage.getItem(storageKey);
-		if (!raw) return {};
-		const parsed = JSON.parse(raw);
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			throw new Error("Saved cloud-copy recovery data is invalid.");
+		try {
+			const raw = this._pendingCommandStorage.getItem(storageKey);
+			if (!raw) return {};
+			const parsed = JSON.parse(raw);
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+			return parsed;
+		} catch {
+			throw new HubApiError({code: "CLONE_RECOVERY_INVALID", status: 0});
 		}
-		return parsed;
 	}
 
 	_persistCloneCommandRegistry (registry) {
@@ -760,7 +812,7 @@ export class CharacterSheetCampaign {
 
 	_getCloneCommand ({characterId, campaignId}) {
 		const registry = this._getCloneCommandRegistry();
-		if (!registry) return this._getPendingCommand({kind: "clone-cloud", characterId, campaignId});
+		if (!registry) throw new HubApiError({code: "CLONE_RECOVERY_INVALID", status: 0});
 		const key = this._getCloneCommandKey({characterId, campaignId});
 		if (!registry[key]) {
 			registry[key] = {
@@ -784,7 +836,12 @@ export class CharacterSheetCampaign {
 			&& request.campaignId === campaignId
 			&& request.idempotencyKey === command.idempotencyKey
 			&& (request.rulesVersionId === null || typeof request.rulesVersionId === "string");
-		if (!isValid) throw new Error("Saved cloud-copy recovery data is invalid.");
+		const isRecoveryValid = Number.isSafeInteger(command.replayUntil)
+			&& command.replayUntil > 0
+			&& Array.isArray(command.baselineCloneIds)
+			&& command.baselineCloneIds.every(id => typeof id === "string" && id)
+			&& new Set(command.baselineCloneIds).size === command.baselineCloneIds.length;
+		if (!isValid || !isRecoveryValid) throw new HubApiError({code: "CLONE_RECOVERY_INVALID", status: 0});
 		return {
 			characterId,
 			campaignId,
@@ -793,7 +850,7 @@ export class CharacterSheetCampaign {
 		};
 	}
 
-	_stageCloneCommandRequest ({command, characterId, campaignId, rulesVersionId}) {
+	_stageCloneCommandRequest ({command, characterId, campaignId, rulesVersionId, baselineCloneIds}) {
 		const request = {
 			characterId,
 			campaignId,
@@ -801,6 +858,8 @@ export class CharacterSheetCampaign {
 			idempotencyKey: command.idempotencyKey,
 		};
 		command.request = request;
+		command.replayUntil = this._getNow() + (this._commandReplayWindowMs ?? HUB_COMMAND_REPLAY_WINDOW_MS);
+		command.baselineCloneIds = [...baselineCloneIds];
 		const registry = this._getCloneCommandRegistry();
 		if (!registry) return request;
 		const key = this._getCloneCommandKey({characterId, campaignId});
@@ -808,9 +867,18 @@ export class CharacterSheetCampaign {
 		if (!storedCommand || storedCommand.idempotencyKey !== command.idempotencyKey) {
 			throw new Error("Saved cloud-copy recovery data is invalid.");
 		}
-		registry[key] = {...storedCommand, request};
+		registry[key] = {
+			...storedCommand,
+			request,
+			replayUntil: command.replayUntil,
+			baselineCloneIds: command.baselineCloneIds,
+		};
 		this._persistCloneCommandRegistry(registry);
 		return request;
+	}
+
+	_getNow () {
+		return this._fnNow?.() ?? Date.now();
 	}
 
 	_markCloneCommandCommitted ({characterId, campaignId, character}) {

@@ -1985,29 +1985,17 @@ export class HubCampaignPage {
 		const idempotencyKeys: string[] = [];
 		const requestBodies: string[] = [];
 		let attempt = 0;
-		let releaseSuccess: (() => void) | null = null;
-		let resolveSuccessHandled: (() => void) | null = null;
-		const successGate = new Promise<void>(resolve => releaseSuccess = resolve);
-		const successHandled = new Promise<void>(resolve => resolveSuccessHandled = resolve);
 		await this.page.route(requestUrl, async route => {
 			idempotencyKeys.push(route.request().headers()["idempotency-key"]);
 			requestBodies.push(JSON.stringify(route.request().postDataJSON()));
-			if (++attempt === 1) {
-				const committed = await route.fetch();
-				expect(committed.ok()).toBe(true);
-				await route.fulfill({
-					status: 503,
-					contentType: "application/json",
-					body: JSON.stringify({error: "HUB_UNAVAILABLE"}),
-				});
-				return;
-			}
-			await successGate;
-			try {
-				await route.continue();
-			} finally {
-				resolveSuccessHandled();
-			}
+			if (++attempt !== 1) throw new Error(`Expired item-award recovery resubmitted the command (attempts=${attempt}).`);
+			const committed = await route.fetch();
+			expect(committed.ok()).toBe(true);
+			await route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: "HUB_UNAVAILABLE"}),
+			});
 		});
 		const form = this.page.locator("#campaign-item-form");
 		const submit = form.locator("button[type='submit']");
@@ -2026,20 +2014,24 @@ export class HubCampaignPage {
 			await expect(this.page.locator("#campaign-item-quantity")).toBeDisabled();
 			await expect(this.page.locator("#campaign-item-targets input[type='checkbox']").first()).toBeDisabled();
 			await afterUncertainResponse?.();
-
-			await submit.click();
-			await expect(form).toHaveAttribute("aria-busy", "true");
-			await expect(submit).toBeDisabled();
+			await this.page.evaluate(() => {
+				const storageKey = Object.keys(sessionStorage).find(key => key.startsWith("hub-item-award-draft:"));
+				if (!storageKey) throw new Error("The item-award recovery draft was not persisted.");
+				const draft = JSON.parse(sessionStorage.getItem(storageKey) || "null");
+				draft.replayUntil = 1;
+				sessionStorage.setItem(storageKey, JSON.stringify(draft));
+			});
+			await this.page.reload({waitUntil: "domcontentloaded"});
+			await this.openCampaignWorkbench();
+			await expect(status).toContainText("previous award outcome is unknown");
+			await expect(submit).toBeEnabled();
 			await expect(submit).toHaveText("Retry previous award");
 			await expect(search).toBeDisabled();
-			releaseSuccess();
+
+			await submit.click();
 			await expect(status)
-				.toHaveText(
-					`${quantity} × ${itemName} awarded to ${characterNames.length} character${characterNames.length === 1 ? "" : "s"}.`,
-					{timeout: 15_000},
-				);
-			expect(idempotencyKeys).toHaveLength(2);
-			expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+				.toHaveText("The previously submitted award was already committed. Latest inventories are loaded.", {timeout: 15_000});
+			expect(idempotencyKeys).toHaveLength(1);
 			expect(new Set(requestBodies)).toEqual(new Set([requestBodies[0]]));
 			await expect.poll(() => form.evaluate(element => ({
 				ariaBusy: element.getAttribute("aria-busy"),
@@ -2057,8 +2049,6 @@ export class HubCampaignPage {
 			await expect(search).toBeFocused();
 			await expect(this.page.locator("#hub-error")).toBeHidden();
 		} finally {
-			releaseSuccess?.();
-			if (attempt > 1) await successHandled;
 			await this.page.unroute(requestUrl);
 		}
 		const recipientError = await recipientResult;

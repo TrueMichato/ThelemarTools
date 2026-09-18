@@ -1,4 +1,5 @@
 import {
+	HUB_COMMAND_REPLAY_WINDOW_MS,
 	HubApiClient,
 	HubApiError,
 	HubTransferProposalDrafts,
@@ -51,12 +52,56 @@ import {
 	filterAwardItems,
 	getAwardItemSelectionKey,
 	getOrStageAwardMutationDraft,
+	parseAwardMutationDraft,
 	resolveAwardItemSelection,
 } from "./hub-item-award.js";
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
 let campaignAuthorizationErrorHandler = null;
+
+function getAwardDraftStorageKey ({accountId, campaignId}) {
+	return `hub-item-award-draft:${accountId}:${campaignId}`;
+}
+
+function loadAwardMutationDraft ({storageKey}) {
+	const raw = sessionStorage.getItem(storageKey);
+	if (!raw) return null;
+	const draft = parseAwardMutationDraft(raw);
+	if (!draft) throw new Error("Saved item-award recovery data is invalid. The award remains blocked to prevent a duplicate.");
+	return draft;
+}
+
+function persistAwardMutationDraft ({storageKey, draft}) {
+	sessionStorage.setItem(storageKey, JSON.stringify(draft));
+}
+
+function clearAwardMutationDraft ({storageKey}) {
+	sessionStorage.removeItem(storageKey);
+}
+
+async function pFindAwardEventByCommandId ({campaignId, actorCommandId}) {
+	const snapshot = await api.pGetCampaignSnapshot({campaignId});
+	let beforeSequence = Number(snapshot?.lastSequence || 0) + 1;
+	while (beforeSequence > 1) {
+		const page = await api.pListEventPage({
+			campaignId,
+			beforeSequence,
+			limit: 200,
+		});
+		const match = page.events.find(event =>
+			event.type === "item.granted"
+			&& event.payload?.actorCommandId === actorCommandId);
+		if (match) return match;
+		if (!page.history?.hasMore) return null;
+		const nextBeforeSequence = Number(page.history.scannedBackThroughSequence);
+		if (!Number.isSafeInteger(nextBeforeSequence) || nextBeforeSequence >= beforeSequence) {
+			throw new Error("Item-award history could not be reconciled safely.");
+		}
+		beforeSequence = nextBeforeSequence;
+	}
+	return null;
+}
 
 function concealCampaignAuthorizationSurfaces () {
 	const content = document.getElementById("campaign-content");
@@ -915,10 +960,12 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			form._hubItemAwardRetryPending = isRetryPending;
 			submit.textContent = isRetry ? "Retry previous award" : submitDefaultText;
 			if (isPending) {
+				if (isRetry) submit.disabled = false;
 				applyPendingControlState();
 				return;
 			}
 			restorePendingControlStates();
+			renderPreview();
 		},
 		setTargets (nextTargets) {
 			if (isRetryPending) return;
@@ -2636,12 +2683,17 @@ function getFormFingerprint (form) {
 		.sort(([idA], [idB]) => idA.localeCompare(idB)));
 }
 
-async function pRunFormMutation ({form, fingerprint, fnMutate}) {
+async function pRunFormMutation ({form, fingerprint, fnMutate, idempotencyKey = null}) {
 	if (form._hubIsSubmitting) return null;
 	if (typeof fingerprint !== "string") throw new TypeError("A mutation fingerprint is required.");
 	if (form._hubMutationFingerprint !== fingerprint) {
 		form._hubMutationFingerprint = fingerprint;
-		form._hubMutationKey = crypto.randomUUID();
+		form._hubMutationKey = idempotencyKey || crypto.randomUUID();
+	} else if (idempotencyKey) {
+		if (form._hubMutationKey && form._hubMutationKey !== idempotencyKey) {
+			throw new Error("Saved mutation recovery data does not match the pending command.");
+		}
+		form._hubMutationKey = idempotencyKey;
 	}
 	form._hubIsSubmitting = true;
 	form._hubMutationControlStates = new Map(
@@ -2861,6 +2913,44 @@ async function pInitCampaignForms ({
 	if (dmScreenLink) dmScreenLink.href = `dmscreen.html?hubCampaign=${encodeURIComponent(campaignId)}`;
 	let partyInventory = await api.pGetPartyInventory({campaignId});
 	const itemAward = await pInitItemAwardComposer({context, partyInventory, targetCharacters, events});
+	const itemAwardForm = document.getElementById("campaign-item-form");
+	const itemAwardDraftStorageKey = getAwardDraftStorageKey({
+		accountId: session.account.id,
+		campaignId,
+	});
+	const clearAwardDraftState = () => {
+		clearAwardMutationDraft({storageKey: itemAwardDraftStorageKey});
+		if (!itemAwardForm) return;
+		delete itemAwardForm._hubAwardMutationDraft;
+		itemAwardForm._hubMutationKey = null;
+		itemAwardForm._hubMutationFingerprint = null;
+	};
+	let restoredAwardDraft = null;
+	let itemAwardRecoveryError = null;
+	try {
+		restoredAwardDraft = loadAwardMutationDraft({storageKey: itemAwardDraftStorageKey});
+	} catch (error) {
+		itemAwardRecoveryError = error;
+	}
+	if (itemAwardForm && restoredAwardDraft) {
+		itemAwardForm._hubAwardMutationDraft = restoredAwardDraft;
+		itemAwardForm._hubMutationKey = restoredAwardDraft.idempotencyKey;
+		itemAwardForm._hubMutationFingerprint = restoredAwardDraft.fingerprint;
+		itemAward.setPending(true, {isRetry: true});
+		setFormStatus({
+			formId: "campaign-item-form",
+			message: "The previous award outcome is unknown. Retry before the recovery deadline, or reconcile it from campaign history afterward.",
+		});
+	}
+	if (itemAwardForm && itemAwardRecoveryError) {
+		for (const control of itemAwardForm.querySelectorAll("input, textarea, select, button")) control.disabled = true;
+		setFormStatus({
+			formId: "campaign-item-form",
+			message: `${itemAwardRecoveryError.message} Clear this site's saved data only after checking campaign inventories.`,
+			isError: true,
+		});
+	}
+	const itemAwardSubmissionForm = itemAwardRecoveryError ? null : itemAwardForm;
 	const transferRefreshQueue = new HubTransferRefreshQueue();
 	const pRefreshTransferState = (
 		refresh = {},
@@ -3373,7 +3463,7 @@ async function pInitCampaignForms ({
 		}
 	});
 
-	document.getElementById("campaign-item-form")?.addEventListener("submit", async event => {
+	itemAwardSubmissionForm?.addEventListener("submit", async event => {
 		event.preventDefault();
 		const form = event.currentTarget;
 		const fnIsCurrent = captureProjectionAuthorization();
@@ -3388,13 +3478,67 @@ async function pInitCampaignForms ({
 				draft: form._hubAwardMutationDraft,
 				fnGetSubmission: () => itemAward.getSubmission(),
 				rulesVersionId: currentContext.rulesVersion?.id || null,
+				idempotencyKey: form._hubMutationKey || crypto.randomUUID(),
+				replayWindowMs: HUB_COMMAND_REPLAY_WINDOW_MS,
 			});
 			form._hubAwardMutationDraft = awardDraft;
+			if (!isAwardRetry) {
+				persistAwardMutationDraft({
+					storageKey: itemAwardDraftStorageKey,
+					draft: awardDraft,
+				});
+			}
+			if (Date.now() >= awardDraft.replayUntil) {
+				isAwardRetryRequired = true;
+				itemAward.setPending(true, {isRetry: true});
+				let committedEvent;
+				try {
+					committedEvent = await pFindAwardEventByCommandId({
+						campaignId,
+						actorCommandId: awardDraft.idempotencyKey,
+					});
+				} catch (error) {
+					setFormStatus({
+						formId,
+						message: error.message || "The previous award could not be reconciled safely.",
+						isError: true,
+					});
+					return;
+				}
+				clearAwardDraftState();
+				isAwardRetryRequired = false;
+				itemAward.setPending(false);
+				if (!committedEvent) {
+					setFormStatus({
+						formId,
+						message: "No committed award was found after the safe retry window. Review current inventories, then submit again to create a new command.",
+					});
+					return;
+				}
+				itemAward.onSuccess({
+					awardId: committedEvent.payload.awardId,
+					source: {
+						kind: committedEvent.payload.sourceKind,
+						item: committedEvent.payload.entry?.item,
+					},
+					targets: [],
+				});
+				const refreshResult = await pRefreshTransferState({fnIsCurrent});
+				if (fnIsCurrent() && !refreshResult?.isFenced) {
+					setFormStatus({
+						formId,
+						message: "The previously submitted award was already committed. Latest inventories are loaded.",
+					});
+					itemAward.focusPrimary();
+				}
+				return;
+			}
 			const submission = awardDraft.request;
 			let result;
 			await pRunFormMutation({
 				form,
 				fingerprint: awardDraft.fingerprint,
+				idempotencyKey: awardDraft.idempotencyKey,
 				fnMutate: async idempotencyKey => {
 					itemAward.setPending(true, {isRetry: isAwardRetry});
 					result = await api.pAwardItems({
@@ -3406,7 +3550,7 @@ async function pInitCampaignForms ({
 			});
 			if (!result) return;
 			itemAward.setPending(true);
-			delete form._hubAwardMutationDraft;
+			clearAwardDraftState();
 			const applyAwardSuccessUi = () => {
 				itemAward.onSuccess(result);
 				setFormStatus({
@@ -3451,7 +3595,7 @@ async function pInitCampaignForms ({
 		} catch (error) {
 			isAwardRetryRequired = isMutationOutcomeUncertain(error);
 			if (!isAwardRetryRequired) {
-				delete form._hubAwardMutationDraft;
+				clearAwardDraftState();
 				form._hubMutationKey = null;
 				form._hubMutationFingerprint = null;
 			}

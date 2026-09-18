@@ -597,12 +597,16 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("api.pAwardItems");
 		expect(source).toContain("getOrStageAwardMutationDraft");
 		expect(source).toContain("form._hubAwardMutationDraft");
+		expect(source).toContain("sessionStorage.setItem");
+		expect(source).toContain("pFindAwardEventByCommandId");
+		expect(source).toContain("actorCommandId: awardDraft.idempotencyKey");
 		expect(source).toContain("fnGetSubmission: () => itemAward.getSubmission()");
 		expect(source).toContain("isMutationOutcomeUncertain");
 		expect(source).toContain("Retry previous award");
 		expect(source).toMatch(/isAwardRetryRequired = isMutationOutcomeUncertain\(error\)/);
 		expect(source).toMatch(/itemAward\.setPending\(isAwardRetryRequired, \{isRetry: isAwardRetryRequired\}\)/);
-		expect(source).toMatch(/if \(!result\) return;\s+itemAward\.setPending\(true\);\s+delete form\._hubAwardMutationDraft/);
+		expect(source).toMatch(/if \(isRetry\) submit\.disabled = false;\s+applyPendingControlState\(\)/);
+		expect(source).toMatch(/if \(!result\) return;\s+itemAward\.setPending\(true\);\s+clearAwardDraftState\(\)/);
 		expect(source).toMatch(/setTargets \(nextTargets\) \{\s+if \(isRetryPending\) return;/);
 		expect(source).toContain("form._hubItemAwardRetryPending = isRetryPending");
 		expect(source).toMatch(/isItemAwardRetryPending[\s\S]*\? \[\] : \["campaign-item-targets", "campaign-item-preview-list"\]/);

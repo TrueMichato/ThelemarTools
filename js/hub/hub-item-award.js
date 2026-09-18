@@ -3,6 +3,7 @@ import {
 	getProjectionName,
 	getProjectionView,
 } from "./hub-character-view.js";
+import {HUB_COMMAND_REPLAY_WINDOW_MS} from "./hub-api-client.js";
 import {getHubItemSummary} from "./hub-item-catalog.js";
 
 const REQUEST_ITEM_FIELDS = Object.freeze(["name", "source", "page", "rarity", "weight", "value", "typeCode", "edition"]);
@@ -183,12 +184,21 @@ export function getAwardCommandFingerprint ({source, targetCharacterIds, quantit
 	return JSON.stringify({source, targetCharacterIds, quantity, note, rulesVersionId});
 }
 
-export function stageAwardMutationDraft ({draft = null, submission, rulesVersionId = null} = {}) {
+export function stageAwardMutationDraft ({
+	draft = null,
+	submission,
+	rulesVersionId = null,
+	idempotencyKey = crypto.randomUUID(),
+	fnNow = () => Date.now(),
+	replayWindowMs = HUB_COMMAND_REPLAY_WINDOW_MS,
+} = {}) {
 	if (draft) return draft;
 	const request = structuredClone({...submission, rulesVersionId});
 	return {
 		request,
 		fingerprint: getAwardCommandFingerprint(request),
+		idempotencyKey,
+		replayUntil: fnNow() + replayWindowMs,
 	};
 }
 
@@ -196,12 +206,33 @@ export function getOrStageAwardMutationDraft ({
 	draft = null,
 	fnGetSubmission,
 	rulesVersionId = null,
+	idempotencyKey = undefined,
+	fnNow = undefined,
+	replayWindowMs = undefined,
 } = {}) {
 	if (draft) return draft;
 	return stageAwardMutationDraft({
 		submission: fnGetSubmission(),
 		rulesVersionId,
+		...(idempotencyKey === undefined ? {} : {idempotencyKey}),
+		...(fnNow === undefined ? {} : {fnNow}),
+		...(replayWindowMs === undefined ? {} : {replayWindowMs}),
 	});
+}
+
+export function parseAwardMutationDraft (raw) {
+	let draft;
+	try {
+		draft = typeof raw === "string" ? JSON.parse(raw) : structuredClone(raw);
+	} catch {
+		return null;
+	}
+	if (!draft || typeof draft !== "object" || Array.isArray(draft)) return null;
+	if (!draft.request || typeof draft.request !== "object" || Array.isArray(draft.request)) return null;
+	if (typeof draft.fingerprint !== "string" || draft.fingerprint !== getAwardCommandFingerprint(draft.request)) return null;
+	if (typeof draft.idempotencyKey !== "string" || !draft.idempotencyKey) return null;
+	if (!Number.isSafeInteger(draft.replayUntil) || draft.replayUntil < 1) return null;
+	return draft;
 }
 
 export function buildAwardPreview ({

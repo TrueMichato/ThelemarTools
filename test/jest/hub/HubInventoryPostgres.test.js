@@ -281,6 +281,13 @@ describePostgres("Campaign Hub inventory transfers (real PostgreSQL)", () => {
 		expect(event.payload.entry.item).not.toHaveProperty("entries");
 		expect(event.payload.entry.item).not.toHaveProperty("_baseSource");
 		expect(event.payload.sourceKind).toBe("catalog");
+		expect(event.payload.actorCommandId).toBe(`${prefix}-rich-award`);
+		const dmGrant = (await store.pListVisibleEvents({accountId: dm.id, campaignId: campaign.id}))
+			.find(it => it.type === "item.granted" && it.payload?.awardId === result.awardId);
+		const playerGrant = (await store.pListVisibleEvents({accountId: targetOwner.id, campaignId: campaign.id}))
+			.find(it => it.type === "item.granted" && it.payload?.awardId === result.awardId);
+		expect(dmGrant.payload.actorCommandId).toBe(`${prefix}-rich-award`);
+		expect(playerGrant.payload).not.toHaveProperty("actorCommandId");
 		const audit = (await pool.query(`
 			SELECT details
 			FROM hub.audit_entries

@@ -63,6 +63,7 @@ import {
 	enrichEventPayload,
 	getTransferCharacterDisplaySnapshot,
 	projectTransferForViewer,
+	redactActorCommandEventForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
@@ -2276,6 +2277,7 @@ export class MemoryHubStore {
 	 * HTTP read hides.
 	 */
 	redactEventForViewer ({event, accountId, role}) {
+		event = redactActorCommandEventForViewer({event, accountId});
 		const transferEvent = redactTransferEventForViewer({
 			event,
 			accountId,
@@ -3526,6 +3528,7 @@ export class MemoryHubStore {
 				visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
 				payload: {
 					awardId,
+					actorCommandId: commandIdempotencyKey.key,
 					index,
 					targetCount: stagedCharacters.length,
 					sourceKind: resolvedSourceKind,

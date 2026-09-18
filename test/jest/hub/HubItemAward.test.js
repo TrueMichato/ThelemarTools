@@ -12,6 +12,7 @@ import {
 	getAwardItemSelectionKey,
 	getOrStageAwardMutationDraft,
 	getAwardSourceRequest,
+	parseAwardMutationDraft,
 	resolveAwardItemSelection,
 	stageAwardMutationDraft,
 } from "../../../js/hub/hub-item-award.js";
@@ -273,6 +274,9 @@ describe("Hub item award presentation contract", () => {
 				note: null,
 			},
 			rulesVersionId: "rules-1",
+			idempotencyKey: "award-key",
+			fnNow: () => 1_000,
+			replayWindowMs: 23_000,
 		});
 		const fnGetSubmission = jest.fn(() => {
 			throw new Error("The refreshed form no longer has a selected item.");
@@ -299,6 +303,29 @@ describe("Hub item award presentation contract", () => {
 			idempotencyKey: originalIdempotencyKey,
 		});
 		expect(result.idempotencyKey).toBe(originalIdempotencyKey);
+	});
+
+	it("persists and validates the exact award command through its conservative replay deadline", () => {
+		const draft = stageAwardMutationDraft({
+			submission: {
+				source: {kind: "catalog", item: {name: "Torch", source: "PHB"}},
+				targetCharacterIds: ["a", "b"],
+				quantity: 2,
+				note: "For the road",
+			},
+			rulesVersionId: "rules-1",
+			idempotencyKey: "award-key",
+			fnNow: () => 1_000,
+			replayWindowMs: 23_000,
+		});
+
+		expect(draft).toMatchObject({
+			idempotencyKey: "award-key",
+			replayUntil: 24_000,
+		});
+		expect(parseAwardMutationDraft(JSON.stringify(draft))).toEqual(draft);
+		expect(parseAwardMutationDraft(JSON.stringify({...draft, fingerprint: "tampered"}))).toBeNull();
+		expect(parseAwardMutationDraft(JSON.stringify({...draft, replayUntil: null}))).toBeNull();
 	});
 
 	it("distinguishes exact, lower-bound, unavailable, and policy-blocked previews", () => {

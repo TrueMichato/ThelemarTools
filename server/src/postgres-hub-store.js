@@ -64,6 +64,7 @@ import {
 	enrichEventPayload,
 	getTransferCharacterDisplaySnapshot,
 	projectTransferForViewer,
+	redactActorCommandEventForViewer,
 	redactTransferEventForViewer,
 } from "./hub-event-snapshots.js";
 import {createSemanticOperationRegistry} from "./semantic-operation-registry.js";
@@ -3309,6 +3310,11 @@ export class PostgresHubStore {
 	 * envelope cannot map a hidden character back to its named owner.
 	 */
 	_redactRowForViewer ({row, accountId, role, character}) {
+		if (row.payload?.actorCommandId && row.actor_account_id !== accountId) {
+			const payload = {...row.payload};
+			delete payload.actorCommandId;
+			row = {...row, payload};
+		}
 		if (
 			row.event_type === "character.projection.invalidated"
 			&& row.visibility === "explicit_accounts"
@@ -3331,6 +3337,7 @@ export class PostgresHubStore {
 
 	/** Realtime fanout shares the HTTP read's redaction rather than duplicating it. */
 	async redactEventForViewer ({event, accountId, role}) {
+		event = redactActorCommandEventForViewer({event, accountId});
 		if (event.aggregateType === "transfer" && `${event.type || ""}`.startsWith("transfer.")) {
 			const characterIds = [
 				event.payload?.sourceKind === "character" ? event.payload.sourceId : null,
@@ -5116,6 +5123,7 @@ export class PostgresHubStore {
 					visibleAccountIds: [...new Set([accountId, character.ownerAccountId])],
 					payload: {
 						awardId,
+						actorCommandId: commandIdempotencyKey.key,
 						index,
 						targetCount: updatedTargets.length,
 						sourceKind: resolvedSourceKind,
