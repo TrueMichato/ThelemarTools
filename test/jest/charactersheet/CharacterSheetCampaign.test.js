@@ -22,10 +22,19 @@ const makeDeferred = () => {
 	return {promise, resolve, reject};
 };
 
+function makeStorage () {
+	const data = new Map();
+	return {
+		getItem: key => data.get(key) ?? null,
+		setItem: (key, value) => data.set(key, `${value}`),
+	};
+}
+
 function getControl ({
 	saveResult = true,
 	createResult = {character: {id: "cloud-1"}},
 	currentCampaignId = "campaign-1",
+	pendingCommandStorage = makeStorage(),
 } = {}) {
 	const page = {
 		_currentCharacterId: "local-1",
@@ -101,6 +110,8 @@ function getControl ({
 		_isBusy: false,
 		_feedback: null,
 		_pendingCommand: null,
+		_pendingCommandStorage: pendingCommandStorage,
+		_session: {account: {id: "account-1"}},
 		_fnNavigate: jest.fn(),
 		render: jest.fn(),
 	});
@@ -500,6 +511,42 @@ describe("Character Sheet campaign control", () => {
 
 		expect(control._fnNavigate).not.toHaveBeenCalled();
 		expect(control._feedback).not.toEqual(expect.objectContaining({type: "success"}));
+	});
+
+	it("reconciles a committed clone after a scope switch and reload without creating a duplicate", async () => {
+		const pendingCommandStorage = makeStorage();
+		const clone = makeDeferred();
+		const {control, page} = getControl({pendingCommandStorage});
+		page._currentCharacterId = "cloud-source";
+		control._api.pCloneCharacter.mockReturnValue(clone.promise);
+
+		const pending = control._pCloneCloudCharacter({campaignId: "campaign-2"});
+		await Promise.resolve();
+		await Promise.resolve();
+		const originalKey = control._api.pCloneCharacter.mock.calls[0][0].idempotencyKey;
+		page._currentCharacterId = "cloud-replacement";
+		page._characterLoadGeneration++;
+		clone.resolve({character: {id: "clone-1"}});
+		await pending;
+
+		const {control: fresh, page: freshPage} = getControl({pendingCommandStorage});
+		freshPage._currentCharacterId = "cloud-source";
+		await fresh._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(control._api.pCloneCharacter).toHaveBeenCalledWith(expect.objectContaining({idempotencyKey: originalKey}));
+		expect(fresh._api.pCloneCharacter).not.toHaveBeenCalled();
+		expect(fresh._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-1&hubCampaign=campaign-2");
+
+		const {control: subsequent, page: subsequentPage} = getControl({
+			pendingCommandStorage,
+			createResult: {character: {id: "clone-2"}},
+		});
+		subsequentPage._currentCharacterId = "cloud-source";
+		await subsequent._pCloneCloudCharacter({campaignId: "campaign-2"});
+
+		expect(subsequent._api.pCloneCharacter).toHaveBeenCalledTimes(1);
+		expect(subsequent._api.pCloneCharacter.mock.calls[0][0].idempotencyKey).not.toBe(originalKey);
+		expect(subsequent._fnNavigate).toHaveBeenCalledWith("charactersheet.html?id=clone-2&hubCampaign=campaign-2");
 	});
 
 	it("summarizes rule and homebrew differences without exposing documents", () => {

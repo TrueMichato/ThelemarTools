@@ -5146,6 +5146,12 @@ class CharacterSheetCombat {
 	 * @returns {Promise<boolean>}
 	 */
 	async pChannelSpellFromCast (choice, event = {}) {
+		const prepared = await this.pPrepareChannelSpellFromCast(choice, event);
+		if (!prepared) return false;
+		return this.commitPreparedChannelSpellFromCast(prepared);
+	}
+
+	async pPrepareChannelSpellFromCast (choice, event = {}) {
 		if (!choice?.spell || !choice?.spellData) return false;
 		if (!this._cachedAttacks?.length) this.renderAttacks();
 
@@ -5168,10 +5174,19 @@ class CharacterSheetCombat {
 			if (picked == null) return false;
 			attack = eligibleAttacks[picked];
 		}
+		if (!this._canRollAttackActionAttack(attack)) {
+			JqueryUtil.doToast({type: "warning", content: "No attacks remain in this Attack action."});
+			return false;
+		}
 
-		const didRoll = this._rollAttack(attack.id, event);
+		return {attackId: attack.id, choice, event};
+	}
+
+	commitPreparedChannelSpellFromCast (prepared) {
+		if (!prepared?.attackId || !prepared.choice?.spell || !prepared.choice?.spellData) return false;
+		const didRoll = this._rollAttack(prepared.attackId, prepared.event || {});
 		if (didRoll === false) return false;
-		this._armChannelSpellRider(attack.id, choice);
+		this._armChannelSpellRider(prepared.attackId, prepared.choice);
 		return true;
 	}
 

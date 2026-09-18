@@ -123,7 +123,10 @@ describe("Follow-up C — Blessing of Moonlight Moonbeam cast action", () => {
 		spells._allSpells = [{name: "Moonbeam", source: "XPHB", level: 2}];
 		spells._page = {saveCharacter: jest.fn()};
 		spells._renderSpellList = jest.fn();
-		spells._castSpell = jest.fn(async () => { slots = Math.max(0, slots - 1); });
+		spells._castSpellInner = jest.fn(async () => {
+			slots = Math.max(0, slots - 1);
+			return true;
+		});
 		let slots = moonbeamLevelSlots;
 		const feature = blessingUses == null
 			? null
@@ -164,7 +167,7 @@ describe("Follow-up C — Blessing of Moonlight Moonbeam cast action", () => {
 		globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => true);
 		const toast = jest.spyOn(globalThis.JqueryUtil, "doToast");
 		await spells._castSpellWithBlessing("mb");
-		expect(spells._castSpell).toHaveBeenCalledTimes(1);
+		expect(spells._castSpellInner).toHaveBeenCalledTimes(1);
 		expect(spells._state.useFeature).toHaveBeenCalledWith("Blessing of Moonlight");
 		expect(feature.uses.current).toBe(0);
 		const healToast = toast.mock.calls.map(c => c[0]).find(a => /Blessing of Moonlight/.test(a.content));
@@ -177,25 +180,138 @@ describe("Follow-up C — Blessing of Moonlight Moonbeam cast action", () => {
 		const {spells} = makeSpells({blessingUses: 0});
 		globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => true);
 		await spells._castSpellWithBlessing("mb");
-		expect(spells._castSpell).not.toHaveBeenCalled();
+		expect(spells._castSpellInner).not.toHaveBeenCalled();
 		expect(spells._state.useFeature).not.toHaveBeenCalled();
 	});
 
 	it("does NOT spend the use when the cast is cancelled (no slot consumed)", async () => {
 		const {spells, feature} = makeSpells({blessingUses: 1});
 		globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => true);
-		spells._castSpell = jest.fn(async () => {}); // simulate cancelled cast — slot unchanged
+		spells._castSpellInner = jest.fn(async () => false); // simulate cancelled cast — slot unchanged
 		await spells._castSpellWithBlessing("mb");
-		expect(spells._castSpell).toHaveBeenCalledTimes(1);
+		expect(spells._castSpellInner).toHaveBeenCalledTimes(1);
 		expect(spells._state.useFeature).not.toHaveBeenCalled();
 		expect(feature.uses.current).toBe(1);
+	});
+
+	it("does NOT spend the use on a replacement character when the cast scope is cancelled", async () => {
+		const {spells, feature} = makeSpells({blessingUses: 1});
+		globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => true);
+		spells._pRunCastTransaction = jest.fn(async () => false);
+		const toast = jest.spyOn(globalThis.JqueryUtil, "doToast");
+
+		await spells._castSpellWithBlessing("mb");
+
+		expect(spells._state.useFeature).not.toHaveBeenCalled();
+		expect(feature.uses.current).toBe(1);
+		expect(spells._page.saveCharacter).not.toHaveBeenCalled();
+		expect(spells._renderSpellList).not.toHaveBeenCalled();
+		expect(toast.mock.calls.map(call => call[0]?.content).some(content => /regains <strong>/.test(content || ""))).toBe(false);
+		toast.mockRestore();
 	});
 
 	it("does NOT cast when no slot is available", async () => {
 		const {spells} = makeSpells({blessingUses: 1, moonbeamLevelSlots: 0});
 		globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => true);
 		await spells._castSpellWithBlessing("mb");
-		expect(spells._castSpell).not.toHaveBeenCalled();
+		expect(spells._castSpellInner).not.toHaveBeenCalled();
 		expect(spells._state.useFeature).not.toHaveBeenCalled();
+	});
+
+	it("persists the slot and Blessing spend together when scope changes during the public save", async () => {
+		const originalInputUiUtil = globalThis.InputUiUtil;
+		globalThis.InputUiUtil = {
+			...originalInputUiUtil,
+			pGetUserBoolean: jest.fn(async () => true),
+		};
+		const moonbeamData = {
+			name: "Moonbeam",
+			source: "XPHB",
+			level: 2,
+			school: "V",
+			time: [{number: 1, unit: "action"}],
+			duration: [{type: "timed", duration: {type: "minute", amount: 1}, concentration: true}],
+			components: {v: true, s: true, m: "several seeds of any moonseed plant and a piece of opalescent feldspar"},
+			range: {type: "point", distance: {type: "feet", amount: 120}},
+		};
+		const state = new CharacterSheetState();
+		state.addClass({name: "Bard", source: "XPHB", level: 6});
+		state.addFeature({
+			name: "Blessing of Moonlight",
+			source: "FRHoF",
+			uses: {current: 1, max: 1, recharge: "long"},
+		});
+		const moonbeam = CharacterSheetClassUtils.buildSpellStateObject(moonbeamData, {
+			sourceFeature: "College of the Moon",
+			sourceClass: "Bard",
+			prepared: true,
+		});
+		state.addSpell(moonbeam);
+		const moonbeamId = state.getSpells().find(spell => spell.name === "Moonbeam")?.id;
+		state.setSpellSlots(2, 1, 1);
+		let releaseSave;
+		const saveGate = new Promise(resolve => releaseSave = resolve);
+		let notifySaveStarted;
+		const saveStarted = new Promise(resolve => notifySaveStarted = resolve);
+		let savedSourceJson = null;
+		const page = {
+			_currentCharacterId: "character-a",
+			_characterLoadGeneration: 1,
+			_currentCharacterAccess: "owner",
+			_state: state,
+			getState: () => state,
+			saveCharacter: jest.fn(async () => {
+				savedSourceJson = state.toJson();
+				notifySaveStarted();
+				await saveGate;
+				return true;
+			}),
+			_saveCurrentCharacter: jest.fn(),
+			_rollHistory: {addRoll: jest.fn()},
+			_combat: {
+				renderCombatStates: jest.fn(),
+				renderCombatEffects: jest.fn(),
+			},
+		};
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = state;
+		spells._page = page;
+		spells._allSpells = [moonbeamData];
+		spells._resolveMetamagicChoice = jest.fn().mockResolvedValue(null);
+		spells._pHandleCastingConstraints = jest.fn().mockResolvedValue(true);
+		spells._resolveVariantComponentChoice = jest.fn().mockResolvedValue(null);
+		spells._pConsumeMaterialComponent = jest.fn().mockResolvedValue(undefined);
+		spells._showCastResult = jest.fn().mockResolvedValue({});
+		spells._renderSpellList = jest.fn();
+		spells.renderSlots = jest.fn();
+		spells._refreshSorceryPointUI = jest.fn();
+		spells._updateConcentrationUI = jest.fn();
+		const toast = jest.spyOn(globalThis.JqueryUtil, "doToast");
+
+		const cast = spells._castSpellWithBlessing(moonbeamId);
+		await saveStarted;
+
+		const persistedSource = new CharacterSheetState();
+		persistedSource.loadFromJson(savedSourceJson);
+		expect(persistedSource.getSpellSlotsCurrent(2)).toBe(0);
+		expect(persistedSource.getFeatureUses("Blessing of Moonlight")).toBe(0);
+
+		const replacement = new CharacterSheetState();
+		replacement.addClass({name: "Rogue", source: "PHB", level: 3});
+		const replacementJson = replacement.toJson();
+		page._currentCharacterId = "character-b";
+		page._characterLoadGeneration++;
+		state.loadFromJson(replacementJson);
+		releaseSave(true);
+		await cast;
+
+		expect(state.getClasses()).toEqual([
+			expect.objectContaining({name: "Rogue", source: "PHB", level: 3}),
+		]);
+		expect(state.getFeature("Blessing of Moonlight")).toBeNull();
+		expect(toast.mock.calls.map(call => call[0]?.content).filter(content => /regains <strong>/.test(content || ""))).toHaveLength(1);
+
+		toast.mockRestore();
+		globalThis.InputUiUtil = originalInputUiUtil;
 	});
 });

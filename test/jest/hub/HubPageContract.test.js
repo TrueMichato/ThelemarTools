@@ -345,7 +345,12 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("isActivityAuthorizationFenced = false");
 		expect(source).toContain("isActivityAuthorizationFenced ? [] : liveEvents");
 		expect(source).toContain("[\"AUTH_REQUIRED\", \"FORBIDDEN\", \"CAMPAIGN_NOT_FOUND\", \"MEMBERSHIP_NOT_FOUND\"]");
-		expect(source).toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*signIn\.href = `\/auth\/github\/start\?\$\{new URLSearchParams\(\{returnTo\}\)\}`;[\s\S]*setHidden\(document\.getElementById\("hub-signed-in"\), true\);[\s\S]*setHidden\(document\.getElementById\("hub-signed-out"\), false\);/);
+		expect(source).toMatch(/async function pRenderSignedOutProviders \(\) \{[\s\S]*import\("\.\/hub-auth-providers\.js"\)[\s\S]*pRenderHubAuthProviders\(\{signIn, returnTo\}\)/);
+		expect(source).toContain("if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender");
+		expect(source).toContain("if (!signIn) return;");
+		expect(source).toContain("_pSignedOutProvidersRender = null");
+		expect(source).toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*setHidden\(document\.getElementById\("hub-signed-in"\), true\);[\s\S]*setHidden\(document\.getElementById\("hub-signed-out"\), false\);[\s\S]*void pRenderSignedOutProviders\(\)\.catch\(error => renderError\(error\)\)/);
+		expect(source).not.toMatch(/function showSignedOutAfterSessionExpiry \(\) \{[\s\S]*\/auth\/github\/start/);
 		expect(activitySource).toContain("const requestAuthorizationGeneration = getAuthorizationGeneration()");
 		expect(activitySource).toContain("requestAuthorizationGeneration !== getAuthorizationGeneration()");
 		expect(source).toContain("const isProjectionInvalidation = event.type === \"character.projection.invalidated\"");
@@ -614,6 +619,15 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("import(\"./hub-local-character-adapter.js\")");
 		expect(source).not.toContain("globalThis.StorageUtil");
 		expect(source).not.toContain("globalThis.InputUiUtil");
+	});
+
+	it("uses the latest campaign context for long-lived mutation forms", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toMatch(/async function pInitCampaignForms \(\{[\s\S]*\}\) \{[\s\S]*let currentContext = context;/);
+		expect(source).toMatch(/const pRefreshContextBoundControls = async \(\{context: contextNxt\}\) => \{\s*currentContext = contextNxt;/);
+		expect(source).toMatch(/pCreateCharacter\(\{[\s\S]*rulesVersionId: currentContext\.rulesVersion\?\.id \|\| null/);
+		expect(source).toMatch(/getOrStageAwardMutationDraft\(\{[\s\S]*rulesVersionId: currentContext\.rulesVersion\?\.id \|\| null/);
+		expect(source).toMatch(/const contextNxt = await api\.pGetCampaignContext\(\{campaignId\}\);\s*renderCampaignContext\(contextNxt\);\s*await pRefreshContextBoundControls\(\{context: contextNxt\}\)/);
 	});
 
 	it("preserves the complete hub URL through signed-out OAuth", () => {

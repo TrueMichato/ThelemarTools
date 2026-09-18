@@ -136,7 +136,7 @@ function createElement (tagName, {className = "", text = "", attrs = {}} = {}) {
 }
 
 export class CharacterSheetCampaign {
-	constructor ({page, api = new HubApiClient(), root = null, fnNavigate = null}) {
+	constructor ({page, api = new HubApiClient(), root = null, fnNavigate = null, pendingCommandStorage = globalThis.sessionStorage || null}) {
 		this._page = page;
 		this._api = api;
 		this._root = root || document.getElementById("charsheet-campaign");
@@ -153,6 +153,7 @@ export class CharacterSheetCampaign {
 		this._movePreview = null;
 		this._feedback = null;
 		this._pendingCommand = null;
+		this._pendingCommandStorage = pendingCommandStorage;
 		this._sharing = null;
 		this._isInitialized = false;
 		this._refreshGeneration = 0;
@@ -676,7 +677,14 @@ export class CharacterSheetCampaign {
 			&& this._page._currentCharacterAccess === accessMode
 		);
 		if (!characterId || !campaignId || this._isBusy) return;
-		const command = this._getPendingCommand({kind: "clone-cloud", characterId, campaignId});
+		const command = this._getCloneCommand({characterId, campaignId});
+		if (command.committedCharacterId) {
+			this._feedback = {type: "success", text: "Cloud copy created. This campaign character is unchanged."};
+			this.render();
+			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: command.committedCharacterId}));
+			this._clearCloneCommand({characterId, campaignId});
+			return;
+		}
 		this._isBusy = true;
 		this._feedback = null;
 		this.render();
@@ -691,10 +699,12 @@ export class CharacterSheetCampaign {
 				rulesVersionId: target.rulesVersion?.id || null,
 				idempotencyKey: command.idempotencyKey,
 			});
+			this._markCloneCommandCommitted({characterId, campaignId, character: result.character});
 			if (!isCurrentCharacter()) return;
 			this._feedback = {type: "success", text: "Cloud copy created. This campaign character is unchanged."};
 			this.render();
 			this._fnNavigate(getCampaignCharacterUrl({campaignId, characterId: result.character.id}));
+			this._clearCloneCommand({characterId, campaignId});
 		} catch (error) {
 			if (!isCurrentCharacter()) return;
 			this._feedback = {
@@ -707,6 +717,70 @@ export class CharacterSheetCampaign {
 			this._isBusy = false;
 			this.render();
 		}
+	}
+
+	_getCloneCommandStorageKey () {
+		const accountId = this._session?.account?.id;
+		if (!accountId) return null;
+		return `charsheet-campaign-clone-commands:${accountId}`;
+	}
+
+	_getCloneCommandKey ({characterId, campaignId}) {
+		return JSON.stringify(["clone-cloud", characterId, campaignId]);
+	}
+
+	_getCloneCommandRegistry () {
+		const storageKey = this._getCloneCommandStorageKey();
+		if (!storageKey || !this._pendingCommandStorage) return null;
+		const raw = this._pendingCommandStorage.getItem(storageKey);
+		if (!raw) return {};
+		const parsed = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			throw new Error("Saved cloud-copy recovery data is invalid.");
+		}
+		return parsed;
+	}
+
+	_persistCloneCommandRegistry (registry) {
+		const storageKey = this._getCloneCommandStorageKey();
+		if (!storageKey || !this._pendingCommandStorage) return;
+		this._pendingCommandStorage.setItem(storageKey, JSON.stringify(registry));
+	}
+
+	_getCloneCommand ({characterId, campaignId}) {
+		const registry = this._getCloneCommandRegistry();
+		if (!registry) return this._getPendingCommand({kind: "clone-cloud", characterId, campaignId});
+		const key = this._getCloneCommandKey({characterId, campaignId});
+		if (!registry[key]) {
+			registry[key] = {
+				kind: "clone-cloud",
+				characterId,
+				campaignId,
+				idempotencyKey: crypto.randomUUID(),
+			};
+			this._persistCloneCommandRegistry(registry);
+		}
+		return registry[key];
+	}
+
+	_markCloneCommandCommitted ({characterId, campaignId, character}) {
+		const registry = this._getCloneCommandRegistry();
+		if (!registry) return;
+		const key = this._getCloneCommandKey({characterId, campaignId});
+		const command = registry[key];
+		if (!command || !character?.id) throw new Error("The committed cloud copy could not be reconciled.");
+		registry[key] = {
+			...command,
+			committedCharacterId: character.id,
+		};
+		this._persistCloneCommandRegistry(registry);
+	}
+
+	_clearCloneCommand ({characterId, campaignId}) {
+		const registry = this._getCloneCommandRegistry();
+		if (!registry) return;
+		delete registry[this._getCloneCommandKey({characterId, campaignId})];
+		this._persistCloneCommandRegistry(registry);
 	}
 
 	async _pMoveCloudCharacter ({campaignId, isDetached}) {

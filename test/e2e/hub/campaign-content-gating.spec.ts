@@ -77,4 +77,31 @@ test.describe("Campaign Hub content policy", () => {
 			await context.close();
 		}
 	});
+
+	test("uses a newly published rules version for import and award without reloading", async ({browser}) => {
+		test.setTimeout(180_000);
+		const context = await browser.newContext(contextOptions);
+		try {
+			const hub = new HubCampaignPage(await context.newPage());
+			await hub.signInSynthetic({providerSubject: "current-context-dm", displayName: "Current Context DM", secret: secret!});
+			const localCharacterName = "Current Context Fighter";
+			await hub.seedLocalCharacterForCampaignImport({name: localCharacterName});
+			const campaignId = await hub.createCampaign("Current Context E2E");
+			await hub.publishDefaultCampaignRulesViaApi(campaignId);
+			await hub.gotoCampaign(campaignId);
+			const {rulesVersionId} = await hub.publishContentPolicyViaApi({
+				campaignId,
+				sources: ["PHB"],
+				species: ["Human (Base)|PHB"],
+				editions: ["2014"],
+			});
+			await hub.expectCurrentRulesVersionUsedForImportAndAward({
+				campaignId,
+				rulesVersionId,
+				localCharacterName,
+			});
+		} finally {
+			await context.close();
+		}
+	});
 });

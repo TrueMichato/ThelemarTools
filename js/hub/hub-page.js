@@ -67,15 +67,27 @@ function concealCampaignAuthorizationSurfaces () {
 	return true;
 }
 
-function showSignedOutAfterSessionExpiry () {
+let _pSignedOutProvidersRender = null;
+async function pRenderSignedOutProviders () {
+	if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender;
 	const signIn = document.getElementById("hub-sign-in");
-	if (signIn) {
-		const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-		signIn.href = `/auth/github/start?${new URLSearchParams({returnTo})}`;
-		signIn.hidden = false;
+	if (!signIn) return;
+	const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+	_pSignedOutProvidersRender = (async () => {
+		const {pRenderHubAuthProviders} = await import("./hub-auth-providers.js");
+		await pRenderHubAuthProviders({signIn, returnTo});
+	})();
+	try {
+		await _pSignedOutProvidersRender;
+	} finally {
+		_pSignedOutProvidersRender = null;
 	}
+}
+
+function showSignedOutAfterSessionExpiry () {
 	setHidden(document.getElementById("hub-signed-in"), true);
 	setHidden(document.getElementById("hub-signed-out"), false);
+	void pRenderSignedOutProviders().catch(error => renderError(error));
 }
 
 /**
@@ -2660,6 +2672,7 @@ async function pInitCampaignForms ({
 	pRefreshInvites,
 	roster = [],
 }) {
+	let currentContext = context;
 	// Roster metadata travels beside the projections and is refreshed with them.
 	const rosterRef = {current: roster};
 	const captureProjectionAuthorization = () => {
@@ -2803,7 +2816,7 @@ async function pInitCampaignForms ({
 				clientImportId: character.id,
 				campaignId,
 				data: character,
-				rulesVersionId: context.rulesVersion?.id || null,
+				rulesVersionId: currentContext.rulesVersion?.id || null,
 				idempotencyKey: crypto.randomUUID(),
 			});
 			const charactersNxt = await api.pListCharacters({campaignId});
@@ -3213,6 +3226,7 @@ async function pInitCampaignForms ({
 	document.getElementById("campaign-action-target")?.addEventListener("change", syncActionFields);
 	syncActionFields();
 	const pRefreshContextBoundControls = async ({context: contextNxt}) => {
+		currentContext = contextNxt;
 		campaignConditionBrewContent = contextNxt.brewBundle?.content;
 		itemAward.setCampaignBrewContent(campaignConditionBrewContent);
 		if (conditionCatalogState === "idle") return true;
@@ -3352,7 +3366,7 @@ async function pInitCampaignForms ({
 			const awardDraft = getOrStageAwardMutationDraft({
 				draft: form._hubAwardMutationDraft,
 				fnGetSubmission: () => itemAward.getSubmission(),
-				rulesVersionId: context.rulesVersion?.id || null,
+				rulesVersionId: currentContext.rulesVersion?.id || null,
 			});
 			form._hubAwardMutationDraft = awardDraft;
 			const submission = awardDraft.request;
@@ -3744,7 +3758,9 @@ async function pInitCampaignForms ({
 						versionId: created.rulesVersion.id,
 						idempotencyKey: `${idempotencyKey}:activate`,
 					});
-					renderCampaignContext(await api.pGetCampaignContext({campaignId}));
+					const contextNxt = await api.pGetCampaignContext({campaignId});
+					renderCampaignContext(contextNxt);
+					await pRefreshContextBoundControls({context: contextNxt});
 					setFormStatus({formId: "campaign-rules-form", message: "Campaign rules published."});
 				}});
 		} catch (error) {
@@ -3787,10 +3803,7 @@ async function pInit () {
 			// campaign context stays active in this browser.
 			await activeCampaign.pResolve({trigger: "logout", session});
 			await pRenderActiveCampaignSwitcher();
-			const signIn = document.getElementById("hub-sign-in");
-			const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-			const {pRenderHubAuthProviders} = await import("./hub-auth-providers.js");
-			await pRenderHubAuthProviders({signIn, returnTo});
+			await pRenderSignedOutProviders();
 			setHidden(signedOut, false);
 			return;
 		}

@@ -522,6 +522,23 @@ modal creation, cleanup, stale callback suppression, and retained control fencin
   and a non-positive stored `hp.max` (`_migrateHpMax`, which must run last so every input to
   `_calculateMaxHp()` is already restored)
 
+### Transaction Staging
+
+Awaited character mutations such as Quick Build and spell casting run against
+`CharacterSheetState.createTransactionClone()`. The clone is constructor-free, so it does not replace
+`globalThis.__csState`; it deep-copies mutable character data plus campaign/carry authority context while
+sharing read-only spell, item, and feature catalogs. Staged workflows must use detached module/page proxies,
+never rewire the live page or module across an await, and must suppress saves, roll logging, and rendering until
+the captured owner character ID/load generation/access scope is still current. Related costs must be applied to
+the staged state before its JSON is captured, so one adopted snapshot contains the complete mutation. Once that
+snapshot is adopted, deferred callback surfaces are rebound to the live state/page and buffered rolls plus the
+single live render are replayed synchronously before awaiting network persistence; a scope change during that
+save only suppresses later source UI. Cancellation before adoption discards the clone. Non-serialized combat
+transients are not shallow-cloned or inferred from state JSON: weapon-channel casts require a prepare plus
+synchronous commit contract, prepare their weapon choice while staged, then roll and arm the rider on the live
+combat module immediately before state adoption. A legacy async one-step channel method must not be invoked from
+the staged transaction because it can resume after the live combat references have been restored.
+
 ## Live Campaign Effects (ADR 0012)
 
 An applied server operation reaches an open campaign sheet through

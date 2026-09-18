@@ -904,6 +904,62 @@ export class HubCampaignPage {
 		expect(localCharacters).toContainEqual(expect.objectContaining({id: localId, name}));
 	}
 
+	async seedLocalCharacterForCampaignImport ({name}: {name: string}): Promise<string> {
+		const localId = `local-context-${crypto.randomUUID()}`;
+		await this.page.goto("/charactersheet.html?local=1");
+		await waitForToolsLoaded(this.page);
+		await this.page.evaluate(
+			async character => (window as any).StorageUtil.pSet("charsheet-characters", [character]),
+			{
+				id: localId,
+				name,
+				abilities: {str: 10, dex: 10, con: 14, int: 10, wis: 10, cha: 10},
+				classes: [{name: "Fighter", source: "PHB", level: 1}],
+				race: {name: "Human (Base)", source: "PHB", edition: "classic"},
+				hp: {current: 12, max: 12, temp: 0},
+				inventory: [],
+			},
+		);
+		return localId;
+	}
+
+	async expectCurrentRulesVersionUsedForImportAndAward ({
+		campaignId,
+		rulesVersionId,
+		localCharacterName,
+	}: {
+		campaignId: string;
+		rulesVersionId: string;
+		localCharacterName: string;
+	}): Promise<void> {
+		await expect(this.page.locator("#campaign-policy-summary-status")).toContainText("Version 2", {timeout: 30_000});
+
+		const createRequest = this.page.waitForRequest(request =>
+			request.method() === "POST"
+			&& new URL(request.url()).pathname === "/api/characters",
+		);
+		await this.page.locator("#campaign-upload-local").click();
+		await expect(this.page.locator("#campaign-upload-local-select")).toBeFocused();
+		await this.page.locator("#campaign-upload-local-select").selectOption({label: localCharacterName});
+		await this.page.locator("#campaign-upload-local-confirm").click();
+		expect((await createRequest).postDataJSON()).toEqual(expect.objectContaining({rulesVersionId}));
+		await expect(this.page.locator("#campaign-upload-local-status")).toContainText(`${localCharacterName} was added as a cloud copy`);
+
+		await this.openCampaignWorkbench();
+		await this.page.locator("#campaign-item-search").fill("Dagger");
+		await this.page.locator("#campaign-item-results").selectOption({label: "Dagger — PHB"});
+		await this.page.locator("#campaign-item-use-selection").click();
+		await this.selectItemAwardTargets([localCharacterName]);
+		await this.page.locator("#campaign-item-quantity").fill("1");
+		const awardRequest = this.page.waitForRequest(request =>
+			request.method() === "POST"
+			&& new URL(request.url()).pathname === `/api/campaigns/${campaignId}/item-awards`,
+		);
+		await this.page.locator("#campaign-item-form button[type='submit']").click();
+		expect((await awardRequest).postDataJSON()).toEqual(expect.objectContaining({rulesVersionId}));
+		await expect(this.page.locator("#campaign-item-form-status")).toContainText("1 × Dagger awarded");
+	}
+
 	async expectDetachedCharacterInHub ({characterId, name}: {characterId: string; name: string}): Promise<void> {
 		await this.gotoHub();
 		const section = this.page.locator("#hub-detached-characters");

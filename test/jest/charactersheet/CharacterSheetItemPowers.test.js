@@ -7,6 +7,7 @@ import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-inventory.js";
+import "../../../js/charactersheet/charactersheet-combat.js";
 import "../../../js/charactersheet/charactersheet-spells.js";
 
 if (typeof globalThis.document === "undefined") {

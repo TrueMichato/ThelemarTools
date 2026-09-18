@@ -4834,10 +4834,62 @@ class CharacterSheetQuickBuild {
 		if (!isOwnerScopeCurrent) return false;
 		this._isApplying = true;
 		try {
-			return await this._applyQuickBuildInner(characterScope);
+			if (
+				typeof this._state?.createTransactionClone !== "function"
+				|| typeof this._state?.loadFromJson !== "function"
+			) return await this._applyQuickBuildInner(characterScope);
+			return await this._pApplyQuickBuildStaged(characterScope);
 		} finally {
 			this._isApplying = false;
 		}
+	}
+
+	async _pApplyQuickBuildStaged (characterScope) {
+		const isOwnerScopeCurrent = () => CharacterSheetModal.isCharacterScopeSnapshotCurrent(
+			this._page,
+			characterScope,
+			{isRequireOwner: true},
+		);
+		const liveState = this._state;
+		const stagedState = liveState.createTransactionClone();
+		const livePage = this._page;
+		const stagedPage = Object.create(livePage);
+		const liveSaveCharacter = livePage.saveCharacter;
+		const liveRenderCharacter = livePage.renderCharacter;
+		const liveUpdateTabVisibility = livePage._updateTabVisibility;
+		const stagedSpells = livePage._spells
+			? Object.assign(Object.create(Object.getPrototypeOf(livePage._spells)), livePage._spells, {
+				_state: stagedState,
+			})
+			: null;
+		stagedPage._state = stagedState;
+		stagedPage.getState = () => stagedState;
+		stagedPage._spells = stagedSpells;
+		if (stagedSpells) stagedSpells._page = stagedPage;
+		stagedPage.saveCharacter = async () => {};
+		stagedPage.renderCharacter = () => {};
+		stagedPage._updateTabVisibility = () => {};
+		const stagedModule = Object.assign(Object.create(Object.getPrototypeOf(this)), this, {
+			_state: stagedState,
+			_page: stagedPage,
+		});
+		stagedPage._quickBuild = stagedModule;
+		let stagedJson = null;
+
+		try {
+			const result = await stagedModule._applyQuickBuildInner(characterScope);
+			if (result === false || !isOwnerScopeCurrent()) return false;
+			stagedJson = stagedState.toJson();
+		} finally {
+			globalThis.__csState = liveState;
+		}
+
+		if (!stagedJson || !isOwnerScopeCurrent()) return false;
+		liveState.loadFromJson(stagedJson);
+		await liveSaveCharacter?.call(livePage);
+		if (!isOwnerScopeCurrent()) return false;
+		liveRenderCharacter?.call(livePage);
+		liveUpdateTabVisibility?.call(livePage);
 	}
 
 	async _applyQuickBuildInner (characterScope) {

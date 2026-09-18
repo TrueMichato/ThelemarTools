@@ -132,6 +132,166 @@ class CharacterSheetSpells {
 		return true;
 	}
 
+	async _pRunCastTransaction ({fn, fnAfterCommit = null}) {
+		if (
+			typeof this._state?.createTransactionClone !== "function"
+			|| typeof this._state?.loadFromJson !== "function"
+		) {
+			const result = await fn(this);
+			if (result === true) fnAfterCommit?.();
+			return result;
+		}
+
+		const liveState = this._state;
+		const livePage = this._page;
+		const characterScope = {
+			characterId: livePage._currentCharacterId ?? null,
+			loadGeneration: livePage._characterLoadGeneration ?? 0,
+			accessMode: livePage._currentCharacterAccess ?? null,
+		};
+		const isCharacterScopeCurrent = () => (
+			characterScope.characterId === (livePage._currentCharacterId ?? null)
+			&& characterScope.loadGeneration === (livePage._characterLoadGeneration ?? 0)
+			&& characterScope.accessMode === (livePage._currentCharacterAccess ?? null)
+		);
+		const stagedState = liveState.createTransactionClone();
+		const stagedPage = Object.create(livePage);
+		const liveCombat = livePage._combat;
+		let pendingChannelCommit = null;
+		const stagedCombat = liveCombat
+			? {
+				_state: stagedState,
+				_page: stagedPage,
+				pChannelSpellFromCast: async (choice, event) => {
+					if (
+						typeof liveCombat.pPrepareChannelSpellFromCast !== "function"
+						|| typeof liveCombat.commitPreparedChannelSpellFromCast !== "function"
+					) return false;
+					const prepared = await liveCombat.pPrepareChannelSpellFromCast(choice, event);
+					if (!prepared) return false;
+					pendingChannelCommit = () => liveCombat.commitPreparedChannelSpellFromCast(prepared);
+					return true;
+				},
+			}
+			: null;
+		let pendingPublicSaveArgs = null;
+		const pendingRolls = [];
+		stagedPage._state = stagedState;
+		stagedPage.getState = () => stagedState;
+		stagedPage._combat = stagedCombat;
+		stagedPage.saveCharacter = async (...args) => {
+			pendingPublicSaveArgs = args;
+			return true;
+		};
+		stagedPage._saveCurrentCharacter = async () => true;
+		for (const uiMethod of [
+			"pAnimateD20",
+			"showDiceResult",
+			"_offerGuidedStrikePostAttack",
+		]) {
+			if (typeof livePage[uiMethod] === "function") {
+				stagedPage[uiMethod] = (...args) => livePage[uiMethod](...args);
+			}
+		}
+		stagedPage._rollHistory = livePage._rollHistory
+			? Object.assign(Object.create(livePage._rollHistory), {
+				addRoll: roll => pendingRolls.push(roll),
+			})
+			: null;
+		for (const renderMethod of [
+			"_renderQuickSpells",
+			"_renderResources",
+			"_renderInventory",
+			"_renderActiveStates",
+			"_renderCompanions",
+			"_renderHp",
+			"_renderOverviewMetamagic",
+			"_renderCurrency",
+		]) stagedPage[renderMethod] = () => {};
+		if (stagedCombat) {
+			for (const renderMethod of [
+				"renderCombatStates",
+				"renderCombatEffects",
+				"renderCombatMetamagic",
+				"renderCombatLunar",
+				"renderCombatSpells",
+			]) stagedCombat[renderMethod] = () => {};
+		}
+		const stagedModule = Object.assign(Object.create(Object.getPrototypeOf(this)), this, {
+			_state: stagedState,
+			_page: stagedPage,
+		});
+		for (const renderMethod of [
+			"renderSlots",
+			"_refreshSorceryPointUI",
+			"_updateConcentrationUI",
+		]) stagedModule[renderMethod] = () => {};
+		stagedPage._spells = stagedModule;
+
+		let stagedJson = null;
+		let result;
+		try {
+			result = await fn(stagedModule);
+		} finally {
+			globalThis.__csState = liveState;
+		}
+		if (result !== true || !isCharacterScopeCurrent()) return false;
+		if (pendingChannelCommit) {
+			const liveCombatState = liveCombat._state;
+			const liveCombatPage = liveCombat._page;
+			let didCommit;
+			try {
+				liveCombat._state = stagedState;
+				liveCombat._page = stagedPage;
+				didCommit = pendingChannelCommit();
+				if (didCommit && typeof didCommit.then === "function") throw new Error("Channel spell commit must be synchronous.");
+			} finally {
+				liveCombat._state = liveCombatState;
+				liveCombat._page = liveCombatPage;
+			}
+			if (didCommit !== true || !isCharacterScopeCurrent()) return false;
+		}
+		stagedJson = stagedState.toJson();
+
+		if (!stagedJson || !isCharacterScopeCurrent()) return false;
+		liveState.loadFromJson(stagedJson);
+		stagedModule._state = liveState;
+		stagedModule._page = livePage;
+		stagedPage._state = liveState;
+		stagedPage.getState = () => liveState;
+		stagedPage._combat = liveCombat;
+		stagedPage._rollHistory = livePage._rollHistory;
+		stagedPage.saveCharacter = (...args) => livePage.saveCharacter?.(...args);
+		stagedPage._saveCurrentCharacter = (...args) => livePage._saveCurrentCharacter?.(...args);
+		for (const renderMethod of [
+			"_renderQuickSpells",
+			"_renderResources",
+			"_renderInventory",
+			"_renderActiveStates",
+			"_renderCompanions",
+			"_renderHp",
+			"_renderOverviewMetamagic",
+			"_renderCurrency",
+		]) stagedPage[renderMethod] = (...args) => livePage[renderMethod]?.(...args);
+		this._activeApplyToSelfToastEl = stagedModule._activeApplyToSelfToastEl;
+		for (const roll of pendingRolls) livePage._rollHistory?.addRoll?.(roll);
+		fnAfterCommit?.();
+		this.renderSlots?.();
+		this._refreshSorceryPointUI?.();
+		this._updateConcentrationUI?.();
+		livePage._renderQuickSpells?.();
+		livePage._renderResources?.();
+		livePage._renderInventory?.();
+		livePage._renderActiveStates?.();
+		livePage._renderCompanions?.();
+		livePage._renderHp?.();
+		livePage._renderOverviewMetamagic?.();
+		livePage._renderCurrency?.();
+		if (pendingPublicSaveArgs) await livePage.saveCharacter?.(...pendingPublicSaveArgs);
+		if (!isCharacterScopeCurrent()) return false;
+		return true;
+	}
+
 	_renderMetamagic () {
 		CharacterSheetCombat.renderMetamagicDashboard(
 			this._state,
@@ -2215,6 +2375,14 @@ class CharacterSheetSpells {
 	}
 
 	async pCastItemSpell (power, {fnOnCast = null} = {}) {
+		let committedActivity = null;
+		return this._pRunCastTransaction({
+			fn: stagedModule => stagedModule._pCastItemSpellInner(power, {fnOnCast: activity => committedActivity = activity}),
+			fnAfterCommit: () => fnOnCast?.(committedActivity),
+		});
+	}
+
+	async _pCastItemSpellInner (power, {fnOnCast = null} = {}) {
 		const spellData = this._allSpells.find(spell =>
 			spell.name?.toLowerCase() === power?.spellName?.toLowerCase()
 			&& spell.source?.toLowerCase() === power?.spellSource?.toLowerCase());
@@ -2243,7 +2411,7 @@ class CharacterSheetSpells {
 		}
 		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: false})) return false;
 		const castResult = await this._showCastResult(spell, slotLevel, false, false, {sourceItem: power.itemName});
-		if (castResult?.characterScopeCancelled) return false;
+		if (castResult?.characterScopeCancelled || castResult?.cancelled) return false;
 		if (requiresConcentration) {
 			this._state.setConcentration?.(spell.name, slotLevel);
 			this._updateConcentrationUI();
@@ -2254,6 +2422,12 @@ class CharacterSheetSpells {
 	}
 
 	async _castSpell (spellId, {withMetamagic, decision = null} = {}) {
+		return this._pRunCastTransaction({
+			fn: stagedModule => stagedModule._castSpellInner(spellId, {withMetamagic, decision}),
+		});
+	}
+
+	async _castSpellInner (spellId, {withMetamagic, decision = null} = {}) {
 		// Metamagic prompt runs unless the caller explicitly opts out (withMetamagic === false).
 		// Default (undefined) preserves legacy behaviour for callers that pass only a spellId
 		// (combat / overview / favourites quick-cast surfaces).
@@ -2350,7 +2524,7 @@ class CharacterSheetSpells {
 
 			if (!weaponChannelChoice) {
 				const castResult = await this._showCastResult(spell, 0, false, false, castMeta);
-				if (castResult?.characterScopeCancelled) return;
+				if (castResult?.characterScopeCancelled || castResult?.cancelled) return;
 			}
 			await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 			// Set concentration for concentration cantrips (rare but possible)
@@ -2361,7 +2535,7 @@ class CharacterSheetSpells {
 			}
 			this._state.consumeStatesEndingOnSpellCast?.();
 			await this._page.saveCharacter({activity: this._getSpellUseActivity({spell, slotLevel: 0, mode: "cantrip"})});
-			return;
+			return true;
 		}
 
 		// Check if spell can be cast as a ritual (no slot needed, +10 min casting time)
@@ -2427,7 +2601,7 @@ class CharacterSheetSpells {
 
 				// Ritual cast: no slot consumed
 				const castResult = await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
-				if (castResult?.characterScopeCancelled) return;
+				if (castResult?.characterScopeCancelled || castResult?.cancelled) return;
 				await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 				const vcRemovesConcR = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 				if (requiresConcentration && !vcRemovesConcR) {
@@ -2436,7 +2610,7 @@ class CharacterSheetSpells {
 				}
 				this._state.consumeStatesEndingOnSpellCast?.();
 				await this._page.saveCharacter({activity: this._getSpellUseActivity({spell, slotLevel: spell.level, mode: "ritual"})});
-				return;
+				return true;
 			}
 			// Otherwise fall through to normal slot-consuming cast
 		}
@@ -2691,6 +2865,7 @@ class CharacterSheetSpells {
 					? "free"
 					: "spell_slot";
 		await this._page.saveCharacter({activity: this._getSpellUseActivity({spell, slotLevel: effectiveSlotLevel, mode})});
+		return true;
 	}
 
 	_getSpellUseActivity ({spell, slotLevel, mode}) {
@@ -2710,6 +2885,12 @@ class CharacterSheetSpells {
 	 * @param {string} spellId - The spell ID
 	 */
 	async _castSpellAsRitual (spellId) {
+		return this._pRunCastTransaction({
+			fn: stagedModule => stagedModule._castSpellAsRitualInner(spellId),
+		});
+	}
+
+	async _castSpellAsRitualInner (spellId) {
 		const spells = this._state.getSpells();
 		const spell = spells.find(s => s.id === spellId);
 		if (!spell) return;
@@ -2738,7 +2919,7 @@ class CharacterSheetSpells {
 		// Cast as ritual — no slot consumed
 		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: true})) return;
 		const castResult = await this._showCastResult(spell, spell.level, false, true);
-		if (castResult?.characterScopeCancelled) return;
+		if (castResult?.characterScopeCancelled || castResult?.cancelled) return;
 		await this._pConsumeMaterialComponent({spell, spellData, variantUsed: false});
 
 		if (requiresConcentration) {
@@ -2748,6 +2929,7 @@ class CharacterSheetSpells {
 
 		this._state.consumeStatesEndingOnSpellCast?.();
 		await this._page.saveCharacter({activity: this._getSpellUseActivity({spell, slotLevel: spell.level, mode: "ritual"})});
+		return true;
 	}
 
 	/* -------------------------------------------------------------------------- */
@@ -2828,24 +3010,26 @@ class CharacterSheetSpells {
 		}));
 		if (!confirmed) return;
 
-		// Cast Moonbeam normally: auto-slot, no metamagic / component / ritual prompts.
-		await this._castSpell(spellId, {withMetamagic: false, decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true}});
-
-		// _castSpell doesn't report success; if no slot was consumed the cast was cancelled
-		// (e.g. the player declined the break-concentration prompt) — don't spend the use.
-		const slotsAfter = this._countUsableSlotsForSpell(spell);
-		if (slotsAfter >= slotsBefore) return;
-
-		this._state.useFeature("Blessing of Moonlight");
-
-		const heal = (1 + Math.floor(Math.random() * 4)) + (1 + Math.floor(Math.random() * 4));
-		JqueryUtil.doToast(/** @type {*} */ ({
-			type: "success",
-			content: `🌙 <strong>Blessing of Moonlight</strong>: you shed Dim Light in a 5-ft radius. On a failed save, a creature within 60 ft regains <strong>${heal}</strong> HP <span class="ve-muted">(2d4)</span>.`,
-		}));
-
-		this._page.saveCharacter();
-		this._renderSpellList();
+		// Spend the slot and Blessing use in one staged snapshot. The heal reminder is
+		// commit UI, not another mutation/save after the transaction has persisted.
+		return this._pRunCastTransaction({
+			fn: async stagedModule => {
+				const didCast = await stagedModule._castSpellInner(spellId, {
+					withMetamagic: false,
+					decision: {autoSlot: true, castAsRitual: false, skipComponentPrompt: true},
+				});
+				if (didCast !== true) return false;
+				return stagedModule._state.useFeature("Blessing of Moonlight");
+			},
+			fnAfterCommit: () => {
+				const heal = (1 + Math.floor(Math.random() * 4)) + (1 + Math.floor(Math.random() * 4));
+				JqueryUtil.doToast(/** @type {*} */ ({
+					type: "success",
+					content: `🌙 <strong>Blessing of Moonlight</strong>: you shed Dim Light in a 5-ft radius. On a failed save, a creature within 60 ft regains <strong>${heal}</strong> HP <span class="ve-muted">(2d4)</span>.`,
+				}));
+				this._renderSpellList();
+			},
+		});
 	}
 
 	/**
