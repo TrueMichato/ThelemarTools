@@ -2200,7 +2200,6 @@ export class HubCampaignPage {
 
 		const transferMatcher = `**/api/campaigns/${campaignId}/transfers`;
 		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
-		let transferRequestCount = 0;
 		let transferPostCount = 0;
 		let failedRefreshCount = 0;
 		let shouldFailRefresh = true;
@@ -2268,6 +2267,7 @@ export class HubCampaignPage {
 
 		const transferMatcher = `**/api/campaigns/${campaignId}/transfers`;
 		const partyMatcher = `**/api/campaigns/${campaignId}/party-inventory`;
+		let transferRequestCount = 0;
 		let transferPostCount = 0;
 		let failedRefreshCount = 0;
 		let shouldFailRefresh = true;
