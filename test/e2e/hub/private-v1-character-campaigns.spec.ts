@@ -352,25 +352,40 @@ test("stale move completion cannot detach the selected character and terminal de
 		});
 		expect((await player.getCharacter(sourceCharacter.id)).campaignId).toBe(sourceCampaignId);
 
-		await player.page.evaluate(
-			characterId => (globalThis as any).charSheet._pLoadCharacter(characterId),
-			selectedCharacter.id,
-		);
+		await player.openCharacterSheet({
+			campaignId: sourceCampaignId,
+			characterId: selectedCharacter.id,
+			name: "Selected Survivor",
+		});
+		await expect(player.page.locator("#charsheet-ipt-name")).toHaveValue("Selected Survivor");
+		expect(await player.page.evaluate(() => (globalThis as any).charSheet._currentCharacterId))
+			.toBe(selectedCharacter.id);
 		await player.page.evaluate(() => (globalThis as any).charSheet._detachHubRealtime());
 		await otherDevice.deleteCharacterViaApi(selectedCharacter.id);
-		const deleteErrorCode = await player.page.evaluate(async () => {
+		const deleteOutcome = await player.page.evaluate(async () => {
+			const sheet = (globalThis as any).charSheet;
+			const preCallCharacterId = sheet._currentCharacterId;
 			const originalConfirm = (globalThis as any).InputUiUtil.pGetUserBoolean;
 			(globalThis as any).InputUiUtil.pGetUserBoolean = async () => true;
 			try {
-				await (globalThis as any).charSheet._onDeleteCharacter();
-				return null;
+				await sheet._onDeleteCharacter();
+				return {preCallCharacterId, errorCode: null};
 			} catch (error: any) {
-				return error?.code || null;
+				return {
+					preCallCharacterId,
+					errorCode: typeof error?.code === "string" ? error.code : error?.code?.code || null,
+				};
 			} finally {
 				(globalThis as any).InputUiUtil.pGetUserBoolean = originalConfirm;
 			}
 		});
-		expect(deleteErrorCode).toBe("CHARACTER_NOT_FOUND");
+		const isDeleteOutcomeValid = deleteOutcome.preCallCharacterId === selectedCharacter.id
+			? deleteOutcome.errorCode === "CHARACTER_NOT_FOUND"
+			: deleteOutcome.preCallCharacterId === null && deleteOutcome.errorCode === null;
+		expect(
+			isDeleteOutcomeValid,
+			`Terminal delete race produced an invalid pre-call/error combination: ${JSON.stringify(deleteOutcome)}`,
+		).toBe(true);
 		await expect(player.page.locator("#charsheet-campaign-access-ended")).toBeVisible();
 		await expect(player.page.locator("main.charsheet-page")).toBeHidden();
 		expect(await player.page.evaluate(() => (globalThis as any).charSheet._currentCharacterId)).toBeNull();

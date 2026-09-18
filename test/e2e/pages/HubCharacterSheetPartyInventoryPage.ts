@@ -41,42 +41,141 @@ export class HubCharacterSheetPartyInventoryPage {
 	}): Promise<void> {
 		const matcher = `**/api/campaigns/${campaignId}/party-inventory`;
 		let failedRefreshRequests = 0;
+		let failedRefreshRequestsAfterRetryArm = 0;
 		let manualRetryRequests = 0;
+		let retryPhase: "initial" | "armed" | "admitted" = "initial";
+		const startedAt = Date.now();
+		const requestLog: Array<{atMs: number; kind: string; event: string; phase: string}> = [];
+		const onRequest = (request: Request) => {
+			if (request.method() !== "GET") return;
+			const pathname = new URL(request.url()).pathname;
+			const kind = pathname === `/api/campaigns/${campaignId}/party-inventory`
+				? "party-inventory"
+				: pathname === `/api/campaigns/${campaignId}/snapshot`
+					? "snapshot"
+					: null;
+			if (!kind) return;
+			requestLog.push({atMs: Date.now() - startedAt, kind, event: "request", phase: retryPhase});
+		};
+		const getFailureDiagnostics = async () => ({
+			harness: {
+				retryPhase,
+				failedRefreshRequests,
+				failedRefreshRequestsAfterRetryArm,
+				manualRetryRequests,
+				requestLog,
+			},
+			product: await this.page.evaluate(() => {
+				const sheet = (globalThis as any).charSheet;
+				const partyInventory = sheet?._partyInventory;
+				const active = partyInventory?._active;
+				const refresh = partyInventory?._refreshPromise;
+				return {
+					active: active
+						? {
+							characterId: active.characterId,
+							generation: active.generation,
+							isOwner: active.isOwner,
+							isActivationPending: active.isActivationPending,
+						}
+						: null,
+					isCurrentActive: active ? partyInventory?._isCurrent?.(active) : false,
+					hasManualRefreshPromise: !!partyInventory?._manualRefreshPromise,
+					hasRefreshPromise: !!refresh,
+					isRefreshActiveCurrent: !!refresh && refresh.active === active,
+					refreshFlags: partyInventory?._refreshFlags,
+					isScheduledRefresh: partyInventory?._scheduledRefresh,
+					isLoading: partyInventory?._isLoading,
+					refreshNotice: partyInventory?._refreshNotice,
+					partyError: partyInventory?._partyError,
+					reconcileError: partyInventory?._reconcileError,
+					actionError: partyInventory?._error,
+					hasPartyFetchToken: !!partyInventory?._partyFetchToken,
+					currentCharacterId: sheet?._currentCharacterId,
+					characterLoadGeneration: sheet?._characterLoadGeneration,
+				};
+			}),
+		});
+		let markManualRetryAdmitted: () => void = () => {};
+		const manualRetryAdmitted = new Promise<void>(resolve => {
+			markManualRetryAdmitted = resolve;
+		});
+		let releaseManualRetry: () => void = () => {};
+		const manualRetryRelease = new Promise<void>(resolve => {
+			releaseManualRetry = resolve;
+		});
+		let markManualRetryComplete: () => void = () => {};
+		const manualRetryComplete = new Promise<void>(resolve => {
+			markManualRetryComplete = resolve;
+		});
 		const handler = async (route: Route): Promise<void> => {
-			const isManualRetry = await this.root()
-				.getByText("Retrying party stash sync...", {exact: true})
-				.isVisible()
-				.catch(() => false);
-			if (!isManualRetry) {
-				failedRefreshRequests++;
-				await route.fulfill({
-					status: 503,
-					contentType: "application/json",
-					body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
-				});
+			if (retryPhase === "armed") {
+				requestLog.push({atMs: Date.now() - startedAt, kind: "party-inventory", event: "admit", phase: retryPhase});
+				retryPhase = "admitted";
+				manualRetryRequests++;
+				markManualRetryAdmitted();
+				try {
+					await manualRetryRelease;
+					await route.continue();
+				} finally {
+					markManualRetryComplete();
+				}
 				return;
 			}
-			manualRetryRequests++;
-			await new Promise(resolve => setTimeout(resolve, 200));
-			await route.continue();
+			requestLog.push({atMs: Date.now() - startedAt, kind: "party-inventory", event: "fail", phase: retryPhase});
+			if (retryPhase === "initial") failedRefreshRequests++;
+			else failedRefreshRequestsAfterRetryArm++;
+			await route.fulfill({
+				status: 503,
+				contentType: "application/json",
+				body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
+			});
 		};
+		this.page.on("request", onRequest);
 		await this.page.route(matcher, handler);
 		try {
 			await this.hub.openCharacterSheet({campaignId, characterId, name});
 			await this.openInventoryTab();
+			await this.page.evaluate(async () => {
+				const partyInventory = (globalThis as any).charSheet?._partyInventory;
+				await partyInventory?._active?.activationPromise;
+			});
 			const root = this.root();
 			await expect(root).toBeVisible();
-			await expect(root.getByRole("alert")).toContainText("could not be loaded");
-			expect(failedRefreshRequests, "The initial party-stash refresh must fail before Retry is exercised.").toBeGreaterThan(0);
-			await root.getByRole("button", {name: "Retry", exact: true}).click();
+			try {
+				await expect(root.getByRole("alert")).toContainText("could not be loaded");
+			} catch (error) {
+				throw new Error(`${error instanceof Error ? error.message : error}\nParty Inventory diagnostics: ${JSON.stringify(await getFailureDiagnostics())}`);
+			}
+			expect(failedRefreshRequests, "At least one initial party-stash refresh must fail before Retry is exercised.").toBeGreaterThanOrEqual(1);
+			const retryButton = root.getByRole("button", {name: "Retry", exact: true});
+			await expect(retryButton).toBeEnabled();
+			retryPhase = "armed";
+			await retryButton.click();
+			try {
+				await expect.poll(
+					() => retryPhase,
+					{message: `Manual retry was not admitted: phase=${retryPhase}; admitted=${manualRetryRequests}; initialFailures=${failedRefreshRequests}; postArmFailures=${failedRefreshRequestsAfterRetryArm}`},
+				).toBe("admitted");
+			} catch (error) {
+				throw new Error(`${error instanceof Error ? error.message : error}\nParty Inventory diagnostics: ${JSON.stringify(await getFailureDiagnostics())}`);
+			}
+			await manualRetryAdmitted;
 			await expect(root.getByRole("button", {name: "Refreshing..."})).toBeDisabled();
-			await expect(root).toContainText("Retrying party stash sync...");
+			await expect(root.getByText("Retrying party stash sync...", {exact: true})).toBeVisible();
+			releaseManualRetry();
+			await manualRetryComplete;
 			await expect(root).toContainText("Party stash refreshed.");
 			expect(manualRetryRequests, "Only the refresh initiated by the real Retry click may succeed.").toBe(1);
+			expect(retryPhase, "The one-shot retry admission must be consumed synchronously.").toBe("admitted");
+			expect(failedRefreshRequestsAfterRetryArm, "No automatic refresh may race or follow the admitted manual retry.").toBe(0);
 			await expect(root).toContainText("Nothing is stored here yet.");
 			await expect(root.getByRole("alert")).toHaveCount(0);
 		} finally {
+			releaseManualRetry();
+			if (manualRetryRequests) await manualRetryComplete;
 			await this.page.unroute(matcher, handler);
+			this.page.off("request", onRequest);
 		}
 	}
 

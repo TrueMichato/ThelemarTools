@@ -444,6 +444,83 @@ describe("Character Sheet party inventory", () => {
 		expect(partyInventory._active).toBe(newActive);
 	});
 
+	it("queues one manual retry while the initial failed refresh is still settling", async () => {
+		let resolveInitialReconcile;
+		let markInitialPartyFailed;
+		const initialPartyFailed = new Promise(resolve => markInitialPartyFailed = resolve);
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => true,
+		});
+		const active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._active = active;
+		partyInventory._render = jest.fn();
+		partyInventory._decorateCharacterInventory = jest.fn();
+		partyInventory._pReconcileCharacter = jest.fn()
+			.mockImplementationOnce(() => new Promise(resolve => resolveInitialReconcile = resolve))
+			.mockResolvedValue({status: "unchanged"});
+		partyInventory._pRefreshParty = jest.fn()
+			.mockImplementationOnce(async () => {
+				partyInventory._partyError = "The latest party inventory could not be loaded.";
+				partyInventory._isLoading = false;
+				partyInventory._render();
+				markInitialPartyFailed();
+				return false;
+			})
+			.mockResolvedValueOnce(true);
+		partyInventory._refreshFlags = {character: true, party: true};
+
+		const initialRefresh = partyInventory._pDrainRefresh();
+		await initialPartyFailed;
+		const manualRefresh = partyInventory._pManualRefresh({errorSource: "party"});
+
+		expect(partyInventory._manualRefreshPromise).toBe(manualRefresh);
+		expect(partyInventory._refreshNotice).toBe("");
+		expect(partyInventory._partyError).toBe("The latest party inventory could not be loaded.");
+		expect(partyInventory._refreshFlags).toEqual({character: false, party: false});
+
+		resolveInitialReconcile({status: "unchanged"});
+		await expect(initialRefresh).resolves.toBe(false);
+		await expect(manualRefresh).resolves.toBe(true);
+
+		expect(partyInventory._pRefreshParty).toHaveBeenCalledTimes(2);
+		expect(partyInventory._pReconcileCharacter).toHaveBeenCalledTimes(2);
+		expect(partyInventory._refreshNotice).toBe("Party stash refreshed.");
+		expect(partyInventory._partyError).toBeNull();
+	});
+
+	it("does not start a fresh manual attempt after the pending refresh loses its character scope", async () => {
+		let resolveInitialReconcile;
+		let isCurrent = true;
+		const partyInventory = new CharacterSheetPartyInventory({
+			api: {},
+			campaignId: "campaign-1",
+			repository: {pReconcileAuthoritativeCharacter: jest.fn()},
+			fnIsCurrentCharacter: () => isCurrent,
+		});
+		const active = {characterId: "character-1", generation: 1, token: Symbol("test"), isOwner: true};
+		partyInventory._active = active;
+		partyInventory._render = jest.fn();
+		partyInventory._pReconcileCharacter = jest.fn(() => new Promise(resolve => resolveInitialReconcile = resolve));
+		partyInventory._pRefreshParty = jest.fn(async () => true);
+		partyInventory._partyError = "The latest party inventory could not be loaded.";
+		partyInventory._refreshFlags = {character: true, party: false};
+
+		const initialRefresh = partyInventory._pDrainRefresh();
+		const manualRefresh = partyInventory._pManualRefresh({errorSource: "party"});
+		isCurrent = false;
+		resolveInitialReconcile({status: "unchanged"});
+
+		await expect(initialRefresh).resolves.toBe(true);
+		await expect(manualRefresh).resolves.toBe(false);
+		expect(partyInventory._pReconcileCharacter).toHaveBeenCalledTimes(1);
+		expect(partyInventory._pRefreshParty).not.toHaveBeenCalled();
+		expect(partyInventory._partyError).toBe("The latest party inventory could not be loaded.");
+		expect(partyInventory._refreshNotice).toBe("");
+	});
+
 	it("does not consume a semantic-effect revision from a generic projection invalidation", () => {
 		const listeners = new Map();
 		const realtime = {

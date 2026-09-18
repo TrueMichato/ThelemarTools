@@ -28,7 +28,7 @@ test("owned Character Sheets reconcile authoritative party inventory across devi
 		ignoreHTTPSErrors: true,
 	};
 	const dmContext = await browser.newContext(contextOptions);
-	const playerContext = await browser.newContext(contextOptions);
+	const playerContext = await browser.newContext({...contextOptions, serviceWorkers: "block"});
 	const recipientContext = await browser.newContext(contextOptions);
 	const localContext = await browser.newContext(contextOptions);
 	try {

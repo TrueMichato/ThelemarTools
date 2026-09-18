@@ -796,6 +796,8 @@ class CharacterSheetPage {
 	}
 
 	_beginHubRoleScopedRosterRefresh () {
+		const characterId = this._currentCharacterId;
+		const isPartyInventoryAttached = this._partyInventory?.isAttachedTo?.({characterId}) === true;
 		const generation = ++this._hubRoleRosterGeneration;
 		this._characterLoadGeneration++;
 		this._isHubRoleRosterUnavailable = false;
@@ -812,6 +814,11 @@ class CharacterSheetPage {
 		}
 		this._characterRepository.invalidateRoleScopedCharacterAccess?.();
 		this._setHubRoleRosterStatus("refreshing");
+		this._reattachRetainedHubCharacterIntegrations?.({
+			characterId,
+			generation: this._characterLoadGeneration,
+			isPartyInventoryAttached,
+		});
 		return generation;
 	}
 
@@ -4016,7 +4023,8 @@ class CharacterSheetPage {
 	}
 
 	async _onDeleteCharacter () {
-		if (!this._currentCharacterId) return;
+		const characterId = this._currentCharacterId;
+		if (!characterId) return;
 
 		const confirm = await InputUiUtil.pGetUserBoolean({
 			title: "Delete Character",
@@ -4024,11 +4032,9 @@ class CharacterSheetPage {
 			textYes: "Delete",
 			textNo: "Cancel",
 		});
-
 		if (!confirm) return;
 
-		const characterId = this._currentCharacterId;
-		this._detachHubRealtime();
+		if (this._currentCharacterId === characterId) this._detachHubRealtime();
 		try {
 			await this._characterRepository.pDelete({characterId});
 		} catch (error) {

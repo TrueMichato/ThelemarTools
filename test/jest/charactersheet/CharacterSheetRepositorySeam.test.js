@@ -218,6 +218,73 @@ describe("Character Sheet repository seam", () => {
 		expect(select.value).toBe("cloud-a");
 	});
 
+	it("reattaches retained owner Party Inventory on each role-roster generation fence", () => {
+		const partyInventory = {
+			isAttachedTo: jest.fn(() => true),
+			pAttach: jest.fn(async () => true),
+		};
+		const host = {
+			_hubCampaignId: "campaign-1",
+			_isHubCharacter: true,
+			_hubCampaignContext: null,
+			_hubRoleRosterGeneration: 0,
+			_currentCharacterId: "owned",
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterLoadGeneration: 2,
+			_characterRepository: {invalidateRoleScopedCharacterAccess: jest.fn()},
+			_partyInventory: partyInventory,
+			_peerTargeting: {deactivate: jest.fn()},
+			isCurrentCharacterReadOnly: CharacterSheetPage.prototype.isCurrentCharacterReadOnly,
+			_reattachRetainedHubCharacterIntegrations: CharacterSheetPage.prototype._reattachRetainedHubCharacterIntegrations,
+			_setHubRoleRosterStatus: CharacterSheetPage.prototype._setHubRoleRosterStatus,
+			_beginHubRoleScopedRosterRefresh: CharacterSheetPage.prototype._beginHubRoleScopedRosterRefresh,
+		};
+
+		CharacterSheetPage.prototype._onHubMembershipChanged.call(host, {campaignId: "campaign-1"});
+		CharacterSheetPage.prototype._onHubMembershipChanged.call(host, {campaignId: "campaign-1"});
+
+		expect(host._characterLoadGeneration).toBe(4);
+		expect(partyInventory.pAttach).toHaveBeenNthCalledWith(1, {
+			characterId: "owned",
+			generation: 3,
+		});
+		expect(partyInventory.pAttach).toHaveBeenNthCalledWith(2, {
+			characterId: "owned",
+			generation: 4,
+		});
+	});
+
+	it.each([
+		["a DM read-only character", "private", CHARACTER_ACCESS_MODES.DM_READ_ONLY],
+		["a concealed character", null, CHARACTER_ACCESS_MODES.OWNER],
+	])("does not reattach retained Party Inventory for %s during a role-roster fence", (_label, characterId, accessMode) => {
+		const partyInventory = {
+			isAttachedTo: jest.fn(() => true),
+			pAttach: jest.fn(),
+		};
+		const host = {
+			_hubCampaignId: "campaign-1",
+			_isHubCharacter: true,
+			_hubCampaignContext: null,
+			_hubRoleRosterGeneration: 0,
+			_currentCharacterId: characterId,
+			_currentCharacterAccess: accessMode,
+			_characterLoadGeneration: 2,
+			_characterRepository: {invalidateRoleScopedCharacterAccess: jest.fn()},
+			_partyInventory: partyInventory,
+			_peerTargeting: {deactivate: jest.fn()},
+			isCurrentCharacterReadOnly: CharacterSheetPage.prototype.isCurrentCharacterReadOnly,
+			_reattachRetainedHubCharacterIntegrations: CharacterSheetPage.prototype._reattachRetainedHubCharacterIntegrations,
+			_setHubRoleRosterStatus: CharacterSheetPage.prototype._setHubRoleRosterStatus,
+			_beginHubRoleScopedRosterRefresh: CharacterSheetPage.prototype._beginHubRoleScopedRosterRefresh,
+		};
+
+		CharacterSheetPage.prototype._onHubMembershipChanged.call(host, {campaignId: "campaign-1"});
+
+		expect(host._characterLoadGeneration).toBe(3);
+		expect(partyInventory.pAttach).not.toHaveBeenCalled();
+	});
+
 	it("conceals role-scoped selector metadata before an authoritative demotion roster resolves", async () => {
 		const contextRefresh = makeDeferred();
 		const rosterRefresh = makeDeferred();
@@ -751,6 +818,38 @@ describe("Character Sheet repository seam", () => {
 			accessEndCause: "character",
 		});
 		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["terminal teardown", null],
+		["a replacement selection", "character-b"],
+	])("keeps the delete target captured before %s wins during confirmation", async (_label, replacementCharacterId) => {
+		const confirmation = makeDeferred();
+		const terminalError = Object.assign(new Error("already archived"), {code: "CHARACTER_NOT_FOUND", status: 404});
+		const host = {
+			_characterRepository: {pDelete: jest.fn(async () => { throw terminalError; })},
+			_currentCharacterId: "character-a",
+			_isHubCharacter: true,
+			_detachHubRealtime: jest.fn(),
+			_attachHubRealtime: jest.fn(),
+			_canRestoreHubRealtimeAfterError: CharacterSheetPage.prototype._canRestoreHubRealtimeAfterError,
+			_endCurrentHubCharacterAccess: jest.fn(),
+		};
+		const confirm = jest.spyOn(globalThis.InputUiUtil, "pGetUserBoolean").mockImplementation(() => confirmation.promise);
+		try {
+			const pending = CharacterSheetPage.prototype._onDeleteCharacter.call(host);
+			host._currentCharacterId = replacementCharacterId;
+			confirmation.resolve(true);
+			await expect(pending).rejects.toBe(terminalError);
+		} finally {
+			confirm.mockRestore();
+		}
+
+		expect(host._characterRepository.pDelete).toHaveBeenCalledWith({characterId: "character-a"});
+		expect(host._detachHubRealtime).not.toHaveBeenCalled();
+		expect(host._endCurrentHubCharacterAccess).not.toHaveBeenCalled();
+		expect(host._attachHubRealtime).not.toHaveBeenCalled();
+		expect(host._currentCharacterId).toBe(replacementCharacterId);
 	});
 
 	it("does not conceal or reattach the source when a delete failure settles after a character switch", async () => {
