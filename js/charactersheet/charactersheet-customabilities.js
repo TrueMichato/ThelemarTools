@@ -1979,6 +1979,7 @@ class CharacterSheetCustomAbilities {
 			sheet: this._sheet,
 			scope: characterScope,
 			element: modal,
+			isCloseOnDocumentInvalidation: true,
 			cleanup: () => {
 				if (this._abilityEditorPortal === portal) this._abilityEditorPortal = null;
 			},

@@ -486,6 +486,8 @@ Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the r
    their interaction ownership ignores document generation, while awaited completions and explicit
    staged-workflow scope checks remain document-generation fenced. Portals that own a staged
    whole-document snapshot opt into `isCloseOnDocumentInvalidation` and are removed immediately.
+   The custom-ability editor is one such snapshot owner: it preserves fields such as limited-use
+   counters while open, so authoritative adoption must close it before stale form data can be saved.
 6. **Awaited caller-owned modal promises must settle on scope teardown.** Pass a cancellation-only
    `cbCharacterScopeTeardown`; do not reuse a mutating ordinary `cbClose`. Create the outer resolver
    before opening the modal, or explicitly handle teardown that occurs while asynchronous modal
