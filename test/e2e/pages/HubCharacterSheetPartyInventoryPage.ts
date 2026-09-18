@@ -328,10 +328,29 @@ export class HubCharacterSheetPartyInventoryPage {
 		};
 		this.page.on("request", onRequest);
 		try {
-			await this.page.context().setOffline(true);
-			await this.page.evaluate(() => (window as any).charSheet?._hubRealtime?._active?.client?._socket?.close());
-			await expect(this.root()).toContainText("Reconnecting to the Campaign Hub");
-			await this.page.context().setOffline(false);
+			const didRenderReconnect = await this.page.evaluate(async () => {
+				const client = (window as any).charSheet?._hubRealtime?._active?.client;
+				const socket = client?._socket;
+				if (!client || !socket) return false;
+				return new Promise<boolean>(resolve => {
+					let unsubscribe = () => {};
+					const timeout = window.setTimeout(() => {
+						unsubscribe();
+						resolve(false);
+					}, 5_000);
+					unsubscribe = client.on("state", (state: any) => {
+						if (!["reconnecting", "unavailable"].includes(state?.state)) return;
+						window.clearTimeout(timeout);
+						unsubscribe();
+						window.requestAnimationFrame(() => {
+							const root = document.querySelector("[data-charsheet-party-inventory]");
+							resolve(root?.textContent?.includes("Reconnecting to the Campaign Hub") === true);
+						});
+					});
+					socket.close();
+				});
+			});
+			expect(didRenderReconnect).toBe(true);
 			await expect.poll(() => refreshRequests, {timeout: 15_000}).toBeGreaterThan(0);
 			await expect(this.root().getByLabel("Party stash connected live")).toBeVisible();
 		} finally {
