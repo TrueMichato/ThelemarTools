@@ -2315,12 +2315,22 @@ export class HubCampaignPage {
 		let transferRequestCount = 0;
 		let transferPostCount = 0;
 		let failedRefreshCount = 0;
-		let shouldFailRefresh = true;
-		let isHoldingSuccessfulRefreshes = true;
-		const heldSuccessfulRefreshes: Array<{release: () => void}> = [];
+		type RefreshPhase = "initial_failure" | "pre_fence_retry" | "post_fence_failure" | "manual_retry" | "complete";
+		type HeldRefresh = {phase: "pre_fence_retry" | "manual_retry"; release: () => void; isReleased: boolean};
+		let refreshPhase: RefreshPhase = "initial_failure";
+		let releasedRefreshCount = 0;
+		const heldSuccessfulRefreshes: HeldRefresh[] = [];
+		const getHeldRefresh = (phase: HeldRefresh["phase"]) =>
+			heldSuccessfulRefreshes.find(held => held.phase === phase);
+		const releaseHeldRefresh = (held: HeldRefresh | undefined) => {
+			if (!held || held.isReleased) return;
+			held.isReleased = true;
+			releasedRefreshCount++;
+			held.release();
+		};
 		const releaseAllHeldRefreshes = () => {
-			isHoldingSuccessfulRefreshes = false;
-			for (const held of heldSuccessfulRefreshes) held.release();
+			refreshPhase = "complete";
+			for (const held of heldSuccessfulRefreshes) releaseHeldRefresh(held);
 		};
 		const pWaitForFailureQuiescence = async () => {
 			const deadline = Date.now() + 10_000;
@@ -2337,12 +2347,13 @@ export class HubCampaignPage {
 			}
 			throw new Error(`Balance refresh failures did not quiesce (failed=${failedRefreshCount}).`);
 		};
-		const pWaitForHeldRefresh = async (index: number, deadline: number) => {
+		const pWaitForHeldRefresh = async (phase: HeldRefresh["phase"], deadline: number) => {
 			while (Date.now() < deadline) {
-				if (heldSuccessfulRefreshes.length > index) return heldSuccessfulRefreshes[index];
+				const held = getHeldRefresh(phase);
+				if (held) return held;
 				await this.page.waitForTimeout(50);
 			}
-			throw new Error(`Timed out waiting for held balance refresh ${index + 1} (held=${heldSuccessfulRefreshes.length}).`);
+			throw new Error(`Timed out waiting for held ${phase} balance refresh (${await pGetDiagnostics()}).`);
 		};
 		const pGetRecoveryState = async () => ({
 			retryText: await this.page.locator("#campaign-transfer-form-status button")
@@ -2351,30 +2362,45 @@ export class HubCampaignPage {
 			hasRecovery: await this.page.locator("#campaign-transfer-form")
 				.evaluate(form => !!(form as any)._hubTransferRefreshRecovery)
 				.catch(() => false),
+			statusText: await this.page.locator("#campaign-transfer-form-status").textContent().catch(() => null),
+			isSubmitEnabled: await this.page.locator("#campaign-transfer-form button[type='submit']")
+				.isEnabled()
+				.catch(() => false),
 		});
-		const pReleaseUntilRetryRecreated = async () => {
-			const deadline = Date.now() + 15_000;
-			const maximumReleasedRefreshes = 5;
-			let nextHeldIndex = 0;
-			while (Date.now() < deadline && nextHeldIndex < maximumReleasedRefreshes) {
-				const held = await pWaitForHeldRefresh(nextHeldIndex, deadline);
-				nextHeldIndex++;
-				held.release();
-				while (Date.now() < deadline) {
-					const recovery = await pGetRecoveryState();
-					if (recovery.retryText === "Retry latest balances" && recovery.hasRecovery) return;
-					if (heldSuccessfulRefreshes.length > nextHeldIndex) break;
-					await this.page.waitForTimeout(50);
-				}
-			}
+		const pGetDiagnostics = async () => {
 			const recovery = await pGetRecoveryState();
-			throw new Error(
-				`Fenced retry was not recreated `
-				+ `(failed=${failedRefreshCount}, held=${heldSuccessfulRefreshes.length}, released=${Math.min(heldSuccessfulRefreshes.length, maximumReleasedRefreshes)}, retry=${recovery.retryText}, recovery=${recovery.hasRecovery}).`,
-			);
+			return JSON.stringify({
+				phase: refreshPhase,
+				transferRequestCount,
+				transferPostCount,
+				failedRefreshCount,
+				heldRefreshCount: heldSuccessfulRefreshes.length,
+				releasedRefreshCount,
+				...recovery,
+			});
+		};
+		const pWaitForRetryRecreated = async () => {
+			const deadline = Date.now() + 15_000;
+			while (Date.now() < deadline) {
+				const recovery = await pGetRecoveryState();
+				if (
+					recovery.retryText === "Retry latest balances"
+					&& recovery.hasRecovery
+					&& !recovery.isSubmitEnabled
+				) return;
+				await this.page.waitForTimeout(50);
+			}
+			throw new Error(`Fenced retry was not recreated (${await pGetDiagnostics()}).`);
 		};
 		const failRefresh = async (route: Route) => {
-			if (shouldFailRefresh) {
+			if (refreshPhase === "complete") return route.continue();
+			const heldPhase = refreshPhase === "pre_fence_retry" || refreshPhase === "manual_retry"
+				? refreshPhase
+				: null;
+			if (
+				!heldPhase
+				|| getHeldRefresh(heldPhase)
+			) {
 				failedRefreshCount++;
 				return route.fulfill({
 					status: 503,
@@ -2382,12 +2408,55 @@ export class HubCampaignPage {
 					body: JSON.stringify({error: {code: "NETWORK_UNAVAILABLE"}}),
 				});
 			}
-			if (!isHoldingSuccessfulRefreshes) return route.continue();
 			let release = () => {};
 			const gate = new Promise<void>(resolve => release = resolve);
-			heldSuccessfulRefreshes.push({release});
+			heldSuccessfulRefreshes.push({phase: heldPhase, release, isReleased: false});
 			await gate;
 			return route.continue();
+		};
+		const pClickRetryUntilHeld = async (
+			phase: HeldRefresh["phase"],
+			{isAllowSuccessfulDetachment = false} = {},
+		): Promise<HeldRefresh | null> => {
+			for (let attempt = 1; attempt <= 2; attempt++) {
+				if (getHeldRefresh(phase)) {
+					throw new Error(`Automatic balance traffic consumed ${phase} before the real retry click (${await pGetDiagnostics()}).`);
+				}
+				const retry = this.page.getByRole("button", {name: "Retry latest balances", exact: true});
+				await expect(retry).toBeVisible();
+				await expect(retry).toBeEnabled();
+				if (getHeldRefresh(phase)) {
+					throw new Error(`Automatic balance traffic consumed ${phase} while the real retry click was being prepared (${await pGetDiagnostics()}).`);
+				}
+				try {
+					await retry.click({timeout: 5_000});
+				} catch (error) {
+					const held = getHeldRefresh(phase);
+					const recovery = await pGetRecoveryState();
+					if (
+						isAllowSuccessfulDetachment
+						&& recovery.statusText === "Latest balances loaded. You can send another transfer."
+						&& recovery.isSubmitEnabled
+					) return null;
+					if (!held && attempt === 1 && recovery.retryText === "Retry latest balances") continue;
+					throw new Error(`Retry click did not start ${phase} refresh (${await pGetDiagnostics()}).`, {cause: error});
+				}
+				try {
+					const held = await pWaitForHeldRefresh(phase, Date.now() + 5_000);
+					await expect(this.page.locator("#campaign-transfer-form-status button")).toHaveText("Retrying...");
+					return held;
+				} catch (error) {
+					const recovery = await pGetRecoveryState();
+					if (
+						isAllowSuccessfulDetachment
+						&& recovery.statusText === "Latest balances loaded. You can send another transfer."
+						&& recovery.isSubmitEnabled
+					) return null;
+					if (attempt === 1 && recovery.retryText === "Retry latest balances") continue;
+					throw new Error(`Retry did not start ${phase} refresh (${await pGetDiagnostics()}).`, {cause: error});
+				}
+			}
+			throw new Error(`Retry attempts exhausted for ${phase} (${await pGetDiagnostics()}).`);
 		};
 		const observeTransfer = async (route: Route) => {
 			if (route.request().method() === "POST") {
@@ -2432,51 +2501,29 @@ export class HubCampaignPage {
 			await expect(retry).toBeEnabled();
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeDisabled();
 			await pWaitForFailureQuiescence();
-			shouldFailRefresh = false;
-			await retry.click();
-			await pWaitForHeldRefresh(0, Date.now() + 15_000);
+			refreshPhase = "pre_fence_retry";
+			const preFenceRefresh = await pClickRetryUntilHeld("pre_fence_retry");
+			if (!preFenceRefresh) throw new Error(`Pre-fence retry completed without the required held request (${await pGetDiagnostics()}).`);
+			refreshPhase = "post_fence_failure";
 			await onRetryRefreshHeld();
-			await pReleaseUntilRetryRecreated();
+			releaseHeldRefresh(preFenceRefresh);
+			await pWaitForRetryRecreated();
 			const deferredRetry = this.page.getByRole("button", {name: "Retry latest balances", exact: true});
 			await expect(deferredRetry).toBeVisible();
 			await expect(deferredRetry).toHaveText("Retry latest balances");
 			await expect(deferredRetry).toBeEnabled();
 			await expect.poll(() => this.page.locator("#campaign-transfer-form").evaluate(form => !!(form as any)._hubTransferRefreshRecovery)).toBe(true);
-			const expectedHeldRefreshCount = heldSuccessfulRefreshes.length + 1;
-			for (let attempt = 1; attempt <= 2; attempt++) {
-				if (attempt === 2 && heldSuccessfulRefreshes.length >= expectedHeldRefreshCount) break;
-				await expect(deferredRetry).toBeEnabled();
-				if (attempt === 2 && heldSuccessfulRefreshes.length >= expectedHeldRefreshCount) break;
-				try {
-					await deferredRetry.click({timeout: 5_000});
-				} catch (error) {
-					const isEnabled = await deferredRetry.isEnabled().catch(() => false);
-					if (heldSuccessfulRefreshes.length >= expectedHeldRefreshCount) break;
-					if (attempt === 1 && isEnabled) continue;
-					throw new Error(
-						`Deferred balance retry click did not start a refresh `
-						+ `(attempt=${attempt}, held=${heldSuccessfulRefreshes.length}, expected=${expectedHeldRefreshCount}, enabled=${isEnabled}).`,
-						{cause: error},
-					);
-				}
-				try {
-					await pWaitForHeldRefresh(expectedHeldRefreshCount - 1, Date.now() + 5_000);
-					break;
-				} catch (error) {
-					const isEnabled = await deferredRetry.isEnabled().catch(() => false);
-					if (heldSuccessfulRefreshes.length >= expectedHeldRefreshCount) break;
-					if (attempt === 1 && isEnabled) continue;
-					throw new Error(
-						`Deferred balance retry did not start a refresh `
-						+ `(attempt=${attempt}, held=${heldSuccessfulRefreshes.length}, expected=${expectedHeldRefreshCount}, enabled=${isEnabled}).`,
-						{cause: error},
-					);
-				}
-			}
-			await pWaitForHeldRefresh(expectedHeldRefreshCount - 1, Date.now() + 15_000);
-			releaseAllHeldRefreshes();
+			await pWaitForFailureQuiescence();
+			refreshPhase = "manual_retry";
+			const manualRefresh = await pClickRetryUntilHeld("manual_retry", {isAllowSuccessfulDetachment: true});
+			if (manualRefresh) releaseHeldRefresh(manualRefresh);
 			await expect(this.page.locator("#campaign-transfer-form-status")).toHaveText("Latest balances loaded. You can send another transfer.");
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
+			expect(heldSuccessfulRefreshes.map(held => held.phase)).toEqual(manualRefresh
+				? ["pre_fence_retry", "manual_retry"]
+				: ["pre_fence_retry"]);
+			expect(releasedRefreshCount).toBe(manualRefresh ? 2 : 1);
+			refreshPhase = "complete";
 		} finally {
 			releaseAllHeldRefreshes();
 			await this.page.unroute(transferMatcher, observeTransfer).catch(() => undefined);

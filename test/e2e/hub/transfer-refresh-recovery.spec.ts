@@ -67,7 +67,9 @@ test("a fenced transfer balance retry remains recoverable until replacement refr
 						},
 					},
 				});
-				await expect(player.page.locator("#campaign-party-empty")).toHaveText("Refreshing authorized party details...");
+				const partyRefresh = player.page.locator("#campaign-party-empty");
+				await expect(partyRefresh).toBeVisible();
+				await expect(partyRefresh).toHaveText("Refreshing authorized party details...");
 			},
 		});
 	} finally {
