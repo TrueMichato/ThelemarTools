@@ -2179,7 +2179,8 @@ export class HubCampaignPage {
 		await expect(this.page.locator("#campaign-content")).toHaveAttribute("aria-hidden", "true");
 		await expect(this.page.locator("#campaign-content")).toBeEmpty();
 		await expect(this.page.locator("body")).not.toContainText(characterName);
-		const signIn = this.page.locator("#hub-sign-in");
+		await expect(this.page.getByRole("group", {name: "Sign-in providers"})).toBeVisible();
+		const signIn = this.page.getByRole("link", {name: "Sign in with GitHub"});
 		await expect(signIn).toBeVisible();
 		await expect(signIn).toBeEnabled();
 		const currentUrl = new URL(this.page.url());
