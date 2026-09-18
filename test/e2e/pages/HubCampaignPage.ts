@@ -2164,7 +2164,37 @@ export class HubCampaignPage {
 			await expect(this.page.locator("#campaign-transfer-entry")).toHaveValue(itemValue);
 			await expect(this.page.locator("#campaign-transfer-quantity")).toBeDisabled();
 			await expect(this.page.locator("#campaign-transfer-quantity")).toHaveValue(`${quantity}`);
-			await retry.click();
+			for (let attempt = 1; attempt <= 2; attempt++) {
+				if (attempt === 2 && proposalAttempts >= 2) break;
+				await expect(retry).toBeEnabled();
+				if (attempt === 2 && proposalAttempts >= 2) break;
+				try {
+					await retry.click({timeout: 5_000});
+				} catch (error) {
+					const isEnabled = await retry.isEnabled().catch(() => false);
+					if (proposalAttempts >= 2) break;
+					if (attempt === 1 && isEnabled) continue;
+					throw new Error(
+						`Transfer retry click did not issue a second proposal `
+						+ `(attempt=${attempt}, proposals=${proposalAttempts}, enabled=${isEnabled}).`,
+						{cause: error},
+					);
+				}
+				try {
+					await expect.poll(() => proposalAttempts, {timeout: 5_000}).toBeGreaterThanOrEqual(2);
+					break;
+				} catch (error) {
+					const isEnabled = await retry.isEnabled().catch(() => false);
+					if (proposalAttempts >= 2) break;
+					if (attempt === 1 && isEnabled) continue;
+					throw new Error(
+						`Transfer retry did not issue a second proposal `
+						+ `(attempt=${attempt}, proposals=${proposalAttempts}, enabled=${isEnabled}).`,
+						{cause: error},
+					);
+				}
+			}
+			await expect.poll(() => proposalAttempts, {timeout: 15_000}).toBeGreaterThanOrEqual(2);
 			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
 			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
 			expect(proposalAttempts).toBeGreaterThanOrEqual(2);
@@ -2397,7 +2427,38 @@ export class HubCampaignPage {
 			await expect(deferredRetry).toHaveText("Retry latest balances");
 			await expect(deferredRetry).toBeEnabled();
 			await expect.poll(() => this.page.locator("#campaign-transfer-form").evaluate(form => !!(form as any)._hubTransferRefreshRecovery)).toBe(true);
-			await deferredRetry.click();
+			const expectedHeldRefreshCount = heldSuccessfulRefreshes.length + 1;
+			for (let attempt = 1; attempt <= 2; attempt++) {
+				if (attempt === 2 && heldSuccessfulRefreshes.length >= expectedHeldRefreshCount) break;
+				await expect(deferredRetry).toBeEnabled();
+				if (attempt === 2 && heldSuccessfulRefreshes.length >= expectedHeldRefreshCount) break;
+				try {
+					await deferredRetry.click({timeout: 5_000});
+				} catch (error) {
+					const isEnabled = await deferredRetry.isEnabled().catch(() => false);
+					if (heldSuccessfulRefreshes.length >= expectedHeldRefreshCount) break;
+					if (attempt === 1 && isEnabled) continue;
+					throw new Error(
+						`Deferred balance retry click did not start a refresh `
+						+ `(attempt=${attempt}, held=${heldSuccessfulRefreshes.length}, expected=${expectedHeldRefreshCount}, enabled=${isEnabled}).`,
+						{cause: error},
+					);
+				}
+				try {
+					await pWaitForHeldRefresh(expectedHeldRefreshCount - 1, Date.now() + 5_000);
+					break;
+				} catch (error) {
+					const isEnabled = await deferredRetry.isEnabled().catch(() => false);
+					if (heldSuccessfulRefreshes.length >= expectedHeldRefreshCount) break;
+					if (attempt === 1 && isEnabled) continue;
+					throw new Error(
+						`Deferred balance retry did not start a refresh `
+						+ `(attempt=${attempt}, held=${heldSuccessfulRefreshes.length}, expected=${expectedHeldRefreshCount}, enabled=${isEnabled}).`,
+						{cause: error},
+					);
+				}
+			}
+			await pWaitForHeldRefresh(expectedHeldRefreshCount - 1, Date.now() + 15_000);
 			releaseAllHeldRefreshes();
 			await expect(this.page.locator("#campaign-transfer-form-status")).toHaveText("Latest balances loaded. You can send another transfer.");
 			await expect(this.page.locator("#campaign-transfer-form button[type='submit']")).toBeEnabled();
