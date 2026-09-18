@@ -1164,7 +1164,14 @@ export class HubCampaignPage {
 					detail: {},
 				},
 			})));
-			responses.forEach(response => expect(response.ok()).toBe(true));
+			const failures = await Promise.all(responses.map(async (response, offset) => response.ok()
+				? null
+				: {
+					index: chunk[offset],
+					status: response.status(),
+					body: await response.text(),
+				}));
+			expect(failures.filter(Boolean), "Every load-test roll request must commit successfully.").toEqual([]);
 		}
 	}
 
