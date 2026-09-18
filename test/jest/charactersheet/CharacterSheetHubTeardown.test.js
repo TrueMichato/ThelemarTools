@@ -614,6 +614,13 @@ describe("Character Sheet campaign content context lifecycle", () => {
 		expect(page._initHubRealtimeListeners()).toBe(true);
 		expect(realtime.attach({characterId: "source-character"})).toBe(true);
 
+		clientListeners.get("cursor")({
+			cursor: {campaignId: "campaign-1", lastSequence: 17},
+			membership: {accountId: "viewer-account", role: "player"},
+			characterRefs: [{id: "source-character", revision: 4, projectionRevision: 2}],
+		});
+		await pFlushPromises();
+
 		clientListeners.get("event")({
 			id: "role-change",
 			campaignId: "campaign-1",
@@ -621,6 +628,7 @@ describe("Character Sheet campaign content context lifecycle", () => {
 			type: "membership.role_changed",
 			aggregateType: "membership",
 			aggregateId: "opaque-membership",
+			payload: {accountId: "viewer-account", role},
 		});
 		await pFlushPromises();
 		expect(targeting._isSuspended).toBe(true);
