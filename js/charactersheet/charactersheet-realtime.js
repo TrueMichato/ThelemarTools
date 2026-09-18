@@ -356,7 +356,7 @@ export class CharacterSheetRealtimeCoordinator {
 			return;
 		}
 
-		if (event.type === "membership.role_changed") {
+		if (isViewerRoleChange) {
 			this._enqueue(active, {
 				type: "membershipChanged",
 				value: {

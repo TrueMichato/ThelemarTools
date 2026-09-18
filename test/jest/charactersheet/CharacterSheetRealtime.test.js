@@ -266,7 +266,14 @@ describe("Character Sheet realtime coordinator", () => {
 		const {clients, coordinator} = makeCoordinator();
 		const membershipChanges = [];
 		coordinator.on("membershipChanged", value => membershipChanges.push(value));
-		coordinator.attach({characterId: "character-1"});
+		coordinator.attach({characterId: "character-1", membershipRole: "player"});
+
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 17},
+			membership: {accountId: "viewer-account", role: "player"},
+			characterRefs: [{id: "character-1", revision: 4, projectionRevision: 2}],
+		});
+		await pFlush();
 
 		clients[0].emit("event", {
 			id: "role-change",
@@ -275,7 +282,7 @@ describe("Character Sheet realtime coordinator", () => {
 			type: "membership.role_changed",
 			aggregateType: "membership",
 			aggregateId: "opaque-membership",
-			payload: {accountId: "opaque-account", role: "spectator"},
+			payload: {accountId: "viewer-account", role: "spectator"},
 		});
 		await pFlush();
 
@@ -285,6 +292,33 @@ describe("Character Sheet realtime coordinator", () => {
 			sequence: 18,
 			source: "event",
 		}]);
+	});
+
+	it("does not invalidate the open character when another member changes roles", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const membershipChanges = [];
+		coordinator.on("membershipChanged", value => membershipChanges.push(value));
+		coordinator.attach({characterId: "character-1", membershipRole: "player"});
+
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 17},
+			membership: {accountId: "viewer-account", role: "player"},
+			characterRefs: [{id: "character-1", revision: 4, projectionRevision: 2}],
+		});
+		await pFlush();
+
+		clients[0].emit("event", {
+			id: "other-role-change",
+			campaignId: "campaign-1",
+			sequence: 18,
+			type: "membership.role_changed",
+			aggregateType: "membership",
+			aggregateId: "other-membership",
+			payload: {accountId: "other-account", role: "co_dm"},
+		});
+		await pFlush();
+
+		expect(membershipChanges).toEqual([]);
 	});
 
 	it("preserves the difference between an absent watermark and authoritative zero", async () => {
