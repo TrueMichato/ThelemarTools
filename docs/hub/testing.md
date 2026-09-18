@@ -291,6 +291,9 @@ See [CI and provenance](ci-and-provenance.md) for job ownership, test-auth bound
   id, refresh/select the cloud roster before realtime attachment, and do not emit a deliberate missing-character
   probe. Projection regressions preserve `owner_truth` versus `dm_truth`; a DM view keeps live reads but disables
   mutation controls and skips owner-only sharing, pending-action, targeting, lease, and party-inventory calls.
+  Deferred-read coverage bursts projection invalidations and live signals around slow DM reads, proving one active
+  request, replaceable trailing demand, eventual newest-projection adoption, lifecycle fencing, and live retry
+  after a transient failure.
   Same-tab account-switch coverage proves a failed owner draft is account-scoped, cannot replace a later DM's
   projection, and cannot stale a subsequent invalidation refetch. Selector, New, Duplicate, file-import, and
   programmatic-create barriers prove a save/create completion from A cannot replace a newer B selection.

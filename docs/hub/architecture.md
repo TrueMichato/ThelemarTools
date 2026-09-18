@@ -257,6 +257,12 @@ inert. The coordinator routes metadata-only projection invalidations and the fro
 `character.operation.*` lifecycle allowlist through the HTTP repository's existing mutation queue, so a
 delivery cannot overtake an in-flight save. Character/campaign switch, canonical-id replacement, detach,
 revocation, logout, and terminal page hide all fence the subscription generation.
+DM read-only projection refetches are single-flight. A burst of character- or campaign-scoped invalidations,
+periodic live signals, and reconnect recovery may replace one pending trailing demand, but never starts a second
+HTTP read while one is active. The active read may apply when its character, campaign, role, load, realtime, and
+refresh-generation fences still match; a queued trailing read then fetches any newer canonical projection.
+Transient failure keeps refresh-required state latched for the next live signal, while terminal projection loss
+uses the ordinary synchronous access teardown.
 Character selection, New, Duplicate, import, and programmatic create continuations also capture the source
 character/load fence before their first save. Every later await must still belong to that source before it can
 reset state, adopt a created character, update navigation, or render. A committed create that finishes after a

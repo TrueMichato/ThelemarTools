@@ -539,6 +539,11 @@ Reconciliation is `R = E(B)`, `F = E(L)`, `nextSave = diff(R, F)`:
   value equality, so advancing only one side produces a spurious conflict on identical values.
 - Adoption reuses the existing `loadFromJson` → `_reconcileClassFeatures()` → `_renderCharacter()` path.
   Rendering runs after the repository commits, so a paint failure never rolls back coherent state.
+- DM read-only invalidations use the same single-flight/trailing shape as owner reconciliation: one active
+  authorization-scoped `pGet`, one replaceable pending demand, and no generation bump merely for queuing demand.
+  The active response may apply under the captured character/campaign/role/load/realtime fences, then the trailing
+  read obtains the newest canonical projection. Transient failure leaves refresh-required latched for a later live
+  signal; terminal projection loss runs the ordinary access teardown.
 - Coverage is tracked per document track, not by one accepted revision, because `pGet` can store fresh canonical
   truth containing the operation while returning an older recovery draft as live state.
 - An unprovable delivery blocks autosave and schedules a serialized no-reload recovery

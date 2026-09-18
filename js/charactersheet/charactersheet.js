@@ -127,6 +127,8 @@ class CharacterSheetPage {
 		this._characterLoadGeneration = 0;
 		this._hubRealtimeGeneration = 0;
 		this._hubReadOnlyRefreshGeneration = 0;
+		this._hubReadOnlyRefreshRequest = null;
+		this._hubReadOnlyRefreshPromise = null;
 		this._isHubReadOnlyRefreshRequired = false;
 		this._hubAuthoritativeReconcileRequest = null;
 		this._hubAuthoritativeReconcilePromise = null;
@@ -271,6 +273,7 @@ class CharacterSheetPage {
 
 	_attachHubRealtime ({characterId = this._currentCharacterId} = {}) {
 		this._hubRealtimeGeneration++;
+		this._hubReadOnlyRefreshRequest = null;
 		this._isHubReadOnlyRefreshRequired = false;
 		if (this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY) {
 			this._hubEffects?.deactivate();
@@ -344,6 +347,7 @@ class CharacterSheetPage {
 	/** `teardown-generation`: fence in-flight realtime work. */
 	_fenceHubGeneration () {
 		this._hubRealtimeGeneration++;
+		this._hubReadOnlyRefreshRequest = null;
 		this._isHubReadOnlyRefreshRequired = false;
 	}
 
@@ -453,23 +457,74 @@ class CharacterSheetPage {
 		return true;
 	}
 
-	async _pRefreshHubReadOnlyCharacter ({characterId = this._currentCharacterId} = {}) {
+	// Reuse the owner reconciliation pattern: one active read plus one replaceable trailing demand.
+	_pRefreshHubReadOnlyCharacter ({characterId = this._currentCharacterId} = {}) {
 		if (
 			!characterId
 			|| characterId !== this._currentCharacterId
 			|| this._currentCharacterAccess !== CHARACTER_ACCESS_MODES.DM_READ_ONLY
 			|| typeof this._characterRepository?.pGet !== "function"
-		) return false;
+		) return Promise.resolve(false);
 		this._isHubReadOnlyRefreshRequired = true;
-		const refreshGeneration = ++this._hubReadOnlyRefreshGeneration;
-		const characterLoadGeneration = this._characterLoadGeneration;
-		const realtimeGeneration = this._hubRealtimeGeneration;
-		const isCurrent = () => (
-			refreshGeneration === this._hubReadOnlyRefreshGeneration
-			&& characterLoadGeneration === this._characterLoadGeneration
+		this._hubReadOnlyRefreshRequest = {
+			characterId,
+			campaignId: this._hubCampaignId,
+			characterLoadGeneration: this._characterLoadGeneration,
+			realtimeGeneration: this._hubRealtimeGeneration,
+		};
+		return this._pStartHubReadOnlyRefresh();
+	}
+
+	_pStartHubReadOnlyRefresh () {
+		if (this._hubReadOnlyRefreshPromise) return this._hubReadOnlyRefreshPromise;
+		if (!this._hubReadOnlyRefreshRequest) return Promise.resolve(false);
+		const promise = this._pDrainHubReadOnlyRefresh()
+			.catch(error => {
+				this._isHubReadOnlyRefreshRequired = true;
+				// eslint-disable-next-line no-console
+				console.error("Read-only character refresh failed:", error);
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "Could not refresh this read-only character. Reconnect or reload before relying on its current values.",
+				});
+				return false;
+			});
+		this._hubReadOnlyRefreshPromise = promise;
+		void promise.finally(() => {
+			if (this._hubReadOnlyRefreshPromise === promise) this._hubReadOnlyRefreshPromise = null;
+			if (this._hubReadOnlyRefreshRequest) void this._pStartHubReadOnlyRefresh();
+		});
+		return promise;
+	}
+
+	async _pDrainHubReadOnlyRefresh () {
+		let isApplied = false;
+		while (this._hubReadOnlyRefreshRequest) {
+			const request = this._hubReadOnlyRefreshRequest;
+			this._hubReadOnlyRefreshRequest = null;
+			isApplied = await this._pRunHubReadOnlyRefresh(request) || isApplied;
+		}
+		return isApplied;
+	}
+
+	async _pRunHubReadOnlyRefresh ({
+		characterId,
+		campaignId,
+		characterLoadGeneration,
+		realtimeGeneration,
+	}) {
+		const isScopeCurrent = () => (
+			characterLoadGeneration === this._characterLoadGeneration
 			&& realtimeGeneration === this._hubRealtimeGeneration
+			&& campaignId === this._hubCampaignId
 			&& characterId === this._currentCharacterId
 			&& this._currentCharacterAccess === CHARACTER_ACCESS_MODES.DM_READ_ONLY
+		);
+		if (!isScopeCurrent()) return false;
+		const refreshGeneration = ++this._hubReadOnlyRefreshGeneration;
+		const isCurrent = () => (
+			refreshGeneration === this._hubReadOnlyRefreshGeneration
+			&& isScopeCurrent()
 		);
 		try {
 			const character = await this._characterRepository.pGet({characterId});
@@ -485,7 +540,7 @@ class CharacterSheetPage {
 			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 			this._reconcileClassFeatures();
 			this._renderCharacter();
-			this._isHubReadOnlyRefreshRequired = false;
+			if (!this._hubReadOnlyRefreshRequest) this._isHubReadOnlyRefreshRequired = false;
 			return true;
 		} catch (error) {
 			if (!isCurrent()) return false;
