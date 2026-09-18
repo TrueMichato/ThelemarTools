@@ -1,6 +1,7 @@
 import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
 import {CharacterSheetRealtimeCoordinator} from "../../../js/charactersheet/charactersheet-realtime.js";
 import {HubHttpCharacterRepository} from "../../../js/hub/hub-http-character-repository.js";
 import {LocalCharacterRepository} from "../../../js/hub/hub-character-repository.js";
@@ -1059,5 +1060,31 @@ describe("Applicable maximum through live reconciliation", () => {
 
 		expect(state.getName()).toBe("After Adoption");
 		expect(host._characterDocumentGeneration).toBe(5);
+	});
+
+	it("closes character-scoped portals when authoritative live adoption invalidates them", () => {
+		CharacterSheetModal._resetForTests();
+		const state = new CharacterSheetState();
+		const element = {
+			addEventListener: jest.fn(),
+			removeEventListener: jest.fn(),
+			remove: jest.fn(),
+		};
+		const cleanup = jest.fn();
+		const host = {
+			_state: state,
+			_currentCharacterId: "character-1",
+			_characterLoadGeneration: 2,
+			_characterDocumentGeneration: 4,
+			_currentCharacterAccess: "owner",
+			_reconcileClassFeatures: jest.fn(),
+		};
+		CharacterSheetModal.registerCharacterScopePortal({sheet: host, element, cleanup});
+
+		CharacterSheetPage.prototype._adoptHubLiveCharacterData.call(host, state.toJson());
+
+		expect(element.remove).toHaveBeenCalledTimes(1);
+		expect(cleanup).toHaveBeenCalledWith({isCharacterScopeTeardown: true});
+		CharacterSheetModal._resetForTests();
 	});
 });

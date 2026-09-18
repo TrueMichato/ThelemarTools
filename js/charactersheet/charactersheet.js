@@ -77,6 +77,13 @@ const _getHubComparableCharacterDocument = ({document, repairItems, pristineItem
 	if (out && typeof out === "object" && !Array.isArray(out)) delete out.carry;
 	return out;
 };
+const _advanceCharacterDocumentGeneration = page => {
+	page._characterDocumentGeneration = (page._characterDocumentGeneration || 0) + 1;
+	void CharacterSheetModal.closeCharacterScopeModals().catch(error => {
+		// eslint-disable-next-line no-console
+		console.error("Failed to close stale character-scoped UI:", error);
+	});
+};
 
 /**
  * Character Sheet - Main Controller
@@ -552,7 +559,7 @@ class CharacterSheetPage {
 			this._state.loadFromJson(character);
 			this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 			this._reconcileClassFeatures();
-			this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
+			_advanceCharacterDocumentGeneration(this);
 			this._renderCharacter();
 			if (!this._hubReadOnlyRefreshRequest) this._isHubReadOnlyRefreshRequired = false;
 			return true;
@@ -1011,7 +1018,7 @@ class CharacterSheetPage {
 		try {
 			this._state.loadFromJson({...liveNext, id: this._currentCharacterId});
 			this._reconcileClassFeatures();
-			this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
+			_advanceCharacterDocumentGeneration(this);
 		} catch (error) {
 			try {
 				this._state.loadFromJson(liveBefore);
@@ -1345,7 +1352,7 @@ class CharacterSheetPage {
 				isIdentityChanged ||= identity.isChanged;
 				this._state.loadFromJson(resolved);
 				this._reconcileClassFeatures();
-				this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
+				_advanceCharacterDocumentGeneration(this);
 				this._renderCharacter();
 				isResolutionAdopted = true;
 				return true;
@@ -1435,7 +1442,7 @@ class CharacterSheetPage {
 			isIdentityChanged ||= identity.isChanged;
 			this._state.loadFromJson(resolved);
 			this._reconcileClassFeatures();
-			this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
+			_advanceCharacterDocumentGeneration(this);
 			this._renderCharacter();
 			isResolutionAdopted = true;
 			return true;
@@ -1657,7 +1664,7 @@ class CharacterSheetPage {
 						this._state.loadFromJson(data);
 						this._state.setCampaignSettingsOverlay(_getHubRulesOverlay(this._hubContext));
 						this._reconcileClassFeatures();
-						this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
+						_advanceCharacterDocumentGeneration(this);
 						this._renderCharacter();
 					},
 					fnSaveCharacter: () => this._saveCurrentCharacter({isInteractiveConflict: false}),
@@ -5678,7 +5685,7 @@ class CharacterSheetPage {
 					const livePatches = getJsonPatchesWithDocumentValues({patches: rebased.patches, document: live});
 					this._state.loadFromJson({...applyJsonPatch(canonical, livePatches), id: persisted.id});
 					this._reconcileClassFeatures();
-					this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
+					_advanceCharacterDocumentGeneration(this);
 					this._renderCharacter();
 				}
 			}
@@ -5736,7 +5743,7 @@ class CharacterSheetPage {
 				if (choice) return this._saveCurrentCharacter({activity: null});
 				this._state.loadFromJson(recovery.server);
 				this._reconcileClassFeatures();
-				this._characterDocumentGeneration = (this._characterDocumentGeneration || 0) + 1;
+				_advanceCharacterDocumentGeneration(this);
 				this._renderCharacter();
 				this._updateSaveIndicator("saved");
 				return true;

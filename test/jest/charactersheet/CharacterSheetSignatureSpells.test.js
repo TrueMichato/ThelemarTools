@@ -351,6 +351,31 @@ describe("Wizard Signature Spells", () => {
 		expect(spells.renderSlots).not.toHaveBeenCalled();
 	});
 
+	test("a second cast cannot stage against the same live character transaction", async () => {
+		const state = makeState();
+		const spells = makeSpellsModule(state, []);
+		let releaseFirst;
+		const firstGate = new Promise(resolve => releaseFirst = resolve);
+		const firstFn = jest.fn(async stagedModule => {
+			stagedModule._state.setName("First Cast");
+			await firstGate;
+			return true;
+		});
+		const secondFn = jest.fn(async stagedModule => {
+			stagedModule._state.setName("Second Cast");
+			return true;
+		});
+
+		const first = spells._pRunCastTransaction({fn: firstFn});
+		await Promise.resolve();
+		await expect(spells._pRunCastTransaction({fn: secondFn})).resolves.toBe(false);
+		expect(secondFn).not.toHaveBeenCalled();
+
+		releaseFirst();
+		await expect(first).resolves.toBe(true);
+		expect(state.getName()).toBe("First Cast");
+	});
+
 	test("private-only staged saves are subsumed by the item caller's final save", async () => {
 		const state = makeState();
 		const spells = makeSpellsModule(state, []);

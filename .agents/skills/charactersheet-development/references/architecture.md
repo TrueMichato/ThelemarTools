@@ -532,7 +532,10 @@ never rewire the live page or module across an await, and must suppress saves, r
 the captured owner character ID/load generation/document generation/access scope is still current. Every
 successful authoritative same-character adoption advances the document generation, so a staged workflow that
 overlapped a realtime effect, resync, or canonical reconciliation cancels rather than replacing newer live truth
-with its older whole-document snapshot. Related costs must be applied to
+with its older whole-document snapshot. Advancing that generation also tears down character-scoped modals and
+portals immediately; invalidating a scope without removing its interaction guard would strand a dead overlay.
+Only one staged cast transaction may run at a time, so sibling casts cannot commit independent snapshots from the
+same starting document. Related costs must be applied to
 the staged state before its JSON is captured, so one adopted snapshot contains the complete mutation. Once that
 snapshot is adopted, deferred callback surfaces are rebound to the live state/page and buffered rolls plus the
 single live render are replayed synchronously before awaiting network persistence; a scope change during that

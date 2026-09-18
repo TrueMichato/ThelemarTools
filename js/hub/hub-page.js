@@ -604,6 +604,17 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 	});
 	const selectedTargetIds = new Set();
 	const pendingDisabledStates = new Map();
+	const submitDefaultText = submit.textContent;
+	let isPending = false;
+	let isRetryPending = false;
+	const applyPendingControlState = () => {
+		if (!isPending) return;
+		for (const control of form.querySelectorAll("input, textarea, select, button")) {
+			if (control === submit) continue;
+			if (!pendingDisabledStates.has(control)) pendingDisabledStates.set(control, control.disabled);
+			control.disabled = true;
+		}
+	};
 	const restorePendingControlStates = () => {
 		if (isCampaignReloadRequired) {
 			pendingDisabledStates.clear();
@@ -720,6 +731,7 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			? `${selectedTargetIds.size} of ${currentTargets.length} eligible character${currentTargets.length === 1 ? "" : "s"} selected.`
 			: "No eligible campaign characters are available.";
 		renderPreview();
+		applyPendingControlState();
 	};
 
 	const renderResults = async () => {
@@ -862,6 +874,7 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			renderPreview();
 		},
 		setCampaignBrewContent (content) {
+			if (isRetryPending) return;
 			catalogLoader.setCampaignBrewContent(content);
 			if (["catalog", "campaign_item"].includes(sourceKind.value)) {
 				clearSelection();
@@ -869,10 +882,12 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			}
 		},
 		setEvents (nextEvents) {
+			if (isRetryPending) return;
 			currentEvents = nextEvents;
 			if (sourceKind.value === "recent") void renderResults();
 		},
 		setPartyInventory (nextPartyInventory) {
+			if (isRetryPending) return;
 			currentPartyInventory = nextPartyInventory;
 			if (sourceKind.value === "party_inventory") {
 				const refreshedSelection = selectedItem?.sourceKind === "party_inventory"
@@ -889,19 +904,18 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 				void renderResults();
 			}
 		},
-		setPending (isPending) {
+		setPending (isPendingNxt, {isRetry = false} = {}) {
+			isPending = !!isPendingNxt;
+			isRetryPending = isPending && isRetry;
+			submit.textContent = isRetry ? "Retry previous award" : submitDefaultText;
 			if (isPending) {
-				pendingDisabledStates.clear();
-				for (const control of form.querySelectorAll("input, textarea, select, button")) {
-					if (control === submit) continue;
-					pendingDisabledStates.set(control, control.disabled);
-					control.disabled = true;
-				}
+				applyPendingControlState();
 				return;
 			}
 			restorePendingControlStates();
 		},
 		setTargets (nextTargets) {
+			if (isRetryPending) return;
 			currentTargets = nextTargets;
 			renderTargets();
 		},
@@ -3362,7 +3376,9 @@ async function pInitCampaignForms ({
 		setFormStatus({formId});
 		renderError(null);
 		let isAwardComplete = false;
+		let isAwardRetryRequired = false;
 		try {
+			const isAwardRetry = !!form._hubAwardMutationDraft;
 			const awardDraft = getOrStageAwardMutationDraft({
 				draft: form._hubAwardMutationDraft,
 				fnGetSubmission: () => itemAward.getSubmission(),
@@ -3375,7 +3391,7 @@ async function pInitCampaignForms ({
 				form,
 				fingerprint: awardDraft.fingerprint,
 				fnMutate: async idempotencyKey => {
-					itemAward.setPending(true);
+					itemAward.setPending(true, {isRetry: isAwardRetry});
 					result = await api.pAwardItems({
 						campaignId,
 						...submission,
@@ -3384,6 +3400,7 @@ async function pInitCampaignForms ({
 				},
 			});
 			if (!result) return;
+			itemAward.setPending(true);
 			delete form._hubAwardMutationDraft;
 			const applyAwardSuccessUi = () => {
 				itemAward.onSuccess(result);
@@ -3427,17 +3444,20 @@ async function pInitCampaignForms ({
 				});
 			}
 		} catch (error) {
-			if (!isMutationOutcomeUncertain(error)) {
+			isAwardRetryRequired = isMutationOutcomeUncertain(error);
+			if (!isAwardRetryRequired) {
 				delete form._hubAwardMutationDraft;
 				form._hubMutationKey = null;
 				form._hubMutationFingerprint = null;
 			}
 			if (!fnIsCurrent()) return;
-			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;
+			const message = isAwardRetryRequired
+				? "The award outcome could not be confirmed. The original item and recipients are locked; retry the previous award to reconcile it safely."
+				: error instanceof HubApiError ? getErrorMessage(error) : error.message;
 			setFormStatus({formId, message, isError: true});
 			if (error instanceof HubApiError) renderError(error);
 		} finally {
-			itemAward.setPending(false);
+			itemAward.setPending(isAwardRetryRequired, {isRetry: isAwardRetryRequired});
 			if (isAwardComplete) itemAward.focusPrimary();
 		}
 	});

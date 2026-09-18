@@ -229,6 +229,10 @@ contain only the bounded summary even though authoritative inventory retains the
 Those returned/event/audit summaries are derived from the resolved authoritative item, so browser-supplied
 display metadata cannot disagree with the persisted object. Event and audit `sourceKind` identify the resolved
 authority; the response source continues to describe the normalized submitted command for retry identity.
+After an outcome-uncertain award failure, the browser retains that exact command body and idempotency key, locks
+the item and recipient controls to the displayed command, and labels the only available submission action
+`Retry previous award`. The composer unlocks only after a definitive failure or a confirmed successful replay;
+it never presents editable award B while submission would replay retained award A.
 
 Direct DM/co-DM body:
 

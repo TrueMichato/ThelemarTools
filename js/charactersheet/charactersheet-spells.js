@@ -133,6 +133,16 @@ class CharacterSheetSpells {
 	}
 
 	async _pRunCastTransaction ({fn, fnAfterCommit = null}) {
+		if (this._isCastTransactionActive) return false;
+		this._isCastTransactionActive = true;
+		try {
+			return await this._pRunCastTransactionInner({fn, fnAfterCommit});
+		} finally {
+			this._isCastTransactionActive = false;
+		}
+	}
+
+	async _pRunCastTransactionInner ({fn, fnAfterCommit = null}) {
 		if (
 			typeof this._state?.createTransactionClone !== "function"
 			|| typeof this._state?.loadFromJson !== "function"
