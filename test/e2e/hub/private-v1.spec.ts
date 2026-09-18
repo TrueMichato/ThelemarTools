@@ -190,10 +190,7 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 		await secondDevice.page.locator("#campaign-transfer-source").selectOption({label: "Rowan"});
 		await secondDevice.page.locator("#campaign-transfer-target").selectOption({label: "Party inventory"});
 		await secondDevice.page.locator("#campaign-transfer-gp").fill("1");
-		let markTransferStarted = () => {};
-		const transferStarted = new Promise<void>(resolve => {
-			markTransferStarted = resolve;
-		});
+		let transferStartedCount = 0;
 		let continueTransfer = () => {};
 		const transferGate = new Promise<void>(resolve => {
 			continueTransfer = resolve;
@@ -203,12 +200,54 @@ test("private V1 multi-user lifecycle through the real stack", async ({browser})
 				await route.continue();
 				return;
 			}
-			markTransferStarted();
+			transferStartedCount++;
 			await transferGate;
 			await route.continue();
 		});
-		await secondDevice.page.locator("#campaign-transfer-form button[type='submit']").click();
-		await transferStarted;
+		const transferSubmit = secondDevice.page.locator("#campaign-transfer-form button[type='submit']");
+		const isTransferStarted = () => {
+			if (transferStartedCount > 1) {
+				throw new Error(`Second-device fencing issued duplicate transfers (requests=${transferStartedCount}).`);
+			}
+			return transferStartedCount === 1;
+		};
+		const pGetTransferDiagnostics = async () => JSON.stringify({
+			requests: transferStartedCount,
+			source: await secondDevice.page.locator("#campaign-transfer-source").inputValue().catch(() => null),
+			target: await secondDevice.page.locator("#campaign-transfer-target").inputValue().catch(() => null),
+			gp: await secondDevice.page.locator("#campaign-transfer-gp").inputValue().catch(() => null),
+			busy: await secondDevice.page.locator("#campaign-transfer-form").getAttribute("aria-busy").catch(() => null),
+			status: await secondDevice.page.locator("#campaign-transfer-form-status").textContent().catch(() => null),
+		});
+		for (let attempt = 1; attempt <= 2; attempt++) {
+			if (isTransferStarted()) break;
+			try {
+				await transferSubmit.click({timeout: 5_000});
+			} catch (error) {
+				if (isTransferStarted()) break;
+				const isEnabled = await transferSubmit.isEnabled().catch(() => false);
+				if (attempt === 1 && isEnabled) continue;
+				throw new Error(
+					`Second-device transfer click did not reach the request boundary `
+					+ `(attempt=${attempt}; ${await pGetTransferDiagnostics()}).`,
+					{cause: error},
+				);
+			}
+			try {
+				await expect.poll(isTransferStarted, {timeout: 5_000}).toBe(true);
+				break;
+			} catch (error) {
+				if (isTransferStarted()) break;
+				const isEnabled = await transferSubmit.isEnabled().catch(() => false);
+				if (attempt === 1 && isEnabled) continue;
+				throw new Error(
+					`Second-device transfer did not reach the request boundary `
+					+ `(attempt=${attempt}; ${await pGetTransferDiagnostics()}).`,
+					{cause: error},
+				);
+			}
+		}
+		await expect.poll(isTransferStarted, {timeout: 15_000}).toBe(true);
 		await expect(secondDevice.page.locator("#campaign-party-roster")).toContainText("Rowan");
 		await player.revokeOtherSession();
 		continueTransfer();

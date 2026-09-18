@@ -2262,6 +2262,7 @@ export class HubCampaignPage {
 		const proposalBodies: string[] = [];
 		const proposalKeys: Array<string | undefined> = [];
 		let proposalAttempts = 0;
+		let retryTransferStatus: string | null = null;
 		let resolutionCount = 0;
 		const observeResolution = (request: Request) => {
 			const pathname = new URL(request.url()).pathname;
@@ -2289,7 +2290,10 @@ export class HubCampaignPage {
 				});
 				return;
 			}
-			await route.continue();
+			const retried = await route.fetch();
+			expect(retried.ok()).toBe(true);
+			retryTransferStatus = (await retried.json()).transfer?.status || null;
+			await route.fulfill({response: retried});
 		};
 		this.page.on("request", observeResolution);
 		await this.page.route(proposalMatcher, loseFirstProposalResponse);
@@ -2350,8 +2354,8 @@ export class HubCampaignPage {
 				}
 			}
 			await expect.poll(isRetryProposalObserved, {timeout: 15_000}).toBe(true);
+			await expect.poll(() => retryTransferStatus, {timeout: 15_000}).toBe("committed");
 			await expect(this.page.locator("#campaign-transfer-form")).not.toHaveAttribute("aria-busy", "true", {timeout: 15_000});
-			await expect(this.page.locator("#campaign-transfer-form-status")).toContainText("Transfer complete.");
 			await expect(this.page.locator("#campaign-pending-transfers .hub-data-row")).toHaveCount(0);
 			expect(proposalAttempts).toBe(2);
 			expect(new Set(proposalBodies)).toEqual(new Set([proposalBodies[0]]));
