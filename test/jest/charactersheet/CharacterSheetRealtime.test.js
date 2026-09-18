@@ -225,6 +225,43 @@ describe("Character Sheet realtime coordinator", () => {
 		]);
 	});
 
+	it("does not invalidate membership when the initial cursor confirms the attached context role", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const membershipChanges = [];
+		coordinator.on("membershipChanged", value => membershipChanges.push(value));
+		coordinator.attach({characterId: "character-1", membershipRole: "player"});
+
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 12},
+			membership: {role: "player"},
+			characterRefs: [{id: "character-1", revision: 4, projectionRevision: 2}],
+		});
+		await pFlush();
+
+		expect(membershipChanges).toEqual([]);
+	});
+
+	it("still invalidates membership when the initial cursor supersedes the attached context role", async () => {
+		const {clients, coordinator} = makeCoordinator();
+		const membershipChanges = [];
+		coordinator.on("membershipChanged", value => membershipChanges.push(value));
+		coordinator.attach({characterId: "character-1", membershipRole: "player"});
+
+		clients[0].emit("cursor", {
+			cursor: {campaignId: "campaign-1", lastSequence: 12},
+			membership: {role: "spectator"},
+			characterRefs: [{id: "character-1", revision: 4, projectionRevision: 2}],
+		});
+		await pFlush();
+
+		expect(membershipChanges).toEqual([{
+			campaignId: "campaign-1",
+			sequence: 12,
+			source: "cursor",
+			role: "spectator",
+		}]);
+	});
+
 	it("notifies consumers to refetch authority after live membership role changes", async () => {
 		const {clients, coordinator} = makeCoordinator();
 		const membershipChanges = [];

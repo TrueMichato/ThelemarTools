@@ -1523,8 +1523,84 @@ export class HubCampaignPage {
 		characterId: string;
 		rollVisibility: "all_members" | "actor_and_dm";
 	}): Promise<void> {
+		const traceKey = "__hubE2eCharacterSwitchTrace";
+		await this.page.evaluate(({targetCharacterId, key}) => {
+			const sheet = (window as any).charSheet;
+			if (!sheet?._pLoadCharacter) throw new Error("Character Sheet load handler is unavailable.");
+			const originalLoad = sheet._pLoadCharacter;
+			sheet[key] = {
+				targetCharacterId,
+				generationBefore: sheet._characterLoadGeneration,
+				loadCalls: 0,
+				loadResult: "not-started",
+				loadError: null,
+			};
+			sheet._pLoadCharacter = async function (nextCharacterId: string) {
+				if (nextCharacterId !== targetCharacterId) return originalLoad.call(this, nextCharacterId);
+				const trace = this[key];
+				trace.loadCalls++;
+				trace.loadResult = "pending";
+				try {
+					const result = await originalLoad.call(this, nextCharacterId);
+					trace.loadResult = result;
+					return result;
+				} catch (error) {
+					trace.loadError = {
+						name: error instanceof Error ? error.name : null,
+						message: error instanceof Error ? error.message : `${error}`,
+						code: (error as any)?.code ?? null,
+					};
+					throw error;
+				} finally {
+					this._pLoadCharacter = originalLoad;
+				}
+			};
+		}, {targetCharacterId: characterId, key: traceKey});
+
 		await this.page.locator("#charsheet-sel-character").selectOption(characterId);
-		await expect.poll(() => new URL(this.page.url()).searchParams.get("id")).toBe(characterId);
+		const getSwitchState = () => this.page.evaluate(({targetCharacterId, key}) => {
+			const sheet = (window as any).charSheet;
+			const trace = sheet?.[key] || {};
+			const generationCurrent = sheet?._characterLoadGeneration ?? null;
+			return {
+				selectorValue: (document.querySelector("#charsheet-sel-character") as HTMLSelectElement | null)?.value ?? null,
+				urlId: new URL(window.location.href).searchParams.get("id"),
+				currentCharacterId: sheet?._currentCharacterId ?? null,
+				loadCalls: trace.loadCalls ?? 0,
+				loadResult: trace.loadResult ?? "missing",
+				loadError: trace.loadError ?? null,
+				generationBefore: trace.generationBefore ?? null,
+				generationCurrent,
+				generationDelta: Number.isInteger(trace.generationBefore) && Number.isInteger(generationCurrent)
+					? generationCurrent - trace.generationBefore
+					: null,
+				targetCharacterId,
+			};
+		}, {targetCharacterId: characterId, key: traceKey});
+		try {
+			await expect.poll(async () => {
+				const state = await getSwitchState();
+				return {
+					selectorValue: state.selectorValue,
+					urlId: state.urlId,
+					currentCharacterId: state.currentCharacterId,
+					loadCalls: state.loadCalls,
+					loadResult: state.loadResult,
+					loadError: state.loadError,
+					generationDelta: state.generationDelta,
+				};
+			}, {timeout: 5_000}).toEqual({
+				selectorValue: characterId,
+				urlId: characterId,
+				currentCharacterId: characterId,
+				loadCalls: 1,
+				loadResult: true,
+				loadError: null,
+				generationDelta: 1,
+			});
+		} catch (error) {
+			throw new Error(`Character switch did not converge: ${JSON.stringify(await getSwitchState())}`, {cause: error});
+		}
 
 		await this.page.locator("#charsheet-btn-rolllog").click();
 		const visibility = this.page.locator("#charsheet-roll-history-visibility");

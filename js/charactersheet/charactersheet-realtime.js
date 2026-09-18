@@ -99,7 +99,7 @@ export class CharacterSheetRealtimeCoordinator {
 			&& typeof this._repository?.pEnqueueRealtimeDelivery === "function";
 	}
 
-	attach ({characterId}) {
+	attach ({characterId, membershipRole = null}) {
 		this.detach();
 		if (!this._isEligible({characterId})) return false;
 
@@ -116,7 +116,7 @@ export class CharacterSheetRealtimeCoordinator {
 			inventoryEventKeys: new Set(),
 			authorityBaselineSequence: null,
 			isAuthorityBaselineValid: false,
-			membershipRole: null,
+			membershipRole: _CAMPAIGN_MEMBERSHIP_ROLES.has(membershipRole) ? membershipRole : null,
 			operationKeys: new Set(),
 			recipientNoticeKeys: new Set(),
 			cursorMetadata: null,

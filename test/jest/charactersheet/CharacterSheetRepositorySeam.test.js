@@ -218,6 +218,29 @@ describe("Character Sheet repository seam", () => {
 		expect(select.value).toBe("cloud-a");
 	});
 
+	it("seeds realtime attachment with the authoritative campaign membership role", () => {
+		const attach = jest.fn(() => true);
+		const host = {
+			_hubRealtimeGeneration: 4,
+			_hubReadOnlyRefreshRequest: null,
+			_isHubReadOnlyRefreshRequired: false,
+			_currentCharacterAccess: CHARACTER_ACCESS_MODES.OWNER,
+			_characterLoadGeneration: 7,
+			_hubContext: {membership: {role: "player"}},
+			_hubEffects: {activate: jest.fn()},
+			_peerTargeting: {activate: jest.fn()},
+			_partyInventory: {pAttach: jest.fn()},
+			_hubRealtime: {attach},
+		};
+
+		expect(CharacterSheetPage.prototype._attachHubRealtime.call(host, {characterId: "character-a"})).toBe(true);
+
+		expect(attach).toHaveBeenCalledWith({
+			characterId: "character-a",
+			membershipRole: "player",
+		});
+	});
+
 	it("reattaches retained owner Party Inventory on each role-roster generation fence", () => {
 		const partyInventory = {
 			isAttachedTo: jest.fn(() => true),

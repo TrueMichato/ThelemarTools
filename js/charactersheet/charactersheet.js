@@ -293,7 +293,10 @@ class CharacterSheetPage {
 				generation: this._characterLoadGeneration,
 			});
 		}
-		const isAttached = this._hubRealtime?.attach({characterId}) || false;
+		const isAttached = this._hubRealtime?.attach({
+			characterId,
+			membershipRole: this._hubContext?.membership?.role,
+		}) || false;
 		return isAttached;
 	}
 
