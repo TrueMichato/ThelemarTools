@@ -2358,13 +2358,17 @@ export class HubCampaignPage {
 			const form = this.page.locator("#campaign-transfer-form");
 			const submit = form.locator("button[type='submit']");
 			for (let attempt = 1; attempt <= 2; attempt++) {
+				if (attempt === 2 && transferRequestCount !== 0) break;
 				await expect(submit).toBeEnabled();
+				if (attempt === 2 && transferRequestCount !== 0) break;
 				await submit.click();
 				try {
 					await expect.poll(() => transferRequestCount, {timeout: 5_000}).toBe(1);
 					break;
 				} catch (error) {
-					if (attempt === 1 && transferRequestCount === 0 && await submit.isEnabled()) continue;
+					const isEnabled = await submit.isEnabled();
+					if (transferRequestCount !== 0) break;
+					if (attempt === 1 && isEnabled) continue;
 					const state = {
 						attempt,
 						transferRequestCount,
@@ -2375,6 +2379,7 @@ export class HubCampaignPage {
 					throw new Error(`Transfer submit did not issue exactly one request: ${JSON.stringify(state)}`, {cause: error});
 				}
 			}
+			await expect.poll(() => transferRequestCount, {timeout: 15_000}).toBe(1);
 			await expect.poll(() => transferPostCount, {timeout: 15_000}).toBe(1);
 			await expect.poll(() => failedRefreshCount).toBeGreaterThan(0);
 			const retry = this.page.getByRole("button", {name: "Retry latest balances", exact: true});
