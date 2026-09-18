@@ -877,7 +877,7 @@ async function pInitItemAwardComposer ({context, partyInventory, targetCharacter
 			if (isRetryPending) return;
 			catalogLoader.setCampaignBrewContent(content);
 			if (["catalog", "campaign_item"].includes(sourceKind.value)) {
-				clearSelection();
+				if (sourceKind.value === "campaign_item" || selectedItem?.sourceKind === "campaign_item") clearSelection();
 				void renderResults();
 			}
 		},

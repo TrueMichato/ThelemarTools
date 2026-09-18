@@ -590,6 +590,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("import(\"./hub-item-catalog.js\")");
 		expect(source).toContain("ownerAccountId: session.account.id");
 		expect(source).toContain("itemAward.setCampaignBrewContent");
+		expect(source).toMatch(/sourceKind\.value === "campaign_item" \|\| selectedItem\?\.sourceKind === "campaign_item"/);
 		expect(source).toContain("api.pAwardItems");
 		expect(source).toContain("getOrStageAwardMutationDraft");
 		expect(source).toContain("form._hubAwardMutationDraft");

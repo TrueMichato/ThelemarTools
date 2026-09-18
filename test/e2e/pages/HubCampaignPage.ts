@@ -949,8 +949,10 @@ export class HubCampaignPage {
 		await this.page.locator("#campaign-item-search").fill("Dagger");
 		await this.page.locator("#campaign-item-results").selectOption({label: "Dagger — PHB"});
 		await this.page.locator("#campaign-item-use-selection").click();
+		await expect(this.page.locator("#campaign-item-selection-summary")).toContainText("Dagger · PHB");
 		await this.selectItemAwardTargets([localCharacterName]);
 		await this.page.locator("#campaign-item-quantity").fill("1");
+		await expect(this.page.locator("#campaign-item-form button[type='submit']")).toBeEnabled();
 		const awardRequest = this.page.waitForRequest(request =>
 			request.method() === "POST"
 			&& new URL(request.url()).pathname === `/api/campaigns/${campaignId}/item-awards`,
