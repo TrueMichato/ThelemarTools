@@ -482,6 +482,10 @@ Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the r
    continuations and mutating handlers must also final-check the captured character ID, load
    generation, and owner authority after every await and immediately before changing state.
    Wrapped `pGetResolved` completions become cancellation when their originating scope changed.
+   An authoritative same-character document adoption does not make ordinary modals or portals inert:
+   their interaction ownership ignores document generation, while awaited completions and explicit
+   staged-workflow scope checks remain document-generation fenced. Portals that own a staged
+   whole-document snapshot opt into `isCloseOnDocumentInvalidation` and are removed immediately.
 6. **Awaited caller-owned modal promises must settle on scope teardown.** Pass a cancellation-only
    `cbCharacterScopeTeardown`; do not reuse a mutating ordinary `cbClose`. Create the outer resolver
    before opening the modal, or explicitly handle teardown that occurs while asynchronous modal

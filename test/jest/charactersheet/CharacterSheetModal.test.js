@@ -33,7 +33,12 @@ const mkEle = ({tag = "div", children = [], isVisible = true} = {}) => {
 		removeEventListener (name, fn) {
 			this.handlers[name] = (this.handlers[name] || []).filter(it => it !== fn);
 		},
-		dispatch (name, evt) { (this.handlers[name] || []).forEach(fn => fn(evt)); },
+		dispatch (name, evt) {
+			for (const fn of this.handlers[name] || []) {
+				fn(evt);
+				if (evt.isImmediatePropagationStopped) break;
+			}
+		},
 		contains (other) { return other === this || this.children.includes(other); },
 		remove () { this.isConnected = false; },
 		querySelector (sel) {
@@ -286,6 +291,7 @@ describe("CharacterSheetModal", () => {
 			const page = {
 				_currentCharacterId: "character-a",
 				_characterLoadGeneration: 1,
+				_characterDocumentGeneration: 1,
 				_currentCharacterAccess: "owner",
 			};
 			CharacterSheetModal.bindCharacterSheet(page);
@@ -298,6 +304,55 @@ describe("CharacterSheetModal", () => {
 
 			expect(evt.isDefaultPrevented).toBe(true);
 			expect(evt.isImmediatePropagationStopped).toBe(true);
+		});
+
+		it("keeps an ordinary modal dismissible after same-character authoritative adoption", async () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_characterDocumentGeneration: 4,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			globalThis.EventUtil.isInInput = () => true;
+			let closeCount = 0;
+			nextModal = () => ({
+				eleModal: mkEle(),
+				eleModalInner: mkEle(),
+				doClose: () => { closeCount++; },
+			});
+			const modal = await CharacterSheetModal.pGetShow({title: "Custom Modifiers"});
+			page._characterDocumentGeneration++;
+			const evt = mkEvent("Escape");
+
+			modal.eleModal.dispatch("keydown", evt);
+
+			expect(closeCount).toBe(1);
+			expect(evt.isDefaultPrevented).toBe(true);
+		});
+
+		it("still cancels an awaited modal result after same-character authoritative adoption", async () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_characterDocumentGeneration: 4,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			let resolveModal;
+			nextModal = () => ({
+				eleModal: mkEle(),
+				eleModalInner: mkEle(),
+				doClose: () => {},
+				pGetResolved: () => new Promise(resolve => resolveModal = resolve),
+			});
+			const modal = await CharacterSheetModal.pGetShow({title: "Blood Price"});
+			const pending = modal.pGetResolved();
+			page._characterDocumentGeneration++;
+
+			resolveModal([true, "confirmed"]);
+
+			await expect(pending).resolves.toEqual([false]);
 		});
 
 		it("turns a confirmed InputUiUtil completion into cancellation when its character scope ended", async () => {
@@ -373,6 +428,7 @@ describe("CharacterSheetModal", () => {
 			const page = {
 				_currentCharacterId: "character-a",
 				_characterLoadGeneration: 1,
+				_characterDocumentGeneration: 1,
 				_currentCharacterAccess: "owner",
 			};
 			CharacterSheetModal.bindCharacterSheet(page);
@@ -385,6 +441,25 @@ describe("CharacterSheetModal", () => {
 
 			expect(evt.isDefaultPrevented).toBe(true);
 			expect(evt.isImmediatePropagationStopped).toBe(true);
+		});
+
+		it("keeps an ordinary portal interactive after same-character authoritative adoption", () => {
+			const page = {
+				_currentCharacterId: "character-a",
+				_characterLoadGeneration: 1,
+				_characterDocumentGeneration: 4,
+				_currentCharacterAccess: "owner",
+			};
+			CharacterSheetModal.bindCharacterSheet(page);
+			const portalEl = mkEle();
+			const portal = CharacterSheetModal.registerCharacterScopePortal({sheet: page, element: portalEl});
+			page._characterDocumentGeneration++;
+			const evt = mkEvent("Enter");
+
+			portalEl.dispatch("click", evt);
+
+			expect(evt.isDefaultPrevented).toBe(false);
+			expect(portal.isCurrent({isRequireOwner: true})).toBe(true);
 		});
 
 		it("permanently fences retained controls removed by a module reset hook", () => {

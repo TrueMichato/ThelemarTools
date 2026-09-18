@@ -328,11 +328,17 @@ class CharacterSheetPage {
 		};
 	}
 
-	_isCharacterScopeSnapshotCurrent (snapshot, {isRequireOwner = false} = {}) {
+	_isCharacterScopeSnapshotCurrent (snapshot, {
+		isRequireOwner = false,
+		isIgnoreDocumentGeneration = false,
+	} = {}) {
 		if (!snapshot) return false;
 		return snapshot.characterId === this._currentCharacterId
 			&& snapshot.loadGeneration === this._characterLoadGeneration
-			&& (snapshot.documentGeneration ?? 0) === (this._characterDocumentGeneration ?? 0)
+			&& (
+				isIgnoreDocumentGeneration
+				|| (snapshot.documentGeneration ?? 0) === (this._characterDocumentGeneration ?? 0)
+			)
 			&& snapshot.accessMode === this._currentCharacterAccess
 			&& (!isRequireOwner || !this.isCurrentCharacterReadOnly());
 	}

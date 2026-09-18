@@ -113,7 +113,7 @@ class CharacterSheetModal {
 			if (btnClose) btnClose.addEventListener("click", () => modal.doClose(false));
 			CharacterSheetModal._decorate({modal, opts, headerId, isCloseable, characterScope});
 		}
-		if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope)) {
+		if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope, {isIgnoreDocumentGeneration: true})) {
 			void CharacterSheetModal._pCloseModalMetaForCharacterScope(modalMeta);
 		}
 		return modal;
@@ -188,7 +188,7 @@ class CharacterSheetModal {
 
 		// The spawn harness's fallback stub has no `eleModal`; there is nothing to enhance.
 		if (!modal?.eleModal) {
-			if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope)) {
+			if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope, {isIgnoreDocumentGeneration: true})) {
 				await CharacterSheetModal._pCloseModalMetaForCharacterScope(modalMeta);
 			}
 			return modal;
@@ -197,7 +197,7 @@ class CharacterSheetModal {
 		if (btnClose) btnClose.addEventListener("click", () => modal.doClose(false));
 
 		CharacterSheetModal._decorate({modal, opts, headerId, isCloseable, characterScope});
-		if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope)) {
+		if (!CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope, {isIgnoreDocumentGeneration: true})) {
 			await CharacterSheetModal._pCloseModalMetaForCharacterScope(modalMeta);
 		}
 
@@ -235,15 +235,19 @@ class CharacterSheetModal {
 	static _isCharacterScopeSnapshotCurrent (snapshot, {
 		sheet = CharacterSheetModal._characterSheet,
 		isRequireOwner = false,
+		isIgnoreDocumentGeneration = false,
 	} = {}) {
 		if (!snapshot) return true;
 		if (!sheet) return false;
 		if (typeof sheet._isCharacterScopeSnapshotCurrent === "function") {
-			return sheet._isCharacterScopeSnapshotCurrent(snapshot, {isRequireOwner});
+			return sheet._isCharacterScopeSnapshotCurrent(snapshot, {isRequireOwner, isIgnoreDocumentGeneration});
 		}
 		const isCurrent = snapshot.characterId === (sheet._currentCharacterId ?? null)
 			&& snapshot.loadGeneration === (sheet._characterLoadGeneration ?? 0)
-			&& (snapshot.documentGeneration ?? 0) === (sheet._characterDocumentGeneration ?? 0)
+			&& (
+				isIgnoreDocumentGeneration
+				|| (snapshot.documentGeneration ?? 0) === (sheet._characterDocumentGeneration ?? 0)
+			)
 			&& snapshot.accessMode === (sheet._currentCharacterAccess ?? null);
 		return isCurrent && (!isRequireOwner || snapshot.accessMode == null || snapshot.accessMode === "owner");
 	}
@@ -252,8 +256,14 @@ class CharacterSheetModal {
 		return CharacterSheetModal._getCharacterScopeSnapshot(sheet);
 	}
 
-	static isCharacterScopeSnapshotCurrent (sheet, snapshot, {isRequireOwner = false} = {}) {
-		return CharacterSheetModal._isCharacterScopeSnapshotCurrent(snapshot, {sheet, isRequireOwner});
+	static isCharacterScopeSnapshotCurrent (sheet, snapshot, {
+		isRequireOwner = false,
+		isIgnoreDocumentGeneration = false,
+	} = {}) {
+		return CharacterSheetModal._isCharacterScopeSnapshotCurrent(
+			snapshot,
+			{sheet, isRequireOwner, isIgnoreDocumentGeneration},
+		);
 	}
 
 	static registerCharacterScopePortal ({
@@ -281,7 +291,11 @@ class CharacterSheetModal {
 			const isCurrentOwner = !portalMeta.isCharacterScopeTeardown
 				&& CharacterSheetModal._isCharacterScopeSnapshotCurrent(
 					portalMeta.characterScope,
-					{sheet: portalMeta.sheet, isRequireOwner: portalMeta.isRequireOwner},
+					{
+						sheet: portalMeta.sheet,
+						isRequireOwner: portalMeta.isRequireOwner,
+						isIgnoreDocumentGeneration: !portalMeta.isCloseOnDocumentInvalidation,
+					},
 				);
 			if (isCurrentOwner) return;
 			evt?.preventDefault?.();
@@ -298,7 +312,11 @@ class CharacterSheetModal {
 			isCurrent: ({isRequireOwner = false} = {}) => !portalMeta.isClosed
 				&& CharacterSheetModal._isCharacterScopeSnapshotCurrent(
 					portalMeta.characterScope,
-					{sheet: portalMeta.sheet, isRequireOwner},
+					{
+						sheet: portalMeta.sheet,
+						isRequireOwner,
+						isIgnoreDocumentGeneration: !portalMeta.isCloseOnDocumentInvalidation,
+					},
 				),
 			close: () => CharacterSheetModal._closeCharacterScopePortal(portalMeta),
 		};
@@ -427,7 +445,10 @@ class CharacterSheetModal {
 
 		if (characterScope) {
 			const handleCharacterScopeInteraction = evt => {
-				if (CharacterSheetModal._isCharacterScopeSnapshotCurrent(characterScope)) return;
+				if (CharacterSheetModal._isCharacterScopeSnapshotCurrent(
+					characterScope,
+					{isIgnoreDocumentGeneration: true},
+				)) return;
 				evt.preventDefault();
 				evt.stopImmediatePropagation();
 			};
