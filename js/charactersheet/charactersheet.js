@@ -510,7 +510,7 @@ class CharacterSheetPage {
 	}
 
 	async _pRefreshHubRules ({rulesVersionId = null, isUseLatest = false} = {}) {
-		const characterId = this._currentCharacterId;
+		const campaignId = this._hubCampaignId;
 		const expectedRulesVersionId = isUseLatest ? null : rulesVersionId ?? this._hubRulesPendingVersionId;
 		const generation = ++this._hubRulesRefreshGeneration;
 		const contextGeneration = ++this._hubContextGeneration;
@@ -552,7 +552,7 @@ class CharacterSheetPage {
 			) return false;
 			if (this._handleTerminalCharacterCampaignAccessError?.({
 				error,
-				characterId,
+				campaignId,
 			})) return false;
 			this._clearHubRules({
 				isUnavailable: true,
@@ -667,11 +667,12 @@ class CharacterSheetPage {
 
 	_handleTerminalCharacterCampaignAccessError ({
 		error,
-		characterId = this._currentCharacterId,
+		campaignId = this._hubCampaignId,
 	} = {}) {
 		if (!this._isHubCharacter || !isTerminalCharacterCampaignAccessError(error)) return false;
+		if (campaignId !== this._hubCampaignId) return false;
 		const isEnded = this._endCurrentHubCharacterAccess({
-			characterId,
+			characterId: this._currentCharacterId,
 			accessEndCause: CHARACTER_REALTIME_ACCESS_END_CAUSES.CAMPAIGN,
 		});
 		if (!isEnded) return false;
@@ -729,7 +730,7 @@ class CharacterSheetPage {
 				? this._hubContext?.brewBundle?.id
 				: null;
 		if (event?.aggregateId && event.aggregateId === activeContextId) return;
-		const characterId = this._currentCharacterId;
+		const campaignId = this._hubCampaignId;
 		const generation = ++this._hubContextGeneration;
 		this._hubContextRefreshActiveGeneration = generation;
 		this._isHubContextRefreshing = true;
@@ -749,7 +750,7 @@ class CharacterSheetPage {
 				if (generation !== this._hubContextGeneration) return;
 				if (this._handleTerminalCharacterCampaignAccessError?.({
 					error,
-					characterId,
+					campaignId,
 				})) return;
 				this._isHubContextUnavailable = true;
 				this._isHubContextRevalidationRequired = true;

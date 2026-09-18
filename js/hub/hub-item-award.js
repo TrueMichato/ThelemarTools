@@ -192,6 +192,18 @@ export function stageAwardMutationDraft ({draft = null, submission, rulesVersion
 	};
 }
 
+export function getOrStageAwardMutationDraft ({
+	draft = null,
+	fnGetSubmission,
+	rulesVersionId = null,
+} = {}) {
+	if (draft) return draft;
+	return stageAwardMutationDraft({
+		submission: fnGetSubmission(),
+		rulesVersionId,
+	});
+}
+
 export function buildAwardPreview ({
 	targets = [],
 	selectedItem = null,

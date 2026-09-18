@@ -50,8 +50,8 @@ import {
 	createGenerationFencedCatalogLoader,
 	filterAwardItems,
 	getAwardItemSelectionKey,
+	getOrStageAwardMutationDraft,
 	resolveAwardItemSelection,
-	stageAwardMutationDraft,
 } from "./hub-item-award.js";
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
@@ -3349,9 +3349,9 @@ async function pInitCampaignForms ({
 		renderError(null);
 		let isAwardComplete = false;
 		try {
-			const awardDraft = stageAwardMutationDraft({
+			const awardDraft = getOrStageAwardMutationDraft({
 				draft: form._hubAwardMutationDraft,
-				submission: itemAward.getSubmission(),
+				fnGetSubmission: () => itemAward.getSubmission(),
 				rulesVersionId: context.rulesVersion?.id || null,
 			});
 			form._hubAwardMutationDraft = awardDraft;

@@ -1,3 +1,4 @@
+import {jest} from "@jest/globals";
 import {
 	buildAwardSubmission,
 	buildAwardPreview,
@@ -9,6 +10,7 @@ import {
 	filterAwardItems,
 	getAwardCommandFingerprint,
 	getAwardItemSelectionKey,
+	getOrStageAwardMutationDraft,
 	getAwardSourceRequest,
 	resolveAwardItemSelection,
 	stageAwardMutationDraft,
@@ -260,6 +262,43 @@ describe("Hub item award presentation contract", () => {
 			rulesVersionId: "rules-1",
 		});
 		expect(retryDraft.fingerprint).toBe(getAwardCommandFingerprint(retryDraft.request));
+	});
+
+	it("replays a retained award draft and idempotency key without reading invalidated form state", async () => {
+		const draft = stageAwardMutationDraft({
+			submission: {
+				source: {kind: "party_inventory", entryId: "stash-entry"},
+				targetCharacterIds: ["a"],
+				quantity: 1,
+				note: null,
+			},
+			rulesVersionId: "rules-1",
+		});
+		const fnGetSubmission = jest.fn(() => {
+			throw new Error("The refreshed form no longer has a selected item.");
+		});
+		const pAwardItems = jest.fn(async request => request);
+		const originalIdempotencyKey = "award-key";
+
+		const retryDraft = getOrStageAwardMutationDraft({
+			draft,
+			fnGetSubmission,
+			rulesVersionId: "rules-2",
+		});
+		const result = await pAwardItems({
+			campaignId: "campaign-a",
+			...retryDraft.request,
+			idempotencyKey: originalIdempotencyKey,
+		});
+
+		expect(retryDraft).toBe(draft);
+		expect(fnGetSubmission).not.toHaveBeenCalled();
+		expect(pAwardItems).toHaveBeenCalledWith({
+			campaignId: "campaign-a",
+			...draft.request,
+			idempotencyKey: originalIdempotencyKey,
+		});
+		expect(result.idempotencyKey).toBe(originalIdempotencyKey);
 	});
 
 	it("distinguishes exact, lower-bound, unavailable, and policy-blocked previews", () => {

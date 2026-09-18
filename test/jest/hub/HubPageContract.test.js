@@ -586,8 +586,9 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("ownerAccountId: session.account.id");
 		expect(source).toContain("itemAward.setCampaignBrewContent");
 		expect(source).toContain("api.pAwardItems");
-		expect(source).toContain("stageAwardMutationDraft");
+		expect(source).toContain("getOrStageAwardMutationDraft");
 		expect(source).toContain("form._hubAwardMutationDraft");
+		expect(source).toContain("fnGetSubmission: () => itemAward.getSubmission()");
 		expect(source).toContain("isMutationOutcomeUncertain");
 		expect(source).toContain("form._hubProjectionControlRestores.add(restorePendingControlStates)");
 		expect(source).toMatch(/delete form\._hubProjectionControlRestores;\s+for \(const fnRestore of deferredControlRestores\) fnRestore\(\)/);

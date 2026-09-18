@@ -2090,6 +2090,7 @@ describe("Character Sheet repository seam", () => {
 			_hubContextRefreshActiveGeneration: null,
 			_isHubContextRefreshing: false,
 			_currentCharacterId: "character-a",
+			_hubCampaignId: "campaign-a",
 			_isHubCharacter: true,
 			_hubCampaignContext: {pRefresh: jest.fn(async () => { throw authError; })},
 			_hubActiveCampaign: {pRevalidate},
@@ -2119,6 +2120,7 @@ describe("Character Sheet repository seam", () => {
 			_hubContextRefreshActiveGeneration: null,
 			_isHubContextRefreshing: false,
 			_currentCharacterId: "character-a",
+			_hubCampaignId: "campaign-a",
 			_isHubCharacter: true,
 			_hubCampaignContext: {pRefresh: jest.fn(async () => { throw transientError; })},
 			_hubActiveCampaign: {pRevalidate: jest.fn()},
@@ -2160,6 +2162,73 @@ describe("Character Sheet repository seam", () => {
 			characterId: "character-a",
 			accessEndCause: "campaign",
 		});
+		expect(host._hubActiveCampaign.pRevalidate).toHaveBeenCalledWith({trigger: "access_loss"});
+	});
+
+	it("does not conceal a replacement character outside the campaign that lost access", async () => {
+		const authError = Object.assign(new Error("campaign unavailable"), {code: "CAMPAIGN_NOT_FOUND", status: 404});
+		const refresh = makeDeferred();
+		const host = {
+			_hubContext: {rulesVersion: null, brewBundle: null},
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_currentCharacterId: "character-a",
+			_hubCampaignId: "campaign-a",
+			_isHubCharacter: true,
+			_hubCampaignContext: {pRefresh: jest.fn(() => refresh.promise)},
+			_hubActiveCampaign: {pRevalidate: jest.fn(() => new Promise(() => {}))},
+			_clearHubRules: jest.fn(),
+			_campaign: {render: jest.fn()},
+			_endCurrentHubCharacterAccess: jest.fn(() => true),
+			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+		};
+
+		CharacterSheetPage.prototype._onHubCampaignContextChanged.call(host, {type: "membership.changed"});
+		host._currentCharacterId = "character-b";
+		host._hubCampaignId = "campaign-b";
+		refresh.reject(authError);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		expect(host._endCurrentHubCharacterAccess).not.toHaveBeenCalled();
+		expect(host._hubActiveCampaign.pRevalidate).not.toHaveBeenCalled();
+	});
+
+	it("conceals the replacement campaign character when a pending context refresh proves campaign access loss", async () => {
+		const authError = Object.assign(new Error("campaign unavailable"), {code: "CAMPAIGN_NOT_FOUND", status: 404});
+		const refresh = makeDeferred();
+		const host = {
+			_hubContext: {rulesVersion: null, brewBundle: null},
+			_hubContextGeneration: 0,
+			_hubContextRefreshActiveGeneration: null,
+			_isHubContextRefreshing: false,
+			_currentCharacterId: "character-a",
+			_hubCampaignId: "campaign-a",
+			_isHubCharacter: true,
+			_hubCampaignContext: {pRefresh: jest.fn(() => refresh.promise)},
+			_hubActiveCampaign: {pRevalidate: jest.fn(() => new Promise(() => {}))},
+			_clearHubRules: jest.fn(),
+			_campaign: {
+				render: jest.fn(),
+				resetCharacterScope: jest.fn(),
+			},
+			_fenceHubGeneration: jest.fn(),
+			_detachHubRealtimeClient: jest.fn(),
+			_detachHubProjections: jest.fn(),
+			_concealHubPrivateCharacter: jest.fn(),
+			_teardownHubRules: jest.fn(),
+			_endCurrentHubCharacterAccess: CharacterSheetPage.prototype._endCurrentHubCharacterAccess,
+			_handleTerminalCharacterCampaignAccessError: CharacterSheetPage.prototype._handleTerminalCharacterCampaignAccessError,
+		};
+
+		CharacterSheetPage.prototype._onHubCampaignContextChanged.call(host, {type: "membership.changed"});
+		host._currentCharacterId = "character-b";
+		refresh.reject(authError);
+		await new Promise(resolve => setTimeout(resolve, 0));
+
+		expect(host._concealHubPrivateCharacter).toHaveBeenCalledTimes(1);
+		expect(host._detachHubRealtimeClient).toHaveBeenCalledTimes(1);
+		expect(host._campaign.resetCharacterScope).toHaveBeenCalledTimes(1);
 		expect(host._hubActiveCampaign.pRevalidate).toHaveBeenCalledWith({trigger: "access_loss"});
 	});
 
