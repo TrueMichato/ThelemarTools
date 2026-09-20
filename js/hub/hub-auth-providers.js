@@ -40,6 +40,7 @@ export async function pRenderHubAuthProviders ({
 	pCreateInviteAdmission = null,
 	pRetryInviteAdmission = null,
 	onInviteStarted = () => {},
+	onInviteRetryInvalid = () => {},
 	onError = () => {},
 	fnFetch = fetch,
 	documentRef = document,
@@ -58,7 +59,10 @@ export async function pRenderHubAuthProviders ({
 		provider.status === "available"
 		&& (!inviteRetry || provider.slug === inviteRetry.provider),
 	);
-	if (!available.length) throw new Error("Authentication providers are unavailable.");
+	if (!available.length) {
+		if (inviteRetry) return onInviteRetryInvalid();
+		throw new Error("Authentication providers are unavailable.");
+	}
 
 	const group = documentRef.createElement("div");
 	group.className = "hub-button-row hub-button-row--centered";
@@ -88,6 +92,10 @@ export async function pRenderHubAuthProviders ({
 					window.location.assign(result.authorizationUrl);
 				} catch (error) {
 					for (const control of group.querySelectorAll("button")) control.disabled = false;
+					if (inviteRetry && error?.code === "INVITE_ADMISSION_INVALID") {
+						onInviteRetryInvalid();
+						return;
+					}
 					onError(error);
 				}
 			});

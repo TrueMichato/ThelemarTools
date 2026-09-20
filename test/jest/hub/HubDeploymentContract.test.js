@@ -178,6 +178,7 @@ describe("Hub portable deployment contract", () => {
 		expect(compose).toMatch(/edge:[\s\S]*?networks:\n\s+hub-private:\n\s+ipv4_address: \$\{HUB_EDGE_PRIVATE_IP:-172\.30\.0\.10\}\n\s+hub-public:/);
 		expect(compose).toMatch(/HUB_TRUST_PROXY: \$\{HUB_TRUST_PROXY:-172\.30\.0\.10}/);
 		expect(compose).toContain("HUB_INVITE_TOKEN_SECRET: $" + "{HUB_INVITE_TOKEN_SECRET:?Set HUB_INVITE_TOKEN_SECRET}");
+		expect(compose).toContain("HUB_INVITE_TOKEN_PREVIOUS_SECRETS: $" + "{HUB_INVITE_TOKEN_PREVIOUS_SECRETS:-}");
 		expect(compose).toContain("HUB_INVITE_ACCOUNT_ADMISSION_ENABLED: $" + "{HUB_INVITE_ACCOUNT_ADMISSION_ENABLED:-false}");
 		expect(compose).toContain("HUB_ALLOWED_OAUTH_SUBJECTS: $" + "{HUB_ALLOWED_OAUTH_SUBJECTS:-}");
 		expect(compose).toContain("subnet: $" + "{HUB_PRIVATE_SUBNET:-172.30.0.0/24}");

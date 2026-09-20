@@ -13,10 +13,10 @@ a public third-party API. Schemas in `server/src/app.js` are authoritative if th
 ### Authentication
 
 - Session cookie: signed `__Host-hub_session`; httpOnly, SameSite=Lax, Secure in production.
-- OAuth correlation cookie: signed `__Host-hub_oauth`; httpOnly and short-lived. It carries one random browser
-  correlation value, while state selects a provider/operation/redirect-bound one-time server transaction, so
-  concurrent tabs do not overwrite each other. Invite-gated starts also bind exactly one five-minute server-side
-  invite context to that transaction.
+- OAuth correlation cookies: one short-lived signed `__Host-hub_oauth-<transaction-id>` cookie per transaction.
+  The opaque state carries the transaction id plus independent entropy, selecting the exact
+  provider/operation/redirect-bound row without a singleton-cookie last-writer race. Invite-gated starts also
+  bind exactly one five-minute server-side invite context to that transaction.
 - Account authority is only `(provider, immutable subject)`; email and mutable profile fields never select or
   link an account.
 - `GET /api/session` is the bootstrap call. Signed-in responses include the CSRF token.
@@ -63,7 +63,7 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 |---|---|---|---|
 | `GET /api/health` | Public | none | `{ok:true}` or 503 `{ok:false,error:"DATABASE_UNAVAILABLE"}`; verifies DB, migration ledger, and required migration |
 | `GET /api/meta` | Public | none | protocol/package version, additive capabilities, and bounded provider availability; `campaign.rules_policy.v1` is present only when the new management surface is enabled |
-| `POST /api/auth/invite-contexts` | Public, exact Origin, current protocol, 10/min | `{token,provider,returnTo}` | Validates a campaign invite and atomically creates one server-side context plus its bound OAuth transaction; returns `{authorizationUrl,retryToken}` and sets/retains the signed browser-correlation cookie |
+| `POST /api/auth/invite-contexts` | Public, exact Origin, current protocol, 10/min | `{token,provider,returnTo}` | Validates a campaign invite and atomically creates one server-side context plus its bound OAuth transaction; returns `{authorizationUrl,retryToken}` and sets that transaction's signed correlation cookie |
 | `POST /api/auth/invite-contexts/retry` | Public, exact Origin, current protocol, 10/min | `{retryToken,provider,returnTo}` | After a consumed callback which did not commit admission, replaces the old context/transaction with a fresh same-provider pair and rotated opaque retry token |
 | `GET /auth/:provider/start` | Public, 10/min | concrete `github`, `discord`, or `google` route; query `returnTo?` | Creates a one-time durable transaction, sets signed correlation cookie, and redirects using the adapter's declared PKCE/nonce capabilities |
 | `GET /auth/:provider/callback` | OAuth correlation cookie, 20/min | concrete route; query `code`, `state` | Atomically consumes exact provider/operation/redirect-bound state and validates immutable subject. Existing identities sign in normally. A bound invite context atomically signs in and joins the campaign; an unknown identity additionally requires the default-off `auth.invite_admission.v1` rollout capability |
@@ -91,7 +91,8 @@ Unknown identity without a bound invite returns `INVITE_ADMISSION_REQUIRED`. Inv
 exhausted, replayed, raced, or mismatched invite contexts return `INVITE_ADMISSION_INVALID`. A rollout-disabled
 new-account completion returns `INVITE_ADMISSION_UNAVAILABLE`. Provider failure after OAuth-state consumption
 does not consume invite use or create any account/session/membership; the bound context is not reusable and the
-browser may restart through the one-time opaque retry handle. Reusing or changing that handle/provider returns
+browser may restart through the one-time opaque retry handle, whether the old state was consumed or navigation
+was abandoned. Reusing or changing that handle/provider/browser transaction cookie returns
 the same bounded invalid-admission result.
 
 ## Campaign routes
@@ -151,9 +152,12 @@ does not understand.
 | `POST /api/invites/redeem` | Authenticated mutation, 20/min | raw token 32-500 chars | Active membership; invalid/expired/revoked/exhausted is `INVITE_INVALID` |
 
 Only the token hash is persisted. The raw token is returned only from creation.
-Tokens are derived with a dedicated independent `HUB_INVITE_TOKEN_SECRET` from actor, campaign, idempotency key,
-and normalized request hash. The invite table and command receipt persist no raw token, while an exact retry
-reconstructs the same response. List/event/log/export/backup surfaces never expose it.
+Tokens are derived with the current independent `HUB_INVITE_TOKEN_SECRET` from actor, campaign, idempotency key,
+and normalized request hash. On rotation, up to three prior keys in
+`HUB_INVITE_TOKEN_PREVIOUS_SECRETS` remain available for at least the 24-hour receipt lifetime. The invite table
+and command receipt persist no raw token; replay selects the derived candidate whose hash matches the stored
+invite hash. No match fails as `INVITE_TOKEN_RECOVERY_UNAVAILABLE` rather than returning an unusable token.
+List/event/log/export/backup surfaces never expose it.
 
 ## Character routes
 
@@ -425,7 +429,7 @@ Campaign role alone does not permit reading another DM's workspace.
 | Class | Stable codes |
 |---|---|
 | Authentication/security | `AUTH_REQUIRED`, `INVALID_ORIGIN`, `INVALID_CSRF`, `PROTOCOL_UPDATE_REQUIRED`, `ACCOUNT_UNAVAILABLE`, `ACCOUNT_DELETION_PENDING`, `FORBIDDEN` |
-| Request/idempotency | `INVALID_REQUEST`, `INVALID_ID`, `INVALID_CAMPAIGN_NAME`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_RESULT_GONE`, `PAYLOAD_TOO_LARGE`, `REQUEST_REJECTED` |
+| Request/idempotency | `INVALID_REQUEST`, `INVALID_ID`, `INVALID_CAMPAIGN_NAME`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_RESULT_GONE`, `INVITE_TOKEN_RECOVERY_UNAVAILABLE`, `PAYLOAD_TOO_LARGE`, `REQUEST_REJECTED` |
 | OAuth | `INVALID_OAUTH_STATE`, `INVITE_ADMISSION_REQUIRED`, `INVITE_ADMISSION_INVALID`, `INVITE_ADMISSION_UNAVAILABLE`, `AUTH_PROVIDER_UNAVAILABLE` |
 | Not found/lifecycle | `ACCOUNT_NOT_FOUND`, `SESSION_NOT_FOUND`, `CAMPAIGN_NOT_FOUND`, `MEMBERSHIP_NOT_FOUND`, `CHARACTER_NOT_FOUND`, `WORKSPACE_NOT_FOUND`, `ACTION_NOT_FOUND`, `TRANSFER_NOT_FOUND`, `BREW_NOT_FOUND`, `RULES_NOT_FOUND`, `INVITE_INVALID`, `INVITE_NOT_FOUND`, `ACCOUNT_DELETION_NOT_PENDING` |
 | Concurrency/lifecycle conflicts | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY`, `MEMBERSHIP_OWNER_PROTECTED`, `ACCOUNT_OWNS_CAMPAIGN` |

@@ -30,7 +30,7 @@ security boundary.
 | `accounts` | Internal user | display name 1-100; active/suspended/deletion_requested/deleted; paired deletion timestamps | Seven-day request/cancel/purge implemented |
 | `external_identities` | OAuth link | unique provider+subject; bounded metadata; account+identity key; deferred last-identity protection; cascade with account | Registry-ready; GitHub only |
 | `sessions` | Browser session | unique token hash; expiry after creation; optional revoke; same-account identity provenance; recent-reauthentication slot | Hash-only server sessions |
-| `oauth_transactions` | Short-lived OAuth correlation | hash-only one-time state and browser correlation; concrete provider/operation/redirect; optional account/session, invite context, PKCE verifier, OIDC nonce; <=10 minutes | Concurrent-tab-safe start/callback; later reauth/link-ready |
+| `oauth_transactions` | Short-lived OAuth correlation | hash-only one-time state; concrete provider/operation/redirect; optional account/session, invite context, PKCE verifier, OIDC nonce; <=10 minutes | State-selected transaction-specific-cookie start/callback; later reauth/link-ready |
 | `invite_contexts` | First-access admission | one invite, hash-only retry handle, <=5 minutes, one unique OAuth transaction binding, terminal account/session/membership ids only after commit | Default-off r9 first-account admission and existing-account atomic invite join |
 | `campaigns` | Campaign root | owner account; active/archived/deleting; monotonic next event sequence | active and archived used; deleting reserved |
 | `memberships` | Account role in campaign | unique campaign+account; dm/co_dm/player/spectator | active, removed, and left used; reinvite reuses row |

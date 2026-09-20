@@ -20,11 +20,12 @@
   subject: they require ADR 0018's valid five-minute campaign-invite context and the default-off new-account
   admission switch.
 - The raw invite is sent once in a same-origin POST body. A random server-side context is bound to one provider,
-  OAuth transaction, signed browser correlation cookie, redirect, and state. It never enters `returnTo`, OAuth
+  OAuth transaction, transaction-specific signed correlation cookie, redirect, and state. It never enters `returnTo`, OAuth
   state, cookies, referrers, logs, or browser history.
-- The correlation cookie contains a random browser value rather than one transaction id, so multiple tabs select
-  their own transaction by state without overwriting each other. Failed/cancelled callbacks may rotate a separate
-  hash-only opaque retry handle into a new same-provider context; the original context is never rebound.
+- Each concurrent start has its own cookie name and state-selected transaction, so two empty-jar starts survive
+  the browser's final merged cookie jar. Failed, cancelled, or abandoned navigation may rotate a separate
+  hash-only opaque retry handle into a new same-provider context only when the old transaction cookie is present;
+  the original context is never rebound.
 - Authentication authority is `(provider, immutable subject)`. Email and mutable profile fields are discarded
   before store lookup and cannot link, admit, merge, or select an account.
 - Authorization codes and provider access/refresh tokens are never persisted. The callback-local access token is
@@ -38,10 +39,11 @@
 - Sessions use random tokens stored only as SHA-256 hashes; successful reauthentication revokes the prior
   browser session. New sessions record same-account external-identity provenance without changing campaign
   authorization.
-- Invite tokens are cryptographically pseudorandom under an independent `HUB_INVITE_TOKEN_SECRET`; derivation is
-  bound to actor, campaign, idempotency key, and normalized request hash. The invite table and command receipt
-  store no raw token, while exact retries reproduce it. Invite-context and OAuth transaction row data are
-  excluded from backups.
+- Invite tokens are cryptographically pseudorandom under an independent versioned key ring. Derivation is bound
+  to actor, campaign, idempotency key, and normalized request hash. The invite table and command receipt store no
+  raw token. Exact replay tries the current key then at most three retained prior keys and returns a token only
+  when its hash matches the stored invite hash; otherwise it fails closed. Invite-context and OAuth transaction
+  row data are excluded from backups.
 - First access commits account, identity, session, membership, invite use, account/invite audit, membership event,
   and outbox atomically. Provider failure, cancellation, expiry, revocation, exhaustion, replay, a lost max-use
   race, or session-write failure commits none of them.

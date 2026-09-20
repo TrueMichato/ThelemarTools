@@ -33,9 +33,9 @@ normally; a bound context signs an existing account in and joins the campaign at
 session, and membership in that same transaction. Provider failure, replay, expiry, revoke, exhaustion, race,
 or session-write failure consumes no invite and leaves no orphan authority. The provider-subject allowlist is no
 longer first-account admission authority.
-One hash-only browser-correlation cookie supports multiple simultaneous OAuth transactions selected by state.
-A failed or cancelled invite callback can rotate a separate five-minute opaque retry handle into a fresh
-same-provider context without retaining the raw invite.
+Transaction-specific signed OAuth cookies support multiple simultaneous starts from an empty shared cookie jar.
+A failed, cancelled, or abandoned invite flow can rotate a separate five-minute opaque retry handle into a fresh
+same-provider context when the old transaction cookie is present, without retaining the raw invite.
 
 This foundation is intentionally **not deployable with new-account admission enabled** until the next stacked
 layer implements provider-neutral account-level `campaign:create` entitlement, backfills existing owners and

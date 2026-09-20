@@ -36,13 +36,7 @@ CREATE INDEX invite_contexts_expiry_idx
 
 ALTER TABLE hub.oauth_transactions
 	ADD COLUMN invite_context_id uuid UNIQUE
-		REFERENCES hub.invite_contexts(id) ON DELETE CASCADE,
-	ADD COLUMN browser_correlation_hash bytea,
-	ADD CONSTRAINT oauth_transactions_browser_correlation_hash_check
-		CHECK (
-			browser_correlation_hash IS NULL
-			OR octet_length(browser_correlation_hash) = 32
-		);
+		REFERENCES hub.invite_contexts(id) ON DELETE CASCADE;
 
 CREATE INDEX oauth_transactions_invite_context_idx
 	ON hub.oauth_transactions (invite_context_id)

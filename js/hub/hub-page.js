@@ -134,6 +134,11 @@ async function pRenderSignedOutProviders () {
 				_pendingInviteRetry = inviteRetry;
 				sessionStorage.setItem("hub-invite-retry", JSON.stringify(inviteRetry));
 			},
+			onInviteRetryInvalid: () => {
+				_pendingInviteRetry = null;
+				sessionStorage.removeItem("hub-invite-retry");
+				window.location.replace("hub.html");
+			},
 			onError: renderError,
 		});
 	})();
@@ -234,6 +239,7 @@ function getErrorMessage (error) {
 		case "INVITE_ADMISSION_REQUIRED": return "A valid campaign invite is required to create a Hub account.";
 		case "INVITE_ADMISSION_INVALID": return "That invite can no longer be used. Open the original invite link and try again.";
 		case "INVITE_ADMISSION_UNAVAILABLE": return "New Hub account admission is not enabled yet.";
+		case "INVITE_TOKEN_RECOVERY_UNAVAILABLE": return "This invite was created with a retired server key. Create a new invite.";
 		case "ACCOUNT_UNAVAILABLE": return "This Hub account cannot sign in.";
 		case "ACCOUNT_OWNS_CAMPAIGN": return "Transfer ownership or archive every active campaign before deleting your account.";
 		case "ACCOUNT_DELETION_PENDING": return "Your account is scheduled for deletion. Cancel deletion before using campaign features.";

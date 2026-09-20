@@ -183,11 +183,9 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 
 		const correlatedTransactionId = crypto.randomUUID();
 		const correlatedStateHash = getSha256(`${prefix}-correlated-state`);
-		const browserCorrelationHash = getSha256(`${prefix}-browser-correlation`);
 		await store.pCreateOAuthTransaction({
 			id: correlatedTransactionId,
 			stateHash: correlatedStateHash,
-			browserCorrelationHash,
 			provider: "github",
 			operation: "sign_in",
 			redirectUri: "https://tools.example/auth/github/callback",
@@ -196,8 +194,8 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			expiresAt: new Date(Date.now() + 60_000),
 		});
 		const correlated = await store.pConsumeOAuthTransaction({
+			id: correlatedTransactionId,
 			stateHash: correlatedStateHash,
-			browserCorrelationHash,
 			provider: "github",
 			operation: "sign_in",
 			redirectUri: "https://tools.example/auth/github/callback",
@@ -470,26 +468,29 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 				redirectUri: "https://tools.example/auth/github/callback",
 				returnTo: "/hub.html",
 				pkceVerifier: "v".repeat(64),
-				browserCorrelationHash: getSha256(`${prefix}-browser`),
 				ttlSeconds: 60,
 			},
 			inviteTokenHash: retryInviteHash,
 			retryTokenHash: failedRetryHash,
 			contextTtlSeconds: 60,
 		});
-		await store.pConsumeOAuthTransaction({
-			stateHash: failedStateHash,
-			browserCorrelationHash: getSha256(`${prefix}-browser`),
-			provider: "github",
-			operation: "sign_in",
-			redirectUri: "https://tools.example/auth/github/callback",
-		});
-		await store.pDeleteExpiredOAuthTransactions({limit: 10_000});
-		expect((await store._pool.query(
-			`SELECT 1 FROM hub.oauth_transactions WHERE id = $1`,
-			[failedTransactionId],
-		)).rowCount).toBe(1);
 		const retryTransactionId = crypto.randomUUID();
+		await expect(store.pRetryInviteOAuthTransaction({
+			transaction: {
+				id: retryTransactionId,
+				stateHash: getSha256(`${prefix}-retry-state-cross-browser`),
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+				returnTo: "/hub.html",
+				pkceVerifier: "v".repeat(64),
+				ttlSeconds: 60,
+			},
+			retryTokenHash: failedRetryHash,
+			nextRetryTokenHash: getSha256(`${prefix}-cross-browser-retry`),
+			contextTtlSeconds: 60,
+			browserTransactionIds: [],
+		})).rejects.toMatchObject({code: "INVITE_ADMISSION_INVALID"});
 		await store.pRetryInviteOAuthTransaction({
 			transaction: {
 				id: retryTransactionId,
@@ -499,12 +500,12 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 				redirectUri: "https://tools.example/auth/github/callback",
 				returnTo: "/hub.html",
 				pkceVerifier: "v".repeat(64),
-				browserCorrelationHash: getSha256(`${prefix}-browser`),
 				ttlSeconds: 60,
 			},
 			retryTokenHash: failedRetryHash,
 			nextRetryTokenHash: getSha256(`${prefix}-next-retry`),
 			contextTtlSeconds: 60,
+			browserTransactionIds: [failedTransactionId],
 		});
 		const retryRows = await store._pool.query(`
 			SELECT id

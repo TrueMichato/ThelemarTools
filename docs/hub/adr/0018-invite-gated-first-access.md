@@ -49,14 +49,15 @@ account admission enabled until the stacked `campaign:create` entitlement layer 
    and the one OAuth transaction allowed to reference it. The response contains the provider authorization URL
    plus a separate opaque retry handle; no raw invite or context identifier enters return paths, OAuth state,
    cookies, referrers, or history.
-4. The signed OAuth cookie holds one random browser correlation shared by that browser's outstanding
-   transactions. State selects the concrete transaction, so two tabs cannot overwrite each other's transaction.
-   Provider, transaction id, state, redirect URI, and the unique context binding prevent cross-provider or
-   non-invite rebinding.
+4. Each transaction gets a short-lived signed `__Host-hub_oauth-<transaction-id>` cookie. State carries the
+   transaction id plus independent entropy, so two starts from an empty shared cookie jar retain both
+   correlations. Provider, transaction id, state, redirect URI, and the unique context binding prevent
+   cross-provider or non-invite rebinding.
 5. OAuth state is consumed before provider exchange as in ADR 0014. Provider cancellation/failure consumes no
-   invite use and leaves no account/session/membership. The bound context is not reusable; its hash-only retry
-   handle may atomically replace it with one fresh same-provider context/transaction while the invite remains
-   valid.
+   invite use and leaves no account/session/membership. Abandoning navigation also consumes nothing. The bound
+   context is not reusable; its hash-only retry handle plus the old transaction-specific cookie may atomically
+   replace either a consumed or unconsumed transaction with one fresh same-provider context/transaction while
+   the invite remains valid.
 6. After provider identity validation, the store re-reads and locks all admission authority and performs the
    terminal commit. Callback replay is rejected by the consumed OAuth transaction and completed context.
 
@@ -73,10 +74,12 @@ Migration `0008_invite_gated_first_access.sql` adds:
 - expiry indexes and constraints which prohibit partial terminal outcomes.
 
 The invite table continues to store only `token_hash`. New raw invite tokens are cryptographically
-pseudorandom under a dedicated `HUB_INVITE_TOKEN_SECRET`, bound to actor, campaign, idempotency key, and request
-hash. The 24-hour creator command receipt contains no raw token; the BFF reconstructs the same token for an exact
-retry. Invite listing, events, logs, metrics, exports, and backups never expose it. OAuth transactions and
-invite-context row data are excluded from portable backup contents.
+pseudorandom under a bounded key ring: current `HUB_INVITE_TOKEN_SECRET` followed by at most three retained
+`HUB_INVITE_TOKEN_PREVIOUS_SECRETS`, bound to actor, campaign, idempotency key, and request hash. The 24-hour
+creator command receipt contains no raw token. On replay, the BFF derives one candidate per retained key and
+returns only the candidate whose hash matches the stored invite hash; no match fails closed. Invite listing,
+events, logs, metrics, exports, and backups never expose it. OAuth transactions and invite-context row data are
+excluded from portable backup contents.
 
 PostgreSQL invite authority uses one total lock order:
 
@@ -107,7 +110,7 @@ or deleted-creator credentials use one bounded invalid-admission result and comm
 - Private first access is campaign-sponsored rather than provider-configured.
 - A first-login failure cannot create an orphan account or consume an invite.
 - Existing users retain normal sign-in and may join an invited campaign during that same callback.
-- Multiple tabs share one browser-correlation cookie while state selects each concrete transaction, so a later
+- Multiple tabs retain transaction-specific cookies while state selects the matching transaction, so a later
   start does not overwrite or misapply an earlier tab's invite context.
 - Rollback to pre-r9 application behavior after admitting r9-only accounts can strand those accounts. Keep new
   admission disabled until the stacked entitlement/release layer defines and proves the exact rollback gate.
