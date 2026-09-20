@@ -4656,6 +4656,7 @@ export class MemoryHubStore {
 			this._assertFreshReauthentication({accountId, sessionId});
 			return prior;
 		}
+		this._assertFreshReauthentication({accountId, sessionId});
 		if (
 			this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
 			&& [...this._accounts.values()].filter(current => (
@@ -4663,7 +4664,6 @@ export class MemoryHubStore {
 				&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
 			)).length <= 1
 		) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
-		this._assertFreshReauthentication({accountId, sessionId});
 		const ownedCampaigns = [...this._campaigns.values()].filter(campaign => campaign.ownerAccountId === accountId && campaign.status === "active");
 		if (ownedCampaigns.length) {
 			throw new HubStoreError("ACCOUNT_OWNS_CAMPAIGN", `Transfer ownership or archive campaigns before deleting the account.`, {
@@ -4674,6 +4674,7 @@ export class MemoryHubStore {
 		await this._pBeforeSensitiveCommit();
 		const concurrentPrior = this._getReceipt({accountId, idempotencyKey});
 		if (concurrentPrior) return concurrentPrior;
+		this._assertFreshReauthentication({accountId, sessionId});
 		if (
 			this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
 			&& [...this._accounts.values()].filter(current => (
@@ -4681,7 +4682,6 @@ export class MemoryHubStore {
 				&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
 			)).length <= 1
 		) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
-		this._assertFreshReauthentication({accountId, sessionId});
 		if (account.status !== "deletion_requested") {
 			const requestedAt = this._fnNow();
 			account.status = "deletion_requested";

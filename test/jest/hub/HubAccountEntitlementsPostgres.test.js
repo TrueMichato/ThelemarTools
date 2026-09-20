@@ -491,4 +491,24 @@ describePostgres("PostgreSQL account entitlement authority", () => {
 			});
 		}
 	});
+
+	it("checks deletion freshness before last-operator protection", async () => {
+		const priorOperators = await pMakeOnlyActiveOperators(store, [operator.id]);
+		const [identity] = await store.pListExternalIdentities({accountId: operator.id});
+		const staleSession = await store.pCreateSession({
+			accountId: operator.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+			authenticatedViaIdentityId: identity.id,
+		});
+		try {
+			await expect(store.pRequestAccountDeletion({
+				accountId: operator.id,
+				sessionId: staleSession.id,
+				idempotencyKey: crypto.randomUUID(),
+			})).rejects.toMatchObject({code: "REAUTHENTICATION_REQUIRED", status: 403});
+		} finally {
+			await store.pReconcileConfiguredOperatorEntitlements({accountIds: priorOperators});
+		}
+	});
 });
