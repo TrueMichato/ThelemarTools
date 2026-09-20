@@ -88,7 +88,7 @@ test("Google first access requires and atomically redeems a campaign invite", as
 	await page.goto("/hub.html");
 	await page.locator("#hub-logout").click();
 	await page.waitForURL(/\/hub\.html$/);
-	await page.goto(`/hub.html#invite=${encodeURIComponent(inviteToken)}`);
+	await page.goto(`/hub.html?flow=first-access#invite=${encodeURIComponent(inviteToken)}`);
 	const signInGroup = page.getByRole("group", {name: "Sign-in providers"});
 	await expect(signInGroup).toBeVisible();
 	await signInGroup.getByRole("button", {name: "Sign in with Google"}).click();
