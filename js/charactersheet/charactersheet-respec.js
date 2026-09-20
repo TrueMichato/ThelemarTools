@@ -3001,7 +3001,16 @@ class CharacterSheetRespec {
 		const levelUp = this._page?._levelUp;
 		if (typeof levelUp?._renderFeatChoicesUI !== "function") return false;
 		const candidateContext = Object.create(levelUp);
+		const candidatePage = Object.create(this._page);
+		Object.defineProperty(candidatePage, "_state", {get: () => this._state});
+		if (this._page?._spells) {
+			const candidateSpells = Object.create(this._page._spells);
+			Object.defineProperty(candidateSpells, "_state", {get: () => this._state});
+			Object.defineProperty(candidateSpells, "_page", {get: () => candidatePage});
+			Object.defineProperty(candidatePage, "_spells", {value: candidateSpells});
+		}
 		Object.defineProperty(candidateContext, "_state", {get: () => this._state});
+		Object.defineProperty(candidateContext, "_page", {get: () => candidatePage});
 		try {
 			levelUp._renderFeatChoicesUI.call(candidateContext, feat, choices, container);
 			return true;
