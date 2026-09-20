@@ -793,13 +793,14 @@ describe("ItemBuilderCore", () => {
 		expect(draft.gemstone).toEqual(item.socketedGemstones[0]);
 	});
 
-	test("preserves material role and resonance in the canonical reference", () => {
+	test("preserves material role, resonance, and incorporated quantity in the canonical reference", () => {
 		const draft = ItemBuilderCore.createDraft({source: "HB"});
 		draft.material = {
 			name: "Dragonbone",
 			source: "TGTT",
 			role: "strikingSurface",
 			resonance: {name: "Ember Domain", source: "TGTT"},
+			quantity: 4,
 		};
 
 		expect(ItemBuilderCore.serialize(draft).material).toEqual(draft.material);

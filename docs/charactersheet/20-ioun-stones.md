@@ -115,7 +115,7 @@ per-setting.
 
 | Layer | Source | Why it exists |
 |---|---|---|
-| 1. `user` | `item.iounSettings` (number), set in the ⚙ item editor | A DM can make **any** item hold stones |
+| 1. `user` | `item.iounSettings` (number), set in the ⚙ item editor | A DM can make **any non-matrix item** hold stones |
 | | *`null`/blank* = not declared, falls through · *`0`* = an explicit "**not** a host", overriding the layers below | |
 | 2. `brew` | `item.iounHost: {settings, grants, waivesAttunement}` | Editable homebrew declares it in data |
 | 3. `registry` | `IOUN_HOST_REGISTRY`, keyed `_variantName\|source`, then `name\|source`, then bare `_variantName` | The **only** way to support a book that cannot be edited locally |
@@ -152,6 +152,38 @@ writes the six values the text names (Int/Wis/Cha checks **and** saves). Correct
 applied **before** the base capture, or a wrong shipped value would be pinned as the
 pristine base forever.
 
+### Ioun Sand quantity and capacity
+
+Ioun Sand is different from a generic player-declared host. Its seat count comes from the
+amount of material incorporated into that specific item:
+
+```json
+"material": {
+  "name": "Ioun Sand",
+  "source": "TGTT",
+  "quantity": 4
+}
+```
+
+One unit is one matrix seat. This is composition data, not the inventory wrapper's stack
+`quantity`: a single matrix made from four units remains one inventory item, and otherwise
+identical matrices made from different amounts do not stack together.
+
+The material picker asks for the amount before applying Ioun Sand and exposes **Update
+amount** while it is applied. The generic ⚙ item's `iounSettings` field is disabled for a
+matrix and points back to the material picker, preventing two competing capacity controls.
+
+Old saves remain valid. A matrix assignment with no `material.quantity` migrates to one unit;
+if that old item used `iounSettings` to size the matrix, that positive whole-number count is
+adopted instead. Migration runs when a save loads with the catalog available and again when a
+late material catalog arrives.
+
+Reducing capacity is explicit and deterministic. The state API previews which seats would be
+displaced and refuses the change until the caller confirms. On confirmation, the newest
+seats are emptied first; those stones remain bonded and functioning in orbit. Removing or
+swapping the material uses the same preflight. Disabling material mechanics also empties the
+matrix and restores every doubled value.
+
 ### Why the bonus is materialised, not derived
 
 `bonusWeapon` is read raw at about a dozen combat call sites, and `requiresAttunement &&
@@ -168,9 +200,10 @@ Three invariants keep that safe:
   pristine base rather than inheriting a zero from an older capture.
 - **Always recompute from the base**, never from the current value, so five set/unset cycles
   land exactly where one did.
-- **Reversible.** Withdrawing host status (clearing the ⚙ field, or a registry entry going
-  away) restores the base and drops the seats; shrinking the setting count evicts from the
-  **end**, so stones seated first keep their places.
+- **Reversible.** Withdrawing host status restores the base and drops the seats; shrinking
+  Ioun Sand quantity evicts from the **end**, so stones seated first keep their places.
+- **Orphan-safe.** Reconciliation restores any matrix capture whose host was removed, whose
+  material stopped being a matrix, or whose seat no longer points back to that stone.
 
 The ⚙ editor is the sharp edge here: it shows and receives **base** values, and
 `dematerialiseIounHostBonuses()` runs before the merge so both halves speak the same units.
@@ -211,7 +244,8 @@ Per-ability *saves* already existed end-to-end; per-ability *checks* did not —
 |---|---|
 | Manager zone *Set in items* | owns assignment: host rows, empty-bezel tray, pry-out |
 | Item row `◇ / ◈ Settings (n/m)` | a doorway — opens the manager scrolled to and focused on that host |
-| ⚙ item editor → *Ioun Stone Settings* | declares any item a host |
+| Material picker → *Ioun Sand units* | sets and later edits matrix capacity; warns before displacing stones |
+| ⚙ item editor → *Ioun Stone Settings* | declares any non-matrix item a host |
 
 ## Effect-implementation audit
 

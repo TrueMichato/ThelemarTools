@@ -55,6 +55,11 @@
 					"type": "string",
 					"minLength": 1
 				},
+				"quantity": {
+					"type": "integer",
+					"minimum": 1,
+					"description": "Units of this material incorporated into the item. Used by variable-quantity materials such as Ioun Sand."
+				},
 				"role": {
 					"$ref": "#/$defs/itemMaterialRole"
 				},

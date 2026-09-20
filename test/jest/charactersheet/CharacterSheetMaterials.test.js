@@ -1685,10 +1685,6 @@ describe("Item Materials", () => {
 		let hostId;
 		let stoneId;
 
-		// The ⚙ editor is the only production writer of `iounSettings`; poking the raw row
-		// keeps these tests on the state API surface they are actually exercising.
-		const setSeats = (id, n) => { state._data.inventory.find(i => i.id === id).item.iounSettings = n; };
-
 		const addStone = (name, props = {}) => {
 			state.addItem({name, type: "W", weight: 0, value: 0, quantity: 1, ...props});
 			const row = state.getItems().at(-1);
@@ -1700,7 +1696,7 @@ describe("Item Materials", () => {
 			state.setItemMaterialCatalog([...MATERIALS, IOUN_SAND, IOUN_CRYSTAL]);
 			state.addItem({name: "Crystalline Torc", type: "W", weight: 1, value: 0, quantity: 1});
 			hostId = state.getItems().at(-1).id;
-			state.setItemMaterial(hostId, {name: "Ioun Sand", source: "TGTT"});
+			state.setItemMaterial(hostId, {name: "Ioun Sand", source: "TGTT"}, {quantity: 1});
 			stoneId = addStone("Ioun Stone (Protection)", {bonusAc: 1});
 		});
 
@@ -1719,7 +1715,8 @@ describe("Item Materials", () => {
 			expect(state.isIounMatrix(state.getItems().find(i => i.id === hostId))).toBe(false);
 		});
 
-		it("makes the item a host with one matrix seat", () => {
+		it("stores one incorporated unit and makes it one matrix seat", () => {
+			expect(state.getItemRaw(hostId).material.quantity).toBe(1);
 			const policy = state.getIounHostPolicy(state.getItems().find(i => i.id === hostId));
 			expect(policy.isHost).toBe(true);
 			expect(policy.isMatrix).toBe(true);
@@ -1727,25 +1724,48 @@ describe("Item Materials", () => {
 			expect(policy.perStone).toBe(0);
 		});
 
-		it("respects an explicit iounSettings override without inventing a bonus", () => {
-			setSeats(hostId, 3);
+		it("uses four incorporated units as four matrix seats", () => {
+			state.clearItemMaterial(hostId);
+			expect(state.setItemMaterial(hostId, IOUN_SAND, {quantity: 4})).toBe(true);
+			expect(state.getItemRaw(hostId).material).toEqual({name: "Ioun Sand", source: "TGTT", quantity: 4});
 			const policy = state.getIounHostPolicy(state.getItems().find(i => i.id === hostId));
-			expect(policy.settings).toBe(3);
-			// Sizing a matrix from the editor must not turn it into an Ioun Blade.
+			expect(policy.settings).toBe(4);
 			expect(policy.perStone).toBe(0);
 			expect(policy.grants).toEqual([]);
 		});
 
 		it("adds no bonus of its own to a seated stone's host", () => {
-			setSeats(hostId, 1);
 			state.setIounStone(hostId, stoneId);
 			const host = state.getItems().find(i => i.id === hostId);
 			expect(host.bonusWeapon == null || host.bonusWeapon === 0).toBe(true);
 		});
 
-		it("doubles a seated stone's numeric bonuses", () => {
-			expect(state.setIounStone(hostId, stoneId).success).toBe(true);
-			expect(state.getItems().find(i => i.id === stoneId).bonusAc).toBe(2);
+		it("doubles every canonical structured numeric bonus channel and leaves nonnumeric effects single", () => {
+			const bonusProps = Object.keys(CharacterSheetState.ITEM_SCHEMA_EFFECT_ADAPTERS)
+				.filter(prop => prop.startsWith("bonus"));
+			const perAbilityProps = ["SavingThrow", "AbilityCheck"]
+				.flatMap(family => ["Str", "Dex", "Con", "Int", "Wis", "Cha"].map(ability => `bonus${family}${ability}`));
+			const numericProps = [...new Set([...bonusProps, ...perAbilityProps, "reach"])];
+			const nonnumeric = {
+				ability: {str: 2},
+				critThreshold: 19,
+				damageRiders: [{damage: "1d6", damageType: "force"}],
+				effects: [{type: "skill:arcana", value: 1}],
+				modifySpeed: {walk: 10},
+				resist: ["force"],
+			};
+			const allPropsStoneId = addStone(
+				"Ioun Stone (Every Number)",
+				{
+					...Object.fromEntries(numericProps.map(prop => [prop, 2])),
+					...nonnumeric,
+				},
+			);
+
+			expect(state.setIounStone(hostId, allPropsStoneId).success).toBe(true);
+			const stone = state.getItems().find(i => i.id === allPropsStoneId);
+			for (const prop of numericProps) expect(stone[prop]).toBe(4);
+			for (const [prop, value] of Object.entries(nonnumeric)) expect(stone[prop]).toEqual(value);
 		});
 
 		it("restores the pristine value when the stone is pried out", () => {
@@ -1774,7 +1794,7 @@ describe("Item Materials", () => {
 		});
 
 		it("reports which seated stones are doubled and which are excluded", () => {
-			setSeats(hostId, 2);
+			state.setItemMaterialQuantity(hostId, 2);
 			const fragId = addStone("Ioun Fragment (Protection)", {bonusAc: 1});
 			state.setIounStone(hostId, stoneId);
 			state.setIounStone(hostId, fragId);
@@ -1785,10 +1805,50 @@ describe("Item Materials", () => {
 			expect(status.props).toContain("bonusAc");
 		});
 
+		it("previews a capacity reduction and refuses to displace stones without confirmation", () => {
+			state.setItemMaterialQuantity(hostId, 4);
+			const stoneIds = [
+				stoneId,
+				addStone("Ioun Stone (Insight)", {bonusAbilityCheck: 1}),
+				addStone("Ioun Stone (Fortitude)", {bonusSavingThrow: 1}),
+				addStone("Ioun Stone (Mastery)", {bonusProficiencyBonus: 1}),
+			];
+			stoneIds.forEach(id => expect(state.setIounStone(hostId, id).success).toBe(true));
+
+			expect(state.getIounMaterialQuantityChange(hostId, 1)).toEqual(expect.objectContaining({
+				success: true,
+				quantity: 1,
+				displacedStoneIds: stoneIds.slice(1),
+			}));
+			expect(state.setItemMaterialQuantity(hostId, 1)).toEqual(expect.objectContaining({
+				success: false,
+				requiresConfirmation: true,
+				displacedStoneIds: stoneIds.slice(1),
+			}));
+			expect(state.getIounSetStoneIds(hostId)).toEqual(stoneIds);
+
+			const result = state.setItemMaterialQuantity(hostId, 1, {isAllowDisplacement: true});
+			expect(result).toEqual(expect.objectContaining({
+				success: true,
+				changed: true,
+				displacedStoneIds: stoneIds.slice(1),
+			}));
+			expect(state.getIounSetStoneIds(hostId)).toEqual([stoneIds[0]]);
+			for (const id of stoneIds.slice(1)) {
+				const stone = state.getItems().find(it => it.id === id);
+				expect(stone.equipped).toBe(true);
+				expect(stone.iounMatrixBaseBonuses).toBeNull();
+			}
+			state.reconcileIounHosts();
+			state.reconcileIounHosts();
+			expect(state.getIounSetStoneIds(hostId)).toEqual([stoneIds[0]]);
+			expect(state.getItems().find(it => it.id === stoneIds[0]).bonusAc).toBe(2);
+		});
+
 		it("leaves exactly one capture when a stone moves matrix to matrix", () => {
 			state.addItem({name: "Sand Halo", type: "W", weight: 1, value: 0, quantity: 1});
 			const host2Id = state.getItems().at(-1).id;
-			state.setItemMaterial(host2Id, {name: "Ioun Sand", source: "TGTT"});
+			state.setItemMaterial(host2Id, {name: "Ioun Sand", source: "TGTT"}, {quantity: 1});
 
 			state.setIounStone(hostId, stoneId);
 			expect(state.setIounStone(host2Id, stoneId).success).toBe(true);
@@ -1801,8 +1861,109 @@ describe("Item Materials", () => {
 		it("un-doubles when the Ioun Sand material is removed", () => {
 			state.setIounStone(hostId, stoneId);
 			expect(state.getItems().find(i => i.id === stoneId).bonusAc).toBe(2);
-			state.clearItemMaterial(hostId);
+			expect(state.clearItemMaterial(hostId)).toBe(false);
+			state.clearItemMaterial(hostId, {isAllowIounDisplacement: true});
 			expect(state.getItems().find(i => i.id === stoneId).bonusAc).toBe(1);
+			expect(state.getIounSetStoneIds(hostId)).toEqual([]);
+			expect(state.getItems().find(i => i.id === stoneId).equipped).toBe(true);
+		});
+
+		it("un-doubles and clears seats when material mechanics are disabled", () => {
+			state.setIounStone(hostId, stoneId);
+			state.setSetting("enableMaterials", false);
+			expect(state.getItems().find(i => i.id === stoneId).bonusAc).toBe(1);
+			expect(state.getItems().find(i => i.id === stoneId).iounMatrixBaseBonuses).toBeNull();
+			expect(state.getIounSetStoneIds(hostId)).toEqual([]);
+			expect(state.getItems().find(i => i.id === stoneId).equipped).toBe(true);
+		});
+
+		it("un-doubles and clears seats when Ioun Sand is swapped for another material", () => {
+			state.setIounStone(hostId, stoneId);
+			expect(state.setItemMaterial(hostId, {name: "Steel", source: "TGTT"})).toBe(false);
+			state.setItemMaterial(hostId, {name: "Steel", source: "TGTT"}, {isAllowIounDisplacement: true});
+			expect(state.getItems().find(i => i.id === stoneId).bonusAc).toBe(1);
+			expect(state.getItems().find(i => i.id === stoneId).iounMatrixBaseBonuses).toBeNull();
+			expect(state.getIounSetStoneIds(hostId)).toEqual([]);
+		});
+
+		it("restores a doubled stone when the matrix host leaves inventory", () => {
+			state.setIounStone(hostId, stoneId);
+			state.removeItem(hostId);
+			const stone = state.getItems().find(i => i.id === stoneId);
+			expect(stone.bonusAc).toBe(1);
+			expect(stone.iounMatrixBaseBonuses).toBeNull();
+			expect(stone.equipped).toBe(true);
+		});
+
+		it("migrates a quantity-less matrix save to one incorporated unit without compounding", () => {
+			state.setIounStone(hostId, stoneId);
+			const saved = JSON.parse(JSON.stringify(state.toJson()));
+			const savedHost = saved.inventory.find(i => i.id === hostId);
+			delete savedHost.item.material.quantity;
+
+			const restored = new CharacterSheetState();
+			restored.loadFromJson(saved);
+			restored.setItemMaterialCatalog([...MATERIALS, IOUN_SAND, IOUN_CRYSTAL]);
+
+			expect(restored.getItemRaw(hostId).material.quantity).toBe(1);
+			expect(restored.getIounHostPolicy(restored.getItemRaw(hostId)).settings).toBe(1);
+			expect(restored.getItemRaw(stoneId).bonusAc).toBe(2);
+			restored.reconcileIounHosts();
+			expect(restored.getItemRaw(stoneId).bonusAc).toBe(2);
+		});
+
+		it("adopts a legacy matrix iounSettings count into material quantity", () => {
+			const rawHost = state._data.inventory.find(i => i.id === hostId).item;
+			delete rawHost.material.quantity;
+			rawHost.iounSettings = 4;
+			state.setItemMaterialCatalog([...MATERIALS, IOUN_SAND, IOUN_CRYSTAL]);
+			expect(state.getItemRaw(hostId).material.quantity).toBe(4);
+			expect(state.getItemRaw(hostId).iounSettings).toBeUndefined();
+			expect(state.getIounHostPolicy(state.getItemRaw(hostId)).settings).toBe(4);
+		});
+
+		it("round-trips four seats and their captures through save/load", () => {
+			state.setItemMaterialQuantity(hostId, 4);
+			const stoneIds = [
+				stoneId,
+				addStone("Ioun Stone (Insight)", {bonusAbilityCheck: 1}),
+				addStone("Ioun Stone (Fortitude)", {bonusSavingThrow: 1}),
+				addStone("Ioun Stone (Mastery)", {bonusProficiencyBonus: 1}),
+			];
+			stoneIds.forEach(id => state.setIounStone(hostId, id));
+
+			const restored = new CharacterSheetState();
+			restored.setItemMaterialCatalog([...MATERIALS, IOUN_SAND, IOUN_CRYSTAL]);
+			restored.loadFromJson(JSON.parse(JSON.stringify(state.toJson())));
+
+			expect(restored.getItemRaw(hostId).material.quantity).toBe(4);
+			expect(restored.getIounHostPolicy(restored.getItemRaw(hostId)).settings).toBe(4);
+			expect(restored.getIounSetStoneIds(hostId)).toEqual(stoneIds);
+			expect(stoneIds.map(id => restored.getItemRaw(id).iounMatrixBaseBonuses?.__hostId)).toEqual(stoneIds.map(() => hostId));
+			restored.reconcileIounHosts();
+			expect(restored.getItemRaw(stoneIds[0]).bonusAc).toBe(2);
+		});
+
+		it("renders the Ioun Sand unit selector contract for apply and edit flows", () => {
+			const applyHtml = CharacterSheetMaterials.getMaterialQuantityControlHtml({
+				material: IOUN_SAND,
+				quantity: 4,
+				isApplied: false,
+			});
+			const editHtml = CharacterSheetMaterials.getMaterialQuantityControlHtml({
+				material: IOUN_SAND,
+				quantity: 1,
+				isApplied: true,
+			});
+			expect(applyHtml).toContain("charsheet__material-quantity\"");
+			expect(applyHtml).toContain("value=\"4\"");
+			expect(applyHtml).toContain("Each unit adds one Ioun Stone seat");
+			expect(editHtml).toContain("Update amount");
+			expect(CharacterSheetMaterials.getMaterialQuantityControlHtml({
+				material: MATERIALS[0],
+				quantity: 1,
+				isApplied: false,
+			})).toBe("");
 		});
 
 		it("gives the Ioun Crystal free effect to a fragment but not an intact stone", () => {

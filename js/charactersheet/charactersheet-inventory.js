@@ -4046,11 +4046,19 @@ class CharacterSheetInventory {
 			const policy = this._state?.getIounHostPolicy?.(seed?.item || o) || null;
 			const inherited = (policy && policy.origin !== "user") ? policy.settings : 0;
 			eleIounSettings.placeholder = String(inherited || 0);
+			if (policy?.isMatrix) {
+				eleIounSettings.disabled = true;
+				eleIounSettings.value = "";
+			} else eleIounSettings.disabled = false;
 			const eleOrigin = form.querySelector("#custom-item-ioun-settings-origin");
 			if (eleOrigin) {
-				eleOrigin.textContent = inherited
-					? `This item already provides ${inherited} setting${inherited === 1 ? "" : "s"} from ${policy.origin === "registry" ? "its own rules" : "its item data"}. Leave blank to keep that; enter a number to override it.`
-					: "";
+				if (policy?.isMatrix) {
+					eleOrigin.textContent = `This matrix has ${policy.settings} seat${policy.settings === 1 ? "" : "s"} from its incorporated Ioun Sand. Edit the sand amount in the Material picker.`;
+				} else {
+					eleOrigin.textContent = inherited
+						? `This item already provides ${inherited} setting${inherited === 1 ? "" : "s"} from ${policy.origin === "registry" ? "its own rules" : "its item data"}. Leave blank to keep that; enter a number to override it.`
+						: "";
+				}
 			}
 		}
 

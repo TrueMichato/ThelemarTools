@@ -25612,6 +25612,38 @@ color: var(--cs-text-primary, #f1f5f9);
 	margin-top: 8px;
 }
 
+.charsheet__material-quantity-control {
+	display: flex;
+	align-items: end;
+	justify-content: space-between;
+	gap: 12px;
+	margin-top: 8px;
+	padding: 8px 10px;
+	border: 1px solid var(--cs-border, rgb(255 255 255 / 12%));
+	border-radius: var(--cs-radius-sm, 6px);
+	background: color-mix(in srgb, var(--cs-accent, #60a5fa) 8%, transparent);
+}
+
+.charsheet__material-quantity-label {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin: 0;
+}
+
+.charsheet__material-quantity-label > span {
+	display: flex;
+	flex-direction: column;
+}
+
+.charsheet__material-quantity {
+	flex: 0 0 72px;
+	width: 72px;
+	text-align: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.charsheet__material-option-chevron {
 		transition: none;
@@ -25647,6 +25679,11 @@ color: var(--cs-text-primary, #f1f5f9);
 		min-height: 44px;
 		padding-right: 16px;
 		padding-left: 16px;
+	}
+
+	.charsheet__material-quantity,
+	.charsheet__material-quantity-save {
+		min-height: 44px;
 	}
 
 	/* The capacity chip opens the Magic Capacity modal, so on touch it is a target

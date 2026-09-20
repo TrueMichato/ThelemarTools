@@ -19,6 +19,7 @@
 				"material": {
 					"name": "Dragonbone",
 					"source": "TGTT",
+					"quantity": 4,
 					"role": "strikingSurface",
 					"resonance": {
 						"name": "Ember Domain",

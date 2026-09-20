@@ -482,6 +482,7 @@ class CharacterSheetIoun {
 				// An Ioun Sand matrix confers no bonus of its own — doubling IS its
 				// contribution — so the readout is suppressed rather than printed as "+0".
 				isMatrix: !!policy.isMatrix,
+				matrixUnits: policy.isMatrix ? (this._state.getItemMaterialQuantity?.(row.id) || policy.settings) : null,
 				matrix: policy.isMatrix ? this._state.getIounMatrixStatus?.(row.id) : null,
 				// The bonus the readout announces. `bonusWeapon` is the Ioun Blade's headline
 				// number; a DM-declared host falls back to whatever its policy grants first.
@@ -754,6 +755,11 @@ class CharacterSheetIoun {
 
 	static _fmtBonus (n) { return `${n >= 0 ? "+" : ""}${n}`; }
 
+	static _getSeatBenefitText (host) {
+		if (host.isMatrix) return "An intact stone's structured numeric bonuses are doubled while set; loose fragments are not.";
+		return `Each stone set raises this item's ${CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus"} by ${host.policy.perStone}.`;
+	}
+
 	/**
 	 * One host item: identity, the superseded-value readout, and a tray of its EMPTY settings.
 	 *
@@ -773,7 +779,10 @@ class CharacterSheetIoun {
 		const metaBits = [];
 		metaBits.push(host.equipped ? "equipped" : "not equipped — its bonus is dormant");
 		if (host.isAttunementWaived) metaBits.push("bond-borne — no attunement needed");
-		if (host.isMatrix) metaBits.push("Ioun Sand matrix — a set stone's numeric properties are doubled");
+		if (host.isMatrix) {
+			metaBits.push(`${host.matrixUnits} Ioun Sand unit${host.matrixUnits === 1 ? "" : "s"} — ${total} matrix seat${total === 1 ? "" : "s"}`);
+			metaBits.push("a set stone's numeric properties are doubled");
+		}
 
 		const bezels = [];
 		for (let i = filled; i < total; ++i) {
@@ -1175,7 +1184,7 @@ class CharacterSheetIoun {
 			outer: `
 				<div class="cs-ioun cs-adaptive-panel ve-flex-col w-100">
 					<div class="cs-ioun-hostgroup mb-2">${this._getHostRowHtml(host)}</div>
-					<p class="ve-small ve-muted mb-2">The stone keeps conferring its own effect — setting it only changes where it sits. Each stone set raises this item's ${CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus"} by ${host.policy.perStone}.</p>
+					<p class="ve-small ve-muted mb-2">The stone keeps conferring its own effect — setting it only changes where it sits. ${CharacterSheetIoun._getSeatBenefitText(host)}</p>
 					<div class="cs-ioun-list">${listHtml}</div>
 				</div>`,
 		}));
@@ -1191,7 +1200,10 @@ class CharacterSheetIoun {
 					return;
 				}
 				const after = this.getHostItems().find(h => h.id === hostId);
-				this._announce(`${CharacterSheetIoun.getStoneDescriptor(stone)} set into ${host.name}; ${CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus"} now ${CharacterSheetIoun._fmtBonus(after?.bonusNow ?? host.bonusNow)}. The stone keeps conferring its own effect.`);
+				const changed = host.isMatrix
+					? "its structured numeric bonuses are now doubled"
+					: `${CharacterSheetIoun._GRANT_LABELS[host.bonusKey] || "bonus"} now ${CharacterSheetIoun._fmtBonus(after?.bonusNow ?? host.bonusNow)}`;
+				this._announce(`${CharacterSheetIoun.getStoneDescriptor(stone)} set into ${host.name}; ${changed}. The stone keeps conferring its own effect.`);
 			});
 		});
 	}

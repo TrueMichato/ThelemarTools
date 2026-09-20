@@ -6340,6 +6340,10 @@ class CharacterSheetState {
 		// have been restored. This removes stale Chained Fury effects from old
 		// saves when Rage/Manifest Chains/source legality no longer applies.
 		this.reconcileTargetEffects();
+		if (this._itemMaterialCatalog?.length) {
+			this._migrateIounMatrixMaterialQuantities();
+			this.reconcileIounHosts();
+		}
 	}
 
 	/**
@@ -31613,25 +31617,40 @@ class CharacterSheetState {
 	 *
 	 * @param {string} itemId
 	 * @param {object|null} material Material entity or `{name, source}` ref; null clears.
-	 * @param {object} [choices] Per-material sub-choices (dragon type, condensate role,
-	 *        draconic domain), stored alongside the reference.
+	 * @param {object} [choices] Assignment metadata such as quantity, condensate role,
+	 *        draconic domain, and confirmed Ioun-seat displacement.
 	 * @returns {boolean} Whether anything changed.
 	 */
 	setItemMaterial (itemId, material, choices = null) {
 		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item) return false;
 
-		if (!material) return this.clearItemMaterial(itemId);
+		if (!material) return this.clearItemMaterial(itemId, choices || undefined);
 		// A reference with no name can never be resolved back to an entity, so accepting it
 		// would leave the item permanently "made of something" with nothing to project.
 		if (!material.name) return false;
 
-		invItem.item.material = {
+		const assignment = {
 			name: material.name,
 			source: material.source || "TGTT",
-			...(choices && Object.keys(choices).length ? {choices} : {}),
 		};
+		for (const prop of ["role", "resonance"]) {
+			const value = choices?.[prop] ?? material[prop];
+			if (value != null) assignment[prop] = MiscUtil.copyFast(value);
+		}
+		const materialEntity = this.getItemMaterialEntity({material: assignment})
+			|| ((material.effects || []).length ? material : null);
+		const isMatrix = this._isIounMatrixMaterial(materialEntity);
+		if (isMatrix) {
+			const quantity = choices?.quantity ?? material.quantity ?? 1;
+			if (!CharacterSheetState._isValidIounMaterialQuantity(quantity)) return false;
+			assignment.quantity = Number(quantity);
+		}
 
+		const change = this.getIounMaterialAssignmentChange(itemId, assignment);
+		if (change.displacedStoneIds.length && !choices?.isAllowIounDisplacement) return false;
+
+		invItem.item.material = assignment;
 		this._onItemMaterialChanged();
 		return true;
 	}
@@ -31641,12 +31660,125 @@ class CharacterSheetState {
 	 * @param {string} itemId
 	 * @returns {boolean}
 	 */
-	clearItemMaterial (itemId) {
+	clearItemMaterial (itemId, {isAllowIounDisplacement = false} = {}) {
 		const invItem = this._findInventoryRow(itemId);
 		if (!invItem?.item?.material) return false;
+		const change = this.getIounMaterialAssignmentChange(itemId, null);
+		if (change.displacedStoneIds.length && !isAllowIounDisplacement) return false;
 		delete invItem.item.material;
 		this._onItemMaterialChanged();
 		return true;
+	}
+
+	static _isValidIounMaterialQuantity (quantity) {
+		const numeric = Number(quantity);
+		return Number.isSafeInteger(numeric) && numeric > 0;
+	}
+
+	_isIounMatrixMaterial (material) {
+		return !!(material?.effects || []).some(fx => fx?.type === "doubleNumericProperties");
+	}
+
+	/**
+	 * Number of material units incorporated into an Ioun Sand matrix.
+	 *
+	 * Old saves used `iounSettings` to size matrices, while the first matrix implementation
+	 * omitted a quantity entirely and implied one seat. Both forms remain readable, but every
+	 * new write stores the value on the material assignment itself.
+	 *
+	 * @param {string|object} itemOrId
+	 * @returns {number|null}
+	 */
+	getItemMaterialQuantity (itemOrId) {
+		const itemData = typeof itemOrId === "string"
+			? this._findInventoryRow(itemOrId)?.item
+			: (itemOrId?.item || itemOrId);
+		if (!itemData?.material?.name) return null;
+		const material = this.getItemMaterialEntity(itemData);
+		if (!this._isIounMatrixMaterial(material)) return null;
+		if (CharacterSheetState._isValidIounMaterialQuantity(itemData.material.quantity)) {
+			return Number(itemData.material.quantity);
+		}
+		if (CharacterSheetState._isValidIounMaterialQuantity(itemData.iounSettings)) {
+			return Number(itemData.iounSettings);
+		}
+		return 1;
+	}
+
+	_getIounCapacityChange (itemId, nextCapacity) {
+		const invItem = this._findInventoryRow(itemId);
+		if (!invItem?.item) return {success: false, error: "Item not found", displacedStoneIds: []};
+		const capacity = Math.max(0, Math.floor(Number(nextCapacity) || 0));
+		const seated = Array.isArray(invItem.item.iounSet) ? invItem.item.iounSet : [];
+		return {
+			success: true,
+			capacity,
+			occupied: seated.length,
+			displacedStoneIds: seated.slice(capacity),
+		};
+	}
+
+	/**
+	 * Preview the seat displacement caused by changing a matrix's incorporated quantity.
+	 * Seats are kept in insertion order, so reductions always displace the newest seats first.
+	 */
+	getIounMaterialQuantityChange (itemId, quantity) {
+		const invItem = this._findInventoryRow(itemId);
+		if (!invItem?.item) return {success: false, error: "Item not found", displacedStoneIds: []};
+		if (this.getItemMaterialQuantity(invItem.item) == null) {
+			return {success: false, error: "That item is not made with a variable-quantity matrix material", displacedStoneIds: []};
+		}
+		if (!CharacterSheetState._isValidIounMaterialQuantity(quantity)) {
+			return {success: false, error: "Ioun Sand quantity must be a positive whole number", displacedStoneIds: []};
+		}
+		return {
+			...this._getIounCapacityChange(itemId, Number(quantity)),
+			quantity: Number(quantity),
+			currentQuantity: this.getItemMaterialQuantity(invItem.item),
+		};
+	}
+
+	/**
+	 * Preview the seats that would be displaced by replacing or removing a material.
+	 *
+	 * @param {string} itemId
+	 * @param {object|null} materialAssignment
+	 */
+	getIounMaterialAssignmentChange (itemId, materialAssignment) {
+		const invItem = this._findInventoryRow(itemId);
+		if (!invItem?.item) return {success: false, error: "Item not found", displacedStoneIds: []};
+		const nextItem = {...invItem.item};
+		if (materialAssignment) nextItem.material = MiscUtil.copyFast(materialAssignment);
+		else delete nextItem.material;
+		const nextPolicy = this.getIounHostPolicy(nextItem);
+		return {
+			...this._getIounCapacityChange(itemId, nextPolicy.isHost ? nextPolicy.settings : 0),
+			material: materialAssignment ? MiscUtil.copyFast(materialAssignment) : null,
+		};
+	}
+
+	/**
+	 * Persist a new Ioun Sand amount. A reduction that would evict stones is rejected until
+	 * the caller explicitly confirms; confirmed stones remain bonded and functioning in orbit.
+	 */
+	setItemMaterialQuantity (itemId, quantity, {isAllowDisplacement = false} = {}) {
+		const preview = this.getIounMaterialQuantityChange(itemId, quantity);
+		if (!preview.success) return preview;
+		if (preview.displacedStoneIds.length && !isAllowDisplacement) {
+			return {...preview, success: false, requiresConfirmation: true, changed: false};
+		}
+		const invItem = this._findInventoryRow(itemId);
+		const hasStoredQuantity = CharacterSheetState._isValidIounMaterialQuantity(invItem.item.material.quantity);
+		if (hasStoredQuantity && preview.currentQuantity === preview.quantity && !preview.displacedStoneIds.length) {
+			return {...preview, changed: false};
+		}
+		for (const stoneId of preview.displacedStoneIds) {
+			const stone = this._findInventoryRow(stoneId);
+			if (stone) stone.equipped = true;
+		}
+		invItem.item.material.quantity = preview.quantity;
+		this._onItemMaterialChanged();
+		return {...preview, changed: true};
 	}
 
 	/**
@@ -36605,21 +36737,18 @@ class CharacterSheetState {
 	 * the structured subset — the numeric bonus props the engine actually reads — and the UI
 	 * says as much rather than pretending the rest was handled.
 	 */
-	static IOUN_MATRIX_DOUBLED_PROPS = Object.freeze([
-		"bonusWeapon",
-		"bonusWeaponAttack",
-		"bonusWeaponDamage",
-		"bonusWeaponCritDamage",
-		"bonusAc",
-		"bonusAbilityCheck",
-		"bonusSavingThrow",
-		"bonusSavingThrowConcentration",
-		"bonusSpellAttack",
-		"bonusSpellDamage",
-		"bonusSpellSaveDc",
-		"bonusProficiencyBonus",
-		"reach",
-	]);
+	static getIounMatrixDoubledProps () {
+		const props = Object.keys(CharacterSheetState.ITEM_SCHEMA_EFFECT_ADAPTERS)
+			.filter(prop => prop.startsWith("bonus"));
+		for (const family of ["bonusSavingThrow", "bonusAbilityCheck"]) {
+			for (const ability of ["Str", "Dex", "Con", "Int", "Wis", "Cha"]) props.push(`${family}${ability}`);
+		}
+		// `reach` is the one structured numerical range channel currently consumed by
+		// the sheet. Inverse thresholds (for example `critThreshold`) are deliberately
+		// excluded: doubling 19 to 38 would make the benefit worse, not stronger.
+		props.push("reach");
+		return [...new Set(props)];
+	}
 
 	/**
 	 * Matches an item's own declaration that its attunement is free of the normal slot
@@ -36794,8 +36923,8 @@ class CharacterSheetState {
 	getIounHostPolicy (itemData) {
 		const none = {isHost: false, settings: 0, grants: [], perStone: 1, waivesAttunement: false, settingLabel: "setting", origin: "none"};
 		if (!itemData) return none;
-		// The matrix overlay is applied to whichever of the four layers below answers, so it
-		// survives a player sizing the matrix from the ⚙ editor.
+		// The matrix overlay is applied to whichever of the four layers below answers, so an
+		// intrinsic host keeps its own per-stone bonus while material quantity owns capacity.
 		return this._applyIounMatrixOverlay(itemData, this._getIounHostPolicyBase(itemData, none));
 	}
 
@@ -36853,9 +36982,8 @@ class CharacterSheetState {
 	/**
 	 * Fold an Ioun Sand matrix's properties onto a resolved host policy.
 	 *
-	 * The matrix has no stated setting count in the rules ("complete matrices holding several
-	 * intact stones are among the rarest magical devices in existence"), so an undeclared
-	 * matrix gets **one** seat and the ⚙ editor's `iounSettings` sizes it up.
+	 * Every incorporated material unit provides one setting. Quantity-less legacy assignments
+	 * read as one unit until the catalog-backed migration writes that default explicitly.
 	 *
 	 * @param {object} itemData
 	 * @param {object} policy - the policy resolved by the four detection layers
@@ -36863,13 +36991,15 @@ class CharacterSheetState {
 	 */
 	_applyIounMatrixOverlay (itemData, policy) {
 		if (!this.isIounMatrix(itemData)) return policy;
-		// A bare `iounSettings` number sizes the matrix; it does NOT turn it into an Ioun
-		// Blade. Only a host whose source actually declared a bonus keeps one.
+		// Material quantity sizes the matrix; it does NOT turn the item into an Ioun Blade.
+		// Only a host whose source actually declared a bonus keeps one.
 		const isBonusHost = policy.isHost && policy.isBonusDeclared;
+		const materialQuantity = this.getItemMaterialQuantity(itemData) || 1;
 		return {
 			...policy,
 			isHost: true,
-			settings: policy.settings > 0 ? policy.settings : 1,
+			settings: materialQuantity,
+			materialQuantity,
 			// A matrix does not grant a bonus of its own — the doubling IS its contribution —
 			// so `perStone` is zeroed rather than inheriting the Ioun Blade's +1.
 			grants: isBonusHost ? policy.grants : [],
@@ -36893,7 +37023,7 @@ class CharacterSheetState {
 		if (!itemData?.material?.name) return false;
 		if (!this._data?.settings?.enableMaterials) return false;
 		const material = this.getItemMaterialEntity(itemData);
-		return !!(material?.effects || []).some(fx => fx?.type === "doubleNumericProperties");
+		return this._isIounMatrixMaterial(material);
 	}
 
 	/**
@@ -37123,7 +37253,7 @@ class CharacterSheetState {
 			}
 
 			if (!stone.iounMatrixBaseBonuses) stone.iounMatrixBaseBonuses = {__hostId: hostRow.id ?? data.id};
-			for (const key of CharacterSheetState.IOUN_MATRIX_DOUBLED_PROPS) {
+			for (const key of CharacterSheetState.getIounMatrixDoubledProps()) {
 				const current = Number(stone.iounMatrixBaseBonuses[key] ?? stone[key]);
 				if (!Number.isFinite(current) || current === 0) continue;
 				if (stone.iounMatrixBaseBonuses[key] == null) stone.iounMatrixBaseBonuses[key] = current;
@@ -37191,6 +37321,8 @@ class CharacterSheetState {
 			const liveIds = new Set(this._data.inventory.map(i => i.id));
 			const hasBond = this.hasIounBond();
 			let changed = false;
+			const seatedIds = new Set();
+			const activeMatrixHostByStone = new Map();
 			for (const row of this._data.inventory) {
 				const data = row.item;
 				if (!data) continue;
@@ -37203,14 +37335,38 @@ class CharacterSheetState {
 						data._iounDataCorrected = true;
 					}
 				}
+				const policy = this.getIounHostPolicy(data);
 				const seats = data.iounSet;
 				if (Array.isArray(seats)) {
-					const kept = seats.filter(id => liveIds.has(id));
+					const kept = seats
+						.filter(id => liveIds.has(id) && !seatedIds.has(id))
+						.slice(0, policy.isHost ? policy.settings : 0);
 					if (kept.length !== seats.length) {
 						data.iounSet = kept;
 						changed = true;
 					}
+					for (const id of kept) {
+						seatedIds.add(id);
+						if (policy.isMatrix) activeMatrixHostByStone.set(id, row.id);
+					}
 				}
+			}
+
+			// A host can leave inventory before reconciliation runs. Restore captures whose
+			// owner no longer exists (or no longer seats this stone) before active matrices
+			// materialise their values again.
+			for (const row of this._data.inventory) {
+				const capture = row.item?.iounMatrixBaseBonuses;
+				if (!capture) continue;
+				if (activeMatrixHostByStone.get(row.id) === capture.__hostId) continue;
+				for (const [key, base] of Object.entries(capture)) {
+					if (key !== "__hostId") row.item[key] = base;
+				}
+				row.item.iounMatrixBaseBonuses = null;
+				changed = true;
+			}
+
+			for (const row of this._data.inventory) {
 				this._recomputeIounHostBonuses(row);
 				this._recomputeIounMatrixDoubling(row);
 				this._recomputeIounHostAttunement(row, hasBond);
@@ -38794,7 +38950,11 @@ class CharacterSheetState {
 				showAllOptFeatureVersions: false,
 			});
 		}
+		const previous = this._data.settings[key];
 		this._data.settings[key] = value;
+		if (key === "enableMaterials" && previous !== value && (value === false || this._itemMaterialCatalog?.length)) {
+			this._onItemMaterialChanged();
+		}
 	}
 
 	/** Whether the optional top-level "Abilities" tab is shown (default false). */
@@ -45880,6 +46040,8 @@ class CharacterSheetState {
 		// that failed against a *populated* catalog is a genuine fault and is deliberately kept:
 		// installing another catalog is not evidence that a mis-sourced name became correct.
 		globalThis.CharacterSheetMaterials?.clearUnresolvedReferences?.({onlyCatalogless: true});
+		this._migrateIounMatrixMaterialQuantities();
+		this.reconcileIounHosts();
 
 		// A brew can install *after* a character is already loaded, and every material modifier
 		// computed before that point was computed against an empty catalog -- i.e. against
@@ -45888,6 +46050,24 @@ class CharacterSheetState {
 		// because from the inventory's point of view nothing changed.
 		if (previousSize !== this._itemMaterialCatalog.length && this._data?.inventory?.length) {
 			this._recalculateEquipmentModifiers();
+		}
+	}
+
+	_migrateIounMatrixMaterialQuantities () {
+		for (const row of this._data?.inventory || []) {
+			const item = row.item;
+			if (!item?.material?.name) continue;
+			const material = this.getItemMaterialEntity(item);
+			if (!this._isIounMatrixMaterial(material)) continue;
+			if (!CharacterSheetState._isValidIounMaterialQuantity(item.material.quantity)) {
+				item.material.quantity = CharacterSheetState._isValidIounMaterialQuantity(item.iounSettings)
+					? Number(item.iounSettings)
+					: 1;
+			}
+			// Before quantity existed, the generic override field was the documented way to
+			// size a matrix. Retire that legacy control after adopting it, or removing Ioun
+			// Sand would leave a phantom generic host with the old matrix seats.
+			delete item.iounSettings;
 		}
 	}
 

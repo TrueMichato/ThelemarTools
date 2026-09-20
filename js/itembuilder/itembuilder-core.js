@@ -40,6 +40,7 @@ const _materialRef = ent => {
 	if (!out) return null;
 	if (ent.role) out.role = ent.role;
 	if (ent.resonance?.name) out.resonance = _ref(ent.resonance);
+	if (Number.isSafeInteger(Number(ent.quantity)) && Number(ent.quantity) > 0) out.quantity = Number(ent.quantity);
 	return out;
 };
 const _isEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);

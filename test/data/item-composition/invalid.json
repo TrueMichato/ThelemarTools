@@ -27,6 +27,26 @@
 			}
 		},
 		{
+			"name": "material quantity is zero",
+			"value": {
+				"material": {
+					"name": "Ioun Sand",
+					"source": "TGTT",
+					"quantity": 0
+				}
+			}
+		},
+		{
+			"name": "material quantity is fractional",
+			"value": {
+				"material": {
+					"name": "Ioun Sand",
+					"source": "TGTT",
+					"quantity": 1.5
+				}
+			}
+		},
+		{
 			"name": "material contains instance state",
 			"value": {
 				"material": {

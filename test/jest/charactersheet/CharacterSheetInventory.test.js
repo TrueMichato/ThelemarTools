@@ -92,6 +92,26 @@ describe("Inventory Management", () => {
 			expect(state.getInventory()).toHaveLength(3);
 		});
 
+		it("treats incorporated material quantity as composition, not inventory stack quantity", () => {
+			state.addItem({
+				name: "Sand Matrix",
+				source: "HB",
+				quantity: 1,
+				material: {name: "Ioun Sand", source: "TGTT", quantity: 1},
+			});
+			state.addItem({
+				name: "Sand Matrix",
+				source: "HB",
+				quantity: 1,
+				material: {name: "Ioun Sand", source: "TGTT", quantity: 4},
+			});
+
+			const items = state.getInventory();
+			expect(items).toHaveLength(2);
+			expect(items.map(item => item.quantity)).toEqual([1, 1]);
+			expect(items.map(item => item.item.material.quantity)).toEqual([1, 4]);
+		});
+
 		it("stacks items with equivalent structured composition", () => {
 			const item = {
 				name: "Longsword",

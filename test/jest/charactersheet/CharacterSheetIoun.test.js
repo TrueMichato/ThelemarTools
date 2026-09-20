@@ -14,6 +14,7 @@
  */
 
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-ioun.js";
 
@@ -621,6 +622,28 @@ describe("CharacterSheetIoun — the 'Set in items' zone", () => {
 		expect(host.bonusBase).toBe(1);
 		expect(host.bonusNow).toBe(2);
 		expect(host.seated.map(s => s.id)).toEqual([stone.id]);
+	});
+
+	it("reports Ioun Sand units and matching seat capacity in the host interface", () => {
+		const {ioun, state} = makeSheet([]);
+		const iounSand = {
+			name: "Ioun Sand",
+			source: "TGTT",
+			appliesTo: ["other"],
+			effects: [{type: "doubleNumericProperties"}],
+		};
+		state.setItemMaterialCatalog([iounSand]);
+		state.addItem({name: "Sand Matrix", source: "HB", type: "W"});
+		const matrix = state.getItems().at(-1);
+		state.setItemMaterial(matrix.id, iounSand, {quantity: 4});
+
+		const host = ioun.getHostItems().find(it => it.id === matrix.id);
+		expect(host.matrixUnits).toBe(4);
+		expect(host.policy.settings).toBe(4);
+		expect(ioun._getHostRowHtml(host)).toContain("4 Ioun Sand units");
+		expect(ioun._getHostRowHtml(host)).toContain("0 / 4 set");
+		expect(CharacterSheetIoun._getSeatBenefitText(host)).toContain("structured numeric bonuses are doubled");
+		expect(CharacterSheetIoun._getSeatBenefitText(host)).not.toContain("by 0");
 	});
 
 	it("moves a stone OUT of 'In orbit' when it is set — one place at a time", () => {

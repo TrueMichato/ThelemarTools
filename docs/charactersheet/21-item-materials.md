@@ -470,10 +470,16 @@ Applying the **Ioun Sand** material to any item turns it into an Ioun host. Dete
 on the material's structured `doubleNumericProperties` effect, **never on its name**, so a
 homebrew material declaring the same effect behaves identically.
 
-`getIounHostPolicy()` gained a fifth step, but as an **overlay** rather than a fifth detection
-layer — `_applyIounMatrixOverlay()` runs on whatever the four existing layers answered, so a
-player who sizes the matrix from the ⚙ editor (`iounSettings`) still gets the doubling. An
-undeclared matrix gets **one** seat.
+The applied assignment stores a positive whole-number `material.quantity`; each unit grants
+one seat. The material picker asks for the amount before Apply and exposes it again under the
+currently applied material. This is deliberately separate from the inventory wrapper's
+stack `quantity`, so one item made with four units remains one carried item and composition
+identity prevents it from stacking with a one-unit matrix.
+
+`getIounHostPolicy()` applies `_applyIounMatrixOverlay()` on top of the four existing host
+layers, but the overlay's capacity comes from `material.quantity`. Existing quantity-less
+saves migrate to one unit, or adopt their old positive `iounSettings` count if one was used
+to size the matrix before this field existed.
 
 A matrix confers **no bonus of its own** — the doubling *is* its contribution — so the overlay
 zeroes `perStone` and empties `grants` unless the item was *already* a declared bonus-granting
@@ -495,13 +501,32 @@ moved straight from one matrix to another is re-doubled by the new matrix's own 
 double-restored.
 
 It is wired into `setIounStone`, `unsetIounStone` and the `reconcileIounHosts` loop.
-`_onItemMaterialChanged` also calls `reconcileIounHosts()`, because applying or removing Ioun
-Sand changes both the host policy and the doubling.
+`_onItemMaterialChanged` also calls `reconcileIounHosts()`, because applying, resizing,
+swapping, removing, or disabling Ioun Sand changes both the host policy and the doubling.
+Reconciliation also repairs captures whose host no longer exists, and deduplicates corrupt
+cross-host seat references.
 
-**Only the structured numeric props are doubled** — `CharacterSheetState.IOUN_MATRIX_DOUBLED_PROPS`,
-13 of them, drawn from `ITEM_SCHEMA_EFFECT_ADAPTERS`. Ranges, areas, healing and durations live
-in prose and cannot be doubled by machine; the UI tooltip says so rather than pretending
-otherwise. Zero and non-finite values are skipped.
+**Every canonical structured numeric bonus channel is doubled.**
+`CharacterSheetState.getIounMatrixDoubledProps()` derives the `bonus*` channels from
+`ITEM_SCHEMA_EFFECT_ADAPTERS`, expands the six per-ability save and check channels, and
+includes the sheet's structured `reach` range. This avoids a hand-maintained subset silently
+missing a newly supported bonus. Nonnumeric effects and inverse values such as
+`critThreshold` remain single. Prose-only ranges, areas, healing and durations remain the
+DM's call; the UI tooltip says so rather than pretending otherwise. Zero and non-finite
+values are skipped.
+
+### Capacity reductions
+
+`getIounMaterialQuantityChange()` previews a resize, including the exact stone IDs that
+would be displaced. `setItemMaterialQuantity()` rejects such a reduction unless the caller
+passes explicit confirmation. The material picker presents those stone names before
+continuing.
+
+Confirmed reductions keep the earliest-seated stones and remove from the end. Displaced
+stones are not deleted or unbonded: they remain `equipped`, which is the sheet's persisted
+"in orbit and functioning" state. Material removal and swaps use the same preflight. Directly
+disabling material mechanics empties the matrix and returns its stones to orbit while
+restoring their pristine numeric values.
 
 ### Fragments
 
@@ -533,15 +558,20 @@ item-info modal. Nothing is automated — a geode is scenery, not gear.
 |---|---|
 | `state.isIounMatrix(itemData)` | whether the item's material grants `doubleNumericProperties` (false when materials are disabled) |
 | `CharacterSheetState.isIounFragment(itemData)` | name-based fragment test |
+| `state.getItemMaterialQuantity(itemOrId)` | incorporated matrix units, including legacy fallback |
+| `state.getIounMaterialQuantityChange(hostItemId, quantity)` | validation plus deterministic `displacedStoneIds` preview |
+| `state.setItemMaterialQuantity(hostItemId, quantity, {isAllowDisplacement})` | guarded quantity update and reconciliation |
 | `state.getIounMatrixStatus(hostItemId)` | `{isMatrix, doubled[], excluded[], props[]}` |
-| `CharacterSheetState.IOUN_MATRIX_DOUBLED_PROPS` | the frozen 13-prop list |
+| `CharacterSheetState.getIounMatrixDoubledProps()` | registry-derived numeric bonus channels |
 | `CharacterSheetMaterials._isMcRuleFormApplicable(item, rule)` | whether a form-scoped MC rule applies |
 
 ### Surfaces
 
 | Surface | Where |
 |---|---|
+| **Ioun Sand units** apply/edit control | `showMaterialPickerModal` |
 | **Matrix** badge + "a set stone's numeric properties are doubled" meta on the host row | `_getHostRowHtml` |
+| Unit count and matching `filled / total set` capacity | `_getHostRowHtml` |
 | **Doubled** / **Not doubled** badge on each seated stone | `_getStoneRowHtml` |
 | Bonus readout **suppressed** for a matrix that grants nothing | `_getHostRowHtml` (`isShowReadout`) |
 | Fragment and geode prose | `entries` on the Ioun Crystal material — item-info modal and `crafting.html` |

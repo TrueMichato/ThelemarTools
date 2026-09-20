@@ -869,15 +869,22 @@ An item may carry `material: {name, source}` — a **non-destructive reference**
   `Distilled Dragon's Blood` items with `usesPerCasting` 1–4. Do not rebuild them.
 - **Ioun Sand makes any item an Ioun host**, detected by the material's structured
   `doubleNumericProperties` effect (never by name). `getIounHostPolicy` applies
-  `_applyIounMatrixOverlay` *on top of* its four detection layers, so sizing a matrix from
-  the ⚙ editor still doubles. A matrix grants no bonus of its own — `perStone` is zeroed and
-  `grants` emptied unless the base layer reported `isBonusDeclared`.
+  `_applyIounMatrixOverlay` *on top of* its four detection layers. Matrix capacity is the
+  positive whole-number `item.material.quantity`: one incorporated unit is one seat. This is
+  composition data, not inventory stack quantity. Quantity-less saves migrate to one, or
+  adopt a legacy positive `iounSettings` count. A matrix grants no bonus of its own —
+  `perStone` is zeroed and `grants` emptied unless the base layer reported
+  `isBonusDeclared`.
 - **The doubling is materialised onto the stone row**, mirroring `_recomputeIounHostBonuses`:
   `_recomputeIounMatrixDoubling` captures pristine values in `stone.iounMatrixBaseBonuses`
   (with a `__hostId` key so only the responsible host unwinds it) and always reads *from* the
-  capture, so it is idempotent. Only the 13 props in
-  `CharacterSheetState.IOUN_MATRIX_DOUBLED_PROPS` are doubled; prose ranges/areas/durations
-  are the DM's call.
+  capture, so it is idempotent. `getIounMatrixDoubledProps()` derives every `bonus*` channel
+  from `ITEM_SCHEMA_EFFECT_ADAPTERS`, expands per-ability saves/checks, and includes
+  structured `reach`; nonnumeric effects and inverse thresholds remain single.
+- **Capacity reductions are previewed and confirmed.** Newest seats are displaced first;
+  their stones remain bonded and functioning in orbit. Removing/swapping the material uses
+  the same preflight. Reconciliation restores orphan captures, deduplicates cross-host seat
+  references, and is rerun after load, late catalog arrival, and material-setting changes.
 - **`CharacterSheetState.isIounFragment` is name-based and load-bearing in exactly two
   places**: a matrix never doubles a fragment, and Ioun Crystal's `freeEffect` MC rule belongs
   to fragments alone (enforced generally by

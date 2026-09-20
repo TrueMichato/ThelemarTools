@@ -55,4 +55,29 @@ describe("Item Builder character-sheet compatibility", () => {
 		expect(roundTripped.socketedGemstones[0]).toEqual(expect.objectContaining({name: "Journey", source: "TGTT"}));
 		expect(roundTripped.effects || []).not.toContainEqual(expect.objectContaining({type: "speedBonus"}));
 	});
+
+	test("round-trips Ioun Sand incorporated quantity as composition rather than inventory count", () => {
+		const iounSand = {
+			name: "Ioun Sand",
+			source: "TGTT",
+			appliesTo: ["other"],
+			effects: [{type: "doubleNumericProperties"}],
+		};
+		const draft = ItemBuilderCore.createDraft({source: "HB"});
+		draft.item = {name: "Sand Matrix", source: "HB", type: "W", entries: []};
+		draft.material = {name: "Ioun Sand", source: "TGTT", quantity: 4};
+		const item = ItemBuilderCore.serialize(draft, {materials: [iounSand]});
+
+		const state = new CharacterSheetState();
+		state.setItemMaterialCatalog([iounSand]);
+		state.addItem(item, 1, false, false);
+		const added = state.getItems()[0];
+
+		expect(added.quantity).toBe(1);
+		expect(added.material.quantity).toBe(4);
+		expect(state.getIounHostPolicy(added).settings).toBe(4);
+
+		const restored = ItemBuilderCore.fromItem(state.getItemRaw(added.id));
+		expect(ItemBuilderCore.serialize(restored, {materials: [iounSand]}).material.quantity).toBe(4);
+	});
 });

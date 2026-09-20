@@ -174,7 +174,7 @@ class CharacterSheetMaterials {
 		armorDexCapDelta: {consumer: "projection", note: "Adjusts the Dex cap."},
 		rangeMultiplier: {consumer: "projection", note: "Multiplies weapon range."},
 		thrownRangeDelta: {consumer: "projection", note: "Adjusts thrown range."},
-		doubleNumericProperties: {consumer: "reference", note: "Ioun Sand doubles properties granted by an intact Ioun Stone SET IN THE MATRIX — explicitly not ordinary enchantments or loose fragments. The sheet models Ioun Stones as their own subsystem, not as material sockets, so which numbers qualify is a table call."},
+		doubleNumericProperties: {consumer: "modifier", note: "Ioun Sand doubles every structured numeric bonus granted by an intact Ioun Stone set in the matrix; prose-only quantities remain a table call."},
 		penetrationIgnoresMagicalAc: {consumer: "projection", note: "Penetration applies against magical AC."},
 
 		// --- modifier: reaches a derived stat ---
@@ -1818,6 +1818,24 @@ class CharacterSheetMaterials {
 		return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 	}
 
+	static usesVariableQuantity (material) {
+		return !!(material?.effects || []).some(fx => fx?.type === "doubleNumericProperties");
+	}
+
+	static getMaterialQuantityControlHtml ({material, quantity = 1, isApplied = false} = {}) {
+		if (!CharacterSheetMaterials.usesVariableQuantity(material)) return "";
+		const normalized = Number.isSafeInteger(Number(quantity)) && Number(quantity) > 0 ? Number(quantity) : 1;
+		return `
+			<div class="charsheet__material-quantity-control">
+				<label class="charsheet__material-quantity-label">
+					<span><strong>Ioun Sand units</strong><span class="ve-muted ve-small">Each unit adds one Ioun Stone seat.</span></span>
+					<input type="number" min="1" step="1" inputmode="numeric" class="form-control input-xs charsheet__material-quantity" value="${CharacterSheetMaterials._esc(normalized)}" aria-label="Ioun Sand units incorporated">
+				</label>
+				${isApplied ? `<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__material-quantity-save">Update amount</button>` : ""}
+			</div>
+		`;
+	}
+
 	static _getMaterialRuleHelpHtml (key, label) {
 		const rule = Parser.ITEM_MATERIAL_RULE_BY_KEY[key];
 		if (!rule) return CharacterSheetMaterials._esc(label);
@@ -1893,6 +1911,22 @@ class CharacterSheetMaterials {
 		});
 
 		const content = e_({outer: `<div class="charsheet__material-modal"></div>`});
+		const getQuantityFrom = (parent, fallback = 1) => {
+			const raw = Number(parent?.querySelector?.(".charsheet__material-quantity")?.value ?? fallback);
+			return Number.isSafeInteger(raw) && raw > 0 ? raw : null;
+		};
+		const pConfirmDisplacement = async (change, actionLabel) => {
+			if (!change?.displacedStoneIds?.length) return true;
+			const names = change.displacedStoneIds
+				.map(id => this._state.getItemRaw?.(id)?.name)
+				.filter(Boolean);
+			return InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: `${actionLabel}?`,
+				htmlDescription: `<p>This reduces the matrix below its current occupancy. The newest ${change.displacedStoneIds.length === 1 ? "stone" : `${change.displacedStoneIds.length} stones`} will be removed from the matrix and left bonded and functioning in orbit.</p>${names.length ? `<p class="ve-muted ve-small">${names.map(esc).join(", ")}</p>` : ""}`,
+				textYes: actionLabel,
+				textNo: "Cancel",
+			}));
+		};
 
 		// --- Currently applied ---
 		const currentSection = e_({outer: `<div class="charsheet__material-current mb-3"></div>`});
@@ -1922,6 +1956,13 @@ class CharacterSheetMaterials {
 					</div>
 				</div>
 			`}));
+			if (CharacterSheetMaterials.usesVariableQuantity(mat)) {
+				currentSection.append(e_({outer: CharacterSheetMaterials.getMaterialQuantityControlHtml({
+					material: mat,
+					quantity: this._state.getItemMaterialQuantity?.(itemId) || 1,
+					isApplied: true,
+				})}));
+			}
 
 			// A condensate's affinity applies in exactly one role, and only a weapon is genuinely
 			// ambiguous about which role it is — so the selector appears only when there is a real
@@ -2089,6 +2130,9 @@ class CharacterSheetMaterials {
 							${risk.repair ? ` ${esc(risk.repair)}` : " This cannot be undone."}
 						</p>`
 					: "";
+				const quantityHtml = !isApplied
+					? CharacterSheetMaterials.getMaterialQuantityControlHtml({material: mat, quantity: 1})
+					: "";
 				return e_({outer: `
 					<div class="charsheet__material-detail">
 						${riskHtml}
@@ -2097,6 +2141,7 @@ class CharacterSheetMaterials {
 		: `<div class="ve-muted ve-small">No numeric changes to this item.</div>`}
 						${notes.length ? `<ul class="ve-small mt-1 mb-0">${notes.map(n => `<li><strong>${esc(n.label)}.</strong> ${esc(n.description)}</li>`).join("")}</ul>` : ""}
 						${mcHtml}
+						${quantityHtml}
 						<div class="charsheet__material-detail-actions">
 							${isApplied
 		// A disabled "Applied" button here would just repeat the pill on the row
@@ -2267,13 +2312,56 @@ class CharacterSheetMaterials {
 		modalInner.append(footer);
 		footer.querySelector("button").addEventListener("click", () => doClose(false));
 
-		content.addEventListener("click", (evt) => {
+		content.addEventListener("click", async (evt) => {
+			const quantitySaveBtn = evt.target.closest(".charsheet__material-quantity-save");
+			if (quantitySaveBtn) {
+				const quantity = getQuantityFrom(quantitySaveBtn.closest(".charsheet__material-quantity-control"));
+				if (quantity == null) {
+					JqueryUtil.doToast({type: "danger", content: "Ioun Sand units must be a positive whole number."});
+					return;
+				}
+				const preview = this._state.getIounMaterialQuantityChange?.(itemId, quantity);
+				if (!preview?.success) {
+					JqueryUtil.doToast({type: "danger", content: preview?.error || "Could not update the Ioun Sand amount."});
+					return;
+				}
+				if (!await pConfirmDisplacement(preview, "Update Ioun Sand")) return;
+				const result = this._state.setItemMaterialQuantity(itemId, quantity, {isAllowDisplacement: true});
+				if (!result.success) {
+					JqueryUtil.doToast({type: "danger", content: result.error || "Could not update the Ioun Sand amount."});
+					return;
+				}
+				this._page.saveCharacter?.();
+				this._page.renderCharacter?.();
+				renderCurrent();
+				renderPreview();
+				JqueryUtil.doToast({
+					type: "success",
+					content: `Ioun Sand updated to ${quantity} unit${quantity === 1 ? "" : "s"}${result.displacedStoneIds.length ? `; ${result.displacedStoneIds.length} stone${result.displacedStoneIds.length === 1 ? "" : "s"} moved into orbit` : ""}.`,
+				});
+				return;
+			}
+
 			const applyBtn = evt.target.closest(".charsheet__material-apply");
 			if (applyBtn) {
 				const mat = eligible[Number(applyBtn.dataset.materialIdx)];
 				if (!mat) return;
+				const quantity = CharacterSheetMaterials.usesVariableQuantity(mat)
+					? getQuantityFrom(applyBtn.closest(".charsheet__material-detail"))
+					: null;
+				if (CharacterSheetMaterials.usesVariableQuantity(mat) && quantity == null) {
+					JqueryUtil.doToast({type: "danger", content: "Ioun Sand units must be a positive whole number."});
+					return;
+				}
 				const prior = this._state.getItemRaw?.(itemId)?.material || null;
-				this._state.setItemMaterial(itemId, mat);
+				const assignment = quantity == null ? null : {quantity};
+				const previewAssignment = {name: mat.name, source: mat.source || "TGTT", ...(assignment || {})};
+				const preview = this._state.getIounMaterialAssignmentChange?.(itemId, previewAssignment);
+				if (!await pConfirmDisplacement(preview, `Apply ${mat.name}`)) return;
+				if (!this._state.setItemMaterial(itemId, mat, {...(assignment || {}), isAllowIounDisplacement: true})) {
+					JqueryUtil.doToast({type: "danger", content: `Could not apply ${mat.name}.`});
+					return;
+				}
 				this._page.saveCharacter?.();
 				this._page.renderCharacter?.();
 				doClose(true);
@@ -2283,7 +2371,9 @@ class CharacterSheetMaterials {
 
 			if (evt.target.closest(".charsheet__material-clear")) {
 				const prior = this._state.getItemRaw?.(itemId)?.material || null;
-				this._state.clearItemMaterial(itemId);
+				const preview = this._state.getIounMaterialAssignmentChange?.(itemId, null);
+				if (!await pConfirmDisplacement(preview, "Remove material")) return;
+				if (!this._state.clearItemMaterial(itemId, {isAllowIounDisplacement: true})) return;
 				this._page.saveCharacter?.();
 				this._page.renderCharacter?.();
 				renderCurrent();
@@ -2326,10 +2416,20 @@ class CharacterSheetMaterials {
 			</div>
 		`});
 
-		content.addEventListener("click", (evt) => {
+		content.addEventListener("click", async (evt) => {
 			if (!evt.target.closest(".charsheet__material-undo")) return;
-			if (prior?.name) this._state.setItemMaterial(itemId, prior);
-			else this._state.clearItemMaterial(itemId);
+			const preview = this._state.getIounMaterialAssignmentChange?.(itemId, prior?.name ? prior : null);
+			if (preview?.displacedStoneIds?.length) {
+				const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+					title: `Revert to ${back}?`,
+					htmlDescription: `<p>This will move ${preview.displacedStoneIds.length} seated stone${preview.displacedStoneIds.length === 1 ? "" : "s"} out of the matrix. They remain bonded and functioning in orbit.</p>`,
+					textYes: "Revert",
+					textNo: "Cancel",
+				}));
+				if (!confirmed) return;
+			}
+			if (prior?.name) this._state.setItemMaterial(itemId, prior, {isAllowIounDisplacement: true});
+			else this._state.clearItemMaterial(itemId, {isAllowIounDisplacement: true});
 			this._page.saveCharacter?.();
 			this._page.renderCharacter?.();
 			// The host toast dismisses itself on any click inside it, so there is no
