@@ -47,10 +47,8 @@ class CharacterSheetRespecEngine {
 			page: this._page,
 			state: this._candidateState,
 		});
-		this._candidateState.initializeProgressionOwnership(this._originalManifest);
-		this._candidateState.reconcileProgressionOwnership(this._originalManifest);
 		this._manifest = this._originalManifest;
-		this._candidateState.setProgressionManifest(this._manifest);
+		this._persistManifest();
 		return this._candidateState;
 	}
 
@@ -68,10 +66,22 @@ class CharacterSheetRespecEngine {
 			page: this._page,
 			state: this._candidateState,
 		});
+		this._persistManifest();
+		return this._manifest;
+	}
+
+	_persistManifest () {
+		if (!this._candidateState || !this._manifest) return false;
+		// A degraded level has no decisions, so persisting it would erase the saved
+		// ledger and release progression-owned values before catalogs finish loading.
+		const hasIncompleteClassDiscovery = (this._manifest.issues || [])
+			.some(issue => issue.code === "missing-class-data")
+			|| (this._manifest.levels || []).some(level => !level.classData);
+		if (hasIncompleteClassDiscovery) return false;
 		this._candidateState.initializeProgressionOwnership?.(this._manifest);
 		this._candidateState.reconcileProgressionOwnership?.(this._manifest);
 		this._candidateState.setProgressionManifest(this._manifest);
-		return this._manifest;
+		return true;
 	}
 
 	markDirty () {

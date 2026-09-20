@@ -108,4 +108,36 @@ describe("CharacterSheetRespecEngine", () => {
 		expect(engine.syncCleanDraft()).toBe(false);
 		expect(engine.state).toBe(dirtyDraft);
 	});
+
+	it("preserves ledger ownership through an incomplete-to-complete manifest transition", async () => {
+		state.addSkillProficiency("athletics");
+		const skillDecision = state.getLevelHistoryEntry(1).decisions.find(decision => decision.type === "skills");
+		state.claimProgressionOwnership("skills", "athletics", skillDecision.semanticKey);
+		state._data.progressionOwnership.initialized = true;
+		expect(state.loadFromJson(state.toJson())).not.toBe(false);
+		const originalSnapshot = state.toJson();
+		page.getClasses = () => [];
+
+		engine.begin();
+		engine.refreshManifest();
+
+		expect(engine.manifest.issues).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "missing-class-data"}),
+		]));
+		expect(engine.state.toJson()).toEqual(originalSnapshot);
+		expect(engine.state.getSkillProficiency("athletics")).toBe(1);
+
+		page.getClasses = () => [classData];
+		engine.refreshManifest();
+		await engine.apply();
+
+		expect(state.getSkillProficiency("athletics")).toBe(1);
+		expect(state.getLevelHistoryEntry(1)).toMatchObject({
+			choices: {skills: ["athletics"]},
+			manifestComplete: true,
+			decisions: expect.arrayContaining([
+				expect.objectContaining({type: "skills", status: "resolved", selection: ["athletics"]}),
+			]),
+		});
+	});
 });

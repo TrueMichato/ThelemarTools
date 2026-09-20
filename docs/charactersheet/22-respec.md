@@ -50,6 +50,11 @@ Legal option catalogs exist only on the in-memory manifest. They are re-derived
 when Respec opens and are not serialized into `levelHistory`, preventing full
 spell, feat, and feature entities from inflating character saves.
 
+Manifest discovery must be complete before it replaces the saved ledger. If
+class data is temporarily unavailable, Respec may report the discovery error,
+but it preserves the existing decisions and `manifestComplete` state rather
+than treating an empty degraded manifest as authoritative.
+
 Every decision family must be registered in
 `CharacterSheetProgression.DECISION_ADAPTERS`. The adapter declares its
 discovery source, editor, validation contract, mechanics handler, and
@@ -135,6 +140,11 @@ Replacing that feat reverses the receipt before applying the new feat. Old saves
 which predate receipts still use the conservative legacy reversal path; fixed
 or overlapping grants from those old feats may require manual review when they
 are replaced.
+
+Feat sub-choice controls in Respec run against the isolated candidate state.
+The selected ability and other sub-choices are stored on the candidate feat,
+and its exact effect receipt is committed atomically with the resolved
+progression decision.
 
 Non-Epic-Boon `featProgression` grants, such as Fighting Styles, are also
 manifest decisions. A skipped grant can be created later, and replacements use
