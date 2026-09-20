@@ -754,6 +754,23 @@ class CharacterSheetProgression {
 		return selected.length ? selected : null;
 	}
 
+	static _isLegacyUntrackedSpellProgression ({className, classSource, history, spellPool}) {
+		if (Object.values(spellPool || {}).some(spells => spells?.length)) return false;
+		const classUid = CharacterSheetProgression.getClassUid(className, classSource);
+		const classHistory = (history || []).filter(entry =>
+			CharacterSheetProgression.getClassUid(entry?.class) === classUid,
+		);
+		if (!classHistory.length) return false;
+
+		const acquisitionTypes = new Set(["spellbookSpells", "knownSpells", "cantrips", "preparedSpells", "preparedCantrips"]);
+		const storedDecisions = classHistory
+			.flatMap(entry => entry.decisions || [])
+			.filter(decision => acquisitionTypes.has(decision.type));
+		if (storedDecisions.some(decision => decision.selection != null)) return false;
+		if (storedDecisions.some(decision => decision.meta?.legacyUntracked)) return true;
+		return classHistory.every(entry => entry.manifestComplete !== true);
+	}
+
 	static _getExistingSelection ({storedPool, semanticKey, history, type, sourceKey, slot, fallback = null, fallbackStatus = "ambiguous"}) {
 		const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
 		if (exact) return {selection: CharacterSheetProgression._copy(exact.selection), status: exact.status};
@@ -876,6 +893,12 @@ class CharacterSheetProgression {
 			const levelDecisionsStart = decisions.length;
 			const classUid = CharacterSheetProgression.getClassUid(classData);
 			const spellPool = spellPools.get(CharacterSheetProgression._normalize(classData.name)) || null;
+			const isLegacyUntrackedSpellProgression = CharacterSheetProgression._isLegacyUntrackedSpellProgression({
+				className: classData.name,
+				classSource: classData.source,
+				history: normalizedHistory,
+				spellPool,
+			});
 			const allSpellOptions = page?.getFilteredSpellData?.() || page?.getSpells?.() || [];
 			const getLegalSpellOptions = maxSpellLevel => allSpellOptions.filter(spell => {
 				if (!Number.isFinite(Number(spell.level))) return false;
@@ -1242,11 +1265,15 @@ class CharacterSheetProgression {
 					type: "spellbookSpells",
 					label: levelInfo.classLevel === 1 ? "Starting Spellbook" : "Spellbook Additions",
 					sourceKey: "wizard-spellbook",
+					required: !isLegacyUntrackedSpellProgression,
 					count: spellbookCount,
 					options: getLegalSpellOptions(maxSpellLevel),
 					fallbackSelection: fallback,
 					fallbackStatus: "resolved",
-					meta: {maxSpellLevel},
+					meta: {
+						maxSpellLevel,
+						...(isLegacyUntrackedSpellProgression ? {legacyUntracked: true} : {}),
+					},
 				});
 			}
 
@@ -1264,11 +1291,15 @@ class CharacterSheetProgression {
 					type: key,
 					label: "Cantrips Known",
 					sourceKey: `${spellModel || "spell"}-cantrips`,
+					required: !isLegacyUntrackedSpellProgression,
 					count: cantripGain,
 					options: getLegalSpellOptions(0),
 					fallbackSelection: fallback,
 					fallbackStatus: "resolved",
-					meta: {maxSpellLevel: 0},
+					meta: {
+						maxSpellLevel: 0,
+						...(isLegacyUntrackedSpellProgression ? {legacyUntracked: true} : {}),
+					},
 				});
 			}
 
@@ -1285,11 +1316,15 @@ class CharacterSheetProgression {
 						type: "knownSpells",
 						label: "Spells Known",
 						sourceKey: "known-spells",
+						required: !isLegacyUntrackedSpellProgression,
 						count,
 						options: getLegalSpellOptions(maxSpellLevel),
 						fallbackSelection: fallback,
 						fallbackStatus: "resolved",
-						meta: {maxSpellLevel},
+						meta: {
+							maxSpellLevel,
+							...(isLegacyUntrackedSpellProgression ? {legacyUntracked: true} : {}),
+						},
 					});
 				}
 			}
@@ -1305,11 +1340,15 @@ class CharacterSheetProgression {
 						type: "preparedSpells",
 						label: "Permanent Prepared Spells",
 						sourceKey: "prepared-spells",
+						required: !isLegacyUntrackedSpellProgression,
 						count,
 						options: getLegalSpellOptions(maxSpellLevel),
 						fallbackSelection: fallback,
 						fallbackStatus: "resolved",
-						meta: {maxSpellLevel},
+						meta: {
+							maxSpellLevel,
+							...(isLegacyUntrackedSpellProgression ? {legacyUntracked: true} : {}),
+						},
 					});
 				}
 			}

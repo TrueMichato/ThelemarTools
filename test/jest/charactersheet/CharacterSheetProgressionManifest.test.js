@@ -193,8 +193,8 @@ describe("CharacterSheetProgression manifest", () => {
 	it("derives Wizard spellbook/cantrip and prepared-caster permanent spell opportunities", () => {
 		const page = getPage();
 		const wizardHistory = [
-			{level: 1, class: {name: "Wizard", source: "XPHB"}, choices: {}, complete: true},
-			{level: 2, class: {name: "Wizard", source: "XPHB"}, choices: {}, complete: true},
+			{level: 1, class: {name: "Wizard", source: "XPHB"}, choices: {}, complete: true, manifestComplete: true},
+			{level: 2, class: {name: "Wizard", source: "XPHB"}, choices: {}, complete: true, manifestComplete: true},
 		];
 		const wizardState = getState({
 			classes: [{name: "Wizard", source: "XPHB", level: 2}],
@@ -215,8 +215,8 @@ describe("CharacterSheetProgression manifest", () => {
 			state: getState({
 				classes: [{name: "Cleric", source: "XPHB", level: 2}],
 				history: [
-					{level: 1, class: {name: "Cleric", source: "XPHB"}, choices: {}, complete: true},
-					{level: 2, class: {name: "Cleric", source: "XPHB"}, choices: {}, complete: true},
+					{level: 1, class: {name: "Cleric", source: "XPHB"}, choices: {}, complete: true, manifestComplete: true},
+					{level: 2, class: {name: "Cleric", source: "XPHB"}, choices: {}, complete: true, manifestComplete: true},
 				],
 			}),
 		});
@@ -224,6 +224,47 @@ describe("CharacterSheetProgression manifest", () => {
 			expect.objectContaining({type: "preparedSpells", characterLevel: 1, count: 4, status: "missing"}),
 			expect.objectContaining({type: "preparedSpells", characterLevel: 2, count: 1, status: "missing"}),
 		]));
+	});
+
+	it("defers only wholly untracked legacy spell progressions", () => {
+		const bard = {
+			name: "Bard",
+			source: "TGTT",
+			hd: {faces: 8},
+			casterProgression: "full",
+			spellcastingAbility: "cha",
+			cantripProgression: [2, 2],
+			preparedSpellsProgression: [4, 5],
+			classFeatures: [],
+		};
+		const page = getPage({classes: [bard], classFeatures: []});
+		const legacyState = getState({
+			classes: [{name: "Bard", source: "TGTT", level: 2}],
+			history: [
+				{level: 1, class: {name: "Bard", source: "TGTT"}, choices: {}},
+				{level: 2, class: {name: "Bard", source: "TGTT"}, choices: {}},
+			],
+			spellcastingAbility: "cha",
+		});
+
+		const legacyManifest = CharacterSheetProgression.buildManifest({page, state: legacyState});
+		const deferred = legacyManifest.decisions.filter(it => ["knownSpells", "cantrips"].includes(it.type));
+		expect(deferred).not.toHaveLength(0);
+		expect(deferred.every(decision =>
+			decision.required === false
+				&& decision.status === "deferred"
+				&& decision.meta?.legacyUntracked === true,
+		)).toBe(true);
+
+		const partiallyTrackedState = getState({
+			classes: [{name: "Bard", source: "TGTT", level: 2}],
+			history: legacyState.getLevelHistory(),
+			cantrips: [{name: "Vicious Mockery", source: "XPHB", level: 0, sourceClass: "Bard"}],
+			spellcastingAbility: "cha",
+		});
+		const partiallyTracked = CharacterSheetProgression.buildManifest({page, state: partiallyTrackedState});
+		expect(partiallyTracked.decisions.filter(it => it.type === "knownSpells"))
+			.toEqual(expect.arrayContaining([expect.objectContaining({required: true, status: "missing"})]));
 	});
 
 	it("reconstructs a legal aggregate spell history for a single legacy caster", () => {

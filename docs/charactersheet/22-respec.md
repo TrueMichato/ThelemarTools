@@ -71,6 +71,13 @@ Old saves are normalized on load.
 - Legacy spells on a single spellcasting class are assigned across acquisition
   levels as an aggregate legal set. Lower-level spells are assigned first and
   every resulting level must satisfy the spell-level and class-list rules.
+- A pre-manifest character with no tracked class spells or cantrips is treated
+  as having left spell tracking unused. Its historical spell-acquisition rows
+  remain explicitly deferred instead of blocking an unrelated Respec. The
+  deferred marker is persisted so reopening Respec remains stable.
+- This exception applies only to wholly untracked legacy spell progression.
+  Once any class spell or cantrip is present, incomplete or illegal aggregate
+  selections remain required repair items.
 - Uncertain values remain `ambiguous`; Respec does not invent a historical
   choice.
 - Values with no recorded progression source are preserved rather than removed.
@@ -196,7 +203,9 @@ automatically. If real choices are missing, Review groups all unresolved spell
 decisions into one repair item. The spell-repair flow walks them in acquisition
 order, prevents assigning the same permanent spell to two levels, and keeps
 partially completed work in the candidate when the player chooses **Finish
-later**.
+later**. Pre-manifest characters which never used class spell tracking retain
+those empty spell rows as deferred; they are not forced to invent twenty levels
+of historical spell picks before applying an unrelated change.
 
 ## Tests
 

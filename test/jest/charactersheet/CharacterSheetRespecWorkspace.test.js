@@ -407,7 +407,7 @@ describe("CharacterSheetRespec workspace", () => {
 		expect(respec._state.getFeats().map(it => it.name)).toEqual(["Resilient Constitution"]);
 	});
 
-	it("persists a legacy level-19 Epic Boon choice and receipt through Apply, reload, refresh, and reopen", async () => {
+	it("commits a legacy level-19 Epic Boon from an untracked-spell save through Apply, reload, refresh, and reopen", async () => {
 		const jester = {
 			name: "College of Jesters",
 			shortName: "Jesters",
@@ -417,8 +417,10 @@ describe("CharacterSheetRespec workspace", () => {
 			name: "Bard",
 			source: "TGTT",
 			hd: {number: 1, faces: 8},
-			cantripProgression: Array(20).fill(0),
-			spellsKnownProgression: Array(20).fill(0),
+			spellcastingAbility: "cha",
+			casterProgression: "full",
+			cantripProgression: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+			preparedSpellsProgression: [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22],
 			classFeatures: [
 				{classFeature: "Bard Subclass|Bard|XPHB|3", gainSubclassFeature: true},
 				"Epic Boon|Bard|XPHB|19",
@@ -431,12 +433,12 @@ describe("CharacterSheetRespec workspace", () => {
 			name: "Boon of Spell Recall",
 			source: "XPHB",
 			category: "EB",
-			ability: [{choose: {from: ["cha"], amount: 1}, max: 30}],
+			ability: [{choose: {from: ["int", "wis", "cha"], amount: 1}, max: 30}],
 			entries: [],
 		};
 		state = new CharacterSheetState();
-		state.setAbilityBase("con", 14);
-		state.setAbilityBase("cha", 18);
+		state.setAbilityBase("con", 15);
+		state.setAbilityBase("int", 10);
 		state.addClass({...bard, level: 20, subclass: jester});
 		state.addFeat(alert);
 		for (let level = 1; level <= 20; ++level) {
@@ -468,22 +470,26 @@ describe("CharacterSheetRespec workspace", () => {
 
 		const decision = respec._engine.manifest.decisions.find(it => it.type === "feat" && it.characterLevel === 19);
 		expect(decision).toMatchObject({status: "invalid", selection: {legacyAsi: {con: 2}}});
+		expect(respec._engine.manifest.decisions.filter(it => ["knownSpells", "cantrips"].includes(it.type)))
+			.toEqual(expect.arrayContaining([
+				expect.objectContaining({required: false, status: "deferred", meta: expect.objectContaining({legacyUntracked: true})}),
+			]));
 		expect(respec._applyImprovementChange(decision, {
 			mode: "feat",
 			feat: boon,
-			featChoices: {ability: "cha"},
+			featChoices: {ability: "int"},
 		})).toBe(true);
 		expect(respec._engine.getValidation().errors).toEqual([]);
 
 		await respec._engine.apply();
 
-		expect(state.getAbilityBase("con")).toBe(12);
-		expect(state.getAbilityBase("cha")).toBe(19);
+		expect(state.getAbilityBase("con")).toBe(13);
+		expect(state.getAbilityBase("int")).toBe(11);
 		expect(state.getFeats()).toEqual(expect.arrayContaining([
 			expect.objectContaining({
 				name: "Boon of Spell Recall",
-				choices: expect.objectContaining({ability: "cha"}),
-				appliedEffects: expect.objectContaining({abilityDeltas: {cha: 1}}),
+				choices: expect.objectContaining({ability: "int"}),
+				appliedEffects: expect.objectContaining({abilityDeltas: {int: 1}}),
 			}),
 		]));
 		expect(state.getLevelHistoryEntry(19)).toMatchObject({
@@ -509,13 +515,13 @@ describe("CharacterSheetRespec workspace", () => {
 			reopened._engine.refreshManifest();
 			reopened._engine.refreshManifest();
 
-			expect(reopened._state.getAbilityBase("con")).toBe(12);
-			expect(reopened._state.getAbilityBase("cha")).toBe(19);
+			expect(reopened._state.getAbilityBase("con")).toBe(13);
+			expect(reopened._state.getAbilityBase("int")).toBe(11);
 			expect(reopened._state.getFeats()).toEqual(expect.arrayContaining([
 				expect.objectContaining({
 					name: "Boon of Spell Recall",
-					choices: expect.objectContaining({ability: "cha"}),
-					appliedEffects: expect.objectContaining({abilityDeltas: {cha: 1}}),
+					choices: expect.objectContaining({ability: "int"}),
+					appliedEffects: expect.objectContaining({abilityDeltas: {int: 1}}),
 				}),
 			]));
 			expect(reopened._engine.manifest.decisions.find(it => it.type === "feat" && it.characterLevel === 19))
@@ -523,6 +529,7 @@ describe("CharacterSheetRespec workspace", () => {
 					status: "resolved",
 					selection: {name: "Boon of Spell Recall", source: "XPHB"},
 				});
+			expect(reopened._engine.getValidation().errors).toEqual([]);
 			roundTripped = reopened._state;
 		}
 	});
