@@ -631,6 +631,62 @@ describe("CharacterSheetRespec workspace", () => {
 		]));
 	});
 
+	it("binds feat spell pickers to candidate-known spells instead of live-known spells", () => {
+		const liveSpell = {name: "Live Spell", source: "XPHB", level: 1};
+		const candidateSpell = {name: "Candidate Spell", source: "XPHB", level: 1};
+		state.addSpell(liveSpell);
+		let pickerKnownSpellIds = null;
+		let pickerPoolSpellIds = null;
+		let pickerUsesCandidateSpells = false;
+		const spells = {
+			_state: state,
+			showFilteredSpellPicker (choice, onSelect) {
+				pickerKnownSpellIds = this._state.getSpells().map(spell => `${spell.name}|${spell.source}`);
+				pickerPoolSpellIds = this._page.getFilteredSpellData().map(spell => `${spell.name}|${spell.source}`);
+				pickerUsesCandidateSpells = this._page._spells === this;
+				onSelect(candidateSpell);
+			},
+		};
+		const levelUp = {
+			_state: state,
+			_page: null,
+			_renderFeatChoicesUI (feat) {
+				this._page._spells.showFilteredSpellPicker(
+					{filter: "level=1"},
+					spell => feat._featChoices.spells.push(spell),
+				);
+			},
+		};
+		const page = {
+			_state: state,
+			_levelUp: levelUp,
+			_spells: spells,
+			getFilteredSpellData () {
+				return this._state.getSpells();
+			},
+		};
+		levelUp._page = page;
+		respec = new CharacterSheetRespec({page, state});
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		respec._state.removeSpell(liveSpell.name, liveSpell.source);
+		respec._state.addSpell(candidateSpell);
+
+		const feat = {_featChoices: {spells: []}};
+		expect(respec._renderFeatChoicesForCandidate(
+			feat,
+			{spells: {spells: {count: 1, filter: "level=1"}}},
+			{},
+		)).toBe(true);
+		expect(pickerKnownSpellIds).toEqual(["Candidate Spell|XPHB"]);
+		expect(pickerPoolSpellIds).toEqual(["Candidate Spell|XPHB"]);
+		expect(pickerUsesCandidateSpells).toBe(true);
+		expect(feat._featChoices.spells).toEqual([candidateSpell]);
+		expect(spells._state).toBe(state);
+		expect(page._spells).toBe(spells);
+		expect(levelUp._state).toBe(state);
+	});
+
 	it("rejects a feat selection when the shared choice renderer fails", () => {
 		const error = new Error("renderer unavailable");
 		const page = {
