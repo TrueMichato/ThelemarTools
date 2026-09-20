@@ -419,6 +419,9 @@ describePostgres("PostgreSQL account entitlement authority", () => {
 		const statusClients = await Promise.all([store._pool.connect(), store._pool.connect()]);
 		try {
 			await Promise.all(statusClients.map(client => client.query("BEGIN")));
+			await Promise.all(statusClients.map(client =>
+				client.query(`SELECT set_config('hub.enforce_operator_guard', 'on', true)`),
+			));
 			await Promise.all([
 				statusClients[0].query(`
 					UPDATE hub.accounts
@@ -448,5 +451,44 @@ describePostgres("PostgreSQL account entitlement authority", () => {
 			WHERE id = ANY($1::uuid[])
 		`, [[operator.id, target.id]]);
 		await store.pReconcileConfiguredOperatorEntitlements({accountIds: priorOperators});
+	});
+
+	it("keeps predecessor default-off status updates compatible while current deletion protects the last operator", async () => {
+		const legacyOperator = await pCreateAccount(store, prefix, "legacy-operator");
+		await store.pReconcileConfiguredOperatorEntitlements({accountIds: [legacyOperator.id]});
+		const priorOperators = await pMakeOnlyActiveOperators(store, [legacyOperator.id]);
+		const predecessorUpdate = await store._pool.query(`
+			UPDATE hub.accounts
+			SET status = 'deletion_requested',
+				deletion_requested_at = now(),
+				purge_after = now() + interval '1 day'
+			WHERE id = $1
+			RETURNING status
+		`, [legacyOperator.id]);
+		expect(predecessorUpdate.rows[0].status).toBe("deletion_requested");
+		await expect(store._pool.query(`DELETE FROM hub.accounts WHERE id = $1`, [legacyOperator.id]))
+			.resolves.toMatchObject({rowCount: 1});
+
+		await store.pReconcileConfiguredOperatorEntitlements({accountIds: [operator.id]});
+		const currentPriorOperators = await pMakeOnlyActiveOperators(store, [operator.id]);
+		const defaultOffStore = PostgresHubStore.fromConnectionString({
+			connectionString: databaseUrl,
+			ssl: false,
+			maxConnections: 2,
+			isAccountEntitlementsEnabled: false,
+		});
+		try {
+			const freshSession = await pCreateFreshSession(defaultOffStore, operator);
+			await expect(defaultOffStore.pRequestAccountDeletion({
+				accountId: operator.id,
+				sessionId: freshSession.id,
+				idempotencyKey: crypto.randomUUID(),
+			})).rejects.toMatchObject({code: "LAST_OPERATOR_PROTECTED", status: 409});
+		} finally {
+			await defaultOffStore.pClose();
+			await store.pReconcileConfiguredOperatorEntitlements({
+				accountIds: [...priorOperators, ...currentPriorOperators],
+			});
+		}
 	});
 });

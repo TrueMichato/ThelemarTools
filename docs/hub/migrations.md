@@ -110,7 +110,12 @@ Migration 0008 is additive and ignored by the previous application. Enabling inv
 application/data compatibility boundary: keep it disabled until the stacked creator-entitlement layer and
 rollback procedure are reviewed.
 Migration 0009 is additive and previous-application-compatible: older code ignores the new table. Application
-rollback leaves it in place and turns entitlement enforcement off; there is no database down migration.
+rollback leaves it in place and turns campaign-creation enforcement off; there is no database down migration.
+The deferred trigger always protects entitlement-row revocation. Its account-status branch runs only when the
+current application sets the transaction-local operator guard, so an exact predecessor using the additive
+schema does not receive an unknown raw constraint failure. Entitlement rows removed by an account cascade are
+also exempt: current code prevents last-operator deletion before the account transition, while predecessor
+request/purge remains schema-compatible.
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
 Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0009, grants the
 runtime role, boots the production image against required version 0009, and runs semantic role/replay/

@@ -43,6 +43,12 @@
   transaction is bound to the current account, current session, operation, and concrete provider. The callback
   accepts only an identity already linked to that account, rotates the session, closes the old socket, records
   the exact identity provenance, and timestamps freshness at commit.
+- Memory and PostgreSQL revalidate transaction expiry, initiating session, account status, provider, and
+  identity/account binding after awaited work and immediately before rotation. Account deletion/cancellation
+  uses the same commit-time freshness rule even while creator-entitlement enforcement is disabled.
+- Deletion-pending sessions may start only the reauthentication flow needed for export/cancellation. Successful
+  deletion request revokes the current session, so the browser returns to sign-in rather than leaving unusable
+  account controls visible.
 - `campaign:create` and `platform:operate` are internal-account entitlements. Provider subject, email, handle,
   login, display name, and campaign membership role are never creator/operator authority. Sensitive store
   transactions recheck the <=5 minute freshness window and last-operator invariant under locks.

@@ -98,5 +98,7 @@ account's campaign sockets immediately after the authoritative transaction commi
   their operation-specific owner/role checks.
 - Account deletion-pending sessions may read session/deletion state, export, cancel deletion, or logout;
   ordinary campaign routes return `ACCOUNT_DELETION_PENDING`.
+- Account deletion request and cancellation require provider-backed reauthentication within five minutes for
+  every account, independent of creator-entitlement enforcement.
 - Account deletion-pending sessions cannot use operator routes. The last active platform operator cannot request
   deletion. Purging a non-last operator is allowed and nulls retained entitlement-audit actor references.

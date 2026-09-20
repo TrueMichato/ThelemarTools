@@ -94,6 +94,8 @@
 				<section class="hub-panel">
 					<h2 class="hub-panel__title">Account &amp; devices</h2>
 					<p class="hub-panel__description">Review signed-in devices, export your data, or schedule account deletion.</p>
+					<div id="hub-account-reauth" class="hub-button-row" role="group" aria-label="Reauthenticate your account"></div>
+					<p id="hub-account-reauth-status" class="hub-inline-status" role="status" aria-live="polite"></p>
 					<div id="hub-session-list" class="hub-data-list"></div>
 					<div class="hub-button-row">
 						<button id="hub-revoke-other-sessions" class="hub-button" type="button">Sign out other devices</button>
@@ -113,6 +115,8 @@
 				<div class="hub-state__content">
 					<h2 class="hub-state__title">Account deletion scheduled</h2>
 					<p id="hub-deletion-deadline" class="hub-state__description"></p>
+					<div id="hub-deletion-reauth" class="hub-button-row hub-button-row--centered" role="group" aria-label="Reauthenticate your account"></div>
+					<p id="hub-deletion-reauth-status" class="hub-inline-status" role="status" aria-live="polite"></p>
 					<div class="hub-button-row hub-button-row--centered">
 						<a class="hub-button" href="/api/account/export">Export account data</a>
 						<button id="hub-cancel-deletion" class="hub-button hub-button--primary" type="button">Keep my account</button>

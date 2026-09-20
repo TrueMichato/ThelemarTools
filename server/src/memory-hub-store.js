@@ -511,45 +511,62 @@ export class MemoryHubStore {
 	}) {
 		if (this._sessions.has(tokenHash)) throw new HubStoreError("SESSION_TOKEN_CONFLICT", `Session could not be created.`, {status: 409});
 		const normalizedIdentity = normalizeExternalIdentity(identity);
-		const transaction = this._oauthTransactions.get(oauthTransactionId);
-		const currentSession = [...this._sessions.values()].find(session => session.id === currentSessionId);
-		if (
-			!transaction
-			|| transaction.operation !== "reauthenticate"
-			|| transaction.provider !== normalizedIdentity.provider
-			|| !transaction.consumedAt
-			|| new Date(transaction.expiresAt) <= this._fnNow()
-			|| transaction.initiatingSessionId !== currentSessionId
-			|| !currentSession
-			|| currentSession.revokedAt
-			|| new Date(currentSession.expiresAt) <= this._fnNow()
-			|| currentSession.accountId !== transaction.initiatingAccountId
-		) throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
-		const externalIdentity = [...this._externalIdentities.values()].find(candidate => (
-			candidate.provider === normalizedIdentity.provider
-			&& candidate.subject === normalizedIdentity.subject
-		));
-		if (!externalIdentity || externalIdentity.accountId !== transaction.initiatingAccountId) {
-			throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
-		}
-		const account = this._accounts.get(transaction.initiatingAccountId);
-		if (!account || !["active", "deletion_requested"].includes(account.status)) {
-			throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
-		}
+		const getAuthority = () => {
+			const transaction = this._oauthTransactions.get(oauthTransactionId);
+			const currentSession = [...this._sessions.values()].find(session => session.id === currentSessionId);
+			const externalIdentity = [...this._externalIdentities.values()].find(candidate => (
+				candidate.provider === normalizedIdentity.provider
+				&& candidate.subject === normalizedIdentity.subject
+			));
+			const account = transaction == null ? null : this._accounts.get(transaction.initiatingAccountId);
+			if (
+				!transaction
+				|| transaction.operation !== "reauthenticate"
+				|| transaction.provider !== normalizedIdentity.provider
+				|| !transaction.consumedAt
+				|| new Date(transaction.expiresAt) <= this._fnNow()
+				|| transaction.initiatingSessionId !== currentSessionId
+				|| !currentSession
+				|| currentSession.revokedAt
+				|| new Date(currentSession.expiresAt) <= this._fnNow()
+				|| currentSession.accountId !== transaction.initiatingAccountId
+				|| !externalIdentity
+				|| externalIdentity.accountId !== transaction.initiatingAccountId
+				|| !account
+				|| !["active", "deletion_requested"].includes(account.status)
+			) throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
+			return {account, currentSession, externalIdentity};
+		};
+		getAuthority();
+		await this._pBeforeSensitiveCommit();
+		const {account, currentSession, externalIdentity} = getAuthority();
+		if (this._sessions.has(tokenHash)) throw new HubStoreError("SESSION_TOKEN_CONFLICT", `Session could not be created.`, {status: 409});
 		const now = this._fnNow();
-		const session = await this.pCreateSession({
+		const session = {
+			id: crypto.randomUUID(),
 			accountId: account.id,
 			tokenHash,
-			expiresAt,
 			userAgent,
+			createdAt: now.toISOString(),
+			lastSeenAt: now.toISOString(),
+			expiresAt,
+			revokedAt: null,
 			authenticatedViaIdentityId: externalIdentity.id,
-			recentReauthenticatedAt: now,
-		});
+			recentReauthenticatedAt: now.toISOString(),
+		};
+		session.expiresAt = session.expiresAt.toISOString();
+		this._sessions.set(tokenHash, session);
 		externalIdentity.handle = normalizedIdentity.handle;
 		externalIdentity.displayName = normalizedIdentity.displayName;
 		externalIdentity.updatedAt = now.toISOString();
 		externalIdentity.lastAuthenticatedAt = now.toISOString();
-		await this.pRevokeSession({sessionId: currentSessionId});
+		currentSession.revokedAt = now.toISOString();
+		for (const [characterId, lease] of this._characterLeases) {
+			if (lease.sessionId === currentSessionId) this._characterLeases.delete(characterId);
+		}
+		for (const [workspaceId, lease] of this._dmWorkspaceLeases) {
+			if (lease.sessionId === currentSessionId) this._dmWorkspaceLeases.delete(workspaceId);
+		}
 		return copy({
 			account,
 			identity: externalIdentity,
@@ -628,7 +645,13 @@ export class MemoryHubStore {
 				!session
 				|| session.revokedAt
 				|| new Date(session.expiresAt) <= now
-				|| this._accounts.get(initiatingAccountId)?.status !== "active"
+				|| !(
+					this._accounts.get(initiatingAccountId)?.status === "active"
+					|| (
+						operation === "reauthenticate"
+						&& this._accounts.get(initiatingAccountId)?.status === "deletion_requested"
+					)
+				)
 			) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 		}
 		const transaction = {
@@ -4618,9 +4641,6 @@ export class MemoryHubStore {
 	}
 
 	async pRequestAccountDeletion ({accountId, sessionId = null, idempotencyKey, graceMs = 7 * 24 * 60 * 60 * 1000}) {
-		if (!this._isAccountEntitlementsEnabled) {
-			return this._pRequestAccountDeletion({accountId, sessionId, idempotencyKey, graceMs});
-		}
 		return this._pWithSensitiveCommandLocks({
 			accountId,
 			idempotencyKey,
@@ -4633,19 +4653,17 @@ export class MemoryHubStore {
 		const account = this._accounts.get(accountId);
 		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
 		if (prior) {
-			if (this._isAccountEntitlementsEnabled) this._assertFreshReauthentication({accountId, sessionId});
+			this._assertFreshReauthentication({accountId, sessionId});
 			return prior;
 		}
-		if (this._isAccountEntitlementsEnabled) {
-			if (
-				this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
-				&& [...this._accounts.values()].filter(current => (
-					current.status === "active"
-					&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
-				)).length <= 1
-			) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
-			this._assertFreshReauthentication({accountId, sessionId});
-		}
+		if (
+			this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+			&& [...this._accounts.values()].filter(current => (
+				current.status === "active"
+				&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+			)).length <= 1
+		) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
+		this._assertFreshReauthentication({accountId, sessionId});
 		const ownedCampaigns = [...this._campaigns.values()].filter(campaign => campaign.ownerAccountId === accountId && campaign.status === "active");
 		if (ownedCampaigns.length) {
 			throw new HubStoreError("ACCOUNT_OWNS_CAMPAIGN", `Transfer ownership or archive campaigns before deleting the account.`, {
@@ -4653,19 +4671,17 @@ export class MemoryHubStore {
 				details: {campaignIds: ownedCampaigns.map(campaign => campaign.id)},
 			});
 		}
-		if (this._isAccountEntitlementsEnabled) {
-			await this._pBeforeSensitiveCommit();
-			const concurrentPrior = this._getReceipt({accountId, idempotencyKey});
-			if (concurrentPrior) return concurrentPrior;
-			if (
-				this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
-				&& [...this._accounts.values()].filter(current => (
-					current.status === "active"
-					&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
-				)).length <= 1
-			) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
-			this._assertFreshReauthentication({accountId, sessionId});
-		}
+		await this._pBeforeSensitiveCommit();
+		const concurrentPrior = this._getReceipt({accountId, idempotencyKey});
+		if (concurrentPrior) return concurrentPrior;
+		if (
+			this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+			&& [...this._accounts.values()].filter(current => (
+				current.status === "active"
+				&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+			)).length <= 1
+		) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
+		this._assertFreshReauthentication({accountId, sessionId});
 		if (account.status !== "deletion_requested") {
 			const requestedAt = this._fnNow();
 			account.status = "deletion_requested";
@@ -4701,9 +4717,6 @@ export class MemoryHubStore {
 	}
 
 	async pCancelAccountDeletion ({accountId, sessionId = null, idempotencyKey}) {
-		if (!this._isAccountEntitlementsEnabled) {
-			return this._pCancelAccountDeletion({accountId, sessionId, idempotencyKey});
-		}
 		return this._pWithSensitiveCommandLocks({
 			accountId,
 			idempotencyKey,
@@ -4716,15 +4729,15 @@ export class MemoryHubStore {
 		const account = this._accounts.get(accountId);
 		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
 		if (prior) {
-			if (this._isAccountEntitlementsEnabled) this._assertFreshReauthentication({accountId, sessionId});
+			this._assertFreshReauthentication({accountId, sessionId});
 			return prior;
 		}
 		if (account.status !== "deletion_requested") throw new HubStoreError("ACCOUNT_DELETION_NOT_PENDING", `Account deletion is not pending.`, {status: 409});
-		if (this._isAccountEntitlementsEnabled) this._assertFreshReauthentication({accountId, sessionId});
+		this._assertFreshReauthentication({accountId, sessionId});
 		await this._pBeforeSensitiveCommit();
 		const concurrentPrior = this._getReceipt({accountId, idempotencyKey});
 		if (concurrentPrior) return concurrentPrior;
-		if (this._isAccountEntitlementsEnabled) this._assertFreshReauthentication({accountId, sessionId});
+		this._assertFreshReauthentication({accountId, sessionId});
 		account.status = "active";
 		account.deletionRequestedAt = null;
 		account.purgeAfter = null;
@@ -4899,7 +4912,7 @@ export class MemoryHubStore {
 	async pExportAccountData ({accountId, sessionId = null}) {
 		const account = this._accounts.get(accountId);
 		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
-		if (this._isAccountEntitlementsEnabled && account.status === "deletion_requested") {
+		if (account.status === "deletion_requested") {
 			this._assertFreshReauthentication({accountId, sessionId});
 		}
 		const memberships = [...this._memberships.values()].filter(it => it.accountId === accountId);

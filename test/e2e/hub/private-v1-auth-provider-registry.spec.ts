@@ -38,9 +38,11 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 test("operator reauthentication grants and revokes campaign creation through the real stack", async ({browser, page}) => {
 	const secret = process.env.HUB_TEST_AUTH_SECRET;
 	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
-	const targetDisplayName = `Creator Entitlement Target ${Date.now()}`;
+	const targetDisplayName = `Duplicate Creator Name ${Date.now()}`;
 	const targetContext = await browser.newContext({ignoreHTTPSErrors: true});
 	const targetPage = await targetContext.newPage();
+	const duplicateContext = await browser.newContext({ignoreHTTPSErrors: true});
+	const duplicatePage = await duplicateContext.newPage();
 	try {
 		const targetHub = new HubCampaignPage(targetPage);
 		const targetSession = await targetHub.signInSynthetic({
@@ -50,6 +52,13 @@ test("operator reauthentication grants and revokes campaign creation through the
 			grantCampaignCreate: false,
 		});
 		expect(targetSession.entitlements).not.toContain("campaign:create");
+		const duplicateHub = new HubCampaignPage(duplicatePage);
+		const duplicateSession = await duplicateHub.signInSynthetic({
+			providerSubject: `creator-duplicate-${Date.now()}`,
+			displayName: targetDisplayName,
+			secret,
+			grantCampaignCreate: false,
+		});
 
 		await page.goto("/hub.html");
 		await page.getByRole("link", {name: "Sign in with GitHub"}).click();
@@ -57,15 +66,22 @@ test("operator reauthentication grants and revokes campaign creation through the
 		await expect(page.locator("#hub-operator-panel")).toBeVisible();
 		await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toHaveCount(0);
 		await expect(page.getByRole("button", {name: "Reauthenticate with Google"})).toHaveCount(0);
-		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
+		await page.locator("#hub-operator-reauth").getByRole("button", {name: "Reauthenticate with GitHub"}).click();
 		await page.waitForURL(/\/hub\.html$/);
 
 		const targetRow = page.locator("#hub-operator-account-list .hub-data-row").filter({
-			hasText: targetDisplayName,
+			hasText: targetSession.account.id,
+		});
+		const duplicateRow = page.locator("#hub-operator-account-list .hub-data-row").filter({
+			hasText: duplicateSession.account.id,
 		});
 		await expect(targetRow).toBeVisible();
+		await expect(duplicateRow).toBeVisible();
+		await expect(targetRow).toContainText(targetDisplayName);
+		await expect(duplicateRow).toContainText(targetDisplayName);
 		await targetRow.getByRole("button", {name: "Grant creator"}).click();
 		await expect(targetRow.getByRole("button", {name: "Revoke creator"})).toBeVisible();
+		await expect(duplicateRow.getByRole("button", {name: "Grant creator"})).toBeVisible();
 
 		await targetPage.goto("/hub.html");
 		await expect(targetPage.locator("#hub-create-form")).toBeVisible();
@@ -109,6 +125,7 @@ test("operator reauthentication grants and revokes campaign creation through the
 		});
 	} finally {
 		await targetContext.close();
+		await duplicateContext.close();
 	}
 });
 
@@ -149,6 +166,27 @@ for (const provider of providers) {
 		expect((await page.request.get("/api/session")).json()).resolves.toEqual({signedIn: false});
 	});
 }
+
+test("ordinary accounts reauthenticate before requesting deletion", async ({page}) => {
+	await page.goto("/hub.html");
+	await page.getByRole("link", {name: "Sign in with Discord"}).click();
+	await page.waitForURL(/\/hub\.html$/);
+	await expect(page.locator("#hub-account-reauth")).toBeVisible();
+	await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toBeVisible();
+
+	page.on("dialog", dialog => dialog.accept("DELETE"));
+	await page.locator("#hub-request-deletion").click();
+	await expect(page.locator("#hub-account-reauth-status")).toContainText("Reauthentication complete");
+	await expect(page.locator("#hub-request-deletion")).toBeFocused();
+	await page.locator("#hub-request-deletion").click();
+	await page.waitForURL(/\/hub\.html\?accountAction=cancel-deletion$/);
+	await expect(page.getByRole("group", {name: "Sign-in providers"})).toBeVisible();
+	await page.getByRole("link", {name: "Sign in with Discord"}).click();
+	await expect(page.locator("#hub-account-deletion-pending")).toBeVisible();
+	await expect(page.locator("#hub-deletion-reauth-status")).toContainText("Reauthentication complete");
+	await page.locator("#hub-cancel-deletion").click();
+	await expect(page.locator("#hub-account-active")).toBeVisible();
+});
 
 test("session expiry offers only currently available sign-in providers", async ({page}) => {
 	const secret = process.env.HUB_TEST_AUTH_SECRET;

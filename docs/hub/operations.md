@@ -77,6 +77,9 @@ The process refuses to listen until PostgreSQL is reachable and the required led
 
 Rollback is application-only: set both switches false or deploy the previous compatible application. Leave
 `hub.account_entitlements` and migration 0009 in place; never down-migrate or delete entitlement rows.
+Before deploying the predecessor image, current code disables creator enforcement; predecessor account-status
+writes ignore migration 0009's transaction-marked status guard rather than surfacing a raw database constraint
+error.
 
 Before rolling back to a GitHub-only image, prove every active account still has a GitHub identity:
 
