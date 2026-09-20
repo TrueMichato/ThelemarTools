@@ -39,10 +39,11 @@
 - Sessions use random tokens stored only as SHA-256 hashes; successful reauthentication revokes the prior
   browser session. New sessions record same-account external-identity provenance without changing campaign
   authorization.
-- Invite tokens are cryptographically pseudorandom under an independent `HUB_INVITE_TOKEN_SECRET`; derivation is
-  bound to actor, campaign, idempotency key, and normalized request hash. The invite table and command receipt
-  store no raw token, while exact retries reproduce it. Invite-context and OAuth transaction row data are
-  excluded from backups.
+- Invite tokens are cryptographically pseudorandom under an independent versioned key ring. Derivation is bound
+  to actor, campaign, idempotency key, and normalized request hash. The invite table and command receipt store no
+  raw token. Exact replay tries the current key then at most three retained prior keys and returns a token only
+  when its hash matches the stored invite hash; otherwise it fails closed. Invite-context and OAuth transaction
+  row data are excluded from backups.
 - First access commits account, identity, session, membership, invite use, account/invite audit, membership event,
   and outbox atomically. Provider failure, cancellation, expiry, revocation, exhaustion, replay, a lost max-use
   race, or session-write failure commits none of them.

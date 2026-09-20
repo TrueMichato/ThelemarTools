@@ -291,10 +291,11 @@ describe("Hub invite-gated first OAuth access", () => {
 		expect(store._invites.get(getSha256(retrySeed.token)).useCount).toBe(0);
 		await store.pDeleteExpiredOAuthTransactions();
 		expect(store._oauthTransactions.has(failedTransaction.id)).toBe(true);
+		const postFailureCookieHeader = getFinalCookieHeader(failed.response, providerFailure);
 		const retry = await pRetryInvite({
 			app,
 			retryToken: failed.retryToken,
-			cookieHeader: failed.cookieHeader,
+			cookieHeader: postFailureCookieHeader,
 		});
 		expect(retry.response.statusCode).toBe(201);
 		expect((await pCallback({app, ...retry, code: "retry-player"})).statusCode).toBe(302);
@@ -313,7 +314,14 @@ describe("Hub invite-gated first OAuth access", () => {
 		const revoked = await pSeedInvite({store, now});
 		const revokedStart = await pStartInvite({app, token: revoked.token});
 		store._invites.get(getSha256(revoked.token)).revokedAt = now.toISOString();
-		expect((await pCallback({app, ...revokedStart})).json()).toEqual({error: "INVITE_ADMISSION_INVALID"});
+		const revokedCallback = await pCallback({app, ...revokedStart});
+		expect(revokedCallback.json()).toEqual({error: "INVITE_ADMISSION_INVALID"});
+		const postRevocationCookieHeader = getFinalCookieHeader(revokedStart.response, revokedCallback);
+		expect((await pRetryInvite({
+			app,
+			retryToken: revokedStart.retryToken,
+			cookieHeader: postRevocationCookieHeader,
+		})).response.json()).toEqual({error: "INVITE_ADMISSION_INVALID"});
 	});
 
 	it("keeps new-account admission default-off while existing identities remain usable", async () => {
@@ -417,6 +425,25 @@ describe("Hub invite-gated first OAuth access", () => {
 			cookieHeader: expired.cookieHeader,
 		});
 		expect(expiredRetry.response.json()).toEqual({error: "INVITE_ADMISSION_INVALID"});
+	});
+
+	it("preserves correlation through provider cancellation so retry can replace the consumed transaction", async () => {
+		const seeded = await pSeedInvite({store, now});
+		const started = await pStartInvite({app, token: seeded.token});
+		const cancelled = await app.inject({
+			method: "GET",
+			url: `/auth/github/callback?error=access_denied&state=${encodeURIComponent(started.state)}`,
+			headers: {cookie: started.cookieHeader},
+		});
+		expect(cancelled.json()).toEqual({error: "INVALID_OAUTH_STATE"});
+		const postCancellationJar = getFinalCookieHeader(started.response, cancelled);
+		const retried = await pRetryInvite({
+			app,
+			retryToken: started.retryToken,
+			cookieHeader: postCancellationJar,
+		});
+		expect(retried.response.statusCode).toBe(201);
+		expect((await pCallback({app, ...retried})).statusCode).toBe(302);
 	});
 
 	it("does not let a normal OAuth transaction consume an invite-bound context", async () => {

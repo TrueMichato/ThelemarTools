@@ -1016,7 +1016,13 @@ export class MemoryHubStore {
 
 	async pCreateInvite ({accountId, campaignId, role, tokenHash, expiresAt, maxUses, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
+		if (prior) {
+			const invite = [...this._invites.values()].find(current => current.id === prior.invite?.id);
+			if (!invite) {
+				throw new HubStoreError("INVITE_TOKEN_RECOVERY_UNAVAILABLE", `Invite token cannot be recovered.`, {status: 409});
+			}
+			return {...prior, inviteTokenHash: invite.tokenHash};
+		}
 		if (this._invites.has(tokenHash)) {
 			throw new HubStoreError("INVITE_TOKEN_CONFLICT", `Invite could not be created.`, {status: 409});
 		}
@@ -1052,7 +1058,8 @@ export class MemoryHubStore {
 			payload: {role, expiresAt: invite.expiresAt},
 		});
 		const {tokenHash: _tokenHash, ...safeInvite} = invite;
-		return this._setReceipt({accountId, idempotencyKey, response: {invite: safeInvite}});
+		const response = this._setReceipt({accountId, idempotencyKey, response: {invite: safeInvite}});
+		return {...response, inviteTokenHash: tokenHash};
 	}
 
 	async pRedeemInvite ({accountId, tokenHash, idempotencyKey}) {

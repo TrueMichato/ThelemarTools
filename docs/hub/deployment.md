@@ -121,6 +121,7 @@ resolution.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | BFF | Secret (client secret) | Google confidential web/OIDC application |
 | `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED` | BFF | No | Default `false`; enable only after the stacked r9 creator-entitlement/backfill/admin and rollback gate lands |
 | `HUB_INVITE_TOKEN_SECRET` | BFF | Yes | Independent >=32-character secret for deterministic, receipt-free raw invite recovery |
+| `HUB_INVITE_TOKEN_PREVIOUS_SECRETS` | BFF | Sensitive | Optional comma-separated prior invite-token secrets, newest first; retain for at least 24 hours and cap the total key ring at four |
 | `HUB_ALLOWED_OAUTH_SUBJECTS` | rollback preflight only | Operationally sensitive | Exact legacy target-image provider subjects; not a BFF admission setting in r9 |
 | `HUB_TRUST_PROXY` | BFF | No | Exact trusted proxy IP/CIDR; local reference uses `172.30.0.10` |
 | `HUB_CLIENT_IP_HEADER` | BFF | No | Optional provider-set client address; only `do-connecting-ip` is accepted and it is mutually exclusive with `HUB_TRUST_PROXY` |

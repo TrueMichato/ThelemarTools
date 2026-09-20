@@ -50,7 +50,10 @@ const app = await createHubApp({
 		appOrigin: requireEnv("HUB_APP_ORIGIN"),
 		cookieSecret: requireEnv("HUB_COOKIE_SECRET"),
 		csrfSecret: requireEnv("HUB_CSRF_SECRET"),
-		inviteTokenSecret: requireEnv("HUB_INVITE_TOKEN_SECRET"),
+		inviteTokenSecrets: [
+			requireEnv("HUB_INVITE_TOKEN_SECRET"),
+			...getCsv("HUB_INVITE_TOKEN_PREVIOUS_SECRETS"),
+		],
 		trustProxy: getTrustProxy(),
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
 		clientIpHeader,

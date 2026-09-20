@@ -152,9 +152,12 @@ does not understand.
 | `POST /api/invites/redeem` | Authenticated mutation, 20/min | raw token 32-500 chars | Active membership; invalid/expired/revoked/exhausted is `INVITE_INVALID` |
 
 Only the token hash is persisted. The raw token is returned only from creation.
-Tokens are derived with a dedicated independent `HUB_INVITE_TOKEN_SECRET` from actor, campaign, idempotency key,
-and normalized request hash. The invite table and command receipt persist no raw token, while an exact retry
-reconstructs the same response. List/event/log/export/backup surfaces never expose it.
+Tokens are derived with the current independent `HUB_INVITE_TOKEN_SECRET` from actor, campaign, idempotency key,
+and normalized request hash. On rotation, up to three prior keys in
+`HUB_INVITE_TOKEN_PREVIOUS_SECRETS` remain available for at least the 24-hour receipt lifetime. The invite table
+and command receipt persist no raw token; replay selects the derived candidate whose hash matches the stored
+invite hash. No match fails as `INVITE_TOKEN_RECOVERY_UNAVAILABLE` rather than returning an unusable token.
+List/event/log/export/backup surfaces never expose it.
 
 ## Character routes
 
@@ -426,7 +429,7 @@ Campaign role alone does not permit reading another DM's workspace.
 | Class | Stable codes |
 |---|---|
 | Authentication/security | `AUTH_REQUIRED`, `INVALID_ORIGIN`, `INVALID_CSRF`, `PROTOCOL_UPDATE_REQUIRED`, `ACCOUNT_UNAVAILABLE`, `ACCOUNT_DELETION_PENDING`, `FORBIDDEN` |
-| Request/idempotency | `INVALID_REQUEST`, `INVALID_ID`, `INVALID_CAMPAIGN_NAME`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_RESULT_GONE`, `PAYLOAD_TOO_LARGE`, `REQUEST_REJECTED` |
+| Request/idempotency | `INVALID_REQUEST`, `INVALID_ID`, `INVALID_CAMPAIGN_NAME`, `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_RESULT_GONE`, `INVITE_TOKEN_RECOVERY_UNAVAILABLE`, `PAYLOAD_TOO_LARGE`, `REQUEST_REJECTED` |
 | OAuth | `INVALID_OAUTH_STATE`, `INVITE_ADMISSION_REQUIRED`, `INVITE_ADMISSION_INVALID`, `INVITE_ADMISSION_UNAVAILABLE`, `AUTH_PROVIDER_UNAVAILABLE` |
 | Not found/lifecycle | `ACCOUNT_NOT_FOUND`, `SESSION_NOT_FOUND`, `CAMPAIGN_NOT_FOUND`, `MEMBERSHIP_NOT_FOUND`, `CHARACTER_NOT_FOUND`, `WORKSPACE_NOT_FOUND`, `ACTION_NOT_FOUND`, `TRANSFER_NOT_FOUND`, `BREW_NOT_FOUND`, `RULES_NOT_FOUND`, `INVITE_INVALID`, `INVITE_NOT_FOUND`, `ACCOUNT_DELETION_NOT_PENDING` |
 | Concurrency/lifecycle conflicts | `REVISION_CONFLICT`, `LEASE_HELD`, `LEASE_EXPIRED`, `LEASE_FENCED`, `CHARACTER_BUSY`, `CAMPAIGN_BUSY`, `MEMBERSHIP_OWNER_PROTECTED`, `ACCOUNT_OWNS_CAMPAIGN` |

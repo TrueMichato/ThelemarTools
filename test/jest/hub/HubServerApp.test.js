@@ -412,15 +412,35 @@ describe("campaign hub BFF", () => {
 				appOrigin: APP_ORIGIN,
 				cookieSecret: COOKIE_SECRET,
 				csrfSecret: CSRF_SECRET,
-				inviteTokenSecret: "invite-secret-at-least-thirty-two-characters",
+				inviteTokenSecrets: [
+					"new-invite-secret-at-least-thirty-two-characters",
+					"invite-secret-at-least-thirty-two-characters",
+				],
 			},
 		});
 		const retry = await app.inject(request);
+		expect(retry.statusCode).toBe(201);
 		expect(retry.json().token).toBe(first.json().token);
 		expect(JSON.stringify([...store._commandReceipts.values()])).not.toContain(first.json().token);
 		expect([...store._invites.values()][0]).toEqual(expect.objectContaining({
 			tokenHash: expect.any(String),
 		}));
+
+		await app.close();
+		app = await createHubApp({
+			store,
+			oauthProvider,
+			config: {
+				appOrigin: APP_ORIGIN,
+				cookieSecret: COOKIE_SECRET,
+				csrfSecret: CSRF_SECRET,
+				inviteTokenSecrets: ["new-invite-secret-at-least-thirty-two-characters"],
+			},
+		});
+		const missingLegacyKey = await app.inject(request);
+		expect(missingLegacyKey.statusCode).toBe(409);
+		expect(missingLegacyKey.json()).toEqual({error: "INVITE_TOKEN_RECOVERY_UNAVAILABLE"});
+		expect(missingLegacyKey.json()).not.toHaveProperty("token");
 	});
 
 	it("clears production host cookies with Secure attributes", async () => {

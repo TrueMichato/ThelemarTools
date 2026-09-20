@@ -144,6 +144,26 @@ describe("Hub durable GitHub registry flow", () => {
 		})).rejects.toThrow(/exact origin|HTTPS/);
 	});
 
+	it("rejects an empty, duplicate, oversized, or short invite-token key ring", async () => {
+		for (const inviteTokenSecrets of [
+			[],
+			["short"],
+			["a".repeat(32), "a".repeat(32)],
+			Array.from({length: 5}, (_, index) => `${index}`.repeat(32)),
+		]) {
+			await expect(createHubApp({
+				store: new MemoryHubStore(),
+				oauthProvider,
+				config: {
+					appOrigin: ORIGIN,
+					cookieSecret: "c".repeat(32),
+					csrfSecret: "s".repeat(32),
+					inviteTokenSecrets,
+				},
+			})).rejects.toThrow(/inviteTokenSecrets/);
+		}
+	});
+
 	it("rejects a validly signed legacy transaction cookie without reflecting it", async () => {
 		const legacyValue = "legacy-state-and-verifier";
 		const response = await app.inject({

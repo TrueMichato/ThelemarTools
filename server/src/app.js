@@ -146,10 +146,19 @@ function validateConfig (config) {
 	if (!config?.appOrigin) throw new TypeError(`config.appOrigin is required.`);
 	if (!config?.cookieSecret || config.cookieSecret.length < 32) throw new TypeError(`config.cookieSecret must be at least 32 characters.`);
 	if (!config?.csrfSecret || config.csrfSecret.length < 32) throw new TypeError(`config.csrfSecret must be at least 32 characters.`);
-	const inviteTokenSecret = config.inviteTokenSecret
-		|| (process.env.NODE_ENV === "test" ? "test-only-invite-token-secret-value" : null);
-	if (!inviteTokenSecret || inviteTokenSecret.length < 32) {
-		throw new TypeError(`config.inviteTokenSecret must be at least 32 characters.`);
+	const inviteTokenSecrets = config.inviteTokenSecrets
+		|| [
+			config.inviteTokenSecret
+			|| (process.env.NODE_ENV === "test" ? "test-only-invite-token-secret-value" : null),
+		];
+	if (
+		!Array.isArray(inviteTokenSecrets)
+		|| !inviteTokenSecrets.length
+		|| inviteTokenSecrets.length > 4
+		|| inviteTokenSecrets.some(secret => typeof secret !== "string" || secret.length < 32)
+		|| new Set(inviteTokenSecrets).size !== inviteTokenSecrets.length
+	) {
+		throw new TypeError(`config.inviteTokenSecrets must contain 1-4 unique secrets of at least 32 characters.`);
 	}
 	if (config.metricsToken != null && config.metricsToken.length < 32) throw new TypeError(`config.metricsToken must be at least 32 characters.`);
 	const parsedAppOrigin = new URL(config.appOrigin);
@@ -165,11 +174,11 @@ function validateConfig (config) {
 		oauthStateTtlSeconds: 10 * 60,
 		inviteContextTtlSeconds: 5 * 60,
 		isInviteAccountAdmissionEnabled: false,
-		inviteTokenSecret,
 		isSecure: new URL(appOrigin).protocol === "https:",
 		trustProxy: false,
 		metricsToken: null,
 		...config,
+		inviteTokenSecrets,
 		appOrigin,
 		clientIpHeader,
 	};
@@ -859,10 +868,12 @@ export async function createHubApp ({
 				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
 				return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
 			}
-			reply.clearCookie(getOAuthTransactionCookieName(transactionId), getClearCookieOptions({isSecure: config.isSecure}));
-			if (legacyTransactionCookie === transactionId) {
-				reply.clearCookie(OAUTH_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
-			}
+			const clearTransactionCookies = () => {
+				reply.clearCookie(getOAuthTransactionCookieName(transactionId), getClearCookieOptions({isSecure: config.isSecure}));
+				if (legacyTransactionCookie === transactionId) {
+					reply.clearCookie(OAUTH_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
+				}
+			};
 			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
 			let transaction;
 			try {
@@ -874,6 +885,7 @@ export async function createHubApp ({
 					redirectUri,
 				});
 			} catch (error) {
+				clearTransactionCookies();
 				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
 				throw error;
 			}
@@ -909,11 +921,15 @@ export async function createHubApp ({
 					isNewAccountAdmissionEnabled: config.isInviteAccountAdmissionEnabled,
 				});
 			} catch (error) {
+				if (["INVITE_ADMISSION_REQUIRED", "INVITE_ADMISSION_INVALID", "ACCOUNT_UNAVAILABLE"].includes(error?.code)) {
+					clearTransactionCookies();
+				}
 				if (["INVITE_ADMISSION_REQUIRED", "INVITE_ADMISSION_INVALID", "INVITE_ADMISSION_UNAVAILABLE"].includes(error?.code)) {
 					metrics.observeAuth?.({provider: provider.slug, outcome: "not_allowed"});
 				}
 				throw error;
 			}
+			clearTransactionCookies();
 			completed.revokedSessionIds.forEach(sessionId => realtime.closeSession({sessionId}));
 			reply.setCookie(SESSION_COOKIE, token, getCookieOptions({
 				isSecure: config.isSecure,
@@ -1736,8 +1752,8 @@ export async function createHubApp ({
 		},
 	}, async (request, reply) => {
 		const idempotencyKey = getIdempotencyKey(request);
-		const token = getDeterministicToken({
-			secret: config.inviteTokenSecret,
+		const getToken = secret => getDeterministicToken({
+			secret,
 			namespace: "campaign-invite",
 			parts: [
 				request.hubAuth.account.id,
@@ -1746,6 +1762,7 @@ export async function createHubApp ({
 				idempotencyKey.requestHash,
 			],
 		});
+		const token = getToken(config.inviteTokenSecrets[0]);
 		const created = await store.pCreateInvite({
 			accountId: request.hubAuth.account.id,
 			campaignId: request.params.campaignId,
@@ -1755,7 +1772,18 @@ export async function createHubApp ({
 			maxUses: request.body.maxUses || 1,
 			idempotencyKey,
 		});
-		return reply.code(201).send({...created, token});
+		const replayToken = config.inviteTokenSecrets
+			.map(getToken)
+			.find(candidate => isConstantTimeEqual(getSha256(candidate), created.inviteTokenHash));
+		if (!replayToken) {
+			throw new HubStoreError(
+				"INVITE_TOKEN_RECOVERY_UNAVAILABLE",
+				`Invite token cannot be recovered with the configured key ring.`,
+				{status: 409},
+			);
+		}
+		const {inviteTokenHash: _inviteTokenHash, ...response} = created;
+		return reply.code(201).send({...response, token: replayToken});
 	});
 
 	app.post("/api/campaigns/:campaignId/invites/:inviteId/revoke", {

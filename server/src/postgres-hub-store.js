@@ -1063,8 +1063,16 @@ export class PostgresHubStore {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
 			if (prior) {
+				const token = await client.query(`
+					SELECT encode(token_hash, 'hex') AS token_hash
+					FROM hub.invites
+					WHERE id = $1 AND campaign_id = $2
+				`, [prior.invite?.id, campaignId]);
+				if (!token.rowCount) {
+					throw new HubStoreError("INVITE_TOKEN_RECOVERY_UNAVAILABLE", `Invite token cannot be recovered.`, {status: 409});
+				}
 				await client.query("COMMIT");
-				return prior;
+				return {...prior, inviteTokenHash: token.rows[0].token_hash};
 			}
 			const result = await client.query(`
 					UPDATE hub.sessions
@@ -1779,7 +1787,7 @@ export class PostgresHubStore {
 			await this._pAppendEvent({client, campaignId, actorAccountId: accountId, type: "invite.created", aggregateType: "invite", aggregateId: inviteId, visibility: "dm_only", payload: {role, expiresAt}});
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "invite.create", response});
 			await client.query("COMMIT");
-			return response;
+			return {...response, inviteTokenHash: tokenHash};
 		} catch (error) {
 			await client.query("ROLLBACK");
 			throw error;

@@ -74,10 +74,12 @@ Migration `0008_invite_gated_first_access.sql` adds:
 - expiry indexes and constraints which prohibit partial terminal outcomes.
 
 The invite table continues to store only `token_hash`. New raw invite tokens are cryptographically
-pseudorandom under a dedicated `HUB_INVITE_TOKEN_SECRET`, bound to actor, campaign, idempotency key, and request
-hash. The 24-hour creator command receipt contains no raw token; the BFF reconstructs the same token for an exact
-retry. Invite listing, events, logs, metrics, exports, and backups never expose it. OAuth transactions and
-invite-context row data are excluded from portable backup contents.
+pseudorandom under a bounded key ring: current `HUB_INVITE_TOKEN_SECRET` followed by at most three retained
+`HUB_INVITE_TOKEN_PREVIOUS_SECRETS`, bound to actor, campaign, idempotency key, and request hash. The 24-hour
+creator command receipt contains no raw token. On replay, the BFF derives one candidate per retained key and
+returns only the candidate whose hash matches the stored invite hash; no match fails closed. Invite listing,
+events, logs, metrics, exports, and backups never expose it. OAuth transactions and invite-context row data are
+excluded from portable backup contents.
 
 PostgreSQL invite authority uses one total lock order:
 

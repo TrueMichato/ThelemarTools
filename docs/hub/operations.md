@@ -143,8 +143,9 @@ See [observability.md](observability.md) and [backup/restore runbook](runbooks/b
 - Rotating `HUB_CSRF_SECRET` invalidates issued CSRF tokens; clients refresh `/api/session`. Invite tokens use
   the independent invite-token secret and are unaffected.
 - Rotating `HUB_INVITE_TOKEN_SECRET` prevents reconstruction of raw tokens for outstanding invite-creation
-  receipt retries. Existing distributed invite links continue to validate against stored hashes; record the
-  retry consequence before rotation.
+  receipt retries unless the old key remains in `HUB_INVITE_TOKEN_PREVIOUS_SECRETS`. Add the new current key,
+  retain prior keys newest-first for at least 24 hours, then remove expired keys. Existing distributed invite
+  links continue to validate against stored hashes. More than four total keys or duplicate/short keys fail startup.
 - Rotate the GitHub client secret through the provider and deployment secret manager.
 - Revoke individual browser sessions through the database/admin path; logout revokes the current token.
 
