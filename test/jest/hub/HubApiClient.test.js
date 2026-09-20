@@ -203,6 +203,40 @@ describe("hub API client", () => {
 		}));
 	});
 
+	it("adopts unlink session rotation CSRF before the next mutation", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") {
+					return getResponse({body: {signedIn: true, csrfToken: "csrf-old"}});
+				}
+				if (path.includes("/api/account/identities/")) {
+					return getResponse({body: {
+						ok: true,
+						unlinkedIdentityId: "identity-1",
+						csrfToken: "csrf-new",
+						identities: [],
+					}});
+				}
+				return getResponse({body: {ok: true, revokedSessionIds: []}});
+			},
+		});
+
+		await client.pGetSession();
+		await client.pUnlinkAccountIdentity({identityId: "identity-1", idempotencyKey: "unlink-1"});
+		await client.pRevokeOtherSessions({idempotencyKey: "revoke-1"});
+
+		expect(calls[1]).toEqual(expect.objectContaining({
+			path: "/api/account/identities/identity-1",
+			opts: expect.objectContaining({
+				method: "DELETE",
+				headers: expect.objectContaining({"x-csrf-token": "csrf-old"}),
+			}),
+		}));
+		expect(calls[2].opts.headers["x-csrf-token"]).toBe("csrf-new");
+	});
+
 	it("pins cost-bearing peer proposals and reads source-owner status", async () => {
 		const calls = [];
 		const client = new HubApiClient({

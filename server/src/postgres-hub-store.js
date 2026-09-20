@@ -102,6 +102,7 @@ import {
 	redactEntitlementAuditForAccount,
 	redactEntitlementForAccount,
 } from "./account-entitlements.js";
+import {getIdentityUnlinkBlock} from "./account-identities.js";
 
 const {Pool} = pg;
 
@@ -330,12 +331,6 @@ export class PostgresHubStore {
 			FOR UPDATE OF a, ei
 		`, [identity.provider, identity.subject]);
 		if (existing.rowCount) {
-			const account = await client.query(`
-				UPDATE hub.accounts
-				SET display_name = COALESCE($2, display_name), updated_at = now()
-				WHERE id = $1
-				RETURNING id, display_name, status, deletion_requested_at, purge_after
-			`, [existing.rows[0].id, identity.displayName || identity.handle]);
 			const externalIdentity = await client.query(`
 				UPDATE hub.external_identities
 				SET provider_handle = $2,
@@ -350,7 +345,7 @@ export class PostgresHubStore {
 					last_authenticated_at
 			`, [existing.rows[0].identity_id, identity.handle, identity.displayName]);
 			return {
-				account: getAccount(account.rows[0]),
+				account: getAccount(existing.rows[0]),
 				identity: getExternalIdentity(externalIdentity.rows[0]),
 			};
 		}
@@ -773,6 +768,442 @@ export class PostgresHubStore {
 		}
 	}
 
+	async pCreateOAuthLinkTransaction ({
+		accountId,
+		sessionId,
+		transaction,
+		idempotencyKey,
+	}) {
+		if (
+			!(transaction?.expiresAt instanceof Date)
+			|| transaction.expiresAt <= new Date()
+			|| transaction.expiresAt > new Date(Date.now() + 5 * 60_000)
+		) throw new TypeError(`OAuth link transaction expiry must be within five minutes.`);
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				const existing = await client.query(`
+					SELECT *
+					FROM hub.oauth_transactions
+					WHERE id = $1 AND consumed_at IS NULL AND expires_at > clock_timestamp()
+				`, [prior.transactionId]);
+				if (!existing.rowCount) {
+					throw new HubStoreError("IDEMPOTENCY_RESULT_GONE", `The prior link intent is no longer available.`, {status: 410});
+				}
+				await client.query("COMMIT");
+				return {transaction: getOAuthTransaction(existing.rows[0])};
+			}
+			const account = await client.query(`
+				SELECT id
+				FROM hub.accounts
+				WHERE id = $1 AND status = 'active'
+				FOR UPDATE
+			`, [accountId]);
+			if (!account.rowCount) {
+				throw new HubStoreError("ACCOUNT_UNAVAILABLE", `Account is unavailable.`, {status: 403});
+			}
+			await client.query(`
+				SELECT id
+				FROM hub.external_identities
+				WHERE account_id = $1
+				ORDER BY provider, provider_subject, id
+				FOR UPDATE
+			`, [accountId]);
+			const session = await client.query(`
+				SELECT id
+				FROM hub.sessions
+				WHERE id = $1
+					AND account_id = $2
+					AND revoked_at IS NULL
+					AND expires_at > clock_timestamp()
+					AND authenticated_via_identity_id IS NOT NULL
+					AND recent_reauthenticated_at >= clock_timestamp() - interval '5 minutes'
+					AND recent_reauthenticated_at <= clock_timestamp()
+				FOR UPDATE
+			`, [sessionId, accountId]);
+			if (!session.rowCount) {
+				throw new HubStoreError("REAUTHENTICATION_REQUIRED", `Recent reauthentication is required.`, {status: 403});
+			}
+			const inserted = await client.query(`
+				INSERT INTO hub.oauth_transactions (
+					id, state_hash, provider, operation,
+					initiating_account_id, initiating_session_id,
+					redirect_uri, return_to, pkce_verifier, oidc_nonce, expires_at
+				)
+				VALUES (
+					$1, decode($2, 'hex'), $3, 'link',
+					$4, $5, $6, $7, $8, $9, $10
+				)
+				RETURNING *
+			`, [
+				transaction.id,
+				transaction.stateHash,
+				transaction.provider,
+				accountId,
+				sessionId,
+				transaction.redirectUri,
+				transaction.returnTo,
+				transaction.pkceVerifier,
+				transaction.oidcNonce,
+				transaction.expiresAt,
+			]);
+			await this._fnBeforeSensitiveCommit?.({client, operation: "oauth.link_intent"});
+			await this._pAssertReauthenticationTimestampFresh({client, accountId, sessionId});
+			const response = {transactionId: inserted.rows[0].id};
+			await this._pSaveReceipt({
+				client,
+				accountId,
+				idempotencyKey,
+				commandType: "identity.link_intent",
+				response,
+			});
+			await client.query("COMMIT");
+			return {transaction: getOAuthTransaction(inserted.rows[0])};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pCompleteOAuthLink ({
+		identity,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		currentAccountId,
+		currentSessionId,
+		oauthTransactionId,
+		availableProviders,
+	}) {
+		const normalizedIdentity = normalizeExternalIdentity(identity);
+		const discovery = await this._pool.query(`
+			SELECT initiating_account_id
+			FROM hub.oauth_transactions
+			WHERE id = $1
+		`, [oauthTransactionId]);
+		const accountId = discovery.rows[0]?.initiating_account_id;
+		if (!accountId || accountId !== currentAccountId) {
+			throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+		}
+		const idempotencyKey = {
+			key: oauthTransactionId,
+			requestHash: crypto.createHash("sha256")
+				.update(JSON.stringify({provider: normalizedIdentity.provider, subject: normalizedIdentity.subject}))
+				.digest("hex"),
+		};
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const account = await client.query(`
+				SELECT id, display_name, status, deletion_requested_at, purge_after
+				FROM hub.accounts
+				WHERE id = $1
+				FOR UPDATE
+			`, [accountId]);
+			if (account.rows[0]?.status !== "active") {
+				throw new HubStoreError("ACCOUNT_UNAVAILABLE", `Account is unavailable.`, {status: 403});
+			}
+			const ownedIdentityResult = await client.query(`
+				SELECT
+					id AS identity_id, account_id, provider, provider_subject,
+					provider_handle, provider_display_name,
+					created_at AS identity_created_at, updated_at AS identity_updated_at,
+					last_authenticated_at
+				FROM hub.external_identities
+				WHERE account_id = $1 AND provider = $2 AND provider_subject = $3
+			`, [accountId, normalizedIdentity.provider, normalizedIdentity.subject]);
+			const ownedIdentity = ownedIdentityResult.rows[0];
+			let subjectIdentity = ownedIdentity ? {rowCount: 1, rows: [ownedIdentity]} : null;
+			if (!subjectIdentity) {
+				await client.query(`
+					SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
+				`, [normalizedIdentity.provider, normalizedIdentity.subject]);
+				subjectIdentity = await client.query(`
+					SELECT
+						id AS identity_id, account_id, provider, provider_subject,
+						provider_handle, provider_display_name,
+						created_at AS identity_created_at, updated_at AS identity_updated_at,
+						last_authenticated_at
+					FROM hub.external_identities
+					WHERE provider = $1 AND provider_subject = $2
+					FOR UPDATE
+				`, [normalizedIdentity.provider, normalizedIdentity.subject]);
+			}
+			if (subjectIdentity.rowCount && subjectIdentity.rows[0].account_id !== accountId) {
+				throw new HubStoreError("IDENTITY_ALREADY_LINKED", `Identity is already linked.`, {status: 409});
+			}
+			const sessions = await client.query(`
+				SELECT
+					id AS session_id, account_id, user_agent, created_at, last_seen_at,
+					expires_at, revoked_at, authenticated_via_identity_id,
+					recent_reauthenticated_at
+				FROM hub.sessions
+				WHERE account_id = $1
+				ORDER BY id
+				FOR UPDATE
+			`, [accountId]);
+			const currentSession = sessions.rows.find(row => row.session_id === currentSessionId);
+			const transaction = await client.query(`
+				SELECT id, provider, operation, initiating_account_id, initiating_session_id, consumed_at, expires_at
+				FROM hub.oauth_transactions
+				WHERE id = $1
+				FOR UPDATE
+			`, [oauthTransactionId]);
+			const binding = transaction.rows[0];
+			if (
+				!binding
+				|| binding.provider !== normalizedIdentity.provider
+				|| binding.operation !== "link"
+				|| !binding.consumed_at
+				|| binding.expires_at <= new Date()
+				|| binding.initiating_account_id !== accountId
+				|| binding.initiating_session_id !== currentSessionId
+				|| !currentSession
+				|| currentSession.revoked_at
+				|| currentSession.expires_at <= new Date()
+				|| !currentSession.authenticated_via_identity_id
+				|| currentSession.recent_reauthenticated_at == null
+				|| !availableProviders.includes(normalizedIdentity.provider)
+			) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+			await this._fnBeforeSensitiveCommit?.({client, operation: "oauth.link"});
+			await this._pAssertReauthenticationTimestampFresh({client, accountId, sessionId: currentSessionId});
+			if (!availableProviders.includes(normalizedIdentity.provider)) {
+				throw new HubStoreError("AUTH_PROVIDER_UNAVAILABLE", `Authentication provider is unavailable.`, {status: 503});
+			}
+			let linkedIdentity;
+			const isNewIdentity = !subjectIdentity.rowCount;
+			if (isNewIdentity) {
+				const insertedIdentity = await client.query(`
+					INSERT INTO hub.external_identities (
+						id, account_id, provider, provider_subject,
+						provider_handle, provider_display_name, last_authenticated_at
+					)
+					VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp())
+					RETURNING
+						id AS identity_id, account_id, provider, provider_subject,
+						provider_handle, provider_display_name,
+						created_at AS identity_created_at, updated_at AS identity_updated_at,
+						last_authenticated_at
+				`, [
+					crypto.randomUUID(),
+					accountId,
+					normalizedIdentity.provider,
+					normalizedIdentity.subject,
+					normalizedIdentity.handle,
+					normalizedIdentity.displayName,
+				]);
+				linkedIdentity = getExternalIdentity(insertedIdentity.rows[0]);
+				await this._pAppendAudit({
+					client,
+					actorAccountId: accountId,
+					action: "identity.linked",
+					targetType: "external_identity",
+					targetId: linkedIdentity.id,
+					details: {provider: linkedIdentity.provider},
+				});
+			} else {
+				linkedIdentity = getExternalIdentity(subjectIdentity.rows[0]);
+			}
+			const revoked = await client.query(`
+				UPDATE hub.sessions
+				SET revoked_at = COALESCE(revoked_at, clock_timestamp())
+				WHERE account_id = $1 AND revoked_at IS NULL
+				RETURNING id
+			`, [accountId]);
+			const revokedSessionIds = revoked.rows.map(row => row.id);
+			if (revokedSessionIds.length) {
+				await client.query(`DELETE FROM hub.character_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+				await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+			}
+			const insertedSession = await client.query(`
+				INSERT INTO hub.sessions (
+					id, account_id, token_hash, expires_at, user_agent,
+					authenticated_via_identity_id, recent_reauthenticated_at
+				)
+				VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6, clock_timestamp())
+				RETURNING
+					id AS session_id, account_id, user_agent, created_at, last_seen_at,
+					expires_at, revoked_at, authenticated_via_identity_id,
+					recent_reauthenticated_at
+			`, [
+				crypto.randomUUID(),
+				accountId,
+				tokenHash,
+				expiresAt,
+				userAgent,
+				linkedIdentity.id,
+			]);
+			const response = JSON.parse(JSON.stringify({
+				account: getAccount(account.rows[0]),
+				identity: linkedIdentity,
+				session: getSession(insertedSession.rows[0]),
+				revokedSessionIds,
+			}));
+			await this._pSaveReceipt({
+				client,
+				accountId,
+				idempotencyKey,
+				commandType: "identity.link",
+				response,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pUnlinkExternalIdentity ({
+		accountId,
+		currentSessionId,
+		identityId,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		idempotencyKey,
+		retentionRequiredProviders,
+		availableProviders,
+	}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const account = await client.query(`
+				SELECT id, display_name, status, deletion_requested_at, purge_after
+				FROM hub.accounts
+				WHERE id = $1
+				FOR UPDATE
+			`, [accountId]);
+			const identities = await client.query(`
+				SELECT
+					id AS identity_id, account_id, provider, provider_subject,
+					provider_handle, provider_display_name,
+					created_at AS identity_created_at, updated_at AS identity_updated_at,
+					last_authenticated_at
+				FROM hub.external_identities
+				WHERE account_id = $1
+				ORDER BY provider, provider_subject, id
+				FOR UPDATE
+			`, [accountId]);
+			const sessions = await client.query(`
+				SELECT
+					id AS session_id, account_id, user_agent, created_at, last_seen_at,
+					expires_at, revoked_at, authenticated_via_identity_id,
+					recent_reauthenticated_at
+				FROM hub.sessions
+				WHERE account_id = $1
+				ORDER BY id
+				FOR UPDATE
+			`, [accountId]);
+			const currentSession = sessions.rows.find(row => row.session_id === currentSessionId);
+			const identity = identities.rows.find(row => row.identity_id === identityId);
+			if (!identity) {
+				throw new HubStoreError("IDENTITY_NOT_FOUND", `Identity was not found.`, {status: 404});
+			}
+			if (
+				!currentSession
+				|| currentSession.revoked_at
+				|| currentSession.expires_at <= new Date()
+				|| !currentSession.authenticated_via_identity_id
+				|| currentSession.recent_reauthenticated_at == null
+			) {
+				throw new HubStoreError("REAUTHENTICATION_REQUIRED", `Recent reauthentication is required.`, {status: 403});
+			}
+			await this._pAssertReauthenticationTimestampFresh({client, accountId, sessionId: currentSessionId});
+			const externalIdentities = identities.rows.map(getExternalIdentity);
+			const blocked = getIdentityUnlinkBlock({
+				accountStatus: account.rows[0]?.status,
+				identities: externalIdentities,
+				identityId,
+				reauthenticatedIdentityId: currentSession.authenticated_via_identity_id,
+				retentionRequiredProviders,
+				availableProviders,
+			});
+			if (blocked) {
+				const status = blocked === "ACCOUNT_LIFECYCLE_BLOCKED" ? 403 : 409;
+				throw new HubStoreError(blocked, `Identity cannot be unlinked.`, {status});
+			}
+			await this._fnBeforeSensitiveCommit?.({client, operation: "identity.unlink"});
+			await this._pAssertReauthenticationTimestampFresh({client, accountId, sessionId: currentSessionId});
+			await this._pAppendAudit({
+				client,
+				actorAccountId: accountId,
+				action: "identity.unlinked",
+				targetType: "external_identity",
+				targetId: identityId,
+				details: {provider: identity.provider},
+			});
+			await client.query(`DELETE FROM hub.external_identities WHERE id = $1 AND account_id = $2`, [identityId, accountId]);
+			const revoked = await client.query(`
+				UPDATE hub.sessions
+				SET revoked_at = COALESCE(revoked_at, clock_timestamp())
+				WHERE account_id = $1 AND revoked_at IS NULL
+				RETURNING id
+			`, [accountId]);
+			const revokedSessionIds = revoked.rows.map(row => row.id);
+			if (revokedSessionIds.length) {
+				await client.query(`DELETE FROM hub.character_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+				await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
+			}
+			const insertedSession = await client.query(`
+				INSERT INTO hub.sessions (
+					id, account_id, token_hash, expires_at, user_agent,
+					authenticated_via_identity_id, recent_reauthenticated_at
+				)
+				VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6, $7)
+				RETURNING
+					id AS session_id, account_id, user_agent, created_at, last_seen_at,
+					expires_at, revoked_at, authenticated_via_identity_id,
+					recent_reauthenticated_at
+			`, [
+				crypto.randomUUID(),
+				accountId,
+				tokenHash,
+				expiresAt,
+				userAgent,
+				currentSession.authenticated_via_identity_id,
+				currentSession.recent_reauthenticated_at,
+			]);
+			const response = JSON.parse(JSON.stringify({
+				ok: true,
+				unlinkedIdentityId: identityId,
+				unlinkedProvider: identity.provider,
+				session: getSession(insertedSession.rows[0]),
+				revokedSessionIds,
+			}));
+			await this._pSaveReceipt({
+				client,
+				accountId,
+				idempotencyKey,
+				commandType: "identity.unlink",
+				response,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pListExternalIdentities ({accountId}) {
 		const account = await this._pool.query(`SELECT id FROM hub.accounts WHERE id = $1`, [accountId]);
 		if (!account.rows[0]) throw new HubStoreError("ACCOUNT_NOT_FOUND");
@@ -1096,9 +1527,9 @@ export class PostgresHubStore {
 				WHERE tx.expires_at <= now()
 					OR (
 						tx.consumed_at IS NOT NULL
+						AND context.id IS NOT NULL
 						AND (
-							context.id IS NULL
-							OR context.consumed_at IS NOT NULL
+							context.consumed_at IS NOT NULL
 							OR context.expires_at <= now()
 						)
 					)
@@ -2181,9 +2612,9 @@ export class PostgresHubStore {
 					WHERE tx.expires_at <= now()
 						OR (
 							tx.consumed_at IS NOT NULL
+							AND context.id IS NOT NULL
 							AND (
-								context.id IS NULL
-								OR context.consumed_at IS NOT NULL
+								context.consumed_at IS NOT NULL
 								OR context.expires_at <= now()
 							)
 						)

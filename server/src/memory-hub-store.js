@@ -103,6 +103,7 @@ import {
 	redactEntitlementAuditForAccount,
 	redactEntitlementForAccount,
 } from "./account-entitlements.js";
+import {getIdentityUnlinkBlock} from "./account-identities.js";
 
 function copy (value) {
 	return value === undefined ? undefined : structuredClone(value);
@@ -276,7 +277,8 @@ export class MemoryHubStore {
 						new Date(transaction.expiresAt) <= now
 						|| (
 							transaction.consumedAt
-							&& (!context || context.consumedAt || new Date(context.expiresAt) <= now)
+							&& context
+							&& (context.consumedAt || new Date(context.expiresAt) <= now)
 						)
 					);
 				})
@@ -347,8 +349,6 @@ export class MemoryHubStore {
 			};
 			this._externalIdentities.set(externalIdentity.id, externalIdentity);
 		} else {
-			const account = this._accounts.get(accountId);
-			if (identity.displayName || identity.handle) account.displayName = getAccountDisplayName(identity);
 			externalIdentity = [...this._externalIdentities.values()]
 				.find(it => getExternalIdentityKey(it) === identityKey);
 			externalIdentity.handle = identity.handle;
@@ -572,6 +572,282 @@ export class MemoryHubStore {
 			identity: externalIdentity,
 			session,
 			revokedSessionIds: [currentSessionId],
+		});
+	}
+
+	async pCreateOAuthLinkTransaction ({
+		accountId,
+		sessionId,
+		transaction,
+		idempotencyKey,
+	}) {
+		const expiresAt = transaction?.expiresAt;
+		if (
+			!(expiresAt instanceof Date)
+			|| expiresAt <= this._fnNow()
+			|| expiresAt > new Date(this._fnNow().getTime() + 5 * 60_000)
+		) throw new TypeError(`OAuth link transaction expiry must be within five minutes.`);
+		const {key} = this._normalizeIdempotencyKey(idempotencyKey);
+		return this._pWithMemoryLock({
+			key: `idempotency:${accountId}:${key}`,
+			fn: () => this._pWithMemoryLock({
+				key: `account:${accountId}`,
+				fn: async () => {
+					const prior = this._getReceipt({accountId, idempotencyKey});
+					if (prior) {
+						const existing = this._oauthTransactions.get(prior.transactionId);
+						if (!existing || existing.consumedAt || new Date(existing.expiresAt) <= this._fnNow()) {
+							throw new HubStoreError("IDEMPOTENCY_RESULT_GONE", `The prior link intent is no longer available.`, {status: 410});
+						}
+						return {transaction: copy(existing)};
+					}
+					const account = this._accounts.get(accountId);
+					if (account?.status !== "active") {
+						throw new HubStoreError("ACCOUNT_UNAVAILABLE", `Account is unavailable.`, {status: 403});
+					}
+					this._assertFreshReauthentication({accountId, sessionId});
+					const created = await this.pCreateOAuthTransaction({
+						...transaction,
+						operation: "link",
+						initiatingAccountId: accountId,
+						initiatingSessionId: sessionId,
+					});
+					try {
+						await this._pBeforeSensitiveCommit();
+						this._assertFreshReauthentication({accountId, sessionId});
+						this._setReceipt({
+							accountId,
+							idempotencyKey,
+							response: {transactionId: created.id},
+						});
+						return {transaction: created};
+					} catch (error) {
+						this._oauthTransactions.delete(created.id);
+						throw error;
+					}
+				},
+			}),
+		});
+	}
+
+	async pCompleteOAuthLink ({
+		identity,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		currentAccountId,
+		currentSessionId,
+		oauthTransactionId,
+		availableProviders,
+	}) {
+		const normalizedIdentity = normalizeExternalIdentity(identity);
+		const transaction = this._oauthTransactions.get(oauthTransactionId);
+		const accountId = transaction?.initiatingAccountId;
+		if (!accountId || accountId !== currentAccountId) {
+			throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+		}
+		const idempotencyKey = {
+			key: oauthTransactionId,
+			requestHash: crypto.createHash("sha256")
+				.update(JSON.stringify({provider: normalizedIdentity.provider, subject: normalizedIdentity.subject}))
+				.digest("hex"),
+		};
+		return this._pWithMemoryLock({
+			key: `idempotency:${accountId}:${oauthTransactionId}`,
+			fn: () => this._pWithMemoryLock({
+				key: `account:${accountId}`,
+				fn: () => this._pWithMemoryLock({
+					key: `identity:${getExternalIdentityKey(normalizedIdentity)}`,
+					fn: async () => {
+						const prior = this._getReceipt({accountId, idempotencyKey});
+						if (prior) return prior;
+						if (this._sessions.has(tokenHash)) {
+							throw new HubStoreError("SESSION_TOKEN_CONFLICT", `Session could not be created.`, {status: 409});
+						}
+						const currentTransaction = this._oauthTransactions.get(oauthTransactionId);
+						const account = this._accounts.get(accountId);
+						const currentSession = [...this._sessions.values()].find(session => session.id === currentSessionId);
+						if (
+							!currentTransaction
+						|| currentTransaction.operation !== "link"
+						|| currentTransaction.provider !== normalizedIdentity.provider
+						|| !currentTransaction.consumedAt
+						|| new Date(currentTransaction.expiresAt) <= this._fnNow()
+						|| currentTransaction.initiatingAccountId !== accountId
+						|| currentTransaction.initiatingSessionId !== currentSessionId
+						|| account?.status !== "active"
+						|| !availableProviders.includes(normalizedIdentity.provider)
+						|| !currentSession
+						|| currentSession.accountId !== accountId
+						) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+						this._assertFreshReauthentication({accountId, sessionId: currentSessionId});
+						const identityKey = getExternalIdentityKey(normalizedIdentity);
+						const ownerAccountId = this._identityToAccount.get(identityKey);
+						if (ownerAccountId && ownerAccountId !== accountId) {
+							throw new HubStoreError("IDENTITY_ALREADY_LINKED", `Identity is already linked.`, {status: 409});
+						}
+						let externalIdentity = [...this._externalIdentities.values()]
+							.find(candidate => getExternalIdentityKey(candidate) === identityKey);
+						const isNewIdentity = !externalIdentity;
+						await this._pBeforeSensitiveCommit();
+						this._assertFreshReauthentication({accountId, sessionId: currentSessionId});
+						if (!availableProviders.includes(normalizedIdentity.provider)) {
+							throw new HubStoreError("AUTH_PROVIDER_UNAVAILABLE", `Authentication provider is unavailable.`, {status: 503});
+						}
+						const now = this._fnNow().toISOString();
+						if (isNewIdentity) {
+							externalIdentity = {
+								id: crypto.randomUUID(),
+								accountId,
+								provider: normalizedIdentity.provider,
+								subject: normalizedIdentity.subject,
+								handle: normalizedIdentity.handle,
+								displayName: normalizedIdentity.displayName,
+								createdAt: now,
+								updatedAt: now,
+								lastAuthenticatedAt: now,
+							};
+							this._externalIdentities.set(externalIdentity.id, externalIdentity);
+							this._identityToAccount.set(identityKey, accountId);
+							this._appendAudit({
+								actorAccountId: accountId,
+								action: "identity.linked",
+								targetType: "external_identity",
+								targetId: externalIdentity.id,
+								details: {provider: externalIdentity.provider},
+							});
+						} else {
+							externalIdentity.handle = normalizedIdentity.handle;
+							externalIdentity.displayName = normalizedIdentity.displayName;
+							externalIdentity.updatedAt = now;
+							externalIdentity.lastAuthenticatedAt = now;
+						}
+						const revokedSessionIds = [];
+						for (const session of this._sessions.values()) {
+							if (session.accountId !== accountId || session.revokedAt) continue;
+							await this.pRevokeSession({sessionId: session.id});
+							revokedSessionIds.push(session.id);
+						}
+						const session = await this.pCreateSession({
+							accountId,
+							tokenHash,
+							expiresAt,
+							userAgent,
+							authenticatedViaIdentityId: externalIdentity.id,
+							recentReauthenticatedAt: this._fnNow(),
+						});
+						return this._setReceipt({
+							accountId,
+							idempotencyKey,
+							response: {
+								account,
+								identity: externalIdentity,
+								session,
+								revokedSessionIds,
+							},
+						});
+					},
+				}),
+			}),
+		});
+	}
+
+	async pUnlinkExternalIdentity ({
+		accountId,
+		currentSessionId,
+		identityId,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		idempotencyKey,
+		retentionRequiredProviders,
+		availableProviders,
+	}) {
+		const {key} = this._normalizeIdempotencyKey(idempotencyKey);
+		return this._pWithMemoryLock({
+			key: `idempotency:${accountId}:${key}`,
+			fn: () => this._pWithMemoryLock({
+				key: `account:${accountId}`,
+				fn: async () => {
+					const prior = this._getReceipt({accountId, idempotencyKey});
+					if (prior) return prior;
+					if (this._sessions.has(tokenHash)) {
+						throw new HubStoreError("SESSION_TOKEN_CONFLICT", `Session could not be created.`, {status: 409});
+					}
+					const account = this._accounts.get(accountId);
+					const session = [...this._sessions.values()]
+						.find(candidate => candidate.id === currentSessionId && candidate.accountId === accountId);
+					const identities = [...this._externalIdentities.values()]
+						.filter(candidate => candidate.accountId === accountId);
+					const identity = identities.find(candidate => candidate.id === identityId);
+					if (!identity) {
+						throw new HubStoreError("IDENTITY_NOT_FOUND", `Identity was not found.`, {status: 404});
+					}
+					this._assertFreshReauthentication({accountId, sessionId: currentSessionId});
+					const blocked = getIdentityUnlinkBlock({
+						accountStatus: account?.status,
+						identities,
+						identityId,
+						reauthenticatedIdentityId: session.authenticatedViaIdentityId,
+						retentionRequiredProviders,
+						availableProviders,
+					});
+					if (blocked) {
+						const status = blocked === "ACCOUNT_LIFECYCLE_BLOCKED" ? 403 : 409;
+						throw new HubStoreError(blocked, `Identity cannot be unlinked.`, {status});
+					}
+					await this._pBeforeSensitiveCommit();
+					this._assertFreshReauthentication({accountId, sessionId: currentSessionId});
+					const currentIdentities = [...this._externalIdentities.values()]
+						.filter(candidate => candidate.accountId === accountId);
+					const currentBlocked = getIdentityUnlinkBlock({
+						accountStatus: this._accounts.get(accountId)?.status,
+						identities: currentIdentities,
+						identityId,
+						reauthenticatedIdentityId: session.authenticatedViaIdentityId,
+						retentionRequiredProviders,
+						availableProviders,
+					});
+					if (currentBlocked) {
+						const status = currentBlocked === "IDENTITY_NOT_FOUND" ? 404 : currentBlocked === "ACCOUNT_LIFECYCLE_BLOCKED" ? 403 : 409;
+						throw new HubStoreError(currentBlocked, `Identity cannot be unlinked.`, {status});
+					}
+					this._appendAudit({
+						actorAccountId: accountId,
+						action: "identity.unlinked",
+						targetType: "external_identity",
+						targetId: identity.id,
+						details: {provider: identity.provider},
+					});
+					this._externalIdentities.delete(identity.id);
+					this._identityToAccount.delete(getExternalIdentityKey(identity));
+					const revokedSessionIds = [];
+					for (const accountSession of this._sessions.values()) {
+						if (accountSession.accountId !== accountId || accountSession.revokedAt) continue;
+						await this.pRevokeSession({sessionId: accountSession.id});
+						revokedSessionIds.push(accountSession.id);
+					}
+					const replacementSession = await this.pCreateSession({
+						accountId,
+						tokenHash,
+						expiresAt,
+						userAgent,
+						authenticatedViaIdentityId: session.authenticatedViaIdentityId,
+						recentReauthenticatedAt: session.recentReauthenticatedAt,
+					});
+					return this._setReceipt({
+						accountId,
+						idempotencyKey,
+						response: {
+							ok: true,
+							unlinkedIdentityId: identity.id,
+							unlinkedProvider: identity.provider,
+							session: replacementSession,
+							revokedSessionIds,
+						},
+					});
+				},
+			}),
 		});
 	}
 
@@ -820,7 +1096,8 @@ export class MemoryHubStore {
 					new Date(transaction.expiresAt) <= this._fnNow()
 					|| (
 						transaction.consumedAt
-						&& (!context || context.consumedAt || new Date(context.expiresAt) <= this._fnNow())
+						&& context
+						&& (context.consumedAt || new Date(context.expiresAt) <= this._fnNow())
 					)
 				);
 			})

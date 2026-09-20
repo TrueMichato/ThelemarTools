@@ -2,10 +2,10 @@
 
 Status: Accepted for implementation (2026-09-01)
 
-Implementation status: migration `0006_multi_provider_identity.sql` and the provider-neutral transaction
-registry are implemented, as are Discord OAuth and Google OIDC adapters. ADR 0019 completes real
-reauthentication and uses it for account-entitlement administration. Identity link/unlink and broad
-account-security UI remain later work; production provider enablement retains its separate rollout gate.
+Implementation status: migration `0006_multi_provider_identity.sql`, the provider-neutral transaction
+registry, Discord OAuth and Google OIDC adapters, ADR 0019 reauthentication, and the capability-gated account
+identity list/link/unlink UI and authority are implemented. Production provider enablement remains a separate
+operator-controlled rollout gate; deploying this code does not enable Discord or Google.
 
 Admission update: [ADR 0018](0018-invite-gated-first-access.md) supersedes this ADR's provider-subject
 allowlist rules for first account creation. Existing identities sign in normally; an unknown identity requires
@@ -168,7 +168,8 @@ freshness inside their transactions.
 
 `POST /api/account/identities/:provider/link-intents` is an authenticated, idempotent mutation. It requires an
 active account, exact Origin, CSRF, current protocol, recent reauthentication, and an enabled provider. It
-creates a short-lived operation-bound OAuth transaction and returns only the concrete provider start path.
+creates a short-lived operation-bound OAuth transaction and returns only the concrete provider authorization
+URL. The link transaction expires within five minutes; its transaction id is the durable link command identity.
 
 The provider callback attaches an unknown admitted identity to the initiating account under an account lock
 and the existing unique `(provider, provider_subject)` constraint. Linking the same identity to the same
@@ -190,10 +191,12 @@ and recent-reauthentication protections. The reauthentication identity must be d
 removed.
 
 The authority serializes link/unlink for the account and computes usable identities while holding the lock.
-An identity is usable only when its provider is enabled and healthy enough to start authentication and the link
-is not being removed. Existing identities do not depend on a provider-subject allowlist. If no other usable
-identity remains, return `LAST_USABLE_IDENTITY`. Provider configuration changes run the same preflight across
-active accounts before disablement.
+Existing identities do not depend on a provider-subject allowlist. Unlinking must preserve at least one
+identity and at least one identity whose provider is listed in the validated non-empty
+`HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS` policy. The default required provider is `github`, and every
+required provider must be configured. The stable failures are `REAUTHENTICATION_IDENTITY_CONFLICT`,
+`LAST_IDENTITY_PROTECTED`, and `IDENTITY_RETENTION_REQUIRED`. Provider configuration changes run the rollback
+preflight across active accounts before disablement.
 
 Successful unlinking first revokes sessions authenticated through the identity, then rotates the current
 session and revokes all other account sessions. It writes `identity.unlinked` audit with identity id and
@@ -237,8 +240,10 @@ Migration and deployment order is:
 3. exercise GitHub sign-in, reauthentication, link/unlink invariants, export, deletion, and rollback;
 4. deploy Discord and Google adapters disabled, configure exact callbacks and independent credentials outside
    Git, and pass the acceptance suite in isolated staging with fresh test identities;
-5. deploy layer 3 reauthentication/linking before admitting existing users through another provider;
-6. run the paired first-enable preflight and enable Discord and Google together.
+5. deploy layer 3 with `HUB_ACCOUNT_IDENTITY_LINKING_ENABLED=false`, prove reauthentication/linking and
+   GitHub retention, then enable `account.identity_linking.v1` separately;
+6. run the paired first-enable preflight, accepting a new successful sign-in or link for each provider, and
+   enable Discord and Google together.
 
 ## Sessions, export, deletion, and audit
 
@@ -321,8 +326,9 @@ Apply both client-address and bounded provider/account dimensions:
 Limits return the normal stable error envelope and `Retry-After`. Provider is a registry-bounded label; subject,
 email, account id, OAuth state/code/verifier/nonce, provider tokens, cookies, identity profile, and response
 bodies are never metric labels or log values. Request logs continue to strip query strings. Metrics may count
-start/callback/link/unlink outcomes by fixed provider and bounded outcome (`success`, `invalid_state`,
-`not_allowed`, `already_linked`, `rate_limited`, `provider_error`) without recording identity material.
+start/callback/link/unlink outcomes by fixed provider and bounded outcome (`succeeded`, `linked`, `unlinked`,
+`invalid_state`, `not_allowed`, `already_linked`, `rate_limited`, `provider_error`) without recording identity
+material.
 
 Alert on sustained callback/provider errors, state replays, cross-account link conflicts, and rate-limit
 surges. Do not alert with raw provider responses. Operator correlation uses request id plus internal OAuth
@@ -402,7 +408,7 @@ lifecycle, and rollback tests.
   audit, UI, maintenance, and test responsibilities.
 - Private admission remains explicit through campaign invites; adding providers does not broaden registration.
 - Users must understand that an unlinked provider is not the same account. Existing users link it only through
-  the future reauthenticated account-security flow, not another invite.
+  the reauthenticated account-security flow, not another invite.
 - The registry framework must remain deployable with GitHub alone, but Discord and Google are not released as
   separate partial product increments.
 

@@ -1,6 +1,6 @@
 # Runbook: authentication provider registry and rollback
 
-> **Status:** Layers 1-2 plus ADR 0018/0019 r9 admission and entitlement foundation
+> **Status:** Layers 1-3 implemented; provider enablement remains operator-controlled
 > **Owner:** Campaign Hub operator
 > **Last reviewed:** 2026-09-17
 
@@ -52,13 +52,17 @@ Before layer 3, live acceptance is limited to isolated staging with fresh test i
    and Google scopes `openid profile`.
 2. Configure all three providers. Identity admission remains invite-gated rather than subject-allowlisted.
 3. Run `HUB_APP_ORIGIN=... HUB_METRICS_TOKEN=... npm run hub:check-auth-first-enable`.
-4. Complete both printed sign-in journeys. The command passes only if both providers remain available and each
-   aggregate success counter increases after its baseline.
+4. Complete one printed sign-in or authenticated link journey for each provider. The command passes only if
+   both providers remain available and each aggregate successful sign-in-plus-link counter increases after its
+   baseline.
 5. Return staging to GitHub-only.
 
-After layer 3 is deployed, repeat the same paired preflight before first production enablement. A partial result
-blocks enablement. After admission, one failing provider may be emergency-disabled independently while healthy
-providers and existing sessions remain usable.
+After layer 3 is deployed, keep `HUB_ACCOUNT_IDENTITY_LINKING_ENABLED=false` and
+`HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS=github` until the exact-head identity suites, mutation gate, rollback
+preflight, and multi-browser journey pass. Enable the identity capability separately; then repeat the paired
+provider preflight before first production enablement. A partial result blocks enablement. After admission, one
+failing provider may be emergency-disabled independently while healthy providers and existing sessions remain
+usable.
 
 ## GitHub-only rollback preflight
 
@@ -67,7 +71,6 @@ Run against the current database and exact current admission policy:
 ```bash
 DATABASE_URL=... \
 HUB_DATABASE_SSL=true \
-HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678 \
 HUB_ROLLBACK_SUPPORTED_AUTH_PROVIDERS=github \
 npm run hub:check-auth-rollback
 ```
@@ -78,8 +81,9 @@ npm run hub:check-auth-rollback
 
 The command deliberately emits only a count. A zero count does not replace the migration-policy, backup,
 readiness, or smoke checks in [application/database rollback](rollback.md).
-The legacy allowlist value is target-image compatibility input only. It is not passed to or enforced by the r9
-BFF.
+Optional `HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678` is target-image compatibility input only.
+Invite-admitted accounts with a supported-provider identity remain rollback-compatible without appearing in
+that historical list. The value is not passed to or enforced by the r9 BFF.
 
 ## Recovery and escalation
 

@@ -22,9 +22,11 @@ V1-G2's physical one-DM/two-player game day and explicit private-launch go/no-go
 The first `t7-auth-providers` layer provides migration 0006, provider-neutral identity/session provenance,
 durable one-time OAuth transactions, and the validated registry. Layer 2 adds production Discord OAuth and
 Google OIDC adapters, bounded provider HTTP/JWKS validation, paired first-enable preflight, signed-out provider
-guidance, and deterministic memory/PostgreSQL/real-stack coverage. Normal production configuration remains
-GitHub-only. Layer 3 still owns explicit reauthentication, link/unlink, last-identity protections, and account
-security UI; layer 4 owns final rollout/runbooks.
+guidance, and deterministic memory/PostgreSQL/real-stack coverage. Layer 3 adds capability-gated own-identity
+listing, fresh-reauth provider linking, different-identity unlinking, required-provider retention, complete
+session/lease/socket rotation, account-level security UI, linked-outcome preflight support, and Memory/PostgreSQL
+parity. Normal production configuration remains GitHub-only and `account.identity_linking.v1` remains
+default-off pending rollout evidence.
 
 The first r9 identity layer now adds ADR 0018 and migration 0008: signed-out invite links exchange the raw token
 once for a five-minute server-side context bound to one durable OAuth transaction. Existing identities sign in
@@ -42,7 +44,8 @@ The stacked r9 entitlement layer adds migration 0009, provider-neutral `campaign
 reauthentication with session rotation, transaction-local freshness checks, hidden idempotent operator
 administration, lifecycle/export protection, an ordinary-user account reauthentication/deletion flow, stable
 UUID disambiguation for duplicate account names, and focused creator/operator browser states. Enforcement remains
-default-off until release preflight; identity link/unlink and broader account-security polish remain later work.
+default-off until release preflight. The descendant account-linking layer reuses that ordinary-user
+account-level reauthentication authority and adds no migration.
 
 The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
 out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback

@@ -61,6 +61,113 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			email: "changed@example.com",
 		});
 		expect(sameDiscord.id).toBe(accounts[1].id);
+		expect(sameDiscord.displayName).toBe("Shared Name");
+	});
+
+	it("keeps link/unlink authority, audit, retention, and session rotation aligned with MemoryHubStore", async () => {
+		const prefix = `auth-pg-link-${process.pid}-${Date.now()}`;
+		const account = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-github`,
+			displayName: "Stable account name",
+		});
+		const [githubIdentity] = await store.pListExternalIdentities({accountId: account.id});
+		const currentTokenHash = crypto.randomBytes(32).toString("hex");
+		const currentSession = await store.pCreateSession({
+			accountId: account.id,
+			tokenHash: currentTokenHash,
+			expiresAt: new Date(Date.now() + 60 * 60_000),
+			authenticatedViaIdentityId: githubIdentity.id,
+			recentReauthenticatedAt: new Date(),
+		});
+		const otherSession = await store.pCreateSession({
+			accountId: account.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60 * 60_000),
+			authenticatedViaIdentityId: githubIdentity.id,
+		});
+		const transactionId = crypto.randomUUID();
+		const stateHash = getSha256(`${prefix}-state`);
+		const intent = await store.pCreateOAuthLinkTransaction({
+			accountId: account.id,
+			sessionId: currentSession.id,
+			transaction: {
+				id: transactionId,
+				stateHash,
+				provider: "google",
+				redirectUri: `${ORIGIN}/auth/google/callback`,
+				returnTo: "/hub.html",
+				pkceVerifier: "v".repeat(64),
+				oidcNonce: "n".repeat(32),
+				expiresAt: new Date(Date.now() + 5 * 60_000),
+			},
+			idempotencyKey: "postgres-link-intent",
+		});
+		expect(intent.transaction.id).toBe(transactionId);
+		await store.pConsumeOAuthTransaction({
+			id: transactionId,
+			stateHash,
+			provider: "google",
+			operation: "link",
+			redirectUri: `${ORIGIN}/auth/google/callback`,
+		});
+		const linked = await store.pCompleteOAuthLink({
+			identity: {
+				provider: "google",
+				subject: `${prefix}-google`,
+				displayName: "Different provider name",
+			},
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60 * 60_000),
+			currentAccountId: account.id,
+			currentSessionId: currentSession.id,
+			oauthTransactionId: transactionId,
+			availableProviders: ["github", "google"],
+		});
+		expect(linked.account.displayName).toBe("Stable account name");
+		expect(new Set(linked.revokedSessionIds)).toEqual(new Set([currentSession.id, otherSession.id]));
+		expect((await store.pListExternalIdentities({accountId: account.id})).map(identity => identity.provider))
+			.toEqual(["github", "google"]);
+
+		const unlinkKey = "postgres-unlink";
+		const unlinked = await store.pUnlinkExternalIdentity({
+			accountId: account.id,
+			currentSessionId: linked.session.id,
+			identityId: githubIdentity.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60 * 60_000),
+			idempotencyKey: unlinkKey,
+			retentionRequiredProviders: ["google"],
+		});
+		await expect(store.pUnlinkExternalIdentity({
+			accountId: account.id,
+			currentSessionId: unlinked.session.id,
+			identityId: githubIdentity.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60 * 60_000),
+			idempotencyKey: unlinkKey,
+			retentionRequiredProviders: ["google"],
+		})).resolves.toEqual(unlinked);
+		const audit = await store._pool.query(`
+			SELECT action, target_id, details
+			FROM hub.audit_entries
+			WHERE actor_account_id = $1 AND action IN ('identity.linked', 'identity.unlinked')
+			ORDER BY created_at, id
+		`, [account.id]);
+		expect(audit.rows).toEqual([
+			expect.objectContaining({
+				action: "identity.linked",
+				target_id: linked.identity.id,
+				details: {provider: "google"},
+			}),
+			expect.objectContaining({
+				action: "identity.unlinked",
+				target_id: githubIdentity.id,
+				details: {provider: "github"},
+			}),
+		]);
+		expect(JSON.stringify(audit.rows)).not.toContain(`${prefix}-github`);
+		expect(JSON.stringify(audit.rows)).not.toContain(`${prefix}-google`);
 	});
 
 	it("keeps sign-in, provenance, transaction, constraint, and role behavior in one authority", async () => {
@@ -207,14 +314,18 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			)
 		`, [expiredTransactionId, getSha256(`${prefix}-expired-state`), "v".repeat(64)]);
 
-		expect((await store.pGetOperationalMetrics()).expiredOAuthTransactions).toBe(2);
-		expect(await store.pDeleteExpiredOAuthTransactions()).toBe(2);
+		expect((await store.pGetOperationalMetrics()).expiredOAuthTransactions).toBe(1);
+		expect(await store.pDeleteExpiredOAuthTransactions()).toBe(1);
 		expect((await store.pGetOperationalMetrics()).expiredOAuthTransactions).toBe(0);
+		expect((await store._pool.query(
+			`SELECT count(*)::integer AS count FROM hub.oauth_transactions WHERE id = $1`,
+			[transactionId],
+		)).rows[0].count).toBe(1);
 		expect((await store._pool.query(
 			`SELECT count(*)::integer AS count FROM hub.oauth_transactions WHERE id = $1`,
 			[activeTransactionId],
 		)).rows[0].count).toBe(1);
-		await store._pool.query(`DELETE FROM hub.oauth_transactions WHERE id = $1`, [activeTransactionId]);
+		await store._pool.query(`DELETE FROM hub.oauth_transactions WHERE id = ANY($1::uuid[])`, [[transactionId, activeTransactionId]]);
 
 		const correlatedTransactionId = crypto.randomUUID();
 		const correlatedStateHash = getSha256(`${prefix}-correlated-state`);

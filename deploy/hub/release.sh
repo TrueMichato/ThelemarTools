@@ -127,6 +127,8 @@ assert_no_account_entitlement_ambient_override () {
 	local name
 	for name in \
 		HUB_ACCOUNT_ENTITLEMENTS_ENABLED \
+		HUB_ACCOUNT_IDENTITY_LINKING_ENABLED \
+		HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS \
 		HUB_INVITE_ACCOUNT_ADMISSION_ENABLED \
 		HUB_OPERATOR_ACCOUNT_IDS; do
 		if [[ "${!name+set}" == "set" ]]; then
@@ -136,8 +138,10 @@ assert_no_account_entitlement_ambient_override () {
 }
 
 assert_account_entitlement_config () {
-	local entitlement_enabled invite_enabled operator_ids
+	local entitlement_enabled identity_linking_enabled retention_providers invite_enabled operator_ids
 	entitlement_enabled="$(env_value HUB_ACCOUNT_ENTITLEMENTS_ENABLED 2>/dev/null || true)"
+	identity_linking_enabled="$(env_value HUB_ACCOUNT_IDENTITY_LINKING_ENABLED 2>/dev/null || true)"
+	retention_providers="$(env_value HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS 2>/dev/null || true)"
 	invite_enabled="$(env_value HUB_INVITE_ACCOUNT_ADMISSION_ENABLED 2>/dev/null || true)"
 	operator_ids="$(env_value HUB_OPERATOR_ACCOUNT_IDS 2>/dev/null || true)"
 	if [[ "$invite_enabled" == "true" && "$entitlement_enabled" != "true" ]]; then
@@ -145,6 +149,9 @@ assert_account_entitlement_config () {
 	fi
 	if [[ "$entitlement_enabled" == "true" && -z "$operator_ids" ]]; then
 		fail "HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true requires HUB_OPERATOR_ACCOUNT_IDS"
+	fi
+	if [[ "$identity_linking_enabled" == "true" && -z "$retention_providers" ]]; then
+		fail "HUB_ACCOUNT_IDENTITY_LINKING_ENABLED=true requires HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS"
 	fi
 }
 

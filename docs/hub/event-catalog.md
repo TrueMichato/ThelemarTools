@@ -166,11 +166,15 @@ Current audit actions include:
 - `xp.granted`, compatibility `item.granted`, atomic `item.award_batch`;
 - `transfer.committed`, `transfer.rejected`;
 - `session.revoked`, `session.revoked_others`;
+- `identity.linked`, `identity.unlinked`, containing only provider slug and opaque Hub identity id;
 - `account.deletion_requested`, `account.deletion_cancelled`, `account.deletion_purged`.
 
 Not every high-frequency product event has an audit row. Character patches, presence, roll logging, action
 proposal, transfer request, and transfer reservation are represented by canonical/domain data instead. Changing audit policy
 requires privacy/retention review.
+
+Account identity link/unlink is account-scoped security administration, not campaign activity. It never appends
+a campaign domain event or outbox row.
 
 `character.projection.invalidated` remains a transport/control signal and is not rendered as campaign activity.
 Legacy activity without newer optional reason or spell detail fields renders a bounded neutral fallback rather

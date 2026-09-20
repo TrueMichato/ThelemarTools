@@ -49,6 +49,14 @@
 - Deletion-pending sessions may start only the reauthentication flow needed for export/cancellation. Successful
   deletion request revokes the current session, so the browser returns to sign-in rather than leaving unusable
   account controls visible.
+- Account identity linking is default-off behind `account.identity_linking.v1`. Link intent creation requires
+  exact Origin, CSRF, current protocol, idempotency, an active account, and commit-time fresh reauthentication.
+  A link callback cannot call invite admission or create an account; cross-account ownership returns only
+  `IDENTITY_ALREADY_LINKED`.
+- Unlinking requires commit-time fresh reauthentication through a different linked identity, preserves at least
+  one identity and one configured retention-provider identity, rotates the current session, revokes every prior
+  account session and lease in the same transaction, and closes their sockets after commit. Identity audits
+  contain only provider slug plus opaque Hub identity id.
 - `campaign:create` and `platform:operate` are internal-account entitlements. Provider subject, email, handle,
   login, display name, and campaign membership role are never creator/operator authority. Sensitive store
   transactions recheck the <=5 minute freshness window and last-operator invariant under locks.

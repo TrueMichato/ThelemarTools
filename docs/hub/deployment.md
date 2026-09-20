@@ -113,8 +113,10 @@ resolution.
 | `HUB_CSRF_SECRET` | BFF | Yes | CSRF derivation only |
 | `HUB_METRICS_TOKEN` | BFF/monitor | Yes | Independent bearer for `/api/metrics` |
 | `HUB_LOG_LEVEL` | BFF | No | Structured log threshold |
-| `HUB_AUTH_PROVIDERS` | BFF | No | Supported slugs `github,discord,google`; Discord and Google normal enablement must be paired; production remains `github` until layer 3 |
+| `HUB_AUTH_PROVIDERS` | BFF | No | Supported slugs `github,discord,google`; Discord and Google normal enablement must be paired; deployment does not enable them |
 | `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` | BFF | No | Emergency provider-specific kill switch; startup fails if no provider remains |
+| `HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS` | BFF | No | Non-empty subset of configured providers which every active account must retain; defaults to `github` |
+| `HUB_ACCOUNT_IDENTITY_LINKING_ENABLED` | BFF | No | Default `false`; advertises `account.identity_linking.v1` and enables own identity list/link/unlink APIs and UI only after layer-3 preflight |
 | `HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS` | BFF | Operationally sensitive | Comma-separated exact campaign UUID rollout allowlist for protocol-4 peer source costs; blank disables it, and production rejects `*`, malformed IDs, duplicates, and more than 100 IDs |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | BFF | Secret (client secret) | OAuth application |
 | `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` | BFF | Secret (client secret) | Discord confidential OAuth application |

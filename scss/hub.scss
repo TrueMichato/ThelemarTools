@@ -306,6 +306,41 @@
 	color: var(--hub-text);
 }
 
+.hub-account-security {
+	display: grid;
+	gap: 12px;
+	margin-bottom: 20px;
+	padding-bottom: 20px;
+	border-bottom: 1px solid var(--hub-border);
+}
+
+.hub-account-security__heading {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 16px;
+}
+
+.hub-account-reauth {
+	display: grid;
+	gap: 8px;
+	padding: 14px;
+	border: 1px solid color-mix(in srgb, var(--hub-warning) 45%, var(--hub-border));
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--hub-warning) 8%, var(--hub-surface));
+	color: var(--hub-text-secondary);
+	line-height: 1.5;
+}
+
+.hub-account-reauth strong {
+	color: var(--hub-text);
+}
+
+.hub-account-reauth p,
+.hub-account-security .hub-form-hint {
+	margin: 0;
+}
+
 .hub-campaign-list {
 	display: flex;
 	flex-direction: column;

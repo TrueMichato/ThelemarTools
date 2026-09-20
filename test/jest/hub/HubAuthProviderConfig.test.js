@@ -95,4 +95,24 @@ describe("Hub authentication provider configuration", () => {
 			expect(() => getAllowedOAuthSubjects(value)).toThrow();
 		}
 	});
+
+	it("requires a non-empty unique retention policy drawn from configured providers", () => {
+		expect(createAuthProviderConfiguration({
+			env: getEnv({
+				HUB_AUTH_PROVIDERS: "github,discord,google",
+				HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS: "github,google",
+			}),
+		}).identityRetentionRequiredProviders).toEqual(["github", "google"]);
+		for (const retention of ["unknown", "github,github"]) {
+			expect(() => createAuthProviderConfiguration({
+				env: getEnv({HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS: retention}),
+			})).toThrow(/retention provider/i);
+		}
+		expect(() => createAuthProviderConfiguration({
+			env: getEnv({
+				HUB_AUTH_PROVIDERS: "discord,google",
+				HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS: "github",
+			}),
+		})).toThrow(/configured authentication providers/);
+	});
 });

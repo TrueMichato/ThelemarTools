@@ -60,15 +60,15 @@ async function pGetSuccessCounters ({fnFetch, appOrigin, metricsToken}) {
 	});
 	const counters = new Map(REQUIRED_PROVIDERS.map(provider => [provider, 0]));
 	for (const line of text.split("\n")) {
-		const isRelevantMetric = /^hub_auth_outcomes_total\{provider="(?:discord|google)",outcome="succeeded"\}/.test(line.trim());
-		const match = /^hub_auth_outcomes_total\{provider="(discord|google)",outcome="succeeded"\} ([0-9]+)$/.exec(line.trim());
+		const isRelevantMetric = /^hub_auth_outcomes_total\{provider="(?:discord|google)",outcome="(?:succeeded|linked)"\}/.test(line.trim());
+		const match = /^hub_auth_outcomes_total\{provider="(discord|google)",outcome="(succeeded|linked)"\} ([0-9]+)$/.exec(line.trim());
 		if (!match) {
 			if (isRelevantMetric) throw new PreflightError("INVALID_METRICS");
 			continue;
 		}
-		const count = Number(match[2]);
+		const count = Number(match[3]);
 		if (!Number.isSafeInteger(count)) throw new PreflightError("INVALID_METRICS");
-		counters.set(match[1], count);
+		counters.set(match[1], counters.get(match[1]) + count);
 	}
 	return counters;
 }
@@ -92,7 +92,7 @@ export async function pCheckAuthProviderFirstEnable ({
 		throw new PreflightError("PROVIDERS_NOT_AVAILABLE");
 	}
 	const baseline = await pGetSuccessCounters({fnFetch, appOrigin, metricsToken});
-	fnWrite(`Complete both staging sign-ins after this baseline:\n`);
+	fnWrite(`Complete one staging sign-in or account link for each provider after this baseline:\n`);
 	for (const provider of REQUIRED_PROVIDERS) {
 		fnWrite(`${provider}: ${appOrigin}/auth/${provider}/start?returnTo=%2Fhub.html\n`);
 	}

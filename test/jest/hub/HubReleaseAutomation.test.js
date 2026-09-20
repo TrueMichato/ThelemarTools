@@ -262,6 +262,8 @@ describe("Campaign Hub deliberate release automation", () => {
 
 	it.each([
 		"HUB_ACCOUNT_ENTITLEMENTS_ENABLED",
+		"HUB_ACCOUNT_IDENTITY_LINKING_ENABLED",
+		"HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS",
 		"HUB_INVITE_ACCOUNT_ADMISSION_ENABLED",
 		"HUB_OPERATOR_ACCOUNT_IDS",
 	])("rejects ambient %s before Compose can override .env.hub", name => {
@@ -302,9 +304,20 @@ describe("Campaign Hub deliberate release automation", () => {
 			expect(operatorMissing.status).not.toBe(0);
 			expect(operatorMissing.stderr).toMatch(/requires HUB_OPERATOR_ACCOUNT_IDS/);
 
+			const retentionMissing = runCheck([
+				"HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false",
+				"HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true",
+				"HUB_ACCOUNT_IDENTITY_LINKING_ENABLED=true",
+				"HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS=",
+				"HUB_OPERATOR_ACCOUNT_IDS=11111111-1111-4111-8111-111111111111",
+			].join("\n"));
+			expect(retentionMissing.status).not.toBe(0);
+			expect(retentionMissing.stderr).toMatch(/requires HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS/);
+
 			expect(runCheck([
 				"HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false",
 				"HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true",
+				"HUB_ACCOUNT_IDENTITY_LINKING_ENABLED=false",
 				"HUB_OPERATOR_ACCOUNT_IDS=11111111-1111-4111-8111-111111111111",
 			].join("\n")).status).toBe(0);
 		} finally {

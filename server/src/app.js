@@ -39,6 +39,12 @@ import {
 	ACCOUNT_ENTITLEMENTS_CAPABILITY,
 	parseOperatorAccountIds,
 } from "./account-entitlements.js";
+import {
+	ACCOUNT_IDENTITY_LINKING_CAPABILITY,
+	ACCOUNT_IDENTITY_LINK_TTL_SECONDS,
+	getPublicExternalIdentity,
+	normalizeIdentityRetentionRequiredProviders,
+} from "./account-identities.js";
 import {HUB_PROTOCOL_VERSION} from "../../js/hub/hub-capabilities.js";
 import crypto from "node:crypto";
 
@@ -97,6 +103,14 @@ function getCookieOptions ({isSecure, maxAge}) {
 		signed: true,
 		maxAge,
 	};
+}
+
+function getOAuthLinkState ({transactionId, secret}) {
+	return `${transactionId}.${getDeterministicToken({
+		secret,
+		namespace: "hub-oauth-link-state",
+		parts: [transactionId],
+	})}`;
 }
 
 function getClearCookieOptions ({isSecure}) {
@@ -179,6 +193,8 @@ function validateConfig (config) {
 		inviteContextTtlSeconds: 5 * 60,
 		isInviteAccountAdmissionEnabled: false,
 		isAccountEntitlementsEnabled: false,
+		isAccountIdentityLinkingEnabled: false,
+		identityRetentionRequiredProviders: ["github"],
 		operatorAccountIds: [],
 		isSecure: new URL(appOrigin).protocol === "https:",
 		trustProxy: false,
@@ -189,6 +205,9 @@ function validateConfig (config) {
 		clientIpHeader,
 	};
 	normalized.operatorAccountIds = parseOperatorAccountIds(normalized.operatorAccountIds);
+	normalized.identityRetentionRequiredProviders = normalizeIdentityRetentionRequiredProviders(
+		normalized.identityRetentionRequiredProviders,
+	);
 	return normalized;
 }
 
@@ -241,6 +260,10 @@ export async function createHubApp ({
 	if (authProviderRegistry && oauthProvider) throw new TypeError(`Provide authProviderRegistry or oauthProvider, not both.`);
 	const providerRegistry = authProviderRegistry || getLegacyGitHubAuthProviderRegistry(oauthProvider);
 	const config = validateConfig(rawConfig);
+	const registeredProviderSlugs = new Set(providerRegistry.getPublicMetadata().map(provider => provider.slug));
+	if (config.identityRetentionRequiredProviders.some(provider => !registeredProviderSlugs.has(provider))) {
+		throw new TypeError(`Identity retention providers must be registered authentication providers.`);
+	}
 	if (config.isInviteAccountAdmissionEnabled && !config.isAccountEntitlementsEnabled) {
 		throw new TypeError(`Invite account admission requires account entitlement enforcement.`);
 	}
@@ -402,6 +425,7 @@ export async function createHubApp ({
 		) return;
 		const auth = await pGetAuth(request);
 		if (auth?.account.status !== "deletion_requested") return;
+		if (pathname.startsWith("/api/account/reauthentication/")) return;
 		if (deletionPendingAllowedPaths.has(pathname)) return;
 		return reply.code(423).send({error: "ACCOUNT_DELETION_PENDING"});
 	});
@@ -653,6 +677,7 @@ export async function createHubApp ({
 			...(config.isInviteAccountAdmissionEnabled ? [INVITE_ADMISSION_CAPABILITY] : []),
 			...(config.isCampaignRulesPolicyEnabled ? [CAMPAIGN_RULES_POLICY_CAPABILITY] : []),
 			...(config.isAccountEntitlementsEnabled ? [ACCOUNT_ENTITLEMENTS_CAPABILITY] : []),
+			...(config.isAccountIdentityLinkingEnabled ? [ACCOUNT_IDENTITY_LINKING_CAPABILITY] : []),
 		],
 		authProviders: providerRegistry.getPublicMetadata(),
 	}));
@@ -966,6 +991,11 @@ export async function createHubApp ({
 				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
 				throw error;
 			}
+			if (transaction.operation === "link" && !config.isAccountIdentityLinkingEnabled) {
+				clearTransactionCookies();
+				metrics.observeAuth?.({provider: provider.slug, outcome: "link_disabled"});
+				return reply.code(403).send({error: "AUTH_PROVIDER_UNAVAILABLE"});
+			}
 			if (typeof request.query.code !== "string" || request.query.error) {
 				metrics.observeAuth?.({provider: provider.slug, outcome: "provider_cancelled"});
 				return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
@@ -1007,15 +1037,36 @@ export async function createHubApp ({
 						oauthTransactionId: transaction.id,
 						isNewAccountAdmissionEnabled: config.isInviteAccountAdmissionEnabled,
 					});
+				} else if (transaction.operation === "link") {
+					completed = await store.pCompleteOAuthLink({
+						identity,
+						tokenHash: getSha256(token),
+						expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+						userAgent: request.headers["user-agent"] || null,
+						currentAccountId: priorAuth?.account.id || null,
+						currentSessionId: priorAuth?.session.id || null,
+						oauthTransactionId: transaction.id,
+						availableProviders: providerRegistry.getAvailableProviders().map(current => current.slug),
+					});
 				} else {
 					throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 				}
 			} catch (error) {
-				if (["INVITE_ADMISSION_REQUIRED", "INVITE_ADMISSION_INVALID", "ACCOUNT_UNAVAILABLE"].includes(error?.code)) {
+				if ([
+					"INVITE_ADMISSION_REQUIRED",
+					"INVITE_ADMISSION_INVALID",
+					"ACCOUNT_UNAVAILABLE",
+					"IDENTITY_ALREADY_LINKED",
+					"INVALID_OAUTH_STATE",
+					"REAUTHENTICATION_REQUIRED",
+				].includes(error?.code)) {
 					clearTransactionCookies();
 				}
 				if (["INVITE_ADMISSION_REQUIRED", "INVITE_ADMISSION_INVALID", "INVITE_ADMISSION_UNAVAILABLE"].includes(error?.code)) {
 					metrics.observeAuth?.({provider: provider.slug, outcome: "not_allowed"});
+				}
+				if (error?.code === "IDENTITY_ALREADY_LINKED") {
+					metrics.observeAuth?.({provider: provider.slug, outcome: "already_linked"});
 				}
 				throw error;
 			}
@@ -1025,7 +1076,10 @@ export async function createHubApp ({
 				isSecure: config.isSecure,
 				maxAge: config.sessionTtlSeconds,
 			}));
-			metrics.observeAuth?.({provider: provider.slug, outcome: "succeeded"});
+			metrics.observeAuth?.({
+				provider: provider.slug,
+				outcome: transaction.operation === "link" ? "linked" : "succeeded",
+			});
 			return reply.redirect(transaction.returnTo);
 		});
 	}
@@ -1058,9 +1112,153 @@ export async function createHubApp ({
 			capabilities: [
 				ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY,
 				...(config.isAccountEntitlementsEnabled ? [ACCOUNT_ENTITLEMENTS_CAPABILITY] : []),
+				...(config.isAccountIdentityLinkingEnabled ? [ACCOUNT_IDENTITY_LINKING_CAPABILITY] : []),
 			],
 		};
 	});
+
+	if (config.isAccountIdentityLinkingEnabled) {
+		const providerMetadata = new Map(
+			providerRegistry.getPublicMetadata().map(provider => [provider.slug, provider]),
+		);
+		const pGetPublicIdentities = async auth => {
+			const identities = await store.pListExternalIdentities({accountId: auth.account.id});
+			const availableProviders = providerRegistry.getAvailableProviders().map(provider => provider.slug);
+			return identities.map(identity => getPublicExternalIdentity({
+				identity,
+				accountStatus: auth.account.status,
+				identities,
+				currentSessionIdentityId: auth.session.authenticatedViaIdentityId,
+				providerStatus: providerMetadata.get(identity.provider)?.status || "disabled",
+				retentionRequiredProviders: config.identityRetentionRequiredProviders,
+				availableProviders,
+			}));
+		};
+
+		app.get("/api/account/identities", {
+			preHandler: [requireAuth, requireCurrentProtocolVersion],
+		}, async request => ({
+			identities: await pGetPublicIdentities(request.hubAuth),
+		}));
+
+		app.post("/api/account/identities/:provider/link-intents", {
+			preHandler: [requireMutationSecurity, requireCurrentProtocolVersion],
+			config: {rateLimit: {max: 5, timeWindow: "1 minute"}},
+			schema: {
+				params: {
+					type: "object",
+					required: ["provider"],
+					additionalProperties: false,
+					properties: {provider: {type: "string", minLength: 1, maxLength: 32}},
+				},
+				body: {
+					type: "object",
+					additionalProperties: false,
+					properties: {returnTo: {type: "string", minLength: 1, maxLength: 2_048}},
+				},
+			},
+		}, async (request, reply) => {
+			const provider = providerRegistry.getAvailableProviders()
+				.find(current => current.slug === request.params.provider);
+			if (!provider) return reply.code(404).send({error: "NOT_FOUND"});
+			const transactionId = crypto.randomUUID();
+			const state = getOAuthLinkState({transactionId, secret: config.csrfSecret});
+			const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
+			const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
+			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
+			const returnTo = getSafeReturnTo({
+				rawReturnTo: request.body?.returnTo,
+				appOrigin: config.appOrigin,
+			});
+			const created = await store.pCreateOAuthLinkTransaction({
+				accountId: request.hubAuth.account.id,
+				sessionId: request.hubAuth.session.id,
+				transaction: {
+					id: transactionId,
+					stateHash: getSha256(state),
+					provider: provider.slug,
+					redirectUri,
+					returnTo,
+					pkceVerifier,
+					oidcNonce,
+					expiresAt: new Date(Date.now() + ACCOUNT_IDENTITY_LINK_TTL_SECONDS * 1_000),
+				},
+				idempotencyKey: getIdempotencyKey(request),
+			});
+			const replayState = getOAuthLinkState({
+				transactionId: created.transaction.id,
+				secret: config.csrfSecret,
+			});
+			const authorizationUrl = provider.getAuthorizationUrl({
+				state: replayState,
+				codeChallenge: created.transaction.pkceVerifier == null
+					? null
+					: getPkceChallenge(created.transaction.pkceVerifier),
+				nonce: created.transaction.oidcNonce,
+				redirectUri: created.transaction.redirectUri,
+			});
+			reply.setCookie(
+				getOAuthTransactionCookieName(created.transaction.id),
+				created.transaction.id,
+				getCookieOptions({
+					isSecure: config.isSecure,
+					maxAge: ACCOUNT_IDENTITY_LINK_TTL_SECONDS,
+				}),
+			);
+			metrics.observeAuth?.({provider: provider.slug, outcome: "link_started"});
+			return reply.code(201).send({authorizationUrl});
+		});
+
+		app.delete("/api/account/identities/:identityId", {
+			preHandler: [requireMutationSecurity, requireCurrentProtocolVersion],
+			config: {rateLimit: {max: 5, timeWindow: "1 minute"}},
+			schema: {
+				params: {
+					type: "object",
+					required: ["identityId"],
+					additionalProperties: false,
+					properties: {identityId: {type: "string", format: "uuid"}},
+				},
+			},
+		}, async (request, reply) => {
+			const idempotencyKey = getIdempotencyKey(request);
+			const token = getDeterministicToken({
+				secret: config.cookieSecret,
+				namespace: "hub-identity-unlink-session",
+				parts: [request.hubAuth.account.id, idempotencyKey.key],
+			});
+			const completed = await store.pUnlinkExternalIdentity({
+				accountId: request.hubAuth.account.id,
+				currentSessionId: request.hubAuth.session.id,
+				identityId: request.params.identityId,
+				tokenHash: getSha256(token),
+				expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+				userAgent: request.headers["user-agent"] || null,
+				idempotencyKey,
+				retentionRequiredProviders: config.identityRetentionRequiredProviders,
+				availableProviders: providerRegistry.getAvailableProviders().map(provider => provider.slug),
+			});
+			completed.revokedSessionIds.forEach(sessionId => realtime.closeSession({sessionId}));
+			metrics.observeAuth?.({provider: completed.unlinkedProvider, outcome: "unlinked"});
+			reply.setCookie(SESSION_COOKIE, token, getCookieOptions({
+				isSecure: config.isSecure,
+				maxAge: config.sessionTtlSeconds,
+			}));
+			return {
+				ok: true,
+				unlinkedIdentityId: completed.unlinkedIdentityId,
+				csrfToken: getCsrfToken({
+					csrfSecret: config.csrfSecret,
+					sessionId: completed.session.id,
+				}),
+				identities: await pGetPublicIdentities({
+					account: request.hubAuth.account,
+					session: completed.session,
+				}),
+				otherDevicesSignedOut: completed.revokedSessionIds.some(id => id !== request.hubAuth.session.id),
+			};
+		});
+	}
 
 	if (config.isAccountEntitlementsEnabled) {
 		const entitlementParamsSchema = {

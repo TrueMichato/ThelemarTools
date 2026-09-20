@@ -10,8 +10,8 @@ Use when the prior image supports the current schema:
 
 1. Stop promotion.
 2. Record incident/request/build versions.
-3. Run `npm run hub:check-auth-rollback` with the exact providers supported by the target image and the current
-   allowlist. Stop if it reports any blocked account.
+3. Run `npm run hub:check-auth-rollback` with the exact providers supported by the target image and, only when
+   that target still requires it, the optional legacy allowlist. Stop if it reports any blocked account.
 4. Confirm every pending/applied migration is classified in `deploy/hub/migration-policy.json`.
 5. Deploy prior immutable BFF/static digests.
 6. Verify required migration compatibility before readiness.
@@ -25,8 +25,9 @@ the release operation that created it, while its OCI revision/version labels ide
 preserved.
 
 Migration 0006 is previous-app-compatible before any currently admitted account relies solely on a provider
-unsupported by the target image. Never infer rollback safety from provider row counts alone; the exact allowlist
-is part of usability. Already de-admitted accounts do not make an otherwise compatible rollback less safe. The
+unsupported by the target image. Never infer rollback safety from provider row counts alone; invite-admitted
+accounts are accepted through their supported identity, while an optional historical allowlist constrains only
+legacy target-image accounts. Already de-admitted accounts do not make an otherwise compatible rollback less safe. The
 preflight returns only a count to avoid exposing account/provider subjects in evidence.
 
 Migration 0009 is an additive previous-app-compatible expand migration. Reverting the application leaves
