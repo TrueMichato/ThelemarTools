@@ -355,6 +355,7 @@ describe("Hub lifecycle administration", () => {
 			accountId: player.id,
 			idempotencyKey: key("delete"),
 		});
+
 		expect(requested.deletion.status).toBe("deletion_requested");
 		expect(await store.pGetSessionByTokenHash({tokenHash: "a".repeat(64)})).toBeNull();
 		const graceSession = await store.pCreateSession({accountId: player.id, tokenHash: "c".repeat(64), expiresAt, userAgent: "Grace"});
@@ -365,5 +366,44 @@ describe("Hub lifecycle administration", () => {
 		now = new Date(now.getTime() + 8 * 86_400_000);
 		expect(await store.pPurgeDueAccounts()).toEqual({purgedAccountIds: [player.id], blockedAccountIds: []});
 		await expect(store.pExportAccountData({accountId: player.id})).rejects.toMatchObject({code: "ACCOUNT_NOT_FOUND"});
+	});
+
+	it("removes invites created by a purged member", async () => {
+		const creator = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "purged-invite-creator",
+			displayName: "Invite Creator",
+		});
+		const joinHash = "purged-creator-join";
+		await store.pCreateInvite({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			role: "co_dm",
+			tokenHash: joinHash,
+			expiresAt: new Date(now.getTime() + 86_400_000),
+			maxUses: 1,
+			idempotencyKey: "purged-creator-join-invite",
+		});
+		const creatorMembership = (await store.pRedeemInvite({
+			accountId: creator.id,
+			tokenHash: joinHash,
+			idempotencyKey: "purged-creator-join-redeem",
+		})).membership;
+		await store.pCreateInvite({
+			accountId: creator.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash: "purged-created-invite",
+			expiresAt: new Date(now.getTime() + 86_400_000),
+			maxUses: 1,
+			idempotencyKey: "purged-created-invite-command",
+		});
+		await store.pRequestAccountDeletion({
+			accountId: creator.id,
+			idempotencyKey: "purged-creator-delete",
+			graceMs: 0,
+		});
+		await store.pPurgeDueAccounts();
+		expect([...store._invites.values()].some(invite => invite.createdByMembershipId === creatorMembership.id)).toBe(false);
 	});
 });

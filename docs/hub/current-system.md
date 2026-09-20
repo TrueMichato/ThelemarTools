@@ -2,7 +2,7 @@
 
 > **Status:** Current implementation reference
 > **Scope:** Repository implementation through PR #253; deployed Oracle baseline identified separately
-> **Last verified:** 2026-09-13
+> **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 This document describes what exists in the repository. It is not the delivery plan, and repository implementation
@@ -21,7 +21,8 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 - The browser never connects directly to PostgreSQL or an OAuth provider.
 - PostgreSQL is canonical for online data.
 - The Fastify backend-for-frontend (BFF) is the authorization, validation, transaction, and WebSocket boundary.
-- Private V1 is allowlisted and invite-only.
+- Private V1 campaign access is invite-only. Existing provider identities sign in normally; unknown identities
+  use ADR 0018's default-off invite-gated first-access path rather than a provider-subject allowlist.
 
 ## Repository map
 
@@ -207,8 +208,12 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - Session and OAuth cookies are httpOnly; production cookies are Secure and `__Host-` scoped.
 - Session tokens are stored only as SHA-256 hashes.
 - OAuth state is hash-only in `oauth_transactions`; provider, operation, redirect, PKCE/nonce requirements, and
-  future account/session bindings are durable for at most ten minutes and consumed atomically. Provider tokens
+  account/session/invite-context bindings are durable for at most ten minutes and consumed atomically. A
+  hash-only browser correlation lets multiple tabs retain separate state-selected transactions. Provider tokens
   are callback-local and never stored.
+- A raw invite is exchanged once in a POST body for a <=5-minute server-side context bound to one OAuth
+  transaction. First access atomically creates account/identity/session/membership or creates none. New-account
+  admission is disabled by default pending the stacked creator-entitlement layer.
 - Accounts resolve only through `(provider, immutable subject)`. Email, login, handle, and display name are
   presentation metadata and never account-selection inputs.
 - Discord uses canonical decimal user-id text and `identify` only. Google uses `openid profile`, RS256 signature,
@@ -244,7 +249,7 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - signed-out/session/error/loading states;
 - campaign list;
 - inline campaign creation;
-- invite-fragment preservation across OAuth.
+- invite-fragment removal plus server-side OAuth admission binding; raw invite tokens do not cross OAuth.
 - session/device listing and revocation;
 - account export and seven-day deletion request/cancellation state.
 
@@ -306,5 +311,5 @@ limits, and WebSocket context; live ingress spoofing evidence is still required.
 Phase 6G is complete for release `hub-staging-2026-09-10-r7` at
 `77d955c053dcdfe949235620db93f7eba477af34`. Its manual operations, off-machine backup, authenticated restore,
 RPO/RTO, exact-r6 rollback, exact-r7 return, and genuine scheduled maintenance/backup executions are proven.
-V1-G1 is complete. Before expanding the allowlist, execute V1-G2's
+V1-G1 is complete. Before expanding the private invite cohort, execute V1-G2's
 [one-DM/two-player game day](runbooks/private-game-day.md) and explicit go/no-go in the [living roadmap](roadmap.md).

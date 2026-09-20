@@ -32,8 +32,8 @@ describe("Campaign Hub multi-provider identity ADR contract", () => {
 
 	it("covers admission and the protected link lifecycle", () => {
 		for (const required of [
-			"private admission policy",
-			"A campaign invite never bypasses the Hub allowlist",
+			"invite-gated first-access transaction",
+			"Linking does not require another campaign",
 			"recent reauthentication",
 			"CSRF protection",
 			"one-time state",

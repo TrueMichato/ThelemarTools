@@ -7,6 +7,11 @@ transaction registry. Layer 2 adds Discord OAuth and Google OIDC adapters, bound
 paired configuration, and deterministic acceptance coverage. Production remains GitHub-only until layer 3 adds
 explicit reauthentication and identity link/unlink controls.
 
+Admission update: [ADR 0018](0018-invite-gated-first-access.md) supersedes this ADR's provider-subject
+allowlist rules for first account creation. Existing identities sign in normally; an unknown identity requires
+an OAuth-bound campaign invite context. Future authenticated provider linking requires fresh reauthentication
+and does not require a campaign invite or provider-subject allowlist.
+
 ## Context
 
 The Campaign Hub currently has one injected `GitHubOAuthProvider`, two concrete routes
@@ -25,8 +30,8 @@ correct for the current allowlisted single-provider flow but is not sufficient f
 [ADR 0001](0001-backend-and-sessions.md) requires stable OAuth identities behind the same-origin BFF.
 [ADR 0007](0007-lifecycle-deletion.md), the [security model](../security.md), and the
 [data lifecycle](../data-lifecycle.md) require sessions, export, deletion, and audit to remain account-scoped.
-The private pilot remains allowlisted and campaign invitations remain authorization to join a campaign, not
-proof that two provider profiles belong to one person.
+The private pilot remains invite-gated. A campaign invite is admission to one campaign and never proof that two
+provider profiles belong to one person.
 
 ## Decision
 
@@ -42,8 +47,8 @@ The following rules are normative:
 3. An existing signed-in user links another provider only through an explicit account-management action with
    CSRF protection, recent reauthentication, one-time state, and PKCE where the provider supports it.
 4. An identity already linked to another account is rejected without disclosing that account.
-5. An unknown identity may create an account only after the private admission policy accepts that exact
-   normalized provider and subject. A campaign invite never bypasses the Hub allowlist.
+5. An unknown identity may create an account only through the invite-gated first-access transaction defined by
+   ADR 0018. Provider subject, email, handle, and login are not admission authority.
 6. Unlinking, provider disablement, and rollback must not leave an active account without a usable identity.
 7. Sessions, account export, account deletion, audit, and revocation operate across every identity linked to
    the internal account.
@@ -125,19 +130,18 @@ Callback resolution is ordered and transactional:
 2. Normalize and validate the provider identity.
 3. If `(provider, subject)` already exists, sign in to its internal account unless the transaction is a link
    for a different account.
-4. If the identity is unknown and the transaction is a normal sign-in, require
-   `HUB_ALLOWED_OAUTH_SUBJECTS` (or its future policy implementation) to contain the exact
-   `provider:subject`, then create the account and identity in one transaction.
-5. If the identity is unknown and the transaction is a link, require the link intent's account/session,
-   recent reauthentication, and the same private admission policy, then attach it to that account.
+4. If the identity is unknown and the transaction is a normal sign-in, require ADR 0018's valid bound invite
+   context and create account, identity, session, and membership atomically.
+5. If the identity is unknown and the transaction is a link, require the link intent's account/session and
+   recent reauthentication, then attach it to that existing account. Linking does not require another campaign
+   invite or a provider-subject allowlist.
 6. If the identity belongs to another account, return the stable conflict `IDENTITY_ALREADY_LINKED`. Do not
    reveal the owner, email, display name, or account existence beyond the conflict.
 
-The existing campaign-invite fragment may survive the OAuth round trip as it does now, but redemption occurs
-only after Hub admission and authentication. Matching an email on another identity does nothing. A user who
-signs in with an unlinked but allowlisted provider may therefore create a separate account; the UI must direct
-existing users to sign in with a linked identity and use **Link provider** first. Account merging is a
-separate, higher-risk decision.
+The raw campaign-invite fragment never survives the OAuth round trip. ADR 0018 exchanges it once for a
+server-side context bound to the durable OAuth transaction and commits membership before redirect. Matching an
+email on another identity does nothing. Existing users must sign in with a linked identity and use **Link
+provider** for later identities. Account merging is a separate, higher-risk decision.
 
 ## Account-link lifecycle
 
@@ -181,8 +185,8 @@ and recent-reauthentication protections. The reauthentication identity must be d
 removed.
 
 The authority serializes link/unlink for the account and computes usable identities while holding the lock.
-An identity is usable only when its provider is enabled and healthy enough to start authentication, its exact
-provider-subject remains admitted by private policy, and the link is not being removed. If no other usable
+An identity is usable only when its provider is enabled and healthy enough to start authentication and the link
+is not being removed. Existing identities do not depend on a provider-subject allowlist. If no other usable
 identity remains, return `LAST_USABLE_IDENTITY`. Provider configuration changes run the same preflight across
 active accounts before disablement.
 
@@ -224,7 +228,7 @@ Migration and deployment order is:
 
 1. apply the additive migration;
 2. deploy the provider registry with only the GitHub adapter enabled and preserve the existing GitHub routes,
-   allowlist values, sessions, identities, and account ids;
+   sessions, identities, and account ids; ADR 0018 separately retires subject allowlisting;
 3. exercise GitHub sign-in, reauthentication, link/unlink invariants, export, deletion, and rollback;
 4. deploy Discord and Google adapters disabled, configure exact callbacks and independent credentials outside
    Git, and pass the acceptance suite in isolated staging with fresh test identities;
@@ -286,7 +290,7 @@ Rotation is provider-by-provider:
 1. create the replacement credential or provider application without exposing the value;
 2. register the same exact callback and minimum scopes;
 3. update the BFF secret/config and restart;
-4. pass start/callback, state, declared provider-capability, allowlist, session rotation, and redacted-log
+4. pass start/callback, state, declared provider-capability, invite admission, session rotation, and redacted-log
    probes;
 5. revoke the prior credential only after success.
 
@@ -341,7 +345,7 @@ Implementation is not accepted until automated tests cover:
 
 1. registry rejection of duplicate slugs/routes, unknown adapters, enabled providers with missing config, and
    mismatched callback origins;
-2. unchanged GitHub start/callback paths, numeric-subject allowlist behavior, S256 PKCE, safe return paths,
+2. unchanged GitHub start/callback paths, existing-identity sign-in behavior, S256 PKCE, safe return paths,
    existing identity/account ids, and session-cookie semantics;
 3. concrete Discord and Google paths, minimum scopes, exact redirect URI, Discord snowflake handling without
    numeric precision loss, Discord confidential-client authentication and one-time transaction/code handling,
@@ -354,8 +358,8 @@ Implementation is not accepted until automated tests cover:
 6. normalization of GitHub, Discord, and Google subjects while mutable handle/display-name changes preserve
    identity ownership;
 7. explicit proof that equal or changed emails never link, merge, admit, or select an account;
-8. unknown sign-in denial outside the exact provider-subject allowlist, including a valid campaign invite,
-   plus allowed first-account creation in one transaction;
+8. unknown sign-in denial without an ADR 0018 invite context, invalid-context non-commit behavior, and allowed
+   first-account creation with campaign membership in one transaction;
 9. link initiation refusal without authentication, active status, exact Origin, CSRF, protocol, idempotency,
    recent reauthentication, provider admission, or provider availability;
 10. link success to the initiating account, same-account idempotency, cross-account
@@ -391,9 +395,9 @@ lifecycle, and rollback tests.
 - Provider outages and credential rotation become isolated operational events.
 - Identity management becomes a security-sensitive mutation surface with additional schema, rate limiting,
   audit, UI, maintenance, and test responsibilities.
-- Private allowlisting remains explicit per provider subject; adding providers does not broaden registration.
-- Users must understand that signing in with an unlinked provider can create a separate account when that
-  identity is admitted. This inconvenience is accepted instead of risking account takeover.
+- Private admission remains explicit through campaign invites; adding providers does not broaden registration.
+- Users must understand that an unlinked provider is not the same account. Existing users link it only through
+  the future reauthenticated account-security flow, not another invite.
 - The registry framework must remain deployable with GitHub alone, but Discord and Google are not released as
   separate partial product increments.
 

@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-09-13
+> **Last reviewed:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -40,6 +40,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 account linking/rollout retain their own acceptance gates |
+| **active** | r9 invite-gated identity | ADR 0018/migration 0008 server foundation is implemented on the current branch; new-account admission stays default-off and is not deployable until the stacked provider-neutral `campaign:create` entitlement/backfill/admin layer lands |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
 Oracle runs annotated release `hub-staging-2026-09-10-r7` at
@@ -121,7 +122,7 @@ Acceptance:
 - DM and player tasks are understandable without developer guidance or database edits;
 - the deployed release remains healthy through disconnect/reconnect and at least one rehearsed operator recovery;
 - participant feedback, defects, metrics, backup age, and outbox/database health are recorded;
-- maintainers record an explicit private-V1 go/no-go. Expansion remains allowlisted and private.
+- maintainers record an explicit private-V1 go/no-go. Expansion remains invite-gated and private.
 
 ## V2 delivery rules
 
@@ -157,6 +158,7 @@ The approved decision-record sequence has landed:
 | [ADR 0014](adr/0014-multi-provider-identity.md) | Identity-provider registry | V2-T8 |
 | [ADR 0015](adr/0015-campaign-rules-policy.md) | Campaign rules policy | V2-T6 |
 | [ADR 0016](adr/0016-atomic-peer-source-costs.md) | Atomic peer source costs | V2-T7 |
+| [ADR 0018](adr/0018-invite-gated-first-access.md) | Invite-gated first account access and future creator entitlement boundary | r9 identity |
 
 ## Approved V2 release trains
 
@@ -455,7 +457,7 @@ Deliver:
 - a provider-neutral OAuth/OIDC adapter contract, stable external-subject identities, and account-linking model;
 - Discord and Google implementations with provider-specific configuration and claims validation;
 - linking only from an authenticated Hub session after fresh reauthentication;
-- safe link, unlink, collision, recovery, allowlist, invite, session-revocation, audit, export, and deletion
+- safe link, unlink, collision, recovery, invite admission, session-revocation, audit, export, and deletion
   behavior across every linked identity.
 
 Implemented:
@@ -480,7 +482,7 @@ Acceptance:
 - unlinked matching email/login strings never auto-merge accounts;
 - state, PKCE/nonce where applicable, redirect, token, issuer/audience, subject, and session-rotation tests pass;
 - losing one provider does not strand an account that retains another verified sign-in path;
-- allowlisting, invite redemption, session/device revocation, audit attribution, account export, and deletion
+- invite-gated admission, invite redemption, session/device revocation, audit attribution, account export, and deletion
   behave consistently regardless of which linked identity established the session;
 - provider rollout is separately gated and GitHub remains available until migration evidence supports a change.
 
@@ -615,7 +617,7 @@ privacy, and compatibility parity. Preserve a staged coexistence window.
 
 Requires registration/recovery, moderation/reporting/takedown, quotas and cost controls, privacy/terms/data
 processing review, deletion SLA, support operations, tenant-scale load tests, vulnerability response, and a
-fresh security assessment. Private allowlisting remains enabled until every gate has an owner and evidence.
+fresh security assessment. Private invite-gated admission remains until every gate has an owner and evidence.
 
 ## Explicitly deferred
 

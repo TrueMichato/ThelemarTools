@@ -147,6 +147,10 @@ function getOAuthTransaction (row) {
 		returnTo: row.return_to,
 		pkceVerifier: row.pkce_verifier,
 		oidcNonce: row.oidc_nonce,
+		inviteContextId: row.invite_context_id ?? null,
+		browserCorrelationHash: row.browser_correlation_hash == null
+			? null
+			: Buffer.from(row.browser_correlation_hash).toString("hex"),
 		authorizationStartedAt: row.authorization_started_at,
 		expiresAt: row.expires_at,
 		consumedAt: row.consumed_at,
@@ -375,11 +379,127 @@ export class PostgresHubStore {
 		expiresAt,
 		userAgent = null,
 		priorSessionId = null,
+		oauthTransactionId = null,
+		isNewAccountAdmissionEnabled = false,
 	}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
-			const resolved = await this._pResolveOAuthAccount({client, rawIdentity: identity});
+			const normalizedIdentity = normalizeExternalIdentity(identity);
+			let discovered = null;
+			if (oauthTransactionId != null) {
+				const discovery = await client.query(`
+					SELECT
+						tx.id AS transaction_id,
+						tx.provider AS transaction_provider,
+						tx.operation AS transaction_operation,
+						tx.consumed_at AS transaction_consumed_at,
+						tx.invite_context_id,
+						context.id AS context_id,
+						invite.id AS invite_id,
+						invite.campaign_id
+					FROM hub.oauth_transactions tx
+					LEFT JOIN hub.invite_contexts context ON context.id = tx.invite_context_id
+					LEFT JOIN hub.invites invite ON invite.id = context.invite_id
+					WHERE tx.id = $1
+				`, [oauthTransactionId]);
+				discovered = discovery.rows[0];
+				if (
+					!discovered
+					|| discovered.transaction_provider !== normalizedIdentity.provider
+					|| discovered.transaction_operation !== "sign_in"
+					|| !discovered.transaction_consumed_at
+				) {
+					throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+				}
+			}
+			await client.query(`
+				SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
+			`, [normalizedIdentity.provider, normalizedIdentity.subject]);
+			const existingIdentity = await client.query(`
+				SELECT
+					a.id, a.display_name, a.status, a.deletion_requested_at, a.purge_after,
+					ei.id AS identity_id, ei.account_id, ei.provider, ei.provider_subject,
+					ei.provider_handle, ei.provider_display_name,
+					ei.created_at AS identity_created_at, ei.updated_at AS identity_updated_at,
+					ei.last_authenticated_at
+				FROM hub.external_identities ei
+				JOIN hub.accounts a ON a.id = ei.account_id
+				WHERE ei.provider = $1 AND ei.provider_subject = $2
+				FOR UPDATE OF a, ei
+			`, [normalizedIdentity.provider, normalizedIdentity.subject]);
+			const existingStatus = existingIdentity.rows[0]?.status;
+			if (existingStatus && !["active", "deletion_requested"].includes(existingStatus)) {
+				throw new HubStoreError("ACCOUNT_UNAVAILABLE", `Account is unavailable.`, {status: 403});
+			}
+			if (existingStatus === "deletion_requested" && discovered?.invite_context_id) {
+				throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+			}
+			let inviteAuthority = null;
+			if (discovered?.invite_context_id) {
+				if (!discovered.campaign_id) {
+					throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+				}
+				await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [discovered.campaign_id]);
+				const campaign = await client.query(`
+						SELECT id, status
+						FROM hub.campaigns
+						WHERE id = $1
+						FOR UPDATE
+					`, [discovered.campaign_id]);
+				const authority = await client.query(`
+						SELECT
+							tx.id AS transaction_id,
+							tx.provider AS transaction_provider,
+							tx.operation AS transaction_operation,
+							tx.consumed_at AS transaction_consumed_at,
+							context.id AS context_id,
+							context.expires_at AS context_expires_at,
+							context.consumed_at AS context_consumed_at,
+							invite.id AS invite_id,
+							invite.campaign_id,
+							invite.role,
+							invite.max_uses,
+							invite.use_count,
+							invite.expires_at AS invite_expires_at,
+							invite.revoked_at
+						FROM hub.oauth_transactions tx
+						JOIN hub.invite_contexts context ON context.id = tx.invite_context_id
+						JOIN hub.invites invite ON invite.id = context.invite_id
+						WHERE tx.id = $1
+						FOR UPDATE OF tx, context, invite
+					`, [oauthTransactionId]);
+				const row = authority.rows[0];
+				const activeMembership = existingIdentity.rowCount
+					? await client.query(`
+							SELECT id
+							FROM hub.memberships
+							WHERE campaign_id = $1 AND account_id = $2 AND status = 'active'
+							FOR UPDATE
+						`, [discovered.campaign_id, existingIdentity.rows[0].account_id])
+					: {rowCount: 0};
+				if (
+					row
+						&& row.transaction_provider === normalizedIdentity.provider
+						&& row.transaction_operation === "sign_in"
+						&& row.transaction_consumed_at
+						&& !row.context_consumed_at
+						&& row.context_expires_at > new Date()
+						&& !row.revoked_at
+						&& row.invite_expires_at > new Date()
+						&& (row.use_count < row.max_uses || activeMembership.rowCount)
+						&& campaign.rows[0]?.status === "active"
+				) inviteAuthority = row;
+				else throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+			}
+			if (!existingIdentity.rowCount && !inviteAuthority) {
+				throw new HubStoreError("INVITE_ADMISSION_REQUIRED", `Invite admission is required.`, {status: 403});
+			}
+			if (!existingIdentity.rowCount && !isNewAccountAdmissionEnabled) {
+				throw new HubStoreError("INVITE_ADMISSION_UNAVAILABLE", `Invite admission is unavailable.`, {status: 403});
+			}
+			const isNewAccount = !existingIdentity.rowCount;
+			const resolved = await this._pResolveOAuthAccount({client, rawIdentity: normalizedIdentity});
 			const sessionId = crypto.randomUUID();
 			const inserted = await client.query(`
 				INSERT INTO hub.sessions (
@@ -399,6 +519,64 @@ export class PostgresHubStore {
 				userAgent,
 				resolved.identity.id,
 			]);
+			if (isNewAccount) {
+				await this._pAppendAudit({
+					client,
+					actorAccountId: resolved.account.id,
+					action: "account.created",
+					targetType: "account",
+					targetId: resolved.account.id,
+					details: {admission: "campaign_invite"},
+				});
+			}
+			let membership = null;
+			if (inviteAuthority) {
+				const existingMembership = await client.query(`
+					SELECT id, campaign_id, account_id, role, status
+					FROM hub.memberships
+					WHERE campaign_id = $1 AND account_id = $2 AND status = 'active'
+					FOR UPDATE
+				`, [inviteAuthority.campaign_id, resolved.account.id]);
+				if (existingMembership.rowCount) {
+					membership = getMembership(existingMembership.rows[0]);
+				} else {
+					const membershipResult = await client.query(`
+						INSERT INTO hub.memberships (id, campaign_id, account_id, role, status)
+						VALUES ($1, $2, $3, $4, 'active')
+						ON CONFLICT (campaign_id, account_id) DO UPDATE
+						SET role = EXCLUDED.role, status = 'active', updated_at = now()
+						RETURNING id, campaign_id, account_id, role, status
+					`, [crypto.randomUUID(), inviteAuthority.campaign_id, resolved.account.id, inviteAuthority.role]);
+					await client.query(`UPDATE hub.invites SET use_count = use_count + 1 WHERE id = $1`, [inviteAuthority.invite_id]);
+					membership = getMembership(membershipResult.rows[0]);
+					await this._pAppendAudit({
+						client,
+						campaignId: inviteAuthority.campaign_id,
+						actorAccountId: resolved.account.id,
+						action: "invite.redeemed",
+						targetType: "membership",
+						targetId: membership.id,
+						details: {inviteId: inviteAuthority.invite_id, admission: true},
+					});
+					await this._pAppendEvent({
+						client,
+						campaignId: inviteAuthority.campaign_id,
+						actorAccountId: resolved.account.id,
+						type: "membership.joined",
+						aggregateType: "membership",
+						aggregateId: membership.id,
+						payload: {accountId: resolved.account.id, role: membership.role},
+					});
+				}
+				await client.query(`
+					UPDATE hub.invite_contexts
+					SET consumed_at = now(),
+						completed_account_id = $2,
+						completed_session_id = $3,
+						completed_membership_id = $4
+					WHERE id = $1 AND consumed_at IS NULL
+				`, [inviteAuthority.context_id, resolved.account.id, sessionId, membership.id]);
+			}
 			const revokedSessionIds = [];
 			if (priorSessionId) {
 				const revoked = await client.query(`
@@ -418,6 +596,7 @@ export class PostgresHubStore {
 				account: resolved.account,
 				identity: resolved.identity,
 				session: getSession(inserted.rows[0]),
+				membership,
 				revokedSessionIds,
 			};
 		} catch (error) {
@@ -455,6 +634,8 @@ export class PostgresHubStore {
 		returnTo,
 		pkceVerifier = null,
 		oidcNonce = null,
+		inviteContextId = null,
+		browserCorrelationHash = null,
 		expiresAt = null,
 		ttlSeconds = null,
 	}) {
@@ -467,11 +648,13 @@ export class PostgresHubStore {
 			INSERT INTO hub.oauth_transactions (
 				id, state_hash, provider, operation,
 				initiating_account_id, initiating_session_id,
-				redirect_uri, return_to, pkce_verifier, oidc_nonce, expires_at
+				redirect_uri, return_to, pkce_verifier, oidc_nonce, invite_context_id,
+				browser_correlation_hash, expires_at
 			)
 			VALUES (
-				$1, decode($2, 'hex'), $3, $4, $5, $6, $7, $8, $9, $10,
-				COALESCE($11::timestamptz, now() + ($12::integer * interval '1 second'))
+				$1, decode($2, 'hex'), $3, $4, $5, $6, $7, $8, $9, $10, $11,
+				CASE WHEN $12::text IS NULL THEN NULL ELSE decode($12, 'hex') END,
+				COALESCE($13::timestamptz, now() + ($14::integer * interval '1 second'))
 			)
 			RETURNING *
 		`, [
@@ -485,31 +668,227 @@ export class PostgresHubStore {
 			returnTo,
 			pkceVerifier,
 			oidcNonce,
+			inviteContextId,
+			browserCorrelationHash,
 			expiresAt,
 			ttlSeconds,
 		]);
 		return getOAuthTransaction(result.rows[0]);
 	}
 
+	async pCreateInviteOAuthTransaction ({
+		transaction,
+		inviteTokenHash,
+		retryTokenHash,
+		contextTtlSeconds,
+	}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const discovery = await client.query(`
+				SELECT invite.campaign_id
+				FROM hub.invites invite
+				WHERE invite.token_hash = decode($1, 'hex')
+			`, [inviteTokenHash]);
+			if (!discovery.rowCount) {
+				throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+			}
+			const campaignId = discovery.rows[0].campaign_id;
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+			const campaign = await client.query(`
+				SELECT id, status
+				FROM hub.campaigns
+				WHERE id = $1
+				FOR UPDATE
+			`, [campaignId]);
+			const inviteResult = await client.query(`
+				SELECT id, expires_at
+				FROM hub.invites
+				WHERE token_hash = decode($1, 'hex') AND campaign_id = $2
+					AND revoked_at IS NULL
+					AND expires_at > now()
+					AND use_count < max_uses
+				FOR UPDATE
+			`, [inviteTokenHash, campaignId]);
+			if (!inviteResult.rowCount || campaign.rows[0]?.status !== "active") {
+				throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+			}
+			if (!Number.isInteger(contextTtlSeconds) || contextTtlSeconds < 1 || contextTtlSeconds > 300) {
+				throw new TypeError(`Invite context TTL must be between 1 and 300 seconds.`);
+			}
+			const contextId = crypto.randomUUID();
+			await client.query(`
+				INSERT INTO hub.invite_contexts (id, invite_id, retry_token_hash, expires_at)
+				VALUES (
+					$1,
+					$2,
+					decode($3, 'hex'),
+					LEAST($4::timestamptz, now() + ($5::integer * interval '1 second'))
+				)
+			`, [contextId, inviteResult.rows[0].id, retryTokenHash, inviteResult.rows[0].expires_at, contextTtlSeconds]);
+			const result = await client.query(`
+				INSERT INTO hub.oauth_transactions (
+					id, state_hash, provider, operation,
+					initiating_account_id, initiating_session_id,
+					redirect_uri, return_to, pkce_verifier, oidc_nonce,
+					invite_context_id, browser_correlation_hash, expires_at
+				)
+				VALUES (
+					$1, decode($2, 'hex'), $3, $4, $5, $6, $7, $8, $9, $10,
+					$11, decode($12, 'hex'), now() + ($13::integer * interval '1 second')
+				)
+				RETURNING *
+			`, [
+				transaction.id,
+				transaction.stateHash,
+				transaction.provider,
+				transaction.operation,
+				transaction.initiatingAccountId ?? null,
+				transaction.initiatingSessionId ?? null,
+				transaction.redirectUri,
+				transaction.returnTo,
+				transaction.pkceVerifier ?? null,
+				transaction.oidcNonce ?? null,
+				contextId,
+				transaction.browserCorrelationHash,
+				transaction.ttlSeconds,
+			]);
+			await client.query("COMMIT");
+			return getOAuthTransaction(result.rows[0]);
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pRetryInviteOAuthTransaction ({
+		transaction,
+		retryTokenHash,
+		nextRetryTokenHash,
+		contextTtlSeconds,
+	}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const discovery = await client.query(`
+				SELECT
+					context.id AS context_id,
+					invite.id AS invite_id,
+					invite.campaign_id,
+					tx.id AS transaction_id,
+					tx.provider,
+					tx.consumed_at AS transaction_consumed_at
+				FROM hub.invite_contexts context
+				JOIN hub.invites invite ON invite.id = context.invite_id
+				JOIN hub.oauth_transactions tx ON tx.invite_context_id = context.id
+				WHERE context.retry_token_hash = decode($1, 'hex')
+			`, [retryTokenHash]);
+			const discovered = discovery.rows[0];
+			if (!discovered) throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [discovered.campaign_id]);
+			const campaign = await client.query(`SELECT id, status FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [discovered.campaign_id]);
+			const authority = await client.query(`
+				SELECT
+					context.id AS context_id,
+					context.expires_at AS context_expires_at,
+					context.consumed_at AS context_consumed_at,
+					invite.id AS invite_id,
+					invite.expires_at AS invite_expires_at,
+					invite.revoked_at,
+					invite.max_uses,
+					invite.use_count,
+					tx.id AS transaction_id,
+					tx.provider,
+					tx.consumed_at AS transaction_consumed_at
+				FROM hub.invite_contexts context
+				JOIN hub.invites invite ON invite.id = context.invite_id
+				JOIN hub.oauth_transactions tx ON tx.invite_context_id = context.id
+				WHERE context.retry_token_hash = decode($1, 'hex')
+				FOR UPDATE OF context, invite, tx
+			`, [retryTokenHash]);
+			const row = authority.rows[0];
+			if (
+				!row
+				|| row.context_consumed_at
+				|| row.context_expires_at <= new Date()
+				|| !row.transaction_consumed_at
+				|| row.provider !== transaction.provider
+				|| row.revoked_at
+				|| row.invite_expires_at <= new Date()
+				|| row.use_count >= row.max_uses
+				|| campaign.rows[0]?.status !== "active"
+				|| !Number.isInteger(contextTtlSeconds)
+				|| contextTtlSeconds < 1
+				|| contextTtlSeconds > 300
+			) throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+			await client.query(`DELETE FROM hub.invite_contexts WHERE id = $1`, [row.context_id]);
+			const contextId = crypto.randomUUID();
+			await client.query(`
+				INSERT INTO hub.invite_contexts (id, invite_id, retry_token_hash, expires_at)
+				VALUES (
+					$1, $2, decode($3, 'hex'),
+					LEAST($4::timestamptz, now() + ($5::integer * interval '1 second'))
+				)
+			`, [contextId, row.invite_id, nextRetryTokenHash, row.invite_expires_at, contextTtlSeconds]);
+			const result = await client.query(`
+				INSERT INTO hub.oauth_transactions (
+					id, state_hash, provider, operation,
+					redirect_uri, return_to, pkce_verifier, oidc_nonce,
+					invite_context_id, browser_correlation_hash, expires_at
+				)
+				VALUES (
+					$1, decode($2, 'hex'), $3, 'sign_in', $4, $5, $6, $7,
+					$8, decode($9, 'hex'), now() + ($10::integer * interval '1 second')
+				)
+				RETURNING *
+			`, [
+				transaction.id,
+				transaction.stateHash,
+				transaction.provider,
+				transaction.redirectUri,
+				transaction.returnTo,
+				transaction.pkceVerifier ?? null,
+				transaction.oidcNonce ?? null,
+				contextId,
+				transaction.browserCorrelationHash,
+				transaction.ttlSeconds,
+			]);
+			await client.query("COMMIT");
+			return getOAuthTransaction(result.rows[0]);
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pConsumeOAuthTransaction ({
-		id,
+		id = null,
 		stateHash,
+		browserCorrelationHash = null,
 		provider,
 		operation,
 		redirectUri,
 	}) {
-		if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+		if (
+			id != null
+			&& (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
+		) {
 			throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 		}
 		const result = await this._pool.query(`
 			WITH candidate AS (
 				SELECT *
 				FROM hub.oauth_transactions
-				WHERE id = $1
+				WHERE ($1::uuid IS NULL OR id = $1)
 					AND state_hash = decode($2, 'hex')
-					AND provider = $3
-					AND operation = $4
-					AND redirect_uri = $5
+					AND ($3::text IS NULL OR browser_correlation_hash = decode($3, 'hex'))
+					AND provider = $4
+					AND operation = $5
+					AND redirect_uri = $6
 					AND consumed_at IS NULL
 					AND expires_at > now()
 				FOR UPDATE
@@ -525,7 +904,7 @@ export class PostgresHubStore {
 				RETURNING candidate.*
 			)
 			SELECT * FROM consumed
-		`, [id, stateHash, provider, operation, redirectUri]);
+		`, [id, stateHash, browserCorrelationHash, provider, operation, redirectUri]);
 		if (!result.rowCount) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 		return getOAuthTransaction(result.rows[0]);
 	}
@@ -534,8 +913,31 @@ export class PostgresHubStore {
 		const result = await this._pool.query(`
 			DELETE FROM hub.oauth_transactions
 			WHERE ctid IN (
+				SELECT tx.ctid
+				FROM hub.oauth_transactions tx
+				LEFT JOIN hub.invite_contexts context ON context.id = tx.invite_context_id
+				WHERE tx.expires_at <= now()
+					OR (
+						tx.consumed_at IS NOT NULL
+						AND (
+							context.id IS NULL
+							OR context.consumed_at IS NOT NULL
+							OR context.expires_at <= now()
+						)
+					)
+				ORDER BY tx.expires_at, tx.id
+				LIMIT $1
+			)
+		`, [limit]);
+		return result.rowCount;
+	}
+
+	async pDeleteExpiredInviteContexts ({limit = 1_000} = {}) {
+		const result = await this._pool.query(`
+			DELETE FROM hub.invite_contexts
+			WHERE ctid IN (
 				SELECT ctid
-				FROM hub.oauth_transactions
+				FROM hub.invite_contexts
 				WHERE expires_at <= now() OR consumed_at IS NOT NULL
 				ORDER BY expires_at, id
 				LIMIT $1
@@ -1083,7 +1485,21 @@ export class PostgresHubStore {
 				COALESCE((SELECT EXTRACT(EPOCH FROM now() - min(created_at)) FROM hub.outbox_entries WHERE status IN ('pending', 'publishing', 'failed')), 0)::double precision AS outbox_oldest_age_seconds,
 				(SELECT count(*) FROM hub.sessions WHERE revoked_at IS NULL AND expires_at > now())::bigint AS active_sessions,
 				(SELECT count(*) FROM hub.command_receipts WHERE expires_at <= now())::bigint AS expired_receipts,
-				(SELECT count(*) FROM hub.oauth_transactions WHERE expires_at <= now() OR consumed_at IS NOT NULL)::bigint AS expired_oauth_transactions,
+				(
+					SELECT count(*)
+					FROM hub.oauth_transactions tx
+					LEFT JOIN hub.invite_contexts context ON context.id = tx.invite_context_id
+					WHERE tx.expires_at <= now()
+						OR (
+							tx.consumed_at IS NOT NULL
+							AND (
+								context.id IS NULL
+								OR context.consumed_at IS NOT NULL
+								OR context.expires_at <= now()
+							)
+						)
+				)::bigint AS expired_oauth_transactions,
+				(SELECT count(*) FROM hub.invite_contexts WHERE expires_at <= now() OR consumed_at IS NOT NULL)::bigint AS expired_invite_contexts,
 				(SELECT count(*) FROM hub.accounts WHERE status = 'deletion_requested' AND purge_after <= now())::bigint AS deletion_due_accounts,
 				COALESCE((
 					SELECT EXTRACT(EPOCH FROM now() - completed_at)
@@ -1115,6 +1531,7 @@ export class PostgresHubStore {
 			activeSessions: Number(row.active_sessions),
 			expiredReceipts: Number(row.expired_receipts),
 			expiredOAuthTransactions: Number(row.expired_oauth_transactions),
+			expiredInviteContexts: Number(row.expired_invite_contexts),
 			deletionDueAccounts: Number(row.deletion_due_accounts),
 			lastMaintenanceAgeSeconds: Number(row.last_maintenance_age_seconds),
 			lastBackupAgeSeconds: Number(row.last_backup_age_seconds),
@@ -1141,6 +1558,7 @@ export class PostgresHubStore {
 					publishedOutbox: await this.pDeletePublishedOutbox({limit: batchSize}),
 					sessions: await this.pDeleteExpiredSessions({limit: batchSize}),
 					oauthTransactions: await this.pDeleteExpiredOAuthTransactions({limit: batchSize}),
+					inviteContexts: await this.pDeleteExpiredInviteContexts({limit: batchSize}),
 					invites: await this.pDeleteExpiredInvites({limit: batchSize}),
 					leases: await this.pDeleteExpiredLeases({limit: batchSize}),
 					accounts: await this.pPurgeDueAccounts({limit: Math.min(batchSize, 100)}),
@@ -1340,15 +1758,20 @@ export class PostgresHubStore {
 				await client.query("COMMIT");
 				return prior;
 			}
-
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+			await client.query(`SELECT id FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
 			const membership = await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
 			const inviteId = crypto.randomUUID();
 			const inserted = await client.query(`
 				INSERT INTO hub.invites (
 					id, campaign_id, created_by_membership_id, token_hash, role, max_uses, expires_at
 				) VALUES ($1, $2, $3, decode($4, 'hex'), $5, $6, $7)
+				ON CONFLICT (token_hash) DO NOTHING
 				RETURNING id, campaign_id, role, max_uses, use_count, expires_at, created_at
 			`, [inviteId, campaignId, membership.id, tokenHash, role, maxUses, expiresAt]);
+			if (!inserted.rowCount) {
+				throw new HubStoreError("INVITE_TOKEN_CONFLICT", `Invite could not be created.`, {status: 409});
+			}
 			const row = inserted.rows[0];
 			const response = {invite: {
 				id: row.id,
@@ -1381,6 +1804,8 @@ export class PostgresHubStore {
 				await client.query("COMMIT");
 				return prior;
 			}
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+			await client.query(`SELECT id FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
 			await this._pGetMembershipForUpdate({client, accountId, campaignId, roles: ["dm", "co_dm"]});
 			const result = await client.query(`
 				UPDATE hub.invites
@@ -1422,15 +1847,23 @@ export class PostgresHubStore {
 				await client.query("COMMIT");
 				return prior;
 			}
-			const inviteResult = await client.query(`
-				SELECT i.id, i.campaign_id, i.role, i.max_uses, i.use_count, i.expires_at, i.revoked_at
-				FROM hub.invites i
-				JOIN hub.campaigns c ON c.id = i.campaign_id AND c.status = 'active'
-				WHERE i.token_hash = decode($1, 'hex')
-				FOR UPDATE
+			const discovery = await client.query(`
+				SELECT campaign_id
+				FROM hub.invites
+				WHERE token_hash = decode($1, 'hex')
 			`, [tokenHash]);
+			if (!discovery.rowCount) throw new HubStoreError("INVITE_INVALID", `Invite is invalid or expired.`, {status: 404});
+			const campaignId = discovery.rows[0].campaign_id;
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+			const campaign = await client.query(`SELECT id, status FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
+			const inviteResult = await client.query(`
+				SELECT id, campaign_id, role, max_uses, use_count, expires_at, revoked_at
+				FROM hub.invites
+				WHERE token_hash = decode($1, 'hex') AND campaign_id = $2
+				FOR UPDATE
+			`, [tokenHash, campaignId]);
 			const invite = inviteResult.rows[0];
-			if (!invite || invite.revoked_at || invite.expires_at <= new Date() || invite.use_count >= invite.max_uses) {
+			if (!invite || campaign.rows[0]?.status !== "active" || invite.revoked_at || invite.expires_at <= new Date() || invite.use_count >= invite.max_uses) {
 				throw new HubStoreError("INVITE_INVALID", `Invite is invalid or expired.`, {status: 404});
 			}
 			const activeMembership = await client.query(`
@@ -6219,17 +6652,37 @@ export class PostgresHubStore {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
-			const accounts = await client.query(`
-				SELECT *
+			const accountCandidates = await client.query(`
+				SELECT id
 				FROM hub.accounts
 				WHERE status = 'deletion_requested' AND purge_after <= now()
 				ORDER BY purge_after, id
 				LIMIT $1
-				FOR UPDATE SKIP LOCKED
 			`, [limit]);
 			const purgedAccountIds = [];
 			const blockedAccountIds = [];
-			for (const account of accounts.rows) {
+			for (const candidate of accountCandidates.rows) {
+				const identityLocks = await client.query(`
+					SELECT provider, provider_subject
+					FROM hub.external_identities
+					WHERE account_id = $1
+					ORDER BY provider, provider_subject
+				`, [candidate.id]);
+				for (const identity of identityLocks.rows) {
+					await client.query(`
+						SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
+					`, [identity.provider, identity.provider_subject]);
+				}
+				const accountResult = await client.query(`
+					SELECT *
+					FROM hub.accounts
+					WHERE id = $1
+						AND status = 'deletion_requested'
+						AND purge_after <= now()
+					FOR UPDATE SKIP LOCKED
+				`, [candidate.id]);
+				const account = accountResult.rows[0];
+				if (!account) continue;
 				const blockingCampaign = await client.query(`SELECT 1 FROM hub.campaigns WHERE owner_account_id = $1 AND status <> 'archived' LIMIT 1 FOR UPDATE`, [account.id]);
 				if (blockingCampaign.rowCount) {
 					blockedAccountIds.push(account.id);
@@ -6254,6 +6707,12 @@ export class PostgresHubStore {
 						FOR UPDATE
 					`, [campaignIds]);
 				}
+				await client.query(`
+					DELETE FROM hub.invites
+					WHERE created_by_membership_id IN (
+						SELECT id FROM hub.memberships WHERE account_id = $1
+					)
+				`, [account.id]);
 				const memberships = membershipDiscovery.rowCount
 					? await client.query(`
 						SELECT id, campaign_id, account_id, role, status

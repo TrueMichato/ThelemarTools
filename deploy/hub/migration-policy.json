@@ -35,6 +35,11 @@
       "phase": "expand",
       "previousAppCompatible": true,
       "notes": "Adds nullable/defaulted peer source-cost authority, terminal failure state, indexes, and invalidation triggers while preserving protocol-3 cost-free rows and previous application reads."
+    },
+    "0008": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds short-lived invite admission contexts and an optional OAuth transaction binding. Previous applications ignore both additive shapes; rollback after admitting identities outside the former allowlist requires the identity-compatibility procedure documented for r9."
     }
   }
 }

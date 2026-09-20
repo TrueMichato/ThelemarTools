@@ -44,7 +44,7 @@ If any item is "not applicable," say why.
 - Do not add cross-user renderer HTML without central validation/sanitization.
 - Do not log request/response bodies containing character, brew, OAuth, invite, or session data.
 - Do not edit an applied migration. Add the next migration once ADR 0005 is implemented.
-- Do not make public-registration assumptions while private allowlisting is the accepted scope.
+- Do not make public-registration assumptions while private invite-gated admission is the accepted scope.
 
 ## Documentation definition of done
 

@@ -124,7 +124,7 @@ exact cleanup. Authentication failure/tampering must leave no plaintext output.
   `77d955c053dcdfe949235620db93f7eba477af34`;
 - archive: `hub-20260912T092100Z.dump.enc`, 139,651 bytes, SHA-256
   `a7737d5bb752805221020f295bd8efef71e9cd8fd496afd9dfc87f804ee80273`;
-- schema: migrations `0001`-`0007`, zero unvalidated constraints;
+- schema: migrations `0001`-`0008`, zero unvalidated constraints;
 - authenticated validation: four production-derived Playwright scenarios passed;
 - rollback: exact preserved-r6 BFF/static authenticated reads passed on schema `0007`, followed by exact-r7
   readiness and authenticated reads;

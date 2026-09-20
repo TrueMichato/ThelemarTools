@@ -32,7 +32,7 @@ const store = PostgresHubStore.fromConnectionString({
 	),
 });
 await store.pCheckHealth();
-const {authProviderRegistry, allowedOAuthSubjects} = createAuthProviderConfiguration({
+const {authProviderRegistry} = createAuthProviderConfiguration({
 	onConfigurationError: ({slug, code}) => {
 		process.stderr.write(`Authentication provider ${slug} configuration failed (${code}).\n`);
 	},
@@ -50,10 +50,11 @@ const app = await createHubApp({
 		appOrigin: requireEnv("HUB_APP_ORIGIN"),
 		cookieSecret: requireEnv("HUB_COOKIE_SECRET"),
 		csrfSecret: requireEnv("HUB_CSRF_SECRET"),
-		allowedOAuthSubjects,
+		inviteTokenSecret: requireEnv("HUB_INVITE_TOKEN_SECRET"),
 		trustProxy: getTrustProxy(),
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
 		clientIpHeader,
+		isInviteAccountAdmissionEnabled: process.env.HUB_INVITE_ACCOUNT_ADMISSION_ENABLED === "true",
 		isCampaignRulesPolicyEnabled: process.env.HUB_CAMPAIGN_RULES_POLICY_ENABLED === "true",
 	},
 });

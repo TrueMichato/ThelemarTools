@@ -41,7 +41,8 @@ Do not start until every item below is true:
 - The latest isolated restore and rollback evidence meets RPO <=24 hours and RTO <=4 hours.
 - One operator can access the Oracle host and the incident/rollback runbooks but will not improvise destructive
   commands.
-- The three GitHub accounts are on the private allowlist. Do not paste numeric subjects, tokens, cookies, invite
+- The existing DM account can sign in, and the two new player accounts have valid campaign invites. Do not paste
+  provider subjects, tokens, cookies, invite
   tokens, monitor URLs, or OAuth material into the worksheet.
 - Campaign A was created before the approved release/configuration window, has an active immutable rules version,
   and its exact UUID passed the [peer source-cost rollout](peer-source-cost-rollout.md) pre-cutover check.
@@ -386,5 +387,5 @@ Record exactly one decision owner and one UTC decision time.
 - [ ] Defect list and participant feedback are attached.
 - [ ] Decision recorded as **GO** or **NO-GO**, with the reason.
 
-**GO** authorizes only the existing private allowlisted cohort and observation period. It does not authorize
+**GO** authorizes only the existing private invite-gated cohort and observation period. It does not authorize
 public registration, broader rollout, multiple active BFF replicas, or unreviewed feature enablement.

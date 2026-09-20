@@ -33,7 +33,7 @@ environment and must not use copied production characters.
 
 ## Environment requirements
 
-- Separate database, OAuth application, secrets, allowlist, domain, backup destination, and alerts.
+- Separate database, OAuth application, secrets, invite cohort, domain, backup destination, and alerts.
 - Synthetic accounts/characters/campaigns only.
 - Immutable BFF image digest with recorded app/protocol/migration versions.
 - Same-origin static/API/auth/WebSocket routing.
@@ -43,6 +43,8 @@ environment and must not use copied production characters.
 - Logs and metrics configured with redaction.
 - Exactly one BFF instance; autoscaling disabled until shared realtime fanout exists.
 - Provider-specific client-IP trust behavior proven against direct spoofing.
+- Keep `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false` for this foundation-only layer. Do not promote an
+  admission-enabled r9 image until the stacked `campaign:create` entitlement/backfill/admin layer is reviewed.
 
 ## Participants
 
@@ -58,7 +60,8 @@ environment and must not use copied production characters.
 ### Identity and access
 
 - valid GitHub sign-in and session rotation;
-- unallowlisted subject rejection;
+- unknown identity without invite rejection and existing-identity sign-in without another invite;
+- default-off first-account admission switch, valid invite first access, and atomic membership before redirect;
 - valid, invalid, expired, revoked, and reused invite;
 - co-DM/player/spectator role boundaries;
 - one-session and all-other-session revocation;

@@ -43,6 +43,9 @@ describe("projection privacy canaries", () => {
 		identity = IDENTITIES.dm;
 		ix = 0;
 		store = new MemoryHubStore();
+		for (const current of Object.values(IDENTITIES)) {
+			await store.pUpsertOAuthAccount(current);
+		}
 		app = await createHubApp({
 			store,
 			oauthProvider: {getAuthorizationUrl: ({state}) => `https://x/?state=${state}`, pExchangeCode: async () => identity},
@@ -50,7 +53,6 @@ describe("projection privacy canaries", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "x".repeat(32),
 				csrfSecret: "y".repeat(32),
-				allowedOAuthSubjects: Object.values(IDENTITIES).map(it => `github:${it.providerSubject}`),
 			},
 		});
 	});

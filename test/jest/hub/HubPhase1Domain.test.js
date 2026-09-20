@@ -25,6 +25,9 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		identity = IDENTITIES.dm;
 		mutationIx = 0;
 		store = new MemoryHubStore();
+		for (const current of Object.values(IDENTITIES)) {
+			await store.pUpsertOAuthAccount(current);
+		}
 		app = await createHubApp({
 			store,
 			oauthProvider: {
@@ -35,7 +38,6 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 				appOrigin: APP_ORIGIN,
 				cookieSecret: COOKIE_SECRET,
 				csrfSecret: CSRF_SECRET,
-				allowedOAuthSubjects: ["github:123", "github:999"],
 			},
 		});
 	});

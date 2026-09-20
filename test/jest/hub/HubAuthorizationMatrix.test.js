@@ -15,16 +15,21 @@ function getCookie (response, name) {
 
 describe("campaign authorization matrix", () => {
 	let app;
+	let store;
 	let identity;
 	let ix;
 
 	beforeEach(async () => {
 		identity = identities.dmA;
 		ix = 0;
+		store = new MemoryHubStore();
+		for (const current of Object.values(identities)) {
+			await store.pUpsertOAuthAccount(current);
+		}
 		app = await createHubApp({
-			store: new MemoryHubStore(),
+			store,
 			oauthProvider: {getAuthorizationUrl: ({state}) => `https://x/?state=${state}`, pExchangeCode: async () => identity},
-			config: {appOrigin: ORIGIN, cookieSecret: "x".repeat(32), csrfSecret: "y".repeat(32), allowedOAuthSubjects: ["github:1", "github:2", "github:3", "github:4"]},
+			config: {appOrigin: ORIGIN, cookieSecret: "x".repeat(32), csrfSecret: "y".repeat(32)},
 		});
 	});
 

@@ -24,6 +24,9 @@ describe("Campaign rules policy API", () => {
 
 	beforeEach(async () => {
 		store = new MemoryHubStore();
+		for (const current of Object.values(IDENTITIES)) {
+			await store.pUpsertOAuthAccount(current);
+		}
 		identity = IDENTITIES.dm;
 		mutationIx = 0;
 		app = await createHubApp({
@@ -36,7 +39,6 @@ describe("Campaign rules policy API", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "c".repeat(32),
 				csrfSecret: "s".repeat(32),
-				allowedOAuthSubjects: Object.values(IDENTITIES).map(it => `${it.provider}:${it.providerSubject}`),
 				isCampaignRulesPolicyEnabled: true,
 			},
 		});
@@ -105,8 +107,10 @@ describe("Campaign rules policy API", () => {
 		expect((await app.inject({method: "GET", url: "/api/meta"})).json().capabilities)
 			.toContain(CAMPAIGN_RULES_POLICY_CAPABILITY);
 		await app.close();
+		const legacyStore = new MemoryHubStore();
+		await legacyStore.pUpsertOAuthAccount(IDENTITIES.dm);
 		app = await createHubApp({
-			store: new MemoryHubStore(),
+			store: legacyStore,
 			oauthProvider: {
 				getAuthorizationUrl: ({state}) => `https://github.example/?state=${state}`,
 				pExchangeCode: async () => identity,
@@ -115,7 +119,6 @@ describe("Campaign rules policy API", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "c".repeat(32),
 				csrfSecret: "s".repeat(32),
-				allowedOAuthSubjects: [`github:${IDENTITIES.dm.providerSubject}`],
 			},
 		});
 		expect((await app.inject({method: "GET", url: "/api/meta"})).json().capabilities)
@@ -181,7 +184,6 @@ describe("Campaign rules policy API", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "c".repeat(32),
 				csrfSecret: "s".repeat(32),
-				allowedOAuthSubjects: Object.values(IDENTITIES).map(it => `${it.provider}:${it.providerSubject}`),
 			},
 		});
 		const dmWithoutCapability = await pSignIn(IDENTITIES.dm);

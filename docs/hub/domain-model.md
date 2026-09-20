@@ -4,7 +4,7 @@
 > **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
-The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0006. The PostgreSQL authority is
+The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0008. The PostgreSQL authority is
 `server/src/postgres-hub-store.js`; `MemoryHubStore` is a deterministic test double, not a production
 security boundary.
 
@@ -30,7 +30,8 @@ security boundary.
 | `accounts` | Internal user | display name 1-100; active/suspended/deletion_requested/deleted; paired deletion timestamps | Seven-day request/cancel/purge implemented |
 | `external_identities` | OAuth link | unique provider+subject; bounded metadata; account+identity key; deferred last-identity protection; cascade with account | Registry-ready; GitHub only |
 | `sessions` | Browser session | unique token hash; expiry after creation; optional revoke; same-account identity provenance; recent-reauthentication slot | Hash-only server sessions |
-| `oauth_transactions` | Short-lived OAuth correlation | hash-only one-time state; concrete provider/operation/redirect; optional account/session, PKCE verifier, OIDC nonce; <=10 minutes | Durable GitHub start/callback; later reauth/link-ready |
+| `oauth_transactions` | Short-lived OAuth correlation | hash-only one-time state and browser correlation; concrete provider/operation/redirect; optional account/session, invite context, PKCE verifier, OIDC nonce; <=10 minutes | Concurrent-tab-safe start/callback; later reauth/link-ready |
+| `invite_contexts` | First-access admission | one invite, hash-only retry handle, <=5 minutes, one unique OAuth transaction binding, terminal account/session/membership ids only after commit | Default-off r9 first-account admission and existing-account atomic invite join |
 | `campaigns` | Campaign root | owner account; active/archived/deleting; monotonic next event sequence | active and archived used; deleting reserved |
 | `memberships` | Account role in campaign | unique campaign+account; dm/co_dm/player/spectator | active, removed, and left used; reinvite reuses row |
 | `invites` | Redeemable role grant | hash-only token, expiry, max/use count, optional revoke | create/list/redeem/revoke/expiry/max-use used |
@@ -244,6 +245,12 @@ and document ordering.
 OAuth state consumption additionally uses the transaction row's unique state hash and row lock. Account,
 identity, and session creation for an unknown admitted sign-in commit together, so a failed session insert
 cannot leave an orphan identity/account.
+
+Invite authority uses identity/account locking first when a callback has identity, then campaign advisory lock
+seed 6, campaign row, and invite row. Other invite mutations use the same campaign-row-invite order. OAuth first
+access adds session/membership work only after complete revalidation. The invite context is the
+pre-account bootstrap command identity; it records a complete terminal account/session/membership outcome or
+remains unconsumed.
 
 ## Character inventory invariant
 

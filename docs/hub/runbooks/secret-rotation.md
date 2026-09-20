@@ -20,7 +20,7 @@
 ## CSRF secret
 
 - invalidates issued CSRF tokens;
-- changes deterministic invite derivation for retries;
+- `HUB_INVITE_TOKEN_SECRET` changes deterministic invite derivation for creator retries; `HUB_CSRF_SECRET` does not;
 - existing raw invite links still match stored hashes;
 - old invite-creation idempotency retries cannot reproduce the original token;
 - refresh sessions/pages and verify mutation/invite behavior.

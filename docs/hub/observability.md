@@ -66,6 +66,7 @@ Signals:
 | `hub_active_sessions` | Gauge | Unrevoked/unexpired sessions |
 | `hub_expired_receipts` | Gauge | Receipts awaiting maintenance |
 | `hub_expired_oauth_transactions` | Gauge | Consumed/expired transaction rows awaiting bounded cleanup |
+| `hub_expired_invite_contexts` | Gauge | Consumed/expired invite-admission contexts awaiting bounded cleanup |
 | `hub_deletion_due_accounts` | Gauge | Accounts past purge deadline |
 | `hub_last_maintenance_age_seconds` | Gauge | Time since successful maintenance |
 | `hub_last_backup_age_seconds` | Gauge | Time since recorded encrypted backup |

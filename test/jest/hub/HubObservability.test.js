@@ -27,6 +27,7 @@ describe("Hub observability", () => {
 		expect(text).toContain("hub_http_requests_total");
 		expect(text).toContain(`hub_auth_outcomes_total{provider="github",outcome="succeeded"} 1`);
 		expect(text).toContain("hub_outbox_pending 2");
+		expect(text).toContain("hub_expired_invite_contexts 0");
 		expect(text).toContain("hub_websocket_connections 3");
 		expect(text).toContain("hub_last_backup_age_seconds -1");
 	});
@@ -61,6 +62,9 @@ describe("Hub observability", () => {
 			"refreshToken",
 			"idToken",
 			"clientSecret",
+			"inviteToken",
+			"retryToken",
+			"inviteContextId",
 		]) expect(HUB_LOG_REDACT_PATHS).toContain(path);
 	});
 

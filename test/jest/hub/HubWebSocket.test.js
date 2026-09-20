@@ -22,6 +22,11 @@ describe("campaign WebSocket", () => {
 
 	beforeEach(async () => {
 		store = new MemoryHubStore();
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "123",
+			displayName: "DM",
+		});
 		app = await createHubApp({
 			store,
 			oauthProvider: {
@@ -37,7 +42,6 @@ describe("campaign WebSocket", () => {
 				appOrigin: APP_ORIGIN,
 				cookieSecret: "x".repeat(32),
 				csrfSecret: "y".repeat(32),
-				allowedOAuthSubjects: ["github:123"],
 			},
 		});
 	});
@@ -149,6 +153,11 @@ describe("campaign WebSocket", () => {
 	it("passes the configured provider client address into WebSocket authorization context", async () => {
 		let connection;
 		const providerStore = new MemoryHubStore();
+		await providerStore.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "123",
+			displayName: "DM",
+		});
 		const providerApp = await createHubApp({
 			store: providerStore,
 			oauthProvider: {
@@ -170,7 +179,6 @@ describe("campaign WebSocket", () => {
 				appOrigin: APP_ORIGIN,
 				cookieSecret: "x".repeat(32),
 				csrfSecret: "y".repeat(32),
-				allowedOAuthSubjects: ["github:123"],
 				clientIpHeader: "do-connecting-ip",
 			},
 		});

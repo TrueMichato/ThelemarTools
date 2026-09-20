@@ -326,6 +326,20 @@ export class HubApiClient {
 		return this._pRequest("/api/meta", {signal});
 	}
 
+	async pCreateInviteAdmission ({token, provider, returnTo}) {
+		return this._pRequest("/api/auth/invite-contexts", {
+			method: "POST",
+			body: {token, provider, returnTo},
+		});
+	}
+
+	async pRetryInviteAdmission ({retryToken, provider, returnTo}) {
+		return this._pRequest("/api/auth/invite-contexts/retry", {
+			method: "POST",
+			body: {retryToken, provider, returnTo},
+		});
+	}
+
 	async pListCampaigns () {
 		return (await this._pRequest("/api/campaigns")).campaigns;
 	}

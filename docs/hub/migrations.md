@@ -1,7 +1,7 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through provider-registry migration 0006
-> **Last verified:** 2026-09-03
+> **Status:** Implemented through invite-admission migration 0008
+> **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 ## Invariants
@@ -98,13 +98,18 @@ Current migrations:
   durable one-time OAuth transaction bindings/cleanup.
 - 0007 atomic peer source-cost bindings, deterministic derivation pins, source-result/event linkage, terminal
   `failed` state, and source/target revision observations for protocol-4 operation legs.
+- 0008 short-lived invite admission contexts, hash-only browser/retry correlation, their one-to-one OAuth
+  transaction binding, and bounded terminal account/session/membership outcome evidence.
 
 Migration 0007 is additive and keeps protocol-3 cost-free rows readable while new source-cost rows require a
 protocol-4 application. Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old
 application reads intact.
+Migration 0008 is additive and ignored by the previous application. Enabling invite-based creation is a separate
+application/data compatibility boundary: keep it disabled until the stacked creator-entitlement layer and
+rollback procedure are reviewed.
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
-Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0007, grants the
-runtime role, boots the production image against required version 0007, and runs semantic role/replay/
+Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0008, grants the
+runtime role, boots the production image against required version 0008, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
 ## Readiness

@@ -113,6 +113,8 @@ function concealCampaignAuthorizationSurfaces () {
 }
 
 let _pSignedOutProvidersRender = null;
+let _pendingInviteToken = null;
+let _pendingInviteRetry = null;
 async function pRenderSignedOutProviders () {
 	if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender;
 	const signIn = document.getElementById("hub-sign-in");
@@ -120,7 +122,20 @@ async function pRenderSignedOutProviders () {
 	const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 	_pSignedOutProvidersRender = (async () => {
 		const {pRenderHubAuthProviders} = await import("./hub-auth-providers.js");
-		await pRenderHubAuthProviders({signIn, returnTo});
+		await pRenderHubAuthProviders({
+			signIn,
+			returnTo,
+			inviteToken: _pendingInviteToken,
+			inviteRetry: _pendingInviteRetry,
+			pCreateInviteAdmission: request => api.pCreateInviteAdmission(request),
+			pRetryInviteAdmission: request => api.pRetryInviteAdmission(request),
+			onInviteStarted: inviteRetry => {
+				_pendingInviteToken = null;
+				_pendingInviteRetry = inviteRetry;
+				sessionStorage.setItem("hub-invite-retry", JSON.stringify(inviteRetry));
+			},
+			onError: renderError,
+		});
 	})();
 	try {
 		await _pSignedOutProvidersRender;
@@ -216,6 +231,10 @@ function getErrorMessage (error) {
 		case "FORBIDDEN": return "Your campaign permissions no longer allow that action. Reload to update the controls available to you.";
 		case "INVALID_CAMPAIGN_NAME": return "Enter a campaign name before creating it.";
 		case "INVITE_INVALID": return "That invite is expired, revoked, or has already been fully used.";
+		case "INVITE_ADMISSION_REQUIRED": return "A valid campaign invite is required to create a Hub account.";
+		case "INVITE_ADMISSION_INVALID": return "That invite can no longer be used. Open the original invite link and try again.";
+		case "INVITE_ADMISSION_UNAVAILABLE": return "New Hub account admission is not enabled yet.";
+		case "ACCOUNT_UNAVAILABLE": return "This Hub account cannot sign in.";
 		case "ACCOUNT_OWNS_CAMPAIGN": return "Transfer ownership or archive every active campaign before deleting your account.";
 		case "ACCOUNT_DELETION_PENDING": return "Your account is scheduled for deletion. Cancel deletion before using campaign features.";
 		case "MEMBERSHIP_OWNER_PROTECTED": return "The campaign owner must transfer ownership or archive the campaign first.";
@@ -3958,8 +3977,21 @@ async function pInit () {
 	initCampaignNetworkAwareness();
 	const inviteFragment = new URLSearchParams(window.location.hash.slice(1)).get("invite");
 	if (inviteFragment) {
-		sessionStorage.setItem("hub-pending-invite", inviteFragment);
+		_pendingInviteToken = inviteFragment;
+		sessionStorage.removeItem("hub-invite-retry");
 		window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+	}
+	if (!_pendingInviteToken) {
+		try {
+			const storedRetry = JSON.parse(sessionStorage.getItem("hub-invite-retry"));
+			if (
+				storedRetry
+				&& typeof storedRetry.provider === "string"
+				&& typeof storedRetry.retryToken === "string"
+			) _pendingInviteRetry = storedRetry;
+		} catch {
+			sessionStorage.removeItem("hub-invite-retry");
+		}
 	}
 	const signedOut = document.getElementById("hub-signed-out");
 	const signedIn = document.getElementById("hub-signed-in");
@@ -3973,9 +4005,12 @@ async function pInit () {
 			await activeCampaign.pResolve({trigger: "logout", session});
 			await pRenderActiveCampaignSwitcher();
 			await pRenderSignedOutProviders();
+			sessionStorage.removeItem("hub-pending-invite");
 			setHidden(signedOut, false);
 			return;
 		}
+		if (_pendingInviteToken) sessionStorage.setItem("hub-pending-invite", _pendingInviteToken);
+		sessionStorage.removeItem("hub-invite-retry");
 		setHidden(signedIn, false);
 		document.getElementById("hub-logout")?.addEventListener("click", async () => {
 			try {

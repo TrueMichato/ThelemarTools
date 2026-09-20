@@ -7,7 +7,7 @@ Signed-out character sheets, homebrew, and DM screens remain supported and do no
 > **Deployment:** Release `hub-staging-2026-09-10-r7` at
 > `77d955c053dcdfe949235620db93f7eba477af34` is live on private Oracle staging; V1-G1 operations and
 > recovery proof passed, while the physical one-DM/two-player game day remains gated
-> **Last verified:** 2026-09-13
+> **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 ## Start here
@@ -112,6 +112,7 @@ second character or apply the move twice. Local character JSON does not gain Hub
 - [ADR 0016: atomic source-cost binding for peer character operations](adr/0016-atomic-peer-source-costs.md) —
   implemented for the narrow PHB/XPHB Cure Wounds slice
 - [ADR 0017: atomic DM item-award batches](adr/0017-atomic-dm-item-awards.md)
+- [ADR 0018: invite-gated first account access](adr/0018-invite-gated-first-access.md)
 
 ADRs 0001-0008 describe implemented portable architecture and launch-readiness decisions. ADR 0009 proposed
 a paid managed provider and was superseded on cost grounds by ADR 0010, which selects Oracle Cloud Always
@@ -122,6 +123,9 @@ source/species/edition and carry/encumbrance on its proven surfaces while the ot
 Advisory. ADR 0016 source-cost atomicity is implemented only for one-player PHB/XPHB Cure Wounds; broader
 targeting remains active. ADR 0017 records the implemented V2-T4 DM award slice and its atomic batch,
 source-trust, preview, event, and reconciliation contracts.
+ADR 0018 replaces provider-subject allowlisting for first account creation with an OAuth-bound campaign invite
+context. Its persistence/server foundation is implemented, but new-account admission remains default-off until
+the stacked provider-neutral `campaign:create` entitlement layer lands.
 
 ## Local BFF setup
 

@@ -1,7 +1,7 @@
 # Campaign Hub data lifecycle
 
 > **Status:** Current behavior plus approved Phase 6 policy
-> **Last verified:** 2026-09-13
+> **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 ## Data inventory
@@ -11,10 +11,12 @@
 | Internal account id/display name/status | Identity and UI | account; campaign members see display name | account lifetime |
 | External provider subject + bounded profile metadata | Stable `(provider, subject)` login binding and own-account presentation | BFF/store; own account export | account lifetime; cascades on purge |
 | OAuth transaction state hash/PKCE verifier/OIDC nonce/bindings | One-time login CSRF and callback binding | BFF/store only; excluded from backups/export/logs | consumed values cleared immediately; row removed by bounded maintenance no later than expiry |
+| Invite admission context | Binds one validated invite, hash-only retry handle, one OAuth transaction, and terminal first-access outcome | BFF/store only; excluded from backups/export/logs | <=5 minutes; replaced once after a non-committing callback or removed by bounded maintenance after expiry/consumption/invite deletion |
 | Session token hash/user agent/timestamps/identity provenance | Authentication/device diagnostics | account/BFF only | expiry/revoke; automated 30-day technical cleanup |
 | Campaign/member/role | Authorization and campaign roster | active campaign members | campaign/account lifecycle |
 | Invite token hash/role/usage/expiry | Join authorization | creator/authority; raw token returned at creation | expiry/revoke; automated 30-day cleanup pending |
-| Raw invite token in browser | Share/redeem invite and survive OAuth round-trip | visible in creator output/link; recipient URL fragment then `sessionStorage["hub-pending-invite"]` until redemption attempt completes | cleared from URL immediately and from sessionStorage after success or failure |
+| Raw invite token in browser | Share/redeem invite | visible in creator output/link; recipient URL fragment until the Hub removes it, then callback-local memory only until the invite-context POST succeeds | never carried through OAuth; authenticated direct redemption still submits it once in a POST body |
+| Opaque invite retry handle | Restart a failed/cancelled invite OAuth attempt without the raw invite | one browser tab's session storage and hash-only server context | rotated on retry; cleared after sign-in; expires with the <=5-minute context |
 | Character document | Player state, including notes/backstory | owner and campaign DM/co-DM full; other members receive the owner's chosen peer profile | owner lifetime/export/archive/deletion |
 | Character sharing policy | Owner's projection choices | owner only; DMs see its computed result, never the raw policy | character lifetime |
 | Campaign brew/rules versions | Shared campaign content/policy | campaign members | campaign lifetime |
@@ -26,7 +28,7 @@
 | Campaign Overview activity window | Presentation cache of authorized domain events | current signed-in campaign page | memory only; newest visible page reloads after refresh, while explicitly loaded older pages remain for the page lifetime |
 | Character Sheet realtime delivery | Ordered metadata/lifecycle handoff for the open owned character | current authenticated campaign page only | memory only; fenced and discarded on switch/detach/access loss/logout/terminal page hide; temporarily retained across BFCache suspension |
 | Outbox rows | Technical delivery | BFF/operators | published 7-day cleanup approved, not implemented |
-| Command receipts | Idempotent retry | BFF/store | 24 hours |
+| Command receipts | Idempotent retry | BFF/store | 24 hours; invite-creation receipts contain metadata only, never the raw invite |
 | Browser character recovery queue | Exact request identity, ordered local snapshots, closed activity descriptor, absolute activity replay deadline, and failure posture | signed-in character owner in bounded session storage; export only by explicit user choice | cleared after commit/use-server/discard; activity replay is capped at 23 hours and expired activity-bearing queues are quarantined; confirmed missing-server PATCH state is exported before its inaccessible local live copy is removed |
 | Semantic operations/commands | Effect lifecycle, stable exactly-once replay, resulting revision/event linkage | authorized participants; BFF/store command records | campaign/account lifecycle; not pruned as technical receipts |
 | Character target references/watermarks | Opaque peer targeting and owner/DM replay reconciliation | target ref only in authorized profiles/truth; watermark owner/DM truth only | character lifetime; target ref rotates on detach/move/archive/reactivation |
@@ -105,10 +107,12 @@ not presented as deleted or nonexistent history.
 
 ### Account/session
 
-OAuth creates or updates one account by immutable `(provider, subject)` and creates account, identity, and
-session atomically. Mutable profile metadata may refresh but never participates in lookup. Successful
-reauthentication creates a new session and revokes the prior browser session discovered during callback. Session
-tokens exist only in cookies; PostgreSQL stores hashes and same-account identity provenance.
+OAuth signs an existing account in by immutable `(provider, subject)`. An unknown identity requires a valid
+OAuth-bound invite context and the rollout switch; account, identity, session, campaign membership, invite use,
+audit, event, and outbox then commit together. Mutable profile metadata may refresh but never participates in
+lookup. Successful reauthentication creates a new session and revokes the prior browser session discovered
+during callback. Session tokens exist only in cookies; PostgreSQL stores hashes and same-account identity
+provenance.
 
 ### Campaign
 
@@ -200,6 +204,7 @@ Approved private-V1 policy:
   identity survives receipt cleanup;
 - published outbox rows: 7 days;
 - expired/revoked sessions and invites: 30 days;
+- invite admission contexts: at most five minutes, then bounded cleanup after expiry or terminal consumption;
 - leases: revoked with sessions/member removal; expired rows may be reused immediately; old-row cleanup is Phase 6E;
 - backups: managed PITR + nightly encrypted portable backup, with rotation chosen to meet RPO <=24h and
   RTO <=4h while documenting deletion aging.

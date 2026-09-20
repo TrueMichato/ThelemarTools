@@ -345,7 +345,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("isActivityAuthorizationFenced = false");
 		expect(source).toContain("isActivityAuthorizationFenced ? [] : liveEvents");
 		expect(source).toContain("[\"AUTH_REQUIRED\", \"FORBIDDEN\", \"CAMPAIGN_NOT_FOUND\", \"MEMBERSHIP_NOT_FOUND\"]");
-		expect(source).toMatch(/async function pRenderSignedOutProviders \(\) \{[\s\S]*import\("\.\/hub-auth-providers\.js"\)[\s\S]*pRenderHubAuthProviders\(\{signIn, returnTo\}\)/);
+		expect(source).toMatch(/async function pRenderSignedOutProviders \(\) \{[\s\S]*import\("\.\/hub-auth-providers\.js"\)[\s\S]*pRenderHubAuthProviders\(\{[\s\S]*signIn,[\s\S]*returnTo,[\s\S]*inviteToken: _pendingInviteToken/);
 		expect(source).toContain("if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender");
 		expect(source).toContain("if (!signIn) return;");
 		expect(source).toContain("_pSignedOutProvidersRender = null");
@@ -653,6 +653,11 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("import(\"./hub-auth-providers.js\")");
 		expect(providerSource).toContain("new URLSearchParams({returnTo})");
 		expect(source).toContain("sessionStorage.setItem(\"hub-pending-invite\"");
+		expect(source).toContain("_pendingInviteToken = inviteFragment");
+		expect(providerSource).toContain("pCreateInviteAdmission");
+		expect(providerSource).toContain("pRetryInviteAdmission");
+		expect(providerSource).toContain("window.location.assign(result.authorizationUrl)");
+		expect(source).toContain("sessionStorage.setItem(\"hub-invite-retry\"");
 		expect(source).toContain("joinUrl.hash");
 		expect(source).not.toContain("searchParams.set(\"invite\"");
 	});
@@ -662,7 +667,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain(`setAttribute("role", "group")`);
 		expect(source).toContain(`setAttribute("aria-label", "Sign-in providers")`);
 		expect(source).toContain("Sign in with $" + "{provider.label}");
-		expect(source).toContain("Using an unlinked provider creates a separate account");
+		expect(source).toContain("New provider links will require account reauthentication");
 		expect(source).toContain("One sign-in provider is temporarily unavailable");
 		expect(source).not.toContain("innerHTML");
 	});

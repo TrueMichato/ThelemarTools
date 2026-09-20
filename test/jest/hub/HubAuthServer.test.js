@@ -17,6 +17,11 @@ describe("Hub durable GitHub registry flow", () => {
 
 	beforeEach(async () => {
 		store = new MemoryHubStore();
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "123",
+			displayName: "Player",
+		});
 		oauthProvider = {
 			getAuthorizationUrl: jest.fn(({state, codeChallenge}) => `https://github.example/authorize?state=${state}&code_challenge=${codeChallenge}`),
 			pExchangeCode: jest.fn(async () => ({
@@ -34,7 +39,6 @@ describe("Hub durable GitHub registry flow", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "c".repeat(32),
 				csrfSecret: "s".repeat(32),
-				allowedOAuthSubjects: ["github:123"],
 			},
 		});
 	});
@@ -89,6 +93,28 @@ describe("Hub durable GitHub registry flow", () => {
 		expect(replay.statusCode).toBe(400);
 		expect(replay.json()).toEqual({error: "INVALID_OAUTH_STATE"});
 		expect(oauthProvider.pExchangeCode).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps concurrent tabs bound by state under one browser correlation cookie", async () => {
+		const first = await pStart();
+		const secondResponse = await app.inject({
+			method: "GET",
+			url: "/auth/github/start?returnTo=/hub.html",
+			headers: {cookie: `__Host-hub_oauth=${first.cookie}`},
+		});
+		const second = {
+			state: new URL(secondResponse.headers.location).searchParams.get("state"),
+			cookie: getCookie(secondResponse, "__Host-hub_oauth"),
+		};
+		expect(app.unsignCookie(second.cookie).value).toBe(app.unsignCookie(first.cookie).value);
+		for (const current of [second, first]) {
+			const callback = await app.inject({
+				method: "GET",
+				url: `/auth/github/callback?code=code&state=${encodeURIComponent(current.state)}`,
+				headers: {cookie: `__Host-hub_oauth=${current.cookie}`},
+			});
+			expect(callback.statusCode).toBe(302);
+		}
 	});
 
 	it("does not register disabled or unknown provider routes", async () => {
@@ -212,6 +238,13 @@ describe("Hub concrete multi-provider routes", () => {
 				};
 			}),
 		}));
+		for (const definition of definitions) {
+			await store.pUpsertOAuthAccount({
+				provider: definition.slug,
+				providerSubject: definition.subject,
+				displayName: `${definition.label} User`,
+			});
+		}
 		app = await createHubApp({
 			store,
 			authProviderRegistry: new AuthProviderRegistry({
@@ -221,7 +254,6 @@ describe("Hub concrete multi-provider routes", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "c".repeat(32),
 				csrfSecret: "s".repeat(32),
-				allowedOAuthSubjects: ["github:101", "discord:202", "google:google-sub"],
 			},
 		});
 	});

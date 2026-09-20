@@ -51,6 +51,9 @@ describe("semantic character operations", () => {
 			fnNow: () => new Date(now),
 			semanticOperationRegistry: createSemanticOperationRegistry({templates: [getTestTemplate()]}),
 		});
+		for (const current of Object.values(IDENTITIES)) {
+			await store.pUpsertOAuthAccount(current);
+		}
 		app = await createHubApp({
 			store,
 			oauthProvider: {
@@ -61,7 +64,6 @@ describe("semantic character operations", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "x".repeat(32),
 				csrfSecret: "y".repeat(32),
-				allowedOAuthSubjects: Object.values(IDENTITIES).map(it => `github:${it.providerSubject}`),
 			},
 		});
 	});

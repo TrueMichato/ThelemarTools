@@ -1,7 +1,7 @@
 import {pGetAuthProviderRollbackBlockers} from "../../../server/src/auth-provider-operations.js";
 
 describe("Hub authentication provider operations", () => {
-	it("counts accounts which would lose every admitted rollback identity", async () => {
+	it("counts accounts which would lose every supported rollback identity", async () => {
 		const calls = [];
 		const result = await pGetAuthProviderRollbackBlockers({
 			queryable: {
@@ -15,13 +15,13 @@ describe("Hub authentication provider operations", () => {
 		});
 
 		expect(result).toEqual({blockedAccounts: 2});
-		expect(calls[0].sql).toContain("EXISTS");
-		expect(calls[0].sql).toContain("identity.provider || ':' || identity.provider_subject");
+		expect(calls[0].sql).toContain("NOT EXISTS");
 		expect(calls[0].sql).toContain("account.status <> 'deleted'");
+		expect(calls[0].sql).toContain("identity.provider || ':' || identity.provider_subject");
 		expect(calls[0].params).toEqual([["github"], ["github:123", "github:456"]]);
 	});
 
-	it("fails closed on empty or malformed rollback policy", async () => {
+	it("fails closed on empty or malformed rollback provider policy", async () => {
 		const queryable = {query: async () => { throw new Error("should not query"); }};
 		await expect(pGetAuthProviderRollbackBlockers({
 			queryable,
@@ -37,6 +37,6 @@ describe("Hub authentication provider operations", () => {
 			queryable,
 			supportedProviders: ["github"],
 			allowedSubjects: [],
-		})).rejects.toThrow(/admitted provider subject/);
+		})).rejects.toThrow(/legacy rollback provider subject/);
 	});
 });

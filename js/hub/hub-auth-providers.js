@@ -35,6 +35,12 @@ function getNote ({documentRef, text}) {
 export async function pRenderHubAuthProviders ({
 	signIn,
 	returnTo,
+	inviteToken = null,
+	inviteRetry = null,
+	pCreateInviteAdmission = null,
+	pRetryInviteAdmission = null,
+	onInviteStarted = () => {},
+	onError = () => {},
 	fnFetch = fetch,
 	documentRef = document,
 }) {
@@ -48,7 +54,10 @@ export async function pRenderHubAuthProviders ({
 	});
 	if (!response?.ok) throw new Error("Authentication providers are unavailable.");
 	const providers = getProviders(await response.json());
-	const available = providers.filter(provider => provider.status === "available");
+	const available = providers.filter(provider =>
+		provider.status === "available"
+		&& (!inviteRetry || provider.slug === inviteRetry.provider),
+	);
 	if (!available.length) throw new Error("Authentication providers are unavailable.");
 
 	const group = documentRef.createElement("div");
@@ -56,9 +65,35 @@ export async function pRenderHubAuthProviders ({
 	group.setAttribute("role", "group");
 	group.setAttribute("aria-label", "Sign-in providers");
 	for (const provider of available) {
-		const link = documentRef.createElement("a");
+		const isInviteFlow = !!(inviteToken || inviteRetry);
+		const link = documentRef.createElement(isInviteFlow ? "button" : "a");
 		link.className = "hub-button hub-button--primary";
-		link.href = `${provider.startPath}?${new URLSearchParams({returnTo})}`;
+		if (isInviteFlow) {
+			link.type = "button";
+			link.addEventListener("click", async () => {
+				for (const control of group.querySelectorAll("button")) control.disabled = true;
+				try {
+					const result = inviteRetry
+						? await pRetryInviteAdmission({
+							retryToken: inviteRetry.retryToken,
+							provider: provider.slug,
+							returnTo,
+						})
+						: await pCreateInviteAdmission({
+							token: inviteToken,
+							provider: provider.slug,
+							returnTo,
+						});
+					onInviteStarted({provider: provider.slug, retryToken: result.retryToken});
+					window.location.assign(result.authorizationUrl);
+				} catch (error) {
+					for (const control of group.querySelectorAll("button")) control.disabled = false;
+					onError(error);
+				}
+			});
+		} else {
+			link.href = `${provider.startPath}?${new URLSearchParams({returnTo})}`;
+		}
 		link.textContent = `Sign in with ${provider.label}`;
 		group.append(link);
 	}
@@ -67,7 +102,7 @@ export async function pRenderHubAuthProviders ({
 	if (available.length > 1) {
 		group.after(getNote({
 			documentRef,
-			text: "Already have a Hub account? Sign in with a provider already linked to it. Using an unlinked provider creates a separate account; provider linking will be available from Account & devices before these options are enabled for existing users.",
+			text: "Already have a Hub account? Sign in with a provider already linked to it. New provider links will require account reauthentication when that flow is enabled.",
 		}));
 	}
 	if (providers.some(provider => provider.status === "configuration_error")) {

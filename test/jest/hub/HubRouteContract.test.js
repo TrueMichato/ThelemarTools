@@ -12,6 +12,8 @@ describe("hub route registration contract", () => {
 		for (const route of [
 			["GET", "/api/live"],
 			["GET", "/api/ready"],
+			["POST", "/api/auth/invite-contexts"],
+			["POST", "/api/auth/invite-contexts/retry"],
 			["GET", "/api/campaigns/:campaignId"],
 			["POST", "/api/campaigns/:campaignId/archive"],
 			["GET", "/api/campaigns/:campaignId/context"],

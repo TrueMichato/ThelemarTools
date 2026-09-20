@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 import {getSha256} from "../../../server/src/security.js";
+import {pGetAuthProviderRollbackBlockers} from "../../../server/src/auth-provider-operations.js";
 
 const databaseUrl = process.env.HUB_TEST_POSTGRES_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
@@ -19,6 +20,7 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 	afterAll(async () => store?.pClose());
 
 	it("never joins Discord or Google accounts by shared profile metadata", async () => {
+		await expect(store.pCheckHealth()).resolves.toBe(true);
 		const prefix = `auth-pg-providers-${process.pid}-${Date.now()}`;
 		const identities = [
 			{provider: "github", providerSubject: `${prefix}-github`},
@@ -44,7 +46,14 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 	});
 
 	it("keeps sign-in, provenance, transaction, constraint, and role behavior in one authority", async () => {
+		await store.pDeleteExpiredOAuthTransactions({limit: 10_000});
+		await store.pDeleteExpiredInviteContexts({limit: 10_000});
 		const prefix = `auth-pg-${process.pid}-${Date.now()}`;
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-subject`,
+			displayName: "First Name",
+		});
 		const firstTokenHash = crypto.randomBytes(32).toString("hex");
 		const first = await store.pCompleteOAuthSignIn({
 			identity: {
@@ -172,11 +181,73 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 		)).rows[0].count).toBe(1);
 		await store._pool.query(`DELETE FROM hub.oauth_transactions WHERE id = $1`, [activeTransactionId]);
 
+		const correlatedTransactionId = crypto.randomUUID();
+		const correlatedStateHash = getSha256(`${prefix}-correlated-state`);
+		const browserCorrelationHash = getSha256(`${prefix}-browser-correlation`);
+		await store.pCreateOAuthTransaction({
+			id: correlatedTransactionId,
+			stateHash: correlatedStateHash,
+			browserCorrelationHash,
+			provider: "github",
+			operation: "sign_in",
+			redirectUri: "https://tools.example/auth/github/callback",
+			returnTo: "/charactersheet.html?hubCampaign=00000000-0000-4000-8000-000000000001#sheet",
+			pkceVerifier: "v".repeat(64),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const correlated = await store.pConsumeOAuthTransaction({
+			stateHash: correlatedStateHash,
+			browserCorrelationHash,
+			provider: "github",
+			operation: "sign_in",
+			redirectUri: "https://tools.example/auth/github/callback",
+		});
+		expect(correlated.id).toBe(correlatedTransactionId);
+
 		const conflictTokenHash = crypto.randomBytes(32).toString("hex");
 		await store.pCreateSession({
 			accountId: first.account.id,
 			tokenHash: conflictTokenHash,
 			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const rollbackCampaign = (await store.pCreateCampaign({
+			accountId: first.account.id,
+			name: `Admission rollback ${prefix}`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		const rollbackInviteTokenHash = getSha256(`${prefix}-rollback-invite`);
+		await store.pCreateInvite({
+			accountId: first.account.id,
+			campaignId: rollbackCampaign.id,
+			role: "player",
+			tokenHash: rollbackInviteTokenHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const rollbackTransactionId = crypto.randomUUID();
+		const rollbackStateHash = getSha256(`${prefix}-rollback-state`);
+		await store.pCreateInviteOAuthTransaction({
+			transaction: {
+				id: rollbackTransactionId,
+				stateHash: rollbackStateHash,
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+				returnTo: "/hub.html",
+				pkceVerifier: "v".repeat(64),
+				ttlSeconds: 60,
+			},
+			inviteTokenHash: rollbackInviteTokenHash,
+			retryTokenHash: getSha256(`${prefix}-rollback-retry`),
+			contextTtlSeconds: 60,
+		});
+		await store.pConsumeOAuthTransaction({
+			id: rollbackTransactionId,
+			stateHash: rollbackStateHash,
+			provider: "github",
+			operation: "sign_in",
+			redirectUri: "https://tools.example/auth/github/callback",
 		});
 		await expect(store.pCompleteOAuthSignIn({
 			identity: {
@@ -186,6 +257,8 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			},
 			tokenHash: conflictTokenHash,
 			expiresAt: new Date(Date.now() + 60_000),
+			oauthTransactionId: rollbackTransactionId,
+			isNewAccountAdmissionEnabled: true,
 		})).rejects.toMatchObject({code: "23505"});
 		const orphan = await store._pool.query(`
 			SELECT 1
@@ -193,16 +266,31 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			WHERE provider = 'github' AND provider_subject = $1
 		`, [`${prefix}-must-rollback`]);
 		expect(orphan.rowCount).toBe(0);
+		const rollbackState = await store._pool.query(`
+			SELECT
+				context.consumed_at,
+				invite.use_count
+			FROM hub.oauth_transactions tx
+			JOIN hub.invite_contexts context ON context.id = tx.invite_context_id
+			JOIN hub.invites invite ON invite.id = context.invite_id
+			WHERE tx.id = $1
+		`, [rollbackTransactionId]);
+		expect(rollbackState.rows[0]).toEqual({
+			consumed_at: null,
+			use_count: 0,
+		});
 
+		const otherAccount = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-other`,
+			displayName: "Other",
+		});
 		const other = await store.pCompleteOAuthSignIn({
-			identity: {
-				provider: "github",
-				subject: `${prefix}-other`,
-				displayName: "Other",
-			},
+			identity: {provider: "github", subject: `${prefix}-other`, displayName: "Other"},
 			tokenHash: crypto.randomBytes(32).toString("hex"),
 			expiresAt: new Date(Date.now() + 60_000),
 		});
+		expect(other.account.id).toBe(otherAccount.id);
 		await expect(store.pCreateSession({
 			accountId: first.account.id,
 			tokenHash: crypto.randomBytes(32).toString("hex"),
@@ -225,13 +313,15 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 				has_table_privilege(current_user, 'hub.oauth_transactions', 'SELECT') AS can_select,
 				has_table_privilege(current_user, 'hub.oauth_transactions', 'INSERT') AS can_insert,
 				has_table_privilege(current_user, 'hub.oauth_transactions', 'UPDATE') AS can_update,
-				has_table_privilege(current_user, 'hub.oauth_transactions', 'DELETE') AS can_delete
+				has_table_privilege(current_user, 'hub.oauth_transactions', 'DELETE') AS can_delete,
+				has_table_privilege(current_user, 'hub.invite_contexts', 'SELECT, INSERT, UPDATE, DELETE') AS can_use_invite_contexts
 		`);
 		expect(privileges.rows[0]).toEqual({
 			can_select: true,
 			can_insert: true,
 			can_update: true,
 			can_delete: true,
+			can_use_invite_contexts: true,
 		});
 
 		const exported = await store.pExportAccountData({accountId: first.account.id});
@@ -243,5 +333,375 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			}),
 		]);
 		expect(JSON.stringify(exported)).not.toMatch(/access.?token|refresh.?token|pkce|nonce|ignored@example/i);
+	});
+
+	it("serializes invite-gated first access, max-use races, and creator purge without deadlock", async () => {
+		const prefix = `auth-pg-admission-${process.pid}-${Date.now()}`;
+		const owner = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-owner`,
+			displayName: "Admission Owner",
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: owner.id,
+			name: `Admission ${prefix}`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		const inviteHash = getSha256(`${prefix}-invite`);
+		await store.pCreateInvite({
+			accountId: owner.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash: inviteHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await expect(store.pCreateInvite({
+			accountId: owner.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash: inviteHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		})).rejects.toMatchObject({code: "INVITE_TOKEN_CONFLICT", status: 409});
+
+		const pCreateConsumedTransaction = async suffix => {
+			const id = crypto.randomUUID();
+			const stateHash = getSha256(`${prefix}-${suffix}-state`);
+			await store.pCreateInviteOAuthTransaction({
+				transaction: {
+					id,
+					stateHash,
+					provider: "github",
+					operation: "sign_in",
+					redirectUri: "https://tools.example/auth/github/callback",
+					returnTo: "/hub.html",
+					pkceVerifier: "v".repeat(64),
+					ttlSeconds: 60,
+				},
+				inviteTokenHash: inviteHash,
+				retryTokenHash: getSha256(`${prefix}-${suffix}-retry`),
+				contextTtlSeconds: 60,
+			});
+			await store.pConsumeOAuthTransaction({
+				id,
+				stateHash,
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+			});
+			return id;
+		};
+		const [transactionA, transactionB] = await Promise.all([
+			pCreateConsumedTransaction("a"),
+			pCreateConsumedTransaction("b"),
+		]);
+		const raced = await Promise.allSettled([
+			store.pCompleteOAuthSignIn({
+				identity: {provider: "github", subject: `${prefix}-racer-a`, displayName: "Racer A"},
+				tokenHash: crypto.randomBytes(32).toString("hex"),
+				expiresAt: new Date(Date.now() + 60_000),
+				oauthTransactionId: transactionA,
+				isNewAccountAdmissionEnabled: true,
+			}),
+			store.pCompleteOAuthSignIn({
+				identity: {provider: "github", subject: `${prefix}-racer-b`, displayName: "Racer B"},
+				tokenHash: crypto.randomBytes(32).toString("hex"),
+				expiresAt: new Date(Date.now() + 60_000),
+				oauthTransactionId: transactionB,
+				isNewAccountAdmissionEnabled: true,
+			}),
+		]);
+		expect(raced.filter(result => result.status === "fulfilled")).toHaveLength(1);
+		expect(raced.filter(result => result.status === "rejected").map(result => result.reason.code))
+			.toEqual(["INVITE_ADMISSION_INVALID"]);
+		const committed = await store._pool.query(`
+			SELECT
+				(SELECT use_count FROM hub.invites WHERE token_hash = decode($1, 'hex')) AS use_count,
+				(SELECT count(*)::integer FROM hub.invite_contexts WHERE consumed_at IS NOT NULL AND completed_account_id IS NOT NULL) AS completed_contexts,
+				(SELECT count(*)::integer FROM hub.external_identities WHERE provider_subject LIKE $2) AS created_identities,
+				(SELECT count(*)::integer FROM hub.memberships WHERE campaign_id = $3 AND account_id <> $4) AS joined_memberships,
+				(
+					SELECT count(*)::integer
+					FROM hub.audit_entries audit
+					WHERE audit.action = 'account.created'
+						AND audit.details->>'admission' = 'campaign_invite'
+						AND audit.actor_account_id IN (
+							SELECT account_id
+							FROM hub.external_identities
+							WHERE provider_subject LIKE $2
+						)
+				) AS account_audits,
+				(SELECT count(*)::integer FROM hub.audit_entries WHERE campaign_id = $3 AND action = 'invite.redeemed') AS invite_audits,
+				(SELECT count(*)::integer FROM hub.domain_events WHERE campaign_id = $3 AND event_type = 'membership.joined') AS join_events
+		`, [inviteHash, `${prefix}-racer-%`, campaign.id, owner.id]);
+		expect(committed.rows[0]).toEqual({
+			use_count: 1,
+			completed_contexts: expect.any(Number),
+			created_identities: 1,
+			joined_memberships: 1,
+			account_audits: 1,
+			invite_audits: 1,
+			join_events: 1,
+		});
+		expect(committed.rows[0].completed_contexts).toBeGreaterThanOrEqual(1);
+
+		const retryInviteHash = getSha256(`${prefix}-retry-invite`);
+		await store.pCreateInvite({
+			accountId: owner.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash: retryInviteHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const failedTransactionId = crypto.randomUUID();
+		const failedStateHash = getSha256(`${prefix}-failed-state`);
+		const failedRetryHash = getSha256(`${prefix}-failed-retry`);
+		await store.pCreateInviteOAuthTransaction({
+			transaction: {
+				id: failedTransactionId,
+				stateHash: failedStateHash,
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+				returnTo: "/hub.html",
+				pkceVerifier: "v".repeat(64),
+				browserCorrelationHash: getSha256(`${prefix}-browser`),
+				ttlSeconds: 60,
+			},
+			inviteTokenHash: retryInviteHash,
+			retryTokenHash: failedRetryHash,
+			contextTtlSeconds: 60,
+		});
+		await store.pConsumeOAuthTransaction({
+			stateHash: failedStateHash,
+			browserCorrelationHash: getSha256(`${prefix}-browser`),
+			provider: "github",
+			operation: "sign_in",
+			redirectUri: "https://tools.example/auth/github/callback",
+		});
+		await store.pDeleteExpiredOAuthTransactions({limit: 10_000});
+		expect((await store._pool.query(
+			`SELECT 1 FROM hub.oauth_transactions WHERE id = $1`,
+			[failedTransactionId],
+		)).rowCount).toBe(1);
+		const retryTransactionId = crypto.randomUUID();
+		await store.pRetryInviteOAuthTransaction({
+			transaction: {
+				id: retryTransactionId,
+				stateHash: getSha256(`${prefix}-retry-state`),
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+				returnTo: "/hub.html",
+				pkceVerifier: "v".repeat(64),
+				browserCorrelationHash: getSha256(`${prefix}-browser`),
+				ttlSeconds: 60,
+			},
+			retryTokenHash: failedRetryHash,
+			nextRetryTokenHash: getSha256(`${prefix}-next-retry`),
+			contextTtlSeconds: 60,
+		});
+		const retryRows = await store._pool.query(`
+			SELECT id
+			FROM hub.oauth_transactions
+			WHERE id = ANY($1::uuid[])
+			ORDER BY id
+		`, [[failedTransactionId, retryTransactionId]]);
+		expect(retryRows.rows.map(row => row.id)).toEqual([retryTransactionId]);
+
+		const coDm = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-co-dm`,
+			displayName: "Co-DM",
+		});
+		const coDmInviteHash = getSha256(`${prefix}-co-dm-invite`);
+		await store.pCreateInvite({
+			accountId: owner.id,
+			campaignId: campaign.id,
+			role: "co_dm",
+			tokenHash: coDmInviteHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await store.pRedeemInvite({
+			accountId: coDm.id,
+			tokenHash: coDmInviteHash,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const createdByCoDm = await store.pCreateInvite({
+			accountId: coDm.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash: getSha256(`${prefix}-purge-race`),
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await store.pRequestAccountDeletion({
+			accountId: coDm.id,
+			idempotencyKey: crypto.randomUUID(),
+			graceMs: 1,
+		});
+		await new Promise(resolve => setTimeout(resolve, 5));
+		const interleaving = await Promise.allSettled([
+			store.pRevokeInvite({
+				accountId: owner.id,
+				campaignId: campaign.id,
+				inviteId: createdByCoDm.invite.id,
+				idempotencyKey: crypto.randomUUID(),
+			}),
+			store.pPurgeDueAccounts({limit: 10}),
+		]);
+		for (const result of interleaving) {
+			if (result.status === "rejected") expect(result.reason.code).not.toBe("40P01");
+		}
+		const remainingInvite = await store._pool.query(`SELECT 1 FROM hub.invites WHERE id = $1`, [createdByCoDm.invite.id]);
+		expect(remainingInvite.rowCount).toBe(0);
+	});
+
+	it("enforces active, deletion-requested, suspended, and deleted sign-in states", async () => {
+		const prefix = `auth-pg-status-${process.pid}-${Date.now()}`;
+		const account = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-member`,
+			displayName: "Status Member",
+		});
+		const owner = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-owner`,
+			displayName: "Status Owner",
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: owner.id,
+			name: `Status ${prefix}`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		const inviteHash = getSha256(`${prefix}-invite`);
+		await store.pCreateInvite({
+			accountId: owner.id,
+			campaignId: campaign.id,
+			role: "player",
+			tokenHash: inviteHash,
+			expiresAt: new Date(Date.now() + 60_000),
+			maxUses: 1,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const pNormalTransaction = async suffix => {
+			const id = crypto.randomUUID();
+			const stateHash = getSha256(`${prefix}-${suffix}`);
+			await store.pCreateOAuthTransaction({
+				id,
+				stateHash,
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+				returnTo: "/hub.html",
+				pkceVerifier: "v".repeat(64),
+				expiresAt: new Date(Date.now() + 60_000),
+			});
+			await store.pConsumeOAuthTransaction({
+				id,
+				stateHash,
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+			});
+			return id;
+		};
+		await store._pool.query(`
+			UPDATE hub.accounts
+			SET status = 'deletion_requested',
+				deletion_requested_at = now(),
+				purge_after = now() + interval '1 day'
+			WHERE id = $1
+		`, [account.id]);
+		await expect(store.pCompleteOAuthSignIn({
+			identity: {provider: "github", subject: `${prefix}-member`, displayName: "Status Member"},
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+			oauthTransactionId: await pNormalTransaction("deletion-normal"),
+		})).resolves.toEqual(expect.objectContaining({account: expect.objectContaining({status: "deletion_requested"})}));
+
+		const inviteTransactionId = crypto.randomUUID();
+		const inviteStateHash = getSha256(`${prefix}-invite-state`);
+		await store.pCreateInviteOAuthTransaction({
+			transaction: {
+				id: inviteTransactionId,
+				stateHash: inviteStateHash,
+				provider: "github",
+				operation: "sign_in",
+				redirectUri: "https://tools.example/auth/github/callback",
+				returnTo: "/hub.html",
+				pkceVerifier: "v".repeat(64),
+				ttlSeconds: 60,
+			},
+			inviteTokenHash: inviteHash,
+			retryTokenHash: getSha256(`${prefix}-invite-retry`),
+			contextTtlSeconds: 60,
+		});
+		await store.pConsumeOAuthTransaction({
+			id: inviteTransactionId,
+			stateHash: inviteStateHash,
+			provider: "github",
+			operation: "sign_in",
+			redirectUri: "https://tools.example/auth/github/callback",
+		});
+		await expect(store.pCompleteOAuthSignIn({
+			identity: {provider: "github", subject: `${prefix}-member`, displayName: "Status Member"},
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+			oauthTransactionId: inviteTransactionId,
+			isNewAccountAdmissionEnabled: true,
+		})).rejects.toMatchObject({code: "INVITE_ADMISSION_INVALID"});
+		const untouchedInvite = await store._pool.query(`
+			SELECT
+				invite.use_count,
+				context.consumed_at
+			FROM hub.oauth_transactions tx
+			JOIN hub.invite_contexts context ON context.id = tx.invite_context_id
+			JOIN hub.invites invite ON invite.id = context.invite_id
+			WHERE tx.id = $1
+		`, [inviteTransactionId]);
+		expect(untouchedInvite.rows[0]).toEqual({use_count: 0, consumed_at: null});
+
+		for (const status of ["suspended", "deleted"]) {
+			await store._pool.query(`
+				UPDATE hub.accounts
+				SET status = $2, deletion_requested_at = NULL, purge_after = NULL
+				WHERE id = $1
+			`, [account.id, status]);
+			await expect(store.pCompleteOAuthSignIn({
+				identity: {provider: "github", subject: `${prefix}-member`, displayName: "Status Member"},
+				tokenHash: crypto.randomBytes(32).toString("hex"),
+				expiresAt: new Date(Date.now() + 60_000),
+				oauthTransactionId: await pNormalTransaction(status),
+			})).rejects.toMatchObject({code: "ACCOUNT_UNAVAILABLE"});
+		}
+	});
+
+	it("blocks legacy rollback for a newly invite-admitted GitHub subject outside the old allowlist", async () => {
+		const prefix = `auth-pg-rollback-${process.pid}-${Date.now()}`;
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-legacy`,
+			displayName: "Legacy",
+		});
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-invite-admitted`,
+			displayName: "Invite admitted",
+		});
+		const result = await pGetAuthProviderRollbackBlockers({
+			queryable: store._pool,
+			supportedProviders: ["github"],
+			allowedSubjects: [`github:${prefix}-legacy`],
+		});
+		expect(result.blockedAccounts).toBeGreaterThanOrEqual(1);
 	});
 });
