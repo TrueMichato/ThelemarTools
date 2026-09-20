@@ -397,6 +397,7 @@ export async function createHubApp ({
 		if (
 			["/api/live", "/api/ready", "/api/health", "/api/meta", "/api/metrics"].includes(pathname)
 			|| pathname.startsWith("/auth/")
+			|| pathname.startsWith("/api/account/reauthentication/")
 			|| pathname.startsWith("/api/operator/")
 		) return;
 		const auth = await pGetAuth(request);

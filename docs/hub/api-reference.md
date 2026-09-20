@@ -77,7 +77,7 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `POST /api/account/sessions/:sessionId/revoke` | Authenticated mutation | own session UUID | Revokes session/leases and closes matching sockets |
 | `POST /api/account/sessions/revoke-others` | Authenticated mutation | none | Revokes all other own sessions/leases/sockets |
 | `GET /api/account/deletion` | Authenticated, including deletion grace | none | Current deletion status/timestamps |
-| `POST /api/account/deletion/request` | Authenticated mutation | `{confirmation:"DELETE"}` | Blocks active campaign owners; schedules seven-day purge, revokes sessions/cookie |
+| `POST /api/account/deletion/request` | Freshly reauthenticated mutation | `{confirmation:"DELETE"}` | Blocks active campaign owners and the last platform operator; schedules seven-day purge, revokes sessions/cookie |
 | `POST /api/account/deletion/cancel` | Reauthenticated deletion-grace mutation | none | Restores active account before purge begins |
 | `POST /api/account/reauthentication/:provider` | Authenticated active-account mutation | `{returnTo}` | Creates a provider/account/session-bound `reauthenticate` OAuth transaction and returns its authorization URL |
 | `GET /api/operator/accounts` | Freshly reauthenticated platform operator | none | Hidden account list with active entitlements; non-operators receive route-equivalent 404 |
@@ -93,6 +93,10 @@ A reauthentication callback accepts only the provider identity already linked to
 the exact initiating session. Success rotates that session, closes its socket, updates the cookie/CSRF state,
 records the identity used, and starts a five-minute freshness window. A provider mismatch, another account's
 identity, stale initiating session, or expired transaction cannot freshen authority.
+The account page exposes this flow to ordinary users as well as operators. A deletion attempt without fresh
+proof starts the linked-provider flow and returns to an explicit confirmation step. A successful deletion
+request clears the session and returns the browser to sign-in; signing in again is the deletion-grace
+reauthentication path for export or cancellation.
 
 The raw invite token is accepted only in the JSON body of `POST /api/auth/invite-contexts`. It is never accepted
 in `returnTo`, OAuth state, cookies, query strings, or callback parameters. The server permits only `/hub.html`

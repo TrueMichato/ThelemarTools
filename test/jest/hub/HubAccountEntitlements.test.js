@@ -94,6 +94,45 @@ describe("Hub account entitlement memory authority", () => {
 		expect(store._audit.filter(entry => entry.details?.targetAccountId === target.id)).toHaveLength(0);
 	});
 
+	it("rechecks Memory reauthentication authority after awaited work", async () => {
+		const transactionId = crypto.randomUUID();
+		const stateHash = "c".repeat(64);
+		await store.pCreateOAuthTransaction({
+			id: transactionId,
+			stateHash,
+			provider: "github",
+			operation: "reauthenticate",
+			initiatingAccountId: operator.id,
+			initiatingSessionId: operatorSession.id,
+			redirectUri: `${ORIGIN}/auth/github/callback`,
+			returnTo: "/hub.html",
+			expiresAt: new Date(now.getTime() + 1_000),
+		});
+		await store.pConsumeOAuthTransaction({
+			id: transactionId,
+			stateHash,
+			provider: "github",
+			operation: "reauthenticate",
+			redirectUri: `${ORIGIN}/auth/github/callback`,
+		});
+		const [linkedIdentity] = await store.pListExternalIdentities({accountId: operator.id});
+		const sessionCount = store._sessions.size;
+		const lastAuthenticatedAt = linkedIdentity.lastAuthenticatedAt;
+		store._fnBeforeSensitiveCommit = async () => {
+			now = new Date(now.getTime() + 1_001);
+		};
+		await expect(store.pCompleteOAuthReauthentication({
+			identity: {provider: "github", subject: "operator", displayName: "Changed"},
+			tokenHash: "d".repeat(64),
+			expiresAt: new Date(now.getTime() + 60_000),
+			currentSessionId: operatorSession.id,
+			oauthTransactionId: transactionId,
+		})).rejects.toMatchObject({code: "REAUTHENTICATION_FAILED"});
+		expect(store._sessions.size).toBe(sessionCount);
+		expect(await store.pGetSessionById({sessionId: operatorSession.id})).not.toBeNull();
+		expect(store._externalIdentities.get(linkedIdentity.id).lastAuthenticatedAt).toBe(lastAuthenticatedAt);
+	});
+
 	it("rechecks deletion freshness before any lifecycle side effect", async () => {
 		const targetSession = (await pCreateFreshSession({store, account: target, now})).session;
 		store._fnBeforeSensitiveCommit = async () => {
@@ -622,6 +661,13 @@ describe("Hub account entitlement routes and reauthentication", () => {
 			providerSubject: "route-target",
 			displayName: "Route Target",
 		});
+		const graceReauthentication = await app.inject({
+			method: "POST",
+			url: "/api/account/reauthentication/github",
+			headers: mutationHeaders(grace, "grace-reauthentication"),
+			payload: {returnTo: "/hub.html?accountAction=cancel-deletion"},
+		});
+		expect(graceReauthentication.statusCode).toBe(201);
 		expect((await app.inject({
 			method: "GET",
 			url: "/api/operator/accounts",
@@ -667,6 +713,8 @@ describe("Hub account entitlement startup gates", () => {
 	it("keeps entitlement enforcement and API exposure default-off", async () => {
 		const store = new MemoryHubStore();
 		const account = await pCreateAccount(store, "default-off", "Default Off");
+		await store.pReconcileConfiguredOperatorEntitlements({accountIds: [account.id]});
+		const session = (await pCreateFreshSession({store, account, now: new Date()})).session;
 		const app = await createHubApp({store, oauthProvider: provider, config});
 		try {
 			expect((await app.inject({method: "GET", url: "/api/meta"})).json().capabilities)
@@ -677,6 +725,11 @@ describe("Hub account entitlement startup gates", () => {
 				name: "Legacy creation",
 				idempotencyKey: "default-off-create",
 			})).resolves.toHaveProperty("campaign");
+			await expect(store.pRequestAccountDeletion({
+				accountId: account.id,
+				sessionId: session.id,
+				idempotencyKey: "default-off-last-operator-delete",
+			})).rejects.toMatchObject({code: "LAST_OPERATOR_PROTECTED", status: 409});
 		} finally {
 			await app.close();
 		}

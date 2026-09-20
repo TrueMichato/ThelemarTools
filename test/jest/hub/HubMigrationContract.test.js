@@ -234,6 +234,8 @@ describe("campaign hub first migration contract", () => {
 			"DEFERRABLE INITIALLY DEFERRED",
 			"pg_try_advisory_xact_lock",
 			"NEW.status IS NOT DISTINCT FROM OLD.status",
+			"current_setting('hub.enforce_operator_guard', true)",
+			"WHERE id = OLD.account_id",
 		]) expect(accountEntitlementsSql).toContain(required);
 	});
 

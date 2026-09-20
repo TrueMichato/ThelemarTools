@@ -51,9 +51,21 @@ AS $$
 DECLARE
 	removed_active_operator boolean := false;
 BEGIN
+	IF TG_TABLE_NAME = 'account_entitlements' THEN
+		IF TG_OP = 'DELETE' AND NOT EXISTS (
+			SELECT 1
+			FROM hub.accounts
+			WHERE id = OLD.account_id
+		) THEN
+			RETURN OLD;
+		END IF;
+	END IF;
 	IF TG_TABLE_NAME = 'accounts' THEN
 		IF TG_OP = 'UPDATE' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
 			RETURN NEW;
+		END IF;
+		IF current_setting('hub.enforce_operator_guard', true) IS DISTINCT FROM 'on' THEN
+			RETURN COALESCE(NEW, OLD);
 		END IF;
 	END IF;
 	IF NOT pg_try_advisory_xact_lock(hashtextextended('account-entitlements', 9)) THEN

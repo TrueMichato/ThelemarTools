@@ -70,6 +70,7 @@ async function pCreateFixture (MemoryHubStore, {fnBeforeSensitiveCommit = null} 
 		store,
 		operator,
 		target,
+		identity,
 		session,
 		advancePastFreshness: () => {
 			now = new Date(now.getTime() + 5 * 60_000 + 1);
@@ -113,6 +114,38 @@ async function probeLastOperator (MemoryHubStore) {
 	}), "LAST_OPERATOR_PROTECTED");
 }
 
+async function probeReauthenticationExpiry (MemoryHubStore) {
+	const fixture = await pCreateFixture(MemoryHubStore);
+	const transactionId = crypto.randomUUID();
+	const stateHash = crypto.randomBytes(32).toString("hex");
+	await fixture.store.pCreateOAuthTransaction({
+		id: transactionId,
+		stateHash,
+		provider: "github",
+		operation: "reauthenticate",
+		initiatingAccountId: fixture.operator.id,
+		initiatingSessionId: fixture.session.id,
+		redirectUri: "https://tools.example/auth/github/callback",
+		returnTo: "/hub.html",
+		expiresAt: new Date("2026-09-20T10:00:01.000Z"),
+	});
+	await fixture.store.pConsumeOAuthTransaction({
+		id: transactionId,
+		stateHash,
+		provider: "github",
+		operation: "reauthenticate",
+		redirectUri: "https://tools.example/auth/github/callback",
+	});
+	fixture.store._fnBeforeSensitiveCommit = async () => fixture.advancePastFreshness();
+	await expectCode(fixture.store.pCompleteOAuthReauthentication({
+		identity: {provider: "github", subject: fixture.identity.subject, displayName: fixture.operator.displayName},
+		tokenHash: crypto.randomBytes(32).toString("hex"),
+		expiresAt: new Date("2026-09-20T11:00:00.000Z"),
+		currentSessionId: fixture.session.id,
+		oauthTransactionId: transactionId,
+	}), "REAUTHENTICATION_FAILED");
+}
+
 const variants = [
 	{
 		name: "baseline",
@@ -129,6 +162,15 @@ const variants = [
 		probe: probeFreshness,
 	},
 	{
+		name: "missing-reauthentication-commit-boundary",
+		mutate: source => source.replace(
+			/getAuthority\(\);\n\t\tawait this\._pBeforeSensitiveCommit\(\);\n\t\tconst \{account, currentSession, externalIdentity\} = getAuthority\(\);/,
+			"const {account, currentSession, externalIdentity} = getAuthority();",
+		),
+		expected: "fail",
+		probe: probeReauthenticationExpiry,
+	},
+	{
 		name: "missing-last-operator-guard",
 		mutate: source => source.replaceAll(")).length <= 1", ")).length < 1"),
 		expected: "fail",
@@ -140,7 +182,7 @@ let killed = 0;
 for (const variant of variants) {
 	const loaded = await loadStoreVariant(variant);
 	try {
-		const probes = variant.probe ? [variant.probe] : [probeFreshness, probeLastOperator];
+		const probes = variant.probe ? [variant.probe] : [probeFreshness, probeReauthenticationExpiry, probeLastOperator];
 		let failure = null;
 		try {
 			for (const probe of probes) await probe(loaded.MemoryHubStore);

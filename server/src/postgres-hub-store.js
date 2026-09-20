@@ -818,7 +818,10 @@ export class PostgresHubStore {
 					AND session.account_id = $5
 					AND session.revoked_at IS NULL
 					AND session.expires_at > now()
-					AND account.status = 'active'
+					AND (
+						account.status = 'active'
+						OR ($4 = 'reauthenticate' AND account.status = 'deletion_requested')
+					)
 				FOR UPDATE OF session
 			)
 			INSERT INTO hub.oauth_transactions (
@@ -7219,36 +7222,29 @@ export class PostgresHubStore {
 		try {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
-			if (prior && !this._isAccountEntitlementsEnabled) {
+			await this._pLockOperatorNamespace(client);
+			const lockedEntitlements = await this._pLockEntitlementRows({client});
+			await this._pAssertFreshReauthentication({client, accountId, sessionId});
+			if (prior) {
 				await client.query("COMMIT");
 				return prior;
 			}
-			let lockedEntitlements = null;
-			if (this._isAccountEntitlementsEnabled) {
-				await this._pLockOperatorNamespace(client);
-				lockedEntitlements = await this._pLockEntitlementRows({client});
-				await this._pAssertFreshReauthentication({client, accountId, sessionId});
-				if (prior) {
-					await client.query("COMMIT");
-					return prior;
-				}
-				const isOperator = lockedEntitlements.some(row => (
-					row.account_id === accountId
-					&& row.entitlement_name === PLATFORM_OPERATE_ENTITLEMENT
-					&& row.revoked_at == null
-				));
-				if (isOperator) {
-					const activeOperators = await client.query(`
-						SELECT count(*)::integer AS count
-						FROM hub.account_entitlements entitlement
-						JOIN hub.accounts account ON account.id = entitlement.account_id
-						WHERE entitlement.entitlement_name = $1
-							AND entitlement.revoked_at IS NULL
-							AND account.status = 'active'
-					`, [PLATFORM_OPERATE_ENTITLEMENT]);
-					if (activeOperators.rows[0].count <= 1) {
-						throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
-					}
+			const isOperator = lockedEntitlements.some(row => (
+				row.account_id === accountId
+				&& row.entitlement_name === PLATFORM_OPERATE_ENTITLEMENT
+				&& row.revoked_at == null
+			));
+			if (isOperator) {
+				const activeOperators = await client.query(`
+					SELECT count(*)::integer AS count
+					FROM hub.account_entitlements entitlement
+					JOIN hub.accounts account ON account.id = entitlement.account_id
+					WHERE entitlement.entitlement_name = $1
+						AND entitlement.revoked_at IS NULL
+						AND account.status = 'active'
+				`, [PLATFORM_OPERATE_ENTITLEMENT]);
+				if (activeOperators.rows[0].count <= 1) {
+					throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
 				}
 			}
 			const account = (await client.query(`SELECT * FROM hub.accounts WHERE id = $1 FOR UPDATE`, [accountId])).rows[0];
@@ -7268,6 +7264,7 @@ export class PostgresHubStore {
 					purgeAfter: account.purge_after,
 				};
 			} else {
+				await client.query(`SELECT set_config('hub.enforce_operator_guard', 'on', true)`);
 				const updated = await client.query(`
 					UPDATE hub.accounts
 					SET status = 'deletion_requested',
@@ -7324,10 +7321,8 @@ export class PostgresHubStore {
 					characterIds: ownedCharacters.rows.map(row => row.id),
 				});
 			}
-			if (this._isAccountEntitlementsEnabled) {
-				await this._fnBeforeSensitiveCommit?.({client, operation: "account.deletion_request"});
-				await this._pAssertFreshReauthentication({client, accountId, sessionId});
-			}
+			await this._fnBeforeSensitiveCommit?.({client, operation: "account.deletion_request"});
+			await this._pAssertFreshReauthentication({client, accountId, sessionId});
 			const sessions = await client.query(`
 				UPDATE hub.sessions
 				SET revoked_at = COALESCE(revoked_at, now())
@@ -7338,13 +7333,14 @@ export class PostgresHubStore {
 			await this._pAppendAudit({client, actorAccountId: accountId, action: "account.deletion_requested", targetType: "account", targetId: accountId, details: {purgeAfter: deletion.purgeAfter}});
 			const response = {deletion, revokedSessionIds};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "account.deletion_request", response});
-			if (this._isAccountEntitlementsEnabled) {
-				await this._pAssertReauthenticationTimestampFresh({client, accountId, sessionId});
-			}
+			await this._pAssertReauthenticationTimestampFresh({client, accountId, sessionId});
 			await client.query("COMMIT");
 			return response;
 		} catch (error) {
 			await client.query("ROLLBACK");
+			if (error?.code === "23514" && /platform operator/i.test(error.message || "")) {
+				throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
+			}
 			throw error;
 		} finally {
 			client.release();
@@ -7356,21 +7352,15 @@ export class PostgresHubStore {
 		try {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
-			if (prior && !this._isAccountEntitlementsEnabled) {
+			await this._pLockOperatorNamespace(client);
+			await this._pLockEntitlementRows({client, accountIds: [accountId]});
+			await this._pAssertFreshReauthentication({client, accountId, sessionId});
+			if (prior) {
 				await client.query("COMMIT");
 				return prior;
 			}
-			if (this._isAccountEntitlementsEnabled) {
-				await this._pLockOperatorNamespace(client);
-				await this._pLockEntitlementRows({client, accountIds: [accountId]});
-				await this._pAssertFreshReauthentication({client, accountId, sessionId});
-				if (prior) {
-					await client.query("COMMIT");
-					return prior;
-				}
-				await this._fnBeforeSensitiveCommit?.({client, operation: "account.deletion_cancel"});
-				await this._pAssertFreshReauthentication({client, accountId, sessionId});
-			}
+			await this._fnBeforeSensitiveCommit?.({client, operation: "account.deletion_cancel"});
+			await this._pAssertFreshReauthentication({client, accountId, sessionId});
 			const updated = await client.query(`
 				UPDATE hub.accounts
 				SET status = 'active', deletion_requested_at = NULL, purge_after = NULL, updated_at = now()
@@ -7386,9 +7376,7 @@ export class PostgresHubStore {
 			await this._pAppendAudit({client, actorAccountId: accountId, action: "account.deletion_cancelled", targetType: "account", targetId: accountId});
 			const response = {deletion};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "account.deletion_cancel", response});
-			if (this._isAccountEntitlementsEnabled) {
-				await this._pAssertFreshReauthentication({client, accountId, sessionId});
-			}
+			await this._pAssertFreshReauthentication({client, accountId, sessionId});
 			await client.query("COMMIT");
 			return response;
 		} catch (error) {
@@ -7568,22 +7556,20 @@ export class PostgresHubStore {
 	}
 
 	async pExportAccountData ({accountId, sessionId = null}) {
-		if (this._isAccountEntitlementsEnabled) {
-			const status = await this._pool.query(`SELECT status FROM hub.accounts WHERE id = $1`, [accountId]);
-			if (status.rows[0]?.status === "deletion_requested") {
-				const client = await this._pool.connect();
-				try {
-					await client.query("BEGIN");
-					await this._pLockOperatorNamespace(client);
-					await this._pLockEntitlementRows({client, accountIds: [accountId]});
-					await this._pAssertFreshReauthentication({client, accountId, sessionId});
-					await client.query("COMMIT");
-				} catch (error) {
-					await client.query("ROLLBACK");
-					throw error;
-				} finally {
-					client.release();
-				}
+		const status = await this._pool.query(`SELECT status FROM hub.accounts WHERE id = $1`, [accountId]);
+		if (status.rows[0]?.status === "deletion_requested") {
+			const client = await this._pool.connect();
+			try {
+				await client.query("BEGIN");
+				await this._pLockOperatorNamespace(client);
+				await this._pLockEntitlementRows({client, accountIds: [accountId]});
+				await this._pAssertFreshReauthentication({client, accountId, sessionId});
+				await client.query("COMMIT");
+			} catch (error) {
+				await client.query("ROLLBACK");
+				throw error;
+			} finally {
+				client.release();
 			}
 		}
 		const [account, identities, sessions, memberships, campaigns, characters, entitlements, audit] = await Promise.all([

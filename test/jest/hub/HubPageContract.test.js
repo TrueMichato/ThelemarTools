@@ -32,6 +32,10 @@ describe("campaign hub pages", () => {
 
 	it("explains creator entitlement and exposes only focused operator administration", () => {
 		for (const id of [
+			"hub-account-reauth",
+			"hub-account-reauth-status",
+			"hub-deletion-reauth",
+			"hub-deletion-reauth-status",
 			"hub-operator-panel",
 			"hub-operator-reauth",
 			"hub-operator-status",
@@ -43,8 +47,10 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("new Set(session.reauthenticationProviders || [])");
 		expect(source).toContain("hasAccountEntitlement(session, \"platform:operate\")");
 		expect(source).toContain("pStartReauthentication");
+		expect(source).toContain("accountAction=delete");
 		expect(source).toContain("pGrantAccountEntitlement");
 		expect(source).toContain("pRevokeAccountEntitlement");
+		expect(source).toMatch(/Account \$\{account\.id\}/);
 	});
 
 	it("waits for both empty and populated campaign-list render states before creating another campaign", () => {

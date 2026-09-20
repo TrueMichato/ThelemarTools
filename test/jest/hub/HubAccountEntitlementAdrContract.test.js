@@ -24,6 +24,7 @@ describe("Campaign Hub account entitlement ADR contract", () => {
 		expect(adr).toMatch(/creates a replacement session[\s\S]*five-minute freshness window/);
 		expect(api).toContain("POST /api/account/reauthentication/:provider");
 		expect(security).toMatch(/callback[\s\S]*identity already linked to that account[\s\S]*rotates the session/);
+		expect(security).toMatch(/Account deletion\/cancellation[\s\S]*even while creator-entitlement enforcement is disabled/);
 	});
 
 	it("locks transactional enforcement and last-operator protection", () => {
@@ -43,5 +44,6 @@ describe("Campaign Hub account entitlement ADR contract", () => {
 		expect(operations).toContain("HUB_ACCOUNT_ENTITLEMENTS_ENABLED=false");
 		expect(operations).toContain("HUB_OPERATOR_ACCOUNT_IDS");
 		expect(rollback).toMatch(/leaves\s+`hub\.account_entitlements` in place and disables enforcement/);
+		expect(read("docs/hub/migrations.md")).toContain("transaction-local operator guard");
 	});
 });

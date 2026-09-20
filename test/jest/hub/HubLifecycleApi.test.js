@@ -13,6 +13,12 @@ function cookie (response, name) {
 	return (response.cookies || []).find(it => it.name === name)?.value;
 }
 
+function oauthCookieHeader (response, state) {
+	const transactionId = state.split(".", 1)[0];
+	const name = `__Host-hub_oauth-${transactionId}`;
+	return `${name}=${cookie(response, name)}`;
+}
+
 describe("Hub lifecycle API", () => {
 	let app;
 	let store;
@@ -43,6 +49,26 @@ describe("Hub lifecycle API", () => {
 		const sessionCookie = `__Host-hub_session=${cookie(callback, "__Host-hub_session")}`;
 		const session = (await app.inject({method: "GET", url: "/api/session", headers: {cookie: sessionCookie}})).json();
 		return {cookie: sessionCookie, ...session};
+	}
+
+	async function reauthenticate (session) {
+		const started = await app.inject({
+			method: "POST",
+			url: "/api/account/reauthentication/github",
+			headers: {...headers(session), "x-hub-protocol-version": "5"},
+			payload: {returnTo: "/hub.html"},
+		});
+		const state = new URL(started.json().authorizationUrl).searchParams.get("state");
+		const callback = await app.inject({
+			method: "GET",
+			url: `/auth/github/callback?code=x&state=${state}`,
+			headers: {cookie: `${session.cookie}; ${oauthCookieHeader(started, state)}`},
+		});
+		const sessionCookie = `__Host-hub_session=${cookie(callback, "__Host-hub_session")}`;
+		return {
+			cookie: sessionCookie,
+			...(await app.inject({method: "GET", url: "/api/session", headers: {cookie: sessionCookie}})).json(),
+		};
 	}
 
 	function headers (session, key = `k-${++ix}`) {
@@ -101,10 +127,11 @@ describe("Hub lifecycle API", () => {
 
 	it("freezes a deletion-pending account until cancellation after reauthentication", async () => {
 		const {player} = await setupCampaign();
+		const freshPlayer = await reauthenticate(player);
 		const requested = await app.inject({
 			method: "POST",
 			url: "/api/account/deletion/request",
-			headers: headers(player, "delete"),
+			headers: headers(freshPlayer, "delete"),
 			payload: {confirmation: "DELETE"},
 		});
 		expect(requested.statusCode).toBe(200);

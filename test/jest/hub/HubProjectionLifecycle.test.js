@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import {createHubApp} from "../../../server/src/app.js";
 import {MemoryHubStore} from "../../../server/src/memory-hub-store.js";
@@ -184,7 +185,20 @@ describe("event privacy after account purge", () => {
 		expect(JSON.stringify(before)).not.toContain(character.id);
 		expect(JSON.stringify(before)).not.toContain("PURGE-SECRET");
 
-		await store.pRequestAccountDeletion({accountId: owner.id, idempotencyKey: "del", graceMs: 0});
+		const [ownerIdentity] = await store.pListExternalIdentities({accountId: owner.id});
+		const ownerSession = await store.pCreateSession({
+			accountId: owner.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+			authenticatedViaIdentityId: ownerIdentity.id,
+			recentReauthenticatedAt: new Date(),
+		});
+		await store.pRequestAccountDeletion({
+			accountId: owner.id,
+			sessionId: ownerSession.id,
+			idempotencyKey: "del",
+			graceMs: 0,
+		});
 		await new Promise(resolve => setTimeout(resolve, 5));
 		await store.pPurgeDueAccounts();
 

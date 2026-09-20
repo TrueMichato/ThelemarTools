@@ -1403,39 +1403,73 @@ function setOperatorStatus (message, {isError = false} = {}) {
 	status.classList.toggle("hub-inline-status--error", isError);
 }
 
-async function pRenderOperatorReauthentication ({session}) {
-	const container = document.getElementById("hub-operator-reauth");
-	if (!container) return;
+function setAccountReauthenticationStatus (message, {isError = false, statusId = "hub-account-reauth-status"} = {}) {
+	const status = document.getElementById(statusId);
+	if (!status) return;
+	status.textContent = message;
+	status.classList.toggle("hub-inline-status--error", isError);
+}
+
+async function pGetEligibleReauthenticationProviders ({session}) {
 	const metadata = await api.pGetMeta();
 	const eligibleProviders = new Set(session.reauthenticationProviders || []);
-	const providers = (metadata.authProviders || []).filter(provider =>
+	return (metadata.authProviders || []).filter(provider =>
 		provider.status === "available"
 		&& eligibleProviders.has(provider.slug),
 	);
+}
+
+async function pStartAccountReauthentication ({provider, returnTo, fnSetStatus, button = null}) {
+	if (button) button.disabled = true;
+	fnSetStatus(`Opening ${provider.label} reauthentication...`);
+	try {
+		const result = await api.pStartReauthentication({
+			provider: provider.slug,
+			returnTo,
+		});
+		window.location.assign(result.authorizationUrl);
+	} catch (error) {
+		fnSetStatus(getErrorMessage(error), {isError: true});
+		if (button) button.disabled = false;
+	}
+}
+
+async function pRenderReauthenticationControls ({
+	session,
+	containerId,
+	statusId,
+	returnTo = "/hub.html",
+	fnSetStatus = (message, options) => setAccountReauthenticationStatus(message, {...options, statusId}),
+}) {
+	const container = document.getElementById(containerId);
+	if (!container) return [];
+	const providers = await pGetEligibleReauthenticationProviders({session});
 	if (!providers.length) {
-		setOperatorStatus("No linked sign-in provider is currently available for reauthentication.", {isError: true});
+		fnSetStatus("No linked sign-in provider is currently available for reauthentication.", {isError: true});
 	}
 	container.replaceChildren(...providers.map(provider => {
 		const button = document.createElement("button");
 		button.type = "button";
 		button.className = "hub-button";
 		button.textContent = `Reauthenticate with ${provider.label}`;
-		button.addEventListener("click", async () => {
-			button.disabled = true;
-			setOperatorStatus(`Opening ${provider.label} reauthentication...`);
-			try {
-				const result = await api.pStartReauthentication({
-					provider: provider.slug,
-					returnTo: "/hub.html",
-				});
-				window.location.assign(result.authorizationUrl);
-			} catch (error) {
-				setOperatorStatus(getErrorMessage(error), {isError: true});
-				button.disabled = false;
-			}
-		});
+		button.addEventListener("click", () => pStartAccountReauthentication({
+			provider,
+			returnTo,
+			fnSetStatus,
+			button,
+		}));
 		return button;
 	}));
+	return providers;
+}
+
+async function pRenderOperatorReauthentication ({session}) {
+	return pRenderReauthenticationControls({
+		session,
+		containerId: "hub-operator-reauth",
+		statusId: "hub-operator-status",
+		fnSetStatus: setOperatorStatus,
+	});
 }
 
 async function pRenderOperatorAccounts () {
@@ -1454,7 +1488,7 @@ async function pRenderOperatorAccounts () {
 		name.textContent = account.displayName;
 		const meta = document.createElement("span");
 		meta.className = "hub-data-row__meta";
-		meta.textContent = hasCreator ? "Campaign creation enabled" : "Campaign creation disabled";
+		meta.textContent = `${hasCreator ? "Campaign creation enabled" : "Campaign creation disabled"} · Account ${account.id}`;
 		main.append(name, meta);
 		const controls = document.createElement("div");
 		controls.className = "hub-data-row__controls";
@@ -1507,6 +1541,12 @@ async function pInitHubIndex ({session}) {
 	// eslint-disable-next-line no-console
 	await activeCampaign.pResolve({trigger: "startup", session});
 	await pRenderActiveCampaignSwitcher();
+	const accountAction = new URLSearchParams(window.location.search).get("accountAction");
+	const accountReauthenticationProviders = await pRenderReauthenticationControls({
+		session,
+		containerId: session.account.status === "deletion_requested" ? "hub-deletion-reauth" : "hub-account-reauth",
+		statusId: session.account.status === "deletion_requested" ? "hub-deletion-reauth-status" : "hub-account-reauth-status",
+	});
 	document.getElementById("hub-cancel-deletion")?.addEventListener("click", async event => {
 		const button = event.currentTarget;
 		button.disabled = true;
@@ -1514,6 +1554,17 @@ async function pInitHubIndex ({session}) {
 			await api.pCancelAccountDeletion({idempotencyKey: crypto.randomUUID()});
 			window.location.reload();
 		} catch (error) {
+			if (error?.code === "REAUTHENTICATION_REQUIRED" && accountReauthenticationProviders[0]) {
+				await pStartAccountReauthentication({
+					provider: accountReauthenticationProviders[0],
+					returnTo: "/hub.html?accountAction=cancel-deletion",
+					fnSetStatus: (message, options) => setAccountReauthenticationStatus(message, {
+						...options,
+						statusId: "hub-deletion-reauth-status",
+					}),
+				});
+				return;
+			}
 			renderError(error);
 			button.disabled = false;
 		}
@@ -1523,10 +1574,23 @@ async function pInitHubIndex ({session}) {
 			purgeAfter: session.account.purgeAfter,
 			deletionRequestedAt: session.account.deletionRequestedAt,
 		});
+		if (accountAction === "cancel-deletion") {
+			setAccountReauthenticationStatus(
+				"Reauthentication complete. Choose Keep my account to cancel deletion.",
+				{statusId: "hub-deletion-reauth-status"},
+			);
+			document.getElementById("hub-cancel-deletion")?.focus();
+			window.history.replaceState(null, "", "/hub.html");
+		}
 		return;
 	}
 	setHidden(document.getElementById("hub-account-active"), false);
 	setHidden(document.getElementById("hub-account-deletion-pending"), true);
+	if (accountAction === "delete") {
+		setAccountReauthenticationStatus("Reauthentication complete. Confirm account deletion again to continue.");
+		document.getElementById("hub-request-deletion")?.focus();
+		window.history.replaceState(null, "", "/hub.html");
+	}
 	const [campaigns, characters] = await Promise.all([
 		api.pListCampaigns(),
 		api.pListCharacters(),
@@ -1607,8 +1671,19 @@ async function pInitHubIndex ({session}) {
 		button.disabled = true;
 		try {
 			const result = await api.pRequestAccountDeletion({idempotencyKey: crypto.randomUUID()});
-			renderAccountDeletionPending(result.deletion);
+			if (result.deletion?.status !== "deletion_requested") {
+				throw new HubApiError({code: "RESPONSE_INVALID", status: 200});
+			}
+			window.location.assign("/hub.html?accountAction=cancel-deletion");
 		} catch (error) {
+			if (error?.code === "REAUTHENTICATION_REQUIRED" && accountReauthenticationProviders[0]) {
+				await pStartAccountReauthentication({
+					provider: accountReauthenticationProviders[0],
+					returnTo: "/hub.html?accountAction=delete",
+					fnSetStatus: setAccountReauthenticationStatus,
+				});
+				return;
+			}
 			renderError(error);
 			button.disabled = false;
 		}

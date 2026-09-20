@@ -27,9 +27,11 @@ authority. Account deletion cascades its entitlement rows; nullable granted/revo
 `ON DELETE SET NULL` so a later purge preserves the audit trail. A partial unique index permits at most one
 active row for each account and entitlement.
 
-A deferred database constraint trigger prevents a transaction from committing with zero active
-`platform:operate` entitlements. Application commands also acquire the operator namespace advisory lock and
-the relevant entitlement/account rows before checking the last-operator rule.
+A deferred database constraint trigger prevents entitlement revocation from committing with zero active
+`platform:operate` entitlements. Current application account-status transitions enable the same deferred check
+with a transaction-local marker after acquiring the operator namespace lock. The marker keeps exact predecessor
+applications schema-compatible while current deletion commands enforce the invariant and map it to
+`LAST_OPERATOR_PROTECTED`.
 
 The migration grants `campaign:create` exactly once to every non-deleted account which owns a current campaign,
 including active, archived, and deleting campaigns. Membership role alone is not a backfill source, and a later
@@ -67,8 +69,10 @@ and CSRF state. An identity linked to another account, a provider mismatch, a se
 transaction, or a stale initiating session cannot freshen authority.
 
 Sensitive entitlement and deletion commands recheck a five-minute freshness window inside their store
-transactions. Deletion-grace reauthentication remains available only for the existing export and cancellation
-paths; deletion-requested accounts cannot use operator administration.
+transactions regardless of the campaign-creation rollout flag. The account page exposes linked-provider
+reauthentication to every account and resumes deletion/cancellation intent after callback. Deletion-grace
+reauthentication remains available only for export and cancellation; deletion-requested accounts cannot use
+operator administration.
 
 ### Operator administration
 
@@ -102,7 +106,8 @@ The lock order is:
 - Existing campaign owners retain creation authority through one migration backfill.
 - Operator configuration is provider-neutral, additive, auditable, and safe against accidental removal.
 - Reverting application code leaves migration 0009 in place and disables entitlement enforcement. There is no
-  database down migration.
+  database down migration. The account-status trigger remains dormant unless the current application sets its
+  transaction-local enforcement marker, so the exact predecessor does not surface an unknown constraint error.
 - Invite admission remains disabled until migration, designated-operator reconciliation, reauthentication,
   entitlement administration, previous-app compatibility, backup/restore, and rollback preflight all pass.
 
