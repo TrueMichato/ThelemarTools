@@ -4343,6 +4343,8 @@ class CharacterSheetSpells {
 					: initialRoll;
 				// Animate the spell-attack d20 (lands on the resolved roll).
 				await this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: [finalRoll]}]});
+				const criticalRange = this._state.getCriticalRange?.("spell") || 20;
+				if (finalRoll >= criticalRange) await this._pApplyTriggeredFeatCriticalHit({spell, spellData});
 				const aimedText = aimedBonus ? ` + ${aimedBonus.total} aimed` : "";
 				const seekingText = normalizedCastMeta.attackMeta?.seekingRerollUsed
 					? ` <span class="ve-muted">(rerolled from ${normalizedCastMeta.attackMeta.originalRoll})</span>`
@@ -4444,6 +4446,11 @@ class CharacterSheetSpells {
 					damageResult = empoweredResult;
 					damageInfo = empoweredResult.text;
 				}
+			}
+
+			if (damageResult?.total != null) {
+				damageResult = await this._pApplyTriggeredFeatDamageToSpellResult({damageResult, spell, spellData});
+				damageInfo = damageResult.text;
 			}
 
 			if (appliedMetamagic?.key === "vampiric" && damageResult?.total > 0) {
@@ -6566,6 +6573,44 @@ class CharacterSheetSpells {
 		if (!pending?.value) return {bonus: 0, sources: []};
 		this._state.consumePendingSpellDamageBonus?.();
 		return {bonus: pending.value, sources: [{name: pending.sourceName || "feature", value: pending.value}]};
+	}
+
+	async _pApplyTriggeredFeatCriticalHit ({spell, spellData}) {
+		const triggeredFeatDie = await this._page._pRollTriggeredFeatDie?.({
+			trigger: "criticalHit",
+			context: {isCriticalHit: true, spell, spellData},
+			rollLabel: `${spell?.name || spellData?.name || "Spell"} critical hit`,
+		});
+		if (!triggeredFeatDie) return null;
+
+		this._state.setTempHp(Math.max(this._state.getTempHp(), triggeredFeatDie.roll));
+		await this._page._saveCurrentCharacter?.();
+		this._page._renderResources?.();
+		this._page._features?._renderResources?.();
+		this._page._combat?.renderCombatResources?.();
+		JqueryUtil.doToast({type: "success", content: `${triggeredFeatDie.sourceName}: gained ${triggeredFeatDie.roll} temporary hit points.`});
+		return triggeredFeatDie;
+	}
+
+	async _pApplyTriggeredFeatDamageToSpellResult ({damageResult, spell, spellData}) {
+		if (damageResult?.total == null) return damageResult;
+		const triggeredFeatDamage = await this._page._pRollTriggeredFeatDie?.({
+			trigger: "damage",
+			context: {damageSource: "spell", spell, spellData},
+			rollLabel: `${spell?.name || spellData?.name || "Spell"} damage`,
+		});
+		if (!triggeredFeatDamage) return damageResult;
+
+		const total = damageResult.total + triggeredFeatDamage.roll;
+		const sides = Number(/^d(\d+)$/i.exec(triggeredFeatDamage.die)?.[1] || 0);
+		if (sides) await this._page.pAnimateDamageDice?.([{sides, rolls: [triggeredFeatDamage.roll]}]);
+		return {
+			...damageResult,
+			total,
+			triggeredFeatDamage,
+			text: `${damageResult.text}<br>${triggeredFeatDamage.sourceName}: <strong>${triggeredFeatDamage.roll}</strong> untyped (${triggeredFeatDamage.die})`
+				+ `<br>Total damage: <strong>${total}</strong>`,
+		};
 	}
 
 	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null) {
@@ -8791,6 +8836,15 @@ class CharacterSheetSpells {
 			resultNote,
 			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus),
 		});
+		if (rollResult.roll >= critRange) {
+			void this._pApplyTriggeredFeatCriticalHit({
+				spell: {name: `${className || "Spell"} Attack`},
+				spellData: null,
+			}).catch(e => {
+				// eslint-disable-next-line no-console
+				console.error("[CharSheet Spells] triggered critical-hit effect failed", e);
+			});
+		}
 	}
 
 	/**

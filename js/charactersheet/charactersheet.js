@@ -8302,12 +8302,19 @@ class CharacterSheetPage {
 		}
 
 		resources.forEach(resource => {
+			const triggerMeta = resource.triggeredDiePool
+				? `${resource.triggeredDiePool.die} • Triggered • ${resource.actionLabel || "No action"}${resource.triggeredDiePool.oncePerTurn ? " • 1/turn" : ""}`
+				: "";
+			const useControl = resource.contextualOnly
+				? `<span class="ve-muted ve-small mr-2" title="Spend this resource when an eligible roll triggers it.">Use on trigger</span>`
+				: `<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__resource-use-btn" ${resource.current <= 0 ? "disabled" : ""}>Use</button>`;
 			const row = e_({outer: `
 				<div class="charsheet__resource-row" data-resource-id="${resource.id}" data-charsheet-status-resource="secondary" data-status-current="${resource.current}" data-status-max="${resource.max}">
 					<span class="charsheet__resource-name">${resource.name}</span>
 					<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(${resource.recharge === "short" ? "Short" : "Long"})</span>
+					${triggerMeta ? `<span class="ve-muted ve-small ml-2">${triggerMeta}</span>` : ""}
 					<div class="charsheet__resource-uses ml-auto">
-						<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__resource-use-btn" ${resource.current <= 0 ? "disabled" : ""}>Use</button>
+						${useControl}
 						<span class="charsheet__resource-current">${resource.current}</span>
 						<span class="charsheet__resource-max">/ ${resource.max}</span>
 						<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__resource-restore-btn" ${resource.current >= resource.max ? "disabled" : ""}>+</button>
@@ -8315,7 +8322,7 @@ class CharacterSheetPage {
 				</div>
 			`});
 
-			row.querySelector(".charsheet__resource-use-btn").addEventListener("click", () => {
+			row.querySelector(".charsheet__resource-use-btn")?.addEventListener("click", () => {
 				void this._pUseResource(resource.id);
 			});
 
@@ -13157,6 +13164,45 @@ class CharacterSheetPage {
 		return true;
 	}
 
+	async _pRollTriggeredFeatDie ({trigger, context = {}, rollLabel = "roll"}) {
+		const options = this._state.getTriggeredFeatDieOptions?.(trigger, context) || [];
+		if (!options.length) return null;
+		const option = options.length === 1
+			? options[0]
+			: await InputUiUtil.pGetUserEnum({
+				title: `Triggered Dice — ${rollLabel}`,
+				values: options,
+				fnDisplay: it => `${it.featName}: ${it.die} (${it.current}/${it.max})`,
+				isResolveItem: true,
+			});
+		if (!option) return null;
+		const promptDetail = option.trigger?.prompt
+			? `<div class="ve-muted ve-small mt-1">${CharacterSheetClassUtils.escapeHtml(option.trigger.prompt)}</div>`
+			: "";
+		const shouldUse = await InputUiUtil.pGetUserBoolean({
+			title: option.featName,
+			htmlDescription: `Spend 1 ${CharacterSheetClassUtils.escapeHtml(option.resourceName || option.name)} (${option.die}) on this ${CharacterSheetClassUtils.escapeHtml(rollLabel)}?${promptDetail}`,
+			textYes: `Roll ${option.die}`,
+			textNo: "No",
+		});
+		if (!shouldUse) return null;
+
+		const spent = this._state.spendTriggeredFeatDie(option.resourceId, trigger, context);
+		if (!spent.ok) {
+			JqueryUtil.doToast({type: "warning", content: spent.error});
+			return null;
+		}
+		const match = /^d(\d+)$/i.exec(spent.die);
+		if (!match) throw new Error(`Invalid triggered feat die: ${spent.die}`);
+		const roll = this.rollDice(1, Number(match[1]));
+
+		await this._saveCurrentCharacter?.();
+		this._renderResources?.();
+		this._features?._renderResources?.();
+		this._combat?.renderCombatResources?.();
+		return {...spent, roll};
+	}
+
 	_getLiveFeatureInteractionResource (resource) {
 		if (!resource) return null;
 		if (resource.isStamina) return {isStamina: true, id: "stamina", current: this._state.getStaminaCurrent()};
@@ -17578,6 +17624,11 @@ class CharacterSheetPage {
 		});
 		effectiveRoll = fortune.effectiveRoll;
 
+		const triggeredFeatDie = await this._pRollTriggeredFeatDie({
+			trigger: "skillCheck",
+			context: {skill: skillKey, ability: skillAbility},
+			rollLabel: `${skillName} Check`,
+		});
 		const toolFlatBonus = (toolAggregated?.bonus || 0) - (toolProbe?.bonus || 0);
 		const total = effectiveRoll + mod + toolFlatBonus - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
@@ -17589,7 +17640,11 @@ class CharacterSheetPage {
 		// Total floor (Indomitable Might). A Strength skill check IS a Strength check, so the
 		// floor arrives on `checkAggregated` (`check:str`) rather than the skill aggregate.
 		const totalFloor = this._applyTotalFloor(
-			total + (stateDice ? stateDice.total : 0) + (modifierDice ? modifierDice.total : 0) + (maneuverBonus?.roll || 0),
+			total
+				+ (stateDice ? stateDice.total : 0)
+				+ (modifierDice ? modifierDice.total : 0)
+				+ (maneuverBonus?.roll || 0)
+				+ (triggeredFeatDie?.roll || 0),
 			checkAggregated.totalMinimum,
 		);
 		const totalWithDice = totalFloor.total;
@@ -17621,6 +17676,10 @@ class CharacterSheetPage {
 				? `${resultNote}\n+${maneuverBonus.roll} ${maneuverBonus.name}`
 				: `+${maneuverBonus.roll} ${maneuverBonus.name}`;
 		}
+		if (triggeredFeatDie) {
+			const note = `${triggeredFeatDie.sourceName}: +${triggeredFeatDie.roll}`;
+			resultNote = resultNote ? `${resultNote}\n${note}` : note;
+		}
 
 		const appliedCondsStr = this._formatAppliedConditionalsNote(appliedConditionals);
 		if (appliedCondsStr) {
@@ -17648,7 +17707,8 @@ class CharacterSheetPage {
 		const numericSources = allSources.filter(source => !modifierDiceSources.has(source));
 		const sourcesStr = numericSources.length > 0 ? ` [${numericSources.join(", ")}]` : "";
 		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
-			+ (modifierDice ? ` ${modifierDice.breakdownStr}` : "");
+			+ (modifierDice ? ` ${modifierDice.breakdownStr}` : "")
+			+ (triggeredFeatDie ? ` + ${triggeredFeatDie.sourceName} 1${triggeredFeatDie.die}` : "");
 		const toolBonusStr = toolFlatBonus ? ` ${toolFlatBonus >= 0 ? "+" : "-"} ${Math.abs(toolFlatBonus)} (tool bonus)` : "";
 
 		// Show animated dice if enabled

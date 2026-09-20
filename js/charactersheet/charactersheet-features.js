@@ -2352,12 +2352,19 @@ class CharacterSheetFeatures {
 				if (isAbility || CharacterSheetState.isHiddenFromGenericAbilitySurfaces?.(linkedFeature, this._state.getFeatures?.() || [])) return;
 			}
 
+			const triggerMeta = resource.triggeredDiePool
+				? `${resource.triggeredDiePool.die} • Triggered • ${resource.actionLabel || "No action"}${resource.triggeredDiePool.oncePerTurn ? " • 1/turn" : ""}`
+				: "";
+			const useControl = resource.contextualOnly
+				? `<span class="ve-muted ve-small mr-2" title="Spend this resource when an eligible roll triggers it.">Use on trigger</span>`
+				: `<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__resource-use-btn" ${resource.current <= 0 ? "disabled" : ""}>Use</button>`;
 			const row = e_({outer: `
 				<div class="charsheet__resource-row" data-resource-id="${resource.id}" data-charsheet-status-resource="secondary" data-status-current="${resource.current}" data-status-max="${resource.max}">
 					<span class="charsheet__resource-name">${resource.name}</span>
 					<span class="charsheet__resource-recharge ve-muted ve-small ml-2">(${resource.recharge === "short" ? "Short" : "Long"})</span>
+					${triggerMeta ? `<span class="ve-muted ve-small ml-2">${triggerMeta}</span>` : ""}
 					<div class="charsheet__resource-uses ml-auto">
-						<button class="ve-btn ve-btn-xs ve-btn-danger mr-2 charsheet__resource-use-btn" ${resource.current <= 0 ? "disabled" : ""}>Use</button>
+						${useControl}
 						<span class="charsheet__resource-current">${resource.current}</span>
 						<span class="charsheet__resource-max">/ ${resource.max}</span>
 						<button class="ve-btn ve-btn-xs ve-btn-success ml-2 charsheet__resource-restore-btn" ${resource.current >= resource.max ? "disabled" : ""}>+</button>
@@ -2366,7 +2373,7 @@ class CharacterSheetFeatures {
 			`});
 
 			// Use button - decrease current by 1
-			row.querySelector(".charsheet__resource-use-btn").addEventListener("click", () => {
+			row.querySelector(".charsheet__resource-use-btn")?.addEventListener("click", () => {
 				void this._page?._pUseResource?.(resource.id);
 			});
 

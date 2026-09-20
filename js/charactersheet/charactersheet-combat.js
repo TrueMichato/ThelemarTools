@@ -1602,9 +1602,9 @@ class CharacterSheetCombat {
 		// Consume "next attack only" states (e.g. Steady Aim or Laughing Lunge).
 		this._consumeOnAttackStates();
 
-		// Generic post-attack extension point. Captured context is passed to each
-		// registered hook (Arcane Shot picker, etc.). Hooks are async and
-		// fire-and-forget so the synchronous roll/display path above is never blocked.
+		// Generic post-attack extension point. Blocking hooks resolve first when their
+		// choice competes with the subsequent damage roll for a shared once-per-turn
+		// resource; all other hooks remain fire-and-forget.
 		const postCtx = {
 			attack,
 			attackId,
@@ -1619,7 +1619,8 @@ class CharacterSheetCombat {
 			isNat20: rollResult.roll === 20,
 			isFumble: rollResult.roll === 1,
 		};
-		void this._runPostAttackHooks(postCtx).catch(e => {
+		await this._runPostAttackHooks(postCtx, {blocking: true});
+		void this._runPostAttackHooks(postCtx, {blocking: false}).catch(e => {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet Combat] post-attack hook error", e);
 		});
@@ -1857,10 +1858,17 @@ class CharacterSheetCombat {
 	// =========================================================================
 
 	/**
-	 * @returns {Array<{id: string, predicate: (ctx: *) => boolean, handler: (ctx: *) => Promise<void>}>}
+	 * @returns {Array<{id: string, blocking?: boolean, predicate: (ctx: *) => boolean, handler: (ctx: *) => Promise<void>}>}
 	 */
 	_getPostAttackHooks () {
 		return [
+			{
+				id: "triggeredFeatCriticalHit",
+				blocking: true,
+				predicate: (ctx) => ctx.isCrit
+					&& (this._state.getTriggeredFeatDieOptions?.("criticalHit", {isCriticalHit: true, attack: ctx.attack}) || []).length > 0,
+				handler: (ctx) => this._pApplyTriggeredFeatCriticalHit(ctx),
+			},
 			{
 				id: "arcaneShot",
 				predicate: (ctx) => ctx.isRanged
@@ -2427,11 +2435,13 @@ class CharacterSheetCombat {
 	 * Run all post-attack hooks in order. Hooks whose predicate fails are skipped.
 	 * Errors in one hook never abort the others (or the roll).
 	 * @param {*} ctx
+	 * @param {{blocking?: ?boolean}} opts
 	 * @returns {Promise<void>}
 	 */
-	async _runPostAttackHooks (ctx) {
+	async _runPostAttackHooks (ctx, {blocking = null} = {}) {
 		const hooks = this._getPostAttackHooks();
 		for (const hook of hooks) {
+			if (blocking != null && !!hook.blocking !== blocking) continue;
 			let applies = false;
 			try { applies = !!hook.predicate(ctx); } catch (e) { applies = false; }
 			if (!applies) continue;
@@ -2443,6 +2453,21 @@ class CharacterSheetCombat {
 				console.error(`[CharSheet Combat] post-attack hook "${hook.id}" failed`, e);
 			}
 		}
+	}
+
+	async _pApplyTriggeredFeatCriticalHit (ctx) {
+		const die = await this._page._pRollTriggeredFeatDie?.({
+			trigger: "criticalHit",
+			context: {isCriticalHit: true, attack: ctx.attack},
+			rollLabel: `${ctx.attack?.name || "Attack"} critical hit`,
+		});
+		if (!die) return;
+		this._state.setTempHp(Math.max(this._state.getTempHp(), die.roll));
+		await this._page._saveCurrentCharacter?.();
+		this._page._renderResources?.();
+		this._page._features?._renderResources?.();
+		this.renderCombatResources?.();
+		JqueryUtil.doToast({type: "success", content: `${die.sourceName}: gained ${die.roll} temporary hit points.`});
 	}
 
 	/**
@@ -3484,6 +3509,15 @@ class CharacterSheetCombat {
 			});
 			if (!weaponDamageType) return;
 		}
+		const triggeredFeatDamage = await this._page._pRollTriggeredFeatDie?.({
+			trigger: "damage",
+			context: {
+				damageSource: attack.isSpell ? "spell" : "weapon",
+				attack,
+				isCriticalHit: isCrit,
+			},
+			rollLabel: `${attack.name} damage`,
+		});
 		let destructiveWrathApplied = false;
 		const rollTypedDamage = (formula, damageType, crit = isCrit) => {
 			const maximize = !destructiveWrathApplied && this._state.canApplyPendingDamageMaximization?.(damageType);
@@ -3794,7 +3828,12 @@ class CharacterSheetCombat {
 
 		const {damage: battleMasterDamage, name: battleMasterName} = this._consumeBattleMasterDamage(attackId, isCrit);
 		const baseDamageTotal = damageRoll.total + totalBonus + sneakAttackDamage + extraDamageTotal + riderSameTypeTotal + doubleshotDamage + battleMasterDamage;
-		const totalBeforeTargetMultiplier = baseDamageTotal + riderDiffTypeTotal + handOfHarmDamage + methodEffectDamage + channelSpellDamage;
+		const totalBeforeTargetMultiplier = baseDamageTotal
+			+ riderDiffTypeTotal
+			+ handOfHarmDamage
+			+ methodEffectDamage
+			+ channelSpellDamage
+			+ (triggeredFeatDamage?.roll || 0);
 		const targetMultiplier = ["object", "structure"].includes(juggernautTarget)
 			? (this._state.getFeatureCalculations?.().demolishingMightObjectMultiplier || 1)
 			: 1;
@@ -3828,6 +3867,7 @@ class CharacterSheetCombat {
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
 		if (channelSpellDamage) subtitle += ` | <strong style="color:#e056fd">+${channelSpellDamage} ${channelSpell.damageType}</strong> (${channelSpell.spellName} on hit ${channelSpell.dice})`;
+		if (triggeredFeatDamage) subtitle += ` | ${triggeredFeatDamage.sourceName} ${triggeredFeatDamage.die}: +${triggeredFeatDamage.roll} untyped`;
 		if (channelSpellMaximized) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
 		if (destructiveWrathApplied) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
 		if (targetMultiplier > 1) subtitle += ` | <strong>Demolishing Might: ×${targetMultiplier} vs ${juggernautTarget}</strong>`;
@@ -3857,7 +3897,9 @@ class CharacterSheetCombat {
 		if (channelSpellDamage) typedExtras.push(`${channelSpellDamage} ${channelSpell.damageType}`);
 		let totalTitle;
 		if (typedExtras.length) {
-			totalTitle = `${baseDamageTotal} ${weaponDamageType} + ${typedExtras.join(" + ")} = ${totalBeforeTargetMultiplier}`;
+			const displayedExtras = [...typedExtras];
+			if (triggeredFeatDamage) displayedExtras.push(`${triggeredFeatDamage.roll} untyped`);
+			totalTitle = `${baseDamageTotal} ${weaponDamageType} + ${displayedExtras.join(" + ")} = ${totalBeforeTargetMultiplier}`;
 		}
 		if (targetMultiplier > 1) totalTitle = `${totalTitle || totalBeforeTargetMultiplier} × ${targetMultiplier} = ${total}`;
 		// Collect the actual dice rolled (count + type + per-die values) so the
@@ -3872,11 +3914,15 @@ class CharacterSheetCombat {
 		this._pushDiceGroup(diceGroups, handOfHarmRollForAnim);
 		this._pushDiceGroup(diceGroups, methodRollForAnim);
 		this._pushDiceGroup(diceGroups, channelSpellRoll);
+		if (triggeredFeatDamage) {
+			const sides = Number(/^d(\d+)$/i.exec(triggeredFeatDamage.die)?.[1] || 0);
+			if (sides) this._pushDiceGroup(diceGroups, {sides, rolls: [triggeredFeatDamage.roll]});
+		}
 		await this._page.pAnimateDamageDice?.(diceGroups);
 
 		this._page.showDiceResult({
 			title: `${attack.name} Damage`,
-			roll: damageRoll.total + sneakAttackDamage + riderDamageTotal + doubleshotDamage,
+			roll: damageRoll.total + sneakAttackDamage + riderDamageTotal + doubleshotDamage + (triggeredFeatDamage?.roll || 0),
 			modifier: totalBonus,
 			total: totalTitle || total,
 			subtitle,
@@ -11392,12 +11438,17 @@ class CharacterSheetCombat {
 
 		for (const resource of combatResources) {
 			const resourceNameHtml = this._getCombatResourceNameHtml(resource, features);
+			const triggerMeta = resource.triggeredDiePool
+				? `${resource.triggeredDiePool.die} • Triggered • ${resource.actionLabel || "No action"}${resource.triggeredDiePool.oncePerTurn ? " • 1/turn" : ""}`
+				: "";
 			// Build pips - filled = available, empty = used. Each pip carries its
 			// index so a single delegated listener (see _bindResourcePipClicks) can
 			// route clicks for ANY pip, not just the first.
 			const pipsHtml = Array.from({length: resource.max}, (_, i) => {
 				const isFilled = i < resource.current;
-				const title = isFilled ? `Set to ${i} (spend)` : `Set to ${i + 1} (restore)`;
+				const title = resource.contextualOnly
+					? `Manual correction: set to ${isFilled ? i : i + 1}`
+					: (isFilled ? `Set to ${i} (spend)` : `Set to ${i + 1} (restore)`);
 				return `<span class="charsheet__resource-pip ${isFilled ? "" : "used"}" data-pip-index="${i}" title="${title}"></span>`;
 			}).join("");
 			const resourceEl = e_({outer: `
@@ -11405,6 +11456,7 @@ class CharacterSheetCombat {
 					<div class="charsheet__combat-resource-name ve-small font-weight-bold">${resourceNameHtml}</div>
 					<div class="charsheet__combat-resource-pips">${pipsHtml}</div>
 					<div class="ve-small ve-muted">${resource.current}/${resource.max}${resource.recharge ? ` (${resource.recharge})` : ""}</div>
+					${triggerMeta ? `<div class="ve-small ve-muted">${triggerMeta} • Use on trigger</div>` : ""}
 				</div>
 			`});
 

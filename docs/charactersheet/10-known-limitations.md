@@ -221,6 +221,22 @@ All Ranger subclasses are fully implemented:
   non-destructive condition suppression, forced-movement protection, and
   speed-reduction immunity.
 
+#### Feat: Cruel (TDCSR) ✅
+
+- Cruelty Dice are a proficiency-bonus-sized d6 resource sourced from the
+  pinned Tal'Dorei Campaign Setting Reborn homebrew collection, restored on a
+  Long Rest, and reconciled for imported/legacy characters.
+- The sheet offers one contextual spend after dealing weapon or spell damage,
+  after scoring a critical hit, or on a Charisma (Intimidation) check. The
+  effects add untyped damage, grant temporary hit points, or add to the check,
+  respectively; all three share one persisted once-per-turn receipt.
+- The resource is shown as `d6 • Triggered • No action • 1/turn`. Generic
+  resource panels do not expose a misleading bare **Use** button; their restore
+  control and Combat's pips remain available for manual corrections.
+- **Deliberate scope limit:** outside active Combat mode the sheet has no
+  authoritative turn boundary, so the once-per-turn gate is not retained
+  between separate out-of-combat rolls.
+
 ---
 
 ## Remaining Implementation Gaps

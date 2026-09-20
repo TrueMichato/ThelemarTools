@@ -3732,6 +3732,39 @@ const FeatureEffectRegistry = {
 		]);
 
 		// ===================================================================
+		// CRUEL (Tal'Dorei Campaign Setting Reborn) — PB d6 Cruelty Dice
+		// ===================================================================
+		this.register("Cruel|TalDoreiCampaignSettingReborn", [
+			{
+				type: "triggeredDiePool",
+				name: "Cruelty Dice",
+				max: "proficiency",
+				die: "d6",
+				recharge: "long",
+				oncePerTurn: true,
+				contextualOnly: true,
+				actionLabel: "No action",
+				legacyNames: ["Cruel"],
+				triggers: {
+					damage: {
+						kind: "bonusDamage",
+						prompt: "Deal extra damage equal to the die roll?",
+					},
+					criticalHit: {
+						kind: "tempHp",
+						prompt: "Gain temporary hit points equal to the die roll?",
+					},
+					skillCheck: {
+						kind: "rollBonus",
+						skill: "intimidation",
+						ability: "cha",
+						prompt: "Add the die roll to this Charisma (Intimidation) check?",
+					},
+				},
+			},
+		]);
+
+		// ===================================================================
 		// MAGE SLAYER — Advantage on saves vs. spells from adjacent creatures
 		// ===================================================================
 		this.register("Mage Slayer", [
@@ -5124,6 +5157,9 @@ class CharacterSheetState {
 
 			// Resources (class features, racial abilities, etc.)
 			resources: [], // [{id, name, current, max, recharge: "short"|"long"|"dawn"}]
+			// Shared once-per-turn receipts for data-driven triggered resource pools.
+			// Keyed by resource id → combat round; ignored outside combat.
+			resourceTurnUsage: {},
 			pendingDamageMaximization: null, // Deferred one-shot damage maximization (e.g. Destructive Wrath)
 			// Deferred one-shot flat bonus on the damage of your next spell
 			// (e.g. Summer's Defiant Blood). See `armPendingSpellDamageBonus`.
@@ -5553,6 +5589,9 @@ class CharacterSheetState {
 			};
 		}
 		if (!hadActionEconomyUsage && legacyBonusActionAvailable === false) this._data.actionEconomyUsage.bonus = true;
+		if (!this._data.resourceTurnUsage || typeof this._data.resourceTurnUsage !== "object" || Array.isArray(this._data.resourceTurnUsage)) {
+			this._data.resourceTurnUsage = {};
+		}
 
 		// Ensure chosenSubfeatures array exists (legacy saves predate structured choices)
 		if (!Array.isArray(this._data.chosenSubfeatures)) {
@@ -5921,6 +5960,7 @@ class CharacterSheetState {
 		// explicit `weapon:true` flag) both categorise as weapons and generate an attack.
 		// Idempotent; only ever sets a missing/false flag to true.
 		this._migrateInventoryItemWeaponFlag();
+		this._ensureFeatRegistryResources();
 	}
 
 	/**
@@ -39131,7 +39171,149 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Resources
+	_resolveFeatRegistryResourceMax (value) {
+		if (value === "proficiency") return this.getProficiencyBonus();
+		return Math.max(0, Math.floor(Number(value) || 0));
+	}
+
+	_upsertFeatRegistryResource (feat, effect) {
+		if (!feat?.id || !effect?.name) return null;
+		const max = this._resolveFeatRegistryResourceMax(effect.max);
+		const registryKey = `${feat.id}:${effect.name}`;
+		let resource = this._data.resources.find(it =>
+			it.registryKey === registryKey
+			|| (it.featId === feat.id && (it.name === effect.name || effect.legacyNames?.includes(it.name))),
+		);
+		if (!resource) {
+			this.addResource({
+				name: effect.name,
+				max,
+				recharge: effect.recharge,
+				featId: feat.id,
+				registryKey,
+				registryManaged: true,
+			});
+			resource = this._data.resources.at(-1);
+		}
+
+		const previousMax = Math.max(0, Number(resource.max) || 0);
+		const previousCurrent = resource.current == null
+			? previousMax
+			: Math.max(0, Math.min(Number(resource.current) || 0, previousMax));
+		const spent = Math.max(0, previousMax - previousCurrent);
+		resource.name = effect.name;
+		resource.max = max;
+		resource.current = Math.max(0, max - spent);
+		resource.recharge = effect.recharge || resource.recharge || "long";
+		resource.featId = feat.id;
+		resource.registryKey = registryKey;
+		resource.registryManaged = true;
+
+		if (effect.type === "triggeredDiePool") {
+			resource.contextualOnly = effect.contextualOnly !== false;
+			resource.actionLabel = effect.actionLabel || "Triggered";
+			resource.triggeredDiePool = {
+				die: effect.die || "d6",
+				oncePerTurn: effect.oncePerTurn !== false,
+				triggers: MiscUtil.copyFast(effect.triggers || {}),
+			};
+		}
+
+		return resource;
+	}
+
+	_ensureFeatRegistryResources () {
+		if (!Array.isArray(this._data.resources)) this._data.resources = [];
+		if (!this._data.resourceTurnUsage || typeof this._data.resourceTurnUsage !== "object") this._data.resourceTurnUsage = {};
+
+		const liveRegistryKeys = new Set();
+		for (const feat of this._data.feats || []) {
+			if (!feat?.name) continue;
+			feat.id ||= `${feat.name}|${feat.source || ""}`;
+			const effects = FeatureEffectRegistry.getFeatEffects(feat.name, feat.source);
+			for (const effect of effects) {
+				if (!["resource", "triggeredDiePool"].includes(effect.type)) continue;
+				const resource = this._upsertFeatRegistryResource(feat, effect);
+				if (resource?.registryKey) liveRegistryKeys.add(resource.registryKey);
+			}
+		}
+
+		const removedIds = [];
+		this._data.resources = this._data.resources.filter(resource => {
+			if (!resource.registryManaged || liveRegistryKeys.has(resource.registryKey)) return true;
+			removedIds.push(resource.id);
+			return false;
+		});
+		for (const id of removedIds) delete this._data.resourceTurnUsage[id];
+		const resourceIds = new Set(this._data.resources.map(resource => resource.id));
+		for (const id of Object.keys(this._data.resourceTurnUsage)) {
+			if (!resourceIds.has(id)) delete this._data.resourceTurnUsage[id];
+		}
+	}
+
+	_matchesTriggeredFeatDieContext (triggerConfig, context = {}) {
+		if (!triggerConfig) return false;
+		if (triggerConfig.skill && String(context.skill || "").toLowerCase().replace(/\s+/g, "") !== triggerConfig.skill) return false;
+		if (triggerConfig.ability && String(context.ability || "").toLowerCase() !== triggerConfig.ability) return false;
+		if (triggerConfig.requiresCritical && !context.isCriticalHit) return false;
+		return true;
+	}
+
+	getTriggeredFeatDieOptions (trigger, context = {}) {
+		this._ensureFeatRegistryResources();
+		const round = this.isInCombat() ? this.getCombatRound() : null;
+		return this._data.resources
+			.filter(resource => resource.triggeredDiePool?.triggers?.[trigger])
+			.filter(resource => resource.current > 0)
+			.filter(resource => this._matchesTriggeredFeatDieContext(resource.triggeredDiePool.triggers[trigger], context))
+			.filter(resource => !resource.triggeredDiePool.oncePerTurn || round == null || this._data.resourceTurnUsage[resource.id] !== round)
+			.map(resource => {
+				const feat = (this._data.feats || []).find(it => it.id === resource.featId);
+				return {
+					resourceId: resource.id,
+					featId: resource.featId,
+					featName: feat?.name || resource.name,
+					name: resource.name,
+					current: resource.current,
+					max: resource.max,
+					die: resource.triggeredDiePool.die,
+					oncePerTurn: resource.triggeredDiePool.oncePerTurn,
+					actionLabel: resource.actionLabel || "Triggered",
+					trigger: MiscUtil.copyFast(resource.triggeredDiePool.triggers[trigger]),
+				};
+			});
+	}
+
+	spendTriggeredFeatDie (resourceId, trigger, context = {}) {
+		this._ensureFeatRegistryResources();
+		const resource = this._data.resources.find(it => it.id === resourceId);
+		if (!resource?.triggeredDiePool) return {ok: false, error: "Triggered die resource is unavailable."};
+		const triggerConfig = resource.triggeredDiePool.triggers?.[trigger];
+		if (!this._matchesTriggeredFeatDieContext(triggerConfig, context)) return {ok: false, error: "This die cannot be used for that roll."};
+		if (resource.current <= 0) return {ok: false, error: `${resource.name} has no uses remaining.`};
+
+		const round = this.isInCombat() ? this.getCombatRound() : null;
+		if (resource.triggeredDiePool.oncePerTurn && round != null && this._data.resourceTurnUsage[resource.id] === round) {
+			return {ok: false, error: `${resource.name} has already been used this turn.`};
+		}
+
+		this.setResourceCurrent(resource.id, resource.current - 1);
+		if (resource.triggeredDiePool.oncePerTurn && round != null) this._data.resourceTurnUsage[resource.id] = round;
+		const feat = (this._data.feats || []).find(it => it.id === resource.featId);
+		return {
+			ok: true,
+			resourceId: resource.id,
+			featId: resource.featId,
+			sourceName: feat?.name || resource.name,
+			resourceName: resource.name,
+			die: resource.triggeredDiePool.die,
+			kind: triggerConfig.kind,
+			remaining: resource.current,
+		};
+	}
+
 	getResources () {
+		this._ensureFeatRegistryResources();
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
@@ -46807,16 +46989,14 @@ class CharacterSheetState {
 
 				// ---- Resource (e.g., Lucky: luck points) ----
 				case "resource": {
-					const max = effect.max === "proficiency" ? this.getProficiencyBonus() : effect.max;
-					const existingResource = this._data.resources.find(r => r.name === effect.name);
-					if (!existingResource) {
-						this.addResource({
-							name: effect.name,
-							max: max,
-							recharge: effect.recharge,
-							featId: featData.id,
-						});
-					}
+					this._upsertFeatRegistryResource(featData, effect);
+					addedCount++;
+					break;
+				}
+
+				// ---- Triggered die pool (e.g., Cruelty Dice) ----
+				case "triggeredDiePool": {
+					this._upsertFeatRegistryResource(featData, effect);
 					addedCount++;
 					break;
 				}
@@ -47996,7 +48176,11 @@ class CharacterSheetState {
 
 		// Remove associated resource if it was auto-added
 		if (feat) {
+			const resourceIdsToRemove = this._data.resources
+				.filter(r => r.featId === feat.id || r.name === feat.name)
+				.map(r => r.id);
 			this._data.resources = this._data.resources.filter(r => r.featId !== feat.id && r.name !== feat.name);
+			for (const resourceId of resourceIdsToRemove) delete this._data.resourceTurnUsage?.[resourceId];
 			// Remove associated modifiers
 			this.removeModifiersByFeature(feat.id);
 			// Remove optional features granted via feat choices
@@ -63760,6 +63944,7 @@ class CharacterSheetState {
 		this._data.sanguineMasteryLastRerollRound = null;
 		this._data.hybridBloodlustTurnStartRound = null;
 		this._data.hybridBloodlustTurnStartCheck = null;
+		this._data.resourceTurnUsage = {};
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
 		this.resetActionEconomy();
