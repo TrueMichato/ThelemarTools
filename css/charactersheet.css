@@ -6314,6 +6314,26 @@ body[data-font="readable"] {
 	border-color: var(--cs-border-hover, rgba(255, 255, 255, 0.2));
 }
 
+.cs-combat-action-economy__family {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-2xs, 0.15rem);
+	min-width: 0;
+}
+
+.cs-combat-action-economy__children {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-2xs, 0.15rem);
+	margin-left: var(--cs-space-md, 0.75rem);
+	padding-left: var(--cs-space-sm, 0.5rem);
+	border-left: 2px solid var(--cs-border, var(--rgb-border-grey));
+}
+
+.cs-combat-action-economy__children .cs-combat-action-economy__item {
+	background: var(--cs-bg-surface, rgb(255 255 255 / 2%));
+}
+
 .cs-combat-action-economy__kind {
 	flex: 0 0 auto;
 	width: 1.15rem;

@@ -20,6 +20,10 @@ globalThis.SourceUtil = {
 let inlineHoverCalls = [];
 globalThis.CharacterSheetClassUtils = {
 	is2024Source: source => source === "XPHB" || source === "TGTT",
+	isCombatMethod: feature => feature?._entityType === "combatMethod"
+		|| (feature?.tradition !== undefined && feature?.degree !== undefined && feature?.staminaCost !== undefined)
+		|| feature?.optionalFeatureTypes?.some(type => type?.startsWith?.("CTM:"))
+		|| feature?.featureType?.some?.(type => type?.startsWith?.("CTM:")),
 	escapeHtml: value => String(value || "")
 		.replace(/&/g, "&amp;")
 		.replace(/</g, "&lt;")
@@ -48,10 +52,11 @@ function makeCombat ({
 	classes = [],
 	chronologicalFirstClass = null,
 	actionsData = actions,
+	CombatClass = CharacterSheetCombat,
 } = {}) {
 	inlineHoverCalls = [];
 	const hoverCalls = [];
-	const combat = Object.create(CharacterSheetCombat.prototype);
+	const combat = Object.create(CombatClass.prototype);
 	combat._state = {
 		getAttacks: () => attacks,
 		getItems: () => [],
@@ -298,6 +303,94 @@ describe("CharacterSheetCombat standard action economy", () => {
 		expect(buckets.reaction.find(entry => entry.name === "Shield")).toMatchObject({kind: "spell"});
 	});
 
+	test("Cunning Action owns semantic Bonus Action children while standard actions remain available", () => {
+		const {combat} = makeCombat({
+			features: [{
+				id: "feature-cunning-action",
+				name: "Cunning Action",
+				source: "XPHB",
+				featureType: "Class Feature",
+				description: "On your turn, you can take one of the following actions as a Bonus Action: Dash, Disengage, or Hide.",
+			}],
+		});
+		const buckets = combat.getCombatActionEconomy();
+		const parent = buckets.bonus.find(entry => entry.name === "Cunning Action");
+
+		expect(parent).toMatchObject({
+			id: "feature-cunning-action",
+			kind: "feature",
+			actionType: "bonus",
+		});
+		expect(parent.children.map(child => child.name)).toEqual(["Dash", "Disengage", "Hide"]);
+		expect(parent.children).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				actionType: "bonus",
+				parentId: "feature-cunning-action",
+				relation: "promoted-action",
+				subtitle: "Bonus Action · via Cunning Action",
+				kindLabel: "Bonus Action granted by Cunning Action",
+			}),
+		]));
+		expect(new Set(parent.children.map(child => child.id)).size).toBe(3);
+		expect(parent.children.every(child => child.id.startsWith("feature-cunning-action:"))).toBe(true);
+
+		for (const name of ["Dash", "Disengage", "Hide"]) {
+			expect(buckets.action.some(entry => entry.name === name && entry.kind === "action")).toBe(true);
+		}
+	});
+
+	test("characters without Cunning Action keep ordinary standard actions without promotion", () => {
+		const {combat} = makeCombat();
+		const buckets = combat.getCombatActionEconomy();
+
+		expect(buckets.bonus.some(entry => entry.children?.length)).toBe(false);
+		for (const name of ["Dash", "Disengage", "Hide"]) {
+			expect(buckets.action.some(entry => entry.name === name && entry.kind === "action")).toBe(true);
+		}
+	});
+
+	test("duplicate Cunning Action feature records do not duplicate the promoted child group", () => {
+		const feature = {
+			name: "Cunning Action",
+			source: "XPHB",
+			description: "You can take a Bonus Action to Dash, Disengage, or Hide.",
+		};
+		const {combat} = makeCombat({
+			features: [
+				{id: "cunning-one", ...feature},
+				{id: "cunning-two", ...feature},
+			],
+		});
+		const parents = combat.getCombatActionEconomy().bonus.filter(entry => entry.name === "Cunning Action");
+
+		expect(parents.filter(parent => parent.children?.length)).toHaveLength(1);
+		expect(parents.flatMap(parent => parent.children || [])).toHaveLength(3);
+	});
+
+	test.each([
+		[{_entityType: "combatMethod"}, "Combat Method"],
+		[{optionalFeatureTypes: ["CTM:1AM"]}, "Combat Method"],
+		[{featureType: ["CTM:1"]}, "Combat Method"],
+		[{tradition: "AM", degree: 1, staminaCost: 1}, "Combat Method · 1 stamina"],
+	])("labels %s structurally", (markers, expected) => {
+		const {combat} = makeCombat();
+		expect(combat._featureEconomySubtitle({
+			name: "Method",
+			featureType: "Optional Feature",
+			...markers,
+		})).toBe(expected);
+	});
+
+	test("limited-use Combat Methods retain their uses subtitle", () => {
+		const {combat} = makeCombat();
+		expect(combat._featureEconomySubtitle({
+			name: "Limited Method",
+			_entityType: "combatMethod",
+			featureType: "Optional Feature",
+			uses: {current: 1, max: 2},
+		})).toBe("1/2 uses");
+	});
+
 	test("resolves every standard action to a real catalog key", () => {
 		const {combat} = makeCombat();
 		const buckets = combat.getCombatActionEconomy();
@@ -368,6 +461,61 @@ describe("CharacterSheetCombat standard action economy", () => {
 		const labels = JSON.stringify(container._children.map(group => group._children));
 		expect(labels).not.toContain("Your options");
 		expect(labels).not.toContain("Rules actions");
+	});
+
+	test("renders Cunning Action children inside one accessible parent group", async () => {
+		const originalE = globalThis.e_;
+		const originalCombat = globalThis.CharacterSheetCombat;
+		globalThis.e_ = (opts = {}) => {
+			const el = originalE(opts);
+			el._attrs = {};
+			el.setAttribute = (name, value) => { el._attrs[name] = String(value); };
+			el.getAttribute = name => el._attrs[name] ?? null;
+			return el;
+		};
+
+		try {
+			const {CharacterSheetCombat: AttributeAwareCombat} = await import("../../../js/charactersheet/charactersheet-combat.js?cunning-action-aria");
+			const {combat} = makeCombat({
+				CombatClass: AttributeAwareCombat,
+				features: [{
+					id: "feature-cunning-action",
+					name: "Cunning Action",
+					source: "XPHB",
+					description: "You can take a Bonus Action to Dash, Disengage, or Hide.",
+				}],
+			});
+			const section = globalThis.e_({tag: "section"});
+			const container = globalThis.e_({tag: "div"});
+			globalThis.document = {
+				getElementById: id => id === "charsheet-combat-action-economy-section" ? section : container,
+			};
+			combat.renderCombatActionEconomy();
+			const groups = container._children;
+			const bonusList = groups[1]._children[1];
+			const buckets = combat.getCombatActionEconomy();
+			const family = bonusList._children.find(node => node._clazz.includes("__family"));
+
+			expect(bonusList._children).toHaveLength(buckets.bonus.length);
+			expect(family).toBeDefined();
+			expect(family.getAttribute("role")).toBe("group");
+			expect(family.getAttribute("aria-label")).toMatch(/Cunning Action/i);
+			expect(family._children[0]._clazz).toContain("__item--feature");
+
+			const children = family._children[1];
+			expect(children._clazz).toContain("__children");
+			expect(children._children.map(row => row._children[1].innerHTML)).toEqual(expect.arrayContaining([
+				expect.stringContaining("Dash"),
+				expect.stringContaining("Disengage"),
+				expect.stringContaining("Hide"),
+			]));
+
+			const count = groups[1]._children[0].innerHTML;
+			expect(count).toContain(`>${buckets.bonus.length + 3}<`);
+		} finally {
+			globalThis.e_ = originalE;
+			globalThis.CharacterSheetCombat = originalCombat;
+		}
 	});
 
 	test("uses the appropriate canonical hover pages and explicit Attack hash", () => {
