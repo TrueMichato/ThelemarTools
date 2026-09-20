@@ -11,8 +11,7 @@ describe("Character Sheet choice discovery contract", () => {
 	it("normalizes union, ability, proficiency, and spell choice shapes", () => {
 		const entity = {
 			name: "Nested Example",
-			skillProficiencies: [{choose: {from: ["arcana", "history"], count: 1}}],
-			toolProficiencies: [{choose: {from: ["thieves' tools", "smith's tools"], count: 1}}],
+			skillToolLanguageProficiencies: [{from: ["anySkill", "anyTool"], count: 1}],
 			ability: [{choose: {from: ["int", "wis"], count: 1}}],
 			additionalSpells: [{
 				level: 0,
@@ -30,7 +29,7 @@ describe("Character Sheet choice discovery contract", () => {
 		};
 		const descriptors = CharacterSheetClassUtils.getChoiceDescriptors(entity);
 		expect(descriptors.map(it => it.kind)).toEqual(expect.arrayContaining([
-			"skill", "tool", "cantrip", "entity",
+			"skillTool", "cantrip", "entity",
 		]));
 		expect(descriptors.every(it => it.grantKey && it.sourcePath && it.rules)).toBe(true);
 	});
@@ -86,16 +85,81 @@ describe("Character Sheet choice discovery contract", () => {
 		expect(CharacterSheetProgression.getAdapterClosureIssues()).toEqual([]);
 	});
 
-	it("runs the census against production class data and protects the real discovery path", () => {
+	it("discovers the reviewed real-data prose families and named entities", () => {
+		const read = file => JSON.parse(fs.readFileSync(path.resolve(process.cwd(), file), "utf8"));
+		const tgtt = read("homebrew/TravelersGuidetoThelemar.json");
+		const classes = fs.readdirSync(path.resolve(process.cwd(), "data/class"))
+			.filter(file => /^class-.*\.json$/.test(file))
+			.flatMap(file => {
+				const parsed = read(`data/class/${file}`);
+				return [...(parsed.class || []), ...(parsed.subclass || []), ...(parsed.classFeature || []), ...(parsed.subclassFeature || [])];
+			});
+		const allClassFeatures = [...classes, ...(tgtt.classFeature || []), ...(tgtt.subclassFeature || [])];
+		const rogueSpecialties = (tgtt.classFeature || []).filter(it =>
+			it.name === "Specialties" && it.className === "Rogue" && it.classSource === "TGTT");
+		expect(rogueSpecialties.map(it => it.level)).toEqual(expect.arrayContaining([1, 3, 5, 7, 9, 11, 13, 15, 17, 19]));
+		const extraSkillTraining = (tgtt.classFeature || []).find(it => it.name === "Extra Skill Training");
+		const arcaneArcherLore = (tgtt.subclassFeature || []).find(it => it.name === "Arcane Archer Lore");
+		const thaumaturge = allClassFeatures.find(it => it.name === "Thaumaturge" && it.className === "Cleric");
+		const lessons = read("data/optionalfeatures.json").optionalfeature.find(it => it.name === "Lessons of the First Ones");
+		expect(extraSkillTraining).toBeTruthy();
+		expect(arcaneArcherLore).toBeTruthy();
+		expect(thaumaturge).toBeTruthy();
+		expect(lessons).toBeTruthy();
+
+		const extraDescriptors = CharacterSheetClassUtils.getChoiceDescriptors(extraSkillTraining);
+		expect(extraDescriptors).toEqual(expect.arrayContaining([
+			expect.objectContaining({kind: "skillTool", count: 1}),
+		]));
+		const recurringSpecialtyDescriptors = CharacterSheetProgression._getEntityChoiceDescriptors(
+			rogueSpecialties.find(it => it.level === 3),
+			{classFeatures: allClassFeatures},
+		);
+		expect(recurringSpecialtyDescriptors).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				kind: "entity",
+				options: expect.arrayContaining([
+					expect.objectContaining({name: expect.any(String)}),
+				]),
+			}),
+		]));
+		const loreKinds = CharacterSheetClassUtils.getChoiceDescriptors(arcaneArcherLore).map(it => it.kind);
+		expect(loreKinds).toEqual(expect.arrayContaining(["skill", "cantrip"]));
+		expect(CharacterSheetClassUtils.getChoiceDescriptors(thaumaturge).some(it =>
+			it.kind === "cantrip" && it.rules.optionSource?.kind === "filter",
+		)).toBe(true);
+		const featDescriptors = CharacterSheetClassUtils.getChoiceDescriptors(lessons, {
+			feats: read("data/feats.json").feat,
+		});
+		expect(featDescriptors).toEqual(expect.arrayContaining([
+			expect.objectContaining({kind: "feat", label: "Origin Feat"}),
+		]));
+	});
+
+	it("runs a complete production census and protects the real discovery path", () => {
 		const classDir = path.resolve(process.cwd(), "data/class");
-		const files = fs.readdirSync(classDir).filter(file => /^class-.*\.json$/.test(file)).slice(0, 4);
+		const files = fs.readdirSync(classDir).filter(file => /^class-.*\.json$/.test(file));
 		const entities = files.flatMap(file => {
 			const parsed = JSON.parse(fs.readFileSync(path.join(classDir, file), "utf8"));
-			return [...(parsed.class || []), ...(parsed.subclass || []), ...(parsed.classFeature || [])];
+			return [...(parsed.class || []), ...(parsed.subclass || []), ...(parsed.classFeature || []), ...(parsed.subclassFeature || [])];
 		});
-		const productionCensus = CharacterSheetClassUtils.getChoiceDescriptorCensus(entities);
+		const catalogFiles = [
+			"data/optionalfeatures.json",
+			"data/feats.json",
+			"data/races.json",
+			"data/backgrounds.json",
+			"homebrew/TravelersGuidetoThelemar.json",
+		];
+		const catalogEntities = catalogFiles.flatMap(file => {
+			const parsed = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), file), "utf8"));
+			return Object.values(parsed).flatMap(value => Array.isArray(value) ? value : []);
+		});
+		const productionCensus = CharacterSheetClassUtils.getChoiceDescriptorCensus([...entities, ...catalogEntities]);
 		expect(productionCensus.total).toBeGreaterThan(0);
 		expect(productionCensus.supported).toBeGreaterThan(0);
+		expect(productionCensus.entries.filter(entry =>
+			entry.classification === "unclassified" && entry.required !== false,
+		)).toEqual([]);
 
 		const entity = {
 			name: "Production-path negative control",

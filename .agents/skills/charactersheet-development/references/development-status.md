@@ -64,6 +64,19 @@ resolved, uncertain choices remain ambiguous, and unattributed proficiency/spell
 values are preserved through the progression-ownership ledger. See
 `docs/charactersheet/22-respec.md`.
 
+Nested feature/feat/optional-feature choices now use the same linked graph as
+top-level progression. The graph includes origin decisions, recurring
+Specialty identity, prose-backed Arcane Archer/Thaumaturge choices,
+`featProgression`, source-keyed receipts, and explicit unsupported-payload
+diagnostics. The inline editor avoids stacked nested modals and all candidate
+mechanics remain isolated until Apply.
+
+Known validation baseline: `npm run test:data` still reports unrelated missing
+links in `data/crafting.json` (TGTT Identify, COMCRAF crafting material
+descriptions, HHHVI materials/diseases, and Arcadia11 ingredients/skill).
+This is intentionally documented rather than hidden or broadened into the
+Respec change.
+
 ### State File Modularization
 **Status**: Planned (medium-term)  
 **Goal**: Split `charactersheet-state.js` (23,400 lines) into:

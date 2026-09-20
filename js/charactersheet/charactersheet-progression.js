@@ -60,45 +60,50 @@ class CharacterSheetProgression {
 		originBackground: {discovery: "base-node", editor: "nested-choice", validation: "entity-option", mechanics: "origin-background", projection: []},
 	});
 
-	static ADAPTER_EDITOR_HANDLERS = new Set([
-		"class", "manifest-options", "languages", "subclass", "improvement", "feat",
-		"optional-features", "feature-choice", "class-feat", "combat-traditions",
-		"combat-methods", "weapon-masteries", "spells", "spell-swap", "scholar",
-		"spell-mastery", "signature-spells", "hit-points", "nested-choice",
-	]);
-
-	static ADAPTER_MECHANICS_HANDLERS = new Set([
-		"class-reassignment", "skill-proficiencies", "tool-proficiencies",
-		"skill-expertise", "languages", "subclass-reassignment", "subclass-choice-refresh",
-		"ability-scores", "feat-transaction", "improvement-transaction",
-		"optional-features", "feature-choice", "combat-traditions", "combat-methods",
-		"weapon-masteries", "known-spells", "known-or-prepared-cantrips",
-		"prepared-spells", "prepared-cantrips", "spell-swap", "skill-expertise",
-		"spell-mastery", "signature-spells", "hit-points", "nested-entity",
-		"union-proficiencies", "ability-configuration", "saving-throws",
-		"weapon-proficiencies", "armor-proficiencies", "resistances", "nested-spells",
-		"nested-configuration", "origin-race", "origin-background",
-	]);
-
-	// The state layer currently uses the same named family for forward and
-	// reverse operations. Keep explicit closure sets so a newly registered
-	// adapter cannot accidentally become a display-only manifest row.
-	static ADAPTER_APPLY_HANDLERS = new Set(CharacterSheetProgression.ADAPTER_MECHANICS_HANDLERS);
-	static ADAPTER_REVERSE_HANDLERS = new Set(CharacterSheetProgression.ADAPTER_MECHANICS_HANDLERS);
-
 	static getAdapterClosureIssues () {
+		// The adapter table is only metadata. Validate it against the executable
+		// controller/state surfaces when those modules have loaded, rather than
+		// maintaining a second hand-written set of names which can drift from the
+		// actual editor and reverse paths.
+		const respecProto = globalThis.CharacterSheetRespec?.prototype;
+		const stateProto = globalThis.CharacterSheetState?.prototype;
+		if (!respecProto || !stateProto) return [];
+		const editorMethods = {
+			class: "_editClassAllocation",
+			"manifest-options": "_editManifestOptions",
+			languages: "_editManifestOptions",
+			subclass: "_editSubclass",
+			improvement: "_editImprovement",
+			feat: "_editFeat",
+			"optional-features": "_editOptionalFeatures",
+			"feature-choice": "_editFeatureChoice",
+			"class-feat": "_editClassFeatProgressionFeat",
+			"combat-traditions": "_editCombatTraditions",
+			"combat-methods": "_editCombatMethods",
+			"weapon-masteries": "_editWeaponMasteries",
+			spells: "_editManifestOptions",
+			"spell-swap": "_editSpellSwapDecision",
+			scholar: "_editManifestOptions",
+			"spell-mastery": "_editManifestOptions",
+			"signature-spells": "_editManifestOptions",
+			"hit-points": "_editHpDecision",
+			"nested-choice": "_editManifestOptions",
+		};
+		const hasEditor = name => typeof respecProto[editorMethods[name]] === "function";
+		const hasForward = typeof respecProto._applyManifestSelectionMechanics === "function";
+		const hasReverse = typeof stateProto.reverseProgressionDecisionReceipt === "function";
 		const issues = [];
 		for (const [type, adapter] of Object.entries(CharacterSheetProgression.DECISION_ADAPTERS)) {
-			if (!CharacterSheetProgression.ADAPTER_EDITOR_HANDLERS.has(adapter.editor)) {
+			if (!editorMethods[adapter.editor] || !hasEditor(adapter.editor)) {
 				issues.push({code: "adapter-missing-editor", type, handler: adapter.editor});
 			}
-			if (!CharacterSheetProgression.ADAPTER_MECHANICS_HANDLERS.has(adapter.mechanics)) {
+			if (!hasForward) {
 				issues.push({code: "adapter-missing-mechanics", type, handler: adapter.mechanics});
 			}
-			if (!CharacterSheetProgression.ADAPTER_APPLY_HANDLERS.has(adapter.mechanics)) {
+			if (!hasForward) {
 				issues.push({code: "adapter-missing-apply", type, handler: adapter.mechanics});
 			}
-			if (!CharacterSheetProgression.ADAPTER_REVERSE_HANDLERS.has(adapter.mechanics)) {
+			if (!hasReverse) {
 				issues.push({code: "adapter-missing-reverse", type, handler: adapter.mechanics});
 			}
 		}
@@ -299,7 +304,28 @@ class CharacterSheetProgression {
 	}
 
 	static _getEntityChoiceDescriptors (entity, opts = {}) {
-		return CharacterSheetClassUtils.getChoiceDescriptors?.(entity, opts) || [];
+		const descriptors = CharacterSheetClassUtils.getChoiceDescriptors?.(entity, opts) || [];
+		for (const descriptor of descriptors) {
+			const source = descriptor.rules?.optionSource;
+			if (descriptor.options?.length || source?.kind !== "classFeature" || !source.ref) continue;
+			const referenced = CharacterSheetClassUtils.getClassFeatureData?.(
+				opts.classFeatures || [],
+				...String(source.ref).split("|").slice(0, 4).map((value, ix) => ix === 3 ? Number(value) : value),
+			);
+			const referencedDescriptor = CharacterSheetClassUtils.getChoiceDescriptors?.(referenced, opts)
+				?.find(candidate => candidate.kind === "entity");
+			if (!referencedDescriptor) continue;
+			descriptor.options = CharacterSheetProgression._copy(referencedDescriptor.options || []);
+			descriptor.rules = {
+				...descriptor.rules,
+				optionSource: {
+					...source,
+					kind: "explicitList",
+					values: CharacterSheetProgression._copy(descriptor.options),
+				},
+			};
+		}
+		return descriptors;
 	}
 
 	static _getSelectedDescriptorValue ({descriptor, entity, state, parentDecision = null, legacyChoices = null}) {
@@ -406,6 +432,15 @@ class CharacterSheetProgression {
 				&& (!source || CharacterSheetProgression._normalize(feature.source) === CharacterSheetProgression._normalize(source)),
 		);
 		if (optional) return optional;
+		// `subclassFeature` contains the word "class"; resolve it before the
+		// generic class-feature branch or a subclass child can be looked up in the
+		// wrong catalog.
+		if (type.includes("subclass") || option.subclassFeature) {
+			return (page?.getSubclassFeatures?.() || []).find(feature =>
+				CharacterSheetProgression._normalize(feature.name) === CharacterSheetProgression._normalize(name)
+						&& (!source || CharacterSheetProgression._normalize(feature.source) === CharacterSheetProgression._normalize(source)),
+			) || null;
+		}
 		if (type.includes("class") || option.classFeature || ref?.split("|").length >= 4) {
 			const parts = String(ref || "").split("|");
 			return CharacterSheetClassUtils.getClassFeatureData?.(
@@ -414,12 +449,6 @@ class CharacterSheetProgression {
 				parts[1] || option.className || parentEntity?.className,
 				parts[2] || source,
 				Number(parts[3]) || option.level || 1,
-			) || null;
-		}
-		if (type.includes("subclass") || option.subclassFeature) {
-			return (page?.getSubclassFeatures?.() || []).find(feature =>
-				CharacterSheetProgression._normalize(feature.name) === CharacterSheetProgression._normalize(name)
-						&& (!source || CharacterSheetProgression._normalize(feature.source) === CharacterSheetProgression._normalize(source)),
 			) || null;
 		}
 		const feat = (page?.getFeats?.() || []).find(candidate =>
@@ -472,6 +501,10 @@ class CharacterSheetProgression {
 			sourcePath: entity.name || "entity",
 			className: levelInfo?.className,
 			classSource: levelInfo?.classSource,
+			classFeatures: page?.getClassFeatures?.() || [],
+			subclassFeatures: page?.getSubclassFeatures?.() || [],
+			optionalFeatures: page?.getOptionalFeatures?.() || [],
+			feats: page?.getFeats?.() || [],
 		});
 		const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity);
 		for (const unsupported of census?.entries?.filter(entry =>
@@ -674,7 +707,13 @@ class CharacterSheetProgression {
 				},
 			});
 			base.decisions.push(entityDecision);
-			const descriptors = CharacterSheetProgression._getEntityChoiceDescriptors(entity, {sourcePath: originType});
+			const descriptors = CharacterSheetProgression._getEntityChoiceDescriptors(entity, {
+				sourcePath: originType,
+				feats: page?.getFeats?.() || [],
+				classFeatures: page?.getClassFeatures?.() || [],
+				subclassFeatures: page?.getSubclassFeatures?.() || [],
+				optionalFeatures: page?.getOptionalFeatures?.() || [],
+			});
 			const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity);
 			for (const unsupported of census?.entries?.filter(entry =>
 				entry.classification === "unclassified" && entry.required !== false,
@@ -1508,6 +1547,30 @@ class CharacterSheetProgression {
 		const decisions = [];
 		const levels = [];
 		const issues = [];
+		for (const entry of normalizedHistory) {
+			for (const decision of entry.decisions || []) {
+				if (CharacterSheetProgression.getDecisionAdapter(decision.type)) continue;
+				issues.push({
+					level: entry.level,
+					severity: decision.required === false ? "warning" : "error",
+					code: "unsupported-persisted-decision",
+					message: `This save contains an unsupported progression decision type "${decision.type || "unknown"}"; it was preserved and must be resolved by a newer editor.`,
+					decisionId: decision.id,
+					semanticKey: decision.semanticKey,
+				});
+			}
+		}
+		for (const decision of state?.getCharacterBase?.()?.decisions || []) {
+			if (CharacterSheetProgression.getDecisionAdapter(decision.type)) continue;
+			issues.push({
+				level: 0,
+				severity: decision.required === false ? "warning" : "error",
+				code: "unsupported-persisted-decision",
+				message: `This save contains an unsupported origin decision type "${decision.type || "unknown"}"; it was preserved and must be resolved by a newer editor.`,
+				decisionId: decision.id,
+				semanticKey: decision.semanticKey,
+			});
+		}
 		issues.push(...CharacterSheetProgression.getAdapterClosureIssues().map(issue => ({
 			...issue,
 			severity: "error",
@@ -2258,10 +2321,16 @@ class CharacterSheetProgression {
 			entry.ledgerVersion = CharacterSheetProgression.LEDGER_VERSION;
 			entry.manifestVersion = CharacterSheetProgression.MANIFEST_VERSION;
 			entry.manifestComplete = true;
-			entry.decisions = (level.decisions || []).map(decision => CharacterSheetProgression.normalizeDecision({
+			const generatedDecisions = (level.decisions || []).map(decision => CharacterSheetProgression.normalizeDecision({
 				...decision,
 				options: [],
 			}, entry));
+			const generatedKeys = new Set(generatedDecisions.map(decision => decision.semanticKey));
+			const preservedUnknown = (entry.decisions || [])
+				.filter(decision => !CharacterSheetProgression.getDecisionAdapter(decision.type))
+				.filter(decision => !generatedKeys.has(decision.semanticKey))
+				.map(decision => CharacterSheetProgression.normalizeDecision(decision, entry));
+			entry.decisions = [...generatedDecisions, ...preservedUnknown];
 			entry.complete = !entry.decisions.some(decision => decision.required && decision.status !== "resolved");
 		}
 		return entries.sort((a, b) => a.level - b.level);
@@ -2270,15 +2339,20 @@ class CharacterSheetProgression {
 	static reconcileCharacterBaseWithManifest ({base, characterBase}) {
 		const out = CharacterSheetProgression._copy(characterBase || {});
 		out.v = Number(out.v) || 1;
-		const decisions = (base?.decisions || []).map(decision => CharacterSheetProgression.normalizeDecision({
+		const generatedDecisions = (base?.decisions || []).map(decision => CharacterSheetProgression.normalizeDecision({
 			...decision,
 			options: [],
 			scope: "origin",
 		}));
-		out.decisions = decisions;
+		const generatedKeys = new Set(generatedDecisions.map(decision => decision.semanticKey));
+		const preservedUnknown = (out.decisions || [])
+			.filter(decision => !CharacterSheetProgression.getDecisionAdapter(decision.type))
+			.filter(decision => !generatedKeys.has(decision.semanticKey))
+			.map(decision => CharacterSheetProgression.normalizeDecision({...decision, scope: "origin"}));
+		out.decisions = [...generatedDecisions, ...preservedUnknown];
 		out.ledgerVersion = CharacterSheetProgression.LEDGER_VERSION;
 		out.manifestVersion = CharacterSheetProgression.MANIFEST_VERSION;
-		out.complete = !decisions.some(decision => decision.required && decision.status !== "resolved");
+		out.complete = !out.decisions.some(decision => decision.required && decision.status !== "resolved");
 		return out;
 	}
 

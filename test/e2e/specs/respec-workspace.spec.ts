@@ -1,6 +1,6 @@
 import {expect, test} from "@playwright/test";
 import {clearCharacterStorage} from "../utils/characterStorage";
-import {createCharacterViaWizard, PRESET_FIGHTER} from "../utils/characterBuilder";
+import {createCharacterViaWizard, PRESET_CLERIC, PRESET_FIGHTER} from "../utils/characterBuilder";
 
 test.describe("Respec workspace", () => {
 	test.beforeEach(async ({page}) => {
@@ -8,7 +8,7 @@ test.describe("Respec workspace", () => {
 	});
 
 	test("repairs a skipped decision atomically and supports cancel, apply, undo, and mobile controls", async ({page}) => {
-		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_FIGHTER, name: "Respec Fighter"});
+		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_FIGHTER, bgSource: "PHB", name: "Respec Fighter"});
 		const removedSkills = await charSheet.makeFirstClassSkillDecisionMissing();
 		expect(removedSkills.length).toBeGreaterThan(0);
 
@@ -16,7 +16,7 @@ test.describe("Respec workspace", () => {
 		expect(await charSheet.getRespecDraftStatus()).toContain("need attention");
 		const missing = await charSheet.getRespecSkillSnapshot();
 
-		await charSheet.stageFirstMissingRespecSkillChoice();
+		await charSheet.stageFirstMissingRespecSkillChoice(removedSkills);
 		const staged = await charSheet.getRespecSkillSnapshot();
 		expect(staged.live).toEqual(missing.live);
 		expect(staged.draft.length).toBeGreaterThan(staged.live.length);
@@ -26,7 +26,7 @@ test.describe("Respec workspace", () => {
 		expect(cancelled.live).toEqual(missing.live);
 		expect(cancelled.draft).toEqual(missing.live);
 
-		await charSheet.stageFirstMissingRespecSkillChoice();
+		await charSheet.stageFirstMissingRespecSkillChoice(removedSkills);
 		const beforeApply = await charSheet.getRespecSkillSnapshot();
 		await charSheet.applyRespecDraft();
 		expect((await charSheet.getRespecSkillSnapshot()).live).toEqual(beforeApply.draft);
@@ -57,5 +57,18 @@ test.describe("Respec workspace", () => {
 		expect(repaired.featName).toBe("Boon of Combat Prowess");
 		expect(repaired.con).toBe(before.con - 2);
 		expect(repaired.abilityTotal).toBe(before.abilityTotal - 1);
+	});
+
+	test("edits a real nested Cleric choice inline without stacking a modal", async ({page}) => {
+		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_CLERIC, name: "Nested Respec Cleric"});
+
+		await charSheet.openRespec();
+		const nested = await charSheet.getRespecNestedDecisionSnapshot();
+		expect(nested.length).toBeGreaterThan(0);
+		expect(nested.every(decision => decision.id && decision.label && decision.characterLevel > 0)).toBe(true);
+
+		await charSheet.stageFirstNestedRespecChoice();
+		const after = await charSheet.getRespecNestedDecisionSnapshot();
+		expect(after.some(decision => decision.status === "resolved" || decision.status === "staged")).toBe(true);
 	});
 });

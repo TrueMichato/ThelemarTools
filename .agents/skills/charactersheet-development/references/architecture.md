@@ -555,6 +555,31 @@ host, representative feature adoption, and the no-stale-result invariant.
 | NpcExporter | State | Read-only conversion to monster format |
 | Features | State | getFeatureCalculations(), resource tracking |
 
+### Progression and Respec graph
+
+`charactersheet-progression.js` is the shared progression contract for Builder,
+Level Up, Quick Build, deferred Features choices, and Respec. It emits one
+manifest containing the base node, chronological level nodes, flattened
+decisions, and actionable issues. Permanent nested acquisitions use stable
+semantic keys with parent/root links, provenance, occurrence, pick slot, and
+compact source receipts. Origin decisions are persisted in
+`characterBase.decisions`; class decisions remain on level-history entries.
+
+Choice discovery is catalog-backed but catalog-transient. The production census
+must classify structured options, union grants, recurring pools,
+`featProgression`, string/object spell filters, reviewed prose fallbacks, and
+runtime/non-Respec payloads. Unsupported required persisted decision types are
+preserved and reported as blocking issues.
+
+`charactersheet-respec-engine.js` owns candidate isolation and the single
+staged graph mutation boundary. The mutation snapshots candidate JSON and the
+manifest, reverses descendants deepest-first, applies mechanics inside the
+candidate, rediscoveries the graph, retains only exact legal child identities,
+and persists the resulting manifest once. State ownership is source-keyed so
+overlapping manual, origin, and progression grants survive unrelated edits;
+materialized features, modifiers, spells, resources, and configuration are
+covered by receipts.
+
 ### Item Hover Routing
 
 All character-sheet item names route through `CharacterSheetClassUtils.buildItemHoverNameHtml`.

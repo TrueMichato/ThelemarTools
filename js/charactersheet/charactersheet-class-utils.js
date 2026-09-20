@@ -3846,10 +3846,162 @@ class CharacterSheetClassUtils {
 			if (typeof choose.from === "string") return [{filter: choose.from}];
 			return [];
 		};
+		const normalizeChoose = choose => {
+			if (Array.isArray(choose)) return {from: choose};
+			if (typeof choose === "string") return {from: choose};
+			if (choose === true) return {};
+			return choose;
+		};
 		const getCount = choose => Math.max(
 			1,
 			Number(choose?.count ?? choose?.amount ?? choose?.max ?? 1) || 1,
 		);
+		const getText = value => {
+			if (typeof value === "string") return value;
+			if (Array.isArray(value)) return value.map(getText).filter(Boolean).join(" ");
+			if (!value || typeof value !== "object") return "";
+			return [
+				value.name,
+				value.entries,
+				value.items,
+				value.entry,
+			].map(getText).filter(Boolean).join(" ");
+		};
+		const getTaggedValues = (text, tag) => {
+			const out = [];
+			const re = new RegExp(`\\{@${tag}\\s+([^}|]+)(?:\\|[^}]*)?\\}`, "gi");
+			let match;
+			while ((match = re.exec(text || "")) != null) {
+				const value = String(match[1]).trim();
+				if (value && !out.some(it => it.toLowerCase() === value.toLowerCase())) out.push(value);
+			}
+			return out;
+		};
+		const addProseDescriptors = (node, path) => {
+			const text = getText(node.entries || node.entry || "");
+			const lower = text.toLowerCase();
+			if (!text) return;
+
+			if (
+				/extra cantrip/.test(lower)
+				&& /cleric spell list/.test(lower)
+			) {
+				add({
+					kind: "cantrip",
+					label: "Cantrip",
+					count: 1,
+					options: [],
+					grantKey: `${path}.prose.cantrip`,
+					sourcePath: `${path}.prose.cantrip`,
+					rules: {
+						optionSource: {
+							kind: "filter",
+							filter: "level=0|class=Cleric",
+						},
+					},
+				});
+			}
+
+			const skills = getTaggedValues(text, "skill");
+			if (
+				skills.length
+				&& /proficien(?:cy|cies)|choose to gain proficiency/.test(lower)
+				&& /either|choice|choose/.test(lower)
+			) {
+				add({
+					kind: "skill",
+					label: "Skill Proficiency",
+					count: 1,
+					options: skills.map(skill => skill.toLowerCase()),
+					grantKey: `${path}.prose.skills`,
+					sourcePath: `${path}.prose.skills`,
+					rules: {optionSource: {kind: "explicitList", values: skills.map(skill => skill.toLowerCase())}},
+				});
+			}
+
+			const spells = getTaggedValues(text, "spell");
+			if (
+				spells.length
+				&& /cantrip|learn either|choose to learn/.test(lower)
+			) {
+				add({
+					kind: /cantrip/.test(lower) ? "cantrip" : "spell",
+					label: /cantrip/.test(lower) ? "Cantrip" : "Spell",
+					count: 1,
+					options: spells.map(name => ({name})),
+					grantKey: `${path}.prose.spells`,
+					sourcePath: `${path}.prose.spells`,
+					rules: {optionSource: {kind: "explicitList", values: spells.map(name => ({name}))}},
+				});
+			}
+
+			if (/proficiency in one of the following/.test(lower) && /any tool/.test(lower)) {
+				const skillNames = [
+					"acrobatics",
+					"animal handling",
+					"arcana",
+					"athletics",
+					"deception",
+					"history",
+					"insight",
+					"intimidation",
+					"investigation",
+					"medicine",
+					"nature",
+					"perception",
+					"performance",
+					"persuasion",
+					"religion",
+					"sleight of hand",
+					"stealth",
+					"survival",
+				];
+				add({
+					kind: "skillTool",
+					label: "Skill or Tool Proficiency",
+					count: 1,
+					options: [
+						...skillNames.map(value => ({kind: "skill", value})),
+						{kind: "tool", value: "anyTool"},
+					],
+					grantKey: `${path}.prose.skillTool`,
+					sourcePath: `${path}.prose.skillTool`,
+					rules: {
+						uniqueWithinSeries: true,
+						optionSource: {
+							kind: "explicitList",
+							values: [
+								...skillNames.map(value => ({kind: "skill", value})),
+								{kind: "tool", value: "anyTool"},
+							],
+						},
+					},
+				});
+			}
+
+			const classFeatureMatch = text.match(/\{@classFeature\s+([^}|]+)\|([^}|]+)\|([^}|]+)\|(\d+)/i);
+			if (
+				classFeatureMatch
+				&& /another\s+specialt(?:y|ies)/i.test(text)
+			) {
+				const [, featureName, className, classSource, level] = classFeatureMatch;
+				add({
+					kind: "entity",
+					label: node.name || "Specialty",
+					count: 1,
+					options: [],
+					grantKey: `${path}.prose.recurring`,
+					sourcePath: `${path}.prose.recurring`,
+					rules: {
+						uniqueWithinSeries: true,
+						optionSource: {
+							kind: "classFeature",
+							ref: `${featureName}|${className}|${classSource}|${level}`,
+						},
+					},
+				});
+			}
+		};
 		const visit = (node, path) => {
 			if (node == null) return;
 			if (Array.isArray(node)) {
@@ -3883,8 +4035,11 @@ class CharacterSheetClassUtils {
 				}
 			}
 
-			if (node.choose && typeof node.choose === "object") {
-				const choose = node.choose;
+			if (Object.prototype.hasOwnProperty.call(node, "choose")) {
+				const rawChooseString = typeof node.choose === "string";
+				const choose = normalizeChoose(node.choose) || {};
+				const isCatalogFilter = /spell|cantrip|additionalspells|known|prepared|innate/i.test(path);
+				if (rawChooseString && !isCatalogFilter) return;
 				const options = getOptions(choose);
 				const label = node.name || node.label || path.split(".").at(-1) || "Choice";
 				const kind = inferKind(path, label);
@@ -3900,9 +4055,13 @@ class CharacterSheetClassUtils {
 						amount: choose.amount,
 						max: choose.max,
 						optionSource: {
-							kind: Array.isArray(choose.from) ? "explicitList" : (choose.fromFilter ? "filter" : "classList"),
+							kind: Array.isArray(choose.from)
+								? "explicitList"
+								: (typeof choose.from === "string" || choose.fromFilter ? "filter" : "classList"),
 							values: options,
-							filter: typeof choose.fromFilter === "string" ? choose.fromFilter : undefined,
+							filter: typeof choose.from === "string"
+								? choose.from
+								: (typeof choose.fromFilter === "string" ? choose.fromFilter : undefined),
 							className: opts.className,
 							classSource: opts.classSource,
 						},
@@ -3927,6 +4086,7 @@ class CharacterSheetClassUtils {
 				["expertise", "expertise"],
 				["toolProficiencies", "tool"],
 				["languageProficiencies", "language"],
+				["skillToolLanguageProficiencies", "skillTool"],
 				["savingThrowProficiencies", "save"],
 				["weaponProficiencies", "weapon"],
 				["armorProficiencies", "armor"],
@@ -3937,8 +4097,10 @@ class CharacterSheetClassUtils {
 				if (node[field] == null) continue;
 				const values = Array.isArray(node[field]) ? node[field] : [node[field]];
 				values.forEach((value, ix) => {
-					if (!value || typeof value !== "object" || !value.choose) return;
-					const options = getOptions(value.choose);
+					if (!value || typeof value !== "object") return;
+					const choose = value.choose || value;
+					if (!choose || (!choose.from && !choose.options && !choose.weighted && !Array.isArray(choose))) return;
+					const options = getOptions(normalizeChoose(choose));
 					add({
 						kind,
 						label: value.name || field,
@@ -3946,7 +4108,42 @@ class CharacterSheetClassUtils {
 						options,
 						grantKey: `${field}.${ix}`,
 						sourcePath: `${path}.${field}[${ix}]`,
-						rules: {optionSource: {kind: "explicitList", values: options}},
+						rules: {
+							optionSource: {
+								kind: "explicitList",
+								values: options,
+							},
+						},
+					});
+				});
+			}
+
+			if (Array.isArray(node.featProgression)) {
+				node.featProgression.forEach((progression, ix) => {
+					const categories = new Set((progression.category || []).map(category => String(category).toLowerCase()));
+					const options = (opts.feats || []).filter(feat =>
+						!categories.size
+						|| (Array.isArray(feat.category) ? feat.category : [feat.category])
+							.filter(Boolean)
+							.some(category => categories.has(String(category).toLowerCase())),
+					);
+					const count = Object.values(progression.progression || {}).reduce((max, value) =>
+						Math.max(max, Number(value) || 0), 1);
+					add({
+						kind: "feat",
+						label: progression.name || "Feat",
+						count,
+						options,
+						grantKey: `featProgression.${ix}`,
+						sourcePath: `${path}.featProgression[${ix}]`,
+						rules: {
+							uniqueWithinSeries: true,
+							optionSource: {
+								kind: "explicitList",
+								values: options,
+								category: [...categories],
+							},
+						},
 					});
 				});
 			}
@@ -3956,20 +4153,27 @@ class CharacterSheetClassUtils {
 					if (Array.isArray(value)) return value.forEach((it, ix) => walkAdditional(it, `${childPath}[${ix}]`));
 					if (!value || typeof value !== "object") return;
 					if (value.choose) {
-						const options = getOptions(value.choose);
+						const choose = normalizeChoose(value.choose);
+						const options = getOptions(choose);
 						const isAbilityChoice = /\.ability(?:\[\d+\])?$/.test(childPath);
+						const filter = typeof choose?.from === "string" ? choose.from : undefined;
+						const isCantrip = Number(value.level) === 0
+							|| (
+								/cantrip|level\s*=\s*0(?:\||$)/i.test(`${childPath}|${filter || ""}`)
+								&& !/level\s*=\s*[1-9]/i.test(filter || "")
+							);
 						add({
-							kind: isAbilityChoice ? "ability" : (Number(value.level) === 0 ? "cantrip" : "spell"),
+							kind: isAbilityChoice ? "ability" : (isCantrip ? "cantrip" : "spell"),
 							label: value.name || (isAbilityChoice ? "Spellcasting Ability" : "Additional Spell"),
-							count: getCount(value.choose),
+							count: getCount(choose),
 							options,
 							grantKey: childPath,
 							sourcePath: childPath,
 							rules: {
 								spellMode: value.innate ? "innate" : (value.known ? "known" : "prepared"),
 								optionSource: {
-									kind: typeof value.choose.from === "string" ? "filter" : "additionalSpells",
-									filter: typeof value.choose.from === "string" ? value.choose.from : undefined,
+									kind: typeof choose?.from === "string" ? "filter" : "additionalSpells",
+									filter,
 									values: options,
 									className: opts.className,
 									classSource: opts.classSource,
@@ -3988,6 +4192,7 @@ class CharacterSheetClassUtils {
 			});
 			if (node.entries) visit(node.entries, path ? `${path}.entries` : "entries");
 			if (node.items) visit(node.items, path ? `${path}.items` : "items");
+			addProseDescriptors(node, path);
 		};
 		visit(entity, sourcePath || entity.name || "entity");
 		return descriptors;
@@ -4021,6 +4226,12 @@ class CharacterSheetClassUtils {
 	 */
 	static classifyChoiceShape (/** @type {*} */ node, path = "") {
 		if (!node || typeof node !== "object") return {classification: "none", path};
+		if (node.nonRespec === true || node.respec === false) {
+			return {classification: "nonRespec", family: node.family || node.type || "non-respec", path, required: false};
+		}
+		if (node.runtime === true || node.current === true || node.mode === "runtime") {
+			return {classification: "runtime", family: "runtime", path, required: false};
+		}
 		if (node.type === "options") return {classification: "supported", family: "entity", path};
 		if (Object.prototype.hasOwnProperty.call(node, "choose")) {
 			const descriptors = CharacterSheetClassUtils.getChoiceDescriptors({choose: node.choose, name: node.name}, {sourcePath: path});
@@ -4028,9 +4239,6 @@ class CharacterSheetClassUtils {
 			return {classification: "unclassified", family: "choose", path, required: node.required !== false};
 		}
 		if (node.additionalSpells) return {classification: "supported", family: "spell", path, required: node.required !== false};
-		if (node.runtime === true || node.current === true || node.mode === "runtime") {
-			return {classification: "runtime", family: "runtime", path};
-		}
 		return {classification: "none", path};
 	}
 
@@ -4039,7 +4247,7 @@ class CharacterSheetClassUtils {
 	 * `entities` may be a class/feature/feat/race/background collection.
 	 */
 	static getChoiceDescriptorCensus (/** @type {*} */ entities) {
-		const result = {total: 0, supported: 0, runtime: 0, unclassified: 0, byFamily: {}, entries: []};
+		const result = {total: 0, supported: 0, runtime: 0, nonRespec: 0, unclassified: 0, byFamily: {}, entries: []};
 		const visit = (node, path) => {
 			if (!node || typeof node !== "object") return;
 			const classification = CharacterSheetClassUtils.classifyChoiceShape(node, path);

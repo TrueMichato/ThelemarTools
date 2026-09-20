@@ -267,3 +267,59 @@ real-path negative-control test: temporarily disabling the descriptor function
 must make the census fail, and the test restores the production function before
 continuing. Focused graph tests cover recursive discovery, origin persistence,
 legacy reconstruction, ownership overlap, and staged rollback.
+
+## Nested graph contract
+
+Every permanent child acquisition is a compact decision node linked to its
+parent and root by semantic key. The node records scope, depth, acquisition
+and source provenance, selected-grant identity, occurrence, pick slot, and a
+source-keyed receipt. Legal catalogs are recomputed transiently; they are never
+stored in the ledger. Origin nodes are stored under `characterBase.decisions`,
+while class and subclass nodes remain in their level-history entry.
+
+The descriptor census covers structured options, unions, recurring pools,
+object and string spell filters, `featProgression`, and reviewed prose
+fallbacks. Runtime-only data is classified separately from supported
+progression data; unsupported required persisted payloads remain visible and
+block Apply rather than becoming inert rows.
+
+Changing a parent is one candidate graph transaction. Descendants are reversed
+deepest-first, the parent and its mechanics are applied inside the candidate
+snapshot, and legal compatible children retain their exact semantic identity.
+Feature, modifier, spell, resource, and configuration effects carry the source
+decision receipt. Ownership claims preserve overlapping race/background/manual
+grants and remove only orphaned progression-owned values. Source-identical
+resources retain spent uses (clamped to the new maximum); same-named resources
+from different sources do not share uses. Triggered pools such as Cruel clear
+their `resourceTurnUsage` entries when removed.
+
+The nested editor is rendered inline in the level editor rather than opening a
+second modal. Rows expose graph depth and resolved/deferred/missing/invalid/
+ambiguous status, and Review lists actionable discovery diagnostics. The
+candidate remains isolated until Apply; Cancel, failed-save rollback, reload,
+and one-step Undo operate on the same serialized snapshot.
+
+The current `npm run test:data` failure is an unrelated repository data
+baseline in `data/crafting.json`: unresolved links to `Identify|TGTT`,
+`Crafting Material Descriptions|COMCRAF`, HHHVI spirit paper/enchanted vial and
+diseases, and Arcadia11 broth/fats/Cooking. The command is still run as a
+required gate; these pre-existing links are documented here rather than
+silenced or changed as part of the Character Sheet Respec scope.
+
+## Iteration 2 verification boundaries
+
+This iteration verifies the shared descriptor/manifest contract, candidate graph
+mutation, ownership cleanup covered by the current state APIs, and the inline
+nested editor with real Cleric cantrip data. The affected Arcane Archer and
+Light Domain Cleric comprehensive browser matrices, including their L1-to-20
+mega cases, also pass.
+
+The following remain explicit follow-up work rather than silently inferred
+support: canonical child-ledger writes from every Builder/Level Up/Quick Build
+and deferred Features path, a frozen pre-child-ledger fixture corpus for every
+legacy evidence family, exhaustive apply/reverse assertions for every
+save/weapon/armor/resistance and Cruel receipt variant, and a complete
+cross-catalog migration/ambiguity matrix. The current focused browser suite
+proves nested discovery, inline editing, candidate isolation, Cancel, Apply,
+reload/Undo, and mobile toolbar geometry; it does not claim those unlisted
+acquisition-flow and migration families are complete.

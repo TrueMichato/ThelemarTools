@@ -156,19 +156,34 @@ export class CharacterSheetPage {
 		return this.page.evaluate(async () => {
 			const cs: any = (globalThis as any).charSheet;
 			const state = cs?._state;
+			const data = state?.toJson?.();
+			if (data) {
+				data.background = null;
+				for (const entry of data.levelHistory || []) {
+					if (entry?.choices) delete entry.choices.background;
+				}
+				state.loadFromJson(data);
+			}
 			const history = state?.getLevelHistoryEntry?.(1);
 			const skills = [...(history?.choices?.skills || [])];
-			for (const skill of skills) {
-				const key = String(skill).toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
-				state?.setSkillProficiency?.(key, 0);
-			}
-			delete history.choices.skills;
-			history.decisions = (history.decisions || []).filter((decision: any) => decision.type !== "skills");
+			const protectedSkills = new Set(
+				(cs?._respec?._engine?.manifest?.decisions || [])
+					.filter((decision: any) => decision.characterLevel === 0 && decision.type === "skills")
+					.flatMap((decision: any) => Array.isArray(decision.selection) ? decision.selection : [decision.selection])
+					.filter(Boolean)
+					.map((skill: string) => String(skill).toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "")),
+			);
+			const candidate = skills.slice().reverse().find(skill => !protectedSkills.has(
+				String(skill).toLowerCase().replace(/\s+/g, "").replace(/'s?/g, ""),
+			));
+			const removed = [candidate || skills[0]];
+			if (skills.length > 1) history.choices.skills = skills.slice(1);
+			else delete history.choices.skills;
 			history.manifestComplete = false;
 			history.complete = false;
 			await cs?._saveCurrentCharacter?.();
 			cs?._renderCharacter?.();
-			return skills;
+			return removed;
 		});
 	}
 
@@ -254,7 +269,7 @@ export class CharacterSheetPage {
 		await featEditor.locator("button", {hasText: "Apply Changes"}).click();
 	}
 
-	async stageFirstMissingRespecSkillChoice (): Promise<string[]> {
+	async stageFirstMissingRespecSkillChoice (missingSkills: string[] = []): Promise<string[]> {
 		const level = this.page.locator('.charsheet__level-entry[data-level="1"]');
 		await level.locator(".charsheet__level-entry-edit").click();
 		const decisionRow = this.page.locator(".charsheet__respec-choice-row").filter({hasText: "Starting Skill Proficiencies"}).last();
@@ -266,11 +281,37 @@ export class CharacterSheetPage {
 			return decisions.find((decision: any) => decision.type === "skills" && decision.characterLevel === 1)?.count || 1;
 		});
 		const options = editor.locator('.charsheet__respec-option input[type="checkbox"]');
+		const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+		const liveSkills = await this.page.evaluate(() => Object.entries(
+			(globalThis as any).charSheet?._respec?._state?.getSkillProficiencies?.() || {},
+		).filter(([, level]) => Number(level) >= 1).map(([skill]) => skill));
+		for (const missingSkill of missingSkills) {
+			const target = normalize(missingSkill);
+			const optionCount = await options.count();
+			for (let i = 0; i < optionCount; i++) {
+				const option = options.nth(i);
+				if (await option.isChecked() && normalize(await option.locator("xpath=..").innerText()).includes(target)) {
+					await option.uncheck();
+					break;
+				}
+			}
+		}
 		const selected: string[] = [];
-		for (let i = 0; i < requiredCount; ++i) {
-			const option = options.nth(i);
-			selected.push(await option.locator("xpath=..").innerText());
-			await option.check();
+		const initialSelectedCount = await options.evaluateAll(items => items.filter((item: HTMLInputElement) => item.checked).length);
+		for (let i = initialSelectedCount; i < requiredCount; ++i) {
+			const optionCount = await options.count();
+			let selectedOption = null;
+			for (let j = 0; j < optionCount; j++) {
+				const candidate = options.nth(j);
+				const candidateLabel = normalize(await candidate.locator("xpath=..").innerText());
+				if (await candidate.isEnabled() && !await candidate.isChecked() && !liveSkills.some(skill => normalize(skill) === candidateLabel)) {
+					selectedOption = candidate;
+					break;
+				}
+			}
+			if (!selectedOption) throw new Error("No unchecked legal skill option remained.");
+			selected.push(await selectedOption.locator("xpath=..").innerText());
+			await selectedOption.check();
 		}
 		await editor.locator("button", {hasText: "Stage Choice"}).click();
 		return selected.map(it => it.trim());
@@ -336,6 +377,63 @@ export class CharacterSheetPage {
 			if (!buttonBox) continue;
 			expect(buttonBox.height).toBeGreaterThanOrEqual(40);
 		}
+	}
+
+	async getRespecNestedDecisionSnapshot (): Promise<Array<{
+		id: string;
+		label: string;
+		type: string;
+		status: string;
+		characterLevel: number;
+		optionCount: number;
+		effectiveOptionCount: number;
+		meta: unknown;
+		selection: unknown;
+	}>> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const decisions = cs?._respec?._engine?.manifest?.decisions || [];
+			return decisions
+				.filter((decision: any) => decision.scope === "nested")
+				.map((decision: any) => ({
+					id: decision.id,
+					label: decision.label,
+					type: decision.type,
+					status: decision.status,
+					characterLevel: decision.characterLevel,
+					optionCount: decision.options?.length || 0,
+					effectiveOptionCount: cs?._respec?._getDecisionOptions?.(decision)?.length || 0,
+					meta: decision.meta,
+					selection: decision.selection,
+				}));
+		});
+	}
+
+	async stageFirstNestedRespecChoice (): Promise<void> {
+		const nested = await this.getRespecNestedDecisionSnapshot();
+		if (!nested.length) throw new Error("No nested Respec decision was discovered.");
+		const decision = nested.find(item => item.optionCount > 0 && item.status !== "resolved")
+			|| nested.find(item => item.optionCount > 0)
+			|| nested[0];
+		const level = this.page.locator(`.charsheet__level-entry[data-level="${decision.characterLevel}"]`);
+		await level.locator(".charsheet__level-entry-edit").click();
+		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: decision.label}).last();
+		await row.locator("button", {hasText: "Change"}).click();
+		const inlineEditor = this.page.locator(".charsheet__respec-nested-editor-host .charsheet__respec-decision-editor");
+		await expect(inlineEditor).toBeVisible();
+		expect(await this.page.locator(".ve-ui-modal__overlay:visible").count()).toBe(1);
+		const inputs = inlineEditor.locator(".charsheet__respec-option input");
+		const inputCount = await inputs.count();
+		if (!inputCount) {
+			throw new Error(`Nested decision "${decision.label}" has no legal UI options: ${JSON.stringify(nested)}`);
+		}
+		for (let i = 0; i < inputCount; i++) {
+			if (await inputs.nth(i).isEnabled()) {
+				await inputs.nth(i).check();
+				break;
+			}
+		}
+		await inlineEditor.locator("button", {hasText: "Stage Choice"}).click();
 	}
 
 	/**

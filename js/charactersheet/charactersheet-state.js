@@ -9563,6 +9563,22 @@ class CharacterSheetState {
 		const sourceId = decision?.semanticKey || decision?.receipt?.sourceDecisionKey;
 		if (!sourceId) return;
 		for (const effect of decision?.receipt?.effects || []) {
+			if (effect?.type === "materialized") {
+				const featureIds = new Set((effect.features || []).map(feature => feature.id).filter(Boolean));
+				for (const feature of effect.features || []) {
+					if (feature.id) this.removeFeature(feature.id);
+					else if (feature.name) this.removeFeature(feature.name, feature.source);
+				}
+				this._data.resources = (this._data.resources || []).filter(resource =>
+					!featureIds.has(resource.featureId)
+					&& resource.sourceDecisionKey !== sourceId,
+				);
+				this._data.modifiers = (this._data.modifiers || []).filter(modifier =>
+					!featureIds.has(modifier.featureId)
+					&& modifier.sourceDecisionKey !== sourceId,
+				);
+				continue;
+			}
 			// Ability and feat receipts are reversed by their owning feature/feat
 			// teardown paths. Reversing them here as well would double-subtract
 			// legacy feat choices whose parent is being replaced in the same
@@ -43584,11 +43600,30 @@ class CharacterSheetState {
 	}
 
 	addResource (resource) {
-		this._data.resources.push({
+		const sourceDecisionKey = resource.sourceDecisionKey || null;
+		const existing = this._data.resources.find(existingResource =>
+			existingResource.name === resource.name
+				&& (sourceDecisionKey
+					? existingResource.sourceDecisionKey === sourceDecisionKey
+					: !existingResource.sourceDecisionKey),
+		);
+		if (existing) {
+			const current = Number(existing.current);
+			Object.assign(existing, resource, {
+				id: existing.id,
+				current: Number.isFinite(current)
+					? Math.max(0, Math.min(current, Number(resource.max) || 0))
+					: resource.max,
+			});
+			return existing;
+		}
+		const created = {
 			id: CryptUtil.uid(),
 			current: resource.max,
 			...resource,
-		});
+		};
+		this._data.resources.push(created);
+		return created;
 	}
 
 	/**
@@ -48113,7 +48148,22 @@ class CharacterSheetState {
 			const featureKey = feature.name.toLowerCase();
 			this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
 			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || []).filter(name => name !== featureKey);
-			this._data.resources = this._data.resources.filter(r => r.featureId !== feature.id && r.name !== feature.name);
+			const removedResourceIds = this._data.resources
+				.filter(r =>
+					r.featureId === feature.id
+					|| (feature.sourceDecisionKey
+						? r.sourceDecisionKey === feature.sourceDecisionKey
+						: r.name === feature.name),
+				)
+				.map(r => r.id)
+				.filter(Boolean);
+			this._data.resources = this._data.resources.filter(r =>
+				r.featureId !== feature.id
+				&& (feature.sourceDecisionKey
+					? r.sourceDecisionKey !== feature.sourceDecisionKey
+					: r.name !== feature.name),
+			);
+			for (const resourceId of removedResourceIds) delete this._data.resourceTurnUsage?.[resourceId];
 			// Remove associated attack if it was auto-added (natural weapon)
 			this._data.attacks = this._data.attacks.filter(a => a.featureId !== feature.id && a.sourceFeature !== feature.name);
 			// Remove associated innate spells

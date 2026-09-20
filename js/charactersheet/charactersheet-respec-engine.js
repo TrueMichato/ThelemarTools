@@ -60,13 +60,13 @@ class CharacterSheetRespecEngine {
 		this._isDirty = false;
 	}
 
-	refreshManifest () {
+	refreshManifest ({persist = true} = {}) {
 		if (!this._candidateState) this.begin();
 		this._manifest = CharacterSheetProgression.buildManifest({
 			page: this._page,
 			state: this._candidateState,
 		});
-		this._persistManifest();
+		if (persist) this._persistManifest();
 		return this._manifest;
 	}
 
@@ -81,6 +81,7 @@ class CharacterSheetRespecEngine {
 			"missing-choice-catalog",
 			"discovery-incomplete",
 			"unsupported-required-choice",
+			"unsupported-persisted-decision",
 			"adapter-missing-editor",
 			"adapter-missing-mechanics",
 			"adapter-missing-reverse",
@@ -132,7 +133,7 @@ class CharacterSheetRespecEngine {
 		}
 	}
 
-	_makeDecisionReceipt (decision, selection) {
+	_makeDecisionReceipt (decision, selection, state = this._candidateState) {
 		const typeMap = {
 			nestedSkill: "skills",
 			nestedSkillTool: "skills",
@@ -181,6 +182,32 @@ class CharacterSheetRespecEngine {
 				}),
 			});
 		}
+		const materializedFeatures = (state?.getFeatures?.() || [])
+			.filter(feature => feature.sourceDecisionKey === decision?.semanticKey)
+			.map(feature => ({id: feature.id, name: feature.name, source: feature.source}));
+		const materializedFeatureIds = new Set(materializedFeatures.map(feature => feature.id));
+		const materializedModifiers = (state?._data?.modifiers || [])
+			.filter(modifier => materializedFeatureIds.has(modifier.featureId) || modifier.sourceDecisionKey === decision?.semanticKey)
+			.map(modifier => ({id: modifier.id, featureId: modifier.featureId, sourceDecisionKey: modifier.sourceDecisionKey}));
+		const materializedResources = (state?.getResources?.() || [])
+			.filter(resource => resource.sourceDecisionKey === decision?.semanticKey || materializedFeatureIds.has(resource.featureId))
+			.map(resource => ({
+				id: resource.id,
+				name: resource.name,
+				sourceDecisionKey: resource.sourceDecisionKey,
+				featureId: resource.featureId,
+			}));
+		if (materializedFeatures.length || materializedModifiers.length || materializedResources.length) {
+			effects.push({
+				type: "materialized",
+				features: materializedFeatures,
+				modifiers: materializedModifiers,
+				resources: materializedResources,
+				spells: values
+					.filter(value => value && typeof value === "object" && value.name)
+					.map(value => ({name: value.name, source: value.source})),
+			});
+		}
 		return {
 			version: 1,
 			sourceDecisionKey: decision.semanticKey,
@@ -215,10 +242,21 @@ class CharacterSheetRespecEngine {
 				: null);
 		if (!stored) throw new Error("That progression decision could not be found in the draft ledger.");
 		try {
-			const descendants = (this._manifest.decisions || [])
-				.filter(candidate => candidate.semanticKey !== decision.semanticKey
-					&& (candidate.parentSemanticKey === decision.semanticKey || candidate.rootSemanticKey === decision.semanticKey))
-				.sort((a, b) => Number(b.depth || 0) - Number(a.depth || 0));
+			const descendants = [];
+			const pendingParents = [decision.semanticKey];
+			const seenDescendants = new Set();
+			while (pendingParents.length) {
+				const parentSemanticKey = pendingParents.shift();
+				for (const candidate of this._manifest.decisions || []) {
+					if (candidate.semanticKey === decision.semanticKey
+						|| candidate.parentSemanticKey !== parentSemanticKey
+						|| seenDescendants.has(candidate.semanticKey)) continue;
+					seenDescendants.add(candidate.semanticKey);
+					descendants.push(candidate);
+					pendingParents.push(candidate.semanticKey);
+				}
+			}
+			descendants.sort((a, b) => Number(b.depth || 0) - Number(a.depth || 0));
 			const descendantSnapshots = descendants.map(descendant => ({
 				decision: CharacterSheetProgression._copy(descendant),
 				selection: CharacterSheetProgression._copy(descendant.selection),
@@ -248,12 +286,12 @@ class CharacterSheetRespecEngine {
 				...stored,
 				selection: CharacterSheetProgression._copy(selection),
 				status,
-				receipt: this._makeDecisionReceipt(decision, selection),
+				receipt: this._makeDecisionReceipt(decision, selection, this._candidateState),
 			}, container);
 			Object.assign(stored, updated);
 			if (decision.scope !== "origin") Object.assign(container, CharacterSheetProgression.projectDecisionsToChoices(container));
 			this._setDirty();
-			const refreshed = this.refreshManifest();
+			const refreshed = this.refreshManifest({persist: false});
 			// A parent replacement may leave some child identities legal (for
 			// example, a recurring pool slot). Rehydrate only exact semantic
 			// matches whose old selections are still present in the new catalog.
@@ -277,14 +315,9 @@ class CharacterSheetRespecEngine {
 				const existing = nextStore.decisions.find(it => it.semanticKey === next.semanticKey);
 				if (existing) Object.assign(existing, nextStored);
 				else nextStore.decisions.push(nextStored);
+				Object.assign(next, nextStored);
 			}
-			if (descendantSnapshots.length) {
-				this._manifest = CharacterSheetProgression.buildManifest({
-					page: this._page,
-					state: this._candidateState,
-				});
-				this._persistManifest();
-			}
+			this._persistManifest();
 			return this._manifest;
 		} catch (error) {
 			this._candidateState.loadFromJson(stateSnapshot);

@@ -330,8 +330,9 @@ class CharacterSheetRespec {
 					return;
 				}
 				const selection = [...selected.values()];
-				this._applyManifestSelectionMechanics(decision, selection, options);
-				this._engine.updateDecisionSelection(decision.id, selection);
+				this._engine.stageGraphMutation(decision.id, selection, {
+					apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, options, state),
+				});
 				ix++;
 				if (ix < decisionIds.length) return renderStep();
 				doClose();
@@ -1368,6 +1369,7 @@ class CharacterSheetRespec {
 		content.append(e_({outer: `<h4>Progression Decisions</h4>`}));
 
 		const choicesList = e_({tag: "div", clazz: "charsheet__respec-choices-list"});
+		const nestedEditorHost = e_({tag: "div", clazz: "charsheet__respec-nested-editor-host"});
 		editableChoices.forEach(choice => {
 			const currentText = typeof choice.current === "object"
 				? (choice.current.name || JSON.stringify(choice.current))
@@ -1384,12 +1386,15 @@ class CharacterSheetRespec {
 			`});
 
 			const editBtn = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", txt: "Change"});
-			editBtn.addEventListener("click", () => this._editChoice(level, history, choice, doClose));
+			editBtn.addEventListener("click", () => this._editChoice(level, history, choice, doClose, {
+				inlineHost: nestedEditorHost,
+			}));
 			choiceRow.append(editBtn);
 
 			choicesList.append(choiceRow);
 		});
 		content.append(choicesList);
+		content.append(nestedEditorHost);
 
 		// Close button
 		const closeBtn = e_({tag: "button", clazz: "ve-btn ve-btn-primary mt-3", txt: "Close"});
@@ -1406,7 +1411,7 @@ class CharacterSheetRespec {
 	 * @param {object} choice - The choice to edit
 	 * @param {Function} closeParentModal - Function to close parent modal
 	 */
-	async _editChoice (level, history, choice, closeParentModal) {
+	async _editChoice (level, history, choice, closeParentModal, opts = {}) {
 		const adapter = choice.decision
 			? globalThis.CharacterSheetProgression?.getDecisionAdapter?.(choice.decision.type)
 			: null;
@@ -1426,7 +1431,7 @@ class CharacterSheetRespec {
 				: this._editClassFeatProgressionFeat(level, history, choice, closeParentModal),
 			class: () => this._editClassAllocation(level, history, choice, closeParentModal),
 			"manifest-options": () => this._editManifestOptions(level, history, choice, closeParentModal),
-			"nested-choice": () => this._editManifestOptions(level, history, choice, closeParentModal),
+			"nested-choice": () => this._editManifestOptions(level, history, choice, closeParentModal, opts),
 			languages: () => this._editManifestOptions(level, history, choice, closeParentModal),
 			spells: () => this._editManifestOptions(level, history, choice, closeParentModal),
 			"spell-swap": () => this._editSpellSwapDecision(level, history, choice, closeParentModal),
@@ -1462,6 +1467,17 @@ class CharacterSheetRespec {
 				options = allSpells.filter(spell => CharacterSheetClassUtils._spellMatchesFilterQuery?.(spell, clauses));
 			} else if (source?.kind === "additionalSpells" && allSpells.length) {
 				options = allSpells;
+			} else if (source?.kind === "explicitList" && Array.isArray(source.values)) {
+				const fullSpellData = this._page.getSpells?.() || allSpells;
+				options = source.values
+					.map(value => {
+						const name = typeof value === "string" ? value : value?.name;
+						const sourceId = typeof value === "object" ? value?.source : null;
+						return fullSpellData.find(spell =>
+							spell?.name === name && (!sourceId || spell.source === sourceId),
+						) || value;
+					})
+					.filter(Boolean);
 			}
 			if (decision.type === "nestedCantrip") options = options.filter(spell => Number(spell.level) === 0);
 			else options = options.filter(spell => Number(spell.level) > 0);
@@ -1515,7 +1531,7 @@ class CharacterSheetRespec {
 		return MiscUtil.copyFast(option);
 	}
 
-	async _editManifestOptions (level, history, choice, closeParentModal) {
+	async _editManifestOptions (level, history, choice, closeParentModal, {inlineHost = null} = {}) {
 		const decision = choice.decision;
 		if (!decision) return;
 		const options = this._getDecisionOptions(decision);
@@ -1525,13 +1541,23 @@ class CharacterSheetRespec {
 			: (decision.selection == null ? [] : [decision.selection]);
 		currentValues.forEach(value => selected.set(CharacterSheetRespec._getDecisionOptionKey(value), value));
 
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
-			title: `${decision.label} · Level ${level}`,
-			isMinHeight0: true,
-			isWidth100: true,
-			isUncappedWidth: true,
-			cbClose: () => {},
-		});
+		let modalInner;
+		let doClose;
+		if (inlineHost) {
+			inlineHost.innerHTML = "";
+			modalInner = inlineHost;
+			doClose = () => inlineHost.replaceChildren();
+		} else {
+			const modal = await CharacterSheetModal.pGetShow({
+				title: `${decision.label} · Level ${level}`,
+				isMinHeight0: true,
+				isWidth100: true,
+				isUncappedWidth: true,
+				cbClose: () => {},
+			});
+			modalInner = modal.eleModalInner;
+			doClose = modal.doClose;
+		}
 		const content = e_({tag: "div", clazz: "charsheet__respec-decision-editor"});
 		content.append(e_({
 			tag: "p",
@@ -1591,7 +1617,7 @@ class CharacterSheetRespec {
 			defer.addEventListener("click", () => {
 				this._engine.updateDecisionSelection(decision.id, null, {status: "deferred"});
 				doClose();
-				closeParentModal?.();
+				if (!inlineHost) closeParentModal?.();
 				this.render();
 			});
 			actions.append(defer);
@@ -1606,10 +1632,11 @@ class CharacterSheetRespec {
 			const selection = ["scholar", "subclassChoice"].includes(decision.type) && decision.count === 1
 				? values[0]
 				: values;
-			this._applyManifestSelectionMechanics(decision, selection, options);
-			this._engine.updateDecisionSelection(decision.id, selection);
+			this._engine.stageGraphMutation(decision.id, selection, {
+				apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, options, state),
+			});
 			doClose();
-			closeParentModal?.();
+			if (!inlineHost) closeParentModal?.();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: `${decision.label} staged in the Respec draft.`});
 		});
@@ -1619,7 +1646,17 @@ class CharacterSheetRespec {
 		search.focus();
 	}
 
-	_applyManifestSelectionMechanics (decision, selection, options) {
+	_applyManifestSelectionMechanics (decision, selection, options, targetState = this._state) {
+		const previousState = this._state;
+		this._state = targetState;
+		try {
+			return this._applyManifestSelectionMechanicsInner(decision, selection, options);
+		} finally {
+			this._state = previousState;
+		}
+	}
+
+	_applyManifestSelectionMechanicsInner (decision, selection, options) {
 		const next = Array.isArray(selection) ? selection : (selection == null ? [] : [selection]);
 		const previous = Array.isArray(decision.selection)
 			? decision.selection
