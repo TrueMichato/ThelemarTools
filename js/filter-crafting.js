@@ -70,6 +70,26 @@ class PageFilterCrafting extends PageFilterBase {
 				// Entries with no DC/value sort last regardless of direction
 				return SortUtil.ascSort(itemA.values[options.sortBy] ?? Number.MAX_SAFE_INTEGER, itemB.values[options.sortBy] ?? Number.MAX_SAFE_INTEGER)
 					|| SortUtil.listSort(itemA, itemB, options);
+			case "materialDamage":
+			case "materialProtection":
+			case "materialCritical":
+			case "materialPenetration":
+			case "materialMagicCapacity":
+			case "materialDensity":
+			case "materialColor": {
+				const a = itemA.values[options.sortBy];
+				const b = itemB.values[options.sortBy];
+				const nameTie = SortUtil.ascSortLower(itemA.name, itemB.name);
+				if (a == null && b == null) return options.sortDir === "desc" ? -nameTie : nameTie;
+				// List reverses the comparator for descending sorts, so nulls must begin
+				// there in the base comparison to finish at the bottom in both directions.
+				if (a == null) return options.sortDir === "desc" ? -1 : 1;
+				if (b == null) return options.sortDir === "desc" ? 1 : -1;
+				const out = typeof a === "string"
+					? SortUtil.ascSortLower(a, b)
+					: SortUtil.ascSort(a, b);
+				return out || (options.sortDir === "desc" ? -nameTie : nameTie);
+			}
 			default:
 				return SortUtil.listSort(itemA, itemB, options);
 		}

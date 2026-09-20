@@ -22,6 +22,16 @@ const _getDisplayValue = (ent) => {
 	return ent.value == null ? null : Parser.getDisplayCurrency(CurrencyUtil.doSimplifyCoins({cp: ent.value}));
 };
 
+const _getItemMaterialSortValue = (ent, key) => {
+	if (ent.__prop !== "itemMaterial") return null;
+	const value = ent[key];
+	if (value === "infinity") return Infinity;
+	if (value === "-infinity") return -Infinity;
+	if (typeof value === "number") return value;
+	if (key === "color") return ent.color?.css || "";
+	return null;
+};
+
 class CraftingSublistManager extends SublistManager {
 	static _getRowTemplate () {
 		return [
@@ -145,6 +155,13 @@ class CraftingPage extends ListPage {
 				value: ent.value ?? Number.MAX_SAFE_INTEGER,
 				creature: ent.harvest?.creature?.name || "",
 				effects: (ent.effectTags || []).join(" "),
+				materialDamage: _getItemMaterialSortValue(ent, "damage"),
+				materialProtection: _getItemMaterialSortValue(ent, "protection"),
+				materialCritical: _getItemMaterialSortValue(ent, "critical"),
+				materialPenetration: _getItemMaterialSortValue(ent, "penetration"),
+				materialMagicCapacity: _getItemMaterialSortValue(ent, "magicCapacity"),
+				materialDensity: _getItemMaterialSortValue(ent, "density"),
+				materialColor: _getItemMaterialSortValue(ent, "color"),
 			},
 			{
 				hash,
@@ -219,7 +236,26 @@ class CraftingPage extends ListPage {
 	async pOnLoad () {
 		await super.pOnLoad();
 		this._initTools();
+		this._initMaterialSort();
 		this._initSearchRescue();
+	}
+
+	_initMaterialSort () {
+		const sel = document.getElementById("crafting-material-sort-select");
+		if (!sel) return;
+
+		sel.addEventListener("change", () => {
+			if (!sel.value) {
+				this._list.sort("name", "asc");
+				return;
+			}
+			const [sortBy, sortDir] = sel.value.split("|");
+			this._list.sort(sortBy, sortDir);
+		});
+
+		document.querySelectorAll("#filtertools .sort").forEach(btn => btn.addEventListener("click", () => {
+			sel.value = "";
+		}));
 	}
 
 	/**

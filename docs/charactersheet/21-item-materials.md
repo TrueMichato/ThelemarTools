@@ -810,8 +810,10 @@ Materials step the damage die along an **11-step ladder**, wider than the upgrad
 ```
 
 `CharacterSheetMaterials.stepDamageDie(die, steps)` supports **negative** steps (Gold −1,
-Heart Stone −2) and clamps at both ends. Off-ladder equivalents (`2d4`, `3d4`, `3d6`) are
-normalised onto the ladder.
+Heart Stone −2) and clamps at both ends. The rules' off-ladder equivalents (`2d4` at the
+`1d12` step and `3d6` at the `2d12` step) are normalised onto the ladder. The canonical
+labels, explanations, and progression live in `Parser.ITEM_MATERIAL_RULES` and
+`Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION`, so the picker and Crafting page cannot drift.
 
 `CharacterSheetUpgrades.increaseDamageDie` **delegates to this same ladder**. It extracts the
 bare die from its input first, then calls `stepDamageDie`. `Superior` is the only author of a
@@ -1127,11 +1129,15 @@ The label reflects it too: `(dormant)` versus `(not available)`.
 Filtering answers *"where is mithril?"*. It does not answer *"which of these twelve metals is
 best for my sword?"* — for that the list has to rank.
 
-`getSortMetrics(item, material)` returns the five comparable numbers **projected onto this
-specific item**, and `getSortOptions(item)` returns the axes worth offering for it. Three
-rules keep the ranking honest:
+`getSortMetrics(item, material)` returns the comparable names, categories, rarity, material
+axes, projected item values, and risk **for this specific item**. `getSortOptions(item)` exposes
+Name, Category, Rarity, Damage Dice, Protection/AC, Critical, Penetration, Magic Capacity,
+Density, projected Weight, material Price, projected Value, and Risk when those choices make
+sense. An adjacent direction control makes every ordering explicitly reversible. Three rules
+keep the ranking honest:
 
-- **Options are item-aware.** A longsword gets Damage but not Armor Class; offering AC there
+- **Options are item-aware.** A longsword gets Damage Dice, Critical, and Penetration but not
+  Armor Class; offering AC there
   would produce sixty-five identical rows and teach the player the control is broken.
 - **Unrankable materials sink, they do not lie.** A material priced *per scale*, or priceless,
   cannot reprice the item — `applyToItem` correctly leaves the base value in place. Ranking on
@@ -1145,10 +1151,12 @@ Sorting and grouping answer different questions and fight each other, so an expl
 **flattens** the list the way a filter does: a "best damage" ranking split across eight
 collapsed category headers ranks nothing.
 
-Alongside it, a collapsed `<details>` at the foot of the picker defines `MC`, `MC ∞`, `MC −∞`,
-`✦`, `Pen`, `Crit` and the condensate roles. The vocabulary is invented by this feature and
-explained nowhere else outside a 678-line rules document; the legend is a reference for the
-first few visits rather than a permanent tax on list space.
+Each compact property in a picker row carries native hover help sourced from the shared rule
+metadata. A collapsed, keyboard-accessible **Material Rules** disclosure at the foot of the
+picker defines all seven properties — Density, Damage Dice, Protection, Critical, Penetration,
+Magic Capacity, and Color — and includes the complete eleven-step Weapon Damage Progression
+with its `2d4` and `3d6` equivalents. The disclosure is the touch/mobile fallback, so no rule
+is available only on hover.
 
 ### An empty list says which kind of empty it is
 

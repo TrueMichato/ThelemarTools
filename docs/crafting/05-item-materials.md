@@ -72,17 +72,25 @@ the full field-by-field breakdown. The page-relevant summary:
 
 `_RenderItemMaterialImpl` in `js/render-crafting.js` produces the stat block:
 
-1. **Axes strip** — five bordered cells (Damage / Protection / Critical / Penetration /
+1. **Axes strip** — five bordered cells (Damage Dice / Protection / Critical / Penetration /
    Magic Capacity). Sentinels render as `N/A`, `∞`, `−∞` and *Varies*, and signed axes get
-   an explicit `+`.
-2. **Density** — with the derived weight multiplier relative to its category baseline.
-3. **Price** — `price.display` verbatim, because trade units are heterogeneous.
-4. **Object AC**, **roles**, **applies to**, **rarity**.
-5. **Magic-capacity rules** and **degradation**, each rendered from a type→text map.
-6. The prose `entries`.
+   an explicit `+`. Each label has native hover help from `Parser.ITEM_MATERIAL_RULES`.
+2. **Material Rules disclosure** — defines all seven properties and prints the complete
+   eleven-step Weapon Damage Progression, including the `2d4` and `3d6` equivalents. This is
+   the keyboard/touch fallback for the compact hover help.
+3. **Density and Color** — Density includes the derived weight multiplier relative to its
+   category baseline; Color includes the authored swatch and hex value.
+4. **Price** — `price.display` verbatim, because trade units are heterogeneous.
+5. **Object AC**, **roles**, **applies to**, **rarity**.
+6. **Magic-capacity rules** and **degradation**, each rendered from a type→text map.
+7. The prose `entries`.
 
 Because trade units vary, `CraftingPage._getDisplayValue()` returns `price.display` for
 `itemMaterial` rather than a coin total.
+
+The list also has a compact **Sort item materials by** selector for Damage Dice, Protection,
+Critical, Penetration, Magic Capacity, Density, and Color. Other crafting entities remain in
+the result set but sink below item materials while a material-property sort is active.
 
 ### The inline Draconic Domain Resonance table
 

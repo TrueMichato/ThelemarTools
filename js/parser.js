@@ -2462,13 +2462,73 @@ Parser.itemMaterialAppliesToFull = function (appliesTo) {
 	return Parser.ITEM_MATERIAL_APPLIES_TO_FULL[appliesTo] ?? `${appliesTo}`.toTitleCase();
 };
 
-Parser.ITEM_MATERIAL_AXES = [
-	{key: "damage", full: "Damage", isSigned: true},
-	{key: "protection", full: "Protection", isSigned: false},
-	{key: "critical", full: "Critical", isSigned: true},
-	{key: "penetration", full: "Penetration", isSigned: false},
-	{key: "magicCapacity", full: "Magic Capacity", isSigned: false},
+Parser.ITEM_MATERIAL_RULES = [
+	{
+		key: "density",
+		full: "Density",
+		summary: "Mass per unit volume, measured in g/cm\u00B3. Magical and organic materials may instead be listed as Varies.",
+		isSigned: false,
+	},
+	{
+		key: "damage",
+		full: "Damage Dice",
+		summary: "Moves a weapon this many steps along the Weapon Damage Progression. Negative values move it down; the damage type is unchanged unless stated otherwise.",
+		isSigned: true,
+	},
+	{
+		key: "protection",
+		full: "Protection",
+		summary: "If nonzero, this is the base AC of armor made primarily from the material, before any allowed Dexterity modifier or shield. 0 leaves normal AC unchanged.",
+		isSigned: false,
+	},
+	{
+		key: "critical",
+		full: "Critical",
+		summary: "Each positive point lowers the attack roll needed for a critical hit by 1; each negative point raises it by 1. A natural 20 still automatically hits.",
+		isSigned: true,
+	},
+	{
+		key: "penetration",
+		full: "Penetration",
+		summary: "If an attack misses AC by no more than this value, it is a Penetrating Blow: piercing damage equal to the attacker's ability modifier, while remaining a miss with no on-hit effects.",
+		isSigned: false,
+	},
+	{
+		key: "magicCapacity",
+		full: "Magic Capacity",
+		summary: "The number of distinct magical effects an item can hold without interference. Infinity never overloads; negative values suppress magic as described by the material.",
+		isSigned: false,
+	},
+	{
+		key: "color",
+		full: "Color",
+		summary: "The material's usual appearance. Natural variation is described in its entry.",
+		isSigned: false,
+	},
 ];
+
+Parser.ITEM_MATERIAL_RULE_BY_KEY = Object.fromEntries(Parser.ITEM_MATERIAL_RULES.map(it => [it.key, it]));
+
+Parser.ITEM_MATERIAL_AXES = ["damage", "protection", "critical", "penetration", "magicCapacity"]
+	.map(key => Parser.ITEM_MATERIAL_RULE_BY_KEY[key]);
+
+Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION = [
+	{step: 1, die: "1d4"},
+	{step: 2, die: "1d6"},
+	{step: 3, die: "1d8"},
+	{step: 4, die: "1d10"},
+	{step: 5, die: "1d12", equivalent: "2d4"},
+	{step: 6, die: "2d6"},
+	{step: 7, die: "2d8"},
+	{step: 8, die: "2d10"},
+	{step: 9, die: "2d12", equivalent: "3d6"},
+	{step: 10, die: "3d8"},
+	{step: 11, die: "3d10"},
+];
+
+Parser.itemMaterialRuleToFull = function (key) {
+	return Parser.ITEM_MATERIAL_RULE_BY_KEY[key]?.full || `${key}`.toTitleCase();
+};
 
 /**
  * Render one of the six material axes.

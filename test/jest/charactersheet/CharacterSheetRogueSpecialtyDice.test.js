@@ -1,4 +1,7 @@
 import {jest} from "@jest/globals";
+import {readFileSync} from "node:fs";
+import {dirname, join} from "node:path";
+import {fileURLToPath} from "node:url";
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
@@ -6,6 +9,11 @@ import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const FeatureModifierParser = globalThis.FeatureModifierParser;
+const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const TGTT_DATA = JSON.parse(
+	readFileSync(join(__dirname, "../../../homebrew/TravelersGuidetoThelemar.json"), "utf8"),
+);
 
 let CharacterSheetPage;
 let savedWindow;
@@ -61,6 +69,38 @@ const FULL_SPECIALTY_TEXT = {
 	shadowSkulk: `${SPECIALTY_TEXT.shadowSkulk} You also gain a passive Dexterity ({@skill Stealth}) score of 10 + your Dexterity modifier + your proficiency bonus.`,
 	skeletonKey: `${SPECIALTY_TEXT.skeletonKey} When you successfully pick a lock, you can alter it to open with a key you possess (in addition or instead of the original keys).`,
 };
+
+const SPECIALTY_CASES = [
+	["Graceful Leap", "skill:acrobatics"],
+	["Keen Eye", "skill:perception"],
+	["Poison Expert", "tool:poisonerskit"],
+	["Practiced Dash", "skill:athletics"],
+	["Sense Aura", "skill:investigation"],
+	["Shadow Skulk", "skill:stealth"],
+	["Skeleton Key", "tool:thievestools"],
+];
+
+function getRealSpecialty (name) {
+	const feature = TGTT_DATA.classFeature.find(it =>
+		it.name === name
+		&& it.className === "Rogue"
+		&& it.classSource === "TGTT"
+		&& it.level === 13,
+	);
+	if (!feature) throw new Error(`Missing TGTT Rogue Specialty: ${name}`);
+	return feature;
+}
+
+function getMaterializedSpecialty (name) {
+	return CharacterSheetClassUtils.buildFeatureStateObject(getRealSpecialty(name), {
+		className: "Rogue",
+		classSource: "TGTT",
+		level: 13,
+		featureType: "Class",
+		isFeatureOption: true,
+		parentFeature: "Specialties",
+	});
+}
 
 function addParsedModifiers (state, text, source) {
 	for (const modifier of FeatureModifierParser.parseModifiers(text, source)) {
@@ -163,6 +203,26 @@ describe("Rogue Specialty d10 parsing", () => {
 		]));
 	});
 
+	test.each(SPECIALTY_CASES)("%s survives real feature materialization", (name, type) => {
+		const state = new CharacterSheetState();
+		const feature = getMaterializedSpecialty(name);
+		if (name === "Shadow Skulk") {
+			feature.description = "<p>You can add a <span>d10</span> to your Dexterity (<span>Stealth</span>) checks.</p>";
+		}
+
+		expect(state.addFeature(feature)).toBe(true);
+		expect(state.aggregateModifiers(type).bonusDiceContributions).toEqual(expect.arrayContaining([
+			expect.objectContaining({dice: "d10", source: name}),
+		]));
+	});
+
+	test("rendered HTML fallback tolerates whitespace around the linked skill name", () => {
+		const rendered = "<p>You can add a <span>d10</span> to your Dexterity (<span>Stealth</span>) checks.</p>";
+		expect(FeatureModifierParser.parseModifiers(rendered, "Shadow Skulk")).toEqual(expect.arrayContaining([
+			expect.objectContaining({type: "skill:stealth", bonusDie: "d10"}),
+		]));
+	});
+
 	test("loading a legacy Specialty save restores dice metadata and removes a stale tool target", () => {
 		const source = new CharacterSheetState();
 		const json = source.toJson();
@@ -221,9 +281,55 @@ describe("Rogue Specialty d10 parsing", () => {
 			}),
 		]);
 	});
+
+	test("loading a V1-migrated Shadow Skulk save repairs the missing d10 from raw entries", () => {
+		const source = new CharacterSheetState();
+		const json = source.toJson();
+		json.features = [{
+			...getMaterializedSpecialty("Shadow Skulk"),
+			id: "specialty:shadow-skulk",
+			description: "<p>You can add a <span>d10</span> to your Dexterity (<span>Stealth</span>) checks.</p>",
+		}];
+		json.namedModifiers = [];
+		json.migrationFlags = {featureBonusDiceV1: true};
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(json);
+
+		expect(restored.aggregateModifiers("skill:stealth").bonusDiceContributions).toEqual([
+			expect.objectContaining({dice: "d10", source: "Shadow Skulk"}),
+		]);
+		expect(restored.toJson().migrationFlags.featureBonusDiceV2).toBe(true);
+
+		const roundTripped = new CharacterSheetState();
+		roundTripped.loadFromJson(JSON.parse(JSON.stringify(restored.toJson())));
+		expect(roundTripped.aggregateModifiers("skill:stealth").bonusDiceContributions).toHaveLength(1);
+	});
 });
 
 describe("Rogue Specialty d10 roll integration", () => {
+	test("the real Shadow Skulk feature adds its d10 in the main Skills roll path", async () => {
+		const state = new CharacterSheetState();
+		state.setAbilityBase("dex", 10);
+		const feature = getMaterializedSpecialty("Shadow Skulk");
+		feature.description = "<p>You can add a <span>d10</span> to your Dexterity (<span>Stealth</span>) checks.</p>";
+		state.addFeature(feature);
+		const page = makeRollPage(state);
+		const diceSpy = jest.spyOn(globalThis.Renderer.dice, "parseRandomise2").mockImplementation(expr => expr === "d10" ? 7 : 0);
+
+		const result = await page._rollSkillCheck("stealth", "Stealth", null);
+
+		expect(result.total).toBe(17);
+		expect(diceSpy).toHaveBeenCalledWith("d10");
+		expect(page._showDiceResult).toHaveBeenCalledWith(
+			expect.any(String),
+			17,
+			expect.stringMatching(/d10.*Shadow Skulk/i),
+			expect.any(String),
+			expect.any(String),
+		);
+	});
+
 	test("a skill Specialty adds its d10 to the total and named breakdown", async () => {
 		const state = new CharacterSheetState();
 		state.setAbilityBase("dex", 10);

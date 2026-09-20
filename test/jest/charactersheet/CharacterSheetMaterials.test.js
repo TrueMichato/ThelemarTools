@@ -6,6 +6,7 @@
  */
 
 import "./setup.js";
+import "../../../js/parser.js";
 import {readFileSync} from "fs";
 import {dirname, join} from "path";
 import {fileURLToPath} from "url";
@@ -683,7 +684,7 @@ describe("Item Materials", () => {
 			const sword = {name: "Longsword", weapon: true, type: "M", dmg1: "1d8", weight: 3, value: 1500};
 			const rows = CharacterSheetMaterials.getPreviewRows(sword, findMat("Steel"));
 			const labels = rows.map(r => r.label);
-			expect(labels).toContain("Damage");
+			expect(labels).toContain("Damage Dice");
 			expect(labels).toContain("Penetration");
 			expect(labels).not.toContain("Base AC");
 		});
@@ -691,7 +692,7 @@ describe("Item Materials", () => {
 		it("compares against the BASE item, not the current material", () => {
 			const sword = {name: "Longsword", weapon: true, type: "M", dmg1: "1d8", material: {name: "Steel", source: "TGTT"}};
 			const rows = CharacterSheetMaterials.getPreviewRows(sword, findMat("Gold"));
-			const damage = rows.find(r => r.label === "Damage");
+			const damage = rows.find(r => r.label === "Damage Dice");
 			expect(damage.from).toBe("1d8");
 			expect(damage.to).toBe("1d6");
 		});
@@ -703,22 +704,22 @@ describe("Item Materials", () => {
 
 		it("lists every axis when no item is supplied", () => {
 			const summary = CharacterSheetMaterials.getSummary(findMat("Mithril"));
-			expect(summary).toContain("AC");
+			expect(summary).toContain("Protection");
 		});
 
 		it("never promises AC on a weapon", () => {
 			// The picker used to advertise "Mithril — AC 18" on a longsword, describing
 			// armour the player was not looking at.
 			const summary = CharacterSheetMaterials.getSummary(findMat("Mithril"), sword);
-			expect(summary).not.toContain("AC");
-			expect(summary).toContain("MC");
+			expect(summary).not.toContain("Protection");
+			expect(summary).toContain("Magic Capacity");
 		});
 
 		it("never promises damage or penetration on armour", () => {
 			const summary = CharacterSheetMaterials.getSummary(findMat("Darkmetal"), mail);
-			expect(summary).not.toContain("Dmg");
-			expect(summary).not.toContain("Pen");
-			expect(summary).toContain("AC");
+			expect(summary).not.toContain("Damage Dice");
+			expect(summary).not.toContain("Penetration");
+			expect(summary).toContain("Protection");
 		});
 
 		it("never promises a crit threshold on armour, and does not set one", () => {
@@ -730,8 +731,8 @@ describe("Item Materials", () => {
 
 		it("keeps the axes that do apply", () => {
 			const summary = CharacterSheetMaterials.getSummary(findMat("Darkmetal"), sword);
-			expect(summary).toContain("Dmg");
-			expect(summary).toContain("Pen");
+			expect(summary).toContain("Damage Dice");
+			expect(summary).toContain("Penetration");
 		});
 	});
 
@@ -743,7 +744,7 @@ describe("Item Materials", () => {
 			// text learns the item is made of something, and nothing about why it matters.
 			const label = CharacterSheetMaterials.getMaterialBadgeAriaLabel(findMat("Mithril"), sword);
 			expect(label).toMatch(/^Material: Mithril\./);
-			expect(label).toContain("MC");
+			expect(label).toContain("Magic Capacity");
 		});
 
 		it("respects item-aware axis gating in the chip's name", () => {
@@ -951,34 +952,36 @@ describe("Item Materials", () => {
 
 		it("offers damage only on a weapon and AC only on armour or a shield", () => {
 			const keys = it => CharacterSheetMaterials.getSortOptions(it).map(o => o.key);
-			expect(keys(SWORD)).toContain("dmg");
+			expect(keys(SWORD)).toEqual(expect.arrayContaining(["damage", "critical", "penetration"]));
 			expect(keys(SWORD)).not.toContain("ac");
 			expect(keys(PLATE)).toContain("ac");
-			expect(keys(PLATE)).not.toContain("dmg");
+			expect(keys(PLATE)).not.toContain("damage");
 			expect(keys(SHIELD)).toContain("ac");
-			expect(keys(SHIELD)).not.toContain("dmg");
+			expect(keys(SHIELD)).not.toContain("damage");
 		});
 
 		it("always offers the axes every item shares", () => {
 			[SWORD, PLATE, SHIELD, {name: "Rope"}].forEach((item) => {
 				const keys = CharacterSheetMaterials.getSortOptions(item).map(o => o.key);
-				expect(keys).toEqual(expect.arrayContaining(["", "mc", "weight", "value"]));
+				expect(keys).toEqual(expect.arrayContaining([
+					"category", "name", "rarity", "mc", "density", "weight", "price", "value", "risk",
+				]));
 			});
 		});
 
-		it("ranks damage by the projected die, not the base one", () => {
+		it("ranks Damage Dice by the projected progression step, not die face size", () => {
 			const steel = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Steel"));
 			const gold = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Gold"));
 			// Steel steps 1d8 up to 1d10; gold steps it down to 1d6.
-			expect(steel.dmg).toBe(10);
-			expect(gold.dmg).toBe(6);
+			expect(steel.damage).toBe(3);
+			expect(gold.damage).toBe(1);
 		});
 
 		it("nulls the axes the item kind cannot express", () => {
 			const onSword = CharacterSheetMaterials.getSortMetrics(SWORD, findMat("Darkmetal"));
 			expect(onSword.ac).toBeNull();
 			const onPlate = CharacterSheetMaterials.getSortMetrics(PLATE, findMat("Darkmetal"));
-			expect(onPlate.dmg).toBeNull();
+			expect(onPlate.damage).toBeNull();
 			expect(onPlate.ac).toBe(19);
 		});
 
@@ -1009,11 +1012,25 @@ describe("Item Materials", () => {
 			expect(CharacterSheetMaterials.getSortMetrics(SWORD, priceless).weight).toBeNull();
 			expect(CharacterSheetMaterials.getSortMetrics(SWORD, perScale).value).toBeNull();
 			// …but it still ranks on the axes it does carry.
-			expect(CharacterSheetMaterials.getSortMetrics(SWORD, perScale).dmg).toBe(10);
+			expect(CharacterSheetMaterials.getSortMetrics(SWORD, perScale).damage).toBe(3);
 		});
 
 		it("returns an all-null shape rather than throwing on missing input", () => {
-			expect(CharacterSheetMaterials.getSortMetrics(null, findMat("Steel"))).toEqual({dmg: null, ac: null, mc: null, weight: null, value: null});
+			expect(CharacterSheetMaterials.getSortMetrics(null, findMat("Steel"))).toEqual({
+				name: "",
+				category: "",
+				rarity: null,
+				damage: null,
+				ac: null,
+				critical: null,
+				penetration: null,
+				mc: null,
+				density: null,
+				weight: null,
+				price: null,
+				value: null,
+				risk: 0,
+			});
 			expect(CharacterSheetMaterials.getSortMetrics(SWORD, null).mc).toBeNull();
 		});
 	});

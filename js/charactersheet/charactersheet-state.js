@@ -2033,11 +2033,11 @@ class FeatureModifierParser {
 		// ===================
 		// "add a d10 to your Dexterity (Acrobatics) checks"
 		// "add a {@dice d10} to your Dexterity ({@skill Acrobatics}) checks"
-		const diceSkillPattern = /add\s+(?:a\s+)?(?:(?:roll\s+of\s+)?(?:your\s+)?)?(?:{@dice\s*)?d(\d+)\}?\s+to\s+(?:your\s+)?(?:\w+\s*\((?:{@skill\s*)?)?(\w+)(?:\}?\))?\s*checks?/gi;
+		const diceSkillPattern = /add\s+(?:a\s+)?(?:(?:roll\s+of\s+)?(?:your\s+)?)?(?:{@dice\s*)?d(\d+)\}?\s+to\s+(?:your\s+)?(?:\w+\s*\(\s*(?:{@skill\s*)?)?([a-z][a-z'’ -]*?)(?:\}?\s*\))?\s+checks?/gi;
 		let diceMatch;
 		while ((diceMatch = diceSkillPattern.exec(plainText)) !== null) {
 			const dieSize = parseInt(diceMatch[1]);
-			const skill = diceMatch[2].toLowerCase().replace(/}?\)?$/, "");
+			const skill = diceMatch[2].toLowerCase().replace(/[^a-z0-9]+/g, "");
 			modifiers.push({
 				type: `skill:${skill}`,
 				value: 0,
@@ -6378,21 +6378,25 @@ class CharacterSheetState {
 	 * zero-value rows in a bonus-die's target family for the same source feature.
 	 */
 	_migrateFeatureBonusDiceModifiers () {
-		if (this._data.migrationFlags.featureBonusDiceV1) return;
+		if (this._data.migrationFlags.featureBonusDiceV2) return;
 		const sources = [
 			...(Array.isArray(this._data.features) ? this._data.features : []),
 			...(Array.isArray(this._data.feats) ? this._data.feats : []),
 		];
 		if (!sources.length) {
 			this._data.migrationFlags.featureBonusDiceV1 = true;
+			this._data.migrationFlags.featureBonusDiceV2 = true;
 			return;
 		}
 		if (!Array.isArray(this._data.namedModifiers)) this._data.namedModifiers = [];
 
 		let changed = false;
 		for (const source of sources) {
-			if (!source?.id || !source.description) continue;
-			const parsed = FeatureModifierParser.parseModifiers(source.description, source.name);
+			if (!source?.id) continue;
+			const sourceText = CharacterSheetState._featureTextFromEntries(source)
+				|| (typeof source.description === "string" ? source.description : "");
+			if (!sourceText) continue;
+			const parsed = FeatureModifierParser.parseModifiers(sourceText, source.name);
 			const desiredDice = parsed.filter(mod => mod.bonusDie);
 			if (!desiredDice.length) continue;
 
@@ -6454,6 +6458,7 @@ class CharacterSheetState {
 
 		if (changed) this._recalculateCustomModifiers();
 		this._data.migrationFlags.featureBonusDiceV1 = true;
+		this._data.migrationFlags.featureBonusDiceV2 = true;
 	}
 
 	/**
@@ -46844,9 +46849,9 @@ class CharacterSheetState {
 	 *   CHOICE (e.g. Arcane Archer Lore's "Arcana or Nature"); skip auto-granting them.
 	 */
 	_processFeatureModifiers (feature, featureId, opts = {}) {
-		if (!feature.description) {
-			return;
-		}
+		const featureText = CharacterSheetState._featureTextFromEntries(feature)
+			|| (typeof feature.description === "string" ? feature.description : "");
+		if (!featureText) return;
 		const claimedSkills = opts.claimedSkills;
 
 		// Skip combat methods (stances) - their effects are handled dynamically by the stance system
@@ -46861,7 +46866,7 @@ class CharacterSheetState {
 		// the passive description parser so it never registers an always-on AC modifier (the parser
 		// extracts "+4 bonus to AC" without recognizing the "while in your shell" gating). Mirrors the
 		// per-feature skips below (Adept Speed, Unarmored Movement) that avoid double-/passive-counting.
-		if (feature.name === "Shell Defense" || /withdraw into your shell/i.test(feature.description)) {
+		if (feature.name === "Shell Defense" || /withdraw into your shell/i.test(featureText)) {
 			return;
 		}
 
@@ -46874,7 +46879,7 @@ class CharacterSheetState {
 		// "Agility" sub-block whose "While the Bladesong is active" gate is a separate entry too
 		// far away for _extractCondition to catch, so it would otherwise leak a PERMANENT +10
 		// speed that double-stacks with the active state. Mirrors the Shell Defense skip above.
-		if (feature.name === "Bladesong" || /while the bladesong is active/i.test(feature.description)) {
+		if (feature.name === "Bladesong" || /while the bladesong is active/i.test(featureText)) {
 			return;
 		}
 
@@ -46909,7 +46914,7 @@ class CharacterSheetState {
 			return;
 		}
 
-		const modifiers = FeatureModifierParser.parseModifiers(feature.description, feature.name);
+		const modifiers = FeatureModifierParser.parseModifiers(featureText, feature.name);
 		if (!modifiers.length) return;
 
 		// Determine feature type for special handling

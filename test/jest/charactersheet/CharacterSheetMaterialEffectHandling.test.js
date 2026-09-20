@@ -10,6 +10,7 @@
  */
 
 import "./setup.js";
+import "../../../js/parser.js";
 import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-rest.js";
@@ -167,7 +168,7 @@ describe("Material effect coverage across the brew", () => {
 });
 
 /**
- * The picker's "What do these numbers mean?" legend is in-app help, and it drifted: for two
+ * The shared Material Rules reference is in-app help, and it drifted: for two
  * days it described Penetration as "ignores that much of a target's non-magical damage
  * resistance" — a completely different mechanic from the one the sheet implements. Nobody
  * noticed, and a second author read that string, believed it, and carried the wrong
@@ -178,10 +179,9 @@ describe("Material effect coverage across the brew", () => {
  * must agree on what Penetration does, and neither may describe it as a resistance effect.
  */
 describe("Picker legend agrees with the mechanic it explains", () => {
-	const materialsSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-materials.js"), "utf8");
 	const combatSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
 
-	const legendPen = materialsSrc.match(/<dt>Pen<\/dt><dd>([^<]*)<\/dd>/)?.[1] || "";
+	const legendPen = Parser.ITEM_MATERIAL_RULE_BY_KEY.penetration.summary;
 	const tooltipPen = combatSrc.match(/title="Penetration \$\{pen\}: ([^"]*)"/)?.[1] || "";
 
 	it("finds both the legend entry and the combat tooltip", () => {
@@ -191,7 +191,7 @@ describe("Picker legend agrees with the mechanic it explains", () => {
 
 	it("describes Penetration as a near-miss against AC in both places", () => {
 		for (const text of [legendPen, tooltipPen]) {
-			expect(text.toLowerCase()).toMatch(/miss(ed)? by/);
+			expect(text.toLowerCase()).toMatch(/miss(?:es|ed)?(?: ac)? by/);
 		}
 	});
 
@@ -202,12 +202,11 @@ describe("Picker legend agrees with the mechanic it explains", () => {
 		}
 	});
 
-	it("keeps every legend entry non-empty and tag-balanced", () => {
-		const entries = [...materialsSrc.matchAll(/<dt>([^<]*)<\/dt><dd>([^<]*(?:<b>[^<]*<\/b>[^<]*)*)<\/dd>/g)];
-		expect(entries.length).toBeGreaterThanOrEqual(7);
-		for (const [, term, def] of entries) {
-			expect(term.trim()).not.toBe("");
-			expect(def.trim().length).toBeGreaterThan(10);
+	it("keeps every shared rule entry non-empty", () => {
+		expect(Parser.ITEM_MATERIAL_RULES).toHaveLength(7);
+		for (const rule of Parser.ITEM_MATERIAL_RULES) {
+			expect(rule.full.trim()).not.toBe("");
+			expect(rule.summary.trim().length).toBeGreaterThan(10);
 		}
 	});
 });

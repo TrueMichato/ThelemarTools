@@ -270,9 +270,11 @@ class _RenderItemMaterialImpl extends RenderPageImplBase {
 	])}
 
 			${this._getAxesRow({ent})}
+			${this._getMaterialRulesRow()}
 
 			${_getMetaRow([
-		["Density", this._getDensityHtml(ent)],
+		[this._getRuleLabel("density"), this._getDensityHtml(ent)],
+		[this._getRuleLabel("color"), this._getColorHtml(ent)],
 		["Price", ent.price?.display || null],
 		["Object AC", this._getObjectAcHtml(ent)],
 		["Roles", (ent.roles || []).map(Parser.itemMaterialRoleToFull).join(", ") || null],
@@ -297,11 +299,43 @@ class _RenderItemMaterialImpl extends RenderPageImplBase {
 	_getAxesRow ({ent}) {
 		const cells = Parser.ITEM_MATERIAL_AXES
 			.map(axis => `<div class="crafting__axis">
-				<div class="crafting__axis-label">${axis.full}</div>
+				<div class="crafting__axis-label">${this._getRuleLabel(axis.key)}</div>
 				<div class="crafting__axis-value">${Parser.itemMaterialAxisToFull(ent[axis.key], {isSigned: axis.isSigned})}</div>
 			</div>`)
 			.join("");
 		return `<tr><td colspan="6" class="ve-pt-2"><div class="crafting__axes">${cells}</div></td></tr>`;
+	}
+
+	_getRuleLabel (key) {
+		const rule = Parser.ITEM_MATERIAL_RULE_BY_KEY[key];
+		if (!rule) return Parser.itemMaterialRuleToFull(key);
+		return `<abbr class="crafting__rule-help" title="${`${rule.full}: ${rule.summary}`.qq()}">${rule.full}</abbr>`;
+	}
+
+	_getMaterialRulesRow () {
+		const rules = Parser.ITEM_MATERIAL_RULES
+			.map(rule => `<dt>${rule.full}</dt><dd>${rule.summary}</dd>`)
+			.join("");
+		const progression = Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION;
+		return `<tr><td colspan="6" class="ve-pt-1">
+			<details class="crafting__material-rules">
+				<summary>Material Rules</summary>
+				<div class="crafting__material-rules-body">
+					<dl class="crafting__material-rule-list">${rules}</dl>
+					<div class="crafting__damage-progression-wrap">
+						<strong>Weapon Damage Progression</strong>
+						<p class="ve-muted mb-1">Move one step for each point of Damage Dice. Parenthetical dice are equivalent alternatives when an effect changes the number of dice.</p>
+						<table class="crafting__damage-progression">
+							<thead><tr>${progression.map(it => `<th scope="col">${it.step}</th>`).join("")}</tr></thead>
+							<tbody>
+								<tr>${progression.map(it => `<td>${it.die}</td>`).join("")}</tr>
+								<tr class="ve-muted">${progression.map(it => `<td>${it.equivalent ? `(${it.equivalent})` : "\u2014"}</td>`).join("")}</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</details>
+		</td></tr>`;
 	}
 
 	_getDensityHtml (ent) {
@@ -310,6 +344,13 @@ class _RenderItemMaterialImpl extends RenderPageImplBase {
 			? ` <span class="ve-muted">(weight &times;${ent.weightMultiplier})</span>`
 			: "";
 		return `${ent.density}${mult}`;
+	}
+
+	_getColorHtml (ent) {
+		const color = ent.color?.css;
+		if (!color) return null;
+		if (!/^#[0-9a-f]{6}$/i.test(color)) return `${color}`.qq();
+		return `<span class="crafting__material-color"><span class="crafting__material-color-swatch" style="--crafting-material-color: ${color}" aria-hidden="true"></span><span>${color}</span></span>`;
 	}
 
 	_getObjectAcHtml (ent) {

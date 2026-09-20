@@ -48,10 +48,86 @@
 				opacity: 0.7;
 			}
 
+			&rule-help {
+				color: inherit;
+				text-decoration: underline dotted;
+				text-decoration-color: currentcolor;
+				text-underline-offset: 2px;
+				cursor: help;
+			}
+
 			&axis-value {
 				font-size: 15px;
 				line-height: 19px;
 				font-weight: 600;
+			}
+
+			&material-rules {
+				border: 1px solid vars.$rgb-border-grey--trans;
+				border-radius: 0;
+
+				> summary {
+					padding: 5px 8px;
+					font-weight: 600;
+					cursor: pointer;
+				}
+			}
+
+			&material-rules-body {
+				padding: 7px 9px 9px;
+				border-top: 1px solid vars.$rgb-border-grey--trans;
+			}
+
+			&material-rule-list {
+				display: grid;
+				grid-template-columns: max-content 1fr;
+				gap: 4px 12px;
+				margin: 0;
+
+				dt {
+					font-weight: 600;
+					white-space: nowrap;
+				}
+
+				dd {
+					margin: 0;
+				}
+			}
+
+			&damage-progression-wrap {
+				max-width: 100%;
+				margin-top: 8px;
+				overflow-x: auto;
+			}
+
+			&damage-progression {
+				width: 100%;
+				min-width: 520px;
+				margin-top: 4px;
+				border-collapse: collapse;
+				text-align: center;
+				font-variant-numeric: tabular-nums;
+
+				th,
+				td {
+					padding: 2px 4px;
+					border: 1px solid vars.$rgb-border-grey--trans;
+					white-space: nowrap;
+				}
+			}
+
+			&material-color {
+				display: inline-flex;
+				align-items: center;
+				gap: 5px;
+			}
+
+			&material-color-swatch {
+				width: 14px;
+				height: 14px;
+				border: 1px solid vars.$rgb-border-grey--trans;
+				border-radius: 50%;
+				background: var(--crafting-material-color);
 			}
 
 			&tag {
@@ -90,6 +166,28 @@
 		}
 	}
 
+	.crafting-material-sort {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 6px;
+		border-bottom: 1px solid vars.$rgb-border-grey--trans;
+
+		label {
+			margin: 0;
+			font-size: 12px;
+			font-weight: 600;
+			white-space: nowrap;
+		}
+
+		select {
+			min-width: 0;
+			height: 26px;
+			flex: 1;
+			font-size: 12px;
+		}
+	}
+
 	.ve-night-mode .crafting {
 		&__ {
 			&tag {
@@ -98,6 +196,38 @@
 
 			&axis {
 				border-color: vars-night.$rgb-border-grey--trans-night;
+			}
+
+			&material-rules,
+			&material-rules-body,
+			&damage-progression th,
+			&damage-progression td,
+			&material-color-swatch {
+				border-color: vars-night.$rgb-border-grey--trans-night;
+			}
+		}
+	}
+
+	.ve-night-mode .crafting-material-sort {
+		border-bottom-color: vars-night.$rgb-border-grey--trans-night;
+	}
+
+	@media (width <= 480px) {
+		.crafting__material-rule-list {
+			grid-template-columns: 1fr;
+
+			dd {
+				margin-bottom: 5px;
+			}
+		}
+
+		.crafting-material-sort {
+			align-items: stretch;
+			flex-direction: column;
+			gap: 3px;
+
+			select {
+				width: 100%;
 			}
 		}
 	}

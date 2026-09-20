@@ -51,10 +51,18 @@ class CharacterSheetMaterials {
 	 * ladder in `CharacterSheetUpgrades.increaseDamageDie`, which caps at 1d12 — that
 	 * helper is deliberately left alone so the `Superior` upgrade is unchanged.
 	 */
-	static DIE_LADDER = ["1d4", "1d6", "1d8", "1d10", "1d12", "2d6", "2d8", "2d10", "2d12", "3d8", "3d10"];
+	static DIE_LADDER = Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION?.map(it => it.die)
+		|| ["1d4", "1d6", "1d8", "1d10", "1d12", "2d6", "2d8", "2d10", "2d12", "3d8", "3d10"];
 
 	/** Off-ladder dice the rules call out as equivalents, mapped to their ladder step. */
-	static DIE_EQUIVALENTS = {"2d4": 4, "3d6": 8};
+	static DIE_EQUIVALENTS = Object.fromEntries(
+		(Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION || [
+			{equivalent: "2d4", step: 5},
+			{equivalent: "3d6", step: 9},
+		])
+			.map((it, ix) => it.equivalent ? [it.equivalent, (it.step ?? ix + 1) - 1] : null)
+			.filter(Boolean),
+	);
 
 	/** Iron, not steel, is the metal baseline for density-derived weight. */
 	static METAL_BASELINE_DENSITY = 7.87;
@@ -1110,19 +1118,31 @@ class CharacterSheetMaterials {
 	 * @param {object} [item] Item the material would be applied to.
 	 */
 	static getSummary (material, item) {
-		if (!material) return "";
+		return CharacterSheetMaterials.getSummaryParts(material, item).map(it => it.text).join(" \u00B7 ");
+	}
+
+	/**
+	 * Structured summary parts let the picker attach the shared material-rule help
+	 * to each compact value without changing the plain-text badge contract.
+	 */
+	static getSummaryParts (material, item) {
+		if (!material) return [];
 		const kind = item ? CharacterSheetMaterials.getItemKind(item) : null;
 		const bits = [];
-		const push = (label, v, opts) => {
+		const push = (key, label, v, opts) => {
 			const n = CharacterSheetMaterials.axisValue(v);
-			if (n) bits.push(`${label} ${CharacterSheetMaterials.formatAxis(v, opts)}`);
+			if (n) bits.push({key, text: `${label} ${CharacterSheetMaterials.formatAxis(v, opts)}`});
 		};
-		if (!kind || kind === "weapon") push("Dmg", material.damage, {plus: true});
-		if ((!kind || kind === "armor") && CharacterSheetMaterials.axisValue(material.protection)) bits.push(`AC ${material.protection}`);
-		if (!kind || kind === "weapon") push("Crit", material.critical, {plus: true});
-		if (!item || CharacterSheetMaterials.isWeapon(item)) push("Pen", material.penetration, {plus: true});
-		if (material.magicCapacity != null) bits.push(`MC ${CharacterSheetMaterials.formatAxis(material.magicCapacity)}`);
-		return bits.join(" \u00B7 ");
+		if (!kind || kind === "weapon") push("damage", "Damage Dice", material.damage, {plus: true});
+		if ((!kind || kind === "armor") && CharacterSheetMaterials.axisValue(material.protection)) {
+			bits.push({key: "protection", text: `Protection ${material.protection}`});
+		}
+		if (!kind || kind === "weapon") push("critical", "Critical", material.critical, {plus: true});
+		if (!item || CharacterSheetMaterials.isWeapon(item)) push("penetration", "Penetration", material.penetration, {plus: true});
+		if (material.magicCapacity != null) {
+			bits.push({key: "magicCapacity", text: `Magic Capacity ${CharacterSheetMaterials.formatAxis(material.magicCapacity)}`});
+		}
+		return bits;
 	}
 
 	/**
@@ -1650,10 +1670,24 @@ class CharacterSheetMaterials {
 	 *
 	 * @param {object} item
 	 * @param {object} material
-	 * @returns {{dmg: ?number, ac: ?number, mc: ?number, weight: ?number, value: ?number}}
+	 * @returns {object}
 	 */
 	static getSortMetrics (item, material) {
-		const empty = {dmg: null, ac: null, mc: null, weight: null, value: null};
+		const empty = {
+			name: "",
+			category: "",
+			rarity: null,
+			damage: null,
+			ac: null,
+			critical: null,
+			penetration: null,
+			mc: null,
+			density: null,
+			weight: null,
+			price: null,
+			value: null,
+			risk: 0,
+		};
 		if (!item || !material) return empty;
 
 		const kind = CharacterSheetMaterials.getItemKind(item);
@@ -1662,9 +1696,16 @@ class CharacterSheetMaterials {
 		const after = CharacterSheetMaterials.applyToItem({...base, material: {name: material.name, source: material.source}}, material);
 		const mc = CharacterSheetMaterials.getMagicCapacityStatus(item, material);
 
-		const dieOf = (v) => {
-			const m = /^\s*\d*d(\d+)/i.exec(String(v || ""));
-			return m ? Number(m[1]) : null;
+		const dieStepOf = (v) => {
+			const norm = String(v || "").trim().toLowerCase();
+			const direct = CharacterSheetMaterials.DIE_LADDER.indexOf(norm);
+			if (direct >= 0) return direct;
+			return CharacterSheetMaterials.DIE_EQUIVALENTS[norm] ?? null;
+		};
+		const axisMetric = (value) => {
+			if (value === "infinity") return Infinity;
+			if (value === "-infinity") return -Infinity;
+			return typeof value === "number" ? value : null;
 		};
 
 		// A material that cannot reprice or reweigh the item leaves the base number in
@@ -1675,13 +1716,24 @@ class CharacterSheetMaterials {
 		const canReweigh = typeof material.density === "number";
 
 		return {
-			dmg: kind === "weapon" ? dieOf(after.dmg1) : null,
+			name: material.name || "",
+			category: CharacterSheetMaterials.CATEGORY_LABELS[material.materialCategory] || material.materialCategory || "",
+			rarity: (Parser.ITEM_RARITIES || ["none", "common", "uncommon", "rare", "very rare", "legendary", "artifact"])
+				.indexOf(material.rarity || "none"),
+			damage: kind === "weapon" ? dieStepOf(after.dmg1) : null,
 			ac: kind === "armor" ? (after.ac ?? null) : kind === "shield" ? (after.acBonus ?? null) : null,
+			critical: kind === "weapon" ? axisMetric(material.critical) : null,
+			penetration: kind === "weapon" ? axisMetric(material.penetration) : null,
 			// Unlimited outranks every finite capacity and a suppressor sits below every
 			// one, which is exactly the order a player ranks them in.
 			mc: !mc ? null : mc.isUnlimited ? Infinity : mc.isSuppressing ? -Infinity : mc.capacity,
+			density: typeof material.density === "number" ? material.density : null,
 			weight: canReweigh ? (after.weight ?? null) : null,
+			price: canReprice ? price.gp : null,
 			value: canReprice ? (after.value ?? null) : null,
+			risk: CharacterSheetMaterials.getRiskFlag(material)?.tier === "destroys"
+				? 2
+				: CharacterSheetMaterials.getRiskFlag(material)?.tier === "degrades" ? 1 : 0,
 		};
 	}
 
@@ -1693,17 +1745,28 @@ class CharacterSheetMaterials {
 	 * the player the control is broken.
 	 *
 	 * @param {object} item
-	 * @returns {Array<{key: string, label: string, isDesc?: boolean}>}
+	 * @returns {Array<{key: string, label: string, defaultDir: "asc"|"desc", isGrouped?: boolean}>}
 	 */
 	static getSortOptions (item) {
 		const kind = CharacterSheetMaterials.getItemKind(item);
 		return [
-			{key: "", label: "Category"},
-			...(kind === "weapon" ? [{key: "dmg", label: "Damage", isDesc: true}] : []),
-			...(kind === "armor" || kind === "shield" ? [{key: "ac", label: "Armor Class", isDesc: true}] : []),
-			{key: "mc", label: "Magic Capacity", isDesc: true},
-			{key: "weight", label: "Weight (lightest)"},
-			{key: "value", label: "Value (cheapest)"},
+			{key: "category", label: "Category", defaultDir: "asc", isGrouped: true},
+			{key: "name", label: "Name", defaultDir: "asc"},
+			{key: "rarity", label: "Rarity", defaultDir: "asc"},
+			...(kind === "weapon"
+				? [
+					{key: "damage", label: "Damage Dice", defaultDir: "desc"},
+					{key: "critical", label: "Critical", defaultDir: "desc"},
+					{key: "penetration", label: "Penetration", defaultDir: "desc"},
+				]
+				: []),
+			...(kind === "armor" || kind === "shield" ? [{key: "ac", label: "Protection / AC", defaultDir: "desc"}] : []),
+			{key: "mc", label: "Magic Capacity", defaultDir: "desc"},
+			{key: "density", label: "Density", defaultDir: "asc"},
+			{key: "weight", label: "Projected Weight", defaultDir: "asc"},
+			{key: "price", label: "Material Price", defaultDir: "asc"},
+			{key: "value", label: "Projected Value", defaultDir: "asc"},
+			{key: "risk", label: "Risk", defaultDir: "asc"},
 		];
 	}
 
@@ -1730,8 +1793,8 @@ class CharacterSheetMaterials {
 			rows.push({label, from: fmt(a), to: fmt(b)});
 		};
 
-		cmp("Damage", base.dmg1, after.dmg1);
-		cmp("Damage (versatile)", base.dmg2, after.dmg2);
+		cmp("Damage Dice", base.dmg1, after.dmg1);
+		cmp("Damage Dice (versatile)", base.dmg2, after.dmg2);
 		cmp("Base AC", base.ac, after.ac);
 		cmp("Shield bonus", base.acBonus, after.acBonus, v => (v == null ? "\u2014" : `+${v}`));
 		cmp("Crit threshold", base.critThreshold || 20, after.critThreshold || 20);
@@ -1753,6 +1816,46 @@ class CharacterSheetMaterials {
 	/** Escape a string for safe interpolation into an HTML template literal. */
 	static _esc (str) {
 		return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+	}
+
+	static _getMaterialRuleHelpHtml (key, label) {
+		const rule = Parser.ITEM_MATERIAL_RULE_BY_KEY[key];
+		if (!rule) return CharacterSheetMaterials._esc(label);
+		const esc = CharacterSheetMaterials._esc;
+		return `<abbr class="charsheet__material-rule-help" title="${esc(`${rule.full}: ${rule.summary}`)}">${esc(label)}</abbr>`;
+	}
+
+	static _getMaterialSummaryHtml (material, item) {
+		return CharacterSheetMaterials.getSummaryParts(material, item)
+			.map(part => CharacterSheetMaterials._getMaterialRuleHelpHtml(part.key, part.text))
+			.join(`<span class="charsheet__material-summary-separator" aria-hidden="true"> \u00B7 </span>`);
+	}
+
+	static _getMaterialRulesHtml () {
+		const esc = CharacterSheetMaterials._esc;
+		const rules = Parser.ITEM_MATERIAL_RULES
+			.map(rule => `<dt>${esc(rule.full)}</dt><dd>${esc(rule.summary)}</dd>`)
+			.join("");
+		const progression = Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION;
+		return `
+			<details class="charsheet__material-glossary mt-2">
+				<summary class="ve-small">Material Rules</summary>
+				<div class="charsheet__material-rules ve-small">
+					<dl class="charsheet__material-glossary-list mb-0">${rules}</dl>
+					<div class="charsheet__material-progression-wrap">
+						<strong>Weapon Damage Progression</strong>
+						<p class="ve-muted mb-1">Move one step for each point of Damage Dice. Parenthetical dice are equivalent alternatives when an effect changes the number of dice.</p>
+						<table class="charsheet__material-progression">
+							<thead><tr>${progression.map(it => `<th scope="col">${it.step}</th>`).join("")}</tr></thead>
+							<tbody>
+								<tr>${progression.map(it => `<td>${esc(it.die)}</td>`).join("")}</tr>
+								<tr class="ve-muted">${progression.map(it => `<td>${it.equivalent ? esc(`(${it.equivalent})`) : "\u2014"}</td>`).join("")}</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</details>
+		`;
 	}
 
 	/**
@@ -1805,7 +1908,7 @@ class CharacterSheetMaterials {
 				<div class="ve-flex-v-center p-2 stripe-even">
 					<div class="ve-flex-1">
 						<strong>${esc(mat.name)}</strong>
-						<span class="ve-muted ve-small ml-1">${esc(CharacterSheetMaterials.getSummary(mat, item))}</span>
+						<span class="ve-muted ve-small ml-1 charsheet__material-option-summary">${CharacterSheetMaterials._getMaterialSummaryHtml(mat, item)}</span>
 						<button type="button" class="ve-btn ve-btn-xxs ve-btn-default ml-2 charsheet__material-clear" aria-label="Remove ${esc(mat.name)} and revert ${esc(item.name)} to its default material">Remove</button>
 					</div>
 				</div>
@@ -1916,21 +2019,31 @@ class CharacterSheetMaterials {
 			// Built once on open: the numbers a player sorts by.
 			const metrics = eligible.map(mat => CharacterSheetMaterials.getSortMetrics(item, mat));
 			const SORTS = CharacterSheetMaterials.getSortOptions(item);
-			let sortKey = "";
+			let sortKey = SORTS[0].key;
+			let sortDir = SORTS[0].defaultDir;
 
 			const filterBar = e_({outer: `
 				<div class="charsheet__material-filter">
 					<input type="search" class="form-control input-sm charsheet__material-filter-ipt" placeholder="Filter ${eligible.length} materials\u2026" aria-label="Filter materials by name or effect" autocomplete="off">
 					<select class="form-control input-sm w-auto charsheet__material-sort" aria-label="Sort materials">
-						${SORTS.map(s => `<option value="${s.key}">${s.key ? `Sort: ${esc(s.label)}` : "Group by category"}</option>`).join("")}
+						${SORTS.map(s => `<option value="${s.key}">Sort: ${esc(s.label)}</option>`).join("")}
 					</select>
+					<button type="button" class="ve-btn ve-btn-default ve-btn-sm charsheet__material-sort-dir" aria-label="Sort ascending" title="Sort ascending"><span aria-hidden="true">\u2191</span></button>
 					<span class="ve-small ve-muted charsheet__material-filter-count" role="status"></span>
 				</div>
 			`});
 			filterIpt = filterBar.querySelector(".charsheet__material-filter-ipt");
 			const sortSel = filterBar.querySelector(".charsheet__material-sort");
+			const sortDirBtn = filterBar.querySelector(".charsheet__material-sort-dir");
 			const filterCount = filterBar.querySelector(".charsheet__material-filter-count");
 			const list = e_({outer: `<div class="charsheet__material-list"></div>`});
+			const updateSortDirection = () => {
+				const isDesc = sortDir === "desc";
+				sortDirBtn.innerHTML = `<span aria-hidden="true">${isDesc ? "\u2193" : "\u2191"}</span>`;
+				sortDirBtn.setAttribute("aria-label", `Sort ${isDesc ? "descending" : "ascending"}`);
+				sortDirBtn.title = `Sort ${isDesc ? "descending" : "ascending"}`;
+			};
+			updateSortDirection();
 
 			// The expanded row: the whole reason the modal exists. Deliberately does *not*
 			// repeat the material name — the row directly above it already says it.
@@ -2020,7 +2133,7 @@ class CharacterSheetMaterials {
 						<button type="button" class="charsheet__material-option-btn" aria-expanded="false">
 							<span class="charsheet__material-option-chevron" aria-hidden="true"></span>
 							<span class="charsheet__material-option-name">${esc(mat.name)}</span>
-							<span class="charsheet__material-option-summary ve-muted ve-small">${esc(CharacterSheetMaterials.getSummary(mat, item))}</span>
+							<span class="charsheet__material-option-summary ve-muted ve-small">${CharacterSheetMaterials._getMaterialSummaryHtml(mat, item)}</span>
 							${risk ? `<span class="charsheet__material-option-risk charsheet__material-option-risk--${risk.tier} ve-small"><span aria-hidden="true">\u26A0</span> ${esc(risk.label)}</span>` : ""}
 							${isCurrent ? `<span class="charsheet__material-option-applied ve-small">Applied</span>` : ""}
 						</button>
@@ -2042,23 +2155,22 @@ class CharacterSheetMaterials {
 				// Sorting and grouping answer different questions and fight each other: a
 				// "best damage" ranking split across eight collapsed headers ranks nothing.
 				// An explicit sort therefore flattens the list, exactly as a filter does.
-				const sort = SORTS.find(s => s.key === sortKey);
-				if (sortKey && sort) {
+				const sort = SORTS.find(s => s.key === sortKey) || SORTS[0];
+				const compareIdxs = (a, b) => {
 					const val = i => metrics[i][sortKey];
-					// Materials that do not carry the sorted axis sink to the bottom rather
-					// than being hidden — they are still eligible, just not ranked.
-					idxs.sort((a, b) => {
-						const va = val(a); const vb = val(b);
-						if (va == null && vb == null) return eligible[a].name.localeCompare(eligible[b].name);
-						if (va == null) return 1;
-						if (vb == null) return -1;
-						if (va === vb) return eligible[a].name.localeCompare(eligible[b].name);
-						return sort.isDesc ? vb - va : va - vb;
-					});
-					idxs.forEach(i => renderRow(list, i));
-				} else if (q) {
-					// A filtered result set is already short; re-grouping it would bury three
-					// matches under eight collapsed headers.
+					const va = val(a); const vb = val(b);
+					if (va == null && vb == null) return eligible[a].name.localeCompare(eligible[b].name);
+					if (va == null) return 1;
+					if (vb == null) return -1;
+					const base = typeof va === "string"
+						? va.localeCompare(vb)
+						: va === vb ? 0 : va < vb ? -1 : 1;
+					return (sortDir === "desc" ? -base : base)
+						|| eligible[a].name.localeCompare(eligible[b].name);
+				};
+
+				if (!sort.isGrouped || q) {
+					idxs.sort(compareIdxs);
 					idxs.forEach(i => renderRow(list, i));
 				} else {
 					const byCategory = new Map();
@@ -2067,10 +2179,8 @@ class CharacterSheetMaterials {
 						if (!byCategory.has(cat)) byCategory.set(cat, []);
 						byCategory.get(cat).push(i);
 					}
-					// The group holding the applied material leads — it is the one the player
-					// is comparing against, and it should not sit below seven collapsed others.
 					const cats = [...byCategory.keys()]
-						.sort((a, b) => Number(b === current?.materialCategory) - Number(a === current?.materialCategory));
+						.sort((a, b) => (sortDir === "desc" ? -1 : 1) * a.localeCompare(b));
 					for (const cat of cats) {
 						const label = CharacterSheetMaterials.CATEGORY_LABELS[cat] || cat;
 						// Always open one group. Landing on eight collapsed headers gives the
@@ -2106,8 +2216,19 @@ class CharacterSheetMaterials {
 				doExpand(idx, {isScroll: true});
 			});
 
-			sortSel.addEventListener("change", () => { sortKey = sortSel.value; renderList(); });
-			filterIpt.addEventListener("input", () => renderList());			filterIpt.addEventListener("keydown", (evt) => {
+			sortSel.addEventListener("change", () => {
+				sortKey = sortSel.value;
+				sortDir = SORTS.find(it => it.key === sortKey)?.defaultDir || "asc";
+				updateSortDirection();
+				renderList();
+			});
+			sortDirBtn.addEventListener("click", () => {
+				sortDir = sortDir === "asc" ? "desc" : "asc";
+				updateSortDirection();
+				renderList();
+			});
+			filterIpt.addEventListener("input", () => renderList());
+			filterIpt.addEventListener("keydown", (evt) => {
 				// Escape clears the filter before it closes the modal — the reflex every
 				// other search box in the app already honours.
 				if (evt.key !== "Escape" || !filterIpt.value) return;
@@ -2128,23 +2249,7 @@ class CharacterSheetMaterials {
 
 		modalInner.append(content);
 
-		// The rules doc is 678 lines; the picker is where people meet the vocabulary. A
-		// disclosure keeps the definitions one keystroke away without spending list space
-		// on players who already know them.
-		modalInner.append(e_({outer: `
-			<details class="charsheet__material-glossary mt-2">
-				<summary class="ve-small">What do these numbers mean?</summary>
-				<dl class="charsheet__material-glossary-list ve-small mb-0">
-					<dt>MC</dt><dd>Magic Capacity \u2014 how many magical effects the material carries before the item is overloaded. Steel holds 3; an overloaded item stops working until you remove effects.</dd>
-					<dt>MC \u221e</dt><dd>Unlimited \u2014 this material never overloads.</dd>
-					<dt>MC \u2212\u221e</dt><dd>Suppressing \u2014 this material smothers magic entirely, so no enchantment functions while the item is made of it.</dd>
-					<dt>\u2726</dt><dd>The material carries a magical property of its own.</dd>
-					<dt>Pen</dt><dd>Penetration \u2014 on a miss, if you missed by that much or less, the attack may still hit. Applies against non-magical AC unless the material says otherwise.</dd>
-					<dt>Crit</dt><dd>The die roll on which an attack becomes a critical hit. Lower is better.</dd>
-					<dt>Roles</dt><dd>A condensate grants its affinity in one role only: a weapon's <b>striking surface</b> or its <b>focus</b>, or armour's <b>protective layer</b>. An affinity written for a role this item cannot host stays dormant.</dd>
-				</dl>
-			</details>
-		`}));
+		modalInner.append(e_({outer: CharacterSheetMaterials._getMaterialRulesHtml()}));
 
 		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-3">
 			<button class="ve-btn ve-btn-default">Close</button>

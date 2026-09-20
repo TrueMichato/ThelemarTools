@@ -39,8 +39,23 @@ describe("itemMaterial crafting-page registration", () => {
 			const byKey = Object.fromEntries(Parser.ITEM_MATERIAL_AXES.map(it => [it.key, it]));
 			expect(Object.keys(byKey).sort()).toEqual(["critical", "damage", "magicCapacity", "penetration", "protection"]);
 			// Damage is a signed step count; Protection is an absolute AC, so it must not gain a "+".
+			expect(byKey.damage.full).toBe("Damage Dice");
 			expect(byKey.damage.isSigned).toBe(true);
 			expect(byKey.protection.isSigned).toBe(false);
+		});
+
+		it("shares all seven property explanations and the complete damage progression", () => {
+			expect(Parser.ITEM_MATERIAL_RULES.map(it => it.key)).toEqual([
+				"density", "damage", "protection", "critical", "penetration", "magicCapacity", "color",
+			]);
+			expect(Parser.ITEM_MATERIAL_RULES.every(it => it.full && it.summary)).toBe(true);
+			expect(Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION.map(it => it.die)).toEqual([
+				"1d4", "1d6", "1d8", "1d10", "1d12", "2d6", "2d8", "2d10", "2d12", "3d8", "3d10",
+			]);
+			expect(Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION.filter(it => it.equivalent)).toEqual([
+				expect.objectContaining({step: 5, equivalent: "2d4"}),
+				expect.objectContaining({step: 9, equivalent: "3d6"}),
+			]);
 		});
 	});
 
@@ -141,6 +156,15 @@ describe("itemMaterial crafting-page registration", () => {
 			expect(groupFn("metal")).toBe("Item Material");
 			expect(groupFn("materials")).toBe("Rule");
 		});
+
+		it("keeps non-material rows below ranked materials in both sort directions", () => {
+			const material = {name: "Steel", values: {materialDamage: 1}};
+			const nonMaterial = {name: "Iron Ingot", values: {materialDamage: null}};
+			expect(PageFilterCrafting.sortCrafting(material, nonMaterial, {sortBy: "materialDamage", sortDir: "asc"})).toBeLessThan(0);
+			// List reverses the comparator for descending order; returning the opposite
+			// here still leaves the unranked row at the bottom after that reversal.
+			expect(PageFilterCrafting.sortCrafting(material, nonMaterial, {sortBy: "materialDamage", sortDir: "desc"})).toBeGreaterThan(0);
+		});
 	});
 
 	describe("generated data", () => {
@@ -149,6 +173,18 @@ describe("itemMaterial crafting-page registration", () => {
 		it("emits the item materials alongside the other three props", () => {
 			expect(Array.isArray(data.itemMaterial)).toBe(true);
 			expect(data.itemMaterial.length).toBeGreaterThan(0);
+		});
+
+		describe("item-material reference rendering", () => {
+			it("renders shared rule help, Damage Dice terminology, color, and the progression", () => {
+				const src = fs.readFileSync("js/render-crafting.js", "utf-8");
+				expect(src).toContain("Parser.ITEM_MATERIAL_RULES");
+				expect(src).toContain("Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION");
+				expect(src).toContain("Material Rules");
+				expect(src).toContain("Weapon Damage Progression");
+				expect(src).toContain("crafting__material-color-swatch");
+				expect(src).toContain("crafting__rule-help");
+			});
 		});
 
 		it("has no duplicate name|source", () => {
