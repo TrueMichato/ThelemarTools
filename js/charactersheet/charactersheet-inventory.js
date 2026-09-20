@@ -677,7 +677,7 @@ class CharacterSheetInventory {
 			if (selectedTypes.size > 0) count++;
 			if (selectedRarities.size > 0) count++;
 			if (selectedSources.size > 0) count++;
-			if (filterAttunement) count++;
+			if (attunementFilter !== FilterPickerHelpers.ATTUNEMENT_FILTER_MODES.ALL) count++;
 			if (selectedWeaponCat) count++;
 			if (selectedArmorCat) count++;
 			if (selectedProps.size > 0) count++;
@@ -893,18 +893,37 @@ class CharacterSheetInventory {
 			});
 		});
 
-		// ---- Quick filter: Attunement only (tabs replace Magical/Mundane/Consumable) ----
+		// ---- Quick filter: Attunement (tabs replace Magical/Mundane/Consumable) ----
 		const quickFilters = e_({outer: `<div class="charsheet__modal-quick-filters"></div>`});
 		filterCollapsible.append(quickFilters);
 
-		let filterAttunement = false;
-		const attuneBtn = e_({tag: "button", clazz: "charsheet__modal-filter-btn", txt: "🔗 Requires Attunement"});
-		quickFilters.append(attuneBtn);
-		attuneBtn.addEventListener("click", () => {
-			filterAttunement = !filterAttunement;
-			FilterPickerHelpers.setPressed(attuneBtn, filterAttunement);
+		quickFilters.append(e_({tag: "span", clazz: "ve-small ve-muted ve-flex-v-center", txt: "Attunement:"}));
+		let attunementFilter = FilterPickerHelpers.ATTUNEMENT_FILTER_MODES.ALL;
+		const attunementButtons = new Map();
+		const setAttunementFilter = (mode) => {
+			attunementFilter = mode;
+			for (const [buttonMode, button] of attunementButtons) {
+				FilterPickerHelpers.setPressed(button, buttonMode === attunementFilter);
+			}
 			_updateFilterToggle();
-			renderList();
+			if (typeof renderList === "function") renderList();
+		};
+		[
+			{mode: FilterPickerHelpers.ATTUNEMENT_FILTER_MODES.ALL, label: "All"},
+			{mode: FilterPickerHelpers.ATTUNEMENT_FILTER_MODES.REQUIRED, label: "🔗 Requires Attunement"},
+			{mode: FilterPickerHelpers.ATTUNEMENT_FILTER_MODES.NONE, label: "No Attunement"},
+		].forEach(({mode, label}) => {
+			const btn = e_({
+				tag: "button",
+				clazz: "charsheet__modal-filter-btn",
+				txt: label,
+				type: "button",
+				attrs: {"aria-label": `Attunement: ${label.replace("🔗 ", "")}`},
+			});
+			FilterPickerHelpers.setPressed(btn, mode === attunementFilter);
+			btn.addEventListener("click", () => setAttunementFilter(mode));
+			attunementButtons.set(mode, btn);
+			quickFilters.append(btn);
 		});
 
 		/** Collapsible facet block inside Filters (keeps power, hides chip walls by default). */
@@ -1194,7 +1213,7 @@ class CharacterSheetInventory {
 				{current: selectedDmgTypes, default: new Set()},
 			],
 			flags: [
-				{current: filterAttunement, default: false},
+				{current: attunementFilter, default: FilterPickerHelpers.ATTUNEMENT_FILTER_MODES.ALL},
 				{current: !!selectedWeaponCat, default: false},
 				{current: !!selectedArmorCat, default: false},
 				{current: currentSort !== defaultItemSort, default: false},
@@ -1203,8 +1222,10 @@ class CharacterSheetInventory {
 
 		const resetItemFilters = () => {
 			search.value = "";
-			filterAttunement = false;
-			FilterPickerHelpers.setPressed(attuneBtn, false);
+			attunementFilter = FilterPickerHelpers.ATTUNEMENT_FILTER_MODES.ALL;
+			for (const [mode, button] of attunementButtons) {
+				FilterPickerHelpers.setPressed(button, mode === attunementFilter);
+			}
 			selectedWeaponCat = null;
 			weaponCatBtns.querySelectorAll("button").forEach(b => FilterPickerHelpers.setPressed(b, false));
 			selectedArmorCat = null;
@@ -1258,7 +1279,7 @@ class CharacterSheetInventory {
 				// Multi-select source filter
 				if (selectedSources.has("__NONE__")) return false;
 				if (selectedSources.size > 0 && !selectedSources.has("__NONE__") && !selectedSources.has(item.source)) return false;
-				if (filterAttunement && !item.reqAttune) return false;
+				if (!FilterPickerHelpers.itemMatchesAttunementFilter(item, attunementFilter)) return false;
 				// Weapon category filter
 				if (selectedWeaponCat && (item.weaponCategory || "").toLowerCase() !== selectedWeaponCat) return false;
 				// Armor category filter

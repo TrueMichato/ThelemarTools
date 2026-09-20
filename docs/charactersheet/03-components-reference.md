@@ -322,6 +322,11 @@ static summarizeEffects(effects)
 | 5 | Skills, tools, languages |
 | 6 | Review and finalize |
 
+The background catalog excludes the PHB 2014 `Custom Background` rules template;
+players create custom backgrounds through the dedicated builder action instead.
+The canonical data entity remains loaded so existing saves continue to render and
+can be edited or replaced.
+
 ### Key State Properties
 
 ```javascript
@@ -486,6 +491,11 @@ _updateCurrency(type, value)
 // Encumbrance
 _calculateEncumbrance()
 ```
+
+The Add Item picker keeps its other facets intact while applying an explicit
+three-state attunement filter: **All**, **Requires Attunement**, or
+**No Attunement**. Conditional requirements such as “by a wizard” count as
+requiring attunement; Reset Filters restores **All**.
 
 ### Item Data Structure
 

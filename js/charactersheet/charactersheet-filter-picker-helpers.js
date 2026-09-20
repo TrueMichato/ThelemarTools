@@ -15,6 +15,37 @@ export const LABELS = {
 	emptyFilteredDetail: "Nothing matches your search or filters.",
 };
 
+export const ATTUNEMENT_FILTER_MODES = Object.freeze({
+	ALL: "all",
+	REQUIRED: "required",
+	NONE: "none",
+});
+
+function _isRequiredAttunementValue (value) {
+	if (value == null || value === false) return false;
+	if (typeof value !== "string") return true;
+	return value.trim().toLowerCase() !== "optional";
+}
+
+/**
+ * True when an item has any required-attunement path. Strings such as
+ * "by a wizard" are requirements; an optional-only path is not.
+ */
+export function itemRequiresAttunement (item) {
+	if (!item) return false;
+	return [item.requiresAttunement, item.reqAttune, item.reqAttuneAlt]
+		.some(_isRequiredAttunementValue);
+}
+
+/** Match an item against the Add Item modal's three-state attunement filter. */
+export function itemMatchesAttunementFilter (item, mode = ATTUNEMENT_FILTER_MODES.ALL) {
+	if (mode === ATTUNEMENT_FILTER_MODES.ALL) return true;
+	const requiresAttunement = itemRequiresAttunement(item);
+	if (mode === ATTUNEMENT_FILTER_MODES.REQUIRED) return requiresAttunement;
+	if (mode === ATTUNEMENT_FILTER_MODES.NONE) return !requiresAttunement;
+	throw new Error(`Unknown attunement filter mode "${mode}"`);
+}
+
 /** True when a filtered list should show the empty canvas (arrays only). */
 export function shouldShowFilteredEmpty (filtered) {
 	return !Array.isArray(filtered) || filtered.length === 0;
@@ -411,6 +442,9 @@ export function shouldShowTypeFamily (selectedTypes, familyKeys, opts = {}) {
 
 const exportsObj = {
 	LABELS,
+	ATTUNEMENT_FILTER_MODES,
+	itemRequiresAttunement,
+	itemMatchesAttunementFilter,
 	shouldShowFilteredEmpty,
 	setsEqual,
 	isFilterDirty,

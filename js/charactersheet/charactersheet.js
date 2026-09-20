@@ -1950,7 +1950,7 @@ class CharacterSheetPage {
 		}
 
 		const races = this.filterByAllowedSources(this._races || []);
-		const backgrounds = this.filterByAllowedSources(this._backgrounds || []);
+		const backgrounds = this.filterByAllowedSources(this.getBackgrounds());
 		const byName = (/** @type {*} */ a, /** @type {*} */ b) => SortUtil.ascSortLower(a.name, b.name);
 
 		const {eleModalInner: modalInner, doClose} = UiUtil.getShowModal({
@@ -21138,7 +21138,16 @@ class CharacterSheetPage {
 	getSubclasses () { return this._subclasses; }
 	getClassFeatures () { return this._classFeatures; }
 	getSubclassFeatures () { return this._subclassFeatures; }
-	getBackgrounds () { return this._backgrounds; }
+	static isPlayerSelectableBackground (background) {
+		return !(
+			String(background?.name || "").toLowerCase() === "custom background"
+			&& String(background?.source || "").toUpperCase() === "PHB"
+		);
+	}
+
+	getBackgrounds () {
+		return (this._backgrounds || []).filter(this.constructor.isPlayerSelectableBackground);
+	}
 	getSpells () { return this._spellsData; }
 	getItems () { return this._itemsData; }
 	getFeats () { return this._featsData; }

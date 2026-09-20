@@ -16,6 +16,9 @@
  */
 
 import "./setup.js";
+import {readFileSync} from "node:fs";
+
+const REAL_ITEMS = JSON.parse(readFileSync(new URL("../../../data/items.json", import.meta.url), "utf8")).item;
 
 /** Minimal element tree for helper DOM builders (no jsdom). */
 function mkNode (tag = "div") {
@@ -133,6 +136,9 @@ const {
 	shouldShowTypeFamily,
 	createExclusivePopoverController,
 	clearAnchoredPopoverStyles,
+	ATTUNEMENT_FILTER_MODES,
+	itemRequiresAttunement,
+	itemMatchesAttunementFilter,
 } = await import("../../../js/charactersheet/charactersheet-filter-picker-helpers.js");
 
 describe("CharacterSheetFilterPickerHelpers — empty predicate", () => {
@@ -191,6 +197,45 @@ describe("CharacterSheetFilterPickerHelpers — setPressed", () => {
 		setPressed(btn, false);
 		expect(btn.classList.contains("active")).toBe(false);
 		expect(btn.getAttribute("aria-pressed")).toBe("false");
+	});
+});
+
+describe("CharacterSheetFilterPickerHelpers — item attunement modes", () => {
+	const getRealItem = (name, source) => {
+		const item = REAL_ITEMS.find(it => it.name === name && it.source === source);
+		expect(item).toBeDefined();
+		return item;
+	};
+
+	it("partitions real item data into required and no-attunement sets", () => {
+		const required = REAL_ITEMS.filter(item => itemMatchesAttunementFilter(item, ATTUNEMENT_FILTER_MODES.REQUIRED));
+		const without = REAL_ITEMS.filter(item => itemMatchesAttunementFilter(item, ATTUNEMENT_FILTER_MODES.NONE));
+
+		expect(required.length).toBeGreaterThan(0);
+		expect(without.length).toBeGreaterThan(0);
+		expect(required).toHaveLength(REAL_ITEMS.filter(itemRequiresAttunement).length);
+		expect(required.length + without.length).toBe(REAL_ITEMS.length);
+		expect(required.some(item => without.includes(item))).toBe(false);
+	});
+
+	it("treats conditional and alternate attunement shapes as requiring attunement", () => {
+		const classRestricted = getRealItem("+1 All-Purpose Tool", "TCE");
+		const alternateOptional = getRealItem("Hazirawn", "HotDQ");
+
+		expect(typeof classRestricted.reqAttune).toBe("string");
+		expect(alternateOptional.reqAttuneAlt).toBe("optional");
+		expect(itemRequiresAttunement(classRestricted)).toBe(true);
+		expect(itemRequiresAttunement(alternateOptional)).toBe(true);
+		expect(itemMatchesAttunementFilter(classRestricted, ATTUNEMENT_FILTER_MODES.REQUIRED)).toBe(true);
+		expect(itemMatchesAttunementFilter(alternateOptional, ATTUNEMENT_FILTER_MODES.NONE)).toBe(false);
+	});
+
+	it("keeps ordinary non-attunement items in the negative set and all mode reversible", () => {
+		const potion = getRealItem("Potion of Healing", "DMG");
+		expect(itemRequiresAttunement(potion)).toBe(false);
+		expect(itemMatchesAttunementFilter(potion, ATTUNEMENT_FILTER_MODES.NONE)).toBe(true);
+		expect(itemMatchesAttunementFilter(potion, ATTUNEMENT_FILTER_MODES.REQUIRED)).toBe(false);
+		expect(itemMatchesAttunementFilter(potion, ATTUNEMENT_FILTER_MODES.ALL)).toBe(true);
 	});
 });
 
