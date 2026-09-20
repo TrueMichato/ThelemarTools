@@ -72,7 +72,7 @@
 						<div id="hub-campaign-list" class="hub-campaign-list"></div>
 						<div id="hub-campaign-empty" class="hub-empty ve-hidden">No campaigns yet. Create the first table when you are ready.</div>
 					</div>
-					<div class="hub-panel">
+					<div id="hub-create-panel" class="hub-panel">
 						<h2 class="hub-panel__title">Create a campaign</h2>
 						<p class="hub-panel__description">Start with a name. Members and content come next.</p>
 						<form id="hub-create-form" class="hub-form">
@@ -80,6 +80,10 @@
 							<input id="hub-campaign-name" class="hub-input" name="name" type="text" maxlength="120" autocomplete="off" required>
 							<button id="hub-create-submit" class="hub-button hub-button--primary" type="submit">Create campaign</button>
 						</form>
+						<div id="hub-create-not-entitled" class="hub-entitlement-state ve-hidden" role="status">
+							<strong>Campaign creation is not enabled for this account.</strong>
+							<span>You can still join campaigns through an invite and use every campaign you already belong to.</span>
+						</div>
 					</div>
 				</div>
 				<section id="hub-detached-characters" class="hub-panel hub-panel--border-top ve-hidden">
@@ -90,6 +94,8 @@
 				<section class="hub-panel">
 					<h2 class="hub-panel__title">Account &amp; devices</h2>
 					<p class="hub-panel__description">Review signed-in devices, export your data, or schedule account deletion.</p>
+					<div id="hub-account-reauth" class="hub-button-row" role="group" aria-label="Reauthenticate your account"></div>
+					<p id="hub-account-reauth-status" class="hub-inline-status" role="status" aria-live="polite"></p>
 					<div id="hub-session-list" class="hub-data-list"></div>
 					<div class="hub-button-row">
 						<button id="hub-revoke-other-sessions" class="hub-button" type="button">Sign out other devices</button>
@@ -97,11 +103,20 @@
 						<button id="hub-request-deletion" class="hub-button hub-button--danger" type="button">Delete account</button>
 					</div>
 				</section>
+				<section id="hub-operator-panel" class="hub-panel hub-panel--border-top ve-hidden">
+					<h2 class="hub-panel__title">Creator access</h2>
+					<p class="hub-panel__description">Operator-only controls for granting or revoking campaign creation. Reauthenticate before changing access.</p>
+					<div id="hub-operator-reauth" class="hub-button-row" role="group" aria-label="Reauthenticate with a linked provider"></div>
+					<p id="hub-operator-status" class="hub-inline-status" role="status" aria-live="polite"></p>
+					<div id="hub-operator-account-list" class="hub-data-list"></div>
+				</section>
 			</div>
 			<section id="hub-account-deletion-pending" class="hub-state--centered ve-hidden">
 				<div class="hub-state__content">
 					<h2 class="hub-state__title">Account deletion scheduled</h2>
 					<p id="hub-deletion-deadline" class="hub-state__description"></p>
+					<div id="hub-deletion-reauth" class="hub-button-row hub-button-row--centered" role="group" aria-label="Reauthenticate your account"></div>
+					<p id="hub-deletion-reauth-status" class="hub-inline-status" role="status" aria-live="polite"></p>
 					<div class="hub-button-row hub-button-row--centered">
 						<a class="hub-button" href="/api/account/export">Export account data</a>
 						<button id="hub-cancel-deletion" class="hub-button hub-button--primary" type="button">Keep my account</button>

@@ -35,6 +35,10 @@ import {getClientIpHeader, getRequestClientIp} from "./client-ip.js";
 import {SAFE_ITEM_SUMMARY_FIELDS} from "./hub-actions.js";
 import {PEER_SOURCE_COSTS_PROTOCOL_VERSION} from "../../js/hub/hub-source-costs.js";
 import {ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY} from "./hub-capabilities.js";
+import {
+	ACCOUNT_ENTITLEMENTS_CAPABILITY,
+	parseOperatorAccountIds,
+} from "./account-entitlements.js";
 import {HUB_PROTOCOL_VERSION} from "../../js/hub/hub-capabilities.js";
 import crypto from "node:crypto";
 
@@ -169,11 +173,13 @@ function validateConfig (config) {
 	if (clientIpHeader && config.trustProxy) {
 		throw new TypeError(`clientIpHeader and trustProxy cannot be enabled together.`);
 	}
-	return {
+	const normalized = {
 		sessionTtlSeconds: 60 * 60 * 24 * 30,
 		oauthStateTtlSeconds: 10 * 60,
 		inviteContextTtlSeconds: 5 * 60,
 		isInviteAccountAdmissionEnabled: false,
+		isAccountEntitlementsEnabled: false,
+		operatorAccountIds: [],
 		isSecure: new URL(appOrigin).protocol === "https:",
 		trustProxy: false,
 		metricsToken: null,
@@ -182,6 +188,8 @@ function validateConfig (config) {
 		appOrigin,
 		clientIpHeader,
 	};
+	normalized.operatorAccountIds = parseOperatorAccountIds(normalized.operatorAccountIds);
+	return normalized;
 }
 
 function getSafeReturnTo ({rawReturnTo, appOrigin}) {
@@ -233,6 +241,9 @@ export async function createHubApp ({
 	if (authProviderRegistry && oauthProvider) throw new TypeError(`Provide authProviderRegistry or oauthProvider, not both.`);
 	const providerRegistry = authProviderRegistry || getLegacyGitHubAuthProviderRegistry(oauthProvider);
 	const config = validateConfig(rawConfig);
+	if (config.isInviteAccountAdmissionEnabled && !config.isAccountEntitlementsEnabled) {
+		throw new TypeError(`Invite account admission requires account entitlement enforcement.`);
+	}
 	const metrics = metricsOverride || new HubMetrics();
 	const app = Fastify({
 		logger,
@@ -240,6 +251,19 @@ export async function createHubApp ({
 		bodyLimit: 2 * 1024 * 1024,
 		genReqId: request => getSafeRequestId(request) || crypto.randomUUID(),
 	});
+	store.setAccountEntitlementsEnabled?.(config.isAccountEntitlementsEnabled);
+	if (!config.isOperatorReconciliationComplete && config.operatorAccountIds.length) {
+		await store.pReconcileConfiguredOperatorEntitlements?.({
+			accountIds: config.operatorAccountIds,
+			onWarning: warning => app.log.warn(warning, "Configured Hub operator account was not found"),
+		});
+	}
+	if (
+		config.isAccountEntitlementsEnabled
+		&& !await store.pHasActivePlatformOperator?.()
+	) {
+		throw new TypeError(`Account entitlement enforcement requires an active platform operator.`);
+	}
 	await app.register(cookie, {secret: config.cookieSecret});
 	let realtime;
 	await app.register(websocket, {
@@ -370,7 +394,12 @@ export async function createHubApp ({
 	]);
 	app.addHook("preHandler", async (request, reply) => {
 		const pathname = request.url.split("?")[0];
-		if (["/api/live", "/api/ready", "/api/health", "/api/meta", "/api/metrics"].includes(pathname) || pathname.startsWith("/auth/")) return;
+		if (
+			["/api/live", "/api/ready", "/api/health", "/api/meta", "/api/metrics"].includes(pathname)
+			|| pathname.startsWith("/auth/")
+			|| pathname.startsWith("/api/account/reauthentication/")
+			|| pathname.startsWith("/api/operator/")
+		) return;
 		const auth = await pGetAuth(request);
 		if (auth?.account.status !== "deletion_requested") return;
 		if (deletionPendingAllowedPaths.has(pathname)) return;
@@ -623,6 +652,7 @@ export async function createHubApp ({
 			ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY,
 			...(config.isInviteAccountAdmissionEnabled ? [INVITE_ADMISSION_CAPABILITY] : []),
 			...(config.isCampaignRulesPolicyEnabled ? [CAMPAIGN_RULES_POLICY_CAPABILITY] : []),
+			...(config.isAccountEntitlementsEnabled ? [ACCOUNT_ENTITLEMENTS_CAPABILITY] : []),
 		],
 		authProviders: providerRegistry.getPublicMetadata(),
 	}));
@@ -793,6 +823,53 @@ export async function createHubApp ({
 	});
 
 	for (const provider of providerRegistry.getAvailableProviders()) {
+		app.post(`/api/account/reauthentication/${provider.slug}`, {
+			preHandler: [requireMutationSecurity, requireCurrentProtocolVersion],
+			config: {rateLimit: {max: 10, timeWindow: "1 minute"}},
+			schema: {
+				body: {
+					type: "object",
+					additionalProperties: false,
+					properties: {returnTo: {type: "string", minLength: 1, maxLength: 2_048}},
+				},
+			},
+		}, async (request, reply) => {
+			const transactionId = crypto.randomUUID();
+			const state = getOAuthState(transactionId);
+			const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
+			const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
+			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
+			const returnTo = getSafeReturnTo({
+				rawReturnTo: request.body?.returnTo,
+				appOrigin: config.appOrigin,
+			});
+			const authorizationUrl = provider.getAuthorizationUrl({
+				state,
+				codeChallenge: pkceVerifier == null ? null : getPkceChallenge(pkceVerifier),
+				nonce: oidcNonce,
+				redirectUri,
+			});
+			await store.pCreateOAuthTransaction({
+				id: transactionId,
+				stateHash: getSha256(state),
+				provider: provider.slug,
+				operation: "reauthenticate",
+				initiatingAccountId: request.hubAuth.account.id,
+				initiatingSessionId: request.hubAuth.session.id,
+				redirectUri,
+				returnTo,
+				pkceVerifier,
+				oidcNonce,
+				ttlSeconds: config.oauthStateTtlSeconds,
+			});
+			reply.setCookie(getOAuthTransactionCookieName(transactionId), transactionId, getCookieOptions({
+				isSecure: config.isSecure,
+				maxAge: config.oauthStateTtlSeconds,
+			}));
+			metrics.observeAuth?.({provider: provider.slug, outcome: "reauthentication_started"});
+			return reply.code(201).send({authorizationUrl});
+		});
+
 		app.get(provider.startPath, {
 			config: {rateLimit: {max: 10, timeWindow: "1 minute"}},
 			schema: {
@@ -881,7 +958,7 @@ export async function createHubApp ({
 					id: transactionId,
 					stateHash: getSha256(request.query.state),
 					provider: provider.slug,
-					operation: "sign_in",
+					operation: null,
 					redirectUri,
 				});
 			} catch (error) {
@@ -911,15 +988,28 @@ export async function createHubApp ({
 			const token = getRandomToken();
 			let completed;
 			try {
-				completed = await store.pCompleteOAuthSignIn({
-					identity,
-					tokenHash: getSha256(token),
-					expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
-					userAgent: request.headers["user-agent"] || null,
-					priorSessionId: priorAuth?.session.id || null,
-					oauthTransactionId: transaction.id,
-					isNewAccountAdmissionEnabled: config.isInviteAccountAdmissionEnabled,
-				});
+				if (transaction.operation === "reauthenticate") {
+					completed = await store.pCompleteOAuthReauthentication({
+						identity,
+						tokenHash: getSha256(token),
+						expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+						userAgent: request.headers["user-agent"] || null,
+						currentSessionId: priorAuth?.session.id || null,
+						oauthTransactionId: transaction.id,
+					});
+				} else if (transaction.operation === "sign_in") {
+					completed = await store.pCompleteOAuthSignIn({
+						identity,
+						tokenHash: getSha256(token),
+						expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+						userAgent: request.headers["user-agent"] || null,
+						priorSessionId: priorAuth?.session.id || null,
+						oauthTransactionId: transaction.id,
+						isNewAccountAdmissionEnabled: config.isInviteAccountAdmissionEnabled,
+					});
+				} else {
+					throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+				}
 			} catch (error) {
 				if (["INVITE_ADMISSION_REQUIRED", "INVITE_ADMISSION_INVALID", "ACCOUNT_UNAVAILABLE"].includes(error?.code)) {
 					clearTransactionCookies();
@@ -943,6 +1033,16 @@ export async function createHubApp ({
 	app.get("/api/session", async request => {
 		const auth = await pGetAuth(request);
 		if (!auth) return {signedIn: false};
+		const entitlements = config.isAccountEntitlementsEnabled
+			? await store.pGetOwnEntitlements({accountId: auth.account.id})
+			: [];
+		const linkedProviders = new Set(
+			(await store.pListExternalIdentities({accountId: auth.account.id}))
+				.map(identity => identity.provider),
+		);
+		const reauthenticationProviders = providerRegistry.getPublicMetadata()
+			.filter(provider => provider.status === "available" && linkedProviders.has(provider.slug))
+			.map(provider => provider.slug);
 		return {
 			signedIn: true,
 			account: {
@@ -952,13 +1052,61 @@ export async function createHubApp ({
 				deletionRequestedAt: auth.account.deletionRequestedAt,
 				purgeAfter: auth.account.purgeAfter,
 			},
+			entitlements,
+			reauthenticationProviders,
 			csrfToken: getCsrfToken({csrfSecret: config.csrfSecret, sessionId: auth.session.id}),
-			capabilities: [ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY],
+			capabilities: [
+				ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY,
+				...(config.isAccountEntitlementsEnabled ? [ACCOUNT_ENTITLEMENTS_CAPABILITY] : []),
+			],
 		};
 	});
 
+	if (config.isAccountEntitlementsEnabled) {
+		const entitlementParamsSchema = {
+			type: "object",
+			required: ["accountId", "entitlement"],
+			additionalProperties: false,
+			properties: {
+				accountId: {type: "string", format: "uuid"},
+				entitlement: {type: "string", minLength: 1, maxLength: 50},
+			},
+		};
+		app.get("/api/operator/accounts", {
+			preHandler: [requireProtocolVersion, requireCurrentProtocolVersion],
+		}, async request => ({
+			accounts: await store.pListOperatorAccounts({
+				accountId: request.hubAuth.account.id,
+				sessionId: request.hubAuth.session.id,
+			}),
+		}));
+		app.post("/api/operator/accounts/:accountId/entitlements/:entitlement/grant", {
+			preHandler: [requireMutationSecurity, requireCurrentProtocolVersion],
+			schema: {params: entitlementParamsSchema},
+		}, async request => store.pGrantAccountEntitlement({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
+			targetAccountId: request.params.accountId,
+			entitlementName: request.params.entitlement,
+			idempotencyKey: getIdempotencyKey(request),
+		}));
+		app.post("/api/operator/accounts/:accountId/entitlements/:entitlement/revoke", {
+			preHandler: [requireMutationSecurity, requireCurrentProtocolVersion],
+			schema: {params: entitlementParamsSchema},
+		}, async request => store.pRevokeAccountEntitlement({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
+			targetAccountId: request.params.accountId,
+			entitlementName: request.params.entitlement,
+			idempotencyKey: getIdempotencyKey(request),
+		}));
+	}
+
 	app.get("/api/account/export", {preHandler: requireAuth}, async (request, reply) => {
-		const exported = await store.pExportAccountData({accountId: request.hubAuth.account.id});
+		const exported = await store.pExportAccountData({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
+		});
 		reply.header("cache-control", "no-store");
 		reply.header("content-disposition", `attachment; filename="campaign-hub-export.json"`);
 		return exported;
@@ -1019,6 +1167,7 @@ export async function createHubApp ({
 	}, async (request, reply) => {
 		const response = await store.pRequestAccountDeletion({
 			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
 			idempotencyKey: getIdempotencyKey(request),
 		});
 		realtime.closeAccount({accountId: request.hubAuth.account.id, reason: "Account deletion requested"});
@@ -1028,6 +1177,7 @@ export async function createHubApp ({
 
 	app.post("/api/account/deletion/cancel", {preHandler: requireMutationSecurity}, async request => store.pCancelAccountDeletion({
 		accountId: request.hubAuth.account.id,
+		sessionId: request.hubAuth.session.id,
 		idempotencyKey: getIdempotencyKey(request),
 	}));
 

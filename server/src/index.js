@@ -4,6 +4,7 @@ import {getClientIpHeader} from "./client-ip.js";
 import {parsePeerSourceCostsCampaignIds} from "./peer-source-cost-rollout.js";
 import {PostgresHubStore} from "./postgres-hub-store.js";
 import {getSafeRequestLog, HUB_LOG_REDACT_PATHS} from "./observability.js";
+import {parseOperatorAccountIds} from "./account-entitlements.js";
 
 function requireEnv (name) {
 	const value = process.env[name];
@@ -24,14 +25,30 @@ function getTrustProxy () {
 }
 
 const clientIpHeader = getClientIpHeader(process.env.HUB_CLIENT_IP_HEADER);
+const isAccountEntitlementsEnabled = process.env.HUB_ACCOUNT_ENTITLEMENTS_ENABLED === "true";
+const isInviteAccountAdmissionEnabled = process.env.HUB_INVITE_ACCOUNT_ADMISSION_ENABLED === "true";
+const operatorAccountIds = parseOperatorAccountIds(process.env.HUB_OPERATOR_ACCOUNT_IDS);
+if (isInviteAccountAdmissionEnabled && !isAccountEntitlementsEnabled) {
+	throw new Error(`Invite account admission requires account entitlement enforcement.`);
+}
 const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
 	peerSourceCostsEnabled: parsePeerSourceCostsCampaignIds(
 		process.env.HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS,
 	),
+	isAccountEntitlementsEnabled,
 });
 await store.pCheckHealth();
+await store.pReconcileConfiguredOperatorEntitlements({
+	accountIds: operatorAccountIds,
+	onWarning: ({accountId}) => {
+		process.stderr.write(`Configured Hub operator account was not found (${accountId}).\n`);
+	},
+});
+if (isAccountEntitlementsEnabled && !await store.pHasActivePlatformOperator()) {
+	throw new Error(`Account entitlement enforcement requires an active platform operator.`);
+}
 const {authProviderRegistry} = createAuthProviderConfiguration({
 	onConfigurationError: ({slug, code}) => {
 		process.stderr.write(`Authentication provider ${slug} configuration failed (${code}).\n`);
@@ -57,8 +74,11 @@ const app = await createHubApp({
 		trustProxy: getTrustProxy(),
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
 		clientIpHeader,
-		isInviteAccountAdmissionEnabled: process.env.HUB_INVITE_ACCOUNT_ADMISSION_ENABLED === "true",
+		isInviteAccountAdmissionEnabled,
 		isCampaignRulesPolicyEnabled: process.env.HUB_CAMPAIGN_RULES_POLICY_ENABLED === "true",
+		isAccountEntitlementsEnabled,
+		operatorAccountIds,
+		isOperatorReconciliationComplete: true,
 	},
 });
 

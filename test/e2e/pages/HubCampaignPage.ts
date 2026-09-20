@@ -4,6 +4,8 @@ import {waitForToolsLoaded} from "../utils/waitHelpers";
 type HubSession = {
 	signedIn: boolean;
 	account: {id: string; displayName: string; status: string};
+	entitlements?: string[];
+	reauthenticationProviders?: string[];
 	csrfToken: string;
 };
 
@@ -17,10 +19,15 @@ export class HubCampaignPage {
 		this.page = page;
 	}
 
-	async signInSynthetic ({providerSubject, displayName, secret}: {providerSubject: string; displayName: string; secret: string}): Promise<HubSession> {
+	async signInSynthetic ({providerSubject, displayName, secret, grantCampaignCreate = true}: {
+		providerSubject: string;
+		displayName: string;
+		secret: string;
+		grantCampaignCreate?: boolean;
+	}): Promise<HubSession> {
 		const response = await this.page.request.post("/auth/__test/session", {
 			headers: {"x-hub-test-auth": secret},
-			data: {providerSubject, displayName},
+			data: {providerSubject, displayName, grantCampaignCreate},
 		});
 		expect(response.ok()).toBe(true);
 		return response.json();

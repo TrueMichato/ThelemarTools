@@ -26,7 +26,31 @@ describe("campaign hub pages", () => {
 		expect(hubHtml).toContain("id=\"hub-create-form\"");
 		expect(hubHtml).toContain("for=\"hub-campaign-name\"");
 		expect(hubHtml).toContain("id=\"hub-create-submit\"");
+		expect(hubHtml).toContain("id=\"hub-create-not-entitled\"");
 		expect(hubHtml).not.toContain("<dialog");
+	});
+
+	it("explains creator entitlement and exposes only focused operator administration", () => {
+		for (const id of [
+			"hub-account-reauth",
+			"hub-account-reauth-status",
+			"hub-deletion-reauth",
+			"hub-deletion-reauth-status",
+			"hub-operator-panel",
+			"hub-operator-reauth",
+			"hub-operator-status",
+			"hub-operator-account-list",
+		]) expect(hubHtml).toContain(`id="${id}"`);
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS");
+		expect(source).toContain("hasAccountEntitlement(session, \"campaign:create\")");
+		expect(source).toContain("new Set(session.reauthenticationProviders || [])");
+		expect(source).toContain("hasAccountEntitlement(session, \"platform:operate\")");
+		expect(source).toContain("pStartReauthentication");
+		expect(source).toContain("accountAction=delete");
+		expect(source).toContain("pGrantAccountEntitlement");
+		expect(source).toContain("pRevokeAccountEntitlement");
+		expect(source).toMatch(/Account \$\{account\.id\}/);
 	});
 
 	it("waits for both empty and populated campaign-list render states before creating another campaign", () => {

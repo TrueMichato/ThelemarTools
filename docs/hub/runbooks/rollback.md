@@ -29,6 +29,11 @@ unsupported by the target image. Never infer rollback safety from provider row c
 is part of usability. Already de-admitted accounts do not make an otherwise compatible rollback less safe. The
 preflight returns only a count to avoid exposing account/provider subjects in evidence.
 
+Migration 0009 is an additive previous-app-compatible expand migration. Reverting the application leaves
+`hub.account_entitlements` in place and disables enforcement; do not reverse migration 0009 or delete
+entitlement rows. Before rollback, set `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false` so a pre-entitlement image
+cannot admit accounts under a policy it does not enforce.
+
 ### 2026-09-12 exact-release evidence
 
 Release r7 evidence identified predecessor `hub-staging-2026-09-08-r6` at

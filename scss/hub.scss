@@ -291,6 +291,21 @@
 	line-height: 1.6;
 }
 
+.hub-entitlement-state {
+	display: grid;
+	gap: 6px;
+	padding: 14px;
+	border: 1px solid color-mix(in srgb, var(--hub-warning) 45%, var(--hub-border));
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--hub-warning) 8%, var(--hub-surface));
+	color: var(--hub-text-secondary);
+	line-height: 1.5;
+}
+
+.hub-entitlement-state strong {
+	color: var(--hub-text);
+}
+
 .hub-campaign-list {
 	display: flex;
 	flex-direction: column;

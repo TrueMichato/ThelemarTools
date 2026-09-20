@@ -29,9 +29,11 @@ maintenance and backup executions passed on 2026-09-13, completing V1-G1.
    `<HUB_APP_ORIGIN>/auth/github/callback`.
 5. Set `HUB_AUTH_PROVIDERS=github`. `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` is an incident-only kill switch;
    disabling the sole provider intentionally prevents startup.
-6. Leave `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false` until the r9 creator-entitlement layer is deployed and
-   approved. Existing identities continue to sign in. First-account creation uses a valid campaign invite, not
-   provider-subject configuration.
+6. Apply migration 0009, configure `HUB_OPERATOR_ACCOUNT_IDS` with explicitly designated internal account UUIDs,
+   and leave both `HUB_ACCOUNT_ENTITLEMENTS_ENABLED=false` and
+   `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false` until the r9 preflight passes. Startup reconciliation is
+   add-only: missing configured accounts warn, new configured operators are audited, and removed configuration
+   never revokes authority.
    Configure an independent `HUB_INVITE_TOKEN_SECRET`; do not reuse cookie or CSRF secrets.
 7. Serve the static site and BFF behind the same HTTPS origin, forwarding `/api/*` and `/auth/*` to the BFF.
    Set `HUB_TRUST_PROXY` only to the exact proxy IP/CIDR list, and configure that proxy to replace incoming
@@ -57,6 +59,27 @@ after admission.
 
 The process refuses to listen until PostgreSQL is reachable and the required ledger migration exists.
 `/api/health` also returns 503 if readiness fails. See [migrations.md](migrations.md).
+
+### r9 entitlement enablement
+
+1. Verify migration 0009 and role grants on an isolated restored database.
+2. Confirm every non-deleted current campaign owner, including archived/deleting owners, has exactly one active
+   `campaign:create`; confirm role-only DM/co-DM accounts were not backfilled.
+3. Confirm every configured operator UUID exists and has active `platform:operate` plus `campaign:create`.
+   Run `npm run hub:check-account-entitlements` with the candidate environment; it performs the same add-only
+   reconciliation and fails unless an active platform operator remains.
+4. Complete provider reauthentication as one designated operator, grant and revoke a synthetic creator, and
+   prove the revoked account receives `CAMPAIGN_CREATE_NOT_ENTITLED` with zero campaign/audit/event/outbox
+   creation side effects.
+5. Set `HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true`, restart through the normal release path, and verify
+   `account.entitlements.v1` in `/api/meta` and entitlement arrays in `/api/session`.
+6. Only after that evidence may `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=true` be considered.
+
+Rollback is application-only: set both switches false or deploy the previous compatible application. Leave
+`hub.account_entitlements` and migration 0009 in place; never down-migrate or delete entitlement rows.
+Before deploying the predecessor image, current code disables creator enforcement; predecessor account-status
+writes ignore migration 0009's transaction-marked status guard rather than surfacing a raw database constraint
+error.
 
 Before rolling back to a GitHub-only image, prove every active account still has a GitHub identity:
 

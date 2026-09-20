@@ -37,10 +37,12 @@ Transaction-specific signed OAuth cookies support multiple simultaneous starts f
 A failed, cancelled, or abandoned invite flow can rotate a separate five-minute opaque retry handle into a fresh
 same-provider context when the old transaction cookie is present, without retaining the raw invite.
 
-This foundation is intentionally **not deployable with new-account admission enabled** until the next stacked
-layer implements provider-neutral account-level `campaign:create` entitlement, backfills existing owners and
-designated operators, and adds audited freshly reauthenticated grant/revoke administration. Browser creator/admin
-and account-security polish also remains later-layer work.
+The stacked r9 entitlement layer adds migration 0009, provider-neutral `campaign:create` and
+`platform:operate`, exact owner backfill, add-only designated-operator UUID reconciliation, real provider
+reauthentication with session rotation, transaction-local freshness checks, hidden idempotent operator
+administration, lifecycle/export protection, an ordinary-user account reauthentication/deletion flow, stable
+UUID disambiguation for duplicate account names, and focused creator/operator browser states. Enforcement remains
+default-off until release preflight; identity link/unlink and broader account-security polish remain later work.
 
 The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
 out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback

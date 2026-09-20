@@ -40,6 +40,11 @@
       "phase": "expand",
       "previousAppCompatible": true,
       "notes": "Adds short-lived invite admission contexts and an optional OAuth transaction binding. Previous applications ignore both additive shapes; rollback after admitting identities outside the former allowlist requires the identity-compatibility procedure documented for r9."
+    },
+    "0009": {
+      "phase": "expand",
+      "previousAppCompatible": true,
+      "notes": "Adds provider-neutral account entitlements, nullable actor provenance, active-row indexes, a deferred last-operator backstop, and one-time creator backfill. Previous applications ignore the additive table; account-status enforcement requires the current app's transaction marker, so code rollback leaves the table in place without exposing unknown constraint failures."
     }
   }
 }

@@ -8,6 +8,22 @@ const databaseUrl = process.env.HUB_TEST_POSTGRES_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
 const ORIGIN = "https://tools.example";
 
+async function pCreateFreshSession (store, account) {
+	const [identity] = await store.pListExternalIdentities({accountId: account.id});
+	const session = await store.pCreateSession({
+		accountId: account.id,
+		tokenHash: crypto.randomBytes(32).toString("hex"),
+		expiresAt: new Date(Date.now() + 60_000),
+		authenticatedViaIdentityId: identity.id,
+	});
+	await store._pool.query(`
+		UPDATE hub.sessions
+		SET recent_reauthenticated_at = clock_timestamp()
+		WHERE id = $1
+	`, [session.id]);
+	return session;
+}
+
 describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 	let store;
 
@@ -563,8 +579,10 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			maxUses: 1,
 			idempotencyKey: crypto.randomUUID(),
 		});
+		const coDmSession = await pCreateFreshSession(store, coDm);
 		await store.pRequestAccountDeletion({
 			accountId: coDm.id,
+			sessionId: coDmSession.id,
 			idempotencyKey: crypto.randomUUID(),
 			graceMs: 1,
 		});

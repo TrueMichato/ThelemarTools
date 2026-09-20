@@ -40,7 +40,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 account linking/rollout retain their own acceptance gates |
-| **active** | r9 invite-gated identity | ADR 0018/migration 0008 server foundation is implemented on the current branch; new-account admission stays default-off and is not deployable until the stacked provider-neutral `campaign:create` entitlement/backfill/admin layer lands |
+| **active** | r9 invite-gated identity | ADR 0018/migration 0008 foundation and ADR 0019/migration 0009 provider-neutral creator/operator entitlement layer are implemented; entitlement enforcement and new-account admission remain default-off until release preflight |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
 Oracle runs annotated release `hub-staging-2026-09-10-r7` at
@@ -159,6 +159,7 @@ The approved decision-record sequence has landed:
 | [ADR 0015](adr/0015-campaign-rules-policy.md) | Campaign rules policy | V2-T6 |
 | [ADR 0016](adr/0016-atomic-peer-source-costs.md) | Atomic peer source costs | V2-T7 |
 | [ADR 0018](adr/0018-invite-gated-first-access.md) | Invite-gated first account access and future creator entitlement boundary | r9 identity |
+| [ADR 0019](adr/0019-provider-neutral-account-entitlements.md) | Provider-neutral account entitlements and reauthentication | r9 identity |
 
 ## Approved V2 release trains
 

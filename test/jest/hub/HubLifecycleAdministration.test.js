@@ -38,9 +38,7 @@ describe("Hub lifecycle administration", () => {
 		await join(player, "player");
 		await join(observer, "player");
 		playerSession = await store.pCreateSession({
-			accountId: player.id,
-			tokenHash: crypto.randomBytes(32).toString("hex"),
-			expiresAt: new Date(now.getTime() + 86_400_000),
+			...await getFreshSessionInput(player),
 		});
 	});
 
@@ -60,6 +58,18 @@ describe("Hub lifecycle administration", () => {
 			idempotencyKey: key(`invite-${role}`),
 		});
 		return (await store.pRedeemInvite({accountId: account.id, tokenHash, idempotencyKey: key(`redeem-${role}`)})).membership;
+	}
+
+	async function getFreshSessionInput (account, {tokenHash = crypto.randomBytes(32).toString("hex"), userAgent = null} = {}) {
+		const [identity] = await store.pListExternalIdentities({accountId: account.id});
+		return {
+			accountId: account.id,
+			tokenHash,
+			expiresAt: new Date(now.getTime() + 86_400_000),
+			userAgent,
+			authenticatedViaIdentityId: identity.id,
+			recentReauthenticatedAt: now,
+		};
 	}
 
 	it("lists/revokes invites and restricts role changes to the owner", async () => {
@@ -337,7 +347,10 @@ describe("Hub lifecycle administration", () => {
 
 	it("lists/revokes sessions and completes deletion grace, cancellation, and purge", async () => {
 		const expiresAt = new Date(now.getTime() + 30 * 86_400_000);
-		const first = await store.pCreateSession({accountId: player.id, tokenHash: "a".repeat(64), expiresAt, userAgent: "Laptop"});
+		const first = await store.pCreateSession({
+			...await getFreshSessionInput(player, {tokenHash: "a".repeat(64), userAgent: "Laptop"}),
+			expiresAt,
+		});
 		const second = await store.pCreateSession({accountId: player.id, tokenHash: "b".repeat(64), expiresAt, userAgent: "Phone"});
 		expect(await store.pListSessions({accountId: player.id, currentSessionId: first.id})).toEqual(expect.arrayContaining([
 			expect.objectContaining({id: first.id, isCurrent: true}),
@@ -346,23 +359,37 @@ describe("Hub lifecycle administration", () => {
 		const revoked = await store.pRevokeOtherSessions({accountId: player.id, currentSessionId: first.id, idempotencyKey: key("revoke-others")});
 		expect(new Set(revoked.revokedSessionIds)).toEqual(new Set([playerSession.id, second.id]));
 
+		const dmSession = await store.pCreateSession({...await getFreshSessionInput(dm), expiresAt});
 		await expect(store.pRequestAccountDeletion({
 			accountId: dm.id,
+			sessionId: dmSession.id,
 			idempotencyKey: key("owner-delete"),
 		})).rejects.toMatchObject({code: "ACCOUNT_OWNS_CAMPAIGN"});
 
 		const requested = await store.pRequestAccountDeletion({
 			accountId: player.id,
+			sessionId: first.id,
 			idempotencyKey: key("delete"),
 		});
 
 		expect(requested.deletion.status).toBe("deletion_requested");
 		expect(await store.pGetSessionByTokenHash({tokenHash: "a".repeat(64)})).toBeNull();
-		const graceSession = await store.pCreateSession({accountId: player.id, tokenHash: "c".repeat(64), expiresAt, userAgent: "Grace"});
+		const graceSession = await store.pCreateSession({
+			...await getFreshSessionInput(player, {tokenHash: "c".repeat(64), userAgent: "Grace"}),
+			expiresAt,
+		});
 		expect((await store.pGetSessionById({sessionId: graceSession.id})).account.status).toBe("deletion_requested");
-		expect((await store.pCancelAccountDeletion({accountId: player.id, idempotencyKey: key("cancel")})).deletion.status).toBe("active");
+		expect((await store.pCancelAccountDeletion({
+			accountId: player.id,
+			sessionId: graceSession.id,
+			idempotencyKey: key("cancel"),
+		})).deletion.status).toBe("active");
 
-		await store.pRequestAccountDeletion({accountId: player.id, idempotencyKey: key("delete-again")});
+		await store.pRequestAccountDeletion({
+			accountId: player.id,
+			sessionId: graceSession.id,
+			idempotencyKey: key("delete-again"),
+		});
 		now = new Date(now.getTime() + 8 * 86_400_000);
 		expect(await store.pPurgeDueAccounts()).toEqual({purgedAccountIds: [player.id], blockedAccountIds: []});
 		await expect(store.pExportAccountData({accountId: player.id})).rejects.toMatchObject({code: "ACCOUNT_NOT_FOUND"});
@@ -398,8 +425,10 @@ describe("Hub lifecycle administration", () => {
 			maxUses: 1,
 			idempotencyKey: "purged-created-invite-command",
 		});
+		const creatorSession = await store.pCreateSession(await getFreshSessionInput(creator));
 		await store.pRequestAccountDeletion({
 			accountId: creator.id,
+			sessionId: creatorSession.id,
 			idempotencyKey: "purged-creator-delete",
 			graceMs: 0,
 		});

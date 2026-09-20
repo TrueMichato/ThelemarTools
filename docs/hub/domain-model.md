@@ -4,7 +4,7 @@
 > **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
-The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0008. The PostgreSQL authority is
+The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0009. The PostgreSQL authority is
 `server/src/postgres-hub-store.js`; `MemoryHubStore` is a deterministic test double, not a production
 security boundary.
 
@@ -32,6 +32,7 @@ security boundary.
 | `sessions` | Browser session | unique token hash; expiry after creation; optional revoke; same-account identity provenance; recent-reauthentication slot | Hash-only server sessions |
 | `oauth_transactions` | Short-lived OAuth correlation | hash-only one-time state; concrete provider/operation/redirect; optional account/session, invite context, PKCE verifier, OIDC nonce; <=10 minutes | State-selected transaction-specific-cookie start/callback; later reauth/link-ready |
 | `invite_contexts` | First-access admission | one invite, hash-only retry handle, <=5 minutes, one unique OAuth transaction binding, terminal account/session/membership ids only after commit | Default-off r9 first-account admission and existing-account atomic invite join |
+| `account_entitlements` | Provider-neutral creator/operator authority | active `campaign:create`/`platform:operate`; account cascade; actor FKs set null; one active row/account/type; deferred last-operator protection | Capability-gated campaign creation and hidden operator administration |
 | `campaigns` | Campaign root | owner account; active/archived/deleting; monotonic next event sequence | active and archived used; deleting reserved |
 | `memberships` | Account role in campaign | unique campaign+account; dm/co_dm/player/spectator | active, removed, and left used; reinvite reuses row |
 | `invites` | Redeemable role grant | hash-only token, expiry, max/use count, optional revoke | create/list/redeem/revoke/expiry/max-use used |
@@ -58,7 +59,8 @@ security boundary.
 ### Account
 
 Owns external identities, sessions, characters, memberships, receipts, and authored actions. Campaign ownership
-is a blocking dependency. Account export exists; deletion lifecycle is Phase 6B.
+is a blocking dependency. Active account entitlements are account-scoped and independent of provider identity
+or campaign role. Account export includes the caller's entitlements; deletion lifecycle is Phase 6B.
 
 ### Campaign
 
@@ -238,6 +240,7 @@ stateDiagram-v2
 | 3 | account + client import id | serialize claim/reactivation |
 | 4 | campaign id | serialize party inventory creation/write |
 | 6 | campaign id | membership/campaign lifecycle serialization |
+| 7 | platform operator namespace | serialize operator grant/revoke/deletion checks before entitlement/account rows |
 
 These seeds are implementation allocations, not a public API. New lock classes must avoid accidental overlap
 and document ordering.
@@ -245,6 +248,11 @@ and document ordering.
 OAuth state consumption additionally uses the transaction row's unique state hash and row lock. Account,
 identity, and session creation for an unknown admitted sign-in commit together, so a failed session insert
 cannot leave an orphan identity/account.
+
+Account-entitlement commands acquire locks in this total order: idempotency advisory, operator namespace,
+entitlement row, account row, identities, sessions, leases, then any later campaign/invite authority. Campaign
+creation checks `campaign:create` before acquiring campaign authority or writing a receipt. Entitlement commands
+append account audit only and never campaign events or outbox rows.
 
 Invite authority uses identity/account locking first when a callback has identity, then campaign advisory lock
 seed 6, campaign row, and invite row. Other invite mutations use the same campaign-row-invite order. OAuth first

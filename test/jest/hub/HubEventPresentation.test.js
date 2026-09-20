@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import {
 	getRollPresentation,
 	normalizeHubEvent,
@@ -124,7 +125,20 @@ describe("campaign activity event presentation", () => {
 		await store.pMoveCharacter({accountId: player.id, characterId: moveTarget.id, campaignId: destination.id, idempotencyKey: "activity-move"});
 		const playerMembership = await store.pGetMembership({accountId: player.id, campaignId: campaign.id});
 		await store.pRemoveMember({accountId: owner.id, campaignId: campaign.id, membershipId: playerMembership.id, idempotencyKey: "activity-detach"});
-		await store.pRequestAccountDeletion({accountId: deleter.id, idempotencyKey: "activity-delete-request", graceMs: 0});
+		const [deleterIdentity] = await store.pListExternalIdentities({accountId: deleter.id});
+		const deleterSession = await store.pCreateSession({
+			accountId: deleter.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+			authenticatedViaIdentityId: deleterIdentity.id,
+			recentReauthenticatedAt: new Date(),
+		});
+		await store.pRequestAccountDeletion({
+			accountId: deleter.id,
+			sessionId: deleterSession.id,
+			idempotencyKey: "activity-delete-request",
+			graceMs: 0,
+		});
 		await new Promise(resolve => setTimeout(resolve, 5));
 		await store.pPurgeDueAccounts();
 		const events = await store.pListVisibleEvents({accountId: owner.id, campaignId: campaign.id});

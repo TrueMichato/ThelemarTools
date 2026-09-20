@@ -65,6 +65,10 @@
 Legacy pre-v3 `action.*` records may remain as history, but migration 0005 terminalizes arbitrary pending
 structured effects and the protocol-v3 API cannot apply them.
 
+Account entitlement grant/revoke and configured-operator reconciliation are deliberately absent from this
+campaign domain-event catalog. They append account-scoped audit entries only and never allocate a campaign
+sequence or outbox row.
+
 The exact applied payload is:
 
 ```json

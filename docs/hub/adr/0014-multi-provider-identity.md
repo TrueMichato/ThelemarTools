@@ -2,10 +2,10 @@
 
 Status: Accepted for implementation (2026-09-01)
 
-Implementation status: layer 1 uses migration `0006_multi_provider_identity.sql` and the provider-neutral
-transaction registry. Layer 2 adds Discord OAuth and Google OIDC adapters, bounded provider HTTP/JWKS handling,
-paired configuration, and deterministic acceptance coverage. Production remains GitHub-only until layer 3 adds
-explicit reauthentication and identity link/unlink controls.
+Implementation status: migration `0006_multi_provider_identity.sql` and the provider-neutral transaction
+registry are implemented, as are Discord OAuth and Google OIDC adapters. ADR 0019 completes real
+reauthentication and uses it for account-entitlement administration. Identity link/unlink and broad
+account-security UI remain later work; production provider enablement retains its separate rollout gate.
 
 Admission update: [ADR 0018](0018-invite-gated-first-access.md) supersedes this ADR's provider-subject
 allowlist rules for first account creation. Existing identities sign in normally; an unknown identity requires
@@ -158,6 +158,11 @@ Reauthentication must use an identity already linked to that account. Its initia
 mutation with exact Origin and CSRF validation; the resulting provider flow is bound to operation
 `reauthenticate`, account id, session id, and provider. Success rotates the current Hub session before issuing
 recent-reauthentication evidence. Reauthentication never changes identity ownership.
+
+[ADR 0019](0019-provider-neutral-account-entitlements.md) implements this reauthentication substrate for
+operator entitlement administration before link/unlink ships. The callback rotates the initiating session,
+records the exact linked identity used, and sets recent reauthentication at commit; sensitive stores recheck
+freshness inside their transactions.
 
 ### Link
 

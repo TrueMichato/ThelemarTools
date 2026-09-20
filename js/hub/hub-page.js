@@ -13,6 +13,7 @@ import {
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
 import {
+	HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS,
 	HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT,
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
 	pLoadHubCapabilityModule,
@@ -243,6 +244,9 @@ function getErrorMessage (error) {
 		case "ACCOUNT_UNAVAILABLE": return "This Hub account cannot sign in.";
 		case "ACCOUNT_OWNS_CAMPAIGN": return "Transfer ownership or archive every active campaign before deleting your account.";
 		case "ACCOUNT_DELETION_PENDING": return "Your account is scheduled for deletion. Cancel deletion before using campaign features.";
+		case "CAMPAIGN_CREATE_NOT_ENTITLED": return "Campaign creation is not enabled for this account.";
+		case "REAUTHENTICATION_REQUIRED": return "Reauthenticate with a linked sign-in provider before changing creator access.";
+		case "LAST_OPERATOR_PROTECTED": return "The last platform operator cannot lose operator access or delete their account.";
 		case "MEMBERSHIP_OWNER_PROTECTED": return "The campaign owner must transfer ownership or archive the campaign first.";
 		case "PROTOCOL_UPDATE_REQUIRED": return "This page is out of date. Reload it before making campaign changes.";
 		case "PAYLOAD_TOO_LARGE":
@@ -1380,6 +1384,154 @@ async function pRenderAccountSessions () {
 	}));
 }
 
+function hasAccountEntitlement (session, entitlement) {
+	return Array.isArray(session?.entitlements) && session.entitlements.includes(entitlement);
+}
+
+function renderCampaignCreationEntitlement ({session}) {
+	const isEntitlementCapabilityEnabled = session?.capabilities?.includes(HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS);
+	const canCreate = !isEntitlementCapabilityEnabled || hasAccountEntitlement(session, "campaign:create");
+	setHidden(document.getElementById("hub-create-form"), !canCreate);
+	setHidden(document.getElementById("hub-create-not-entitled"), canCreate);
+	return canCreate;
+}
+
+function setOperatorStatus (message, {isError = false} = {}) {
+	const status = document.getElementById("hub-operator-status");
+	if (!status) return;
+	status.textContent = message;
+	status.classList.toggle("hub-inline-status--error", isError);
+}
+
+function setAccountReauthenticationStatus (message, {isError = false, statusId = "hub-account-reauth-status"} = {}) {
+	const status = document.getElementById(statusId);
+	if (!status) return;
+	status.textContent = message;
+	status.classList.toggle("hub-inline-status--error", isError);
+}
+
+async function pGetEligibleReauthenticationProviders ({session}) {
+	const metadata = await api.pGetMeta();
+	const eligibleProviders = new Set(session.reauthenticationProviders || []);
+	return (metadata.authProviders || []).filter(provider =>
+		provider.status === "available"
+		&& eligibleProviders.has(provider.slug),
+	);
+}
+
+async function pStartAccountReauthentication ({provider, returnTo, fnSetStatus, button = null}) {
+	if (button) button.disabled = true;
+	fnSetStatus(`Opening ${provider.label} reauthentication...`);
+	try {
+		const result = await api.pStartReauthentication({
+			provider: provider.slug,
+			returnTo,
+		});
+		window.location.assign(result.authorizationUrl);
+	} catch (error) {
+		fnSetStatus(getErrorMessage(error), {isError: true});
+		if (button) button.disabled = false;
+	}
+}
+
+async function pRenderReauthenticationControls ({
+	session,
+	containerId,
+	statusId,
+	returnTo = "/hub.html",
+	fnSetStatus = (message, options) => setAccountReauthenticationStatus(message, {...options, statusId}),
+}) {
+	const container = document.getElementById(containerId);
+	if (!container) return [];
+	const providers = await pGetEligibleReauthenticationProviders({session});
+	if (!providers.length) {
+		fnSetStatus("No linked sign-in provider is currently available for reauthentication.", {isError: true});
+	}
+	container.replaceChildren(...providers.map(provider => {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "hub-button";
+		button.textContent = `Reauthenticate with ${provider.label}`;
+		button.addEventListener("click", () => pStartAccountReauthentication({
+			provider,
+			returnTo,
+			fnSetStatus,
+			button,
+		}));
+		return button;
+	}));
+	return providers;
+}
+
+async function pRenderOperatorReauthentication ({session}) {
+	return pRenderReauthenticationControls({
+		session,
+		containerId: "hub-operator-reauth",
+		statusId: "hub-operator-status",
+		fnSetStatus: setOperatorStatus,
+	});
+}
+
+async function pRenderOperatorAccounts () {
+	const list = document.getElementById("hub-operator-account-list");
+	if (!list) return;
+	const accounts = await api.pListOperatorAccounts();
+	list.replaceChildren(...accounts.map(account => {
+		const entitlements = new Set(account.entitlements || []);
+		const hasCreator = entitlements.has("campaign:create");
+		const row = document.createElement("div");
+		row.className = "hub-data-row";
+		const main = document.createElement("div");
+		main.className = "hub-data-row__main";
+		const name = document.createElement("span");
+		name.className = "hub-data-row__name";
+		name.textContent = account.displayName;
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		meta.textContent = `${hasCreator ? "Campaign creation enabled" : "Campaign creation disabled"} · Account ${account.id}`;
+		main.append(name, meta);
+		const controls = document.createElement("div");
+		controls.className = "hub-data-row__controls";
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = hasCreator ? "hub-button hub-button--danger" : "hub-button hub-button--primary";
+		button.textContent = hasCreator ? "Revoke creator" : "Grant creator";
+		button.addEventListener("click", async () => {
+			button.disabled = true;
+			setOperatorStatus("");
+			try {
+				const request = {
+					accountId: account.id,
+					entitlement: "campaign:create",
+					idempotencyKey: crypto.randomUUID(),
+				};
+				if (hasCreator) await api.pRevokeAccountEntitlement(request);
+				else await api.pGrantAccountEntitlement(request);
+				setOperatorStatus(`${account.displayName}'s creator access was ${hasCreator ? "revoked" : "granted"}.`);
+				await pRenderOperatorAccounts();
+			} catch (error) {
+				setOperatorStatus(getErrorMessage(error), {isError: true});
+				button.disabled = false;
+			}
+		});
+		controls.append(button);
+		row.append(main, controls);
+		return row;
+	}));
+}
+
+async function pInitOperatorPanel ({session}) {
+	const panel = document.getElementById("hub-operator-panel");
+	const isEnabled = session?.capabilities?.includes(HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS);
+	const isOperator = hasAccountEntitlement(session, "platform:operate");
+	setHidden(panel, !(isEnabled && isOperator));
+	if (!(isEnabled && isOperator)) return;
+	await Promise.all([
+		pRenderOperatorReauthentication({session}),
+		pRenderOperatorAccounts(),
+	]);
+}
+
 async function pInitHubIndex ({session}) {
 	const name = document.getElementById("hub-account-name");
 	if (name) name.textContent = session.account.displayName;
@@ -1389,6 +1541,12 @@ async function pInitHubIndex ({session}) {
 	// eslint-disable-next-line no-console
 	await activeCampaign.pResolve({trigger: "startup", session});
 	await pRenderActiveCampaignSwitcher();
+	const accountAction = new URLSearchParams(window.location.search).get("accountAction");
+	const accountReauthenticationProviders = await pRenderReauthenticationControls({
+		session,
+		containerId: session.account.status === "deletion_requested" ? "hub-deletion-reauth" : "hub-account-reauth",
+		statusId: session.account.status === "deletion_requested" ? "hub-deletion-reauth-status" : "hub-account-reauth-status",
+	});
 	document.getElementById("hub-cancel-deletion")?.addEventListener("click", async event => {
 		const button = event.currentTarget;
 		button.disabled = true;
@@ -1396,6 +1554,17 @@ async function pInitHubIndex ({session}) {
 			await api.pCancelAccountDeletion({idempotencyKey: crypto.randomUUID()});
 			window.location.reload();
 		} catch (error) {
+			if (error?.code === "REAUTHENTICATION_REQUIRED" && accountReauthenticationProviders[0]) {
+				await pStartAccountReauthentication({
+					provider: accountReauthenticationProviders[0],
+					returnTo: "/hub.html?accountAction=cancel-deletion",
+					fnSetStatus: (message, options) => setAccountReauthenticationStatus(message, {
+						...options,
+						statusId: "hub-deletion-reauth-status",
+					}),
+				});
+				return;
+			}
 			renderError(error);
 			button.disabled = false;
 		}
@@ -1405,16 +1574,30 @@ async function pInitHubIndex ({session}) {
 			purgeAfter: session.account.purgeAfter,
 			deletionRequestedAt: session.account.deletionRequestedAt,
 		});
+		if (accountAction === "cancel-deletion") {
+			setAccountReauthenticationStatus(
+				"Reauthentication complete. Choose Keep my account to cancel deletion.",
+				{statusId: "hub-deletion-reauth-status"},
+			);
+			document.getElementById("hub-cancel-deletion")?.focus();
+			window.history.replaceState(null, "", "/hub.html");
+		}
 		return;
 	}
 	setHidden(document.getElementById("hub-account-active"), false);
 	setHidden(document.getElementById("hub-account-deletion-pending"), true);
+	if (accountAction === "delete") {
+		setAccountReauthenticationStatus("Reauthentication complete. Confirm account deletion again to continue.");
+		document.getElementById("hub-request-deletion")?.focus();
+		window.history.replaceState(null, "", "/hub.html");
+	}
 	const [campaigns, characters] = await Promise.all([
 		api.pListCampaigns(),
 		api.pListCharacters(),
 	]);
 	renderCampaignList(campaigns);
 	renderDetachedCharacterList(characters);
+	const canCreateCampaign = renderCampaignCreationEntitlement({session});
 	const inviteToken = sessionStorage.getItem("hub-pending-invite");
 	if (inviteToken) {
 		try {
@@ -1439,6 +1622,7 @@ async function pInitHubIndex ({session}) {
 	});
 	form?.addEventListener("submit", async event => {
 		event.preventDefault();
+		if (!canCreateCampaign) return;
 		renderError("");
 		const input = document.getElementById("hub-campaign-name");
 		const button = document.getElementById("hub-create-submit");
@@ -1462,7 +1646,10 @@ async function pInitHubIndex ({session}) {
 		}
 	});
 	try {
-		await pRenderAccountSessions();
+		await Promise.all([
+			pRenderAccountSessions(),
+			pInitOperatorPanel({session}),
+		]);
 	} catch (error) {
 		renderError(error);
 	}
@@ -1484,8 +1671,19 @@ async function pInitHubIndex ({session}) {
 		button.disabled = true;
 		try {
 			const result = await api.pRequestAccountDeletion({idempotencyKey: crypto.randomUUID()});
-			renderAccountDeletionPending(result.deletion);
+			if (result.deletion?.status !== "deletion_requested") {
+				throw new HubApiError({code: "RESPONSE_INVALID", status: 200});
+			}
+			window.location.assign("/hub.html?accountAction=cancel-deletion");
 		} catch (error) {
+			if (error?.code === "REAUTHENTICATION_REQUIRED" && accountReauthenticationProviders[0]) {
+				await pStartAccountReauthentication({
+					provider: accountReauthenticationProviders[0],
+					returnTo: "/hub.html?accountAction=delete",
+					fnSetStatus: setAccountReauthenticationStatus,
+				});
+				return;
+			}
 			renderError(error);
 			button.disabled = false;
 		}
