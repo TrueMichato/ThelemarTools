@@ -839,7 +839,7 @@ export class MemoryHubStore {
 						expiresAt,
 						userAgent,
 						authenticatedViaIdentityId: session.authenticatedViaIdentityId,
-						recentReauthenticatedAt: session.recentReauthenticatedAt,
+						recentReauthenticatedAt: this._fnNow(),
 					});
 					const remainingIdentities = [...this._externalIdentities.values()]
 						.filter(candidate => candidate.accountId === accountId)

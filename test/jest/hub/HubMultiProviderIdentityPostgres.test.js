@@ -78,8 +78,15 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			tokenHash: currentTokenHash,
 			expiresAt: new Date(Date.now() + 60 * 60_000),
 			authenticatedViaIdentityId: githubIdentity.id,
-			recentReauthenticatedAt: new Date(),
 		});
+		const freshened = await store._pool.query(`
+			UPDATE hub.sessions
+			SET recent_reauthenticated_at = clock_timestamp()
+			WHERE id = $1
+			RETURNING created_at, recent_reauthenticated_at
+		`, [currentSession.id]);
+		expect(freshened.rows[0].recent_reauthenticated_at.getTime())
+			.toBeGreaterThanOrEqual(freshened.rows[0].created_at.getTime());
 		const otherSession = await store.pCreateSession({
 			accountId: account.id,
 			tokenHash: crypto.randomBytes(32).toString("hex"),
@@ -149,6 +156,8 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			idempotencyKey: unlinkKey,
 			retentionRequiredProviders: ["google"],
 		});
+		expect(new Date(unlinked.session.recentReauthenticatedAt).getTime())
+			.toBeGreaterThanOrEqual(new Date(unlinked.session.createdAt).getTime());
 		await expect(store.pUnlinkExternalIdentity({
 			accountId: account.id,
 			currentSessionId: unlinked.session.id,

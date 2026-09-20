@@ -589,6 +589,7 @@ describe("Hub provider-neutral identity and OAuth transaction authority", () => 
 		});
 		expect(replay).toEqual(first);
 		expect(first.session.authenticatedViaIdentityId).toBe(linked.identity.id);
+		expect(first.session.recentReauthenticatedAt).toBe(now.toISOString());
 		expect(await store.pGetSessionByTokenHash({tokenHash: "8".repeat(64)})).toBeNull();
 		expect(await store.pGetSessionByTokenHash({tokenHash: "9".repeat(64)})).toEqual(expect.objectContaining({
 			session: expect.objectContaining({id: first.session.id}),

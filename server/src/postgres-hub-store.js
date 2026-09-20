@@ -1166,7 +1166,7 @@ export class PostgresHubStore {
 					id, account_id, token_hash, expires_at, user_agent,
 					authenticated_via_identity_id, recent_reauthenticated_at
 				)
-				VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6, $7)
+				VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6, clock_timestamp())
 				RETURNING
 					id AS session_id, account_id, user_agent, created_at, last_seen_at,
 					expires_at, revoked_at, authenticated_via_identity_id,
@@ -1178,7 +1178,6 @@ export class PostgresHubStore {
 				expiresAt,
 				userAgent,
 				currentSession.authenticated_via_identity_id,
-				currentSession.recent_reauthenticated_at,
 			]);
 			const remainingIdentities = externalIdentities
 				.filter(candidate => candidate.id !== identityId)
