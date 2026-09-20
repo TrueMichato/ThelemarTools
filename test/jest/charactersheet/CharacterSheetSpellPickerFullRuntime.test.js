@@ -51,6 +51,7 @@ describe("Bug 5 full-runtime: spells hydrated via pLoadAll reach the picker corr
 	let spells;
 	let guidance;
 	let giftOfAlacrity;
+	let dimensionDoor;
 	let divineSoul;
 	let chronurgyEgw;
 
@@ -59,6 +60,7 @@ describe("Bug 5 full-runtime: spells hydrated via pLoadAll reach the picker corr
 		spells = await DataUtil.spell.pLoadAll();
 		guidance = spells.find(s => s.name === "Guidance" && s.source === "PHB");
 		giftOfAlacrity = spells.find(s => s.name === "Gift of Alacrity" && s.source === "EGW");
+		dimensionDoor = spells.find(s => s.name === "Dimension Door" && s.source === "PHB");
 
 		const sorc = loadLocal("data/class/class-sorcerer.json");
 		divineSoul = sorc.subclass.find(sc => sc.shortName === "Divine Soul" && sc.source === "XGE");
@@ -147,6 +149,42 @@ describe("Bug 5 full-runtime: spells hydrated via pLoadAll reach the picker corr
 		});
 		console.log("Gift of Alacrity available for TGTT-2014 Chronurgy Wizard?", ok);
 		expect(ok).toBe(true);
+	});
+
+	it("Gambler accepts Dimension Door via Warlock, but the sorted result was beyond the old 100-row cap", () => {
+		const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+		const gamblerConfigs = [{
+			className: "Warlock",
+			classSource: "TGTT",
+			subclass: {name: "Gambler", shortName: "Gambler", source: "TGTT"},
+			subclassChoice: null,
+			additionalClassNames: [],
+			includeCoreSpellsForHomebrew: false,
+		}];
+		const getRawClasses = spell => Renderer.spell.getCombinedClasses(spell, "fromClassList").map(c => c.name);
+		const selectedClasses = new Set(["Warlock"]);
+
+		expect(dimensionDoor).toBeTruthy();
+		expect(getRawClasses(dimensionDoor)).toContain("Warlock");
+		expect(CharacterSheetClassUtils.spellMatchesPickerClassFilter(
+			dimensionDoor,
+			selectedClasses,
+			gamblerConfigs,
+			getRawClasses(dimensionDoor),
+		)).toBe(true);
+
+		const eligible = spells
+			.filter(spell => spell.level <= 4)
+			.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name))
+			.filter(spell => CharacterSheetClassUtils.spellMatchesPickerClassFilter(
+				spell,
+				selectedClasses,
+				gamblerConfigs,
+				getRawClasses(spell),
+			));
+		const dimensionDoorIndex = eligible.findIndex(spell => spell.name === "Dimension Door" && spell.source === "PHB");
+		expect(eligible.length).toBeGreaterThan(100);
+		expect(dimensionDoorIndex).toBeGreaterThan(99);
 	});
 
 	it("DIAGNOSTIC: which path accepts Guidance for Divine Soul Sorcerer?", () => {

@@ -1,6 +1,7 @@
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 import {CharacterSheetGamblerRules} from "./charactersheet-gambler.js";
+import {ListVirtualRenderer} from "../list2/list2-virtual.js";
 
 /**
  * sourceFeature values assigned to player-chosen spells by the Builder, LevelUp, and QuickBuild flows.
@@ -14,6 +15,61 @@ const {e_, ee} = /** @type {*} */ (globalThis);
 
 const PLAYER_CHOSEN_SPELL_FEATURES = /** @type {*} */ (globalThis).CharacterSheetClassUtils?.PLAYER_CHOSEN_SPELL_FEATURES
 	|| new Set(["Spells Known", "Cantrips Known", "Wizard Spellbook", "Prepared Spells", "Spells Prepared"]);
+
+class _SpellPickerVirtualItem {
+	constructor ({key, getElement, isFocusable = false}) {
+		this.key = key;
+		this._getElement = getElement;
+		this.isFocusable = isFocusable;
+		this._element = null;
+	}
+
+	get ele () {
+		if (!this._element) this._element = this._getElement();
+		return this._element;
+	}
+
+	peekEle () { return this._element; }
+	runElementRenderHooks () {}
+
+	disposeElement () {
+		this._element?.remove();
+		this._element = null;
+	}
+}
+
+class _SpellPickerVirtualRenderer extends ListVirtualRenderer {
+	static THRESHOLD = 100;
+	static ESTIMATED_HEIGHT = 72;
+
+	_handleTab (evt) {
+		if (evt.key !== "Tab" || evt.ctrlKey || evt.metaKey || evt.altKey) return;
+		const item = this._getFocusedItem();
+		if (!item) return;
+		const targets = this._getFocusTargets(item);
+		const boundary = evt.shiftKey ? targets[0] : targets.at(-1);
+		if (evt.target !== boundary) return;
+
+		const direction = evt.shiftKey ? -1 : 1;
+		let index = this._indices.get(item) + direction;
+		while (index >= 0 && index < this._items.length) {
+			const next = this._items[index];
+			if (!next.isFocusable) {
+				index += direction;
+				continue;
+			}
+			this.scrollToItem(next);
+			const targets = this._getFocusTargets(next);
+			if (!targets.length) {
+				index += direction;
+				continue;
+			}
+			evt.preventDefault();
+			(evt.shiftKey ? targets.at(-1) : targets[0]).focus({preventScroll: true});
+			return;
+		}
+	}
+}
 
 /**
  * Character Sheet Spells Manager
@@ -29,6 +85,22 @@ class CharacterSheetSpells {
 			if (normalizedLevel !== "all" && Number(spell.level) !== Number(normalizedLevel)) return false;
 			return true;
 		});
+	}
+
+	static _getSpellPickerVirtualDescriptors (spells) {
+		const byLevel = new Map();
+		(spells || []).forEach(spell => {
+			const level = Number(spell.level) || 0;
+			if (!byLevel.has(level)) byLevel.set(level, []);
+			byLevel.get(level).push(spell);
+		});
+
+		return [...byLevel.entries()]
+			.sort(([a], [b]) => a - b)
+			.flatMap(([level, levelSpells]) => [
+				{type: "header", key: `header:${level}:${levelSpells.length}`, level, count: levelSpells.length},
+				...levelSpells.map(spell => ({type: "spell", key: `spell:${spell.name}|${spell.source}`, spell})),
+			]);
 	}
 
 	/**
@@ -615,6 +687,18 @@ class CharacterSheetSpells {
 		// Get the per-class level (not total character level) for spell level limits
 		const classLevel = this._state.getClassLevel(classInfo.name) || characterLevel;
 
+		// A subclass-declared slot table is authoritative for the spells that class can
+		// learn, including on a multiclass sheet where shared-slot calculation differs.
+		// This matters for published breakpoints the generic caster-level approximation
+		// does not reproduce (for example, Gambler gains a 4th-level slot at Rogue 19).
+		const subclassSlotRow = this._state.constructor.getSubclassSpellSlotRow?.({...classInfo, level: classLevel});
+		if (subclassSlotRow) {
+			for (let level = subclassSlotRow.length; level > 0; --level) {
+				if (subclassSlotRow[level - 1] > 0) return level;
+			}
+			return 0;
+		}
+
 		// Use the class's casterProgression field if available (handles homebrew correctly)
 		const casterProg = classInfo.casterProgression;
 		if (casterProg) {
@@ -673,12 +757,24 @@ class CharacterSheetSpells {
 	}
 
 	async _pShowSpellPickerModal (spells, {targetClass = null, ownClassConfigs = []} = {}) {
-		const knownSpellIds = this._state.getSpells().map(s => `${s.name}|${s.source}`);
+		const knownSpellIds = new Set(this._state.getSpells().map(s => `${s.name}|${s.source}`));
+		const virtualItemCache = new Map();
+		let virtualRenderer = null;
+		let searchTimer = null;
+		let focusTimer = null;
+		let isClosed = false;
 
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "✨ Add Spell",
 			isMinHeight0: true,
 			isWidth100: true,
+			cbClose: () => {
+				isClosed = true;
+				if (searchTimer != null) clearTimeout(searchTimer);
+				if (focusTimer != null) clearTimeout(focusTimer);
+				virtualRenderer?.destroy?.();
+				virtualItemCache.clear();
+			},
 		});
 		// Spell tracking status bar - shows cantrips and spells known/prepared
 		const statusBar = e_({tag: "div", clazz: "charsheet__modal-status-bar", style: "display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 12px; background: rgba(var(--rgb-bg-text), 0.05); border-radius: 6px; margin-bottom: 12px; font-size: 0.85em;"});
@@ -1715,7 +1811,7 @@ class CharacterSheetSpells {
 		modalInner.append(resultsCount);
 
 		// Spell list
-		const list = e_({outer: `<div class="charsheet__modal-list"></div>`});
+		const list = e_({outer: `<div class="charsheet__modal-list" style="height: min(55vh, 560px); min-height: 180px; overflow-y: auto;"></div>`});
 		modalInner.append(list);
 
 		// Cache getCombinedClasses results per spell to avoid expensive recalculation on every filter
@@ -1736,76 +1832,153 @@ class CharacterSheetSpells {
 			return _subclassListCache.get(key);
 		};
 
+		const getSpellLink = (spell) => this._page?.getSpellHoverLink
+			? this._page.getSpellHoverLink(spell.name, spell.source, spell, null)
+			: (this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source) : spell.name);
+
+		const buildSpellRow = (spell, spellLink) => {
+			const spellId = `${spell.name}|${spell.source}`;
+			const isKnown = knownSpellIds.has(spellId);
+			const school = Parser.spSchoolAbvToFull(spell.school);
+			const components = [];
+			if (spell.components?.v) components.push("V");
+			if (spell.components?.s) components.push("S");
+			if (spell.components?.m) components.push("M");
+			const componentStr = components.join(", ");
+			const tagParts = [];
+			if (spell.ritual) tagParts.push("🔮");
+			if (spell.concentration) tagParts.push("⏳");
+			const tagsStr = tagParts.length ? ` ${tagParts.join(" ")}` : "";
+			const formatSubschool = sub => {
+				const parts = sub.split(":");
+				return parts.length === 2 ? parts[1].toTitleCase() : sub.toTitleCase();
+			};
+			const subschoolStr = spell.subschools?.length
+				? ` • 🏷️ ${spell.subschools.map(formatSubschool).join(", ")}`
+				: "";
+			const item = e_({outer: `
+				<div class="charsheet__modal-list-item ${isKnown ? "ve-muted" : ""}" data-spell-name="${spell.name.qq()}" data-spell-source="${spell.source.qq()}">
+					<div class="charsheet__modal-list-item-icon">${this._getSchoolEmoji(spell.school)}</div>
+					<div class="charsheet__modal-list-item-content">
+						<div class="charsheet__modal-list-item-title">${spellLink}${tagsStr}</div>
+						<div class="charsheet__modal-list-item-subtitle">${school} • ${componentStr || "No components"} • ${Parser.sourceJsonToAbv(spell.source)}${subschoolStr}</div>
+					</div>
+					${isKnown
+		? `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known</span>`
+		: `<button class="ve-btn ve-btn-primary ve-btn-xs spell-picker-add">+ Add</button>`
+}
+				</div>
+			`});
+
+			if (!isKnown) {
+				item.querySelector(".spell-picker-add").addEventListener("click", (/** @type {*} */ e) => {
+					e.stopPropagation();
+					this._addSpell(spell, {targetClass});
+					knownSpellIds.add(spellId);
+					item.classList.add("ve-muted");
+					{ const _btn = item.querySelector(".spell-picker-add"); const _badge = e_({outer: `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known</span>`}); _btn.replaceWith(_badge); }
+					JqueryUtil.doToast({type: "success", content: `Added ${spell.name} to your spellbook!`});
+					updateStatusBar();
+				});
+				item.addEventListener("click", () => this._showSpellInfoFromData(spell));
+			}
+
+			return item;
+		};
+
+		const getVirtualItem = descriptor => {
+			if (virtualItemCache.has(descriptor.key)) return virtualItemCache.get(descriptor.key);
+
+			let item;
+			if (descriptor.type === "header") {
+				const levelLabel = descriptor.level === 0 ? "Cantrips" : `Level ${descriptor.level}`;
+				const levelEmoji = descriptor.level === 0
+					? "⭐"
+					: ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"][descriptor.level - 1] || "📜";
+				item = new _SpellPickerVirtualItem({
+					key: descriptor.key,
+					isFocusable: false,
+					getElement: () => e_({outer: `<div class="charsheet__modal-section-title" style="position: static;">${levelEmoji} ${levelLabel} <span style="opacity: 0.6;">(${descriptor.count})</span></div>`}),
+				});
+			} else if (descriptor.type === "empty") {
+				item = new _SpellPickerVirtualItem({
+					key: descriptor.key,
+					isFocusable: descriptor.isDirty,
+					getElement: () => FilterPickerHelpers.buildEmptyState({
+						icon: "📖",
+						title: FilterPickerHelpers.LABELS.emptyFilteredTitle,
+						detail: FilterPickerHelpers.LABELS.emptyFilteredDetail,
+						onReset: descriptor.isDirty ? resetSpellFilters : null,
+					}),
+				});
+			} else {
+				let spellLink;
+				item = new _SpellPickerVirtualItem({
+					key: descriptor.key,
+					isFocusable: true,
+					getElement: () => {
+						if (spellLink == null) spellLink = getSpellLink(descriptor.spell);
+						return buildSpellRow(descriptor.spell, spellLink);
+					},
+				});
+			}
+
+			virtualItemCache.set(descriptor.key, item);
+			return item;
+		};
+
+		virtualRenderer = typeof ResizeObserver !== "undefined" && typeof requestAnimationFrame === "function"
+			? new _SpellPickerVirtualRenderer({list: {_trigger () {}}, wrpList: list})
+			: {
+				update: items => list.replaceChildren(...items.map(item => item.ele)),
+				refresh () {},
+				destroy: () => list.replaceChildren(),
+			};
+
 		const renderList = () => {
+			if (isClosed) return;
 			if (typeof _updateMoreFiltersCount === "function") _updateMoreFiltersCount();
-			list.innerHTML = "";
 
 			const searchTerm = search.value.toLowerCase();
 
 			const filtered = spells.filter(spell => {
 				if (searchTerm && !spell.name.toLowerCase().includes(searchTerm)) return false;
-				// Class filter (separate from subclass)
 				if (selectedClasses.has("__NONE__") && selectedSubclasses.has("__NONE__")) return false;
 
-				// Get spell's class and subclass sources using cached getCombinedClasses
 				const fromClassList = getCachedClassList(spell);
 				const fromSubclass = getCachedSubclassList(spell);
 				const spellClasses = fromClassList?.map(c => c.name) || [];
 				const spellSubclasses = fromSubclass?.map(sc => `${sc.class.name}: ${sc.subclass.name}`) || [];
-
-				// Check class filter (if classes are selected). Fast path = raw
-				// class-list membership; authoritative own-class fallback covers
-				// subclass-EXPANDED lists. See spellMatchesPickerClassFilter (F9).
 				const passesClassFilter = CharacterSheetClassUtils.spellMatchesPickerClassFilter(spell, selectedClasses, ownClassConfigs, spellClasses);
-				// Check subclass filter (if subclasses are selected)
 				const passesSubclassFilter = selectedSubclasses.size === 0 || spellSubclasses.some(sc => selectedSubclasses.has(sc));
-
-				// Spell passes if it matches EITHER the class filter OR the subclass filter (union)
 				if (!passesClassFilter && !passesSubclassFilter) return false;
 
-				// Multi-select level filter
 				if (selectedLevels.has("__NONE__")) return false;
 				if (selectedLevels.size > 0 && !selectedLevels.has(String(spell.level))) return false;
-				// Multi-select school filter
 				if (selectedSchools.has("__NONE__")) return false;
 				if (selectedSchools.size > 0 && !selectedSchools.has(spell.school)) return false;
-				// Rarity filter
 				if (selectedRarities.has("__NONE__")) return false;
-				if (selectedRarities.size > 0) {
-					const spellSubs = spell.subschools || [];
-					if (!spellSubs.some(sub => selectedRarities.has(sub))) return false;
-				}
-				// Legality filter
+				if (selectedRarities.size > 0 && !(spell.subschools || []).some(sub => selectedRarities.has(sub))) return false;
 				if (selectedLegalities.has("__NONE__")) return false;
-				if (selectedLegalities.size > 0) {
-					const spellSubs = spell.subschools || [];
-					if (!spellSubs.some(sub => selectedLegalities.has(sub))) return false;
-				}
-				// Multi-select subschool/tags filter (other tags)
+				if (selectedLegalities.size > 0 && !(spell.subschools || []).some(sub => selectedLegalities.has(sub))) return false;
 				if (selectedSubschools.has("__NONE__")) return false;
 				if (selectedSubschools.size > 0) {
 					const spellSubschools = spell.subschools || [];
-					if (spellSubschools.length === 0 || !spellSubschools.some(sub => selectedSubschools.has(sub))) return false;
+					if (!spellSubschools.some(sub => selectedSubschools.has(sub))) return false;
 				}
-				// Multi-select source filter
-				if (selectedSources.has("__NONE__")) return false; // No sources selected
+				if (selectedSources.has("__NONE__")) return false;
 				if (selectedSources.size > 0 && !selectedSources.has(spell.source)) return false;
-				// Ritual is stored in spell.meta.ritual
 				if (filterRitual && !spell.meta?.ritual) return false;
-				// Concentration is stored in spell.duration[].concentration
 				if (filterConcentration && !spell.duration?.some?.(d => d.concentration)) return false;
-				if (filterVerbal && (!spell.components?.v)) return false;
-				if (filterSomatic && (!spell.components?.s)) return false;
-				if (filterMaterial && (!spell.components?.m)) return false;
+				if (filterVerbal && !spell.components?.v) return false;
+				if (filterSomatic && !spell.components?.s) return false;
+				if (filterMaterial && !spell.components?.m) return false;
 				return true;
 			});
 
 			const totalCount = filtered.length;
-			const renderCap = 100;
-			const capped = filtered.slice(0, renderCap);
-
-			const knownCount = filtered.filter(s => knownSpellIds.includes(`${s.name}|${s.source}`)).length;
-			const countHtml = `<span>${totalCount} spell${totalCount !== 1 ? "s" : ""} found</span>${totalCount > renderCap ? `<span class="ml-2" style="opacity: 0.7;">(showing first ${renderCap})</span>` : ""}${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
+			const knownCount = filtered.filter(s => knownSpellIds.has(`${s.name}|${s.source}`)).length;
+			const countHtml = `<span>${totalCount} spell${totalCount !== 1 ? "s" : ""} found</span>${knownCount > 0 ? `<span class="ml-2" style="color: var(--cs-success);">(${knownCount} already known)</span>` : ""}`;
 			const dirty = isSpellFiltersDirty();
 			FilterPickerHelpers.renderResultsToolbar(resultsCount, {
 				countContent: countHtml,
@@ -1814,114 +1987,31 @@ class CharacterSheetSpells {
 			});
 
 			if (FilterPickerHelpers.shouldShowFilteredEmpty(filtered)) {
-				list.append(FilterPickerHelpers.buildEmptyState({
-					icon: "📖",
-					title: FilterPickerHelpers.LABELS.emptyFilteredTitle,
-					detail: FilterPickerHelpers.LABELS.emptyFilteredDetail,
-					onReset: dirty ? resetSpellFilters : null,
-				}));
+				virtualRenderer.update([getVirtualItem({type: "empty", key: `empty:${dirty}`, isDirty: dirty})]);
 				return;
 			}
 
-			// Group by level
-			const grouped = {};
-			capped.forEach(spell => {
-				const level = spell.level === 0 ? "Cantrips" : `Level ${spell.level}`;
-				if (!grouped[level]) grouped[level] = [];
-				grouped[level].push(spell);
-			});
-
-			Object.entries(grouped).sort((a, b) => {
-				if (a[0] === "Cantrips") return -1;
-				if (b[0] === "Cantrips") return 1;
-				return parseInt(a[0].split(" ")[1]) - parseInt(b[0].split(" ")[1]);
-			}).forEach(([level, levelSpells]) => {
-				const section = e_({outer: `<div class="charsheet__modal-section"></div>`});
-				list.append(section);
-				const levelEmoji = level === "Cantrips" ? "⭐" : ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"][parseInt(level.split(" ")[1]) - 1] || "📜";
-				section.append(e_({outer: `<div class="charsheet__modal-section-title">${levelEmoji} ${level} <span style="opacity: 0.6;">(${levelSpells.length})</span></div>`}));
-
-				levelSpells.forEach(spell => {
-					const spellId = `${spell.name}|${spell.source}`;
-					const isKnown = knownSpellIds.includes(spellId);
-					const school = Parser.spSchoolAbvToFull(spell.school);
-
-					// Build component string
-					const components = [];
-					if (spell.components?.v) components.push("V");
-					if (spell.components?.s) components.push("S");
-					if (spell.components?.m) components.push("M");
-					const componentStr = components.join(", ");
-
-					// Build tags string
-					const tagParts = [];
-					if (spell.ritual) tagParts.push("🔮");
-					if (spell.concentration) tagParts.push("⏳");
-					const tagsStr = tagParts.length ? ` ${tagParts.join(" ")}` : "";
-
-					// Build subschool string
-					let subschoolStr = "";
-					if (spell.subschools && spell.subschools.length > 0) {
-						const formatSubschool = (sub) => {
-							const parts = sub.split(":");
-							if (parts.length === 2) {
-								return `${parts[1].toTitleCase()}`;
-							}
-							return sub.toTitleCase();
-						};
-						subschoolStr = ` • 🏷️ ${spell.subschools.map(formatSubschool).join(", ")}`;
-					}
-
-					// Bug 7 Phase 5: use getSpellHoverLink so rarity/legality subschools
-					// (e.g. TGTT-tagged spells) surface in the picker hover. Falls back
-					// to the standard hover for spells with no charsheet-specific
-					// metadata, so it's safe for every spell.
-					const spellLink = this._page?.getSpellHoverLink
-						? this._page.getSpellHoverLink(spell.name, spell.source, spell, null)
-						: (this._page?.getHoverLink ? this._page.getHoverLink(UrlUtil.PG_SPELLS, spell.name, spell.source) : spell.name);
-
-					const item = e_({outer: `
-						<div class="charsheet__modal-list-item ${isKnown ? "ve-muted" : ""}">
-							<div class="charsheet__modal-list-item-icon">${this._getSchoolEmoji(spell.school)}</div>
-							<div class="charsheet__modal-list-item-content">
-								<div class="charsheet__modal-list-item-title">${spellLink}${tagsStr}</div>
-								<div class="charsheet__modal-list-item-subtitle">${school} • ${componentStr || "No components"} • ${Parser.sourceJsonToAbv(spell.source)}${subschoolStr}</div>
-							</div>
-							${isKnown
-		? `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known</span>`
-		: `<button class="ve-btn ve-btn-primary ve-btn-xs spell-picker-add">+ Add</button>`
-}
-						</div>
-					`});
-
-					if (!isKnown) {
-						item.querySelector(".spell-picker-add").addEventListener("click", (/** @type {*} */ e) => {
-							e.stopPropagation();
-							this._addSpell(spell, {targetClass});
-							knownSpellIds.push(spellId);
-							item.classList.add("ve-muted");
-							{ const _btn = item.querySelector(".spell-picker-add"); const _badge = e_({outer: `<span class="charsheet__modal-list-item-badge charsheet__modal-list-item-badge--known">✓ Known</span>`}); _btn.replaceWith(_badge); }
-							JqueryUtil.doToast({type: "success", content: `Added ${spell.name} to your spellbook!`});
-							updateStatusBar();
-						});
-
-						// Click row to show info
-						item.addEventListener("click", () => this._showSpellInfoFromData(spell));
-					}
-
-					section.append(item);
-				});
-			});
+			const descriptors = CharacterSheetSpells._getSpellPickerVirtualDescriptors(filtered);
+			virtualRenderer.update(descriptors.map(getVirtualItem));
 		};
 
-		search.addEventListener("input", MiscUtil.debounce(renderList, 150));
+		search.addEventListener("input", () => {
+			if (searchTimer != null) clearTimeout(searchTimer);
+			searchTimer = setTimeout(() => {
+				searchTimer = null;
+				renderList();
+			}, 150);
+		});
 		// Level, school, and source filters are handled by checkbox change events above
 
 		// Initial render
 		renderList();
 
 		// Focus search on open
-		setTimeout(() => search.focus(), 100);
+		focusTimer = setTimeout(() => {
+			focusTimer = null;
+			search.focus();
+		}, 100);
 
 		// Close button
 		{ const _cl = ee`<div class="charsheet__modal-footer">

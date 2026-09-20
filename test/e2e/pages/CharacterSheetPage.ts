@@ -3809,6 +3809,134 @@ export class CharacterSheetPage {
 		await this.page.locator(".ve-ui-modal__inner:visible").last().waitFor({state: "visible"});
 	}
 
+	/** Read the Add Spell modal's logical and currently-mounted result state. */
+	async getAddSpellPickerSnapshot (spellName?: string, spellSource = "PHB"): Promise<{
+		countText: string;
+		logicalCount: number;
+		mountedRows: number;
+		scrollTop: number;
+		scrollHeight: number;
+		clientHeight: number;
+		isSpellMounted: boolean;
+		isSpellKnown: boolean;
+		searchValue: string;
+	}> {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		return modal.evaluate((root, target) => {
+			const countText = root.querySelector(".charsheet__modal-results-count")?.textContent?.trim() || "";
+			const logicalCount = Number(countText.match(/(\d+)\s+spells?\s+found/i)?.[1] || 0);
+			const list = root.querySelector<HTMLElement>(".charsheet__modal-list");
+			const rows = [...(list?.querySelectorAll<HTMLElement>(".charsheet__modal-list-item") || [])];
+			const targetRow = target.name
+				? rows.find(row => row.dataset.spellName === target.name && row.dataset.spellSource === target.source)
+				: null;
+			return {
+				countText,
+				logicalCount,
+				mountedRows: rows.length,
+				scrollTop: list?.scrollTop || 0,
+				scrollHeight: list?.scrollHeight || 0,
+				clientHeight: list?.clientHeight || 0,
+				isSpellMounted: !!targetRow,
+				isSpellKnown: !!targetRow?.querySelector(".charsheet__modal-list-item-badge--known"),
+				searchValue: (root.querySelector<HTMLInputElement>(".charsheet__modal-search input")?.value || ""),
+			};
+		}, {name: spellName, source: spellSource});
+	}
+
+	/** Traverse real list viewports until the requested spell is mounted. */
+	async scrollAddSpellPickerUntilMounted (spellName: string, spellSource = "PHB"): Promise<void> {
+		const list = this.page.locator(".ve-ui-modal__inner:visible").last().locator(".charsheet__modal-list");
+		for (let i = 0; i < 500; ++i) {
+			if ((await this.getAddSpellPickerSnapshot(spellName, spellSource)).isSpellMounted) return;
+			const moved = await list.evaluate(el => {
+				const before = el.scrollTop;
+				const step = Math.min(200, Math.max(128, el.clientHeight * 0.75));
+				el.scrollTop = Math.min(el.scrollHeight - el.clientHeight, before + step);
+				return el.scrollTop > before;
+			});
+			if (!moved) break;
+			await list.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+		}
+		const final = await this.getAddSpellPickerSnapshot(spellName, spellSource);
+		expect(final.isSpellMounted, `${spellName}|${spellSource} never mounted while traversing the spell list: ${JSON.stringify(final)}`).toBe(true);
+	}
+
+	/** Scroll to the logical final item and report its virtual-list position. */
+	async scrollAddSpellPickerToEnd (): Promise<{name: string; position: number; setSize: number}> {
+		const list = this.page.locator(".ve-ui-modal__inner:visible").last().locator(".charsheet__modal-list");
+		for (let i = 0; i < 10; ++i) {
+			await list.evaluate(el => { el.scrollTop = el.scrollHeight; });
+			await list.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+			const isAtEnd = await list.evaluate(el => Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 1);
+			if (isAtEnd) break;
+		}
+		return list.evaluate(el => {
+			const items = [...el.querySelectorAll<HTMLElement>("[role=listitem]")];
+			const last = items.at(-1);
+			return {
+				name: last?.dataset.spellName || "",
+				position: Number(last?.getAttribute("aria-posinset") || 0),
+				setSize: Number(last?.getAttribute("aria-setsize") || 0),
+			};
+		});
+	}
+
+	/** Search the Add Spell modal and wait for its result toolbar to settle. */
+	async searchAddSpellPicker (value: string): Promise<void> {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		await modal.locator(".charsheet__modal-search input").fill(value);
+		await expect.poll(async () => (await this.getAddSpellPickerSnapshot()).searchValue).toBe(value);
+		await this.page.waitForTimeout(200);
+	}
+
+	/** Add a currently-mounted spell by its visible name. */
+	async addMountedSpell (spellName: string, spellSource = "PHB"): Promise<void> {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		const row = modal.locator(`.charsheet__modal-list-item[data-spell-name="${spellName}"][data-spell-source="${spellSource}"]`);
+		await expect(row).toBeVisible();
+		await row.locator(".spell-picker-add").click();
+		await expect(row.locator(".charsheet__modal-list-item-badge--known")).toBeVisible();
+	}
+
+	/** Open the Add Spell modal's secondary filter panel. */
+	async openAddSpellMoreFilters (): Promise<void> {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		const toggle = modal.locator(".charsheet__spell-more-filters-toggle");
+		if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+	}
+
+	/**
+	 * Verify native Tab advances from one spell row into the next row, including
+	 * when the virtual renderer must keep/remount the focused boundary.
+	 */
+	async tabFromLastMountedAddableSpell (): Promise<{from: string; to: string; stayedInList: boolean}> {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		const buttons = modal.locator(".charsheet__modal-list-item .spell-picker-add");
+		await expect(buttons.nth(1)).toBeVisible();
+		const row = buttons.last().locator("xpath=ancestor::div[contains(@class,'charsheet__modal-list-item')]");
+		const from = `${await row.getAttribute("data-spell-name")}|${await row.getAttribute("data-spell-source")}`;
+		await buttons.last().focus();
+		await this.page.keyboard.press("Tab");
+		const {to, stayedInList} = await this.page.evaluate(() => {
+			const active = document.activeElement;
+			const activeRow = active?.closest<HTMLElement>(".charsheet__modal-list-item");
+			return {
+				to: activeRow ? `${activeRow.dataset.spellName}|${activeRow.dataset.spellSource}` : "",
+				stayedInList: !!active?.closest(".charsheet__modal-list"),
+			};
+		});
+		return {from, to, stayedInList};
+	}
+
+	/** Close the currently-visible Add Spell modal. */
+	async closeAddSpellModal (): Promise<void> {
+		const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+		await modal.locator(".charsheet__modal-footer button").click();
+		await expect(modal).toBeHidden();
+	}
+
 	/**
 	 * Locate the Spell picker's always-visible Class filter (identified by its sword icon).
 	 * Positions via the same `FilterPickerHelpers.placeAnchoredPopover` (`position:fixed` +
