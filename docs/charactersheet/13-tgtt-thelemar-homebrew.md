@@ -221,7 +221,7 @@ Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect
 
 | Subclass | Status | Key Features |
 |----------|--------|--------------|
-| **Path of the Chained Fury** | ✅ Complete | `chainDamageDie`, `chainRange`, `chainCount`, `chainRestrainDc`, `chainRestrainDamage`, `chainGrappleSizeBonus`, `grappleSizeUnlimited`, `grantedAttacks`, `attackOnHitOptions`, `attackActionAllowances` |
+| **Path of the Chained Fury** | ✅ Complete | persistent generated Spectral Chains item, `chainDamageDie`, `chainRange`, `chainCount`, `chainRestrainDc`, `chainRestrainDamage`, `chainGrappleSizeBonus`, `grappleSizeUnlimited`, `grantedAttacks`, `attackOnHitOptions`, `attackActionAllowances` |
 
 #### Path of the Chained Fury — mechanical surface
 
@@ -233,7 +233,7 @@ exactly the RAW "they vanish when your rage ends". It inherits Rage's
 
 | Level | Feature | Implementation |
 |---|---|---|
-| 3 | Manifest Chains | `manifestChains` toggle; a `grantedAttacks` descriptor (`Spectral Chains`, finesse, force, `reachBonus`, `requiresState: "manifestChains"`) that appears in the Combat attack list with a `✨ Feature` badge; `attackOnHitOptions` `chains-grapple` / `chains-shove`; grapple size +1 |
+| 3 | Manifest Chains | `manifestChains` toggle; one equipped generated Spectral Chains inventory weapon with stable feature provenance; an item-backed `grantedAttacks` descriptor (finesse, force, `requiresState: "manifestChains"`) that appears in Combat with a `✨ Feature` badge; `attackOnHitOptions` `chains-grapple` / `chains-shove`; grapple size +1 |
 | 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + CON` and recurring damage equal to current Barbarian level |
 | 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
 | 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |
@@ -244,14 +244,21 @@ hardcoded — 1d8/1d10/1d12/2d6 and 15/20/25/30 ft. A hardcoded fallback exists 
 because `addClass` stores lean `{name, source}` subclass refs, so the table is
 often absent at calculation time.
 
-**Reach:** the chains contribute a per-attack `reachBonus`, *not* a global reach
-effect — a global one would wrongly extend the character's greataxe too. See
-`getReachContributions()` / `getAttackReach()`.
+The generated item stores the current base damage, reach, and magical status.
+Reconciliation updates untouched generated values as the Barbarian levels while
+preserving player edits, materials, upgrades, bonuses, notes, equipment state,
+and the inventory wrapper ID. The attack resolves from the live item, so these
+changes automatically flow into Combat. Legacy canonical rows are adopted by a
+strict mechanical signature once; normal ownership uses the stable generated ID
+rather than the editable display name.
 
-**On-hit riders are never auto-applied.** Whether the attack hit, and whether the
-player wants to spend the rider, are facts the sheet cannot know (there is no
-target model). They surface through the generic `featureOnHitOptions` post-attack
-hook as a confirm-then-pick prompt.
+**Reach:** the inventory weapon carries an absolute item-specific reach, not a
+global reach effect — a global one would wrongly extend the character's
+greataxe too. See `getReachContributions()` / `getAttackReach()`.
+
+**On-hit riders are never auto-applied.** They surface through the generic
+`featureOnHitOptions` post-attack hook, then use the persisted target/effect
+model to resolve the chosen grapple, shove, restrain, or reposition result.
 
 
 ### ✅ Bard Colleges

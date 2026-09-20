@@ -17,11 +17,12 @@ const CharacterSheetCombat = globalThis.CharacterSheetCombat;
  * Build a combat instance whose `_state` returns exactly the supplied sources.
  * Everything defaults to empty so each test declares only what it exercises.
  */
-function makeCombat ({attacks = [], items = [], temporaryAttacks = [], activeStateAttacks = [], spells = [], features = [], customAbilities = []} = {}) {
+function makeCombat ({attacks = [], items = [], temporaryAttacks = [], activeStateAttacks = [], spells = [], features = [], customAbilities = [], itemAttackAvailable = () => true} = {}) {
 	const combat = Object.create(CharacterSheetCombat.prototype);
 	combat._state = {
 		getAttacks: () => attacks,
 		getItems: () => items,
+		isItemAttackAvailable: itemAttackAvailable,
 		getWeaponDamageDie: item => item.handsUsed >= 2 && item.dmg2 ? item.dmg2 : (item.dmg1 || item.damage),
 		getTemporaryAttacks: () => temporaryAttacks,
 		getActiveStateAttacks: () => activeStateAttacks,
@@ -85,6 +86,19 @@ describe("getCombatActionEconomy — aggregation & bucketing", () => {
 		expect(names(buckets.action)).not.toContain("Shortbow");
 		// Equipped-weapon subtitle reads the real `dmgType` field.
 		expect(buckets.action.find(e => e.name === "Dagger").subtitle).toBe("1d4 piercing");
+	});
+
+	test("equipped weapons with unmet attack-state requirements are excluded", () => {
+		const buckets = makeCombat({
+			items: [
+				{name: "Longsword", weapon: true, equipped: true, dmg1: "1d8"},
+				{name: "Spectral Chains", weapon: true, equipped: true, dmg1: "1d8", requiresStates: ["rage", "manifestChains"]},
+			],
+			itemAttackAvailable: item => item.name !== "Spectral Chains",
+		}).getCombatActionEconomy();
+
+		expect(names(buckets.action)).toContain("Longsword");
+		expect(names(buckets.action)).not.toContain("Spectral Chains");
 	});
 
 	test("spells bucket by casting time; longer-than-turn casts are excluded", () => {

@@ -280,8 +280,8 @@ describe("_seedOptionsFromItem + _prefillCustomItemForm round-trip weapon master
 	test("prefill ticks the mastery + property checkboxes the item carries", () => {
 		const inv = makeInventory(newState());
 		const checks = {
-			".weapon-mastery-check": [{value: "Sap", checked: false}, {value: "Vex", checked: false}],
-			".weapon-prop-check": [{value: "V", checked: false}, {value: "F", checked: false}],
+			".weapon-mastery-check": [{value: "Sap|XPHB", checked: false}, {value: "Vex|XPHB", checked: false}],
+			".weapon-prop-check": [{value: "V|XPHB", checked: false}, {value: "F|XPHB", checked: false}],
 		};
 		const form = {
 			querySelector: () => ({value: "", checked: false}),
@@ -289,9 +289,9 @@ describe("_seedOptionsFromItem + _prefillCustomItemForm round-trip weapon master
 		};
 		inv._prefillCustomItemForm(form, {name: "Blade", type: "weapon", options: {mastery: ["Sap"], property: ["V"]}});
 
-		expect(checks[".weapon-mastery-check"].find(c => c.value === "Sap").checked).toBe(true);
-		expect(checks[".weapon-mastery-check"].find(c => c.value === "Vex").checked).toBe(false);
-		expect(checks[".weapon-prop-check"].find(c => c.value === "V").checked).toBe(true);
-		expect(checks[".weapon-prop-check"].find(c => c.value === "F").checked).toBe(false);
+		expect(checks[".weapon-mastery-check"].find(c => c.value === "Sap|XPHB").checked).toBe(true);
+		expect(checks[".weapon-mastery-check"].find(c => c.value === "Vex|XPHB").checked).toBe(false);
+		expect(checks[".weapon-prop-check"].find(c => c.value === "V|XPHB").checked).toBe(true);
+		expect(checks[".weapon-prop-check"].find(c => c.value === "F|XPHB").checked).toBe(false);
 	});
 });

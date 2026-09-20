@@ -13899,7 +13899,9 @@ class CharacterSheetPage {
 
 		// Also add attacks from equipped weapons if not already configured
 		const items = this._state.getItems();
-		const equippedWeapons = items.filter(i => i.weapon && i.equipped);
+		const equippedWeapons = items.filter(i => i.weapon
+			&& i.equipped
+			&& (this._state.isItemAttackAvailable?.(i) ?? true));
 
 		equippedWeapons.forEach(weapon => {
 			// Check if we already have an attack for this weapon

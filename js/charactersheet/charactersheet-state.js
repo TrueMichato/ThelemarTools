@@ -6392,6 +6392,7 @@ class CharacterSheetState {
 		// Reconcile opt-in target effects after classes, levels, and active states
 		// have been restored. This removes stale Chained Fury effects from old
 		// saves when Rage/Manifest Chains/source legality no longer applies.
+		this._reconcileChainedFuryChainItem();
 		this.reconcileTargetEffects();
 		if (this._itemMaterialCatalog?.length) {
 			this._migrateIounMatrixMaterialQuantities();
@@ -20305,6 +20306,7 @@ class CharacterSheetState {
 	 * @returns {object} - Feature calculated values
 	 */
 	getFeatureCalculations () {
+		this._reconcileChainedFuryChainItem();
 		const classes = this._data.classes || [];
 		const profBonus = this.getProficiencyBonus();
 		const exhaustionPenalty = this._getExhaustionDcPenalty();
@@ -22262,16 +22264,13 @@ class CharacterSheetState {
 								// so the hardcoded ladder below stays as the fallback and MUST
 								// keep matching the shipped table.
 								const scData = cls.subclass;
-								const tableDamage = CharacterSheetClassUtils.getSubclassTableDice(scData, level, /chains? damage/i);
-								const tableRange = CharacterSheetClassUtils.getSubclassTableNumber(scData, level, /chains? range/i);
+								const chainStats = this._getChainedFuryChainStats(cls);
 
 								calculations.hasManifestChains = true;
 								calculations.chainProperties = ["finesse", "light"];
 								calculations.chainDamageType = "force";
-								calculations.chainDamageDie = tableDamage
-									|| (level >= 14 ? "2d6" : level >= 10 ? "1d12" : level >= 6 ? "1d10" : "1d8");
-								calculations.chainRange = tableRange ??
-									(level >= 14 ? 30 : level >= 10 ? 25 : level >= 6 ? 20 : 15);
+								calculations.chainDamageDie = chainStats.damage;
+								calculations.chainRange = chainStats.range;
 								calculations.chainCount = level >= 14 ? 4 : 2;
 								// Escape DC is the character's current grapple/method DC. Keep
 								// this separate from Chain Imprisonment's STR save DC.
@@ -22307,6 +22306,7 @@ class CharacterSheetState {
 									actionType: "action",
 									requiresState: "manifestChains",
 									requiresStates: ["rage", "manifestChains"],
+									generatedItemId: CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID,
 								});
 
 								// On-hit riders. Never auto-applied — each is a player choice
@@ -65069,10 +65069,59 @@ class CharacterSheetState {
 				const requirements = attack.requiresStates || (attack.requiresState ? [attack.requiresState] : []);
 				return requirements.every(requiredId => this.isStateTypeActive(requiredId));
 			})
-			.map(attack => ({
-				...attack,
-				isFeatureAttack: true,
-			}));
+			.map(attack => attack.generatedItemId
+				? this._resolveGeneratedFeatureItemAttack(attack)
+				: {
+					...attack,
+					isFeatureAttack: true,
+				})
+			.filter(Boolean);
+	}
+
+	isItemAttackAvailable (item) {
+		const requirements = item?.requiresStates || (item?.requiresState ? [item.requiresState] : []);
+		return requirements.every(requiredId => this.isStateTypeActive(requiredId));
+	}
+
+	_resolveGeneratedFeatureItemAttack (attack) {
+		const item = this.getItems().find(it => it._generatedItemId === attack.generatedItemId);
+		if (!item?.equipped || !this.isItemAttackAvailable(item)) return null;
+
+		const overrides = item.attackOverrides || {};
+		const properties = overrides.properties ?? item.property ?? item.properties ?? attack.properties ?? [];
+		const typeBase = String(item.type || "").split("|")[0].toUpperCase();
+		const isRanged = properties.some(prop => {
+			const code = String(prop).split("|")[0].toUpperCase();
+			return code === "A";
+		}) || ["R", "RW"].includes(typeBase) || item.isMelee === false;
+		const hasFinesse = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "F");
+		const range = overrides.range ?? item.range ?? attack.range;
+		const reachMatch = !isRanged ? /^\s*(\d+(?:\.\d+)?)\s*ft\b/i.exec(String(range || "")) : null;
+		const damage = this.getEffectiveWeaponDamage(item.id) || {};
+		const effectiveBonuses = this.getEffectiveItemBonuses(item.id) || {};
+
+		return {
+			...attack,
+			id: `auto_${item.id}`,
+			name: overrides.name ?? item.name ?? attack.name,
+			isMelee: overrides.isMelee ?? !isRanged,
+			abilityMod: overrides.abilityMod ?? (isRanged ? "dex" : hasFinesse ? "finesse" : "str"),
+			attackBonus: Number(damage.attackBonus || 0) + Number(item.customAttackBonus || 0),
+			range,
+			reach: overrides.reach ?? (reachMatch ? Number(reachMatch[1]) : attack.reach),
+			reachBonus: 0,
+			damage: overrides.damage ?? damage.dice ?? attack.damage,
+			damageType: overrides.damageType ?? damage.damageType ?? attack.damageType,
+			damageBonus: Number(damage.flat || 0) + Number(item.customDamageBonus || 0),
+			properties,
+			mastery: item.mastery || attack.mastery || [],
+			countsAsMagical: !!(item.countsAsMagical || effectiveBonuses.countsAsMagical || effectiveBonuses.tags?.includes("Magical")),
+			actionType: item.actionType || attack.actionType || "action",
+			sourceFeature: item.sourceFeature || item._generatedItemProvenance?.sourceFeature || attack.sourceFeature,
+			isAutoGenerated: true,
+			isFeatureAttack: true,
+			sourceItem: item,
+		};
 	}
 
 	getActiveAbilitySubstitution (rollType) {
@@ -65836,6 +65885,160 @@ class CharacterSheetState {
 
 	_getChainedFuryClass () {
 		return (this._data.classes || []).find(cls => this._isCanonicalChainedFuryClass(cls)) || null;
+	}
+
+	static CHAINED_FURY_CHAIN_ITEM_ID = "tgtt-chained-fury:spectral-chains";
+
+	_getChainedFuryChainStats (cls = this._getChainedFuryClass()) {
+		const level = Number(cls?.level) || 0;
+		const subclass = cls?.subclass || this.getEffectiveSubclassForClass(cls);
+		return {
+			damage: CharacterSheetClassUtils.getSubclassTableDice(subclass, level, /chains? damage/i)
+				|| (level >= 14 ? "2d6" : level >= 10 ? "1d12" : level >= 6 ? "1d10" : "1d8"),
+			range: CharacterSheetClassUtils.getSubclassTableNumber(subclass, level, /chains? range/i) ??
+				(level >= 14 ? 30 : level >= 10 ? 25 : level >= 6 ? 20 : 15),
+			countsAsMagical: level >= 6,
+		};
+	}
+
+	_isLegacyChainedFuryChainItem (item) {
+		if (!item) return false;
+		const properties = (item.property || item.properties || [])
+			.map(prop => String(prop).split("|")[0].toUpperCase());
+		const damageType = item.dmgType
+			? Parser.dmgTypeToFull?.(item.dmgType)
+			: item.damageType;
+		return String(item.name || "").trim().toLowerCase() === "spectral chains"
+			&& String(item.source || "").toUpperCase() === "TGTT"
+			&& String(item.type || "").split("|")[0].toUpperCase() === "M"
+			&& item.weapon === true
+			&& String(damageType || "").toLowerCase() === "force"
+			&& properties.includes("F")
+			&& properties.includes("L");
+	}
+
+	_getChainedFuryChainTemplate (cls) {
+		const stats = this._getChainedFuryChainStats(cls);
+		return {
+			name: "Spectral Chains",
+			source: "TGTT",
+			type: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			dmg1: stats.damage,
+			dmgType: "O",
+			property: ["F", "L"],
+			range: `${stats.range} ft.`,
+			weight: 0,
+			value: 0,
+			entries: [
+				"Spectral chains manifested by the Path of the Chained Fury. They can attack, grapple, shove, and manipulate objects while raging.",
+			],
+			countsAsMagical: stats.countsAsMagical,
+			sourceFeature: "Manifest Chains",
+			requiresStates: ["rage", "manifestChains"],
+			actionType: "action",
+			_isCustom: true,
+			_isGeneratedFeatureItem: true,
+			_generatedItemId: CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID,
+			_generatedItemProvenance: {
+				sourceType: "subclassFeature",
+				sourceFeature: "Manifest Chains",
+				source: "TGTT",
+				className: "Barbarian",
+				classSource: "TGTT",
+				subclassShortName: "Chained Fury",
+				subclassSource: "TGTT",
+			},
+			_generatedItemBase: {
+				dmg1: stats.damage,
+				range: `${stats.range} ft.`,
+				countsAsMagical: stats.countsAsMagical,
+			},
+		};
+	}
+
+	_cleanupChainedFuryChainItem () {
+		const ownedIds = new Set(
+			(this._data.inventory || [])
+				.filter(row => row?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+					|| row?.item?._isChainedFuryChain)
+				.map(row => row.id),
+		);
+		const hasManifestState = (this._data.activeStates || [])
+			.some(state => state.stateTypeId === "manifestChains");
+		const hasTargetEffects = (this._data.targetEffects || [])
+			.some(effect => String(effect.source || "").toLowerCase() === "chained-fury");
+		if (!ownedIds.size && !hasManifestState && !hasTargetEffects) return;
+
+		if (ownedIds.size) {
+			for (const itemId of ownedIds) this._unregisterItemEffects?.(itemId);
+			this._data.inventory = (this._data.inventory || []).filter(row => !ownedIds.has(row.id));
+			this._recalculateItemBonuses?.();
+		}
+		this._data.activeStates = (this._data.activeStates || [])
+			.filter(state => state.stateTypeId !== "manifestChains");
+		this.clearTargetEffects?.("chained-fury");
+	}
+
+	_reconcileChainedFuryChainItem () {
+		const cls = this._getChainedFuryClass();
+		if (!cls || (Number(cls.level) || 0) < 3) {
+			this._cleanupChainedFuryChainItem();
+			return null;
+		}
+
+		this._data.inventory ||= [];
+		const generatedRows = this._data.inventory.filter(row =>
+			row?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+			|| row?.item?._isChainedFuryChain,
+		);
+		const candidates = generatedRows.length
+			? generatedRows
+			: this._data.inventory.filter(row => this._isLegacyChainedFuryChainItem(row?.item));
+		const keeper = candidates[0] || null;
+
+		if (candidates.length > 1) {
+			const duplicateIds = new Set(candidates.slice(1).map(row => row.id));
+			for (const itemId of duplicateIds) this._unregisterItemEffects?.(itemId);
+			this._data.inventory = this._data.inventory.filter(row => !duplicateIds.has(row.id));
+		}
+
+		const template = this._getChainedFuryChainTemplate(cls);
+		if (!keeper) {
+			const itemId = CryptUtil.uid();
+			this.addItem({...template, id: itemId}, 1, true, false);
+			return itemId;
+		}
+
+		const item = keeper.item;
+		const previousBase = item._generatedItemBase;
+		const legacyDamageValues = new Set(["1d8", "1d10", "1d12", "2d6"]);
+		const legacyRangeValues = new Set(["15 ft.", "20 ft.", "25 ft.", "30 ft."]);
+		const updateManaged = (key, nextValue, legacyValues = null) => {
+			const isManaged = item[key] == null
+				|| (previousBase && item[key] === previousBase[key])
+				|| (!previousBase && legacyValues?.has(item[key]));
+			if (isManaged) item[key] = nextValue;
+		};
+		updateManaged("dmg1", template.dmg1, legacyDamageValues);
+		updateManaged("range", template.range, legacyRangeValues);
+		updateManaged("countsAsMagical", template.countsAsMagical, new Set([true, false]));
+
+		item.weapon = true;
+		item.type ||= "M";
+		item.weaponCategory ||= "martial";
+		item.dmgType ||= "O";
+		item.property ||= ["F", "L"];
+		item.sourceFeature = "Manifest Chains";
+		item.requiresStates = ["rage", "manifestChains"];
+		item.actionType = "action";
+		item._isGeneratedFeatureItem = true;
+		item._generatedItemId = CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID;
+		item._generatedItemProvenance = MiscUtil.copyFast(template._generatedItemProvenance);
+		item._generatedItemBase = MiscUtil.copyFast(template._generatedItemBase);
+		delete item._isChainedFuryChain;
+		return keeper.id;
 	}
 
 	getChainedMovementState () {

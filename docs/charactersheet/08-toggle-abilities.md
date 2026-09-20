@@ -517,10 +517,17 @@ Three consequences fall out of `requiresStates` for free (see `astralBody`):
 `getActivatableFeatures()` omits the row entirely so the toggle is not even
 offered, and `deactivateState("rage")` cascades the chains off.
 
-The state gates the granted **Spectral Chains** attack (`requiresState:
-"manifestChains"` on the `grantedAttacks` descriptor), so the weapon appears in
-the Combat tab only while the chains are actually manifested. Because the state
-is nested inside Rage, the chains inherit Rage's `breaksConcentration` and its
+The subclass permanently grants one equipped **Spectral Chains** inventory
+weapon. The row carries stable generated-item provenance, so renaming or editing
+it cannot break ownership, and the sheet can migrate legacy characters,
+deduplicate repeated reconciliation, and remove the item if the subclass is
+removed. Materials, upgrades, item bonuses, attack notes, and custom edits stay
+on that row.
+
+The generated attack resolves from the live inventory item and is gated by
+`requiresState: "manifestChains"`, so Combat hides it while the chains are not
+manifested without deleting or recreating the item. Because the state is nested
+inside Rage, the chains inherit Rage's `breaksConcentration` and its
 `exclusiveWith: ["bladesong"]` without restating either.
 
 #### Resolute Stance (Juggernaut Barbarian)
@@ -1604,4 +1611,14 @@ is a companion-record flag. See [Beastheart](./22-beastheart.md) §2.2.
 
 ## Chained Fury
 
-Rage and Manifest Chains are separate toggles. Spectral Chains on-hit riders open the target-aware modal; selecting grapple, shove, Chain Imprisonment, or Chain Control does not silently mutate a target. The modal records target name, size, distance, save totals, and final shove distance. Ending Rage, ending Manifest Chains, resting, or releasing a target clears active chain effects and occupancy.
+Rage and Manifest Chains are separate toggles. Spectral Chains persist as one
+editable generated inventory weapon, while its item-backed Combat attack is
+visible only during Manifest Chains. The attack therefore inherits the backing
+item's materials, upgrades, bonuses, notes, and edits without duplicating the
+inventory row across toggles or reloads.
+
+Spectral Chains on-hit riders open the target-aware modal; selecting grapple,
+shove, Chain Imprisonment, or Chain Control does not silently mutate a target.
+The modal records target name, size, distance, save totals, and final shove
+distance. Ending Rage, ending Manifest Chains, resting, or releasing a target
+clears active chain effects and occupancy.

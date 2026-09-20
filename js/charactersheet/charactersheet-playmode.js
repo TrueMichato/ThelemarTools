@@ -1854,7 +1854,9 @@ export class CharacterSheetPlayMode {
 
 		// Add equipped weapon auto-attacks
 		const items = this._state.getItems();
-		const equippedWeapons = items.filter(i => i.weapon && i.equipped);
+		const equippedWeapons = items.filter(i => i.weapon
+			&& i.equipped
+			&& (this._state.isItemAttackAvailable?.(i) ?? true));
 		equippedWeapons.forEach(weapon => {
 			if (attacks.find(a => a.name === weapon.name)) return;
 

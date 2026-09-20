@@ -4003,8 +4003,10 @@ class CharacterSheetInventory {
 		const checkValues = (selBase, values) => {
 			if (!values?.length) return;
 			const wanted = new Set(values.map(v => String(v).toLowerCase()));
+			const wantedCodes = new Set([...wanted].map(value => value.split("|")[0]));
 			(form.querySelectorAll?.(selBase) || []).forEach?.(cb => {
-				if (wanted.has(String(cb.value).toLowerCase())) cb.checked = true;
+				const value = String(cb.value).toLowerCase();
+				if (wanted.has(value) || wantedCodes.has(value.split("|")[0])) cb.checked = true;
 			});
 		};
 		checkValues(".weapon-mastery-check", o.mastery);

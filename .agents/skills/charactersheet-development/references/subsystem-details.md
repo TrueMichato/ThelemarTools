@@ -526,6 +526,23 @@ Catalog adds preserve both type layers: inventory grouping continues to use the 
 case-insensitive `name|source`. The migration is idempotent, skips custom items, and
 never overwrites metadata already present on the save.
 
+### Feature-generated inventory items
+
+Feature-granted equipment that players may customize must be a real inventory
+row, not only a synthetic attack descriptor. Give it a stable generated ID and
+feature provenance, then resolve any Combat attack from the live item by wrapper
+ID so materials, upgrades, bonuses, attack notes, and edits remain
+authoritative. Editable names are not ownership keys.
+
+Reconciliation must be idempotent: preserve the wrapper ID and player-owned
+fields, update only untouched generated/scaling fields, collapse duplicate
+generated rows, and remove owned artifacts when the granting feature is lost.
+Legacy name/mechanical matching is permitted only as a strict one-time adoption
+path. If the equipment persists while its attack is conditional, put
+`requiresState`/`requiresStates` on the generated item/attack and let Combat
+hide the attack rather than deleting and recreating the inventory row. TGTT
+Chained Fury's Spectral Chains are the reference implementation.
+
 ### Usable adventuring gear
 
 `getUsableGear()` is the canonical read API for type-`G` items whose entries declare an

@@ -1115,4 +1115,20 @@ warning.
 
 ## Chained Fury status
 
-The sheet tracks Chained Fury target identity and active effects in persisted state. Movement uses current walking speed and normal grapple drag cost; Unchained Fury removes the extra drag surcharge but does not remove movement accounting. Optional bonus-action doubling is tracked per combat round and is shared by Combat and Play Mode. Combat and Play Mode expose keyboard-reachable, 44px target controls; narrow layouts stack target fields and actions, while target/escape modal bodies scroll within the viewport and modal footers reserve bottom clearance in addition to any device safe-area inset. The target-aware modal chain reacquires and restores focus to the connected Spectral Chains attack control after its intermediate dialogs close.
+Spectral Chains are a persistent generated inventory weapon with stable
+feature provenance. Players can rename, edit, materialize, upgrade, and annotate
+the item; its Combat attack resolves from that same row and is hidden unless
+Rage and Manifest Chains are active. Save/load, repeated reconciliation, legacy
+character migration, and subclass removal preserve the one-item/one-attack
+lifecycle without display-name matching.
+
+The sheet tracks Chained Fury target identity and active effects in persisted
+state. Movement uses current walking speed and normal grapple drag cost;
+Unchained Fury removes the extra drag surcharge but does not remove movement
+accounting. Optional bonus-action doubling is tracked per combat round and is
+shared by Combat and Play Mode. Combat and Play Mode expose keyboard-reachable,
+44px target controls; narrow layouts stack target fields and actions, while
+target/escape modal bodies scroll within the viewport and modal footers reserve
+bottom clearance in addition to any device safe-area inset. The target-aware
+modal chain reacquires and restores focus to the connected Spectral Chains
+attack control after its intermediate dialogs close.

@@ -24,12 +24,25 @@
 
 import "./setup.js";
 
+if (typeof globalThis.document === "undefined") {
+	globalThis.document = {
+		addEventListener () {},
+		getElementById () { return null; },
+		querySelector () { return null; },
+		querySelectorAll () { return []; },
+	};
+}
+
 let CharacterSheetState;
 let CharacterSheetClassUtils;
+let CharacterSheetInventory;
 
 beforeAll(async () => {
+	await import("../../../js/charactersheet/charactersheet-materials.js");
+	await import("../../../js/charactersheet/charactersheet-upgrades.js");
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
 	CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+	CharacterSheetInventory = (await import("../../../js/charactersheet/charactersheet-inventory.js")).CharacterSheetInventory;
 });
 
 /** The real subclass-feature text, verbatim from `homebrew/TravelersGuidetoThelemar.json`. */
@@ -40,6 +53,16 @@ const FEATURE_TEXT = {
 	"Unchained Fury": "You manifest 4 sets of chains when you enter rage instead of 2. You can grapple any creature with your chains, regardless of size.",
 };
 const FEATURE_LEVELS = [[3, "Manifest Chains"], [6, "Chain Imprisonment"], [10, "Chain Control"], [14, "Unchained Fury"]];
+const GENERATED_CHAIN_ID = "tgtt-chained-fury:spectral-chains";
+const STEP_MATERIAL = {
+	name: "Steeline",
+	source: "TGTT",
+	_entityType: "itemMaterial",
+	materialCategory: "constructed",
+	damage: 1,
+	appliesTo: ["weapon"],
+	roles: ["strikingSurface"],
+};
 
 /** A Chained Fury barbarian at `level`, with STR/DEX/CON set for predictable maths. */
 const mkFury = (level) => {
@@ -70,8 +93,38 @@ const rageAndManifest = (state) => {
 };
 
 const getChains = (state) => (state.getFeatureGrantedAttacks() || []).find(a => a.sourceFeature === "Manifest Chains");
+const getChainItems = (state) => state.getItems().filter(item => item._generatedItemId === GENERATED_CHAIN_ID);
+const getChainItem = (state) => getChainItems(state)[0];
 
 describe("Chained Fury — L3 Manifest Chains", () => {
+	it("creates one equipped inventory weapon with stable generated-item provenance", () => {
+		const state = mkFury(3);
+		const chains = getChainItem(state);
+
+		expect(getChainItems(state)).toHaveLength(1);
+		expect(chains).toMatchObject({
+			name: "Spectral Chains",
+			source: "TGTT",
+			type: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			dmg1: "1d8",
+			dmgType: "O",
+			equipped: true,
+			_isGeneratedFeatureItem: true,
+			_generatedItemId: GENERATED_CHAIN_ID,
+			_generatedItemProvenance: {
+				sourceType: "subclassFeature",
+				sourceFeature: "Manifest Chains",
+				source: "TGTT",
+				className: "Barbarian",
+				classSource: "TGTT",
+				subclassShortName: "Chained Fury",
+				subclassSource: "TGTT",
+			},
+		});
+	});
+
 	it("does NOT offer the chains toggle until the barbarian is raging", () => {
 		const state = mkFury(3);
 		const names = (state.getActivatableFeatures() || []).map(f => f.activationInfo?.stateType?.name);
@@ -101,12 +154,16 @@ describe("Chained Fury — L3 Manifest Chains", () => {
 	it("puts a Spectral Chains weapon in the attack list once manifested", () => {
 		const state = rageAndManifest(mkFury(3));
 		const chains = getChains(state);
+		const item = getChainItem(state);
 		expect(chains).toBeDefined();
 		expect(chains.name).toBe("Spectral Chains");
 		expect(chains.isMelee).toBe(true);
 		expect(chains.damage).toBe("1d8");
 		expect(chains.damageType).toBe("force");
 		expect(chains.isFeatureAttack).toBe(true);
+		expect(chains.id).toBe(`auto_${item.id}`);
+		expect(chains.sourceItem.id).toBe(item.id);
+		expect(chains.sourceItem._generatedItemId).toBe(GENERATED_CHAIN_ID);
 	});
 
 	it("gives the chains 15 ft. reach WITHOUT extending the barbarian's other melee reach", () => {
@@ -157,6 +214,123 @@ describe("Chained Fury — L3 Manifest Chains", () => {
 	it("is NOT yet magical at L3", () => {
 		const state = rageAndManifest(mkFury(3));
 		expect(getChains(state).countsAsMagical).toBe(false);
+	});
+
+	it("keeps the inventory item while hiding its attack outside Rage/Manifest Chains", () => {
+		const state = mkFury(3);
+		const itemId = getChainItem(state).id;
+		expect(state.isItemAttackAvailable(getChainItem(state))).toBe(false);
+		expect(getChains(state)).toBeUndefined();
+
+		state.activateState("rage");
+		expect(getChainItem(state).id).toBe(itemId);
+		expect(state.isItemAttackAvailable(getChainItem(state))).toBe(false);
+		expect(getChains(state)).toBeUndefined();
+
+		state.activateState("manifestChains");
+		expect(state.isItemAttackAvailable(getChainItem(state))).toBe(true);
+		expect(getChains(state).sourceItem.id).toBe(itemId);
+
+		state.deactivateState("rage");
+		expect(getChainItem(state).id).toBe(itemId);
+		expect(state.isItemAttackAvailable(getChainItem(state))).toBe(false);
+		expect(getChains(state)).toBeUndefined();
+	});
+
+	it("resolves edits, attack notes, materials, upgrades, and bonuses from the backing item", () => {
+		const state = rageAndManifest(mkFury(3));
+		state.setItemMaterialCatalog([STEP_MATERIAL]);
+		const original = getChainItem(state);
+		const inventory = new CharacterSheetInventory({
+			getState: () => state,
+			renderCharacter () {},
+			saveCharacter () {},
+		});
+		inventory._renderItemList = () => {};
+
+		const raw = state.getItemRaw(original.id);
+		raw.attackOverrides = {note: "Hooked links and a weighted pommel."};
+		state.replaceItem(original.id, raw);
+		inventory._saveCustomItem("Forged Fury", 1, 3, {
+			type: "weapon",
+			weaponCategory: "martial",
+			dmg1: "1d8",
+			dmgType: "O",
+			property: ["F", "L"],
+			range: "18 ft.",
+		}, original.id);
+		state.replaceItem(original.id, {
+			...state.getItemRaw(original.id),
+			customAttackBonus: 2,
+			customDamageBonus: 3,
+		});
+		state.setItemMaterial(original.id, STEP_MATERIAL);
+		state.applyItemUpgrade(original.id, {name: "Superior", source: "TCAH", upgradeType: ["WU:3"]}, 5000);
+
+		const editedItem = getChainItem(state);
+		const chains = getChains(state);
+		expect(editedItem).toMatchObject({
+			id: original.id,
+			name: "Forged Fury",
+			range: "18 ft.",
+			material: {name: "Steeline", source: "TGTT"},
+			_generatedItemId: GENERATED_CHAIN_ID,
+		});
+		expect(chains).toMatchObject({
+			id: `auto_${original.id}`,
+			name: "Forged Fury",
+			damage: "1d12",
+			range: "18 ft.",
+			attackBonus: 2,
+			damageBonus: 3,
+			sourceItem: {
+				id: original.id,
+				attackOverrides: {note: "Hooked links and a weighted pommel."},
+				material: {name: "Steeline", source: "TGTT"},
+				_generatedItemId: GENERATED_CHAIN_ID,
+			},
+		});
+	});
+
+	it("reconciles repeatedly without replacing edits or duplicating the item", () => {
+		const state = mkFury(3);
+		const item = getChainItem(state);
+		state.replaceItem(item.id, {...state.getItemRaw(item.id), name: "The Long Memory", customDamageBonus: 4});
+
+		state.getFeatureCalculations();
+		state.applyClassFeatureEffects();
+		state.getFeatureCalculations();
+		state.getFeatureCalculations();
+
+		expect(getChainItems(state)).toHaveLength(1);
+		expect(getChainItem(state)).toMatchObject({
+			id: item.id,
+			name: "The Long Memory",
+			customDamageBonus: 4,
+			_generatedItemId: GENERATED_CHAIN_ID,
+		});
+	});
+
+	it("uses generated identity rather than editable display text", () => {
+		const state = mkFury(3);
+		const generated = getChainItem(state);
+		state.replaceItem(generated.id, {...state.getItemRaw(generated.id), name: "Memory's Reach"});
+		state.addItem({
+			name: "Spectral Chains",
+			source: "Custom",
+			type: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			dmg1: "9d9",
+			dmgType: "N",
+			_isCustom: true,
+		}, 1, true);
+
+		state.getFeatureCalculations();
+
+		expect(getChainItems(state)).toHaveLength(1);
+		expect(getChainItem(state)).toMatchObject({id: generated.id, name: "Memory's Reach"});
+		expect(state.getItems().filter(item => item.name === "Spectral Chains" && item.source === "Custom")).toHaveLength(1);
 	});
 });
 
@@ -257,6 +431,7 @@ describe("Chained Fury — L14 Unchained Fury", () => {
 describe("Chained Fury — persistence", () => {
 	it("survives a save/load round-trip with the chains still manifested", () => {
 		const state = rageAndManifest(mkFury(14));
+		const originalItem = getChainItem(state);
 		expect(getChains(state)).toBeDefined();
 
 		const restored = new CharacterSheetState();
@@ -268,6 +443,9 @@ describe("Chained Fury — persistence", () => {
 		expect(chains).toBeDefined();
 		expect(chains.damage).toBe("2d6");
 		expect(restored.getAttackReach(chains)).toBe(30);
+		expect(getChainItems(restored)).toHaveLength(1);
+		expect(getChainItem(restored).id).toBe(originalItem.id);
+		expect(chains.sourceItem.id).toBe(originalItem.id);
 	});
 
 	it("restores a non-manifested rage without conjuring chains", () => {
@@ -278,6 +456,49 @@ describe("Chained Fury — persistence", () => {
 		expect(restored.isStateTypeActive("rage")).toBe(true);
 		expect(restored.isStateTypeActive("manifestChains")).toBe(false);
 		expect(getChains(restored)).toBeUndefined();
+		expect(getChainItems(restored)).toHaveLength(1);
+	});
+
+	it("migrates a legacy character with no chain item exactly once", () => {
+		const state = rageAndManifest(mkFury(6));
+		const legacy = JSON.parse(JSON.stringify(state.toJson()));
+		legacy.inventory = legacy.inventory.filter(row => row.item?._generatedItemId !== GENERATED_CHAIN_ID);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(legacy);
+		restored.getFeatureCalculations();
+		restored.getFeatureCalculations();
+
+		expect(getChainItems(restored)).toHaveLength(1);
+		expect(getChains(restored).sourceItem.id).toBe(getChainItem(restored).id);
+	});
+
+	it("backfills stable identity onto a legacy canonical item without duplicating it", () => {
+		const state = rageAndManifest(mkFury(6));
+		const legacy = JSON.parse(JSON.stringify(state.toJson()));
+		const chainRow = legacy.inventory.find(row => row.item?._generatedItemId === GENERATED_CHAIN_ID);
+		delete chainRow.item._isGeneratedFeatureItem;
+		delete chainRow.item._generatedItemId;
+		delete chainRow.item._generatedItemProvenance;
+		delete chainRow.item._generatedItemBase;
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(legacy);
+
+		expect(getChainItems(restored)).toHaveLength(1);
+		expect(getChainItem(restored).id).toBe(chainRow.id);
+	});
+
+	it("cleans up the item, attack, and manifested state when the subclass is removed", () => {
+		const state = rageAndManifest(mkFury(6));
+		expect(getChainItems(state)).toHaveLength(1);
+		expect(getChains(state)).toBeDefined();
+
+		state.setSubclass("Barbarian", {name: "Path of the Juggernaut", shortName: "Juggernaut", source: "TGTT"});
+
+		expect(getChainItems(state)).toHaveLength(0);
+		expect(getChains(state)).toBeUndefined();
+		expect(state.isStateTypeActive("manifestChains")).toBe(false);
 	});
 });
 
