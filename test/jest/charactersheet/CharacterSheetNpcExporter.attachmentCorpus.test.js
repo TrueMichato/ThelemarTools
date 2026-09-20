@@ -172,7 +172,6 @@ describeCorpus("v20.3 — the reported failing corpus normalizes and validates e
 		const nonEmpty = raw.monster.filter(monster =>
 			CharacterSheetNpcExporter.getExternalItemSources(monster).length > 0);
 		expect(nonEmpty.length).toBeGreaterThan(0);
-
 	});
 
 	(hasRealSchema ? it : it.skip)(
