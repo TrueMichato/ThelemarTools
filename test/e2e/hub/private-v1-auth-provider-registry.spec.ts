@@ -237,7 +237,6 @@ test("links a new provider to the same account, signs in through it, then unlink
 		await secondContext.close();
 	}
 });
-
 test("Google first access requires and atomically redeems a campaign invite", async ({page}) => {
 	const secret = process.env.HUB_TEST_AUTH_SECRET;
 	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
@@ -254,7 +253,8 @@ test("Google first access requires and atomically redeems a campaign invite", as
 	await page.goto("/hub.html");
 	await page.locator("#hub-logout").click();
 	await page.waitForURL(/\/hub\.html$/);
-	await page.goto(`/hub.html#invite=${encodeURIComponent(inviteToken)}`);
+	await expect(page.getByRole("group", {name: "Sign-in providers"})).toBeVisible();
+	await page.goto(`/hub.html?flow=first-access#invite=${encodeURIComponent(inviteToken)}`);
 	const signInGroup = page.getByRole("group", {name: "Sign-in providers"});
 	await expect(signInGroup).toBeVisible();
 	await signInGroup.getByRole("button", {name: "Sign in with Google"}).click();
@@ -269,8 +269,12 @@ test("Google first access requires and atomically redeems a campaign invite", as
 	const campaign = await page.request.get(`/api/campaigns/${campaignId}`);
 	expect(campaign.ok()).toBe(true);
 	expect(await campaign.json()).toEqual(expect.objectContaining({
-		campaign: expect.objectContaining({id: campaignId, name: campaignName}),
-		membership: expect.objectContaining({role: "player", status: "active"}),
+		campaign: expect.objectContaining({
+			id: campaignId,
+			name: campaignName,
+			role: "player",
+			status: "active",
+		}),
 	}));
 	const exported = await page.request.get("/api/account/export");
 	expect(exported.ok()).toBe(true);

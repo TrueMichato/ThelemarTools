@@ -112,7 +112,7 @@ for (const definition of deterministicProviderDefinitions.filter(({slug}) => slu
 		provider: definition.slug,
 		providerSubject: definition.subject,
 		displayName: `Hub E2E ${definition.label}`,
-		handle: definition.slug === "google" ? null : `hub-e2e-${definition.slug}`,
+		handle: `hub-e2e-${definition.slug}`,
 	});
 	providerAccounts.set(definition.slug, account);
 }
