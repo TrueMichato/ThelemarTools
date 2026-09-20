@@ -104,11 +104,12 @@ const authProviderRegistry = new AuthProviderRegistry({
 	registrations: deterministicProviders.map(provider => ({status: "available", provider})),
 });
 const providerAccounts = new Map();
-for (const definition of deterministicProviderDefinitions) {
+for (const definition of deterministicProviderDefinitions.filter(({slug}) => slug !== "google")) {
 	const account = await store.pUpsertOAuthAccount({
 		provider: definition.slug,
 		providerSubject: definition.subject,
 		displayName: `Hub E2E ${definition.label}`,
+		handle: `hub-e2e-${definition.slug}`,
 	});
 	providerAccounts.set(definition.slug, account);
 }
@@ -124,9 +125,13 @@ const app = await createHubApp({
 		appOrigin,
 		cookieSecret,
 		csrfSecret,
-		allowedOAuthSubjects: requireEnv("HUB_ALLOWED_OAUTH_SUBJECTS").split(",").map(it => it.trim()).filter(Boolean),
+		inviteTokenSecrets: [
+			requireEnv("HUB_INVITE_TOKEN_SECRET"),
+			...(process.env.HUB_INVITE_TOKEN_PREVIOUS_SECRETS || "").split(",").map(it => it.trim()).filter(Boolean),
+		],
 		trustProxy: trustedProxies.length ? trustedProxies : false,
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
+		isInviteAccountAdmissionEnabled: true,
 		isCampaignRulesPolicyEnabled: true,
 		isAccountEntitlementsEnabled: true,
 		operatorAccountIds: [operatorAccount.id],
