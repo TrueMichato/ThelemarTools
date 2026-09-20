@@ -454,7 +454,8 @@ describe("Hub concrete multi-provider routes", () => {
 		const callback = await app.inject(callbackRequest);
 		expect(callback.statusCode).toBe(302);
 		const callbackReplay = await app.inject(callbackRequest);
-		expect(callbackReplay.statusCode).toBe(400);
+		expect(callbackReplay.statusCode).toBe(302);
+		expect(getCookie(callbackReplay, "__Host-hub_session")).toBe(getCookie(callback, "__Host-hub_session"));
 		expect(store._audit.filter(entry => entry.action === "identity.linked")).toHaveLength(1);
 		const nextCookie = `__Host-hub_session=${getCookie(callback, "__Host-hub_session")}`;
 		const nextSession = (await app.inject({
@@ -478,7 +479,7 @@ describe("Hub concrete multi-provider routes", () => {
 		expect(JSON.stringify(listed)).not.toMatch(/subject|token|pkce|nonce/i);
 		expect(store._characterLeases.size).toBe(0);
 		expect(store._dmWorkspaceLeases.size).toBe(0);
-		expect(app.hubRealtime.closeSession).toHaveBeenCalledTimes(2);
+		expect(new Set(app.hubRealtime.closeSession.mock.calls.map(([{sessionId}]) => sessionId)).size).toBe(2);
 
 		const oldCsrf = await app.inject({
 			method: "POST",
@@ -513,6 +514,10 @@ describe("Hub concrete multi-provider routes", () => {
 			headers: {cookie: unlinkReauth.cookie},
 		})).json();
 		const googleIdentity = listed.identities.find(identity => identity.provider === "google");
+		const pListExternalIdentities = store.pListExternalIdentities.bind(store);
+		store.pListExternalIdentities = jest.fn(async () => {
+			throw new Error("post-commit identity refresh failed");
+		});
 		const unlink = await app.inject({
 			method: "DELETE",
 			url: `/api/account/identities/${googleIdentity.id}`,
@@ -525,11 +530,25 @@ describe("Hub concrete multi-provider routes", () => {
 			},
 		});
 		expect(unlink.statusCode).toBe(200);
+		expect(store.pListExternalIdentities).not.toHaveBeenCalled();
 		expect(unlink.json()).toEqual(expect.objectContaining({
 			unlinkedIdentityId: googleIdentity.id,
 			csrfToken: expect.any(String),
 		}));
 		const unlinkCookie = `__Host-hub_session=${getCookie(unlink, "__Host-hub_session")}`;
+		const lostResponseReplay = await app.inject({
+			method: "DELETE",
+			url: `/api/account/identities/${googleIdentity.id}`,
+			headers: {
+				cookie: unlinkReauth.cookie,
+				origin: ORIGIN,
+				"x-csrf-token": unlinkSession.csrfToken,
+				"x-hub-protocol-version": "5",
+				"idempotency-key": "unlink-google",
+			},
+		});
+		expect(lostResponseReplay.statusCode).toBe(200);
+		expect(getCookie(lostResponseReplay, "__Host-hub_session")).toBe(getCookie(unlink, "__Host-hub_session"));
 		const unlinkReplay = await app.inject({
 			method: "DELETE",
 			url: `/api/account/identities/${googleIdentity.id}`,
@@ -567,6 +586,7 @@ describe("Hub concrete multi-provider routes", () => {
 			},
 		});
 		expect(freshAfterUnlink.statusCode).toBe(200);
+		store.pListExternalIdentities = pListExternalIdentities;
 	});
 
 	it("rejects link callback session/account mismatch and owned-elsewhere conflict without partial linking", async () => {

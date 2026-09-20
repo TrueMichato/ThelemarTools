@@ -106,6 +106,9 @@ A link callback never enters invite admission or creates an account. An unknown 
 initiating account; a subject owned elsewhere returns bounded `IDENTITY_ALREADY_LINKED`. Unlink returns bounded
 `IDENTITY_NOT_FOUND`, `REAUTHENTICATION_IDENTITY_CONFLICT`, `LAST_IDENTITY_PROTECTED`, or
 `IDENTITY_RETENTION_REQUIRED` without exposing another account or provider subject.
+Link and unlink rotation credentials are deterministically recoverable only from server secrets plus the exact
+OAuth transaction or idempotency command. A lost success response can therefore reissue the already-committed
+replacement cookie/CSRF without repeating the mutation; unrelated revoked sessions remain unauthenticated.
 
 The raw invite token is accepted only in the JSON body of `POST /api/auth/invite-contexts`. It is never accepted
 in `returnTo`, OAuth state, cookies, query strings, or callback parameters. The server permits only `/hub.html`

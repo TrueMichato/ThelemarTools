@@ -60,6 +60,7 @@ import {
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
+const pendingIdentityUnlinks = new Map();
 let campaignAuthorizationErrorHandler = null;
 
 function getAwardDraftStorageKey ({accountId, campaignId}) {
@@ -117,6 +118,7 @@ function concealCampaignAuthorizationSurfaces () {
 let _pSignedOutProvidersRender = null;
 let _pendingInviteToken = null;
 let _pendingInviteRetry = null;
+let _accountProviderMetadata = null;
 async function pRenderSignedOutProviders () {
 	if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender;
 	const signIn = document.getElementById("hub-sign-in");
@@ -1408,6 +1410,39 @@ function getUnlinkBlockMessage (reason) {
 	}
 }
 
+async function pUnlinkAccountIdentityWithRecovery ({identityId}) {
+	const request = pendingIdentityUnlinks.get(identityId) || {
+		identityId,
+		idempotencyKey: crypto.randomUUID(),
+	};
+	pendingIdentityUnlinks.set(identityId, request);
+	let lastError = null;
+	let hasRefreshedSession = false;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			const result = await api.pUnlinkAccountIdentity(request);
+			pendingIdentityUnlinks.delete(identityId);
+			return result;
+		} catch (error) {
+			lastError = error;
+			if (error?.code === "INVALID_CSRF" && !hasRefreshedSession) {
+				const session = await api.pGetSession();
+				if (session.signedIn) {
+					hasRefreshedSession = true;
+					continue;
+				}
+			}
+			if (isMutationOutcomeUncertain(error) && attempt === 0) continue;
+			if (
+				!isMutationOutcomeUncertain(error)
+				&& !["AUTH_REQUIRED", "INVALID_CSRF"].includes(error?.code)
+			) pendingIdentityUnlinks.delete(identityId);
+			break;
+		}
+	}
+	throw lastError;
+}
+
 async function pRenderAccountReauthentication ({
 	session,
 	containerId,
@@ -1416,6 +1451,7 @@ async function pRenderAccountReauthentication ({
 	description = null,
 	eligibleProviderSlugs = null,
 	returnTo = "/hub.html",
+	metadata = null,
 }) {
 	const container = document.getElementById(containerId);
 	if (!container) return;
@@ -1432,6 +1468,7 @@ async function pRenderAccountReauthentication ({
 			: "hub-account-reauth-status",
 		returnTo,
 		eligibleProviderSlugs,
+		metadata,
 	});
 	container.classList.toggle("ve-hidden", !providers.length);
 }
@@ -1460,7 +1497,11 @@ async function pShowAccountReauthentication ({
 	document.getElementById("hub-account-reauth")?.scrollIntoView({behavior: "smooth", block: "nearest"});
 }
 
-async function pRenderAccountIdentities ({session}) {
+async function pRenderAccountIdentities ({
+	session,
+	identities: suppliedIdentities = null,
+	metadata: suppliedMetadata = null,
+}) {
 	const section = document.getElementById("hub-sign-in-methods");
 	const list = document.getElementById("hub-identity-list");
 	if (!section || !list) return;
@@ -1485,10 +1526,14 @@ async function pRenderAccountIdentities ({session}) {
 		return;
 	}
 	if (description) description.textContent = "Link another provider for account access. Identity changes sign out every existing device.";
-	const [identities, metadata] = await Promise.all([
-		api.pListAccountIdentities(),
-		api.pGetMeta(),
-	]);
+	const [identities, metadata] = suppliedIdentities
+		? [suppliedIdentities, suppliedMetadata || _accountProviderMetadata]
+		: await Promise.all([
+			api.pListAccountIdentities(),
+			api.pGetMeta(),
+		]);
+	if (!metadata) throw new HubApiError({code: "RESPONSE_INVALID", status: 200});
+	_accountProviderMetadata = metadata;
 	const providers = metadata.authProviders || [];
 	const linkedProviders = new Set(identities.map(identity => identity.provider));
 	if (showReauthentication) {
@@ -1507,6 +1552,7 @@ async function pRenderAccountIdentities ({session}) {
 				.filter(identity => identity.providerStatus === "available")
 				.map(identity => identity.provider),
 		)],
+		metadata,
 	});
 	const rows = identities.map(identity => {
 		const provider = providers.find(candidate => candidate.slug === identity.provider);
@@ -1534,18 +1580,9 @@ async function pRenderAccountIdentities ({session}) {
 		button.addEventListener("click", async () => {
 			button.disabled = true;
 			setIdentityStatus("");
+			let result;
 			try {
-				const result = await api.pUnlinkAccountIdentity({
-					identityId: identity.id,
-					idempotencyKey: crypto.randomUUID(),
-				});
-				setIdentityStatus(result.otherDevicesSignedOut
-					? "Sign-in method removed. Every other device was signed out."
-					: "Sign-in method removed. Your session was refreshed.");
-				await Promise.all([
-					pRenderAccountIdentities({session: await api.pGetSession()}),
-					pRenderAccountSessions(),
-				]);
+				result = await pUnlinkAccountIdentityWithRecovery({identityId: identity.id});
 			} catch (error) {
 				if (["REAUTHENTICATION_REQUIRED", "REAUTHENTICATION_IDENTITY_CONFLICT"].includes(error?.code)) {
 					setIdentityStatus(getErrorMessage(error), {isError: true});
@@ -1557,6 +1594,29 @@ async function pRenderAccountIdentities ({session}) {
 					});
 				} else setIdentityStatus(getErrorMessage(error), {isError: true});
 				button.disabled = !identity.canUnlink;
+				return;
+			}
+			const successMessage = result.otherDevicesSignedOut
+				? "Sign-in method removed. Every other device was signed out."
+				: "Sign-in method removed. Your session was refreshed.";
+			setIdentityStatus(successMessage);
+			let isRefreshFailed = false;
+			for (const pRefresh of [
+				() => pRenderAccountIdentities({
+					session,
+					identities: result.identities,
+					metadata,
+				}),
+				() => pRenderAccountSessions(),
+			]) {
+				try {
+					await pRefresh();
+				} catch {
+					isRefreshFailed = true;
+				}
+			}
+			if (isRefreshFailed) {
+				setIdentityStatus(`${successMessage} Reload to refresh the device list.`, {isError: true});
 			}
 		});
 		controls.append(button);
@@ -1643,10 +1703,14 @@ function setAccountReauthenticationStatus (message, {isError = false, statusId =
 	status.classList.toggle("hub-inline-status--error", isError);
 }
 
-async function pGetEligibleReauthenticationProviders ({session, eligibleProviderSlugs = null}) {
-	const metadata = await api.pGetMeta();
+async function pGetEligibleReauthenticationProviders ({
+	session,
+	eligibleProviderSlugs = null,
+	metadata = null,
+}) {
+	const resolvedMetadata = metadata || await api.pGetMeta();
 	const eligibleProviders = new Set(eligibleProviderSlugs || session.reauthenticationProviders || []);
-	return (metadata.authProviders || []).filter(provider =>
+	return (resolvedMetadata.authProviders || []).filter(provider =>
 		provider.status === "available"
 		&& eligibleProviders.has(provider.slug),
 	);
@@ -1674,12 +1738,13 @@ async function pRenderReauthenticationControls ({
 	statusId,
 	returnTo = "/hub.html",
 	eligibleProviderSlugs = null,
+	metadata = null,
 	fnSetStatus = (message, options) => setAccountReauthenticationStatus(message, {...options, statusId}),
 }) {
 	const container = document.getElementById(containerId);
 	const buttons = buttonsId ? document.getElementById(buttonsId) : container;
 	if (!container || !buttons) return [];
-	const providers = await pGetEligibleReauthenticationProviders({session, eligibleProviderSlugs});
+	const providers = await pGetEligibleReauthenticationProviders({session, eligibleProviderSlugs, metadata});
 	if (!providers.length) {
 		fnSetStatus("No linked sign-in provider is currently available for reauthentication.", {isError: true});
 	}

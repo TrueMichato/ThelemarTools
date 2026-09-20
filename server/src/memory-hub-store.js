@@ -739,6 +739,7 @@ export class MemoryHubStore {
 						return this._setReceipt({
 							accountId,
 							idempotencyKey,
+							commandType: "identity.link",
 							response: {
 								account,
 								identity: externalIdentity,
@@ -819,6 +820,11 @@ export class MemoryHubStore {
 						targetId: identity.id,
 						details: {provider: identity.provider},
 					});
+					for (const accountSession of this._sessions.values()) {
+						if (accountSession.authenticatedViaIdentityId !== identity.id) continue;
+						accountSession.authenticatedViaIdentityId = null;
+						accountSession.recentReauthenticatedAt = null;
+					}
 					this._externalIdentities.delete(identity.id);
 					this._identityToAccount.delete(getExternalIdentityKey(identity));
 					const revokedSessionIds = [];
@@ -835,15 +841,21 @@ export class MemoryHubStore {
 						authenticatedViaIdentityId: session.authenticatedViaIdentityId,
 						recentReauthenticatedAt: session.recentReauthenticatedAt,
 					});
+					const remainingIdentities = [...this._externalIdentities.values()]
+						.filter(candidate => candidate.accountId === accountId)
+						.sort((a, b) => `${a.createdAt}`.localeCompare(`${b.createdAt}`) || a.id.localeCompare(b.id))
+						.map(({subject: _subject, accountId: _accountId, ...candidate}) => copy(candidate));
 					return this._setReceipt({
 						accountId,
 						idempotencyKey,
+						commandType: "identity.unlink",
 						response: {
 							ok: true,
 							unlinkedIdentityId: identity.id,
 							unlinkedProvider: identity.provider,
 							session: replacementSession,
 							revokedSessionIds,
+							identities: remainingIdentities,
 						},
 					});
 				},
@@ -857,6 +869,49 @@ export class MemoryHubStore {
 			.filter(identity => identity.accountId === accountId)
 			.sort((a, b) => `${a.createdAt}`.localeCompare(`${b.createdAt}`) || a.id.localeCompare(b.id))
 			.map(copy);
+	}
+
+	async pGetCompletedOAuthLink ({oauthTransactionId, provider, redirectUri}) {
+		const transaction = this._oauthTransactions.get(oauthTransactionId);
+		if (
+			!transaction
+			|| transaction.operation !== "link"
+			|| transaction.provider !== provider
+			|| transaction.redirectUri !== redirectUri
+			|| !transaction.consumedAt
+			|| new Date(transaction.expiresAt) <= this._fnNow()
+		) return null;
+		const receipt = this._commandReceipts.get(`${transaction.initiatingAccountId}::${oauthTransactionId}`);
+		if (receipt?.commandType !== "identity.link") return null;
+		const session = [...this._sessions.values()].find(candidate => (
+			candidate.id === receipt.response?.session?.id
+			&& !candidate.revokedAt
+			&& new Date(candidate.expiresAt) > this._fnNow()
+		));
+		if (!session) return null;
+		return copy({...receipt.response, returnTo: transaction.returnTo});
+	}
+
+	async pGetIdentityUnlinkRecovery ({tokenHash, idempotencyKey}) {
+		const session = this._sessions.get(tokenHash);
+		if (!session || !session.revokedAt || new Date(session.expiresAt) <= this._fnNow()) return null;
+		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
+		const receipt = this._commandReceipts.get(`${session.accountId}::${normalized.key}`);
+		if (
+			!receipt
+			|| receipt.commandType !== "identity.unlink"
+			|| receipt.requestHash !== normalized.requestHash
+			|| !receipt.response?.revokedSessionIds?.includes(session.id)
+		) return null;
+		const replacementSession = [...this._sessions.values()].find(candidate => (
+			candidate.id === receipt.response.session?.id
+			&& candidate.accountId === session.accountId
+			&& !candidate.revokedAt
+			&& new Date(candidate.expiresAt) > this._fnNow()
+		));
+		const account = this._accounts.get(session.accountId);
+		if (!replacementSession || account?.status !== "active") return null;
+		return copy({account, session, replacementSession});
 	}
 
 	async pCreateOAuthTransaction ({
@@ -1635,10 +1690,11 @@ export class MemoryHubStore {
 		return copy(receipt.response);
 	}
 
-	_setReceipt ({accountId, idempotencyKey, response}) {
+	_setReceipt ({accountId, idempotencyKey, commandType = null, response}) {
 		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
 		this._commandReceipts.set(`${accountId}::${normalized.key}`, {
 			requestHash: normalized.requestHash,
+			commandType,
 			response: copy(response),
 		});
 		return copy(response);

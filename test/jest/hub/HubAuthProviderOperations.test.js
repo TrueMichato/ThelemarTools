@@ -18,7 +18,6 @@ describe("Hub authentication provider operations", () => {
 		expect(calls[0].sql).toContain("NOT EXISTS");
 		expect(calls[0].sql).toContain("account.status <> 'deleted'");
 		expect(calls[0].sql).toContain("identity.provider || ':' || identity.provider_subject");
-		expect(calls[0].sql).toContain("audit.details->>'admission' = 'campaign_invite'");
 		expect(calls[0].params).toEqual([["github"], ["github:123", "github:456"]]);
 	});
 

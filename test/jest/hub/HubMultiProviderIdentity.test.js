@@ -574,6 +574,13 @@ describe("Hub provider-neutral identity and OAuth transaction authority", () => 
 			idempotencyKey: "unlink-success",
 			retentionRequiredProviders: ["google"],
 		};
+		const removedIdentitySession = await store.pCreateSession({
+			accountId: owner.account.id,
+			tokenHash: "b".repeat(64),
+			expiresAt: new Date(now.getTime() + 60 * 60_000),
+			authenticatedViaIdentityId: owner.identity.id,
+			recentReauthenticatedAt: now,
+		});
 		const first = await store.pUnlinkExternalIdentity(request);
 		const replay = await store.pUnlinkExternalIdentity({
 			...request,
@@ -592,6 +599,12 @@ describe("Hub provider-neutral identity and OAuth transaction authority", () => 
 				details: {provider: "github"},
 			}),
 		]);
+		const exported = await store.pExportAccountData({accountId: owner.account.id});
+		expect(exported.sessions.find(session => session.id === removedIdentitySession.id)).toEqual(expect.objectContaining({
+			authenticatedViaIdentityId: null,
+			recentReauthenticatedAt: null,
+			revokedAt: expect.any(String),
+		}));
 	});
 
 	it("serializes concurrent unlink attempts so only one removes the identity", async () => {

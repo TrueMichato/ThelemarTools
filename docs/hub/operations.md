@@ -93,8 +93,9 @@ HUB_ROLLBACK_SUPPORTED_AUTH_PROVIDERS=github \
 npm run hub:check-auth-rollback
 ```
 
-Optional `HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678` is read only by this legacy-image rollback preflight;
-invite-admitted accounts with a supported identity do not need to appear in it, and the running r9 BFF does not
+Optional `HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678` is read only by this legacy-image rollback preflight.
+When supplied because the target image still enforces that allowlist, every active account needs a supported
+identity present in it, including accounts originally admitted through an invite. The running r9 BFF does not
 use it for admission. Exit status 2 blocks rollback without exposing account or subject identifiers. Follow the
 [authentication provider registry runbook](runbooks/auth-provider-registry.md).
 

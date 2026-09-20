@@ -26,8 +26,8 @@ preserved.
 
 Migration 0006 is previous-app-compatible before any currently admitted account relies solely on a provider
 unsupported by the target image. Never infer rollback safety from provider row counts alone; invite-admitted
-accounts are accepted through their supported identity, while an optional historical allowlist constrains only
-legacy target-image accounts. Already de-admitted accounts do not make an otherwise compatible rollback less safe. The
+accounts are also constrained by an optional historical allowlist whenever the target image still enforces it.
+Already de-admitted accounts do not make an otherwise compatible rollback less safe. The
 preflight returns only a count to avoid exposing account/provider subjects in evidence.
 
 Migration 0009 is an additive previous-app-compatible expand migration. Reverting the application leaves

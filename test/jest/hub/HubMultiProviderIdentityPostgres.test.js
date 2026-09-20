@@ -111,13 +111,14 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			operation: "link",
 			redirectUri: `${ORIGIN}/auth/google/callback`,
 		});
+		const linkedTokenHash = crypto.randomBytes(32).toString("hex");
 		const linked = await store.pCompleteOAuthLink({
 			identity: {
 				provider: "google",
 				subject: `${prefix}-google`,
 				displayName: "Different provider name",
 			},
-			tokenHash: crypto.randomBytes(32).toString("hex"),
+			tokenHash: linkedTokenHash,
 			expiresAt: new Date(Date.now() + 60 * 60_000),
 			currentAccountId: account.id,
 			currentSessionId: currentSession.id,
@@ -128,6 +129,15 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 		expect(new Set(linked.revokedSessionIds)).toEqual(new Set([currentSession.id, otherSession.id]));
 		expect((await store.pListExternalIdentities({accountId: account.id})).map(identity => identity.provider))
 			.toEqual(["github", "google"]);
+		expect(await store.pGetCompletedOAuthLink({
+			oauthTransactionId: transactionId,
+			provider: "google",
+			redirectUri: `${ORIGIN}/auth/google/callback`,
+		})).toEqual(expect.objectContaining({
+			identity: expect.objectContaining({id: linked.identity.id}),
+			session: expect.objectContaining({id: linked.session.id}),
+			returnTo: "/hub.html",
+		}));
 
 		const unlinkKey = "postgres-unlink";
 		const unlinked = await store.pUnlinkExternalIdentity({
@@ -148,6 +158,21 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			idempotencyKey: unlinkKey,
 			retentionRequiredProviders: ["google"],
 		})).resolves.toEqual(unlinked);
+		expect(await store.pGetIdentityUnlinkRecovery({
+			tokenHash: linkedTokenHash,
+			idempotencyKey: unlinkKey,
+		})).toEqual(expect.objectContaining({
+			account: expect.objectContaining({id: account.id}),
+			session: expect.objectContaining({id: linked.session.id}),
+			replacementSession: expect.objectContaining({id: unlinked.session.id}),
+		}));
+		const exported = await store.pExportAccountData({accountId: account.id});
+		for (const sessionId of [currentSession.id, otherSession.id]) {
+			expect(exported.sessions.find(session => session.id === sessionId)).toEqual(expect.objectContaining({
+				authenticatedViaIdentityId: null,
+				recentReauthenticatedAt: null,
+			}));
+		}
 		const audit = await store._pool.query(`
 			SELECT action, target_id, details
 			FROM hub.audit_entries
@@ -841,17 +866,28 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			providerSubject: `${prefix}-legacy`,
 			displayName: "Legacy",
 		});
-		await store.pUpsertOAuthAccount({
+		const baseline = await pGetAuthProviderRollbackBlockers({
+			queryable: store._pool,
+			supportedProviders: ["github"],
+			allowedSubjects: [`github:${prefix}-legacy`],
+		});
+		const inviteAdmitted = await store.pUpsertOAuthAccount({
 			provider: "github",
 			providerSubject: `${prefix}-invite-admitted`,
 			displayName: "Invite admitted",
 		});
+		await store._pool.query(`
+			INSERT INTO hub.audit_entries (
+				id, actor_account_id, action, target_type, target_id, details
+			)
+			VALUES ($1, $2, 'account.created', 'account', $2, '{"admission":"campaign_invite"}'::jsonb)
+		`, [crypto.randomUUID(), inviteAdmitted.id]);
 		const result = await pGetAuthProviderRollbackBlockers({
 			queryable: store._pool,
 			supportedProviders: ["github"],
 			allowedSubjects: [`github:${prefix}-legacy`],
 		});
-		expect(result.blockedAccounts).toBeGreaterThanOrEqual(1);
+		expect(result.blockedAccounts).toBeGreaterThanOrEqual(baseline.blockedAccounts + 1);
 	});
 
 	it("replays invite creation across secret rotation without persisting or returning an unusable token", async () => {

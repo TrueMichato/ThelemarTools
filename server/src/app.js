@@ -590,6 +590,28 @@ export async function createHubApp ({
 			})),
 		};
 	};
+	const requireIdentityMutationSecurity = async (request, reply) => {
+		if (request.headers.origin !== config.appOrigin) return reply.code(403).send({error: "INVALID_ORIGIN"});
+		let auth = await pGetAuth(request);
+		if (!auth) {
+			const token = getSignedCookie(request, SESSION_COOKIE);
+			if (token) {
+				auth = await store.pGetIdentityUnlinkRecovery?.({
+					tokenHash: getSha256(token),
+					idempotencyKey: getIdempotencyKey(request),
+				});
+			}
+		}
+		if (!auth) return reply.code(401).send({error: "AUTH_REQUIRED"});
+		const expected = getCsrfToken({csrfSecret: config.csrfSecret, sessionId: auth.session.id});
+		if (!isConstantTimeEqual(request.headers["x-csrf-token"], expected)) {
+			return reply.code(403).send({error: "INVALID_CSRF"});
+		}
+		if (!SUPPORTED_HUB_PROTOCOL_VERSIONS.has(request.headers["x-hub-protocol-version"])) {
+			return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
+		}
+		request.hubAuth = auth;
+	};
 	const getSemanticCommand = request => {
 		const idempotencyKey = getIdempotencyKey(request);
 		if (idempotencyKey.key !== request.body.commandId) {
@@ -987,6 +1009,36 @@ export async function createHubApp ({
 					redirectUri,
 				});
 			} catch (error) {
+				const isDeterministicLinkState = isConstantTimeEqual(
+					request.query?.state,
+					getOAuthLinkState({transactionId, secret: config.csrfSecret}),
+				);
+				const recovered = (
+					error?.code === "INVALID_OAUTH_STATE"
+					&& config.isAccountIdentityLinkingEnabled
+					&& isDeterministicLinkState
+				)
+					? await store.pGetCompletedOAuthLink?.({
+						oauthTransactionId: transactionId,
+						provider: provider.slug,
+						redirectUri,
+					})
+					: null;
+				if (recovered) {
+					const token = getDeterministicToken({
+						secret: config.cookieSecret,
+						namespace: "hub-identity-link-session",
+						parts: [transactionId],
+					});
+					clearTransactionCookies();
+					recovered.revokedSessionIds.forEach(sessionId => realtime.closeSession({sessionId}));
+					reply.setCookie(SESSION_COOKIE, token, getCookieOptions({
+						isSecure: config.isSecure,
+						maxAge: config.sessionTtlSeconds,
+					}));
+					metrics.observeAuth?.({provider: provider.slug, outcome: "link_recovered"});
+					return reply.redirect(recovered.returnTo);
+				}
 				clearTransactionCookies();
 				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
 				throw error;
@@ -1015,7 +1067,13 @@ export async function createHubApp ({
 				throw new AuthProviderError();
 			}
 			const priorAuth = await pGetAuth(request);
-			const token = getRandomToken();
+			const token = transaction.operation === "link"
+				? getDeterministicToken({
+					secret: config.cookieSecret,
+					namespace: "hub-identity-link-session",
+					parts: [transaction.id],
+				})
+				: getRandomToken();
 			let completed;
 			try {
 				if (transaction.operation === "reauthenticate") {
@@ -1121,8 +1179,9 @@ export async function createHubApp ({
 		const providerMetadata = new Map(
 			providerRegistry.getPublicMetadata().map(provider => [provider.slug, provider]),
 		);
-		const pGetPublicIdentities = async auth => {
-			const identities = await store.pListExternalIdentities({accountId: auth.account.id});
+		const pGetPublicIdentities = async (auth, {identities: suppliedIdentities = null} = {}) => {
+			const identities = suppliedIdentities
+				|| await store.pListExternalIdentities({accountId: auth.account.id});
 			const availableProviders = providerRegistry.getAvailableProviders().map(provider => provider.slug);
 			return identities.map(identity => getPublicExternalIdentity({
 				identity,
@@ -1210,7 +1269,7 @@ export async function createHubApp ({
 		});
 
 		app.delete("/api/account/identities/:identityId", {
-			preHandler: [requireMutationSecurity, requireCurrentProtocolVersion],
+			preHandler: [requireIdentityMutationSecurity, requireCurrentProtocolVersion],
 			config: {rateLimit: {max: 5, timeWindow: "1 minute"}},
 			schema: {
 				params: {
@@ -1254,6 +1313,8 @@ export async function createHubApp ({
 				identities: await pGetPublicIdentities({
 					account: request.hubAuth.account,
 					session: completed.session,
+				}, {
+					identities: completed.identities,
 				}),
 				otherDevicesSignedOut: completed.revokedSessionIds.some(id => id !== request.hubAuth.session.id),
 			};

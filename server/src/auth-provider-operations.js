@@ -28,13 +28,6 @@ export async function pGetAuthProviderRollbackBlockers ({
 					AND (
 						cardinality($2::text[]) = 0
 						OR identity.provider || ':' || identity.provider_subject = ANY($2::text[])
-						OR EXISTS (
-							SELECT 1
-							FROM hub.audit_entries audit
-							WHERE audit.actor_account_id = account.id
-								AND audit.action = 'account.created'
-								AND audit.details->>'admission' = 'campaign_invite'
-						)
 					)
 			)
 	`, [providers, admitted]);

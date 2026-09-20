@@ -57,6 +57,10 @@
   one identity and one configured retention-provider identity, rotates the current session, revokes every prior
   account session and lease in the same transaction, and closes their sockets after commit. Identity audits
   contain only provider slug plus opaque Hub identity id.
+- The replacement credential for link/unlink is deterministic under the server cookie secret and exact command
+  identity, but is never stored or returned outside the secure session cookie. A bounded consumed-link receipt
+  or exact revoked-session/idempotency/CSRF proof can recover a lost success response without rerunning the
+  mutation; ordinary revoked sessions cannot use this path.
 - `campaign:create` and `platform:operate` are internal-account entitlements. Provider subject, email, handle,
   login, display name, and campaign membership role are never creator/operator authority. Sensitive store
   transactions recheck the <=5 minute freshness window and last-operator invariant under locks.

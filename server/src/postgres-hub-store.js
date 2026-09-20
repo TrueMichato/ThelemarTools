@@ -1180,12 +1180,16 @@ export class PostgresHubStore {
 				currentSession.authenticated_via_identity_id,
 				currentSession.recent_reauthenticated_at,
 			]);
+			const remainingIdentities = externalIdentities
+				.filter(candidate => candidate.id !== identityId)
+				.map(({subject: _subject, accountId: _accountId, ...candidate}) => candidate);
 			const response = JSON.parse(JSON.stringify({
 				ok: true,
 				unlinkedIdentityId: identityId,
 				unlinkedProvider: identity.provider,
 				session: getSession(insertedSession.rows[0]),
 				revokedSessionIds,
+				identities: remainingIdentities,
 			}));
 			await this._pSaveReceipt({
 				client,
@@ -1218,6 +1222,71 @@ export class PostgresHubStore {
 			ORDER BY created_at, id
 		`, [accountId]);
 		return result.rows.map(getExternalIdentity);
+	}
+
+	async pGetCompletedOAuthLink ({oauthTransactionId, provider, redirectUri}) {
+		const result = await this._pool.query(`
+			SELECT receipt.response, transaction.return_to
+			FROM hub.oauth_transactions transaction
+			JOIN hub.command_receipts receipt
+				ON receipt.actor_account_id = transaction.initiating_account_id
+				AND receipt.idempotency_key = transaction.id::text
+				AND receipt.command_type = 'identity.link'
+				AND receipt.expires_at > clock_timestamp()
+			JOIN hub.sessions replacement
+				ON replacement.id = (receipt.response->'session'->>'id')::uuid
+				AND replacement.account_id = transaction.initiating_account_id
+				AND replacement.revoked_at IS NULL
+				AND replacement.expires_at > clock_timestamp()
+			WHERE transaction.id = $1
+				AND transaction.operation = 'link'
+				AND transaction.provider = $2
+				AND transaction.redirect_uri = $3
+				AND transaction.consumed_at IS NOT NULL
+				AND transaction.expires_at > clock_timestamp()
+		`, [oauthTransactionId, provider, redirectUri]);
+		return result.rowCount
+			? {...result.rows[0].response, returnTo: result.rows[0].return_to}
+			: null;
+	}
+
+	async pGetIdentityUnlinkRecovery ({tokenHash, idempotencyKey}) {
+		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
+		const result = await this._pool.query(`
+			SELECT
+				session.id AS session_id, session.account_id, session.user_agent,
+				session.created_at, session.last_seen_at, session.expires_at,
+				session.revoked_at, session.authenticated_via_identity_id,
+				session.recent_reauthenticated_at,
+				account.id, account.display_name, account.status,
+				account.deletion_requested_at, account.purge_after,
+				receipt.response
+			FROM hub.sessions session
+			JOIN hub.accounts account
+				ON account.id = session.account_id
+				AND account.status = 'active'
+			JOIN hub.command_receipts receipt
+				ON receipt.actor_account_id = session.account_id
+				AND receipt.idempotency_key = $2
+				AND receipt.request_hash = $3
+				AND receipt.command_type = 'identity.unlink'
+				AND receipt.expires_at > clock_timestamp()
+			JOIN hub.sessions replacement
+				ON replacement.id = (receipt.response->'session'->>'id')::uuid
+				AND replacement.account_id = session.account_id
+				AND replacement.revoked_at IS NULL
+				AND replacement.expires_at > clock_timestamp()
+			WHERE session.token_hash = decode($1, 'hex')
+				AND session.revoked_at IS NOT NULL
+				AND session.expires_at > clock_timestamp()
+				AND receipt.response->'revokedSessionIds' ? session.id::text
+		`, [tokenHash, normalized.key, normalized.requestHash]);
+		if (!result.rowCount) return null;
+		return {
+			account: getAccount(result.rows[0]),
+			session: getSession(result.rows[0]),
+			replacementSession: result.rows[0].response.session,
+		};
 	}
 
 	async pCreateOAuthTransaction ({

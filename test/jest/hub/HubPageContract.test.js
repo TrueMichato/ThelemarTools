@@ -49,6 +49,10 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("hasAccountEntitlement(session, \"platform:operate\")");
 		expect(source).toContain("pStartReauthentication");
 		expect(source).toContain("accountAction=delete");
+		expect(source).toContain("identities: result.identities");
+		expect(source).toContain("pendingIdentityUnlinks");
+		expect(source).toContain("isMutationOutcomeUncertain(error)");
+		expect(source).toContain("Reload to refresh the device list.");
 		expect(source).toContain("pGrantAccountEntitlement");
 		expect(source).toContain("pRevokeAccountEntitlement");
 		expect(source).toMatch(/Account \$\{account\.id\}/);

@@ -81,9 +81,9 @@ npm run hub:check-auth-rollback
 
 The command deliberately emits only a count. A zero count does not replace the migration-policy, backup,
 readiness, or smoke checks in [application/database rollback](rollback.md).
-Optional `HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678` is target-image compatibility input only.
-Invite-admitted accounts with a supported-provider identity remain rollback-compatible without appearing in
-that historical list. The value is not passed to or enforced by the r9 BFF.
+Optional `HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678` is target-image compatibility input only. When the target
+still enforces it, every active account requires a supported identity in that historical list, including
+invite-admitted accounts. The value is not passed to or enforced by the r9 BFF.
 
 ## Recovery and escalation
 
