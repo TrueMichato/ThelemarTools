@@ -833,6 +833,22 @@ TGTT variant rule. Each entry: `{name: string, bonus: number}`. Flat per-skill b
 
 Gated by the standard TGTT settings flag — non-TGTT characters never render the section.
 
+### Linked tool-check custom skills
+
+A custom skill may carry `toolCheck: {tool, toolKey, skill}`. This stores identity,
+not copied mechanics:
+
+- `getEffectiveSkillProficiency()` derives 1× PB from current tool proficiency, or
+  2× PB when Tool Expertise is active.
+- `hasToolSkillAdvantage()` grants advantage only while both the linked tool and
+  linked skill are currently proficient.
+- `_rollSkillCheck()` merges the custom skill, underlying ability check, and
+  `tool:<toolKey>` modifier pools by stable contribution identity.
+
+This keeps saved combinations such as `Thieves' Tools + Investigation` live:
+removing a proficiency or its granting Specialty immediately removes the
+corresponding proficiency, advantage, or bonus die without a migration.
+
 ### `settings.skipConditionalPrompt`
 
 When `true`, the conditional-modifier picker is suppressed and no conditional modifiers auto-apply. Roll handlers still aggregate non-conditional modifiers normally. Toggled from the dice settings dropdown.
@@ -850,12 +866,19 @@ When `true`, the conditional-modifier picker is suppressed and no conditional mo
     disadvantage,           // True if any non-conditional source grants disadvantage
     minimum,                // Floor (e.g. Silver Tongue "minimum 10")
     maximum,                // Cap
-    bonusDice,              // Array of "+1d4"-style entries
+    bonusDice,              // Compatibility array of die expressions
+    bonusDiceContributions, // Stable {id, dice, source, conditional} entries
     conditionalsAvailable: [ // Surfaced for the pre-roll picker
-        {id, name, conditional, advantage?, disadvantage?, bonus?, target?},
+        {id, name, conditional, advantage?, disadvantage?, bonus?, bonusDie?, target?},
     ],
 }
 ```
+
+Roll handlers merge `bonusDiceContributions` by `id`, not by die text. Two
+different features which each grant `d10` therefore stack, while one logical
+modifier reached through both a skill and its underlying ability is rolled once.
+On load, feature prose is re-parsed for bonus-die metadata so saves created before
+`bonusDie` and canonical tool names were persisted are repaired in place.
 
 ### `appliedConditionalIds`
 

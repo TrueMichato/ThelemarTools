@@ -1116,7 +1116,7 @@ export class CharacterSheetPlayMode {
 		const nonProficient = [];
 		skillsList.forEach(skill => {
 			const key = skill.key || skill.name.toLowerCase().replace(/\s+/g, "");
-			const profLevel = this._state.getSkillProficiency(key);
+			const profLevel = this._state.getEffectiveSkillProficiency(key);
 			if (profLevel >= 1) {
 				proficient.push({...skill, key, profLevel});
 			} else {
@@ -1157,6 +1157,7 @@ export class CharacterSheetPlayMode {
 		// Prefer the EFFECTIVE ability (pin/feature-swap aware) so pins show in play mode too.
 		const ability = this._state.getSkillAbility?.(skill.key) || skill.ability || "";
 		const isPinned = !!this._state.getSkillAbilityOverride?.(skill.key);
+		const toolCheck = this._state.getToolCheckLink?.(skill.key);
 
 		let cls = "pm-skill";
 		if (skill.profLevel >= 2) cls += " pm-skill--expertise";
@@ -1172,15 +1173,21 @@ export class CharacterSheetPlayMode {
 			const _pp = this._pip(_lvl >= 1, {parent: profToggle});
 			if (_lvl >= 2) _pp.classList.add("pm-pip--expertise");
 		}
-		profToggle.title = PROF_TITLES[Math.min(skill.profLevel, 2)];
-		profToggle.setAttribute("aria-label", PROF_TITLES[Math.min(skill.profLevel, 2)]);
-		profToggle.addEventListener("click", (e) => {
-			e.stopPropagation();
-			const next = (skill.profLevel + 1) % 3;
-			this._state.setSkillProficiency(skill.key, next);
-			this._logActivity("skills", `${skill.name}: set to ${["none", "proficient", "expertise"][next]}`);
-			this._renderCharacterPanel();
-		});
+		if (toolCheck) {
+			profToggle.disabled = true;
+			profToggle.title = `Derived from ${toolCheck.tool} proficiency`;
+			profToggle.setAttribute("aria-label", profToggle.title);
+		} else {
+			profToggle.title = PROF_TITLES[Math.min(skill.profLevel, 2)];
+			profToggle.setAttribute("aria-label", PROF_TITLES[Math.min(skill.profLevel, 2)]);
+			profToggle.addEventListener("click", (e) => {
+				e.stopPropagation();
+				const next = (skill.profLevel + 1) % 3;
+				this._state.setSkillProficiency(skill.key, next);
+				this._logActivity("skills", `${skill.name}: set to ${["none", "proficient", "expertise"][next]}`);
+				this._renderCharacterPanel();
+			});
+		}
 
 		const elName = this._ce("span", "pm-skill__name", row);
 		elName.textContent = skill.name;

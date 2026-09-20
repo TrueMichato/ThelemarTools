@@ -1041,6 +1041,13 @@ globalThis.FeatureChoiceParser = FeatureChoiceParser;
  * Works with both official and homebrew content
  */
 class FeatureModifierParser {
+	static normalizeToolKey (tool) {
+		return String(tool || "")
+			.toLowerCase()
+			.replace(/[’']/g, "")
+			.replace(/[^a-z0-9]+/g, "");
+	}
+
 	/**
 	 * The 5e conditions a feature can plausibly grant a gated saving-throw advantage against
 	 * ("advantage on saving throws to avoid becoming paralyzed or stunned"). Used to filter the
@@ -2043,16 +2050,33 @@ class FeatureModifierParser {
 		// ADD DICE TO TOOL CHECKS
 		// ===================
 		// "add a d10 to checks made with thieves' tools"
-		const diceToolPattern = /add\s+(?:a\s+)?(?:{@dice\s*)?d(\d+)\}?\s+to\s+checks?\s+(?:made\s+)?with\s+(?:the\s+)?([^.]+?)(?:\s+tools?)?(?:\.|,|$)/gi;
+		const diceToolPattern = /add\s+(?:a\s+)?(?:{@dice\s*)?d(\d+)\}?\s+to\s+checks?\s+(?:made\s+)?with\s+(?:(?:a|an|the)\s+)?([a-z][a-z’'\s-]*?(?:kit|tools?))(?=\s+(?:and|or)\b|[.,;]|$)/gi;
 		let diceToolMatch;
 		while ((diceToolMatch = diceToolPattern.exec(plainText)) !== null) {
 			const dieSize = parseInt(diceToolMatch[1]);
-			const tool = diceToolMatch[2].toLowerCase().trim().replace(/'/g, "").replace(/\s+/g, "");
+			const toolName = diceToolMatch[2].trim();
+			const tool = FeatureModifierParser.normalizeToolKey(toolName);
 			modifiers.push({
 				type: `tool:${tool}`,
 				value: 0,
 				note: sourceName,
 				bonusDie: `d${dieSize}`,
+				toolName,
+			});
+		}
+
+		// "add a d10 ... on saving throws against poison"
+		const diceConditionalSavePattern = /add\s+(?:a\s+)?(?:{@dice\s*)?d(\d+)\}?\s+[^.]*?\bon\s+saving\s+throws?\s+against\s+([a-z][a-z\s-]*?)(?=[.,;]|$)/gi;
+		let diceConditionalSaveMatch;
+		while ((diceConditionalSaveMatch = diceConditionalSavePattern.exec(plainText)) !== null) {
+			const dieSize = parseInt(diceConditionalSaveMatch[1]);
+			const condition = diceConditionalSaveMatch[2].trim().toLowerCase();
+			modifiers.push({
+				type: "save:all",
+				value: 0,
+				note: sourceName,
+				bonusDie: `d${dieSize}`,
+				conditional: `against ${condition}`,
 			});
 		}
 
@@ -2409,7 +2433,25 @@ class FeatureModifierParser {
 		const unique = [];
 		const seen = new Set();
 		modifiers.forEach(m => {
-			const key = `${m.type}|${m.value}|${m.conditional || ""}`;
+			const key = [
+				m.type,
+				m.value,
+				m.conditional || "",
+				m.bonusDie || "",
+				m.toolName || "",
+				m.damageType || "",
+				m.abilityMod || "",
+				m.newAbility || "",
+				m.oldAbility || "",
+				!!m.advantage,
+				!!m.disadvantage,
+				!!m.removeAdvantage,
+				!!m.removeDisadvantage,
+				!!m.proficiencyBonus,
+				m.setValue ?? "",
+				m.setMinimum ?? "",
+				m.setMaximum ?? "",
+			].join("|");
 			if (!seen.has(key)) {
 				seen.add(key);
 				unique.push(m);
@@ -4262,6 +4304,10 @@ FeatureEffectRegistry.init();
 globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 
 class CharacterSheetState {
+	static normalizeToolKey (tool) {
+		return FeatureModifierParser.normalizeToolKey(tool);
+	}
+
 	/** Base melee reach for Small/Medium creatures, in feet. */
 	static BASE_MELEE_REACH = 5;
 	/** Extra reach granted by a weapon's "Reach" property, in feet. */
@@ -5738,6 +5784,11 @@ class CharacterSheetState {
 		// and those whose source feature still exists are preserved.
 		this._migrateOrphanedFeatureModifiers();
 
+		// Repair parser-owned bonus-die modifiers in saves created before `bonusDie`
+		// and full tool names were persisted. Runs after orphan cleanup so removed
+		// features are never resurrected, and before later reapply passes.
+		this._migrateFeatureBonusDiceModifiers();
+
 		// (Bug 5c) Repair persisted "add your <ability> modifier to saves/checks/cantrip
 		// damage" modifiers that a prior parser field-name bug stored as no-op `value:0`
 		// rows (no abilityMod). Notably the Cleric "Chaste" Principle of Devotion, whose
@@ -6316,6 +6367,93 @@ class CharacterSheetState {
 			// Ensure proficiency entry exists so the skill renders correctly
 			this._data.skillProficiencies[key] = this._data.skillProficiencies[key] || 1;
 		});
+	}
+
+	/**
+	 * Reconcile bonus-die modifiers from current feature prose into legacy saves.
+	 *
+	 * Older saves kept the parser-created row but discarded `bonusDie`/`toolName`;
+	 * older tool parsing could also store a truncated or combined `tool:*` target.
+	 * Update matching rows in place, add missing current rows, and remove only stale
+	 * zero-value rows in a bonus-die's target family for the same source feature.
+	 */
+	_migrateFeatureBonusDiceModifiers () {
+		if (this._data.migrationFlags.featureBonusDiceV1) return;
+		const sources = [
+			...(Array.isArray(this._data.features) ? this._data.features : []),
+			...(Array.isArray(this._data.feats) ? this._data.feats : []),
+		];
+		if (!sources.length) {
+			this._data.migrationFlags.featureBonusDiceV1 = true;
+			return;
+		}
+		if (!Array.isArray(this._data.namedModifiers)) this._data.namedModifiers = [];
+
+		let changed = false;
+		for (const source of sources) {
+			if (!source?.id || !source.description) continue;
+			const parsed = FeatureModifierParser.parseModifiers(source.description, source.name);
+			const desiredDice = parsed.filter(mod => mod.bonusDie);
+			if (!desiredDice.length) continue;
+
+			const sourceMods = () => this._data.namedModifiers.filter(mod =>
+				mod.sourceFeatureId === source.id
+					|| (!mod.sourceFeatureId && mod.note?.includes(`From ${source.name}`)),
+			);
+			const parsedMatches = (existing, desired) =>
+				existing.type === desired.type
+					&& (existing.value || 0) === (desired.value || 0)
+					&& (existing.conditional || null) === (desired.conditional || null);
+
+			for (const desired of desiredDice) {
+				const existing = sourceMods().find(mod => parsedMatches(mod, desired));
+				if (existing) {
+					if (!existing.sourceFeatureId) existing.sourceFeatureId = source.id;
+					if (existing.bonusDie !== desired.bonusDie) existing.bonusDie = desired.bonusDie;
+					if (desired.toolName && existing.toolName !== desired.toolName) existing.toolName = desired.toolName;
+					changed = true;
+					continue;
+				}
+
+				this.addNamedModifier({
+					name: desired.conditional ? `${source.name}: ${desired.conditional}` : source.name,
+					type: desired.type,
+					value: desired.value || 0,
+					note: `From ${source.name}${desired.conditional ? ` - ${desired.conditional}` : ""}`,
+					enabled: !desired.conditional,
+					sourceFeatureId: source.id,
+					bonusDie: desired.bonusDie,
+					...(desired.toolName ? {toolName: desired.toolName} : {}),
+					...(desired.conditional ? {conditional: desired.conditional} : {}),
+				});
+				changed = true;
+			}
+
+			const desiredFamilies = new Set(desiredDice.map(mod => String(mod.type || "").split(":")[0]));
+			const currentParsedKeys = new Set(parsed.map(mod => [
+				mod.type,
+				mod.value || 0,
+				mod.conditional || "",
+				mod.bonusDie || "",
+			].join("|")));
+			this._data.namedModifiers = this._data.namedModifiers.filter(mod => {
+				if (mod.sourceFeatureId !== source.id || mod.bonusDie || Number(mod.value) !== 0) return true;
+				const family = String(mod.type || "").split(":")[0];
+				if (!desiredFamilies.has(family)) return true;
+				const currentKey = [
+					mod.type,
+					mod.value || 0,
+					mod.conditional || "",
+					mod.bonusDie || "",
+				].join("|");
+				if (currentParsedKeys.has(currentKey)) return true;
+				changed = true;
+				return false;
+			});
+		}
+
+		if (changed) this._recalculateCustomModifiers();
+		this._data.migrationFlags.featureBonusDiceV1 = true;
 	}
 
 	/**
@@ -11703,6 +11841,8 @@ class CharacterSheetState {
 	 */
 	getEffectiveSkillProficiency (skill) {
 		if (this._isStrainSuppressingSkillProficiency()) return 0;
+		const toolCheck = this.getToolCheckLink(skill);
+		if (toolCheck) return this.getToolCheckProficiencyLevel(toolCheck.tool);
 		return this.getSkillProficiency(skill);
 	}
 
@@ -11887,7 +12027,8 @@ class CharacterSheetState {
 
 		// Note: exhaustion is intentionally NOT applied here. The display stays
 		// "pure"; the penalty is applied once at roll time (_rollSkillCheck).
-		return mod + profBonus + custom + itemBonus + dynamicFeatureBonus + abilityCheckBonus + stateBonus + stanceBonus;
+		const toolBonus = this.getLinkedToolFlatBonus(normalizedSkill);
+		return mod + profBonus + custom + itemBonus + dynamicFeatureBonus + abilityCheckBonus + stateBonus + stanceBonus + toolBonus;
 	}
 
 	/**
@@ -12029,15 +12170,22 @@ class CharacterSheetState {
 	 * Add a custom skill
 	 * @param {string} name - The skill name
 	 * @param {string} ability - The associated ability (str, dex, con, int, wis, cha)
-	 * @param {{derivedSkill?: {source:string, mode?:string, delta?:number}}} [opts]
+	 * @param {{derivedSkill?: {source:string, mode?:string, delta?:number}, toolCheck?: {tool:string, skill:string}}} [opts]
 	 */
-	addCustomSkill (name, ability, {derivedSkill} = {}) {
+	addCustomSkill (name, ability, {derivedSkill, toolCheck} = {}) {
 		const key = name.toLowerCase().replace(/\s+/g, "");
+		if (derivedSkill && toolCheck) return false;
 		// Don't add if already exists
 		if (this._data.customSkills.some(s => s.name.toLowerCase().replace(/\s+/g, "") === key)) {
 			return false;
 		}
-		this._data.customSkills.push({name, ability});
+		const normalizedToolCheck = this._normalizeToolCheckLink(toolCheck);
+		if (toolCheck && !normalizedToolCheck) return false;
+		this._data.customSkills.push({
+			name,
+			ability,
+			...(normalizedToolCheck ? {toolCheck: normalizedToolCheck} : {}),
+		});
 		if (derivedSkill) {
 			const sourceFeatureId = `customSkill:${key}`;
 			const modifierId = this.addNamedModifier({
@@ -12083,6 +12231,92 @@ class CharacterSheetState {
 	 */
 	getCustomSkills () {
 		return this._data.customSkills || [];
+	}
+
+	setCustomSkillAbility (name, ability) {
+		const key = this._normalizeSkillKey(name);
+		const customSkill = (this._data.customSkills || []).find(it => this._normalizeSkillKey(it.name) === key);
+		if (!customSkill) return false;
+		customSkill.ability = ability || null;
+		return true;
+	}
+
+	setCustomSkillToolCheck (name, toolCheck) {
+		const key = this._normalizeSkillKey(name);
+		const customSkill = (this._data.customSkills || []).find(it => this._normalizeSkillKey(it.name) === key);
+		if (!customSkill) return false;
+		const normalized = this._normalizeToolCheckLink(toolCheck);
+		if (!normalized) return false;
+		customSkill.toolCheck = normalized;
+		return true;
+	}
+
+	_normalizeToolCheckLink (toolCheck) {
+		if (!toolCheck || typeof toolCheck !== "object") return null;
+		const tool = String(toolCheck.tool || "").trim();
+		const skill = this._normalizeSkillKey(toolCheck.skill);
+		const toolKey = CharacterSheetState.normalizeToolKey(tool);
+		if (!tool || !toolKey || !skill) return null;
+		return {tool, toolKey, skill};
+	}
+
+	getToolCheckLink (skill) {
+		const normalizedSkill = this._normalizeSkillKey(skill);
+		const customSkill = (this._data.customSkills || []).find(it => this._normalizeSkillKey(it.name) === normalizedSkill);
+		const normalized = this._normalizeToolCheckLink(customSkill?.toolCheck);
+		return normalized ? {...normalized} : null;
+	}
+
+	getToolCheckProficiencyLevel (tool) {
+		if (!this.hasToolProficiency(tool)) return 0;
+		return this._data._classFeatureToolExpertise ? 2 : 1;
+	}
+
+	getToolCheckRollMinimum (tool) {
+		const floor = this._data.rollFloors?.skill?.["all"];
+		if (!floor) return null;
+		if (floor.requiresProficiency && this.getToolCheckProficiencyLevel(tool) < 1) return null;
+		return Number.isFinite(floor.minimum) ? floor.minimum : null;
+	}
+
+	_getLinkedToolModifierComponents (skill) {
+		const link = this.getToolCheckLink(skill);
+		if (!link) return [];
+		const type = `tool:${link.toolKey}`;
+		return (this._data.namedModifiers || [])
+			.filter(mod => mod.enabled && !mod.conditional && mod.type === type)
+			.map(mod => ({
+				name: mod.name || mod.note || "Tool Modifier",
+				value: this._getNamedModifierEffectiveValue(mod),
+			}))
+			.filter(component => component.value);
+	}
+
+	getLinkedToolFlatBonus (skill) {
+		return this._getLinkedToolModifierComponents(skill)
+			.reduce((sum, component) => sum + component.value, 0);
+	}
+
+	hasToolSkillAdvantage (skill) {
+		const link = this.getToolCheckLink(skill);
+		if (!link || !this.hasToolProficiency(link.tool)) return false;
+		return this.getEffectiveSkillProficiency(link.skill) > 0;
+	}
+
+	getToolModifierTargets () {
+		const out = new Map();
+		for (const modifier of this._data.namedModifiers || []) {
+			if (!modifier.enabled && !modifier.conditional) continue;
+			const type = String(modifier.type || "");
+			if (!type.startsWith("tool:")) continue;
+			const toolKey = CharacterSheetState.normalizeToolKey(type.slice("tool:".length));
+			if (!toolKey || out.has(toolKey)) continue;
+			out.set(toolKey, {
+				toolKey,
+				name: modifier.toolName || type.slice("tool:".length),
+			});
+		}
+		return [...out.values()];
 	}
 
 	// #region Lore Skills (TGTT variant rule)
@@ -12874,6 +13108,10 @@ class CharacterSheetState {
 
 		const abilityCheckBonus = ability ? this.getAbilityCheckCustomMod(ability) : 0;
 		if (abilityCheckBonus !== 0) components.push({type: "custom", name: `${(ability || "").toUpperCase()} Check Modifier`, value: abilityCheckBonus, icon: "⚙️", isCanonical: false});
+
+		this._getLinkedToolModifierComponents(normalizedSkill).forEach(component => {
+			components.push({type: "tool", name: component.name, value: component.value, icon: "🛠", isCanonical: false});
+		});
 
 		const stateBonus = this.getSkillBonusFromStates(normalizedSkill, ability);
 		if (stateBonus !== 0) components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮", isCanonical: false});
@@ -15014,15 +15252,13 @@ class CharacterSheetState {
 	 * @returns {boolean} True if proficient
 	 */
 	hasToolProficiency (tool) {
-		// Normalize tool name the same way as parser: remove apostrophes and whitespace
-		const toolNormalized = tool.toLowerCase().replace(/['\s]+/g, "");
-		return this._data.toolProficiencies.some(t => t.toLowerCase().replace(/['\s]+/g, "") === toolNormalized);
+		const toolNormalized = CharacterSheetState.normalizeToolKey(tool);
+		return this._data.toolProficiencies.some(t => CharacterSheetState.normalizeToolKey(t) === toolNormalized);
 	}
 
 	removeToolProficiency (tool) {
-		// Normalize tool name the same way as parser: remove apostrophes and whitespace
-		const toolNormalized = tool.toLowerCase().replace(/['\s]+/g, "");
-		const idx = this._data.toolProficiencies.findIndex(t => t.toLowerCase().replace(/['\s]+/g, "") === toolNormalized);
+		const toolNormalized = CharacterSheetState.normalizeToolKey(tool);
+		const idx = this._data.toolProficiencies.findIndex(t => CharacterSheetState.normalizeToolKey(t) === toolNormalized);
 		if (idx >= 0) this._data.toolProficiencies.splice(idx, 1);
 	}
 
@@ -46848,9 +47084,11 @@ class CharacterSheetState {
 			if (mod.advantage) modifierData.advantage = true;
 			if (mod.removeDisadvantage) modifierData.removeDisadvantage = true;
 			if (mod.proficiencyBonus) modifierData.proficiencyBonus = true;
+			if (mod.bonusDie) modifierData.bonusDie = mod.bonusDie;
 			if (mod.ignore) modifierData.ignore = true;
 			if (mod.newAbility) modifierData.newAbility = mod.newAbility;
 			if (mod.oldAbility) modifierData.oldAbility = mod.oldAbility;
+			if (mod.toolName) modifierData.toolName = mod.toolName;
 			if (mod.conditional) modifierData.conditional = mod.conditional;
 
 			// Idempotency guard: now that descriptions are derived from entries in more
@@ -46869,6 +47107,7 @@ class CharacterSheetState {
 				&& existing.type === modifierData.type
 				&& (existing.newAbility || null) === (modifierData.newAbility || null)
 				&& (existing.abilityMod || null) === (modifierData.abilityMod || null)
+				&& (existing.bonusDie || null) === (modifierData.bonusDie || null)
 				&& (existing.conditional || null) === (modifierData.conditional || null)
 				&& (existing.value || 0) === (modifierData.value || 0),
 			);
@@ -54027,6 +54266,7 @@ class CharacterSheetState {
 		if (hasProfBonus) newModifier.proficiencyBonus = true;
 		if (modifier.halfProficiency) newModifier.halfProficiency = true;
 		if (modifier.bonusDie) newModifier.bonusDie = modifier.bonusDie;
+		if (modifier.toolName) newModifier.toolName = modifier.toolName;
 
 		// Set/override values
 		if (modifier.setValue) newModifier.setValue = modifier.setValue === true ? modifier.value : modifier.setValue;
@@ -54093,7 +54333,7 @@ class CharacterSheetState {
 	_isSameNamedModifier (a, b) {
 		if (!a || !b) return false;
 		if (a.sourceFeatureId !== b.sourceFeatureId) return false;
-		const FIELDS = ["type", "name", "value", "conditional", "abilityMod", "newAbility", "oldAbility", "setValue", "equalTo"];
+		const FIELDS = ["type", "name", "value", "conditional", "abilityMod", "newAbility", "oldAbility", "setValue", "equalTo", "bonusDie", "toolName", "damageType"];
 		for (const field of FIELDS) {
 			if ((a[field] ?? null) !== (b[field] ?? null)) return false;
 		}
@@ -55242,6 +55482,7 @@ class CharacterSheetState {
 			setValue: null, // Override with set value
 			multiplier: 1, // Result multiplier
 			bonusDice: [], // Array of bonus dice to add (e.g., ["d4", "d6"])
+			bonusDiceContributions: [], // Source-aware dice; distinct same-die modifiers stack
 			reroll: null, // Reroll threshold (e.g., 1 for Lucky)
 			autoCrit: false,
 			autoSuccess: false,
@@ -55277,6 +55518,7 @@ class CharacterSheetState {
 							// must NOT show a phantom "+1" chip for them. Modifiers that carry an
 							// explicit numeric `value` alongside an `advantage` field still show it.
 							bonus: mod._advFromType ? 0 : (typeof mod.value === "number" ? mod.value : 0),
+							bonusDie: mod.bonusDie || null,
 							target: mod._baseType || mod.type || "",
 						});
 					}
@@ -55330,8 +55572,23 @@ class CharacterSheetState {
 			}
 
 			// Bonus dice
-			if (mod.bonusDie && !result.bonusDice.includes(mod.bonusDie)) {
-				result.bonusDice.push(mod.bonusDie);
+			if (mod.bonusDie) {
+				if (!result.bonusDice.includes(mod.bonusDie)) result.bonusDice.push(mod.bonusDie);
+				const id = mod.id || [
+					mod._baseType || mod.type || "",
+					mod.sourceFeatureId || "",
+					mod.name || mod.note || "",
+					mod.conditional || "",
+					mod.bonusDie,
+				].join("|");
+				if (!result.bonusDiceContributions.some(it => it.id === id)) {
+					result.bonusDiceContributions.push({
+						id,
+						dice: mod.bonusDie,
+						source: mod.name || mod.note || "Modifier",
+						conditional: mod.conditional || null,
+					});
+				}
 			}
 
 			// Reroll threshold (use highest)
@@ -55374,7 +55631,7 @@ class CharacterSheetState {
 				// Check specific skill floor, then "all" proficient floor
 				const floor = this._data.rollFloors.skill[specific] || this._data.rollFloors.skill["all"];
 				if (floor) {
-					const meetsReq = !floor.requiresProficiency || this.getSkillProficiency(specific) >= 1;
+					const meetsReq = !floor.requiresProficiency || this.getEffectiveSkillProficiency(specific) >= 1;
 					if (meetsReq) {
 						result.minimum = result.minimum == null ? floor.minimum : Math.max(result.minimum, floor.minimum);
 						if (floor.source && !result.sources.includes(floor.source)) {

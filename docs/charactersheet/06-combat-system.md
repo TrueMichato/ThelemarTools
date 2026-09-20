@@ -718,20 +718,21 @@ this._page._onAddCondition?.();
 
 ## Conditional Modifier Picker (Pre-Roll Flow)
 
-Four roll sites in `charactersheet.js` use the same pre-roll picker pattern to let the player opt in to conditional modifiers:
+Five roll sites in `charactersheet.js` use the same pre-roll picker pattern to let the player opt in to conditional modifiers:
 
 | Roll site | Line | Notes |
 |---|---|---|
 | `_rollAbilityCheck` | ~L8957 | Probes `check:<ability>` |
 | `_rollSavingThrow` | ~L9060 | Probes `save:<ability>`; preserves Evasion passive alert |
 | `_rollSkillCheck` | ~L9150 | Probes both `skill:X` and `check:<ability>`, dedupes by ID |
+| `_rollToolCheck` | current tool-check helper | Probes `tool:<canonical-key>` and `check:<ability>`; paired skill proficiency supplies advantage |
 | `_rollAttack` | ~L9350 | `async`; only adds the picker's bonus delta to avoid double-counting registry mods already folded into `attack.attackBonus` |
 
 ### Picker UI — `_pPickConditionalModifiers({rollLabel, conditionalsAvailable})`
 
 Defined at ~L8960. Modal with one row per available conditional:
 
-- Checkbox + name + colored chip (Advantage = green, Disadvantage = red, `+N` = indigo)
+- Checkbox + name + colored chip (Advantage = green, Disadvantage = red, `+N` or `+dN` = indigo)
 - "Apply all" / "Apply none" buttons
 - Actions: **Cancel** (abort the roll), **Skip** (roll with zero conditionals applied), **Apply selected**
 
@@ -744,6 +745,7 @@ Each opted-in conditional contributes one line to the roll result note, prefixed
 ```
 ⚡ Dauntless Heritage (Advantage, against being frightened)
 ⚡ Stout Resilience (+2, against poison)
+⚡ Poison Expert (+d10, against poison)
 ```
 
 ### Settings Toggle

@@ -359,6 +359,25 @@ duration.
 |-----------|--------|--------------|
 | **The Belly Dancer** | ✅ Complete | Source-gated `dancing` state (+CHA AC, min +1; Acrobatics advantage; melee Sneak Attack without advantage); named target tracking for Tantalizing Shivers and automatic Percussive Strike; canonical teardown with queued DC 10 CON end save; Fluid Step Disengage benefit |
 
+#### Rogue Specialties — bonus dice and tool checks
+
+The level-13 roll specialties are consumed through the generic named-modifier
+dice pipeline rather than Rogue-specific branches. Graceful Leap, Keen Eye,
+Practiced Dash, Sense Aura, and Shadow Skulk add their d10 to the named skill
+roll. Skeleton Key targets canonical thieves' tools checks. Poison Expert
+targets poisoner's-kit checks and offers its saving-throw d10 through the
+default-off conditional picker for saves against poison.
+
+Legacy saves are migrated on load: dice-less Specialty modifiers are enriched
+from the saved feature prose, and malformed legacy tool targets are replaced by
+their current canonical targets. Players do not need to remove and reselect a
+Specialty.
+
+Tool checks are operable from the Proficiencies section. The sheet follows the
+2024 rule: current tool proficiency adds PB, Tool Expertise doubles PB, and a
+paired proficient skill grants advantage. Paired tool+skill checks persist as
+custom skills while deriving all mechanics from current state.
+
 #### The Belly Dancer — feature-by-feature
 
 | Lvl | Feature | Mechanical effect on the sheet |

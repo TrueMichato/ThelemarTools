@@ -500,7 +500,11 @@ void globalThis;
  * @property {boolean} inspiration
  * @property {AbilityKey[]} saveProficiencies
  * @property {Object<string, number>} skillProficiencies
- * @property {Array<{name: string, ability: AbilityKey}>} customSkills
+ * @property {Array<{
+ *   name: string,
+ *   ability: AbilityKey | null,
+ *   toolCheck?: {tool: string, toolKey: string, skill: string}
+ * }>} customSkills
  * @property {string[]} armorProficiencies
  * @property {string[]} weaponProficiencies
  * @property {string[]} toolProficiencies

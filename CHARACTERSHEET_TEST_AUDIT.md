@@ -238,4 +238,5 @@ Complete edition-gated feature tests (Druid Primal Order, Epic Boons, etc.).
 
 | File | Tests | Coverage |
 |---|---|---|
+| CharacterSheetRogueSpecialtyDice.test.js | 28 | All seven Rogue Specialty d10 targets using complete feature prose; legacy-save migration for skill and malformed tool rows; feature-ingestion preservation; source-aware die stacking/deduplication; symbolic martial-die resolution; skill/save/direct-tool roll totals, floors, and breakdowns; conditional poison save; linked tool-skill persistence, flat-bonus parity, proficiency, advantage, and XPHB/XGE metadata resolution |
 | CharacterSheetConditionalModifiers.test.js | 15 | Unified conditional-modifier pipeline: `_isConditionalSaveSubtype` / `_buildConditionalModId` helpers, aggregator gating, both encodings (text-parsed + registry sub-typed `save:advantage:<sub>`), opt-in via `appliedConditionalIds`, `getAdvantageState` / `getModifierBonus` opt forwarding |

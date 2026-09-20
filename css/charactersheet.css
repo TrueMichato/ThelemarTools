@@ -7147,6 +7147,10 @@ body[data-font="readable"] {
 /* Proficiencies */
 .charsheet__prof-group {
 	margin-bottom: 0.5rem;
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 0.25rem;
 }
 
 .charsheet__prof-label {
@@ -7157,6 +7161,19 @@ body[data-font="readable"] {
 .charsheet__prof-value {
 	font-size: 0.85rem;
 	color: var(--rgb-text-dim);
+}
+
+.charsheet__tool-check-btn {
+	margin-left: auto;
+	white-space: nowrap;
+}
+
+.charsheet__skill-tool-marker {
+	filter: saturate(0.8);
+}
+
+.charsheet__prof-indicator--derived {
+	cursor: help;
 }
 
 /* Currency */

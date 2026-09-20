@@ -158,6 +158,86 @@ describe("CharacterSheetPlayMode", () => {
 		});
 	});
 
+	describe("linked tool skills", () => {
+		it("keeps linked tool skills in the collapsed proficient list", () => {
+			state.addToolProficiency("Thieves' Tools");
+			state.addCustomSkill("Thieves' Tools + Sleight of Hand", "dex", {
+				toolCheck: {tool: "Thieves' Tools", skill: "sleightofhand"},
+			});
+			const linkedSkill = {
+				name: "Thieves' Tools + Sleight of Hand",
+				ability: "dex",
+				isCustom: true,
+				toolCheck: {tool: "Thieves' Tools", skill: "sleightofhand"},
+			};
+			const page = {
+				getState: () => state,
+				getSkillsList: () => [linkedSkill],
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._elCharPanel = {};
+			pm._makeCard = jest.fn(() => ({children: []}));
+			pm._ce = jest.fn((tag, className, parent) => {
+				const element = {tag, className, children: [], addEventListener: jest.fn()};
+				parent?.children?.push(element);
+				return element;
+			});
+			pm._setIconLabel = jest.fn();
+			pm._renderSkillRow = jest.fn();
+
+			pm._renderSkills();
+
+			expect(pm._renderSkillRow).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({
+					name: linkedSkill.name,
+					profLevel: 1,
+				}),
+			);
+		});
+
+		it("renders derived tool proficiency as fixed in Play Mode", () => {
+			state.addToolProficiency("Thieves' Tools");
+			state.setSkillProficiency("sleightofhand", 1);
+			state.addCustomSkill("Thieves' Tools + Sleight of Hand", "dex", {
+				toolCheck: {tool: "Thieves' Tools", skill: "sleightofhand"},
+			});
+			const page = {
+				getState: () => state,
+				_rollSkillCheck: jest.fn(),
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			const created = [];
+			pm._ce = jest.fn((tag, className, parent) => {
+				const element = {
+					tag,
+					className,
+					children: [],
+					classList: {add: jest.fn()},
+					addEventListener: jest.fn(),
+					setAttribute: jest.fn(),
+				};
+				parent?.children?.push(element);
+				created.push(element);
+				return element;
+			});
+			pm._pip = jest.fn(() => ({classList: {add: jest.fn()}}));
+			pm._makeClickable = jest.fn();
+
+			pm._renderSkillRow({children: []}, {
+				name: "Thieves' Tools + Sleight of Hand",
+				key: "thieves'tools+sleightofhand",
+				ability: "dex",
+				profLevel: state.getEffectiveSkillProficiency("thieves'tools+sleightofhand"),
+			});
+
+			const toggle = created.find(element => element.className === "pm-skill__prof-toggle");
+			expect(toggle.disabled).toBe(true);
+			expect(toggle.title).toMatch(/Derived from Thieves' Tools proficiency/);
+			expect(toggle.addEventListener).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("Action economy rendering", () => {
 		it("refreshes the existing Your Turn card instead of appending a duplicate", () => {
 			const actionsHub = {

@@ -1673,6 +1673,7 @@ class CharacterSheetPage {
 
 		// Edit proficiencies
 		bind("charsheet-edit-proficiencies", "click", () => this._showEditProficienciesModal());
+		bind("charsheet-roll-tool-check", "click", () => this._showToolCheckModal());
 
 		// Edit ability scores
 		bind("charsheet-edit-abilities", "click", () => this._showEditAbilityScoresModal());
@@ -4494,6 +4495,7 @@ class CharacterSheetPage {
 
 		skills.forEach(skill => {
 			const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
+			const toolCheck = this._state.getToolCheckLink?.(skillKey);
 			const profLevel = this._state.getEffectiveSkillProficiency(skillKey);
 			const breakdown = this._state.getSkillBreakdown(skillKey);
 			const effective = breakdown.total;
@@ -4504,8 +4506,14 @@ class CharacterSheetPage {
 			const modHtml = this._formatModWithEffective(canonical, effective, {titleEffective: skillTooltip});
 
 			let profClass = "";
-			let profTitle = "Not proficient - Click to toggle proficiency";
-			if (profLevel === 2) {
+			let profTitle = toolCheck
+				? `Derived from ${toolCheck.tool}${this._state.hasToolSkillAdvantage(skillKey) ? ` and ${this._formatSkillKeyLabel(toolCheck.skill)} proficiency (advantage)` : ""}`
+				: "Not proficient - Click to toggle proficiency";
+			if (toolCheck && profLevel === 2) {
+				profClass = "charsheet__prof-indicator--expertise";
+			} else if (toolCheck && profLevel === 1) {
+				profClass = "charsheet__prof-indicator--proficient";
+			} else if (profLevel === 2) {
 				profClass = "charsheet__prof-indicator--expertise";
 				profTitle = "Expertise (2x proficiency bonus) - Click to toggle";
 			} else if (profLevel === 1) {
@@ -4533,8 +4541,8 @@ class CharacterSheetPage {
 
 			const row = e_({outer: `
 				<div class="charsheet__skill-row${customClass}" data-skill="${skillKey}" data-default-ability="${defaultAbility}" title="${skillTooltip.replace(/"/g, "&quot;")}">
-					<span class="charsheet__prof-indicator charsheet__prof-indicator--clickable ${profClass}" title="${profTitle}" data-skill="${skillKey}"></span>
-					<span class="charsheet__skill-name"><span class="charsheet__skill-name-text">${skillNameHtml}</span>${skill.isCustom ? `<span class="charsheet__skill-custom-marker" title="Custom skill">✦</span>` : ""}</span>
+					<span class="charsheet__prof-indicator ${toolCheck ? "charsheet__prof-indicator--derived" : "charsheet__prof-indicator--clickable"} ${profClass}" title="${profTitle}" data-skill="${skillKey}"></span>
+					<span class="charsheet__skill-name"><span class="charsheet__skill-name-text">${skillNameHtml}</span>${toolCheck ? `<span class="charsheet__skill-custom-marker charsheet__skill-tool-marker" title="Tool check: ${toolCheck.tool} paired with ${this._formatSkillKeyLabel(toolCheck.skill)}">🛠</span>` : skill.isCustom ? `<span class="charsheet__skill-custom-marker" title="Custom skill">✦</span>` : ""}</span>
 					<span class="charsheet__skill-ability">(${abilityCell})</span>
 					<span class="charsheet__skill-mod">${modHtml}</span>
 					<span class="charsheet__skill-passive" title="Passive ${skill.name}: ${passiveScore}">${passiveScore}</span>
@@ -4544,11 +4552,15 @@ class CharacterSheetPage {
 
 			// Proficiency toggle click handler
 			const profIndicator = row.querySelector(".charsheet__prof-indicator");
-			profIndicator.addEventListener("click", (e) => {
-				e.stopPropagation();
-				this._cycleSkillProficiency(skillKey);
-			});
-			this._bindActivate(profIndicator, {label: `Cycle ${skill.name} proficiency`});
+			if (toolCheck) {
+				profIndicator.addEventListener("click", (e) => e.stopPropagation());
+			} else {
+				profIndicator.addEventListener("click", (e) => {
+					e.stopPropagation();
+					this._cycleSkillProficiency(skillKey);
+				});
+				this._bindActivate(profIndicator, {label: `Cycle ${skill.name} proficiency`});
+			}
 
 			row.addEventListener("click", (e) => {
 				// Don't roll if clicking delete button or prof indicator
@@ -5708,6 +5720,14 @@ class CharacterSheetPage {
 		(/** @type {*} */ (document.getElementById("charsheet-prof-armor"))).innerHTML = `${Renderer.get().render(armor)}` || "—";
 		(/** @type {*} */ (document.getElementById("charsheet-prof-weapons"))).innerHTML = `${Renderer.get().render(weapons)}` || "—";
 		(/** @type {*} */ (document.getElementById("charsheet-prof-tools"))).innerHTML = `${Renderer.get().render(tools)}` || "—";
+		const toolCheckBtn = /** @type {HTMLButtonElement} */ (document.getElementById("charsheet-roll-tool-check"));
+		if (toolCheckBtn) {
+			const toolCount = this._getToolCheckCandidates().length;
+			toolCheckBtn.disabled = toolCount === 0;
+			toolCheckBtn.title = toolCount
+				? "Roll a tool check, optionally pairing it with a proficient skill"
+				: "Add a tool proficiency or a feature which modifies a tool check first";
+		}
 
 		// Languages with hover links - look up correct source from language data
 		if (profs.languages?.length) {
@@ -16003,6 +16023,42 @@ class CharacterSheetPage {
 		return {total, parts, breakdownStr};
 	}
 
+	static _mergeModifierDiceContributions (...aggregates) {
+		const out = [];
+		const seen = new Set();
+		for (const aggregate of aggregates) {
+			for (const contribution of aggregate?.bonusDiceContributions || []) {
+				const id = contribution.id || `${contribution.dice}|${contribution.source}|${contribution.conditional || ""}`;
+				if (seen.has(id)) continue;
+				seen.add(id);
+				out.push(contribution);
+			}
+		}
+		return out;
+	}
+
+	_rollModifierDiceBonuses (...aggregates) {
+		const dice = this.constructor._mergeModifierDiceContributions(...aggregates);
+		if (!dice.length) return null;
+		let total = 0;
+		const parts = dice.map(contribution => {
+			const diceExpression = contribution.dice === "martial"
+				? this._state.getFeatureCalculations?.().martialArtsDie
+				: contribution.dice;
+			if (!diceExpression) return null;
+			const value = Renderer.dice.parseRandomise2(diceExpression);
+			if (!Number.isFinite(value)) return null;
+			total += value;
+			return {...contribution, dice: diceExpression, value};
+		}).filter(Boolean);
+		if (!parts.length) return null;
+		return {
+			total,
+			parts,
+			breakdownStr: parts.map(part => `+ ${part.value} [${part.dice} ${part.source}]`).join(" "),
+		};
+	}
+
 	/**
 	 * Get the mode label for display
 	 */
@@ -16085,6 +16141,7 @@ class CharacterSheetPage {
 				if (c.advantage) chips.push(`<span class="charsheet__cond-pick-chip charsheet__cond-pick-chip--adv">Advantage</span>`);
 				if (c.disadvantage) chips.push(`<span class="charsheet__cond-pick-chip charsheet__cond-pick-chip--dis">Disadvantage</span>`);
 				if (c.bonus) chips.push(`<span class="charsheet__cond-pick-chip">${c.bonus > 0 ? "+" : ""}${c.bonus}</span>`);
+				if (c.bonusDie) chips.push(`<span class="charsheet__cond-pick-chip">+${c.bonusDie}</span>`);
 				const chipHtml = chips.length ? chips.join(" ") : `<span class="ve-muted ve-small">applies</span>`;
 				const safeName = (c.name || "Conditional bonus").replace(/[<>]/g, "");
 				const safeCond = (c.conditional || "").replace(/[<>]/g, "");
@@ -16309,7 +16366,8 @@ class CharacterSheetPage {
 			const effect = c.advantage ? "advantage"
 				: c.disadvantage ? "disadvantage"
 					: c.bonus ? `${c.bonus > 0 ? "+" : ""}${c.bonus}`
-						: "applied";
+						: c.bonusDie ? `+${c.bonusDie}`
+							: "applied";
 			return `⚡ ${c.name} (${effect}, ${c.conditional})`;
 		}).join("\n");
 	}
@@ -16792,6 +16850,8 @@ class CharacterSheetPage {
 		// Buff dice (e.g. Guidance's 1d4) rolled into the total.
 		const stateDice = this._rollStateDiceBonuses(aggType);
 		if (stateDice) total += stateDice.total;
+		const modifierDice = this._rollModifierDiceBonuses(aggregated);
+		if (modifierDice) total += modifierDice.total;
 
 		// Total floor (Indomitable Might). Applied AFTER every bonus, because RAW floors
 		// "your total for a Strength check", not the die and not the modifier.
@@ -16830,8 +16890,11 @@ class CharacterSheetPage {
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const customBonusStr = customBonus !== 0 ? ` + ${customBonus} (custom)` : "";
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
-		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
-		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
+		const modifierDiceSources = new Set((modifierDice?.parts || []).map(part => part.source));
+		const numericSources = aggregated.sources.filter(source => !modifierDiceSources.has(source));
+		const sourcesStr = numericSources.length > 0 ? ` [${numericSources.join(", ")}]` : "";
+		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
+			+ (modifierDice ? ` ${modifierDice.breakdownStr}` : "");
 
 		// Show animated dice if enabled
 		await this.pAnimateD20(rollResult);
@@ -16969,7 +17032,11 @@ class CharacterSheetPage {
 
 		// Buff dice (e.g. Bless's 1d4) rolled into the total.
 		const stateDice = this._rollStateDiceBonuses(aggType);
-		const totalFloor = this._applyTotalFloor(total + (stateDice ? stateDice.total : 0), aggregated.totalMinimum);
+		const modifierDice = this._rollModifierDiceBonuses(aggregated);
+		const totalFloor = this._applyTotalFloor(
+			total + (stateDice ? stateDice.total : 0) + (modifierDice ? modifierDice.total : 0),
+			aggregated.totalMinimum,
+		);
 		const totalWithDice = totalFloor.total;
 
 		// Thelemar crit visual cues
@@ -17011,8 +17078,11 @@ class CharacterSheetPage {
 
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
-		const sourcesStr = aggregated.sources.length > 0 ? ` [${aggregated.sources.join(", ")}]` : "";
-		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
+		const modifierDiceSources = new Set((modifierDice?.parts || []).map(part => part.source));
+		const numericSources = aggregated.sources.filter(source => !modifierDiceSources.has(source));
+		const sourcesStr = numericSources.length > 0 ? ` [${numericSources.join(", ")}]` : "";
+		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
+			+ (modifierDice ? ` ${modifierDice.breakdownStr}` : "");
 
 		// Show animated dice if enabled
 		await this.pAnimateD20(rollResult);
@@ -17265,6 +17335,127 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Roll a 2024-style tool check. Tool proficiency contributes proficiency bonus;
+	 * pairing it with a proficient relevant skill grants advantage rather than a
+	 * second proficiency bonus.
+	 */
+	async _rollToolCheck ({toolName, ability, skillKey = null, event = null}) {
+		if (!ability) {
+			JqueryUtil.doToast({type: "warning", content: "Choose an ability for the tool check."});
+			return null;
+		}
+		const toolType = `tool:${CharacterSheetState.normalizeToolKey(toolName)}`;
+		const checkType = `check:${ability}`;
+		const toolProbe = this._state.aggregateModifiers(toolType);
+		const checkProbe = this._state.aggregateModifiers(checkType);
+		const mergedAvailable = [];
+		const seenIds = new Set();
+		[...toolProbe.conditionalsAvailable, ...checkProbe.conditionalsAvailable].forEach(conditional => {
+			if (seenIds.has(conditional.id)) return;
+			seenIds.add(conditional.id);
+			mergedAvailable.push(conditional);
+		});
+
+		let appliedConditionalIds = new Set();
+		let appliedConditionals = [];
+		if (mergedAvailable.length) {
+			const picked = await this._pPickConditionalModifiers({
+				rollLabel: `${toolName} Check`,
+				conditionalsAvailable: mergedAvailable,
+			});
+			if (picked.cancelled) return null;
+			appliedConditionalIds = picked.appliedConditionalIds;
+			appliedConditionals = picked.applied;
+		}
+		const toolAggregate = appliedConditionalIds.size
+			? this._state.aggregateModifiers(toolType, {appliedConditionalIds})
+			: toolProbe;
+		const checkAggregate = appliedConditionalIds.size
+			? this._state.aggregateModifiers(checkType, {appliedConditionalIds})
+			: checkProbe;
+
+		const proficiencyLevel = this._state.getToolCheckProficiencyLevel(toolName);
+		const proficiencyBonus = proficiencyLevel * this._state.getProficiencyBonus();
+		const hasSkillAdvantage = !!skillKey
+			&& proficiencyLevel > 0
+			&& this._state.getEffectiveSkillProficiency(skillKey) > 0;
+		const advantageState = this._state.getAdvantageState?.(checkType, {appliedConditionalIds});
+		const hasAdvantage = hasSkillAdvantage || advantageState?.advantage || checkAggregate.advantage || toolAggregate.advantage;
+		const hasDisadvantage = advantageState?.disadvantage || checkAggregate.disadvantage || toolAggregate.disadvantage;
+		const rollResult = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage});
+		const exhaustionPenalty = this._getExhaustionPenalty();
+		const substitutedAbility = this._state.getActiveAbilitySubstitution?.(checkType);
+		const abilityMod = this._state.getAbilityMod(substitutedAbility || ability);
+		const baseMod = abilityMod + checkAggregate.bonus + proficiencyBonus + toolAggregate.bonus;
+		const toolMinimum = this._state.getToolCheckRollMinimum?.(toolName);
+		const minimumCandidates = [toolMinimum, checkAggregate.minimum, toolAggregate.minimum].filter(Number.isFinite);
+		const minimum = minimumCandidates.length ? Math.max(...minimumCandidates) : null;
+		let effectiveRoll = rollResult.roll;
+		if (minimum != null && effectiveRoll < minimum) effectiveRoll = minimum;
+		const redCant = await this._pMaybeApplyRedCant({
+			rollResult,
+			effectiveRoll,
+			ability,
+			rollLabel: `${toolName} Check`,
+			totalMod: baseMod,
+			exhaustionPenalty,
+		});
+		effectiveRoll = redCant.effectiveRoll;
+		if (redCant.applied) rollResult.thelemar_critBonus = 0;
+		const fortune = await this._pMaybeApplyFortuneIntervention({
+			rollResult,
+			effectiveRoll,
+			rollLabel: `${toolName} Check`,
+			rollType: "check",
+			totalMod: baseMod,
+			exhaustionPenalty,
+		});
+		effectiveRoll = fortune.effectiveRoll;
+		const stateDice = this._rollStateDiceBonuses(checkType);
+		const modifierDice = this._rollModifierDiceBonuses(checkAggregate, toolAggregate);
+		const rawTotal = effectiveRoll
+			+ baseMod
+			- exhaustionPenalty
+			+ (rollResult.thelemar_critBonus || 0)
+			+ (stateDice?.total || 0)
+			+ (modifierDice?.total || 0);
+		const totalFloor = this._applyTotalFloor(rawTotal, checkAggregate.totalMinimum);
+		const skillName = skillKey ? this._formatSkillKeyLabel(skillKey) : null;
+		const noteParts = [];
+		if (hasSkillAdvantage) noteParts.push(`${toolName} + ${skillName}: advantage from both proficiencies`);
+		if (minimum != null && rollResult.roll < minimum) noteParts.push(`Minimum ${minimum} applied (rolled ${rollResult.roll})`);
+		if (redCant.note) noteParts.push(redCant.note);
+		if (fortune.note) noteParts.push(fortune.note);
+		if (totalFloor.note) noteParts.push(totalFloor.note);
+		const conditionalNote = this._formatAppliedConditionalsNote(appliedConditionals);
+		if (conditionalNote) noteParts.push(conditionalNote);
+		const modeLabel = this._getModeLabel(rollResult.mode);
+		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
+		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+		const proficiencyStr = proficiencyBonus
+			? ` + ${proficiencyBonus} (${proficiencyLevel === 2 ? "tool expertise" : "tool proficiency"})`
+			: "";
+		const toolBonusStr = toolAggregate.bonus ? ` ${toolAggregate.bonus >= 0 ? "+" : "-"} ${Math.abs(toolAggregate.bonus)} (tool bonus)` : "";
+		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
+			+ (modifierDice ? ` ${modifierDice.breakdownStr}` : "");
+		const abilityModStr = `${abilityMod >= 0 ? "+" : "-"} ${Math.abs(abilityMod)} (${Parser.attAbvToFull(ability)})`;
+
+		await this.pAnimateD20(rollResult);
+		this._showDiceResult(
+			`${toolName} Check${modeLabel}${stateEffectStr}`,
+			totalFloor.total,
+			`1d20 (${rollResult.roll}) ${abilityModStr}${proficiencyStr}${toolBonusStr}${exhaustionStr}${diceBonusStr}`,
+			rollResult.thelemar_critBonus === 5
+				? "charsheet__dice-result-total--crit"
+				: rollResult.thelemar_critBonus === -5
+					? "charsheet__dice-result-total--fumble"
+					: "",
+			noteParts.join("\n"),
+		);
+		return {total: totalFloor.total, roll: rollResult.roll, mode: rollResult.mode};
+	}
+
+	/**
 	 * @param {string} skillKey
 	 * @param {string} skillName
 	 * @param {Event} [event]
@@ -17288,13 +17479,20 @@ class CharacterSheetPage {
 		const skillAbility = overrideAbility || this._state.getSkillAbility?.(skillKey) || this._getDefaultSkillAbility(skillKey);
 		const skillType = `skill:${skillKey}`;
 		const checkType = `check:${skillAbility}`;
+		const toolCheck = this._state.getToolCheckLink?.(skillKey);
+		const toolType = toolCheck ? `tool:${toolCheck.toolKey}` : null;
 
 		// Probe both pools for conditional opt-ins.
 		const skillProbe = this._state.aggregateModifiers(skillType);
 		const checkProbe = this._state.aggregateModifiers(checkType);
+		const toolProbe = toolType ? this._state.aggregateModifiers(toolType) : null;
 		const mergedAvailable = [];
 		const seenIds = new Set();
-		[...skillProbe.conditionalsAvailable, ...checkProbe.conditionalsAvailable].forEach(c => {
+		[
+			...skillProbe.conditionalsAvailable,
+			...checkProbe.conditionalsAvailable,
+			...(toolProbe?.conditionalsAvailable || []),
+		].forEach(c => {
 			if (!seenIds.has(c.id)) {
 				seenIds.add(c.id);
 				mergedAvailable.push(c);
@@ -17318,11 +17516,20 @@ class CharacterSheetPage {
 		const checkAggregated = appliedConditionalIds.size
 			? this._state.aggregateModifiers(checkType, {appliedConditionalIds})
 			: checkProbe;
+		const toolAggregated = toolType
+			? (appliedConditionalIds.size
+				? this._state.aggregateModifiers(toolType, {appliedConditionalIds})
+				: toolProbe)
+			: null;
 
 		// Check for advantage/disadvantage from skill and check modifiers
 		const advState = this._state.getAdvantageState?.(`skill:${skillKey}`, {appliedConditionalIds});
-		const hasAdvantage = advState?.advantage || aggregated.advantage || checkAggregated.advantage;
-		const hasDisadvantage = advState?.disadvantage || aggregated.disadvantage || checkAggregated.disadvantage;
+		const hasAdvantage = advState?.advantage
+			|| aggregated.advantage
+			|| checkAggregated.advantage
+			|| toolAggregated?.advantage
+			|| this._state.hasToolSkillAdvantage?.(skillKey);
+		const hasDisadvantage = advState?.disadvantage || aggregated.disadvantage || checkAggregated.disadvantage || toolAggregated?.disadvantage;
 
 		const rollResult = this._rollD20({event, stateAdvantage: hasAdvantage, stateDisadvantage: hasDisadvantage});
 
@@ -17371,16 +17578,18 @@ class CharacterSheetPage {
 		});
 		effectiveRoll = fortune.effectiveRoll;
 
-		const total = effectiveRoll + mod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
+		const toolFlatBonus = (toolAggregated?.bonus || 0) - (toolProbe?.bonus || 0);
+		const total = effectiveRoll + mod + toolFlatBonus - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Buff dice (e.g. Guidance's 1d4) rolled into the total. Match against the
 		// underlying ability check so generic "check" buffs apply to skills.
 		const stateDice = this._rollStateDiceBonuses(checkType);
+		const modifierDice = this._rollModifierDiceBonuses(aggregated, checkAggregated, toolAggregated);
 		const maneuverBonus = this._combat?.consumeBattleMasterCheckBonus?.(`check:${overrideAbility || skillAbility}:${skillKey}`);
 		// Total floor (Indomitable Might). A Strength skill check IS a Strength check, so the
 		// floor arrives on `checkAggregated` (`check:str`) rather than the skill aggregate.
 		const totalFloor = this._applyTotalFloor(
-			total + (stateDice ? stateDice.total : 0) + (maneuverBonus?.roll || 0),
+			total + (stateDice ? stateDice.total : 0) + (modifierDice ? modifierDice.total : 0) + (maneuverBonus?.roll || 0),
 			checkAggregated.totalMinimum,
 		);
 		const totalWithDice = totalFloor.total;
@@ -17430,14 +17639,22 @@ class CharacterSheetPage {
 		const abilityLabel = overrideAbility ? ` (${overrideAbility.toUpperCase()})` : "";
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
-		const allSources = [...aggregated.sources, ...checkAggregated.sources.filter(s => !aggregated.sources.includes(s))];
-		const sourcesStr = allSources.length > 0 ? ` [${allSources.join(", ")}]` : "";
-		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
+		const allSources = [
+			...aggregated.sources,
+			...checkAggregated.sources.filter(s => !aggregated.sources.includes(s)),
+			...(toolAggregated?.sources || []).filter(s => !aggregated.sources.includes(s) && !checkAggregated.sources.includes(s)),
+		];
+		const modifierDiceSources = new Set((modifierDice?.parts || []).map(part => part.source));
+		const numericSources = allSources.filter(source => !modifierDiceSources.has(source));
+		const sourcesStr = numericSources.length > 0 ? ` [${numericSources.join(", ")}]` : "";
+		const diceBonusStr = (stateDice ? ` ${stateDice.breakdownStr}` : "")
+			+ (modifierDice ? ` ${modifierDice.breakdownStr}` : "");
+		const toolBonusStr = toolFlatBonus ? ` ${toolFlatBonus >= 0 ? "+" : "-"} ${Math.abs(toolFlatBonus)} (tool bonus)` : "";
 
 		// Show animated dice if enabled
 		await this.pAnimateD20(rollResult);
 
-		const skillBreakdown = this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : (redCant.applied ? redCant.effectiveRoll : null)) + sourcesStr + diceBonusStr;
+		const skillBreakdown = this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : (redCant.applied ? redCant.effectiveRoll : null)) + toolBonusStr + sourcesStr + diceBonusStr;
 		this._showDiceResult(
 			`${skillName}${abilityLabel} Check${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			totalWithDice,
@@ -21003,13 +21220,14 @@ class CharacterSheetPage {
 
 		this._itemsData.forEach(item => {
 			// Check if item is a tool type
-			if (item.type && toolTypes.includes(item.type)) {
+			if (item.type && toolTypes.includes(item.type.split("|")[0])) {
 				const existing = toolsMap.get(item.name);
 				// Prefer XPHB (2024) version
 				if (!existing || item.source === Parser.SRC_XPHB) {
 					toolsMap.set(item.name, {
 						name: item.name,
 						source: item.source,
+						item,
 					});
 				}
 			}
@@ -21017,6 +21235,86 @@ class CharacterSheetPage {
 
 		// Sort alphabetically
 		return Array.from(toolsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	static _getToolAbility (item) {
+		let found = null;
+		const walk = value => {
+			if (found || value == null) return;
+			if (Array.isArray(value)) {
+				value.forEach(walk);
+				return;
+			}
+			if (typeof value !== "object") return;
+			if (value.type === "item" && /^ability:\s*$/i.test(value.name || "")) {
+				const text = (value.entries || []).find(it => typeof it === "string");
+				const match = String(text || "").match(/\b(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma)\b/i);
+				if (match) {
+					found = {
+						strength: "str",
+						dexterity: "dex",
+						constitution: "con",
+						intelligence: "int",
+						wisdom: "wis",
+						charisma: "cha",
+					}[match[1].toLowerCase()];
+				}
+			}
+			Object.values(value).forEach(walk);
+		};
+		walk(item?.entries);
+		return found;
+	}
+
+	static _getToolSkillSuggestions (items, skills) {
+		const headings = [];
+		const walk = value => {
+			if (value == null) return;
+			if (Array.isArray(value)) {
+				value.forEach(walk);
+				return;
+			}
+			if (typeof value !== "object") return;
+			if (typeof value.name === "string") headings.push(value.name);
+			Object.values(value).forEach(walk);
+		};
+		items.forEach(item => walk(item?.additionalEntries));
+		const haystack = headings.join(" ").toLowerCase();
+		return skills.filter(skill => {
+			const name = String(skill.name || "").toLowerCase();
+			return name && new RegExp(`\\b${name.escapeRegexp ? name.escapeRegexp() : name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(haystack);
+		});
+	}
+
+	_getToolCheckMetadata (toolName) {
+		const toolKey = CharacterSheetState.normalizeToolKey(toolName);
+		const matchingItems = (this._itemsData || []).filter(item =>
+			CharacterSheetState.normalizeToolKey(item.name) === toolKey
+				&& ["AT", "GS", "INS", "T", "TK"].includes(String(item.type || "").split("|")[0]),
+		);
+		const preferredItem = matchingItems.find(item => item.source === Parser.SRC_XPHB) || matchingItems[0] || null;
+		const standardSkills = this.getSkillsList().filter(skill => !skill.isCustom && !skill.isLoreSkill);
+		return {
+			name: preferredItem?.name || toolName,
+			toolKey,
+			source: preferredItem?.source || null,
+			defaultAbility: CharacterSheetPage._getToolAbility(preferredItem),
+			suggestedSkills: CharacterSheetPage._getToolSkillSuggestions(matchingItems, standardSkills),
+		};
+	}
+
+	_getToolCheckCandidates () {
+		const byKey = new Map();
+		const add = raw => {
+			const name = typeof raw === "string" ? raw : raw?.full || raw?.name;
+			if (!name) return;
+			const metadata = this._getToolCheckMetadata(name);
+			if (!metadata.toolKey || byKey.has(metadata.toolKey)) return;
+			byKey.set(metadata.toolKey, metadata);
+		};
+		(this._state.getProficiencies()?.tools || []).forEach(add);
+		(this._state.getToolModifierTargets?.() || []).forEach(add);
+		return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
 	}
 
 	/**
@@ -21050,6 +21348,7 @@ class CharacterSheetPage {
 					source: "Custom",
 					isCustom: true,
 					isLoreSkill: !!skill.isLoreSkill,
+					toolCheck: skill.toolCheck,
 				});
 			}
 		});
@@ -21621,6 +21920,132 @@ class CharacterSheetPage {
 
 	renderCharacter () {
 		this._renderCharacter();
+	}
+
+	/**
+	 * Show the tool-check setup. A paired proficient skill grants advantage and is
+	 * persisted as a custom skill so the same check becomes one-click thereafter.
+	 */
+	async _showToolCheckModal () {
+		const tools = this._getToolCheckCandidates();
+		if (!tools.length) {
+			JqueryUtil.doToast({type: "warning", content: "No tool checks are available. Add a tool proficiency first."});
+			return;
+		}
+		const proficientSkills = this.getSkillsList()
+			.filter(skill => !skill.isLoreSkill && !skill.toolCheck)
+			.map(skill => ({...skill, key: skill.name.toLowerCase().replace(/\s+/g, "")}))
+			.filter(skill => this._state.getEffectiveSkillProficiency(skill.key) > 0);
+		const abilityOptions = [
+			{value: "", label: "Choose an ability"},
+			{value: "str", label: "Strength"},
+			{value: "dex", label: "Dexterity"},
+			{value: "con", label: "Constitution"},
+			{value: "int", label: "Intelligence"},
+			{value: "wis", label: "Wisdom"},
+			{value: "cha", label: "Charisma"},
+		];
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Roll Tool Check",
+			isMinHeight0: true,
+		});
+		const formEl = ee`<div class="ve-flex-col charsheet__tool-check-modal">
+			<p class="ve-muted ve-small mb-3">
+				Tool proficiency adds your proficiency bonus. If you also pair a proficient relevant skill, the check has advantage and is saved in Skills for next time.
+			</p>
+			<label class="mb-1" for="tool-check-tool">Tool</label>
+			<select class="ve-form-control mb-3" id="tool-check-tool">
+				${tools.map(tool => `<option value="${tool.toolKey}">${tool.name}</option>`).join("")}
+			</select>
+			<label class="mb-1" for="tool-check-ability">Ability</label>
+			<select class="ve-form-control mb-3" id="tool-check-ability">
+				${abilityOptions.map(option => `<option value="${option.value}">${option.label}</option>`).join("")}
+			</select>
+			<label class="mb-1" for="tool-check-skill">Relevant proficient skill <span class="ve-muted">(optional)</span></label>
+			<select class="ve-form-control mb-1" id="tool-check-skill"></select>
+			<div class="ve-muted ve-small mb-3" id="tool-check-guidance"></div>
+			<div class="ve-flex-h-right">
+				<button class="ve-btn ve-btn-default mr-2" type="button" id="tool-check-cancel">Cancel</button>
+				<button class="ve-btn ve-btn-primary" type="button" id="tool-check-roll">Roll</button>
+			</div>
+		</div>`;
+		modalInner.append(formEl);
+
+		const toolEl = /** @type {HTMLSelectElement} */ (formEl.querySelector("#tool-check-tool"));
+		const abilityEl = /** @type {HTMLSelectElement} */ (formEl.querySelector("#tool-check-ability"));
+		const skillEl = /** @type {HTMLSelectElement} */ (formEl.querySelector("#tool-check-skill"));
+		const guidanceEl = /** @type {HTMLElement} */ (formEl.querySelector("#tool-check-guidance"));
+		const rollBtn = /** @type {HTMLButtonElement} */ (formEl.querySelector("#tool-check-roll"));
+		const getTool = () => tools.find(tool => tool.toolKey === toolEl.value) || tools[0];
+		const renderTool = () => {
+			const tool = getTool();
+			abilityEl.value = tool.defaultAbility || "";
+			const suggestedKeys = new Set(tool.suggestedSkills.map(skill => skill.name.toLowerCase().replace(/\s+/g, "")));
+			const availableSuggestions = proficientSkills.filter(skill => suggestedKeys.has(skill.key));
+			const orderedSkills = [...proficientSkills].sort((a, b) => {
+				const aSuggested = suggestedKeys.has(a.key) ? 1 : 0;
+				const bSuggested = suggestedKeys.has(b.key) ? 1 : 0;
+				return bSuggested - aSuggested || a.name.localeCompare(b.name);
+			});
+			skillEl.innerHTML = `<option value="">No paired skill</option>${orderedSkills.map(skill => `<option value="${skill.key}">${skill.name}${suggestedKeys.has(skill.key) ? " — suggested" : ""}</option>`).join("")}`;
+			guidanceEl.textContent = availableSuggestions.length
+				? `Suggested from older tool guidance: ${availableSuggestions.map(skill => skill.name).join(" or ")}. Any relevant proficient skill may be paired.`
+				: proficientSkills.length
+					? "None of the older suggested skills are proficient; choose any proficient skill that is relevant to the task."
+					: "No proficient skills are available; roll with tool proficiency only.";
+			rollBtn.disabled = !abilityEl.value;
+			rollBtn.textContent = "Roll";
+		};
+		const renderAction = () => {
+			rollBtn.disabled = !abilityEl.value;
+			rollBtn.textContent = skillEl.value ? "Save & Roll" : "Roll";
+		};
+		toolEl.addEventListener("change", renderTool);
+		abilityEl.addEventListener("change", renderAction);
+		skillEl.addEventListener("change", renderAction);
+		formEl.querySelector("#tool-check-cancel").addEventListener("click", () => doClose());
+		rollBtn.addEventListener("click", async () => {
+			const tool = getTool();
+			const skill = proficientSkills.find(it => it.key === skillEl.value) || null;
+			if (!abilityEl.value) {
+				JqueryUtil.doToast({type: "warning", content: "Choose an ability for the tool check."});
+				return;
+			}
+			if (!skill) {
+				doClose();
+				await this._rollToolCheck({toolName: tool.name, ability: abilityEl.value});
+				return;
+			}
+			const customName = `${tool.name} + ${skill.name}`;
+			const customKey = customName.toLowerCase().replace(/\s+/g, "");
+			const existing = this._state.getCustomSkills().find(it => it.name.toLowerCase().replace(/\s+/g, "") === customKey);
+			if (!existing) {
+				const added = this._state.addCustomSkill(customName, abilityEl.value, {
+					toolCheck: {tool: tool.name, skill: skill.key},
+				});
+				if (!added) {
+					JqueryUtil.doToast({type: "warning", content: `Could not save ${customName}.`});
+					return;
+				}
+				this._renderSkills();
+				await this._saveCurrentCharacter();
+				JqueryUtil.doToast({type: "success", content: `Saved ${customName} in Skills.`});
+			} else if (!existing.toolCheck) {
+				this._state.setCustomSkillAbility(customName, abilityEl.value);
+				this._state.setCustomSkillToolCheck(customName, {tool: tool.name, skill: skill.key});
+				this._renderSkills();
+				await this._saveCurrentCharacter();
+				JqueryUtil.doToast({type: "success", content: `Linked ${customName} to ${tool.name}.`});
+			} else if (existing.ability !== abilityEl.value) {
+				this._state.setCustomSkillAbility(customName, abilityEl.value);
+				this._renderSkills();
+				await this._saveCurrentCharacter();
+			}
+			doClose();
+			await this._rollSkillCheck(customKey, customName, null);
+		});
+		renderTool();
+		toolEl.focus();
 	}
 
 	/**
