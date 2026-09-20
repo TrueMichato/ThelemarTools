@@ -1,5 +1,26 @@
 const MAX_PROVIDER_COUNT = 10;
 
+export const HUB_ACCOUNT_REAUTHENTICATION_TRIGGER = Object.freeze({
+	INITIAL: "initial",
+	MANUAL: "manual",
+	LINK_REQUIRED: "link-required",
+	UNLINK_REQUIRED: "unlink-required",
+	OPERATOR_REQUIRED: "operator-required",
+	DELETION_REQUIRED: "deletion-required",
+	DELETION_PENDING: "deletion-pending",
+});
+
+const ACCOUNT_REAUTHENTICATION_TRIGGERS = new Set(Object.values(HUB_ACCOUNT_REAUTHENTICATION_TRIGGER));
+
+export function setHubAccountReauthenticationPanelVisibility ({container, providers, trigger}) {
+	if (!container?.classList || !ACCOUNT_REAUTHENTICATION_TRIGGERS.has(trigger)) {
+		throw new Error("Account reauthentication panel state is invalid.");
+	}
+	const isVisible = trigger !== HUB_ACCOUNT_REAUTHENTICATION_TRIGGER.INITIAL && !!providers?.length;
+	container.classList.toggle("ve-hidden", !isVisible);
+	return isVisible;
+}
+
 function getProviders (metadata) {
 	if (!Array.isArray(metadata?.authProviders) || metadata.authProviders.length > MAX_PROVIDER_COUNT) {
 		throw new Error("Authentication providers are unavailable.");

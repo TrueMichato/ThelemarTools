@@ -93,8 +93,15 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("getAccountReauthenticationReturnTo");
 		expect(source).toContain("createPendingIdentityLinkReauthenticationIntent");
 		expect(source).toContain("resolvePendingIdentityLinkReauthenticationIntent");
-		expect(source).toMatch(/isVisible = true[\s\S]*container\.classList\.toggle\("ve-hidden", !isVisible \|\| !providers\.length\)/);
-		expect(source).toContain("isVisible: false");
+		expect(source).toContain(`trigger = "initial"`);
+		expect(source).toContain(`trigger = "manual"`);
+		for (const trigger of [
+			"link-required",
+			"unlink-required",
+			"operator-required",
+			"deletion-required",
+			"deletion-pending",
+		]) expect(source).toContain(`trigger: "${trigger}"`);
 		expect(source).toContain("Reauthentication complete. Sensitive account changes are available for five minutes.");
 		expect(source).toContain("Choose Link $" + "{pendingLinkProvider.label} again to continue.");
 		expect(source).toContain("linkButton.focus()");
@@ -700,6 +707,7 @@ describe("campaign hub pages", () => {
 		const providerSource = read("js/hub/hub-auth-providers.js");
 		expect(source).toContain("window.location.search");
 		expect(source).toContain("import(\"./hub-auth-providers.js\")");
+		expect(source.split(`import("./hub-auth-providers.js")`)).toHaveLength(3);
 		expect(providerSource).toContain("new URLSearchParams({returnTo})");
 		expect(source).toContain("sessionStorage.setItem(\"hub-pending-invite\"");
 		expect(source).toContain("_pendingInviteToken = inviteFragment");

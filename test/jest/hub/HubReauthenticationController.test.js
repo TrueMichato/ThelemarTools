@@ -3,6 +3,22 @@ import {
 	getAccountReauthenticationReturnTo,
 	resolvePendingIdentityLinkReauthenticationIntent,
 } from "../../../js/hub/hub-api-client.js";
+import {
+	HUB_ACCOUNT_REAUTHENTICATION_TRIGGER,
+	setHubAccountReauthenticationPanelVisibility,
+} from "../../../js/hub/hub-auth-providers.js";
+
+function getPanel () {
+	const classes = new Set(["ve-hidden"]);
+	return {
+		classList: {
+			contains: className => classes.has(className),
+			toggle: (className, isEnabled) => isEnabled
+				? classes.add(className)
+				: classes.delete(className),
+		},
+	};
+}
 
 describe("Hub reauthentication controller", () => {
 	it("returns to an explicit successful reauthentication marker", () => {
@@ -55,5 +71,38 @@ describe("Hub reauthentication controller", () => {
 			linkedProviderSlugs: ["github"],
 			now: Date.parse("2026-09-20T20:01:00.000Z"),
 		})).toBeNull();
+	});
+
+	it("keeps the panel hidden initially and reveals it for every explicit or required path", () => {
+		const providers = [
+			{slug: "github", label: "GitHub"},
+			{slug: "discord", label: "Discord"},
+		];
+		const initialPanel = getPanel();
+		expect(setHubAccountReauthenticationPanelVisibility({
+			container: initialPanel,
+			providers,
+			trigger: HUB_ACCOUNT_REAUTHENTICATION_TRIGGER.INITIAL,
+		})).toBe(false);
+		expect(initialPanel.classList.contains("ve-hidden")).toBe(true);
+
+		for (const trigger of [
+			HUB_ACCOUNT_REAUTHENTICATION_TRIGGER.MANUAL,
+			HUB_ACCOUNT_REAUTHENTICATION_TRIGGER.LINK_REQUIRED,
+			HUB_ACCOUNT_REAUTHENTICATION_TRIGGER.UNLINK_REQUIRED,
+			HUB_ACCOUNT_REAUTHENTICATION_TRIGGER.OPERATOR_REQUIRED,
+			HUB_ACCOUNT_REAUTHENTICATION_TRIGGER.DELETION_REQUIRED,
+			HUB_ACCOUNT_REAUTHENTICATION_TRIGGER.DELETION_PENDING,
+		]) {
+			for (const provider of providers) {
+				const panel = getPanel();
+				expect(setHubAccountReauthenticationPanelVisibility({
+					container: panel,
+					providers: [provider],
+					trigger,
+				})).toBe(true);
+				expect(panel.classList.contains("ve-hidden")).toBe(false);
+			}
+		}
 	});
 });

@@ -1489,7 +1489,7 @@ async function pRenderAccountReauthentication ({
 	eligibleProviderSlugs = null,
 	returnTo = getAccountReauthenticationReturnTo(),
 	metadata = null,
-	isVisible = true,
+	trigger = "initial",
 }) {
 	const container = document.getElementById(containerId);
 	if (!container) return;
@@ -1508,7 +1508,8 @@ async function pRenderAccountReauthentication ({
 		eligibleProviderSlugs,
 		metadata,
 	});
-	container.classList.toggle("ve-hidden", !isVisible || !providers.length);
+	const {setHubAccountReauthenticationPanelVisibility} = await import("./hub-auth-providers.js");
+	setHubAccountReauthenticationPanelVisibility({container, providers, trigger});
 }
 
 async function pShowAccountReauthentication ({
@@ -1517,6 +1518,7 @@ async function pShowAccountReauthentication ({
 	excludedIdentityId = null,
 	description,
 	returnTo = getAccountReauthenticationReturnTo(),
+	trigger = "manual",
 }) {
 	const eligibleProviderSlugs = identities == null
 		? session.reauthenticationProviders || []
@@ -1533,7 +1535,7 @@ async function pShowAccountReauthentication ({
 		description,
 		eligibleProviderSlugs,
 		returnTo,
-		isVisible: false,
+		trigger,
 	});
 	document.getElementById("hub-account-reauth")?.scrollIntoView({behavior: "smooth", block: "nearest"});
 }
@@ -1563,7 +1565,6 @@ async function pRenderAccountIdentities ({
 			session,
 			containerId: "hub-account-reauth",
 			buttonsId: "hub-account-reauth-buttons",
-			isVisible: false,
 		});
 		return {identities: [], metadata: null};
 	}
@@ -1595,7 +1596,6 @@ async function pRenderAccountIdentities ({
 				.map(identity => identity.provider),
 		)],
 		metadata,
-		isVisible: true,
 	});
 	const rows = identities.map(identity => {
 		const provider = providers.find(candidate => candidate.slug === identity.provider);
@@ -1634,6 +1634,7 @@ async function pRenderAccountIdentities ({
 						identities,
 						excludedIdentityId: identity.id,
 						description: "Use a different linked sign-in method, then return here to unlink this one.",
+						trigger: "unlink-required",
 					});
 				} else setIdentityStatus(getErrorMessage(error), {isError: true});
 				button.disabled = !identity.canUnlink;
@@ -1705,6 +1706,7 @@ async function pRenderAccountIdentities ({
 						session,
 						identities,
 						description: `Reauthenticate with a linked method, then return here to link ${provider.label}.`,
+						trigger: "link-required",
 					});
 				} else setIdentityStatus(getErrorMessage(error), {isError: true});
 				button.disabled = provider.status !== "available";
@@ -1877,6 +1879,7 @@ async function pRenderOperatorAccounts () {
 					await pShowAccountReauthentication({
 						session: await api.pGetSession(),
 						description: "Reauthenticate with a linked sign-in method, then retry this creator-access change.",
+						trigger: "operator-required",
 					});
 				}
 				button.disabled = false;
@@ -1941,7 +1944,7 @@ async function pInitHubIndex ({session}) {
 			containerId: "hub-deletion-reauth",
 			buttonsId: "hub-deletion-reauth-buttons",
 			returnTo: "/hub.html?accountAction=cancel-deletion",
-			isVisible: true,
+			trigger: "deletion-pending",
 		});
 		if (accountAction === "cancel-deletion") {
 			setAccountReauthenticationStatus(
@@ -2063,6 +2066,7 @@ async function pInitHubIndex ({session}) {
 					identities,
 					description: "Reauthenticate with a linked sign-in method, then request account deletion again.",
 					returnTo: "/hub.html?accountAction=delete",
+					trigger: "deletion-required",
 				});
 			} else renderError(error);
 			button.disabled = false;
