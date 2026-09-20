@@ -8,6 +8,7 @@
  */
 
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
+import {CharacterSheetCombat} from "./charactersheet-combat.js";
 
 function csRestoreModalFocus (trigger) {
 	if (trigger?.isConnected && typeof trigger.focus === "function") {
@@ -1961,7 +1962,7 @@ export class CharacterSheetPlayMode {
 
 			// Note button (B3)
 			const attackId = attack.id || attack.name;
-			const attackNote = this._state.getAttackNote?.(attackId);
+			const attackNote = this._getEntityNote("attack", attackId);
 			const noteBtn = this._ce("button", `pm-note-btn${attackNote ? " pm-note-btn--active" : ""}`, row);
 			this._setIcon(noteBtn, "edit");
 			noteBtn.title = attackNote ? `Note: ${attackNote.slice(0, 60)}${attackNote.length > 60 ? "…" : ""}` : "Add note";
@@ -4285,24 +4286,43 @@ export class CharacterSheetPlayMode {
 
 	// ─── Phase B3: Entity Note Modal (shared helper) ─────────────
 
-	_showEntityNoteModal (entityType, entityId, name, onSave) {
+	_getEntityNote (entityType, entityId) {
+		if (entityType === "attack") return CharacterSheetCombat.getAttackNote(this._state, entityId);
+
 		const getters = {
 			spell: () => this._state.getSpellNote?.(entityId),
 			item: () => this._state.getItemNote?.(entityId),
-			attack: () => this._state.getAttackNote?.(entityId),
 			feature: () => this._state.getFeatureNote?.(entityId),
 			feat: () => this._state.getFeatNote?.(entityId),
 			companion: () => this._state.getCompanionNote?.(entityId),
 		};
+		return (getters[entityType] || getters.feature)?.() || "";
+	}
+
+	_updateEntityNote (entityType, entityId, note) {
+		if (entityType === "attack") return CharacterSheetCombat.updateAttackNote(this._state, entityId, note);
+
 		const setters = {
-			spell: (note) => this._state.updateSpellNote?.(entityId, note),
-			item: (note) => this._state.updateItemNote?.(entityId, note),
-			attack: (note) => this._state.updateAttackNote?.(entityId, note),
-			feature: (note) => this._state.updateFeatureNote?.(entityId, note),
-			feat: (note) => this._state.updateFeatNote?.(entityId, note),
-			companion: (note) => this._state.updateCompanionNote?.(entityId, note),
+			spell: (nextNote) => this._state.updateSpellNote?.(entityId, nextNote),
+			item: (nextNote) => this._state.updateItemNote?.(entityId, nextNote),
+			feature: (nextNote) => this._state.updateFeatureNote?.(entityId, nextNote),
+			feat: (nextNote) => this._state.updateFeatNote?.(entityId, nextNote),
+			companion: (nextNote) => this._state.updateCompanionNote?.(entityId, nextNote),
 		};
-		const currentNote = (getters[entityType] || getters["feature"])?.() || "";
+		return (setters[entityType] || setters.feature)?.(note) || false;
+	}
+
+	_saveEntityNote (entityType, entityId, note) {
+		const isUpdated = this._updateEntityNote(entityType, entityId, note);
+		if (!isUpdated) return entityType !== "attack";
+		if (entityType === "attack") this._page?._combat?.renderAttacks?.();
+		if (this._page?._saveCurrentCharacter) this._page._saveCurrentCharacter();
+		else this._page?.saveCharacter?.();
+		return true;
+	}
+
+	_showEntityNoteModal (entityType, entityId, name, onSave) {
+		const currentNote = this._getEntityNote(entityType, entityId);
 
 		const overlay = this._ce("div", "pm-modal-overlay");
 		const panel = this._ce("div", "pm-modal", overlay);
@@ -4326,7 +4346,10 @@ export class CharacterSheetPlayMode {
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
 
 		const save = () => {
-			(setters[entityType] || setters["feature"])?.(textarea.value.trim());
+			if (!this._saveEntityNote(entityType, entityId, textarea.value.trim())) {
+				JqueryUtil?.doToast?.({type: "warning", content: `Could not save note for ${name}.`});
+				return;
+			}
 			close();
 			onSave?.();
 		};
