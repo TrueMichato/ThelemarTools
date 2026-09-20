@@ -33,7 +33,7 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 	for (const provider of providers) {
 		await expect(signInGroup.getByRole("link", {name: `Sign in with ${provider.label}`})).toBeVisible();
 	}
-	await expect(page.getByText(/Sign in with a provider already linked to it/)).toBeVisible();
+	await expect(page.getByText(/New provider links will require account reauthentication/)).toBeVisible();
 });
 
 test("operator reauthentication grants and revokes campaign creation through the real stack", async ({browser, page}) => {
@@ -68,7 +68,7 @@ test("operator reauthentication grants and revokes campaign creation through the
 		await page.getByRole("button", {name: "Reauthenticate"}).click();
 		await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toHaveCount(0);
 		await expect(page.getByRole("button", {name: "Reauthenticate with Google"})).toHaveCount(0);
-		await page.locator("#hub-operator-reauth").getByRole("button", {name: "Reauthenticate with GitHub"}).click();
+		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
 		await page.waitForURL(/\/hub\.html$/);
 
 		const targetRow = page.locator("#hub-operator-account-list .hub-data-row").filter({
@@ -131,7 +131,7 @@ test("operator reauthentication grants and revokes campaign creation through the
 	}
 });
 
-for (const provider of providers) {
+for (const provider of providers.filter(({slug}) => slug !== "google")) {
 	test(`${provider.label} sign-in uses the durable provider registry through the real stack`, async ({page}) => {
 		const returnPath = `/hub.html?provider=${provider.slug}#auth-return`;
 		await page.goto(returnPath);
@@ -236,6 +236,51 @@ test("links a new provider to the same account, signs in through it, then unlink
 	} finally {
 		await secondContext.close();
 	}
+});
+
+test("Google first access requires and atomically redeems a campaign invite", async ({page}) => {
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+	const hub = new HubCampaignPage(page);
+	await hub.signInSynthetic({
+		providerSubject: "provider-invite-owner",
+		displayName: "Provider Invite Owner",
+		secret,
+	});
+	const campaignName = "Provider Invite Admission";
+	const campaignId = await hub.createCampaign(campaignName);
+	const inviteToken = await hub.createInviteViaApi(campaignId);
+
+	await page.goto("/hub.html");
+	await page.locator("#hub-logout").click();
+	await page.waitForURL(/\/hub\.html$/);
+	await page.goto(`/hub.html#invite=${encodeURIComponent(inviteToken)}`);
+	const signInGroup = page.getByRole("group", {name: "Sign-in providers"});
+	await expect(signInGroup).toBeVisible();
+	await signInGroup.getByRole("button", {name: "Sign in with Google"}).click();
+	await page.waitForURL(/\/hub\.html$/);
+
+	const session = await page.request.get("/api/session");
+	expect(session.ok()).toBe(true);
+	expect(await session.json()).toEqual(expect.objectContaining({
+		signedIn: true,
+		account: expect.objectContaining({displayName: "Hub E2E Google"}),
+	}));
+	const campaign = await page.request.get(`/api/campaigns/${campaignId}`);
+	expect(campaign.ok()).toBe(true);
+	expect(await campaign.json()).toEqual(expect.objectContaining({
+		campaign: expect.objectContaining({id: campaignId, name: campaignName}),
+		membership: expect.objectContaining({role: "player", status: "active"}),
+	}));
+	const exported = await page.request.get("/api/account/export");
+	expect(exported.ok()).toBe(true);
+	expect((await exported.json()).externalIdentities).toEqual([
+		expect.objectContaining({
+			provider: "google",
+			subject: "google-e2e-303",
+			handle: null,
+		}),
+	]);
 });
 
 test("session expiry offers only currently available sign-in providers", async ({page}) => {
