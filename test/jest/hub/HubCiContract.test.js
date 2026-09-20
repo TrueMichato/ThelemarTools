@@ -113,6 +113,8 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(testServer).toContain(`process.env.NODE_ENV !== "test"`);
 		expect(testServer).toContain(`HUB_TEST_AUTH_ENABLED`);
 		expect(testServer).toContain(`HUB_TEST_AUTH_SECRET`);
+		expect(testServer).toContain(`isInviteAccountAdmissionEnabled: true`);
+		expect(testServer).toMatch(/deterministicProviderDefinitions\.filter\(\(\{slug\}\) => slug !== "google"\)[\s\S]*pUpsertOAuthAccount/);
 		expect(testServer).toMatch(/createSemanticOperationRegistry\(\{\s*additionalTemplates:/);
 		expect(testServer).not.toMatch(/createSemanticOperationRegistry\(\{\s*templates:/);
 		expect(composeOverride).toContain(`NODE_ENV: test`);
