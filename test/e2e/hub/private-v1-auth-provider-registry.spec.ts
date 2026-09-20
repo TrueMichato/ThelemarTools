@@ -127,6 +127,8 @@ test("operator reauthentication grants and revokes campaign creation through the
 		await targetContext.close();
 		await duplicateContext.close();
 	}
+});
+
 for (const provider of providers.filter(({slug}) => slug !== "google")) {
 	test(`${provider.label} sign-in uses the durable provider registry through the real stack`, async ({page}) => {
 		const returnPath = `/hub.html?provider=${provider.slug}#auth-return`;
@@ -202,7 +204,8 @@ test("Google first access requires and atomically redeems a campaign invite", as
 	await page.goto("/hub.html");
 	await page.locator("#hub-logout").click();
 	await page.waitForURL(/\/hub\.html$/);
-	await page.goto(`/hub.html#invite=${encodeURIComponent(inviteToken)}`);
+	await expect(page.getByRole("group", {name: "Sign-in providers"})).toBeVisible();
+	await page.goto(`/hub.html?flow=first-access#invite=${encodeURIComponent(inviteToken)}`);
 	const signInGroup = page.getByRole("group", {name: "Sign-in providers"});
 	await expect(signInGroup).toBeVisible();
 	await signInGroup.getByRole("button", {name: "Sign in with Google"}).click();
@@ -217,8 +220,12 @@ test("Google first access requires and atomically redeems a campaign invite", as
 	const campaign = await page.request.get(`/api/campaigns/${campaignId}`);
 	expect(campaign.ok()).toBe(true);
 	expect(await campaign.json()).toEqual(expect.objectContaining({
-		campaign: expect.objectContaining({id: campaignId, name: campaignName}),
-		membership: expect.objectContaining({role: "player", status: "active"}),
+		campaign: expect.objectContaining({
+			id: campaignId,
+			name: campaignName,
+			role: "player",
+			status: "active",
+		}),
 	}));
 	const exported = await page.request.get("/api/account/export");
 	expect(exported.ok()).toBe(true);
