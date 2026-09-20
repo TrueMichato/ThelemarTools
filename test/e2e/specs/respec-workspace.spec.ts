@@ -44,7 +44,9 @@ test.describe("Respec workspace", () => {
 		const before = await charSheet.prepareLegacyEpicBoonRepairFixture();
 
 		await charSheet.openRespec();
-		expect(await charSheet.getRespecDraftStatus()).toContain("spell choices grouped");
+		const draftStatus = await charSheet.getRespecDraftStatus();
+		expect(draftStatus).toContain("need attention");
+		expect(draftStatus).not.toContain("spell choices grouped");
 		const invalid = await charSheet.getLevel19EpicBoonRepairSnapshot();
 		expect(invalid.status).toBe("invalid");
 		expect(invalid.selection).toMatchObject({mode: "asi", legacyAsi: {con: 2}});
