@@ -16,6 +16,7 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 			"auth.provider_registry.v1",
 			"campaign.active_context.v1",
 			"account.entitlements.v1",
+			"auth.invite_admission.v1",
 			"campaign.rules_policy.v1",
 		]),
 		authProviders: providers.map(({slug, label}) => ({
@@ -204,6 +205,7 @@ test("Google first access requires and atomically redeems a campaign invite", as
 	await page.goto("/hub.html");
 	await page.locator("#hub-logout").click();
 	await page.waitForURL(/\/hub\.html$/);
+	await expect(page.locator("#hub-signed-out")).toBeVisible();
 	await expect(page.getByRole("group", {name: "Sign-in providers"})).toBeVisible();
 	await page.goto(`/hub.html?flow=first-access#invite=${encodeURIComponent(inviteToken)}`);
 	const signInGroup = page.getByRole("group", {name: "Sign-in providers"});
