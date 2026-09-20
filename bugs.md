@@ -3,38 +3,23 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-### Round 59 — Character Sheet spell, combat, item, Respec, and homepage fixes
-
-#### S1 — Spell picker (`truemichato-redesigned-fishstick`)
-
-- **Bug 1 — Add Spell stops at 100 results:** replace the hard render cap with a bounded virtualized/lazy list while keeping every filtered spell reachable and selectable.
-- **Bug 3 — Gambler cannot find Dimension Door:** verify Gambler's intended Warlock-list eligibility independently of the render cap, then fix the proven failure without broadening unrelated spell access.
-- **Ownership:** `js/charactersheet/charactersheet-spells.js`; only spell-picker matching helpers in `charactersheet-class-utils.js` if a failing regression proves they are needed.
-
-#### S2 — Item bonuses and Gambler tools (`truemichato-item-and-gambler-fixes`)
-
-- **Bug 2 — Jester's Mask omits its +3 spell attack/save DC for Charisma casters:** locate the canonical item and make class-facing derived spell stats consume the canonical equipped-item bonus calculation.
-- **Bug 7 — Gambler's Cards/Dice/Coins edits do not stick:** preserve stable generated-item identity and edited values across feature reconciliation, rerender, and save/load.
-- **Ownership:** `charactersheet-state.js`, `charactersheet-inventory.js`; only spell-stat calculation helpers in `charactersheet-class-utils.js` if required.
-
-#### S3 — Combat panel (`truemichato-combat-panel-fixes`)
-
-- **Bug 4 — Cunning Action is disconnected from Dash/Disengage/Hide:** retain its card and group the three promoted Bonus Actions beneath it with an accessible semantic relationship.
-- **Bug 5 — Combat Methods are labelled Optional Features:** show the semantic label `Combat Method`.
-- **Bug 6 — Attack notes only work on unarmed/manual attacks:** resolve and persist notes for generated equipped-weapon attacks as well.
-- **Ownership:** `charactersheet-combat.js` and directly scoped Action Economy/attack-note styling and tests.
-
-#### S4 — Epic Boon Respec (`truemichato-epic-boon-respec-fix`)
-
-- **Bug 9 — Epic Boon selection and +1 ability disappear after Respec Apply/refresh:** atomically persist the feat, ability increase, and decision receipt through manifest rebuild and serialization/reload.
-- **Ownership:** `charactersheet-respec.js`, `charactersheet-respec-engine.js`, `charactersheet-progression.js`; only Epic Boon/improvement helpers in `charactersheet-class-utils.js` if required.
-
-#### S5 — Homepage Character Sheet tile (`truemichato-homepage-sheet-tile`)
-
-- **Bug 8 — No homepage Character Sheet link:** add a standard responsive Players-grid tile linking to `charactersheet.html`, with an original cute illustration and accessible day/night/focus treatment.
-- **Ownership:** `index.html`, `scss/index.scss`, and focused homepage contract/accessibility tests.
+_None._
 
 ## Closed Bugs
+
+### Round 59 — Character Sheet spell, combat, item, Respec, and homepage fixes
+
+**Integration.** Five isolated branches were merged `--no-ff` from base `db7383e2` with function-level shared-surface ownership. The only shared test file (`CharacterSheetTGTTGamblerEffects`) auto-merged cleanly and both branches' regressions remained green. Independent integration review found two cross-surface gaps—Play Mode generated-attack notes and Respec feat spell-pickers still reading live state—which were returned to their original owners, fixed in follow-up commits, and re-reviewed with no remaining significant findings. Final gate: ESLint clean, Stylelint clean, **602 suites / 16,733 tests pass** (2 suites / 208 tests skipped), plus the Chromium virtualized spell-picker regression. The base branch's 14 unrelated ESLint failures were cleared in a separate mechanical gate commit; targeted Bestiary/NPC-exporter tests remained green.
+
+- **Bug 1 — Add Spell stopped at 100 results:** the modal's explicit `slice(0, 100)` was replaced with the measured shared virtual-list engine. Every filtered spell remains logically reachable while overscan, measured spacers, lazy row construction, bounded cache, focus retention, compact-height handling, and teardown keep the mounted DOM small and responsive.
+- **Bug 2 — Jester's Mask omitted +3 spell attack/save DC for Charisma casters:** `Jester's Mask|BMT` data and item aggregation were already correct; Sorcerer and Warlock class cards manually rebuilt their spell statistics and bypassed canonical bonuses. Those branches now use the canonical Charisma spell attack/DC accessors, with exact equip/unequip and Bard guard coverage.
+- **Bug 3 — Gambler could not add Dimension Door:** Dimension Door already passed the Gambler-to-Warlock class filter, but was both beyond the first 100 results and hidden by a picker max-level calculation that ignored the subclass's authoritative slot table. Full-result virtualization and slot-row-derived learnable level now expose and add the spell without broadening class-list semantics.
+- **Bug 4 — Cunning Action was disconnected from Dash, Disengage, and Hide:** Action Economy now models Cunning Action as a semantic parent with accessible, visually subordinate Bonus Action alternatives sourced from the edition-correct standard actions. The ordinary Action versions remain available, and characters without Cunning Action are unchanged.
+- **Bug 5 — Combat Methods appeared as Optional Features:** Action Economy now recognizes structural combat-method markers and labels them `Combat Method`, while preserving higher-priority limited-use and stamina metadata.
+- **Bug 6 — attack notes only worked on manual/unarmed attacks:** Combat and Play Mode now share an attack-note storage contract. Manual notes stay on persisted attacks; generated `auto_<itemId>` notes live on the backing item's `attackOverrides.note`, remain synchronized across both surfaces, preserve sibling overrides, survive save/load, and reject transient attacks without durable storage.
+- **Bug 7 — edits to Gambler's Cards/Dice/Coins disappeared:** generated tools now carry stable per-template identities independent of editable names. Reconciliation, spellcasting-focus recognition, Coins riders, attack linkage, cleanup, and legacy backfill use that identity, so all three tools preserve edits and wrapper IDs through recalculation and serialization without duplicates.
+- **Bug 8 — the homepage lacked a Character Sheet link:** desktop and narrow Players grids now include matching Character Sheet tiles with an original smiling parchment illustration, accessible visible naming, decorative `aria-hidden` markup, keyboard focus, responsive 5+4/3x3 layouts, and day/night-compatible styling.
+- **Bug 9 — Respec Epic Boons lost their +1 ability and disappeared:** feat-choice rendering is now fully candidate-bound, including page/spell-picker state; degraded manifests no longer destructively replace valid decision ledgers. The selected boon, ability choice, exact applied-effects receipt, compatibility choice, and progression ownership persist atomically through Apply, repeated refresh, reload, reopen, rollback, and conflict paths without double application.
 
 ### Round 58 — Encounter/Names table hashes and Items magic-row rendering
 
