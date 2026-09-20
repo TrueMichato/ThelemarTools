@@ -215,6 +215,15 @@ describe("Hub account entitlement memory authority", () => {
 		))).toHaveLength(1);
 	});
 
+	it("checks deletion freshness before last-operator protection", async () => {
+		store._sessions.get(operatorSession.tokenHash).recentReauthenticatedAt = new Date(now.getTime() - 5 * 60_000 - 1).toISOString();
+		await expect(store.pRequestAccountDeletion({
+			accountId: operator.id,
+			sessionId: operatorSession.id,
+			idempotencyKey: "stale-last-operator-delete",
+		})).rejects.toMatchObject({code: "REAUTHENTICATION_REQUIRED", status: 403});
+	});
+
 	it("keeps grant/revoke idempotent and reconciliation add-only", async () => {
 		const grant = {
 			accountId: operator.id,
