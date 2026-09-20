@@ -22,6 +22,8 @@
 	}
 
 	.home__btn-page {
+		@include vars.mix-focus-visible;
+
 		border-width: 2px;
 		width: 134px;
 		height: 110px;
@@ -37,6 +39,12 @@
 	@media screen and (width <= #{vars.$width-screen-lg}) {
 		.home__btn-page {
 			width: 113px;
+		}
+	}
+
+	@media screen and (width > #{vars.$width-screen-lg}) {
+		.home__split--players .home__btn-page {
+			width: 118px;
 		}
 	}
 
@@ -58,6 +66,70 @@
 		font-size: 50px;
 		height: 50px;
 		text-align: center;
+	}
+
+	.home__icn-character-sheet {
+		position: relative;
+		width: 50px;
+		margin: 0 auto;
+		font-size: 0;
+		line-height: 1;
+	}
+
+	.home__icn-character-sheet-paper {
+		position: absolute;
+		inset: 3px 8px 2px;
+		display: block;
+		border: 2px solid currentcolor;
+		border-radius: 6px;
+		background: var(--rgb-bg);
+		transform: rotate(-2deg);
+
+		&::before {
+			position: absolute;
+			top: 14px;
+			left: 8px;
+			width: 4px;
+			height: 4px;
+			border-radius: 50%;
+			background: currentcolor;
+			box-shadow: 14px 0 0 currentcolor;
+			content: "";
+		}
+
+		&::after {
+			position: absolute;
+			top: 18px;
+			left: 8px;
+			width: 18px;
+			height: 9px;
+			border-bottom: 2px solid currentcolor;
+			border-radius: 0 0 50% 50%;
+			content: "";
+		}
+	}
+
+	.home__icn-character-sheet-fold {
+		position: absolute;
+		top: -2px;
+		right: -2px;
+		width: 11px;
+		height: 11px;
+		border-bottom: 2px solid currentcolor;
+		border-left: 2px solid currentcolor;
+		border-radius: 0 0 0 6px;
+		background: var(--rgb-bg--alt);
+	}
+
+	.home__icn-character-sheet-lines {
+		position: absolute;
+		bottom: 8px;
+		left: 8px;
+		width: 18px;
+		height: 2px;
+		background: currentcolor;
+		box-shadow: 0 5px 0 currentcolor;
+		opacity: 0.65;
 	}
 
 	.home__lbl-page {
@@ -141,6 +213,17 @@
 	.home__split {
 		display: flex;
 		justify-content: space-between;
+	}
+
+	@media screen and (width > #{vars.$width-screen-md}) and (width <= #{vars.$width-screen-lg}) {
+		.home__split--players {
+			flex-direction: column;
+		}
+
+		.home__split--players > .home__split-spaced {
+			margin-right: 0;
+			margin-bottom: 15px;
+		}
 	}
 
 	.home__split-spaced {
