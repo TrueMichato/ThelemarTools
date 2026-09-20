@@ -1,5 +1,6 @@
 import "./setup.js";
 import fs from "node:fs";
+import {jest} from "@jest/globals";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
@@ -404,6 +405,252 @@ describe("CharacterSheetRespec workspace", () => {
 		expect(respec._state.getAbilityBase("cha")).toBe(18);
 		expect(respec._state.getAbilityBase("con")).toBe(13);
 		expect(respec._state.getFeats().map(it => it.name)).toEqual(["Resilient Constitution"]);
+	});
+
+	it("persists a legacy level-19 Epic Boon choice and receipt through Apply, reload, refresh, and reopen", async () => {
+		const jester = {
+			name: "College of Jesters",
+			shortName: "Jesters",
+			source: "TGTT",
+		};
+		const bard = {
+			name: "Bard",
+			source: "TGTT",
+			hd: {number: 1, faces: 8},
+			cantripProgression: Array(20).fill(0),
+			spellsKnownProgression: Array(20).fill(0),
+			classFeatures: [
+				{classFeature: "Bard Subclass|Bard|XPHB|3", gainSubclassFeature: true},
+				"Epic Boon|Bard|XPHB|19",
+			],
+			featProgression: [{name: "Epic Boon", category: ["EB"], progression: {"19": 1}}],
+			subclasses: [jester],
+		};
+		const alert = {name: "Alert", source: "XPHB", category: "O", entries: []};
+		const boon = {
+			name: "Boon of Spell Recall",
+			source: "XPHB",
+			category: "EB",
+			ability: [{choose: {from: ["cha"], amount: 1}, max: 30}],
+			entries: [],
+		};
+		state = new CharacterSheetState();
+		state.setAbilityBase("con", 14);
+		state.setAbilityBase("cha", 18);
+		state.addClass({...bard, level: 20, subclass: jester});
+		state.addFeat(alert);
+		for (let level = 1; level <= 20; ++level) {
+			state.recordLevelChoice({
+				level,
+				class: {name: "Bard", source: "TGTT"},
+				choices: {
+					...(level === 3 ? {subclass: jester} : {}),
+					...(level === 19 ? {asi: {con: 2}} : {}),
+				},
+			});
+		}
+		const page = {
+			getClasses: () => [bard],
+			getClassFeatures: () => [],
+			getSubclassFeatures: () => [],
+			getOptionalFeatures: () => [],
+			getFeats: () => [alert, boon],
+			getSpells: () => [],
+			getFilteredSpellData: () => [],
+			getSkillsList: () => [],
+			filterByAllowedSources: values => values,
+			saveCharacter: jest.fn().mockResolvedValue(undefined),
+			renderCharacter: jest.fn(),
+		};
+		respec = new CharacterSheetRespec({page, state});
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+
+		const decision = respec._engine.manifest.decisions.find(it => it.type === "feat" && it.characterLevel === 19);
+		expect(decision).toMatchObject({status: "invalid", selection: {legacyAsi: {con: 2}}});
+		expect(respec._applyImprovementChange(decision, {
+			mode: "feat",
+			feat: boon,
+			featChoices: {ability: "cha"},
+		})).toBe(true);
+		expect(respec._engine.getValidation().errors).toEqual([]);
+
+		await respec._engine.apply();
+
+		expect(state.getAbilityBase("con")).toBe(12);
+		expect(state.getAbilityBase("cha")).toBe(19);
+		expect(state.getFeats()).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				name: "Boon of Spell Recall",
+				choices: expect.objectContaining({ability: "cha"}),
+				appliedEffects: expect.objectContaining({abilityDeltas: {cha: 1}}),
+			}),
+		]));
+		expect(state.getLevelHistoryEntry(19)).toMatchObject({
+			choices: {feat: {name: "Boon of Spell Recall", source: "XPHB"}},
+			manifestComplete: true,
+			decisions: expect.arrayContaining([
+				expect.objectContaining({
+					type: "feat",
+					status: "resolved",
+					selection: {name: "Boon of Spell Recall", source: "XPHB"},
+				}),
+			]),
+		});
+		expect(state.getLevelHistoryEntry(19).choices.asi).toBeUndefined();
+
+		let roundTripped = state;
+		for (let i = 0; i < 3; ++i) {
+			const loaded = new CharacterSheetState();
+			expect(loaded.loadFromJson(roundTripped.toJson())).not.toBe(false);
+			const reopened = new CharacterSheetRespec({page, state: loaded});
+			reopened._engine.begin();
+			reopened._state = reopened._engine.state;
+			reopened._engine.refreshManifest();
+			reopened._engine.refreshManifest();
+
+			expect(reopened._state.getAbilityBase("con")).toBe(12);
+			expect(reopened._state.getAbilityBase("cha")).toBe(19);
+			expect(reopened._state.getFeats()).toEqual(expect.arrayContaining([
+				expect.objectContaining({
+					name: "Boon of Spell Recall",
+					choices: expect.objectContaining({ability: "cha"}),
+					appliedEffects: expect.objectContaining({abilityDeltas: {cha: 1}}),
+				}),
+			]));
+			expect(reopened._engine.manifest.decisions.find(it => it.type === "feat" && it.characterLevel === 19))
+				.toMatchObject({
+					status: "resolved",
+					selection: {name: "Boon of Spell Recall", source: "XPHB"},
+				});
+			roundTripped = reopened._state;
+		}
+	});
+
+	it("renders feat sub-choices against the isolated Respec candidate and persists their receipt", async () => {
+		const jester = {
+			name: "College of Jesters",
+			shortName: "Jesters",
+			source: "TGTT",
+		};
+		const boon = {
+			name: "Boon of Spell Recall",
+			source: "XPHB",
+			category: "EB",
+			ability: [{choose: {from: ["cha"], amount: 1}, max: 30}],
+			entries: [],
+		};
+		const bard = {
+			name: "Bard",
+			source: "TGTT",
+			hd: {number: 1, faces: 8},
+			cantripProgression: Array(19).fill(0),
+			spellsKnownProgression: Array(19).fill(0),
+			classFeatures: ["Epic Boon|Bard|XPHB|19"],
+			featProgression: [{name: "Epic Boon", category: ["EB"], progression: {"19": 1}}],
+			subclasses: [jester],
+		};
+		state = new CharacterSheetState();
+		state.setAbilityBase("con", 14);
+		state.setAbilityBase("cha", 18);
+		state.addClass({...bard, level: 19, subclass: jester});
+		for (let level = 1; level <= 19; ++level) {
+			state.recordLevelChoice({
+				level,
+				class: {name: "Bard", source: "TGTT"},
+				choices: {
+					...(level === 3 ? {subclass: jester} : {}),
+					...(level === 19 ? {asi: {con: 2}} : {}),
+				},
+			});
+		}
+		const renderStates = [];
+		const levelUp = {
+			_state: state,
+			_renderFeatChoicesUI (feat) {
+				renderStates.push(this._state);
+				feat._featChoices.ability = "cha";
+			},
+		};
+		const page = {
+			_levelUp: levelUp,
+			getClasses: () => [bard],
+			getClassFeatures: () => [],
+			getSubclassFeatures: () => [],
+			getOptionalFeatures: () => [],
+			getFeats: () => [boon],
+			getSpells: () => [],
+			getFilteredSpellData: () => [],
+			getSkillsList: () => [],
+			filterByAllowedSources: values => values,
+			saveCharacter: async () => {},
+			renderCharacter: () => {},
+		};
+		respec = new CharacterSheetRespec({page, state});
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		const feat = MiscUtil.copyFast(boon);
+		feat._featChoices = {ability: null};
+		const choices = CharacterSheetClassUtils.buildFeatChoicesSpec(feat, {
+			state: respec._state,
+			page,
+		});
+
+		expect(respec._renderFeatChoicesForCandidate(feat, choices, {})).toBe(true);
+		expect(renderStates).toHaveLength(1);
+		expect(renderStates[0]).toBe(respec._state);
+		expect(feat._featChoices.ability).toBe("cha");
+
+		const decision = respec._engine.manifest.decisions.find(it => it.type === "feat" && it.characterLevel === 19);
+		expect(respec._applyImprovementChange(decision, {
+			mode: "feat",
+			feat,
+			featChoices: feat._featChoices,
+		})).toBe(true);
+		expect(respec._engine.getValidation().errors).toEqual([]);
+		await respec._engine.apply();
+
+		expect(state.getAbilityBase("cha")).toBe(19);
+		expect(state.getFeats()).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				name: "Boon of Spell Recall",
+				choices: expect.objectContaining({ability: "cha"}),
+				appliedEffects: expect.objectContaining({abilityDeltas: {cha: 1}}),
+			}),
+		]));
+
+		const loaded = new CharacterSheetState();
+		expect(loaded.loadFromJson(state.toJson())).not.toBe(false);
+		expect(loaded.getAbilityBase("cha")).toBe(19);
+		expect(loaded.getFeats()).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				name: "Boon of Spell Recall",
+				choices: expect.objectContaining({ability: "cha"}),
+				appliedEffects: expect.objectContaining({abilityDeltas: {cha: 1}}),
+			}),
+		]));
+	});
+
+	it("rejects a feat selection when the shared choice renderer fails", () => {
+		const error = new Error("renderer unavailable");
+		const page = {
+			_levelUp: {
+				_renderFeatChoicesUI: () => { throw error; },
+			},
+		};
+		const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			respec = new CharacterSheetRespec({page, state});
+			respec._state = state;
+			expect(respec._renderFeatChoicesForCandidate(
+				{_featChoices: {ability: null}},
+				{ability: {from: ["cha"], amount: 1, max: 30}},
+				{},
+			)).toBe(false);
+			expect(consoleSpy).toHaveBeenCalledWith("[Respec] Failed to render feat choices:", error);
+		} finally {
+			consoleSpy.mockRestore();
+		}
 	});
 
 	it("recomputes a retained paired feat when its ASI changes below the ability cap", () => {

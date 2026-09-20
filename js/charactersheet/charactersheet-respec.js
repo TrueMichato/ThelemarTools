@@ -2985,6 +2985,33 @@ class CharacterSheetRespec {
 	 * @param {object} history - The history entry
 	 * @param {Function} closeParentModal - Function to close parent modal
 	 */
+	_renderFeatChoicesForCandidate (feat, choices, container) {
+		container.innerHTML = "";
+		const hasChoices = !!(
+			choices?.skills
+			|| choices?.languages
+			|| choices?.ability
+			|| choices?.tools
+			|| choices?.expertise
+			|| choices?.spells
+			|| choices?.optionalFeatures?.length
+		);
+		if (!hasChoices) return true;
+
+		const levelUp = this._page?._levelUp;
+		if (typeof levelUp?._renderFeatChoicesUI !== "function") return false;
+		const candidateContext = Object.create(levelUp);
+		Object.defineProperty(candidateContext, "_state", {get: () => this._state});
+		try {
+			levelUp._renderFeatChoicesUI.call(candidateContext, feat, choices, container);
+			return true;
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[Respec] Failed to render feat choices:", error);
+			return false;
+		}
+	}
+
 	async _editFeat (level, history, closeParentModal, choice = null) {
 		const decision = choice?.decision || null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
@@ -3058,8 +3085,13 @@ class CharacterSheetRespec {
 				state: this._state,
 				page: this._page,
 			});
-			featChoicesContainer.innerHTML = "";
-			this._page._levelUp?._renderFeatChoicesUI?.(selectedFeat, selectedFeatChoiceSpec, featChoicesContainer);
+			if (!this._renderFeatChoicesForCandidate(selectedFeat, selectedFeatChoiceSpec, featChoicesContainer)) {
+				selectedFeat = null;
+				selectedFeatChoiceSpec = null;
+				JqueryUtil.doToast({type: "danger", content: "Feat choices are unavailable. Reload the character sheet before selecting this feat."});
+				return false;
+			}
+			return true;
 		};
 
 		const renderFeats = (filter = "") => {
@@ -3086,7 +3118,7 @@ class CharacterSheetRespec {
 				`});
 				CharacterSheetRespec._setHoverLink(item.querySelector(".respec-hover-slot"), UrlUtil.PG_FEATS, feat.name, feat.source);
 				item.addEventListener("click", () => {
-					selectFeat(feat);
+					if (!selectFeat(feat)) return;
 					featList.querySelectorAll(".charsheet__respec-feat-selected").forEach(el => el.classList.remove("charsheet__respec-feat-selected"));
 					item.classList.add("charsheet__respec-feat-selected");
 				});
