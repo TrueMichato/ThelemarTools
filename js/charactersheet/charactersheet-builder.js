@@ -733,6 +733,14 @@ class CharacterSheetBuilder {
 						if (Object.keys(this._selectedRacialFeatureChoices).length) {
 							level1History.choices.raceUserChoices.selectedFeatureChoices = {...this._selectedRacialFeatureChoices};
 						}
+						if (Object.keys(this._selectedRacialSpellAbilities).length) {
+							level1History.choices.raceUserChoices.selectedRacialSpellAbilities = {...this._selectedRacialSpellAbilities};
+						}
+						if (this._selectedRacialSpells?.length) {
+							level1History.choices.raceUserChoices.selectedRacialSpells = this._selectedRacialSpells.map(spell =>
+								spell ? {...spell} : spell,
+							);
+						}
 						if (this._useTashasRules) {
 							level1History.choices.raceUserChoices.useTashasRules = true;
 							level1History.choices.raceUserChoices.tashasAbilityBonuses = {...this._tashasAbilityBonuses};

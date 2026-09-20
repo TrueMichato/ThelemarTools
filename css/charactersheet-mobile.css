@@ -1622,6 +1622,7 @@
 	.charsheet__respec-choice-row {
 		align-items: flex-start;
 		flex-wrap: wrap;
+		margin-left: calc(var(--respec-choice-depth, 0) * 0.75rem);
 	}
 
 	.charsheet__respec-choice-current {

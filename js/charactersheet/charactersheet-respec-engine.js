@@ -72,10 +72,21 @@ class CharacterSheetRespecEngine {
 
 	_persistManifest () {
 		if (!this._candidateState || !this._manifest) return false;
-		// A degraded level has no decisions, so persisting it would erase the saved
-		// ledger and release progression-owned values before catalogs finish loading.
+		// A degraded catalog has no trustworthy decisions, so persisting it would
+		// erase the saved ledger and release progression-owned values before loading
+		// finishes.  This applies to non-class catalogs too.
+		const discoveryBlockingCodes = new Set([
+			"missing-class-data",
+			"missing-nested-reference",
+			"missing-choice-catalog",
+			"discovery-incomplete",
+			"unsupported-required-choice",
+			"adapter-missing-editor",
+			"adapter-missing-mechanics",
+			"adapter-missing-reverse",
+		]);
 		const hasIncompleteClassDiscovery = (this._manifest.issues || [])
-			.some(issue => issue.code === "missing-class-data")
+			.some(issue => discoveryBlockingCodes.has(issue.code))
 			|| (this._manifest.levels || []).some(level => !level.classData);
 		if (hasIncompleteClassDiscovery) return false;
 		this._candidateState.initializeProgressionOwnership?.(this._manifest);
@@ -98,21 +109,192 @@ class CharacterSheetRespecEngine {
 		return this._manifest?.decisions?.find(decision => decision.id === decisionId) || null;
 	}
 
-	updateDecisionSelection (decisionId, selection, {status = null} = {}) {
+	_getDecisionStore (decision) {
+		if (decision?.scope === "origin") {
+			const base = this._candidateState.getCharacterBase?.() || {};
+			return {container: base, key: "decisions"};
+		}
+		const entry = this._candidateState.getLevelHistoryEntry(decision?.characterLevel);
+		return {container: entry, key: "decisions"};
+	}
+
+	_removeDescendantDecisions (rootSemanticKey, keep = null) {
+		const removeFrom = decisions => (decisions || []).filter(decision =>
+			decision.semanticKey === keep
+				|| (decision.semanticKey !== rootSemanticKey
+					&& decision.rootSemanticKey !== rootSemanticKey
+					&& decision.parentSemanticKey !== rootSemanticKey),
+		);
+		const base = this._candidateState.getCharacterBase?.();
+		if (base?.decisions) base.decisions = removeFrom(base.decisions);
+		for (const entry of this._candidateState.getLevelHistory?.() || []) {
+			if (entry.decisions) entry.decisions = removeFrom(entry.decisions);
+		}
+	}
+
+	_makeDecisionReceipt (decision, selection) {
+		const typeMap = {
+			nestedSkill: "skills",
+			nestedSkillTool: "skills",
+			nestedExpertise: "expertise",
+			nestedTool: "tools",
+			nestedLanguage: "languages",
+			nestedSave: "saves",
+			nestedWeapon: "weapons",
+			nestedArmor: "armor",
+			nestedResistance: "resistances",
+			nestedDamageType: "resistances",
+			nestedSpell: "spells",
+			nestedCantrip: "cantrips",
+			skills: "skills",
+			tools: "tools",
+			expertise: "expertise",
+			languages: "languages",
+			knownSpells: "spells",
+			preparedSpells: "spells",
+			spellbookSpells: "spells",
+			cantrips: "cantrips",
+			preparedCantrips: "cantrips",
+		};
+		const ownershipType = typeMap[decision?.type];
+		const values = selection == null ? [] : (Array.isArray(selection) ? selection : [selection]);
+		const effects = [];
+		if (["nestedAbility", "nestedConfiguration"].includes(decision?.type) && values.length) {
+			const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
+			effects.push(...values.map(value => ({
+				type: decision.type === "nestedAbility" ? "abilityDelta" : "configuration",
+				ability: decision.type === "nestedAbility" ? String(value) : undefined,
+				amount: decision.type === "nestedAbility" ? amount : undefined,
+				value: decision.type === "nestedConfiguration" ? value : undefined,
+			})));
+		}
+		if (ownershipType) {
+			effects.push({
+				type: "ownership",
+				ownership: values.map(value => {
+					if (decision.type !== "nestedSkillTool" || !value || typeof value !== "object") return {type: ownershipType, value};
+					const kind = String(value.kind || "").toLowerCase();
+					return {
+						type: kind === "tool" ? "tools" : kind === "language" ? "languages" : "skills",
+						value: value.value ?? value.name ?? value,
+					};
+				}),
+			});
+		}
+		return {
+			version: 1,
+			sourceDecisionKey: decision.semanticKey,
+			effects,
+		};
+	}
+
+	/**
+	 * Stage one linked graph edit.  The snapshot is intentionally at the state
+	 * boundary rather than just the ledger boundary: controller callbacks may
+	 * materialise features, resources, or spells before a descriptor is refreshed.
+	 */
+	stageGraphMutation (decisionId, selection, {status = null, apply = null} = {}) {
 		const decision = this.getDecision(decisionId);
 		if (!decision) throw new Error("That progression decision is no longer available.");
-		const entry = this._candidateState.getLevelHistoryEntry(decision.characterLevel);
-		const stored = entry?.decisions?.find(it => it.id === decisionId || it.semanticKey === decision.semanticKey);
+		if (!this._candidateState) throw new Error("No Respec draft is active.");
+		const stateSnapshot = this._candidateState.toJson();
+		const manifestSnapshot = CharacterSheetProgression._copy(this._manifest);
+		const {container} = this._getDecisionStore(decision);
+		const stored = container?.decisions?.find(it => it.id === decisionId || it.semanticKey === decision.semanticKey)
+			|| (container
+				? (() => {
+					const missing = CharacterSheetProgression.normalizeDecision({
+						...decision,
+						selection: null,
+						status: "invalid",
+						receipt: null,
+					}, container);
+					container.decisions = [...(container.decisions || []), missing];
+					return missing;
+				})()
+				: null);
 		if (!stored) throw new Error("That progression decision could not be found in the draft ledger.");
-		const updated = CharacterSheetProgression.normalizeDecision({
-			...stored,
-			selection: CharacterSheetProgression._copy(selection),
-			status,
-		}, entry);
-		Object.assign(stored, updated);
-		Object.assign(entry, CharacterSheetProgression.projectDecisionsToChoices(entry));
-		this._setDirty();
-		return this.refreshManifest();
+		try {
+			const descendants = (this._manifest.decisions || [])
+				.filter(candidate => candidate.semanticKey !== decision.semanticKey
+					&& (candidate.parentSemanticKey === decision.semanticKey || candidate.rootSemanticKey === decision.semanticKey))
+				.sort((a, b) => Number(b.depth || 0) - Number(a.depth || 0));
+			const descendantSnapshots = descendants.map(descendant => ({
+				decision: CharacterSheetProgression._copy(descendant),
+				selection: CharacterSheetProgression._copy(descendant.selection),
+				status: descendant.status,
+			}));
+			// Descendant state cleanup is owned by the existing state/controller
+			// handlers.  The ledger side is removed deepest-first before the parent
+			// is written, preventing stale choices from surviving a replacement.
+			for (const descendant of descendants) {
+				this._candidateState.reverseProgressionDecisionReceipt?.(descendant);
+				const ownerUid = descendant.provenance?.ownerUid || "";
+				const [parentName, parentSource] = ownerUid.split("|");
+				if (parentName) {
+					this._candidateState.removeChosenSubfeature?.(parentName, {
+						parentSource: parentSource || null,
+						level: descendant.classLevel || descendant.characterLevel,
+					});
+				}
+				const descendantStore = this._getDecisionStore(descendant).container;
+				if (descendantStore?.decisions) {
+					descendantStore.decisions = descendantStore.decisions
+						.filter(item => item.semanticKey !== descendant.semanticKey);
+				}
+			}
+			if (typeof apply === "function") apply({decision, stored, state: this._candidateState});
+			const updated = CharacterSheetProgression.normalizeDecision({
+				...stored,
+				selection: CharacterSheetProgression._copy(selection),
+				status,
+				receipt: this._makeDecisionReceipt(decision, selection),
+			}, container);
+			Object.assign(stored, updated);
+			if (decision.scope !== "origin") Object.assign(container, CharacterSheetProgression.projectDecisionsToChoices(container));
+			this._setDirty();
+			const refreshed = this.refreshManifest();
+			// A parent replacement may leave some child identities legal (for
+			// example, a recurring pool slot). Rehydrate only exact semantic
+			// matches whose old selections are still present in the new catalog.
+			const keyOf = value => typeof value === "string"
+				? value.toLowerCase()
+				: `${String(value?.name || value?.value || value?.choice || "").toLowerCase()}|${String(value?.source || "").toLowerCase()}`;
+			for (const snapshot of descendantSnapshots) {
+				const next = refreshed.decisions?.find(it => it.semanticKey === snapshot.decision.semanticKey);
+				if (!next || snapshot.selection == null) continue;
+				const selected = Array.isArray(snapshot.selection) ? snapshot.selection : [snapshot.selection];
+				const legal = new Set((next.options || []).map(keyOf));
+				if (selected.length !== next.count || selected.some(value => !legal.has(keyOf(value)))) continue;
+				const nextStore = this._getDecisionStore(next).container;
+				if (!nextStore?.decisions) continue;
+				const nextStored = CharacterSheetProgression.normalizeDecision({
+					...next,
+					selection: snapshot.selection,
+					status: snapshot.status,
+					receipt: snapshot.decision.receipt,
+				}, nextStore);
+				const existing = nextStore.decisions.find(it => it.semanticKey === next.semanticKey);
+				if (existing) Object.assign(existing, nextStored);
+				else nextStore.decisions.push(nextStored);
+			}
+			if (descendantSnapshots.length) {
+				this._manifest = CharacterSheetProgression.buildManifest({
+					page: this._page,
+					state: this._candidateState,
+				});
+				this._persistManifest();
+			}
+			return this._manifest;
+		} catch (error) {
+			this._candidateState.loadFromJson(stateSnapshot);
+			this._manifest = manifestSnapshot;
+			throw error;
+		}
+	}
+
+	updateDecisionSelection (decisionId, selection, {status = null} = {}) {
+		return this.stageGraphMutation(decisionId, selection, {status});
 	}
 
 	getValidation () {

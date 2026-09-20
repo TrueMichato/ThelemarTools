@@ -188,6 +188,14 @@ export class CharacterSheetPage {
 			if (!state) throw new Error("Character Sheet state is unavailable");
 			const data = state.toJson();
 			data.classes = [{name: "Bard", source: "TGTT", level: 20}];
+			data.race = null;
+			data.background = null;
+			data.characterBase = {
+				v: 1,
+				raceUserChoices: {},
+				backgroundUserChoices: {},
+				decisions: [],
+			};
 			data.features = [];
 			data.feats = [];
 			data.levelHistory = Array.from({length: 20}, (_, ix) => ({

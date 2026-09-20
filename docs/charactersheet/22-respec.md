@@ -35,6 +35,10 @@ Each decision records:
 - the current selection;
 - one of `resolved`, `deferred`, `missing`, `invalid`, or `ambiguous`;
 - a semantic key which excludes character level.
+- graph provenance (`parentSemanticKey`, `rootSemanticKey`, acquisition key,
+  selected grant identity, depth, and source path);
+- a compact receipt for source ownership and reversible scalar/configuration
+  effects.
 
 Excluding character level from the semantic key is intentional. If the order of
 two class levels changes, a choice follows the class-level opportunity which
@@ -50,6 +54,22 @@ Legal option catalogs exist only on the in-memory manifest. They are re-derived
 when Respec opens and are not serialized into `levelHistory`, preventing full
 spell, feat, and feature entities from inflating character saves.
 
+### Nested decisions
+
+Feature, feat, optional-feature, species, and background descriptors are
+discovered recursively. A selected parent grant becomes the parent node for
+its child decisions, so paths such as `Divine Order → Thaumaturge → cantrip`
+and `Lessons of the First Ones → feat → feat choice` remain linked rather than
+becoming unrelated level rows. The graph uses stable acquisition and semantic
+identities, a bounded recursion depth, and visited tuples to detect cycles.
+Only the selected branch is expanded; legal catalogs are still transient.
+
+Origin decisions live in `characterBase.decisions` and use `base:` semantic
+keys. They are not stored in the level-1 class row, which means changing or
+removing the first class level cannot orphan species/background choices.
+Legacy level-1 origin copies remain readable and are migrated to the base node
+without losing user selections.
+
 Manifest discovery must be complete before it replaces the saved ledger. If
 class data is temporarily unavailable, Respec may report the discovery error,
 but it preserves the existing decisions and `manifestComplete` state rather
@@ -61,6 +81,12 @@ discovery source, editor, validation contract, mechanics handler, and
 compatibility projection. Manifest construction rejects an unregistered type,
 so adding a new progression choice cannot silently create a read-only Respec
 row.
+
+The descriptor census also runs over production class/feature/feat data. A
+required choice shape which cannot be classified or whose legal catalog is
+missing blocks ledger replacement and is shown as an actionable Respec
+diagnostic. A degraded catalog never silently replaces a saved ledger with an
+empty one.
 
 ## Legacy Reconstruction
 
@@ -102,6 +128,12 @@ mechanical value is removed only when no other progression source or preserved
 origin remains. This prevents changing a class skill, tool, language, expertise,
 or spell from deleting the same value when a species, background, feature,
 another class level, or manual edit still supplies it.
+
+Materialized feature/resource rows carry their decision provenance where the
+feature path can provide it. Descendant teardown runs deepest-first and also
+clears chosen-subfeature records, resources, active states, and once-per-turn
+resource usage through the normal state removal APIs. Runtime uses are not
+treated as progression ownership and are not recreated by a manifest refresh.
 
 ## Historical Class Changes
 
@@ -153,6 +185,12 @@ The selected ability and other sub-choices are stored on the candidate feat,
 and its exact effect receipt is committed atomically with the resolved
 progression decision.
 
+Changing a parent choice is a staged graph transaction: the candidate snapshot
+is captured, descendants are reversed/removed deepest-first, the parent
+mechanics are applied, the manifest is rediscovered, and only exact child
+identities which remain legal are retained. Any failure restores both the
+candidate state and the manifest snapshot.
+
 Non-Epic-Boon `featProgression` grants, such as Fighting Styles, are also
 manifest decisions. A skipped grant can be created later, and replacements use
 the same prerequisite, nested-choice, add-feat, receipt, and rollback
@@ -183,6 +221,10 @@ pre-existing sparse-history array entry.
 
 Apply is disabled while any required decision is missing, invalid, or ambiguous,
 or while an optional decision contains an invalid/ambiguous selection.
+Rows are indented by graph depth and expose resolved, deferred, missing,
+invalid, and ambiguous status. Review lists discovery/catalog diagnostics as
+well as decision errors; unsupported required shapes and missing non-class
+catalogs are blocking rather than silently dropped.
 
 ## Spell Decisions
 
@@ -219,3 +261,9 @@ Focused Jest contracts live in:
 `test/e2e/specs/respec-workspace.spec.ts` exercises a skipped first-level choice
 through the rendered UI and verifies candidate isolation, Cancel, Apply, Undo,
 and the narrow-screen toolbar.
+
+The shared descriptor census has a production-data regression and a
+real-path negative-control test: temporarily disabling the descriptor function
+must make the census fail, and the test restores the production function before
+continuing. Focused graph tests cover recursive discovery, origin persistence,
+legacy reconstruction, ownership overlap, and staged rollback.

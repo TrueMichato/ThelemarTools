@@ -42,7 +42,7 @@ describe("CharacterSheetLevelHistory", () => {
 			expect(history[0].level).toBe(1);
 			expect(history[0].class.name).toBe("Fighter");
 			expect(history[0].choices.skills).toContain("athletics");
-			expect(history[0].ledgerVersion).toBe(2);
+			expect(history[0].ledgerVersion).toBe(3);
 			expect(history[0].manifestComplete).toBe(false);
 			expect(history[0].decisions).toEqual(expect.arrayContaining([
 				expect.objectContaining({type: "skills", selection: ["athletics", "perception"], status: "resolved"}),

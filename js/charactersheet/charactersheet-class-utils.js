@@ -3770,6 +3770,294 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Return a stable, controller-free description of the permanent choices exposed
+	 * by an acquired entity.  The character sheet has historically had several
+	 * small parsers for these shapes (feat choices, feature options, proficiency
+	 * choices, and additional-spell blocks); keeping this normalisation here gives
+	 * Builder, Level Up, Quick Build, and Respec one vocabulary without changing
+	 * the existing state mutation APIs.
+	 *
+	 * The parser is intentionally conservative.  A descriptor is emitted only for
+	 * a shape which can be represented as a finite choice or a known option source;
+	 * callers can turn an unclassified required shape into a diagnostic rather
+	 * than silently presenting a read-only row.
+	 *
+	 * @param {*} entity
+	 * @param {{sourcePath?: string, occurrenceStart?: number, className?: string, classSource?: string}} [opts]
+	 * @returns {Array<object>}
+	 */
+	static getChoiceDescriptors (/** @type {*} */ entity, /** @type {*} */ opts = {}) {
+		if (!entity || typeof entity !== "object") return [];
+		const descriptors = [];
+		const sourcePath = opts.sourcePath || "";
+		let occurrence = Number(opts.occurrenceStart) || 0;
+		const seen = new Set();
+		const add = (descriptor) => {
+			if (!descriptor || !descriptor.kind) return;
+			const normalized = CharacterSheetClassUtils.normalizeChoiceDescriptor({
+				...descriptor,
+				occurrence: descriptor.occurrence ?? occurrence++,
+			});
+			const fingerprint = [
+				normalized.kind,
+				normalized.grantKey,
+				normalized.sourcePath,
+				normalized.occurrence,
+			].join("|");
+			if (seen.has(fingerprint)) return;
+			seen.add(fingerprint);
+			descriptors.push(normalized);
+		};
+		const inferKind = (path, label = "") => {
+			// Ignore the entity name in the path. A feat such as "Boon of Spell
+			// Recall" must not turn an ability choice into a spell descriptor.
+			const localPath = String(path || "").split(".").slice(-2).join(".");
+			const value = `${localPath}.${label}`.toLowerCase();
+			if (/ability|dc|modifier/.test(value)) return "ability";
+			if (/cantrip/.test(value)) return "cantrip";
+			if (/spell/.test(value)) return "spell";
+			if (/expertise/.test(value)) return "expertise";
+			if (/skill.*(?:tool|language)|(?:tool|language).*skill/.test(value)) return "skillTool";
+			if (/skill/.test(value)) return "skill";
+			if (/tool/.test(value)) return "tool";
+			if (/language/.test(value)) return "language";
+			if (/saving|save/.test(value)) return "save";
+			if (/armor/.test(value)) return "armor";
+			if (/weapon/.test(value)) return "weapon";
+			if (/resistance|damage.?type/.test(value)) return "resistance";
+			return "configuration";
+		};
+		const getOptions = choose => {
+			if (!choose || typeof choose !== "object") return [];
+			if (Array.isArray(choose)) return choose;
+			if (Array.isArray(choose.from)) return choose.from;
+			if (Array.isArray(choose.options)) return choose.options;
+			if (Array.isArray(choose.fromClassList)) return choose.fromClassList;
+			if (Array.isArray(choose.fromFilter)) return choose.fromFilter;
+			if (Array.isArray(choose.fromGroup)) return choose.fromGroup;
+			if (choose.weighted && typeof choose.weighted === "object") {
+				if (Array.isArray(choose.weighted.from)) return choose.weighted.from;
+				if (Array.isArray(choose.weighted.options)) return choose.weighted.options;
+			}
+			if (choose.from && typeof choose.from === "object") return Object.keys(choose.from);
+			// String filters are catalog-backed rather than empty choices. Keep the
+			// filter as a transient option-source marker so callers can resolve the
+			// actual spell list without mistaking this for a missing descriptor.
+			if (typeof choose.from === "string") return [{filter: choose.from}];
+			return [];
+		};
+		const getCount = choose => Math.max(
+			1,
+			Number(choose?.count ?? choose?.amount ?? choose?.max ?? 1) || 1,
+		);
+		const visit = (node, path) => {
+			if (node == null) return;
+			if (Array.isArray(node)) {
+				node.forEach((it, ix) => visit(it, `${path}[${ix}]`));
+				return;
+			}
+			if (typeof node === "string") return;
+			if (typeof node !== "object") return;
+
+			if (node.type === "options" && Array.isArray(node.entries)) {
+				const options = node.entries.map((option) => {
+					if (typeof option === "string") return option;
+					if (option?.refClassFeature) return {name: option.refClassFeature.split("|")[0], ref: option.refClassFeature, type: "classFeature"};
+					if (option?.classFeature) return {name: option.classFeature.split("|")[0], ref: option.classFeature, type: "classFeature"};
+					if (option?.refSubclassFeature) return {name: option.refSubclassFeature.split("|")[0], ref: option.refSubclassFeature, type: "subclassFeature"};
+					if (option?.subclassFeature) return {name: option.subclassFeature.split("|")[0], ref: option.subclassFeature, type: "subclassFeature"};
+					if (option?.refOptionalfeature) return {name: option.refOptionalfeature.split("|")[0], ref: option.refOptionalfeature, type: "optionalfeature"};
+					if (option?.optionalfeature) return {name: option.optionalfeature.split("|")[0], ref: option.optionalfeature, type: "optionalfeature"};
+					return option?.name ? option : null;
+				}).filter(Boolean);
+				if (options.length && !options.every(option => option.type === "optionalfeature" && !option.entries)) {
+					add({
+						kind: "entity",
+						label: node.name || entity.name || "Feature",
+						count: node.count || 1,
+						options,
+						grantKey: node.name || path || "options",
+						sourcePath: path,
+						rules: {uniqueWithinSeries: true, optionSource: {kind: "explicitList", values: options}},
+					});
+				}
+			}
+
+			if (node.choose && typeof node.choose === "object") {
+				const choose = node.choose;
+				const options = getOptions(choose);
+				const label = node.name || node.label || path.split(".").at(-1) || "Choice";
+				const kind = inferKind(path, label);
+				add({
+					kind,
+					label,
+					count: getCount(choose),
+					required: choose.required !== false,
+					options,
+					grantKey: node.grantKey || path || label,
+					sourcePath: path,
+					rules: {
+						amount: choose.amount,
+						max: choose.max,
+						optionSource: {
+							kind: Array.isArray(choose.from) ? "explicitList" : (choose.fromFilter ? "filter" : "classList"),
+							values: options,
+							filter: typeof choose.fromFilter === "string" ? choose.fromFilter : undefined,
+							className: opts.className,
+							classSource: opts.classSource,
+						},
+					},
+				});
+			}
+
+			if (node.type === "abilityDc" && Array.isArray(node.attributes) && node.attributes.length > 1) {
+				add({
+					kind: "ability",
+					label: node.name || entity.name || "Ability",
+					count: 1,
+					options: node.attributes,
+					grantKey: node.name || path || "ability",
+					sourcePath: path,
+					rules: {optionSource: {kind: "explicitList", values: node.attributes}},
+				});
+			}
+
+			const proficiencyFields = [
+				["skillProficiencies", "skill"],
+				["expertise", "expertise"],
+				["toolProficiencies", "tool"],
+				["languageProficiencies", "language"],
+				["savingThrowProficiencies", "save"],
+				["weaponProficiencies", "weapon"],
+				["armorProficiencies", "armor"],
+				["resistances", "resistance"],
+				["damageResistances", "resistance"],
+			];
+			for (const [field, kind] of proficiencyFields) {
+				if (node[field] == null) continue;
+				const values = Array.isArray(node[field]) ? node[field] : [node[field]];
+				values.forEach((value, ix) => {
+					if (!value || typeof value !== "object" || !value.choose) return;
+					const options = getOptions(value.choose);
+					add({
+						kind,
+						label: value.name || field,
+						count: getCount(value.choose),
+						options,
+						grantKey: `${field}.${ix}`,
+						sourcePath: `${path}.${field}[${ix}]`,
+						rules: {optionSource: {kind: "explicitList", values: options}},
+					});
+				});
+			}
+
+			if (node.additionalSpells && typeof node.additionalSpells === "object") {
+				const walkAdditional = (value, childPath) => {
+					if (Array.isArray(value)) return value.forEach((it, ix) => walkAdditional(it, `${childPath}[${ix}]`));
+					if (!value || typeof value !== "object") return;
+					if (value.choose) {
+						const options = getOptions(value.choose);
+						const isAbilityChoice = /\.ability(?:\[\d+\])?$/.test(childPath);
+						add({
+							kind: isAbilityChoice ? "ability" : (Number(value.level) === 0 ? "cantrip" : "spell"),
+							label: value.name || (isAbilityChoice ? "Spellcasting Ability" : "Additional Spell"),
+							count: getCount(value.choose),
+							options,
+							grantKey: childPath,
+							sourcePath: childPath,
+							rules: {
+								spellMode: value.innate ? "innate" : (value.known ? "known" : "prepared"),
+								optionSource: {
+									kind: typeof value.choose.from === "string" ? "filter" : "additionalSpells",
+									filter: typeof value.choose.from === "string" ? value.choose.from : undefined,
+									values: options,
+									className: opts.className,
+									classSource: opts.classSource,
+								},
+							},
+						});
+					}
+					Object.entries(value).forEach(([key, child]) => walkAdditional(child, `${childPath}.${key}`));
+				};
+				walkAdditional(node.additionalSpells, `${path}.additionalSpells`);
+			}
+
+			Object.entries(node).forEach(([key, value]) => {
+				if (["choose", "entries", "items", "additionalSpells", ...proficiencyFields.map(([field]) => field)].includes(key)) return;
+				if (value && typeof value === "object") visit(value, path ? `${path}.${key}` : key);
+			});
+			if (node.entries) visit(node.entries, path ? `${path}.entries` : "entries");
+			if (node.items) visit(node.items, path ? `${path}.items` : "items");
+		};
+		visit(entity, sourcePath || entity.name || "entity");
+		return descriptors;
+	}
+
+	/**
+	 * Normalize external descriptor-like data so callers can safely persist it as
+	 * provenance metadata.  This deliberately keeps option catalogs transient;
+	 * persisted decisions should retain only the compact selected value.
+	 */
+	static normalizeChoiceDescriptor (/** @type {*} */ descriptor) {
+		const out = {
+			kind: descriptor?.kind || "configuration",
+			label: descriptor?.label || descriptor?.kind || "Choice",
+			count: Math.max(1, Number(descriptor?.count) || 1),
+			required: descriptor?.required !== false,
+			options: Array.isArray(descriptor?.options) ? descriptor.options : [],
+			grantKey: descriptor?.grantKey || descriptor?.sourcePath || "choice",
+			sourcePath: descriptor?.sourcePath || "",
+			occurrence: Math.max(0, Number(descriptor?.occurrence) || 0),
+			rules: {...(descriptor?.rules || {})},
+		};
+		if (out.rules.optionSource) out.rules.optionSource = {...out.rules.optionSource};
+		return out;
+	}
+
+	/**
+	 * Classify a discovered choice shape for the data census.  This is deliberately
+	 * pure and independent of page/catalog availability, so the census can report
+	 * a reachable but catalog-dependent shape separately from a runtime-only one.
+	 */
+	static classifyChoiceShape (/** @type {*} */ node, path = "") {
+		if (!node || typeof node !== "object") return {classification: "none", path};
+		if (node.type === "options") return {classification: "supported", family: "entity", path};
+		if (Object.prototype.hasOwnProperty.call(node, "choose")) {
+			const descriptors = CharacterSheetClassUtils.getChoiceDescriptors({choose: node.choose, name: node.name}, {sourcePath: path});
+			if (descriptors.length) return {classification: "supported", family: descriptors[0].kind, path, required: node.required !== false};
+			return {classification: "unclassified", family: "choose", path, required: node.required !== false};
+		}
+		if (node.additionalSpells) return {classification: "supported", family: "spell", path, required: node.required !== false};
+		if (node.runtime === true || node.current === true || node.mode === "runtime") {
+			return {classification: "runtime", family: "runtime", path};
+		}
+		return {classification: "none", path};
+	}
+
+	/**
+	 * Produce a data-backed census without freezing snapshot counts in tests.
+	 * `entities` may be a class/feature/feat/race/background collection.
+	 */
+	static getChoiceDescriptorCensus (/** @type {*} */ entities) {
+		const result = {total: 0, supported: 0, runtime: 0, unclassified: 0, byFamily: {}, entries: []};
+		const visit = (node, path) => {
+			if (!node || typeof node !== "object") return;
+			const classification = CharacterSheetClassUtils.classifyChoiceShape(node, path);
+			if (classification.classification !== "none") {
+				result.total++;
+				result[classification.classification]++;
+				if (classification.family) result.byFamily[classification.family] = (result.byFamily[classification.family] || 0) + 1;
+				result.entries.push({...classification});
+			}
+			Object.entries(node).forEach(([key, value]) => {
+				if (value && typeof value === "object") visit(value, path ? `${path}.${key}` : key);
+			});
+		};
+		(Array.isArray(entities) ? entities : [entities]).forEach((entity, ix) => visit(entity, entity?.name || `entity-${ix}`));
+		return result;
+	}
+
+	/**
 	 * Look up a class feature by reference parts.
 	 * @param {Array<*>} classFeatures - All class features
 	 * @param {string} featureName
@@ -6590,6 +6878,7 @@ class CharacterSheetClassUtils {
 			isFeatureOption,
 			parentFeature,
 			optionalFeatureTypes,
+			sourceDecisionKey,
 		} = {},
 	) {
 		const outFeature = feature || {};
@@ -6629,6 +6918,7 @@ class CharacterSheetClassUtils {
 			isFeatureOption: outFeature.isFeatureOption ?? isFeatureOption,
 			parentFeature: outFeature.parentFeature ?? parentFeature,
 			optionalFeatureTypes: normalizedOptionalFeatureTypes,
+			sourceDecisionKey: outFeature.sourceDecisionKey ?? sourceDecisionKey,
 		};
 	}
 

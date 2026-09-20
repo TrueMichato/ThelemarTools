@@ -4909,7 +4909,7 @@ class CharacterSheetState {
 			// _data.race/_data.subrace/_data.background). Populated by the Builder and by the load-time
 			// migration _migrateBaseChoices(). `v` is a version sentinel so _ensureCharacterBase() never
 			// re-synthesizes once it has been established.
-			characterBase: null, // {v: 1, raceUserChoices: {}, backgroundUserChoices: {}}
+			characterBase: null, // {v: 1, raceUserChoices: {}, backgroundUserChoices: {}, decisions: []}
 
 			// Provenance for the chronological-first class's starting proficiencies (saves + starting
 			// armor/weapons). Lets respec reverse them and promote a new first class when the original
@@ -5643,6 +5643,10 @@ class CharacterSheetState {
 		if (!hadActionEconomyUsage && legacyBonusActionAvailable === false) this._data.actionEconomyUsage.bonus = true;
 		if (!this._data.resourceTurnUsage || typeof this._data.resourceTurnUsage !== "object" || Array.isArray(this._data.resourceTurnUsage)) {
 			this._data.resourceTurnUsage = {};
+		}
+		if (this._data.characterBase && typeof this._data.characterBase === "object") {
+			if (!Number(this._data.characterBase.v)) this._data.characterBase.v = 1;
+			if (!Array.isArray(this._data.characterBase.decisions)) this._data.characterBase.decisions = [];
 		}
 
 		// Ensure chosenSubfeatures array exists (legacy saves predate structured choices)
@@ -7776,6 +7780,18 @@ class CharacterSheetState {
 			delete c.background;
 			delete c.backgroundUserChoices;
 		}
+		// A few development snapshots wrote origin decisions into the level-1
+		// decision list before the base node became authoritative.  Adopt those
+		// records once, preserving their stable keys, and keep the class row pure.
+		if (lvl1?.decisions?.length) {
+			const originDecisions = lvl1.decisions.filter(decision => decision?.scope === "origin");
+			if (originDecisions.length) {
+				const existing = new Map((this._data.characterBase.decisions || []).map(decision => [decision.semanticKey, decision]));
+				originDecisions.forEach(decision => existing.set(decision.semanticKey, MiscUtil.copyFast(decision)));
+				this._data.characterBase.decisions = [...existing.values()];
+				lvl1.decisions = lvl1.decisions.filter(decision => decision?.scope !== "origin");
+			}
+		}
 	}
 
 	// Alias for compatibility with export module
@@ -9306,6 +9322,10 @@ class CharacterSheetState {
 			history: this._data.levelHistory,
 			manifest,
 		});
+		this._data.characterBase = CharacterSheetProgression.reconcileCharacterBaseWithManifest({
+			base: manifest?.base,
+			characterBase: this._data.characterBase,
+		});
 	}
 
 	_getProgressionOwnershipKey (type, value) {
@@ -9341,18 +9361,37 @@ class CharacterSheetState {
 			spellbookSpells: "spells",
 			cantrips: "cantrips",
 			preparedCantrips: "cantrips",
+			nestedSkill: "skills",
+			nestedSkillTool: "skills",
+			nestedExpertise: "expertise",
+			nestedTool: "tools",
+			nestedLanguage: "languages",
+			nestedSave: "saves",
+			nestedWeapon: "weapons",
+			nestedArmor: "armor",
+			nestedResistance: "resistances",
+			nestedDamageType: "resistances",
 		};
 		const type = typeMap[decision?.type];
 		if (type) {
 			const values = Array.isArray(decision.selection)
 				? decision.selection
 				: (decision.selection == null ? [] : [decision.selection]);
-			return values.map(value => ({type, value}));
+			return values.map(value => {
+				if (decision.type === "nestedSkillTool" && value && typeof value === "object") {
+					const kind = String(value.kind || "").toLowerCase();
+					const routedType = kind === "tool" ? "tools" : kind === "language" ? "languages" : "skills";
+					return {type: routedType, value: value.value ?? value.name ?? value};
+				}
+				return {type, value: value?.value ?? value};
+			});
 		}
 		if (decision?.type === "spellSwap" && decision.selection?.added?.name) {
 			return [{type: Number(decision.selection.added.level) === 0 ? "cantrips" : "spells", value: decision.selection.added}];
 		}
-		return [];
+		const receiptValues = (decision?.receipt?.effects || [])
+			.flatMap(effect => (effect?.ownership || []).map(value => ({type: value.type, value: value.value})));
+		return receiptValues;
 	}
 
 	/**
@@ -9375,6 +9414,10 @@ class CharacterSheetState {
 			expertise: Object.entries(this._data.skillProficiencies || {}).filter(([, level]) => Number(level) >= 2).map(([skill]) => skill),
 			tools: this._data.toolProficiencies || [],
 			languages: this._data.languages || [],
+			saves: this._data.saveProficiencies || [],
+			weapons: this._data.weaponProficiencies || [],
+			armor: this._data.armorProficiencies || [],
+			resistances: this._data.resistances || [],
 			spells: this._data.spellcasting?.spellsKnown || [],
 			cantrips: this._data.spellcasting?.cantripsKnown || [],
 		};
@@ -9391,7 +9434,7 @@ class CharacterSheetState {
 	}
 
 	_getNonProgressionOwnershipKeys (manifest) {
-		const out = Object.fromEntries(["skills", "expertise", "tools", "languages", "spells", "cantrips"]
+		const out = Object.fromEntries(["skills", "expertise", "tools", "languages", "saves", "weapons", "armor", "resistances", "spells", "cantrips"]
 			.map(type => [type, new Set()]));
 		const add = (type, value) => {
 			const key = this._getProgressionOwnershipKey(type, value);
@@ -9421,7 +9464,7 @@ class CharacterSheetState {
 		};
 
 		for (const [type, entries] of Object.entries(this._data.grantedProficiencies || {})) {
-			if (!["skills", "tools", "languages"].includes(type)) continue;
+			if (!["skills", "tools", "languages", "saves", "weapons", "armor", "resistances"].includes(type)) continue;
 			for (const [value, sources] of Object.entries(entries || {})) {
 				if (!sources?.length) continue;
 				add(type, value);
@@ -9437,6 +9480,9 @@ class CharacterSheetState {
 		}
 		addUserChoices(this.getBaseRaceUserChoices());
 		addUserChoices(this.getBaseBackgroundUserChoices());
+		for (const value of this._data.saveProficiencies || []) {
+			if (!(this._data.grantedProficiencies?.saves?.[value]?.length)) add("saves", value);
+		}
 
 		for (const decision of manifest?.decisions || []) {
 			if (!["skills", "tools"].includes(decision.type)) continue;
@@ -9477,6 +9523,10 @@ class CharacterSheetState {
 				if (!expertise?.preserved && !expertise?.sources?.length) this.setSkillProficiency(this._getProgressionOwnershipKey(type, value), 0);
 			} else if (type === "tools") this.removeToolProficiency(value);
 			else if (type === "languages") this.removeLanguage(value);
+			else if (type === "saves") this.removeSaveProficiency(value);
+			else if (type === "weapons") this.removeWeaponProficiency(value);
+			else if (type === "armor") this.removeArmorProficiency(value);
+			else if (type === "resistances") this.removeResistance(value);
 			else if (["spells", "cantrips"].includes(type)) this.removeSpell(value?.name, value?.source);
 			else if (type === "innateSpells") this.removeInnateSpell(value?.name, value?.source);
 		}
@@ -9501,6 +9551,46 @@ class CharacterSheetState {
 			if (expertise?.preserved || expertise?.sources?.length) return false;
 		}
 		return !entry.preserved && !entry.sources.length;
+	}
+
+	/**
+	 * Reverse the durable, source-aware effects recorded for one progression
+	 * decision. This is intentionally conservative: only values whose receipt
+	 * says they were owned by this decision are removed, so manual and
+	 * overlapping grants remain intact.
+	 */
+	reverseProgressionDecisionReceipt (decision) {
+		const sourceId = decision?.semanticKey || decision?.receipt?.sourceDecisionKey;
+		if (!sourceId) return;
+		for (const effect of decision?.receipt?.effects || []) {
+			// Ability and feat receipts are reversed by their owning feature/feat
+			// teardown paths. Reversing them here as well would double-subtract
+			// legacy feat choices whose parent is being replaced in the same
+			// transaction.
+			if (effect?.type === "abilityDelta" || effect?.type === "configuration") continue;
+			if (effect?.type !== "ownership") continue;
+			for (const owned of effect.ownership || []) {
+				const type = owned?.type;
+				const value = owned?.value;
+				if (!type) continue;
+				if (!this.releaseProgressionOwnership(type, value, sourceId)) continue;
+				if (type === "skills") {
+					const skill = CharacterSheetClassUtils.normalizeSkillKey?.(value)
+						|| String(value || "").toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
+					const expertise = this._getProgressionOwnershipEntry("expertise", skill);
+					if (!expertise?.preserved && !expertise?.sources?.length) this.setSkillProficiency(skill, 0);
+				} else if (type === "expertise") {
+					this.setSkillProficiency(String(value || "").toLowerCase(), 1);
+				} else if (type === "tools") this.removeToolProficiency(value);
+				else if (type === "languages") this.removeLanguage(value);
+				else if (type === "saves") this.removeSaveProficiency(value);
+				else if (type === "weapons") this.removeWeaponProficiency(value);
+				else if (type === "armor") this.removeArmorProficiency(value);
+				else if (type === "resistances") this.removeResistance(value);
+				else if (["spells", "cantrips"].includes(type)) this.removeSpell(value?.name, value?.source);
+				else if (type === "innateSpells") this.removeInnateSpell(value?.name, value?.source);
+			}
+		}
 	}
 
 	/**
@@ -9592,7 +9682,10 @@ class CharacterSheetState {
 	 * @returns {{v: number, raceUserChoices: object, backgroundUserChoices: object}}
 	 */
 	_ensureCharacterBase () {
-		if (this._data.characterBase && this._data.characterBase.v) return this._data.characterBase;
+		if (this._data.characterBase && this._data.characterBase.v) {
+			if (!Array.isArray(this._data.characterBase.decisions)) this._data.characterBase.decisions = [];
+			return this._data.characterBase;
+		}
 
 		const lvl1 = Array.isArray(this._data.levelHistory)
 			? this._data.levelHistory.find(h => h.level === 1)
@@ -9603,6 +9696,9 @@ class CharacterSheetState {
 			v: 1,
 			raceUserChoices: legacy.raceUserChoices ? MiscUtil.copyFast(legacy.raceUserChoices) : {},
 			backgroundUserChoices: legacy.backgroundUserChoices ? MiscUtil.copyFast(legacy.backgroundUserChoices) : {},
+			decisions: Array.isArray(this._data.characterBase?.decisions)
+				? MiscUtil.copyFast(this._data.characterBase.decisions)
+				: [],
 		};
 		return this._data.characterBase;
 	}
@@ -18889,9 +18985,10 @@ class CharacterSheetState {
 				featureType: option.subclassShortName ? "Subclass" : "Class",
 				isFeatureOption: true,
 				parentFeature: parentInfo.parent,
+				sourceDecisionKey: parentInfo.sourceDecisionKey,
 			},
 		);
-		this.addFeature(built);
+		this.addFeature(built, {sourceDecisionKey: parentInfo.sourceDecisionKey});
 		this._recordChosenSubfeature({
 			parent: parentInfo.parent,
 			parentSource: parentInfo.parentSource || null,
@@ -45753,6 +45850,9 @@ class CharacterSheetState {
 		const featureData = {
 			id: CryptUtil.uid(),
 			...feature,
+			...(opts.sourceDecisionKey || feature.sourceDecisionKey
+				? {sourceDecisionKey: opts.sourceDecisionKey || feature.sourceDecisionKey}
+				: {}),
 		};
 
 		// Add uses if detected or passed in
@@ -45801,6 +45901,7 @@ class CharacterSheetState {
 					recharge: uses.recharge,
 					...(uses.shortRestRecovery != null ? {shortRestRecovery: uses.shortRestRecovery} : {}),
 					featureId: featureData.id, // Link to feature
+					...(featureData.sourceDecisionKey ? {sourceDecisionKey: featureData.sourceDecisionKey} : {}),
 				});
 			}
 		}

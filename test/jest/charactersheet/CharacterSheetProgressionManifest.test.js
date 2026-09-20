@@ -718,6 +718,7 @@ describe("CharacterSheetProgression manifest", () => {
 			classFeatures: Array.from({length: 19}, (_, ix) => ix === 18 ? [level19Feature] : []),
 			...(featProgression ? {featProgression} : {}),
 		});
+
 		const phbClass = makeClass({
 			source: "PHB",
 			level19Feature: "Ability Score Improvement|Bard|PHB|19",
@@ -768,6 +769,71 @@ describe("CharacterSheetProgression manifest", () => {
 		});
 		expect(tgttDecision.options.map(option => option.name)).toEqual(["Boon of Spell Recall", "Actor"]);
 		expect(tgttManifest.unresolved).toContain(tgttDecision);
+	});
+
+	it("discovers linked descendants of a selected feature and retains graph identity", () => {
+		const rogue = {
+			name: "Rogue",
+			source: "XPHB",
+			hd: {faces: 8},
+			classFeatures: ["Specialty|Rogue|XPHB|1"],
+			startingProficiencies: {},
+		};
+		const specialty = {
+			name: "Specialty",
+			source: "XPHB",
+			className: "Rogue",
+			classSource: "XPHB",
+			level: 1,
+			entries: [{
+				type: "options",
+				count: 1,
+				entries: [
+					{type: "refOptionalfeature", optionalfeature: "Arcane Lore|XPHB"},
+					{type: "entries", name: "Another Arcane Lore option", entries: ["A different choice."]},
+				],
+			}],
+		};
+		const arcaneLore = {
+			name: "Arcane Lore",
+			source: "XPHB",
+			skillProficiencies: [{choose: {from: ["arcana", "history"], count: 1}}],
+			additionalSpells: [{level: 0, choose: {from: [{name: "Mage Hand", source: "XPHB"}]}}],
+		};
+		const page = getPage({
+			classes: [rogue],
+			classFeatures: [specialty],
+			optionalFeatures: [arcaneLore],
+			spells: [{name: "Mage Hand", source: "XPHB", level: 0}],
+		});
+		const manifest = CharacterSheetProgression.buildManifest({
+			page,
+			state: getState({
+				classes: [{name: "Rogue", source: "XPHB", level: 1}],
+				history: [{
+					level: 1,
+					class: {name: "Rogue", source: "XPHB"},
+					choices: {
+						featureChoices: [{
+							featureName: "Specialty",
+							choice: "Arcane Lore",
+							source: "XPHB",
+							type: "optionalfeature",
+						}],
+					},
+					manifestComplete: true,
+				}],
+				features: [specialty],
+			}),
+		});
+		const parent = manifest.decisions.find(it => it.type === "featureChoice");
+		expect(parent).toBeTruthy();
+		const children = manifest.decisions.filter(it => it.scope === "nested");
+		expect(children).toEqual(expect.arrayContaining([
+			expect.objectContaining({type: "nestedSkill", parentSemanticKey: parent.semanticKey}),
+			expect.objectContaining({type: "nestedCantrip", parentSemanticKey: parent.semanticKey}),
+		]));
+		expect(children.every(it => it.rootSemanticKey)).toBe(true);
 	});
 
 	it("registers a complete adapter contract for every emitted decision", () => {

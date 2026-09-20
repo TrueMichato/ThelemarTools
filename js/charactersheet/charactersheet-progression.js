@@ -8,8 +8,8 @@ import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
  * without duplicating the rules which create decision opportunities.
  */
 class CharacterSheetProgression {
-	static LEDGER_VERSION = 2;
-	static MANIFEST_VERSION = 1;
+	static LEDGER_VERSION = 3;
+	static MANIFEST_VERSION = 2;
 
 	static DECISION_STATUSES = new Set(["resolved", "deferred", "missing", "invalid", "ambiguous"]);
 
@@ -40,7 +40,70 @@ class CharacterSheetProgression {
 		spellMastery: {discovery: "class-features", editor: "spell-mastery", validation: "spell-mastery-levels", mechanics: "spell-mastery", projection: ["choices.spellMasterySpells"]},
 		signatureSpells: {discovery: "class-features", editor: "signature-spells", validation: "signature-spell-levels", mechanics: "signature-spells", projection: ["choices.signatureSpells"]},
 		hp: {discovery: "class-level", editor: "hit-points", validation: "hit-point-method", mechanics: "hit-points", projection: ["choices.hpRoll"]},
+		nestedEntity: {discovery: "nested-descriptor", editor: "nested-choice", validation: "entity-option", mechanics: "nested-entity", projection: []},
+		nestedSkill: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "skill-proficiencies", projection: []},
+		nestedSkillTool: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "union-proficiencies", projection: []},
+		nestedExpertise: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "skill-expertise", projection: []},
+		nestedTool: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "tool-proficiencies", projection: []},
+		nestedLanguage: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "languages", projection: []},
+		nestedAbility: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "ability-configuration", projection: []},
+		nestedSave: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "saving-throws", projection: []},
+		nestedWeapon: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "weapon-proficiencies", projection: []},
+		nestedArmor: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "armor-proficiencies", projection: []},
+		nestedResistance: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "resistances", projection: []},
+		nestedSpell: {discovery: "nested-descriptor", editor: "nested-choice", validation: "legal-spell-set", mechanics: "nested-spells", projection: []},
+		nestedCantrip: {discovery: "nested-descriptor", editor: "nested-choice", validation: "legal-spell-set", mechanics: "nested-spells", projection: []},
+		nestedFeat: {discovery: "nested-descriptor", editor: "nested-choice", validation: "eligible-feat", mechanics: "feat-transaction", projection: []},
+		nestedOptionalFeature: {discovery: "nested-descriptor", editor: "nested-choice", validation: "entity-option", mechanics: "optional-features", projection: []},
+		nestedConfiguration: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "nested-configuration", projection: []},
+		originRace: {discovery: "base-node", editor: "nested-choice", validation: "entity-option", mechanics: "origin-race", projection: []},
+		originBackground: {discovery: "base-node", editor: "nested-choice", validation: "entity-option", mechanics: "origin-background", projection: []},
 	});
+
+	static ADAPTER_EDITOR_HANDLERS = new Set([
+		"class", "manifest-options", "languages", "subclass", "improvement", "feat",
+		"optional-features", "feature-choice", "class-feat", "combat-traditions",
+		"combat-methods", "weapon-masteries", "spells", "spell-swap", "scholar",
+		"spell-mastery", "signature-spells", "hit-points", "nested-choice",
+	]);
+
+	static ADAPTER_MECHANICS_HANDLERS = new Set([
+		"class-reassignment", "skill-proficiencies", "tool-proficiencies",
+		"skill-expertise", "languages", "subclass-reassignment", "subclass-choice-refresh",
+		"ability-scores", "feat-transaction", "improvement-transaction",
+		"optional-features", "feature-choice", "combat-traditions", "combat-methods",
+		"weapon-masteries", "known-spells", "known-or-prepared-cantrips",
+		"prepared-spells", "prepared-cantrips", "spell-swap", "skill-expertise",
+		"spell-mastery", "signature-spells", "hit-points", "nested-entity",
+		"union-proficiencies", "ability-configuration", "saving-throws",
+		"weapon-proficiencies", "armor-proficiencies", "resistances", "nested-spells",
+		"nested-configuration", "origin-race", "origin-background",
+	]);
+
+	// The state layer currently uses the same named family for forward and
+	// reverse operations. Keep explicit closure sets so a newly registered
+	// adapter cannot accidentally become a display-only manifest row.
+	static ADAPTER_APPLY_HANDLERS = new Set(CharacterSheetProgression.ADAPTER_MECHANICS_HANDLERS);
+	static ADAPTER_REVERSE_HANDLERS = new Set(CharacterSheetProgression.ADAPTER_MECHANICS_HANDLERS);
+
+	static getAdapterClosureIssues () {
+		const issues = [];
+		for (const [type, adapter] of Object.entries(CharacterSheetProgression.DECISION_ADAPTERS)) {
+			if (!CharacterSheetProgression.ADAPTER_EDITOR_HANDLERS.has(adapter.editor)) {
+				issues.push({code: "adapter-missing-editor", type, handler: adapter.editor});
+			}
+			if (!CharacterSheetProgression.ADAPTER_MECHANICS_HANDLERS.has(adapter.mechanics)) {
+				issues.push({code: "adapter-missing-mechanics", type, handler: adapter.mechanics});
+			}
+			if (!CharacterSheetProgression.ADAPTER_APPLY_HANDLERS.has(adapter.mechanics)) {
+				issues.push({code: "adapter-missing-apply", type, handler: adapter.mechanics});
+			}
+			if (!CharacterSheetProgression.ADAPTER_REVERSE_HANDLERS.has(adapter.mechanics)) {
+				issues.push({code: "adapter-missing-reverse", type, handler: adapter.mechanics});
+			}
+		}
+		return issues;
+	}
 
 	static getDecisionAdapter (type) {
 		return CharacterSheetProgression.DECISION_ADAPTERS[type] || null;
@@ -86,6 +149,44 @@ class CharacterSheetProgression {
 		return `${semanticKey}@level-${Number(characterLevel) || 0}`;
 	}
 
+	static getAcquisitionKey ({ownerType, ownerUid, classLevel = 0, sourcePath = "", occurrence = 0}) {
+		return [
+			CharacterSheetProgression._slug(ownerType || "entity"),
+			CharacterSheetProgression._slug(ownerUid || "unknown"),
+			`cl${Number(classLevel) || 0}`,
+			CharacterSheetProgression._slug(sourcePath || "root"),
+			`occ${Number(occurrence) || 0}`,
+		].join(":");
+	}
+
+	static getOriginSemanticKey ({originType, originUid, grantKey = "", slot = 0}) {
+		return [
+			"base",
+			CharacterSheetProgression._slug(originType || "origin"),
+			CharacterSheetProgression._slug(originUid || "unknown"),
+			CharacterSheetProgression._slug(grantKey || "choice"),
+			`slot${Number(slot) || 0}`,
+		].join(":");
+	}
+
+	static getNestedSemanticKey ({parentSemanticKey = null, acquisitionKey = "", grantKey = "", selectedGrantKey = "", occurrence = 0, slot = 0}) {
+		const anchor = parentSemanticKey || acquisitionKey || "nested";
+		return [
+			"nested",
+			CharacterSheetProgression._slug(anchor),
+			CharacterSheetProgression._slug(selectedGrantKey || grantKey || "choice"),
+			`occ${Number(occurrence) || 0}`,
+			`slot${Number(slot) || 0}`,
+		].join(":");
+	}
+
+	static getDecisionTypeForDescriptor (descriptor, {nested = true} = {}) {
+		const kind = String(descriptor?.kind || "configuration");
+		if (!nested) return kind;
+		const normalized = kind === "skillTool" ? "skillTool" : kind;
+		return `nested${normalized[0].toUpperCase()}${normalized.slice(1)}`;
+	}
+
 	static _getSelectionCount (selection) {
 		if (selection == null) return 0;
 		if (Array.isArray(selection)) return selection.length;
@@ -100,6 +201,40 @@ class CharacterSheetProgression {
 		if (!required && !selectionCount) return "deferred";
 		if (selectionCount < Math.max(1, Number(count) || 1)) return "missing";
 		return "resolved";
+	}
+
+	static _getDecisionReceipt ({semanticKey, type, selection, meta = {}}) {
+		if (selection == null) return null;
+		const typeMap = {
+			nestedSkill: "skills",
+			nestedSkillTool: "skills",
+			nestedExpertise: "expertise",
+			nestedTool: "tools",
+			nestedLanguage: "languages",
+			nestedSave: "saves",
+			nestedWeapon: "weapons",
+			nestedArmor: "armor",
+			nestedResistance: "resistances",
+			nestedDamageType: "resistances",
+			nestedSpell: "spells",
+			nestedCantrip: "cantrips",
+			skills: "skills",
+			tools: "tools",
+			expertise: "expertise",
+			languages: "languages",
+		};
+		const values = Array.isArray(selection) ? selection : [selection];
+		const effects = [];
+		if (typeMap[type]) effects.push({type: "ownership", ownership: values.map(value => ({type: typeMap[type], value}))});
+		if (type === "nestedAbility") {
+			effects.push(...values.map(value => ({
+				type: "abilityDelta",
+				ability: String(value),
+				amount: Number(meta.descriptorRules?.amount) || 1,
+			})));
+		}
+		if (type === "nestedConfiguration") effects.push(...values.map(value => ({type: "configuration", value})));
+		return {version: 1, sourceDecisionKey: semanticKey, effects};
 	}
 
 	static _isSelectionValid ({selection, count = 1, options = [], type}) {
@@ -163,6 +298,516 @@ class CharacterSheetProgression {
 		return selectedValues.every(value => [...getOptionKeys(value)].some(key => optionKeys.has(key)));
 	}
 
+	static _getEntityChoiceDescriptors (entity, opts = {}) {
+		return CharacterSheetClassUtils.getChoiceDescriptors?.(entity, opts) || [];
+	}
+
+	static _getSelectedDescriptorValue ({descriptor, entity, state, parentDecision = null, legacyChoices = null}) {
+		const values = [];
+		const choices = [
+			legacyChoices,
+			entity?.choices,
+			entity?._featChoices,
+			entity?.choice,
+			entity?.selectedChoices,
+		].filter(Boolean);
+		const pathTail = String(descriptor?.grantKey || "").split(".").at(-1);
+		const pathKey = pathTail.replace(/\[\d+\]$/, "");
+		for (const choice of choices) {
+			if (choice) {
+				for (const key of [pathKey, pathTail]) {
+					if (!key || !Object.prototype.hasOwnProperty.call(choice, key)) continue;
+					const value = choice[key];
+					if (value != null) {
+						if (pathTail !== pathKey && Array.isArray(value)) {
+							const index = Number(pathTail.match(/\[(\d+)\]$/)?.[1]);
+							return CharacterSheetProgression._copy(value[index] ?? value);
+						}
+						return CharacterSheetProgression._copy(value);
+					}
+				}
+			}
+			for (const key of [descriptor?.grantKey, descriptor?.label, descriptor?.sourcePath]) {
+				if (!key || !Object.prototype.hasOwnProperty.call(choice || {}, key)) continue;
+				const value = choice[key];
+				if (value != null) return CharacterSheetProgression._copy(value);
+			}
+		}
+		const sourcePath = String(descriptor?.sourcePath || descriptor?.grantKey || "");
+		const choiceIndex = Number(sourcePath.match(/\[(\d+)\]/)?.[1] || 0);
+		const originChoices = legacyChoices || {};
+		if (descriptor?.kind === "ability") {
+			if (sourcePath.includes("additionalSpells")) {
+				const selected = originChoices.selectedRacialSpellAbilities?.[choiceIndex];
+				if (selected != null) return selected;
+			}
+			if (sourcePath.includes(".ability[")) {
+				const selected = originChoices.selectedAbilityChoices?.[`choose_${choiceIndex}_0`] ??
+					originChoices.selectedAbilityChoices?.[sourcePath.match(/ability\[(\d+)\]/)?.[1] || choiceIndex];
+				if (selected != null) return CharacterSheetProgression._copy(selected);
+				const backgroundSelected = originChoices.selectedAbilityBonuses?.[`bg_${choiceIndex}`];
+				if (backgroundSelected != null) return backgroundSelected;
+			}
+		}
+		const stateChoices = [
+			...(state?.getPendingFeatureChoices?.() || []),
+			...(state?.getPendingSpellChoices?.() || []),
+		].filter(choice => {
+			const owner = String(choice.featureName || choice.featureId || "").toLowerCase();
+			return owner && (
+				owner === String(entity?.name || "").toLowerCase()
+					|| owner === String(parentDecision?.provenance?.ownerUid || "").toLowerCase()
+			);
+		});
+		const pending = stateChoices.find(choice =>
+			String(choice.kind || "").toLowerCase() === String(descriptor.kind || "").toLowerCase()
+					|| (descriptor.kind === "cantrip" && choice.kind === "cantrip"),
+		);
+		if (pending?.selection != null) return CharacterSheetProgression._copy(pending.selection);
+
+		if (descriptor.kind === "entity") {
+			const chosen = state?.getChosenSubfeatures?.() || [];
+			const current = chosen.find(record =>
+				String(record.parent || "").toLowerCase() === String(entity?.name || "").toLowerCase(),
+			);
+			if (current) {
+				return {
+					name: current.name,
+					source: current.source,
+				};
+			}
+		}
+		return values.length ? values : null;
+	}
+
+	static _resolveNestedEntity ({option, page, parentEntity = null}) {
+		if (!option) return null;
+		if (typeof option === "string") option = {name: option};
+		if (option.choice && !option.name) {
+			option = {
+				...option,
+				name: option.choice,
+				type: option.type || "optionalfeature",
+			};
+		}
+		if (option.entries || option.choose || option.choices || option._featChoices) return option;
+		const ref = option.ref || option.classFeature || option.subclassFeature || option.optionalfeature;
+		const name = option.name || (typeof ref === "string" ? ref.split("|")[0] : "");
+		const source = option.source || (typeof ref === "string" ? ref.split("|")[1] : "");
+		const type = String(option.type || "").toLowerCase();
+		if (type.includes("optional") || option.optionalfeature) {
+			return (page?.getOptionalFeatures?.() || []).find(feature =>
+				CharacterSheetProgression._normalize(feature.name) === CharacterSheetProgression._normalize(name)
+						&& (!source || CharacterSheetProgression._normalize(feature.source) === CharacterSheetProgression._normalize(source)),
+			) || null;
+		}
+		const optional = (page?.getOptionalFeatures?.() || []).find(feature =>
+			CharacterSheetProgression._normalize(feature.name) === CharacterSheetProgression._normalize(name)
+				&& (!source || CharacterSheetProgression._normalize(feature.source) === CharacterSheetProgression._normalize(source)),
+		);
+		if (optional) return optional;
+		if (type.includes("class") || option.classFeature || ref?.split("|").length >= 4) {
+			const parts = String(ref || "").split("|");
+			return CharacterSheetClassUtils.getClassFeatureData?.(
+				page?.getClassFeatures?.() || [],
+				parts[0] || name,
+				parts[1] || option.className || parentEntity?.className,
+				parts[2] || source,
+				Number(parts[3]) || option.level || 1,
+			) || null;
+		}
+		if (type.includes("subclass") || option.subclassFeature) {
+			return (page?.getSubclassFeatures?.() || []).find(feature =>
+				CharacterSheetProgression._normalize(feature.name) === CharacterSheetProgression._normalize(name)
+						&& (!source || CharacterSheetProgression._normalize(feature.source) === CharacterSheetProgression._normalize(source)),
+			) || null;
+		}
+		const feat = (page?.getFeats?.() || []).find(candidate =>
+			CharacterSheetProgression._normalize(candidate.name) === CharacterSheetProgression._normalize(name)
+					&& (!source || CharacterSheetProgression._normalize(candidate.source) === CharacterSheetProgression._normalize(source)),
+		);
+		return feat || null;
+	}
+
+	static _getNestedSelectionFallback ({descriptor, entity, state}) {
+		const selected = CharacterSheetProgression._getSelectedDescriptorValue({descriptor, entity, state});
+		if (selected != null && (!Array.isArray(selected) || selected.length)) return selected;
+		if (descriptor.kind === "entity") {
+			const records = state?.getChosenSubfeatures?.() || [];
+			const record = records.find(it => String(it.parent || "").toLowerCase() === String(entity?.name || "").toLowerCase());
+			if (record) return {name: record.name, source: record.source};
+		}
+		return null;
+	}
+
+	static _discoverNestedForEntity ({
+		entity,
+		page,
+		state,
+		levelInfo,
+		decisions,
+		levelDecisions,
+		storedPool,
+		parentDecision = null,
+		parentEntity = null,
+		acquisitionKey,
+		rootSemanticKey = null,
+		depth = 1,
+		visited = new Set(),
+		issues,
+		scope = "nested",
+	}) {
+		if (!entity || depth > 12) {
+			if (depth > 12) {
+				issues.push({
+					level: levelInfo?.characterLevel || 0,
+					severity: "error",
+					code: "nested-depth-limit",
+					message: `Nested choice discovery exceeded its safety depth near ${entity?.name || "unknown entity"}.`,
+				});
+			}
+			return;
+		}
+		const descriptors = CharacterSheetProgression._getEntityChoiceDescriptors(entity, {
+			sourcePath: entity.name || "entity",
+			className: levelInfo?.className,
+			classSource: levelInfo?.classSource,
+		});
+		const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity);
+		for (const unsupported of census?.entries?.filter(entry =>
+			entry.classification === "unclassified" && entry.required !== false,
+		) || []) {
+			issues.push({
+				level: levelInfo?.characterLevel || 0,
+				severity: "error",
+				code: "unsupported-required-choice",
+				message: `Unsupported required choice shape on ${entity.name || "unknown entity"} at ${unsupported.path || "unknown path"}.`,
+				sourcePath: unsupported.path,
+				ownerUid: CharacterSheetProgression.getEntityUid(entity),
+			});
+		}
+		descriptors.forEach((descriptor, descriptorIx) => {
+			// A class/subclass feature's entity option is already represented by
+			// the canonical featureChoice decision emitted for that level. Do not
+			// duplicate it as an unparented nestedEntity; recurse from the selected
+			// featureChoice below so all descendants retain the graph edge.
+			if (!parentDecision
+					&& descriptor.kind === "entity"
+					&& decisions.some(decision =>
+						decision.type === "featureChoice"
+						&& CharacterSheetProgression._normalize(decision.label) === CharacterSheetProgression._normalize(entity.name),
+					)) return;
+			if (descriptor.required
+					&& !descriptor.options?.length
+					&& descriptor.rules?.optionSource?.kind !== "filter") {
+				issues.push({
+					level: levelInfo?.characterLevel || 0,
+					severity: "error",
+					code: "missing-choice-catalog",
+					message: `No legal choice catalog is available for ${descriptor.label} on ${entity.name || "unknown entity"} (${descriptor.sourcePath}).`,
+					sourcePath: descriptor.sourcePath,
+					ownerUid: CharacterSheetProgression.getEntityUid(entity),
+				});
+			}
+			const descriptorAcquisitionKey = acquisitionKey || CharacterSheetProgression.getAcquisitionKey({
+				ownerType: "feature",
+				ownerUid: CharacterSheetProgression.getEntityUid(entity),
+				classLevel: levelInfo?.classLevel,
+				sourcePath: descriptor.sourcePath,
+				occurrence: descriptor.occurrence ?? descriptorIx,
+			});
+			const selectedGrant = CharacterSheetProgression._getNestedSelectionFallback({descriptor, entity, state});
+			const selectedValues = Array.isArray(selectedGrant) ? selectedGrant : (selectedGrant == null ? [] : [selectedGrant]);
+			const selectedKeys = selectedValues.map(value => CharacterSheetProgression.getEntityUid(value) || CharacterSheetProgression._slug(value));
+			const visitedKey = [
+				CharacterSheetProgression.getEntityUid(entity),
+				descriptorAcquisitionKey,
+				descriptor.grantKey,
+				selectedKeys.join(","),
+				descriptor.occurrence,
+			].join("|");
+			if (visited.has(visitedKey)) {
+				issues.push({
+					level: levelInfo?.characterLevel || 0,
+					severity: "error",
+					code: "nested-cycle",
+					message: `Nested choice cycle detected at ${entity.name || "unknown"} (${descriptor.sourcePath}).`,
+				});
+				return;
+			}
+			const nextVisited = new Set(visited);
+			nextVisited.add(visitedKey);
+			const type = CharacterSheetProgression.getDecisionTypeForDescriptor(descriptor);
+			const parentSemanticKey = parentDecision?.semanticKey || null;
+			const semanticKey = CharacterSheetProgression.getNestedSemanticKey({
+				parentSemanticKey,
+				acquisitionKey: descriptorAcquisitionKey,
+				grantKey: descriptor.grantKey,
+				selectedGrantKey: selectedKeys.join("|"),
+				occurrence: descriptor.occurrence,
+				slot: descriptorIx,
+			});
+			const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
+			const selection = exact?.selection ?? selectedGrant;
+			const isValid = CharacterSheetProgression._isSelectionValid({
+				selection,
+				count: descriptor.count,
+				options: descriptor.options,
+				type,
+			});
+			const decision = CharacterSheetProgression._makeDecision({
+				...levelInfo,
+				characterLevel: levelInfo?.characterLevel || 0,
+				className: levelInfo?.className || "Unknown",
+				classSource: levelInfo?.classSource || "",
+				classLevel: levelInfo?.classLevel || 0,
+				type,
+				label: descriptor.label,
+				sourceKey: descriptor.grantKey,
+				slot: descriptorIx,
+				required: descriptor.required,
+				count: descriptor.count,
+				options: descriptor.options,
+				selection,
+				status: exact?.status || null,
+				isValid,
+				meta: {descriptorRules: descriptor.rules},
+				scope,
+				parentSemanticKey,
+				rootSemanticKey: rootSemanticKey || semanticKey,
+				depth,
+				semanticKeyOverride: semanticKey,
+				provenance: {
+					ownerType: parentEntity?.featureType || "classFeature",
+					ownerUid: CharacterSheetProgression.getEntityUid(entity),
+					acquisitionKey: descriptorAcquisitionKey,
+					selectedGrantKey: selectedKeys.join("|") || null,
+					grantKind: descriptor.kind,
+					grantKey: descriptor.grantKey,
+					sourcePath: descriptor.sourcePath,
+					occurrence: descriptor.occurrence,
+					pickSlot: descriptorIx,
+				},
+			});
+			decisions.push(decision);
+			levelDecisions.push(decision);
+
+			if (descriptor.kind !== "entity" && !["feat", "optionalFeature"].includes(descriptor.kind)) return;
+			selectedValues.forEach((value, valueIx) => {
+				const selectedEntity = CharacterSheetProgression._resolveNestedEntity({option: value, page, parentEntity: entity});
+				if (!selectedEntity) {
+					if (value && (value.ref || value.name)) {
+						issues.push({
+							level: levelInfo?.characterLevel || 0,
+							severity: "error",
+							code: "missing-nested-reference",
+							message: `Could not resolve nested grant ${value.name || value.ref} from ${entity.name || "unknown"}.`,
+							sourcePath: descriptor.sourcePath,
+						});
+					}
+					return;
+				}
+				const childAcquisitionKey = CharacterSheetProgression.getAcquisitionKey({
+					ownerType: descriptor.kind,
+					ownerUid: CharacterSheetProgression.getEntityUid(selectedEntity),
+					classLevel: levelInfo?.classLevel,
+					sourcePath: `${descriptorAcquisitionKey}.${descriptor.grantKey}`,
+					occurrence: valueIx,
+				});
+				CharacterSheetProgression._discoverNestedForEntity({
+					entity: selectedEntity,
+					page,
+					state,
+					levelInfo,
+					decisions,
+					levelDecisions,
+					storedPool,
+					parentDecision: decision,
+					parentEntity: entity,
+					acquisitionKey: childAcquisitionKey,
+					rootSemanticKey: rootSemanticKey || semanticKey,
+					depth: depth + 1,
+					visited: nextVisited,
+					issues,
+					scope,
+				});
+			});
+		});
+	}
+
+	static _buildOriginManifest ({page, state, storedBasePool, issues}) {
+		const base = {scope: "origin", characterLevel: 0, decisions: []};
+		const addOrigin = (originType, entity, choices, originIx) => {
+			if (!entity) return;
+			const originUid = CharacterSheetProgression.getEntityUid(entity);
+			const entityType = originType === "race" ? "originRace" : "originBackground";
+			const entityKey = CharacterSheetProgression.getOriginSemanticKey({
+				originType,
+				originUid,
+				grantKey: "entity",
+			});
+			const entityStored = storedBasePool.get(entityKey)?.find(decision => decision.selection != null);
+			const entityDecision = CharacterSheetProgression._makeDecision({
+				characterLevel: 0,
+				className: "Base",
+				classSource: "",
+				classLevel: 0,
+				type: entityType,
+				label: originType === "race" ? "Species" : "Background",
+				sourceKey: `base:${originType}`,
+				count: 1,
+				options: [{name: entity.name, source: entity.source}],
+				selection: entityStored?.selection || {name: entity.name, source: entity.source},
+				scope: "origin",
+				semanticKeyOverride: entityKey,
+				rootSemanticKey: entityKey,
+				provenance: {
+					ownerType: originType,
+					ownerUid: originUid,
+					acquisitionKey: `base:${originType}:${originUid}`,
+					selectedGrantKey: originUid,
+					grantKind: "entity",
+					grantKey: "entity",
+					sourcePath: originType,
+					occurrence: originIx,
+					pickSlot: 0,
+				},
+			});
+			base.decisions.push(entityDecision);
+			const descriptors = CharacterSheetProgression._getEntityChoiceDescriptors(entity, {sourcePath: originType});
+			const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity);
+			for (const unsupported of census?.entries?.filter(entry =>
+				entry.classification === "unclassified" && entry.required !== false,
+			) || []) {
+				issues.push({
+					level: 0,
+					severity: "error",
+					code: "unsupported-required-choice",
+					message: `Unsupported required origin choice shape on ${entity.name || "unknown entity"} at ${unsupported.path || originType}.`,
+					sourcePath: unsupported.path || originType,
+					ownerUid: originUid,
+				});
+			}
+			descriptors.forEach((descriptor, slot) => {
+				if (descriptor.required
+						&& !descriptor.options?.length
+						&& descriptor.rules?.optionSource?.kind !== "filter") {
+					issues.push({
+						level: 0,
+						severity: "error",
+						code: "missing-choice-catalog",
+						message: `No legal origin choice catalog is available for ${descriptor.label} on ${entity.name || "unknown entity"} (${descriptor.sourcePath}).`,
+						sourcePath: descriptor.sourcePath,
+						ownerUid: originUid,
+					});
+				}
+				const type = CharacterSheetProgression.getDecisionTypeForDescriptor(descriptor);
+				const key = CharacterSheetProgression.getOriginSemanticKey({
+					originType,
+					originUid,
+					grantKey: descriptor.grantKey,
+					slot,
+				});
+				const selected = CharacterSheetProgression._getSelectedDescriptorValue({
+					descriptor,
+					entity,
+					state,
+					legacyChoices: choices,
+				});
+				const selectedFallback = selected ??
+					choices?.[`selected${descriptor.kind[0].toUpperCase()}${descriptor.kind.slice(1)}s`] ??
+					(descriptor.kind === "ability" && descriptor.sourcePath.includes("additionalSpells")
+						? descriptor.options?.[0]
+						: null);
+				// Some legacy Builder paths allowed the character to continue without
+				// assigning a bonus from an origin's weighted ability block. Keep those
+				// rows visible and editable, but do not make an absent historical
+				// assignment block an otherwise unrelated Respec Apply.
+				const hasAssignedAbilityChoice = Object.values(choices?.selectedAbilityChoices || {})
+					.some(value => value && typeof value === "object" && Object.keys(value).some(key => !key.endsWith("_amount")));
+				const hasAssignedAbilityBonus = Object.keys(choices?.selectedAbilityBonuses || {}).some(key => !key.endsWith("_weight"));
+				const isUnassignedLegacyAbility = descriptor.kind === "ability"
+					&& selectedFallback == null
+					&& !hasAssignedAbilityChoice
+					&& !hasAssignedAbilityBonus;
+				const decision = CharacterSheetProgression._makeDecision({
+					characterLevel: 0,
+					className: "Base",
+					classSource: "",
+					classLevel: 0,
+					type,
+					label: descriptor.label,
+					sourceKey: descriptor.grantKey,
+					slot,
+					count: descriptor.count,
+					required: descriptor.required && !isUnassignedLegacyAbility,
+					options: descriptor.options,
+					selection: selectedFallback,
+					meta: {descriptorRules: descriptor.rules},
+					scope: "origin",
+					semanticKeyOverride: key,
+					rootSemanticKey: entityKey,
+					depth: 1,
+					parentSemanticKey: entityKey,
+					provenance: {
+						ownerType: originType,
+						ownerUid: originUid,
+						acquisitionKey: `base:${originType}:${originUid}`,
+						selectedGrantKey: originUid,
+						grantKind: descriptor.kind,
+						grantKey: descriptor.grantKey,
+						sourcePath: descriptor.sourcePath,
+						occurrence: descriptor.occurrence,
+						pickSlot: slot,
+					},
+				});
+				base.decisions.push(decision);
+
+				// Origin descriptors can themselves select a feature/feat with
+				// another descriptor below it. Keep the origin decision as the
+				// graph parent and discover only the selected entity's children;
+				// the direct descriptor above remains the canonical origin row.
+				if (["entity", "feat", "optionalFeature"].includes(descriptor.kind)) {
+					const selectedValues = Array.isArray(selectedFallback)
+						? selectedFallback
+						: (selectedFallback == null ? [] : [selectedFallback]);
+					selectedValues.forEach((value, valueIx) => {
+						const selectedEntity = CharacterSheetProgression._resolveNestedEntity({
+							option: value,
+							page,
+							parentEntity: entity,
+						});
+						if (!selectedEntity) return;
+						CharacterSheetProgression._discoverNestedForEntity({
+							entity: selectedEntity,
+							page,
+							state,
+							levelInfo: {
+								characterLevel: 0,
+								className: "Base",
+								classSource: "",
+								classLevel: 0,
+							},
+							decisions: base.decisions,
+							levelDecisions: base.decisions,
+							storedPool: storedBasePool,
+							parentDecision: decision,
+							parentEntity: entity,
+							acquisitionKey: `${key}.${descriptor.grantKey}.${valueIx}`,
+							rootSemanticKey: entityKey,
+							depth: 2,
+							issues,
+							scope: "origin",
+						});
+					});
+				}
+			});
+		};
+		const characterBase = state?.getCharacterBase?.() || {};
+		addOrigin("race", state?.getRace?.(), characterBase.raceUserChoices, 0);
+		addOrigin("background", state?.getBackground?.(), characterBase.backgroundUserChoices, 1);
+		return base;
+	}
 	static _makeDecision ({
 		characterLevel,
 		className,
@@ -179,11 +824,18 @@ class CharacterSheetProgression {
 		status = null,
 		isValid = true,
 		meta = {},
+		scope = "level",
+		parentSemanticKey = null,
+		rootSemanticKey = null,
+		depth = 0,
+		provenance = null,
+		receipt = null,
+		semanticKeyOverride = null,
 	}) {
 		if (!CharacterSheetProgression.getDecisionAdapter(type)) {
 			throw new Error(`No progression decision adapter is registered for "${type}".`);
 		}
-		const semanticKey = CharacterSheetProgression.getSemanticKey({
+		const semanticKey = semanticKeyOverride || CharacterSheetProgression.getSemanticKey({
 			className,
 			classSource,
 			classLevel,
@@ -208,6 +860,16 @@ class CharacterSheetProgression {
 			selection: CharacterSheetProgression._copy(selection),
 			status: CharacterSheetProgression._getDecisionStatus({selection, count, required, status, isValid}),
 			meta: CharacterSheetProgression._copy(meta || {}),
+			scope,
+			parentSemanticKey,
+			rootSemanticKey: rootSemanticKey || semanticKey,
+			depth: Math.max(0, Number(depth) || 0),
+			provenance: CharacterSheetProgression._copy(provenance),
+			receipt: CharacterSheetProgression._copy(receipt || (
+				(scope === "nested" || scope === "origin")
+					? CharacterSheetProgression._getDecisionReceipt({semanticKey, type, selection, meta})
+					: null
+			)),
 		};
 	}
 
@@ -324,6 +986,17 @@ class CharacterSheetProgression {
 			semanticKey: normalized.semanticKey,
 			characterLevel: normalized.characterLevel,
 		});
+		normalized.scope = decision?.scope
+			|| (decision?.characterLevel === 0 ? "origin" : (decision?.parentSemanticKey ? "nested" : "level"));
+		normalized.parentSemanticKey = decision?.parentSemanticKey || null;
+		normalized.rootSemanticKey = decision?.rootSemanticKey || (
+			normalized.parentSemanticKey
+				? normalized.parentSemanticKey
+				: normalized.semanticKey
+		);
+		normalized.depth = Math.max(0, Number(decision?.depth) || (normalized.parentSemanticKey ? 1 : 0));
+		normalized.provenance = CharacterSheetProgression._copy(decision?.provenance || null);
+		normalized.receipt = CharacterSheetProgression._copy(decision?.receipt || null);
 		normalized.status = CharacterSheetProgression._getDecisionStatus({
 			selection: normalized.selection,
 			count: normalized.count,
@@ -356,7 +1029,9 @@ class CharacterSheetProgression {
 	static refreshDecisionSelectionsFromChoices (entry) {
 		const normalized = CharacterSheetProgression.normalizeHistoryEntry(entry);
 		if (!normalized.manifestComplete) {
-			normalized.decisions = CharacterSheetProgression.projectLegacyChoices(normalized);
+			const legacy = CharacterSheetProgression.projectLegacyChoices(normalized);
+			const preserved = (normalized.decisions || []).filter(decision => ["nested", "origin"].includes(decision.scope));
+			normalized.decisions = [...legacy, ...preserved];
 			return normalized;
 		}
 		normalized.decisions = normalized.decisions.map(decision => {
@@ -421,6 +1096,7 @@ class CharacterSheetProgression {
 		};
 
 		for (const decision of normalized.decisions || []) {
+			if (decision.scope === "nested" || decision.scope === "origin") continue;
 			const selection = decision.selection;
 			if (selection == null) continue;
 			switch (decision.type) {
@@ -824,11 +1500,26 @@ class CharacterSheetProgression {
 		const normalizedHistory = CharacterSheetProgression.normalizeHistory(history || state?.getLevelHistory?.() || []);
 		const resolvedTimeline = timeline || CharacterSheetProgression.buildTimeline({state, history: normalizedHistory});
 		const storedPool = CharacterSheetProgression._getStoredDecisionPool(normalizedHistory);
+		const baseStoredPool = new Map(
+			(state?.getCharacterBase?.()?.decisions || []).map(decision => [decision.semanticKey, [CharacterSheetProgression.normalizeDecision(decision)]]),
+		);
 		const historyByLevel = new Map(normalizedHistory.map(entry => [Number(entry.level), entry]));
 		const stateClasses = state?.getClasses?.() || [];
 		const decisions = [];
 		const levels = [];
 		const issues = [];
+		issues.push(...CharacterSheetProgression.getAdapterClosureIssues().map(issue => ({
+			...issue,
+			severity: "error",
+			message: `Progression adapter "${issue.type}" is not fully wired (${issue.handler}).`,
+		})));
+		const base = CharacterSheetProgression._buildOriginManifest({
+			page,
+			state,
+			storedBasePool: baseStoredPool,
+			issues,
+		});
+		decisions.push(...base.decisions);
 		const spellPools = CharacterSheetProgression._getClassSpellPools(state, page, normalizedHistory);
 		const spellPoolCursors = new Map();
 
@@ -1428,6 +2119,89 @@ class CharacterSheetProgression {
 				});
 			}
 
+			// Discover the same permanent child choices which the feature/state
+			// pipelines materialise.  The descriptors are compact and catalog-backed;
+			// option lists stay transient in the manifest and are not persisted.
+			const levelNestedDecisions = [];
+			const nestedSeen = new Set();
+			const discover = (entity, opts = {}) => {
+				const uid = CharacterSheetProgression.getEntityUid(entity);
+				const key = `${uid}|${opts.acquisitionKey || ""}|${opts.parentDecision?.semanticKey || ""}`;
+				if (!entity || nestedSeen.has(key)) return;
+				nestedSeen.add(key);
+				CharacterSheetProgression._discoverNestedForEntity({
+					entity,
+					page,
+					state,
+					levelInfo,
+					decisions,
+					levelDecisions: levelNestedDecisions,
+					storedPool,
+					...opts,
+					issues,
+				});
+			};
+			for (const feature of features || []) {
+				discover(feature, {
+					acquisitionKey: CharacterSheetProgression.getAcquisitionKey({
+						ownerType: feature.isSubclassFeature ? "subclassFeature" : "classFeature",
+						ownerUid: CharacterSheetProgression.getEntityUid(feature),
+						classLevel: levelInfo.classLevel,
+						sourcePath: feature.name,
+					}),
+				});
+			}
+			for (const parentDecision of decisions.slice(levelDecisionsStart)) {
+				if (!parentDecision.selection) continue;
+				const values = Array.isArray(parentDecision.selection) ? parentDecision.selection : [parentDecision.selection];
+				if (!["featureChoice", "optionalFeatures", "feat", "classFeatProgressionFeat", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(parentDecision.type)) continue;
+				values.forEach((value, valueIx) => {
+					let selectedEntity = CharacterSheetProgression._resolveNestedEntity({option: value, page, parentEntity: classData});
+					if (!selectedEntity) return;
+					// The catalog entity is intentionally immutable, while the state
+					// copy carries acquisition-time subchoice values (notably feat
+					// ability choices). Merge those values before recursively
+					// discovering children so the graph reflects the candidate.
+					const stateEntity = state?.getFeats?.().find(candidate =>
+						CharacterSheetProgression.getEntityUid(candidate) === CharacterSheetProgression.getEntityUid(selectedEntity),
+					);
+					if (stateEntity) {
+						selectedEntity = {
+							...selectedEntity,
+							...stateEntity,
+							choices: stateEntity.choices || selectedEntity.choices,
+							_featChoices: stateEntity._featChoices || selectedEntity._featChoices,
+						};
+					}
+					discover(selectedEntity, {
+						parentDecision,
+						parentEntity: classData,
+						acquisitionKey: CharacterSheetProgression.getAcquisitionKey({
+							ownerType: parentDecision.type,
+							ownerUid: CharacterSheetProgression.getEntityUid(selectedEntity),
+							classLevel: levelInfo.classLevel,
+							sourcePath: parentDecision.sourceKey,
+							occurrence: valueIx,
+						}),
+						rootSemanticKey: parentDecision.rootSemanticKey || parentDecision.semanticKey,
+						depth: (parentDecision.depth || 0) + 1,
+					});
+				});
+			}
+			for (const selected of state?.getChosenSubfeatures?.() || []) {
+				const selectedEntity = CharacterSheetProgression._resolveNestedEntity({option: selected, page, parentEntity: classData});
+				if (!selectedEntity) continue;
+				discover(selectedEntity, {
+					parentEntity: classData,
+					acquisitionKey: CharacterSheetProgression.getAcquisitionKey({
+						ownerType: "chosenSubfeature",
+						ownerUid: CharacterSheetProgression.getEntityUid(selectedEntity),
+						classLevel: levelInfo.classLevel,
+						sourcePath: selected.parent || "chosen-subfeature",
+					}),
+				});
+			}
+
 			multiclassRequirementIssues.forEach(message => issues.push({
 				level: levelInfo.characterLevel,
 				severity: "warning",
@@ -1446,6 +2220,7 @@ class CharacterSheetProgression {
 
 		return {
 			version: CharacterSheetProgression.MANIFEST_VERSION,
+			base,
 			levels,
 			decisions,
 			issues,
@@ -1490,6 +2265,21 @@ class CharacterSheetProgression {
 			entry.complete = !entry.decisions.some(decision => decision.required && decision.status !== "resolved");
 		}
 		return entries.sort((a, b) => a.level - b.level);
+	}
+
+	static reconcileCharacterBaseWithManifest ({base, characterBase}) {
+		const out = CharacterSheetProgression._copy(characterBase || {});
+		out.v = Number(out.v) || 1;
+		const decisions = (base?.decisions || []).map(decision => CharacterSheetProgression.normalizeDecision({
+			...decision,
+			options: [],
+			scope: "origin",
+		}));
+		out.decisions = decisions;
+		out.ledgerVersion = CharacterSheetProgression.LEDGER_VERSION;
+		out.manifestVersion = CharacterSheetProgression.MANIFEST_VERSION;
+		out.complete = !decisions.some(decision => decision.required && decision.status !== "resolved");
+		return out;
 	}
 
 	static getDecisionDisplayValue (decision) {

@@ -1187,6 +1187,7 @@ class CharacterSheetRespec {
 					current: globalThis.CharacterSheetProgression.getDecisionDisplayValue(decision),
 					decision,
 					hasCascade: ["class", "subclass"].includes(decision.type),
+					depth: decision.depth || 0,
 				};
 				if (decision.type === "featureChoice") {
 					out.index = (history.choices?.featureChoices || []).findIndex(choice =>
@@ -1374,7 +1375,7 @@ class CharacterSheetRespec {
 
 			const status = choice.decision?.status || "resolved";
 			const choiceRow = e_({outer: `
-				<div class="charsheet__respec-choice-row charsheet__respec-choice-row--${status}">
+				<div class="charsheet__respec-choice-row charsheet__respec-choice-row--${status}" style="--respec-choice-depth:${Number(choice.depth) || 0}">
 					<span class="charsheet__respec-choice-label">${choice.label}:</span>
 					<span class="charsheet__respec-choice-current">${currentText}</span>
 					<span class="charsheet__respec-choice-status">${status}</span>
@@ -1425,6 +1426,7 @@ class CharacterSheetRespec {
 				: this._editClassFeatProgressionFeat(level, history, choice, closeParentModal),
 			class: () => this._editClassAllocation(level, history, choice, closeParentModal),
 			"manifest-options": () => this._editManifestOptions(level, history, choice, closeParentModal),
+			"nested-choice": () => this._editManifestOptions(level, history, choice, closeParentModal),
 			languages: () => this._editManifestOptions(level, history, choice, closeParentModal),
 			spells: () => this._editManifestOptions(level, history, choice, closeParentModal),
 			"spell-swap": () => this._editSpellSwapDecision(level, history, choice, closeParentModal),
@@ -1451,7 +1453,19 @@ class CharacterSheetRespec {
 
 	_getDecisionOptions (decision) {
 		let options = [...(decision.options || [])];
-		if (["knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips", "spellMastery", "signatureSpells", "spellSwap"].includes(decision.type)) {
+		const isNestedSpell = ["nestedSpell", "nestedCantrip"].includes(decision.type);
+		if (isNestedSpell) {
+			const source = decision.meta?.descriptorRules?.optionSource;
+			const allSpells = this._page.getFilteredSpellData?.() || this._page.getSpells?.() || [];
+			if (source?.kind === "filter" && source.filter) {
+				const clauses = CharacterSheetClassUtils._parseFilterQuery?.(source.filter) || [];
+				options = allSpells.filter(spell => CharacterSheetClassUtils._spellMatchesFilterQuery?.(spell, clauses));
+			} else if (source?.kind === "additionalSpells" && allSpells.length) {
+				options = allSpells;
+			}
+			if (decision.type === "nestedCantrip") options = options.filter(spell => Number(spell.level) === 0);
+			else options = options.filter(spell => Number(spell.level) > 0);
+		} else if (["knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips", "spellMastery", "signatureSpells", "spellSwap"].includes(decision.type)) {
 			const classData = this._page.getClasses?.().find(cls =>
 				cls.name === decision.className && cls.source === decision.classSource,
 			) || this._page.getClasses?.().find(cls => cls.name === decision.className);
@@ -1619,6 +1633,189 @@ class CharacterSheetRespec {
 			if (this._state.releaseProgressionOwnership(type, value, decision.semanticKey)) fnRemove();
 		};
 		const claim = (type, value) => this._state.claimProgressionOwnership(type, value, decision.semanticKey);
+
+		const valueName = value => typeof value === "string"
+			? value
+			: (value?.name || value?.choice || value?.value || "");
+		const normalizeValue = value => String(valueName(value) || "").trim().toLowerCase();
+		const removeSetValue = (type, value, remove) => {
+			release(type, value, remove);
+		};
+		const applySetChoice = (type, add, remove) => {
+			previous
+				.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
+				.forEach(value => removeSetValue(type, value, () => remove(value)));
+			next.forEach(value => {
+				claim(type, value);
+				add(value);
+			});
+		};
+
+		const nestedSetHandlers = {
+			nestedSkill: {
+				type: "skills",
+				add: value => {
+					const skill = normalizeValue(value);
+					if (skill && this._state.getSkillProficiency(skill) < 1) this._state.addSkillProficiency(skill);
+				},
+				remove: value => {
+					const skill = normalizeValue(value);
+					if (skill) this._state.setSkillProficiency(skill, 0);
+				},
+			},
+			nestedSkillTool: {
+				type: "skills",
+				add: value => {
+					const skill = normalizeValue(value);
+					if (skill && this._state.getSkillProficiency(skill) < 1) this._state.addSkillProficiency(skill);
+				},
+				remove: value => {
+					const skill = normalizeValue(value);
+					if (skill) this._state.setSkillProficiency(skill, 0);
+				},
+			},
+			nestedExpertise: {
+				type: "expertise",
+				add: value => this._state.addExpertise(normalizeValue(value)),
+				remove: value => {
+					const skill = normalizeValue(value);
+					if (skill) this._state.setSkillProficiency(skill, 1);
+				},
+			},
+			nestedTool: {
+				type: "tools",
+				add: value => this._state.addToolProficiency(valueName(value)),
+				remove: value => this._state.removeToolProficiency(valueName(value)),
+			},
+			nestedLanguage: {
+				type: "languages",
+				add: value => this._state.addLanguage(valueName(value)),
+				remove: value => this._state.removeLanguage(valueName(value)),
+			},
+			nestedSave: {
+				type: "saves",
+				add: value => this._state.addSaveProficiency(normalizeValue(value)),
+				remove: value => this._state.removeSaveProficiency(normalizeValue(value)),
+			},
+			nestedWeapon: {
+				type: "weapons",
+				add: value => this._state.addWeaponProficiency(valueName(value)),
+				remove: value => this._state.removeWeaponProficiency(valueName(value)),
+			},
+			nestedArmor: {
+				type: "armor",
+				add: value => this._state.addArmorProficiency(valueName(value)),
+				remove: value => this._state.removeArmorProficiency(valueName(value)),
+			},
+			nestedResistance: {
+				type: "resistances",
+				add: value => this._state.addResistance(valueName(value)),
+				remove: value => this._state.removeResistance(valueName(value)),
+			},
+			nestedDamageType: {
+				type: "resistances",
+				add: value => this._state.addResistance(valueName(value)),
+				remove: value => this._state.removeResistance(valueName(value)),
+			},
+		};
+		const nestedSet = nestedSetHandlers[decision.type];
+		if (decision.type === "nestedSkillTool") {
+			const getKind = value => String(value?.kind || "skill").toLowerCase();
+			const getValue = value => value?.value ?? value?.name ?? value;
+			const getType = value => {
+				const kind = getKind(value);
+				return kind === "tool" ? "tools" : kind === "language" ? "languages" : "skills";
+			};
+			previous
+				.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
+				.forEach(value => release(getType(value), getValue(value), () => {
+					if (getType(value) === "skills") this._state.setSkillProficiency(normalizeSkill(getValue(value)), 0);
+					else if (getType(value) === "tools") this._state.removeToolProficiency(getValue(value));
+					else this._state.removeLanguage(getValue(value));
+				}));
+			next.forEach(value => {
+				const type = getType(value);
+				const selected = getValue(value);
+				claim(type, selected);
+				if (type === "skills") this._state.addSkillProficiency(normalizeSkill(selected));
+				else if (type === "tools") this._state.addToolProficiency(selected);
+				else this._state.addLanguage(selected);
+			});
+			return;
+		}
+		if (nestedSet) {
+			applySetChoice(nestedSet.type, nestedSet.add, nestedSet.remove);
+			return;
+		}
+
+		if (["nestedSpell", "nestedCantrip"].includes(decision.type)) {
+			const isCantrip = decision.type === "nestedCantrip";
+			const type = isCantrip ? "cantrips" : "spells";
+			const previousKeys = new Set(previous.map(CharacterSheetRespec._getDecisionOptionKey));
+			previous.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
+				.forEach(value => release(type, value, () => this._state.removeSpell(value?.name || value, value?.source)));
+			next.filter(value => !previousKeys.has(CharacterSheetRespec._getDecisionOptionKey(value))).forEach(value => {
+				const spell = findFull(value);
+				if (!spell?.name) return;
+				claim(type, spell);
+				const built = isCantrip
+					? CharacterSheetClassUtils.buildCantripStateObject(spell, {
+						sourceFeature: decision.provenance?.ownerUid || decision.label,
+						sourceClass: decision.className,
+					})
+					: CharacterSheetClassUtils.buildSpellStateObject(spell, {
+						sourceFeature: decision.provenance?.ownerUid || decision.label,
+						sourceClass: decision.className,
+						prepared: decision.meta?.spellMode === "prepared",
+					});
+				if (isCantrip) this._state.addCantrip(built);
+				else this._state.addSpell(built);
+			});
+			return;
+		}
+
+		if (decision.type === "nestedAbility" || decision.type === "nestedConfiguration") {
+			const receipt = decision.receipt?.effects || [];
+			if (receipt.length) {
+				for (const effect of receipt) {
+					if (effect.type === "abilityDelta") {
+						this._state.setAbilityBase(effect.ability, (this._state.getAbilityBase(effect.ability) || 0) - (Number(effect.amount) || 0));
+					}
+				}
+			}
+			if (decision.type === "nestedAbility") {
+				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
+				next.forEach(value => {
+					const ability = String(value || "").toLowerCase();
+					if (!ability) return;
+					const before = this._state.getAbilityBase(ability) || 0;
+					this._state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(before, amount, 30));
+				});
+			}
+			return;
+		}
+
+		if (decision.type === "nestedEntity" || decision.type === "nestedOptionalFeature" || decision.type === "nestedFeat") {
+			const ownerUid = decision.provenance?.ownerUid || "";
+			const [parentName, parentSource] = ownerUid.split("|");
+			if (parentName) {
+				this._state.removeChosenSubfeature?.(parentName, {
+					parentSource,
+					level: decision.classLevel || decision.characterLevel,
+				});
+			}
+			const selected = next[0];
+			if (selected?.name) {
+				const option = options.find(it => CharacterSheetRespec._getDecisionOptionKey(it) === CharacterSheetRespec._getDecisionOptionKey(selected)) || selected;
+				this._state._applyChosenSubfeatureOption?.({
+					parent: parentName || decision.label,
+					parentSource,
+					level: decision.classLevel || decision.characterLevel,
+					sourceDecisionKey: decision.semanticKey,
+				}, option);
+			}
+			return;
+		}
 
 		if (decision.type === "skills") {
 			previous.filter(value => !nextKeys.has(CharacterSheetRespec._getDecisionOptionKey(value)))
@@ -4288,13 +4485,8 @@ class CharacterSheetRespec {
 			}
 
 			const currentRace = this._state.getRace();
-			if (selectedRace.name === currentRace?.name && selectedRace.source === currentRace?.source) {
-				JqueryUtil.doToast({type: "info", content: "No changes made."});
-				doClose();
-				return;
-			}
-
-			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+			const isSameEntity = selectedRace.name === currentRace?.name && selectedRace.source === currentRace?.source;
+			const confirmed = isSameEntity || await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Confirm Species Change",
 				htmlDescription: `<p>This will replace all racial traits from <strong>${Renderer.stripTags(currentRaceName)}</strong> with traits from <strong>${Renderer.stripTags(selectedRace.name)}</strong>.</p><p>Are you sure?</p>`,
 				textYes: "Change Species",
@@ -4317,7 +4509,12 @@ class CharacterSheetRespec {
 			closeParentModal();
 			this._engine?.markDirty();
 			this.render();
-			JqueryUtil.doToast({type: "success", content: `Changed species to ${Renderer.stripTags(selectedRace.name)}.`});
+			JqueryUtil.doToast({
+				type: "success",
+				content: isSameEntity
+					? `Updated ${Renderer.stripTags(selectedRace.name)} choices.`
+					: `Changed species to ${Renderer.stripTags(selectedRace.name)}.`,
+			});
 		});
 
 		btnRow.append(cancelBtn, applyBtn);
@@ -4438,13 +4635,8 @@ class CharacterSheetRespec {
 			}
 
 			const currentBg = this._state.getBackground();
-			if (selectedBg.name === currentBg?.name && selectedBg.source === currentBg?.source) {
-				JqueryUtil.doToast({type: "info", content: "No changes made."});
-				doClose();
-				return;
-			}
-
-			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+			const isSameEntity = selectedBg.name === currentBg?.name && selectedBg.source === currentBg?.source;
+			const confirmed = isSameEntity || await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
 				title: "Confirm Background Change",
 				htmlDescription: `<p>This will replace all background traits from <strong>${Renderer.stripTags(currentBgName)}</strong> with traits from <strong>${Renderer.stripTags(selectedBg.name)}</strong>.</p><p>Are you sure?</p>`,
 				textYes: "Change Background",
@@ -4466,7 +4658,12 @@ class CharacterSheetRespec {
 			closeParentModal();
 			this._engine?.markDirty();
 			this.render();
-			JqueryUtil.doToast({type: "success", content: `Changed background to ${Renderer.stripTags(selectedBg.name)}.`});
+			JqueryUtil.doToast({
+				type: "success",
+				content: isSameEntity
+					? `Updated ${Renderer.stripTags(selectedBg.name)} choices.`
+					: `Changed background to ${Renderer.stripTags(selectedBg.name)}.`,
+			});
 		});
 
 		btnRow.append(cancelBtn, applyBtn);

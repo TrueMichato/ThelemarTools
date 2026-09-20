@@ -10049,6 +10049,7 @@ body.has-quickbuild-overlay .toast__container {
 	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
 	border-radius: var(--cs-radius-md, 10px);
+	margin-left: calc(var(--respec-choice-depth, 0) * 1.25rem);
 }
 
 .charsheet__respec-choice-label {
