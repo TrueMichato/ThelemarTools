@@ -287,6 +287,10 @@ describe("Hub invite-gated first OAuth access", () => {
 		const providerFailure = await pCallback({app, ...failed});
 		expect(providerFailure.statusCode).toBe(503);
 		expect(providerFailure.json()).toEqual({error: "AUTH_PROVIDER_UNAVAILABLE"});
+		expect((providerFailure.cookies || []).some(cookie =>
+			cookie.name.includes(failedTransaction.id)
+			&& (cookie.maxAge === 0 || cookie.value === ""),
+		)).toBe(false);
 		expect(store._inviteContexts.get(failedTransaction.inviteContextId).consumedAt).toBeNull();
 		expect(store._invites.get(getSha256(retrySeed.token)).useCount).toBe(0);
 		await store.pDeleteExpiredOAuthTransactions();
@@ -436,6 +440,11 @@ describe("Hub invite-gated first OAuth access", () => {
 			headers: {cookie: started.cookieHeader},
 		});
 		expect(cancelled.json()).toEqual({error: "INVALID_OAUTH_STATE"});
+		const cancelledTransaction = [...store._oauthTransactions.values()].at(-1);
+		expect((cancelled.cookies || []).some(cookie =>
+			cookie.name.includes(cancelledTransaction.id)
+			&& (cookie.maxAge === 0 || cookie.value === ""),
+		)).toBe(false);
 		const postCancellationJar = getFinalCookieHeader(started.response, cancelled);
 		const retried = await pRetryInvite({
 			app,

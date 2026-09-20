@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
+import {createHubApp} from "../../../server/src/app.js";
 import {PostgresHubStore} from "../../../server/src/postgres-hub-store.js";
 import {getSha256} from "../../../server/src/security.js";
 import {pGetAuthProviderRollbackBlockers} from "../../../server/src/auth-provider-operations.js";
 
 const databaseUrl = process.env.HUB_TEST_POSTGRES_URL;
 const describePostgres = databaseUrl ? describe : describe.skip;
+const ORIGIN = "https://tools.example";
 
 describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 	let store;
@@ -87,6 +89,23 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 		expect(updated.identity.handle).toBe("updated-handle");
 		expect(updated.revokedSessionIds).toEqual([first.session.id]);
 		expect(await store.pGetSessionByTokenHash({tokenHash: firstTokenHash})).toBeNull();
+
+		const revokable = await store.pCreateSession({
+			accountId: first.account.id,
+			tokenHash: crypto.randomBytes(32).toString("hex"),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const revokeKey = crypto.randomUUID();
+		const firstRevoke = await store.pRevokeAccountSession({
+			accountId: first.account.id,
+			sessionId: revokable.id,
+			idempotencyKey: revokeKey,
+		});
+		await expect(store.pRevokeAccountSession({
+			accountId: first.account.id,
+			sessionId: revokable.id,
+			idempotencyKey: revokeKey,
+		})).resolves.toEqual(firstRevoke);
 
 		const concurrent = await Promise.all([
 			store.pUpsertOAuthAccount({
@@ -704,5 +723,89 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 			allowedSubjects: [`github:${prefix}-legacy`],
 		});
 		expect(result.blockedAccounts).toBeGreaterThanOrEqual(1);
+	});
+
+	it("replays invite creation across secret rotation without persisting or returning an unusable token", async () => {
+		const prefix = `auth-pg-token-rotation-${process.pid}-${Date.now()}`;
+		const owner = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: `${prefix}-owner`,
+			displayName: "Rotation Owner",
+		});
+		const rawSessionToken = crypto.randomBytes(32).toString("base64url");
+		await store.pCreateSession({
+			accountId: owner.id,
+			tokenHash: getSha256(rawSessionToken),
+			expiresAt: new Date(Date.now() + 60_000),
+		});
+		const campaign = (await store.pCreateCampaign({
+			accountId: owner.id,
+			name: `Rotation ${prefix}`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		const oauthProvider = {
+			getAuthorizationUrl: ({state}) => `https://example.invalid/?state=${state}`,
+			pExchangeCode: async () => ({
+				provider: "github",
+				providerSubject: `${prefix}-owner`,
+				displayName: "Rotation Owner",
+			}),
+		};
+		const oldSecret = "old-invite-token-secret-at-least-thirty-two";
+		const newSecret = "new-invite-token-secret-at-least-thirty-two";
+		const createApp = inviteTokenSecrets => createHubApp({
+			store,
+			oauthProvider,
+			config: {
+				appOrigin: ORIGIN,
+				cookieSecret: "c".repeat(32),
+				csrfSecret: "s".repeat(32),
+				inviteTokenSecrets,
+			},
+		});
+		let app = await createApp([oldSecret]);
+		const sessionCookie = `__Host-hub_session=${app.signCookie(rawSessionToken)}`;
+		const session = (await app.inject({
+			method: "GET",
+			url: "/api/session",
+			headers: {cookie: sessionCookie},
+		})).json();
+		const request = {
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/invites`,
+			headers: {
+				cookie: sessionCookie,
+				origin: ORIGIN,
+				"x-csrf-token": session.csrfToken,
+				"x-hub-protocol-version": "5",
+				"idempotency-key": `${prefix}-invite`,
+			},
+			payload: {role: "player"},
+		};
+		try {
+			const first = await app.inject(request);
+			expect(first.statusCode).toBe(201);
+			const firstToken = first.json().token;
+			await app.close();
+
+			app = await createApp([newSecret, oldSecret]);
+			const replay = await app.inject(request);
+			expect(replay.statusCode).toBe(201);
+			expect(replay.json().token).toBe(firstToken);
+			const receipt = await store._pool.query(`
+				SELECT response::text
+				FROM hub.command_receipts
+				WHERE actor_account_id = $1 AND idempotency_key = $2
+			`, [owner.id, `${prefix}-invite`]);
+			expect(receipt.rows[0].response).not.toContain(firstToken);
+
+			await app.close();
+			app = await createApp([newSecret]);
+			const unavailable = await app.inject(request);
+			expect(unavailable.statusCode).toBe(409);
+			expect(unavailable.json()).toEqual({error: "INVITE_TOKEN_RECOVERY_UNAVAILABLE"});
+		} finally {
+			await app.close();
+		}
 	});
 });

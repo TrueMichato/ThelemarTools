@@ -1063,16 +1063,8 @@ export class PostgresHubStore {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
 			if (prior) {
-				const token = await client.query(`
-					SELECT encode(token_hash, 'hex') AS token_hash
-					FROM hub.invites
-					WHERE id = $1 AND campaign_id = $2
-				`, [prior.invite?.id, campaignId]);
-				if (!token.rowCount) {
-					throw new HubStoreError("INVITE_TOKEN_RECOVERY_UNAVAILABLE", `Invite token cannot be recovered.`, {status: 409});
-				}
 				await client.query("COMMIT");
-				return {...prior, inviteTokenHash: token.rows[0].token_hash};
+				return prior;
 			}
 			const result = await client.query(`
 					UPDATE hub.sessions
@@ -1756,8 +1748,16 @@ export class PostgresHubStore {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
 			if (prior) {
+				const token = await client.query(`
+					SELECT encode(token_hash, 'hex') AS token_hash
+					FROM hub.invites
+					WHERE id = $1 AND campaign_id = $2
+				`, [prior.invite?.id, campaignId]);
+				if (!token.rowCount) {
+					throw new HubStoreError("INVITE_TOKEN_RECOVERY_UNAVAILABLE", `Invite token cannot be recovered.`, {status: 409});
+				}
 				await client.query("COMMIT");
-				return prior;
+				return {...prior, inviteTokenHash: token.rows[0].token_hash};
 			}
 			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
 			await client.query(`SELECT id FROM hub.campaigns WHERE id = $1 FOR UPDATE`, [campaignId]);
