@@ -1493,6 +1493,9 @@ describe("POST /api/campaigns/:campaignId/item-awards", () => {
 
 	beforeEach(async () => {
 		store = new MemoryHubStore({fnResolveAwardItem: async ({item}) => structuredClone(item)});
+		for (const current of Object.values(IDENTITIES)) {
+			await store.pUpsertOAuthAccount(current);
+		}
 		identity = IDENTITIES.dm;
 		keyIndex = 0;
 		app = await createHubApp({
@@ -1505,7 +1508,6 @@ describe("POST /api/campaigns/:campaignId/item-awards", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "x".repeat(32),
 				csrfSecret: "y".repeat(32),
-				allowedOAuthSubjects: Object.values(IDENTITIES).map(it => `${it.provider}:${it.providerSubject}`),
 			},
 		});
 	});

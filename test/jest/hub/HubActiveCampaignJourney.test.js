@@ -71,6 +71,11 @@ describe("active campaign context against the real BFF", () => {
 
 	beforeEach(async () => {
 		store = new MemoryHubStore();
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "123",
+			displayName: "Table Owner",
+		});
 		device = new DeviceStorage();
 		bus = new DeviceBus();
 		requests = [];
@@ -89,7 +94,6 @@ describe("active campaign context against the real BFF", () => {
 				appOrigin: APP_ORIGIN,
 				cookieSecret: COOKIE_SECRET,
 				csrfSecret: CSRF_SECRET,
-				allowedOAuthSubjects: ["github:123"],
 			},
 		});
 	});

@@ -117,6 +117,7 @@ export class MemoryHubStore {
 		this._externalIdentities = new Map();
 		this._sessions = new Map();
 		this._oauthTransactions = new Map();
+		this._inviteContexts = new Map();
 		this._campaigns = new Map();
 		this._memberships = new Map();
 		this._audit = [];
@@ -170,7 +171,21 @@ export class MemoryHubStore {
 			activeSessions: [...this._sessions.values()].filter(session => !session.revokedAt && new Date(session.expiresAt) > now).length,
 			expiredReceipts: 0,
 			expiredOAuthTransactions: [...this._oauthTransactions.values()]
-				.filter(transaction => transaction.consumedAt || new Date(transaction.expiresAt) <= now)
+				.filter(transaction => {
+					const context = transaction.inviteContextId == null
+						? null
+						: this._inviteContexts.get(transaction.inviteContextId);
+					return (
+						new Date(transaction.expiresAt) <= now
+						|| (
+							transaction.consumedAt
+							&& (!context || context.consumedAt || new Date(context.expiresAt) <= now)
+						)
+					);
+				})
+				.length,
+			expiredInviteContexts: [...this._inviteContexts.values()]
+				.filter(context => context.consumedAt || new Date(context.expiresAt) <= now)
 				.length,
 			deletionDueAccounts: [...this._accounts.values()].filter(account => account.status === "deletion_requested" && new Date(account.purgeAfter) <= now).length,
 			lastMaintenanceAgeSeconds: last ? Math.max(0, (now - new Date(last.completedAt)) / 1000) : -1,
@@ -187,7 +202,8 @@ export class MemoryHubStore {
 			publishedOutbox: 0,
 			sessions: 0,
 			oauthTransactions: await this.pDeleteExpiredOAuthTransactions({limit: batchSize}),
-			invites: 0,
+			inviteContexts: await this.pDeleteExpiredInviteContexts({limit: batchSize}),
+			invites: await this.pDeleteExpiredInvites({limit: batchSize}),
 			leases: {characterLeases: 0, workspaceLeases: 0},
 			accounts: await this.pPurgeDueAccounts({limit: Math.min(batchSize, 100)}),
 		};
@@ -265,9 +281,63 @@ export class MemoryHubStore {
 		expiresAt,
 		userAgent = null,
 		priorSessionId = null,
+		oauthTransactionId = null,
+		isNewAccountAdmissionEnabled = false,
 	}) {
 		if (this._sessions.has(tokenHash)) throw new HubStoreError("SESSION_TOKEN_CONFLICT", `Session could not be created.`, {status: 409});
-		const resolved = this._resolveOAuthAccount(identity);
+		const normalizedIdentity = normalizeExternalIdentity(identity);
+		const identityKey = getExternalIdentityKey(normalizedIdentity);
+		const existingAccountId = this._identityToAccount.get(identityKey);
+		const transaction = oauthTransactionId == null ? null : this._oauthTransactions.get(oauthTransactionId);
+		if (
+			oauthTransactionId != null
+			&& (
+				!transaction
+				|| transaction.provider !== normalizedIdentity.provider
+				|| transaction.operation !== "sign_in"
+				|| !transaction.consumedAt
+			)
+		) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+		const inviteContext = transaction?.inviteContextId == null
+			? null
+			: this._inviteContexts.get(transaction.inviteContextId);
+		const invite = inviteContext == null ? null : [...this._invites.values()].find(it => it.id === inviteContext.inviteId);
+		const existingInviteMembership = invite && existingAccountId
+			? this._memberships.get(`${invite.campaignId}::${existingAccountId}`)
+			: null;
+		const hasInviteContext = transaction?.inviteContextId != null;
+		const isInviteValid = !!(
+			transaction
+			&& transaction.operation === "sign_in"
+			&& transaction.provider === normalizedIdentity.provider
+			&& transaction.consumedAt
+			&& inviteContext
+			&& !inviteContext.consumedAt
+			&& new Date(inviteContext.expiresAt) > this._fnNow()
+			&& invite
+			&& !invite.revokedAt
+			&& new Date(invite.expiresAt) > this._fnNow()
+			&& (invite.useCount < invite.maxUses || existingInviteMembership?.status === "active")
+			&& this._campaigns.get(invite.campaignId)?.status === "active"
+		);
+		if (hasInviteContext && !isInviteValid) {
+			throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+		}
+		if (!existingAccountId && !isInviteValid) {
+			throw new HubStoreError("INVITE_ADMISSION_REQUIRED", `Invite admission is required.`, {status: 403});
+		}
+		if (!existingAccountId && !isNewAccountAdmissionEnabled) {
+			throw new HubStoreError("INVITE_ADMISSION_UNAVAILABLE", `Invite admission is unavailable.`, {status: 403});
+		}
+		const existingAccount = existingAccountId ? this._accounts.get(existingAccountId) : null;
+		if (existingAccount && !["active", "deletion_requested"].includes(existingAccount.status)) {
+			throw new HubStoreError("ACCOUNT_UNAVAILABLE", `Account is unavailable.`, {status: 403});
+		}
+		if (existingAccount?.status === "deletion_requested" && isInviteValid) {
+			throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+		}
+		const isNewAccount = !existingAccountId;
+		const resolved = this._resolveOAuthAccount(normalizedIdentity);
 		const session = await this.pCreateSession({
 			accountId: resolved.account.id,
 			tokenHash,
@@ -275,12 +345,60 @@ export class MemoryHubStore {
 			userAgent,
 			authenticatedViaIdentityId: resolved.identity.id,
 		});
+		if (isNewAccount) {
+			this._appendAudit({
+				actorAccountId: resolved.account.id,
+				action: "account.created",
+				targetType: "account",
+				targetId: resolved.account.id,
+				details: {admission: "campaign_invite"},
+			});
+		}
+		let membership = null;
+		if (isInviteValid) {
+			const membershipKey = `${invite.campaignId}::${resolved.account.id}`;
+			const existingMembership = this._memberships.get(membershipKey);
+			if (existingMembership?.status === "active") {
+				membership = existingMembership;
+			} else {
+				membership = {
+					id: existingMembership?.id || crypto.randomUUID(),
+					campaignId: invite.campaignId,
+					accountId: resolved.account.id,
+					role: invite.role,
+					status: "active",
+				};
+				this._memberships.set(membershipKey, membership);
+				invite.useCount++;
+				this._appendAudit({
+					campaignId: invite.campaignId,
+					actorAccountId: resolved.account.id,
+					action: "invite.redeemed",
+					targetType: "membership",
+					targetId: membership.id,
+					details: {inviteId: invite.id, admission: true},
+				});
+				this._appendEvent({
+					campaignId: invite.campaignId,
+					actorAccountId: resolved.account.id,
+					type: "membership.joined",
+					aggregateType: "membership",
+					aggregateId: membership.id,
+					payload: {accountId: resolved.account.id, role: membership.role},
+				});
+			}
+			inviteContext.consumedAt = this._fnNow().toISOString();
+			inviteContext.completedAccountId = resolved.account.id;
+			inviteContext.completedSessionId = session.id;
+			inviteContext.completedMembershipId = membership.id;
+		}
 		const revokedSessionIds = [];
 		if (priorSessionId && await this.pRevokeSession({sessionId: priorSessionId})) revokedSessionIds.push(priorSessionId);
 		return copy({
 			account: resolved.account,
 			identity: resolved.identity,
 			session,
+			membership,
 			revokedSessionIds,
 		});
 	}
@@ -304,6 +422,7 @@ export class MemoryHubStore {
 		returnTo,
 		pkceVerifier = null,
 		oidcNonce = null,
+		inviteContextId = null,
 		expiresAt = null,
 		ttlSeconds = null,
 	}) {
@@ -336,9 +455,16 @@ export class MemoryHubStore {
 			|| resolvedExpiresAt > new Date(now.getTime() + 10 * 60 * 1_000)
 			|| (pkceVerifier != null && (typeof pkceVerifier !== "string" || pkceVerifier.length < 43 || pkceVerifier.length > 128))
 			|| (oidcNonce != null && (typeof oidcNonce !== "string" || oidcNonce.length < 32 || oidcNonce.length > 255))
+			|| (inviteContextId != null && !this._inviteContexts.has(inviteContextId))
 		) throw new TypeError(`Invalid OAuth transaction.`);
 		if ([...this._oauthTransactions.values()].some(transaction => transaction.stateHash === stateHash)) {
 			throw new HubStoreError("OAUTH_STATE_CONFLICT", `OAuth transaction could not be created.`, {status: 409});
+		}
+		if (
+			inviteContextId != null
+			&& [...this._oauthTransactions.values()].some(transaction => transaction.inviteContextId === inviteContextId)
+		) {
+			throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 		}
 		if (hasBinding) {
 			const session = [...this._sessions.values()]
@@ -356,13 +482,119 @@ export class MemoryHubStore {
 			returnTo,
 			pkceVerifier,
 			oidcNonce,
+			inviteContextId,
 			authorizationStartedAt: now.toISOString(),
 			expiresAt: resolvedExpiresAt.toISOString(),
 			consumedAt: null,
+			completedAccountId: null,
+			completedSessionId: null,
+			completedMembershipId: null,
 			createdAt: now.toISOString(),
 		};
 		this._oauthTransactions.set(id, transaction);
 		return copy(transaction);
+	}
+
+	async pCreateInviteOAuthTransaction ({
+		transaction,
+		inviteTokenHash,
+		retryTokenHash,
+		contextTtlSeconds,
+	}) {
+		const invite = this._invites.get(inviteTokenHash);
+		const now = this._fnNow();
+		if (
+			!invite
+			|| invite.revokedAt
+			|| new Date(invite.expiresAt) <= now
+			|| invite.useCount >= invite.maxUses
+			|| this._campaigns.get(invite.campaignId)?.status !== "active"
+			|| !Number.isInteger(contextTtlSeconds)
+			|| contextTtlSeconds < 1
+			|| contextTtlSeconds > 300
+			|| typeof retryTokenHash !== "string"
+			|| !/^[0-9a-f]{64}$/.test(retryTokenHash)
+			|| [...this._inviteContexts.values()].some(context => context.retryTokenHash === retryTokenHash)
+		) throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+		const contextId = crypto.randomUUID();
+		const context = {
+			id: contextId,
+			inviteId: invite.id,
+			retryTokenHash,
+			expiresAt: new Date(Math.min(
+				now.getTime() + contextTtlSeconds * 1_000,
+				new Date(invite.expiresAt).getTime(),
+			)).toISOString(),
+			consumedAt: null,
+			createdAt: now.toISOString(),
+		};
+		this._inviteContexts.set(contextId, context);
+		try {
+			return await this.pCreateOAuthTransaction({...transaction, inviteContextId: contextId});
+		} catch (error) {
+			this._inviteContexts.delete(contextId);
+			throw error;
+		}
+	}
+
+	async pRetryInviteOAuthTransaction ({
+		transaction,
+		retryTokenHash,
+		nextRetryTokenHash,
+		contextTtlSeconds,
+		browserTransactionIds = [],
+	}) {
+		const priorContext = [...this._inviteContexts.values()].find(context => context.retryTokenHash === retryTokenHash);
+		const priorTransaction = priorContext == null
+			? null
+			: [...this._oauthTransactions.values()].find(current => current.inviteContextId === priorContext.id);
+		const invite = priorContext == null ? null : [...this._invites.values()].find(current => current.id === priorContext.inviteId);
+		if (
+			!priorContext
+			|| priorContext.consumedAt
+			|| new Date(priorContext.expiresAt) <= this._fnNow()
+			|| !priorTransaction
+			|| !browserTransactionIds.includes(priorTransaction.id)
+			|| priorTransaction.provider !== transaction.provider
+			|| !invite
+			|| invite.revokedAt
+			|| new Date(invite.expiresAt) <= this._fnNow()
+			|| invite.useCount >= invite.maxUses
+			|| this._campaigns.get(invite.campaignId)?.status !== "active"
+			|| !Number.isInteger(contextTtlSeconds)
+			|| contextTtlSeconds < 1
+			|| contextTtlSeconds > 300
+			|| !/^[0-9a-f]{64}$/.test(nextRetryTokenHash)
+			|| [...this._inviteContexts.values()].some(context => context.retryTokenHash === nextRetryTokenHash)
+		) throw new HubStoreError("INVITE_ADMISSION_INVALID", `Invite admission is unavailable.`, {status: 403});
+		this._oauthTransactions.delete(priorTransaction.id);
+		this._inviteContexts.delete(priorContext.id);
+		const contextId = crypto.randomUUID();
+		this._inviteContexts.set(contextId, {
+			id: contextId,
+			inviteId: invite.id,
+			retryTokenHash: nextRetryTokenHash,
+			expiresAt: new Date(Math.min(
+				this._fnNow().getTime() + contextTtlSeconds * 1_000,
+				new Date(invite.expiresAt).getTime(),
+			)).toISOString(),
+			consumedAt: null,
+			completedAccountId: null,
+			completedSessionId: null,
+			completedMembershipId: null,
+			createdAt: this._fnNow().toISOString(),
+		});
+		try {
+			return {
+				transaction: await this.pCreateOAuthTransaction({...transaction, inviteContextId: contextId}),
+				replacedTransactionId: priorTransaction.id,
+			};
+		} catch (error) {
+			this._inviteContexts.delete(contextId);
+			this._inviteContexts.set(priorContext.id, priorContext);
+			this._oauthTransactions.set(priorTransaction.id, priorTransaction);
+			throw error;
+		}
 	}
 
 	async pConsumeOAuthTransaction ({
@@ -397,11 +629,60 @@ export class MemoryHubStore {
 
 	async pDeleteExpiredOAuthTransactions ({limit = 1_000} = {}) {
 		const expired = [...this._oauthTransactions.values()]
-			.filter(transaction => new Date(transaction.expiresAt) <= this._fnNow() || transaction.consumedAt)
+			.filter(transaction => {
+				const context = transaction.inviteContextId == null
+					? null
+					: this._inviteContexts.get(transaction.inviteContextId);
+				return (
+					new Date(transaction.expiresAt) <= this._fnNow()
+					|| (
+						transaction.consumedAt
+						&& (!context || context.consumedAt || new Date(context.expiresAt) <= this._fnNow())
+					)
+				);
+			})
 			.sort((a, b) => `${a.expiresAt}`.localeCompare(`${b.expiresAt}`) || a.id.localeCompare(b.id))
 			.slice(0, limit);
 		expired.forEach(transaction => this._oauthTransactions.delete(transaction.id));
 		return expired.length;
+	}
+
+	async pDeleteExpiredInviteContexts ({limit = 1_000} = {}) {
+		const expired = [...this._inviteContexts.values()]
+			.filter(context => new Date(context.expiresAt) <= this._fnNow() || context.consumedAt)
+			.sort((a, b) => `${a.expiresAt}`.localeCompare(`${b.expiresAt}`) || a.id.localeCompare(b.id))
+			.slice(0, limit);
+		for (const context of expired) {
+			for (const transaction of this._oauthTransactions.values()) {
+				if (transaction.inviteContextId === context.id) this._oauthTransactions.delete(transaction.id);
+			}
+			this._inviteContexts.delete(context.id);
+		}
+		return expired.length;
+	}
+
+	async pDeleteExpiredInvites ({limit = 1_000, retentionDays = 30} = {}) {
+		const cutoff = new Date(this._fnNow().getTime() - retentionDays * 86_400_000);
+		const expired = [...this._invites.values()]
+			.filter(invite => (
+				new Date(invite.expiresAt) < cutoff
+				|| (invite.revokedAt && new Date(invite.revokedAt) < cutoff)
+			))
+			.sort((a, b) => `${a.revokedAt || a.expiresAt}`.localeCompare(`${b.revokedAt || b.expiresAt}`) || a.id.localeCompare(b.id))
+			.slice(0, limit);
+		for (const invite of expired) this._deleteInvite(invite);
+		return expired.length;
+	}
+
+	_deleteInvite (invite) {
+		this._invites.delete(invite.tokenHash);
+		for (const context of [...this._inviteContexts.values()]) {
+			if (context.inviteId !== invite.id) continue;
+			for (const transaction of [...this._oauthTransactions.values()]) {
+				if (transaction.inviteContextId === context.id) this._oauthTransactions.delete(transaction.id);
+			}
+			this._inviteContexts.delete(context.id);
+		}
 	}
 
 	async pCreateSession ({
@@ -735,7 +1016,16 @@ export class MemoryHubStore {
 
 	async pCreateInvite ({accountId, campaignId, role, tokenHash, expiresAt, maxUses, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
+		if (prior) {
+			const invite = [...this._invites.values()].find(current => current.id === prior.invite?.id);
+			if (!invite) {
+				throw new HubStoreError("INVITE_TOKEN_RECOVERY_UNAVAILABLE", `Invite token cannot be recovered.`, {status: 409});
+			}
+			return {...prior, inviteTokenHash: invite.tokenHash};
+		}
+		if (this._invites.has(tokenHash)) {
+			throw new HubStoreError("INVITE_TOKEN_CONFLICT", `Invite could not be created.`, {status: 409});
+		}
 		const actorMembership = this._getMembership({accountId, campaignId, roles: ["dm", "co_dm"]});
 		const invite = {
 			id: crypto.randomUUID(),
@@ -767,7 +1057,9 @@ export class MemoryHubStore {
 			visibility: "dm_only",
 			payload: {role, expiresAt: invite.expiresAt},
 		});
-		return this._setReceipt({accountId, idempotencyKey, response: {invite}});
+		const {tokenHash: _tokenHash, ...safeInvite} = invite;
+		const response = this._setReceipt({accountId, idempotencyKey, response: {invite: safeInvite}});
+		return {...response, inviteTokenHash: tokenHash};
 	}
 
 	async pRedeemInvite ({accountId, tokenHash, idempotencyKey}) {
@@ -3936,7 +4228,7 @@ export class MemoryHubStore {
 	_deleteCampaignData (campaignId) {
 		this._campaigns.delete(campaignId);
 		for (const [key, membership] of this._memberships) if (membership.campaignId === campaignId) this._memberships.delete(key);
-		for (const [key, invite] of this._invites) if (invite.campaignId === campaignId) this._invites.delete(key);
+		for (const invite of [...this._invites.values()]) if (invite.campaignId === campaignId) this._deleteInvite(invite);
 		for (const [key, version] of this._brewVersions) if (version.campaignId === campaignId) this._brewVersions.delete(key);
 		for (const [key, version] of this._rulesVersions) if (version.campaignId === campaignId) this._rulesVersions.delete(key);
 		for (const [key, workspace] of this._dmWorkspaces) if (workspace.campaignId === campaignId) this._dmWorkspaces.delete(key);
@@ -3971,6 +4263,14 @@ export class MemoryHubStore {
 				if (membership.accountId !== account.id || membership.status !== "active") continue;
 				const campaign = this._campaigns.get(membership.campaignId);
 				if (campaign) this._removeMembershipLifecycle({campaign, membership, actorAccountId: account.id, status: "left"});
+			}
+			const membershipIds = new Set(
+				[...this._memberships.values()]
+					.filter(membership => membership.accountId === account.id)
+					.map(membership => membership.id),
+			);
+			for (const invite of [...this._invites.values()]) {
+				if (membershipIds.has(invite.createdByMembershipId)) this._deleteInvite(invite);
 			}
 			const ownedCharacterIds = new Set([...this._characters.values()].filter(character => character.ownerAccountId === account.id).map(character => character.id));
 			for (const [id, action] of this._pendingActions) if (ownedCharacterIds.has(action.targetCharacterId)) this._pendingActions.delete(id);

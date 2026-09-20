@@ -1,6 +1,6 @@
 # Runbook: authentication provider registry and rollback
 
-> **Status:** Layers 1-2 portable procedure
+> **Status:** Layers 1-2 plus ADR 0018 admission foundation
 > **Owner:** Campaign Hub operator
 > **Last reviewed:** 2026-09-17
 
@@ -26,11 +26,11 @@ Never:
 3. Verify the runtime role can CRUD `hub.oauth_transactions`; run the backup as the backup role and verify
    `oauth_transactions` row data is excluded. PostgreSQL requires table `SELECT` for `pg_dump` to lock/describe
    even an `--exclude-table-data` relation.
-4. Set `HUB_AUTH_PROVIDERS=github`, leave `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` empty, and retain the exact
-   existing GitHub client/secret/callback/allowlist.
+4. Set `HUB_AUTH_PROVIDERS=github`, leave `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` empty, retain the exact
+   existing GitHub client/secret/callback, and keep `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false`.
 5. Deploy the candidate. Probe `/api/ready` and `/api/meta`; the latter must advertise protocol 5,
    `auth.provider_registry.v1`, and only available GitHub.
-6. Complete one allowlisted GitHub sign-in and verify the prior browser session is revoked on a second sign-in.
+6. Complete one existing-account GitHub sign-in and verify the prior browser session is revoked on a second sign-in.
 7. Run maintenance and verify consumed/expired OAuth transaction count is bounded.
 8. Record image/migration version, aggregate result, and request ids only.
 
@@ -44,14 +44,13 @@ Do not use the emergency disable variable for routine rollout.
 
 Deploy layer 2 with `HUB_AUTH_PROVIDERS=github`. Discord and Google credentials may be provisioned, but normal
 production/private-cohort admission stays disabled until layer 3 supplies explicit reauthentication and
-identity linking. Never allowlist an existing user's unlinked provider subject: it creates a distinct account
-by design.
+identity linking. Never treat an existing user's unlinked provider subject as the same account.
 
 Before layer 3, live acceptance is limited to isolated staging with fresh test identities:
 
 1. Register exact callbacks `/auth/discord/callback` and `/auth/google/callback`; use Discord scope `identify`
    and Google scopes `openid profile`.
-2. Configure all three providers and only the fresh staging subjects.
+2. Configure all three providers. Identity admission remains invite-gated rather than subject-allowlisted.
 3. Run `HUB_APP_ORIGIN=... HUB_METRICS_TOKEN=... npm run hub:check-auth-first-enable`.
 4. Complete both printed sign-in journeys. The command passes only if both providers remain available and each
    aggregate success counter increases after its baseline.
@@ -74,16 +73,17 @@ npm run hub:check-auth-rollback
 ```
 
 - exit 0 and `{"blockedAccounts":0}` permits the identity-compatibility portion of rollback;
-- exit 2 means at least one currently admitted account would be newly left without an admitted identity supported
-  by the target image;
+- exit 2 means at least one active account would be left without an identity supported by the target image;
 - any query/configuration failure blocks rollback.
 
 The command deliberately emits only a count. A zero count does not replace the migration-policy, backup,
 readiness, or smoke checks in [application/database rollback](rollback.md).
+The legacy allowlist value is target-image compatibility input only. It is not passed to or enforced by the r9
+BFF.
 
 ## Recovery and escalation
 
-If a deploy fails before any unsupported-provider-only identity exists, leave migration 0006 in place and deploy
+If a deploy fails before any unsupported-provider-only identity exists, leave migrations 0006/0008 in place and deploy
 the last registry or pre-registry GitHub image allowed by migration policy. Do not down-migrate. If a future
 provider-specific incident strands an account, preserve its identities and data, restore provider service or the
 last compatible registry image, and escalate to the Hub security owner. No email/manual-link fallback exists.
@@ -91,3 +91,11 @@ last compatible registry image, and escalate to the Hub security owner. No email
 Evidence: incident/release id, candidate and rollback image digests/SHAs, migration ledger version, preflight
 count, provider status labels, readiness result, request ids, and timestamps. Never include identity/profile or
 OAuth secret material.
+
+## ADR 0018 rollout stop
+
+Migration 0008 and the server foundation may ship with
+`HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false`. Do not enable first-account admission until the stacked
+provider-neutral `campaign:create` entitlement layer is merged, existing campaign owners and designated
+operators are backfilled, audited fresh-reauth grant/revoke administration is available, and rollback is
+reviewed against accounts created outside the pre-r9 subject allowlist.

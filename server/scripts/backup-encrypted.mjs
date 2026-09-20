@@ -23,6 +23,7 @@ try {
 		"--no-owner",
 		"--no-privileges",
 		"--exclude-table-data=hub.oauth_transactions",
+		"--exclude-table-data=hub.invite_contexts",
 		`--file=${dump}`,
 	], {stdio: "inherit", env: getPgEnv({databaseUrl})});
 	if (result.error) throw result.error;

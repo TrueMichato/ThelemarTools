@@ -16,20 +16,24 @@ function cookie (response, name) {
 
 describe("projection lifecycle safety", () => {
 	let app;
+	let store;
 	let identity;
 	let ix;
 
 	beforeEach(async () => {
 		identity = IDENTITIES.dm;
 		ix = 0;
+		store = new MemoryHubStore();
+		for (const current of Object.values(IDENTITIES)) {
+			await store.pUpsertOAuthAccount(current);
+		}
 		app = await createHubApp({
-			store: new MemoryHubStore(),
+			store,
 			oauthProvider: {getAuthorizationUrl: ({state}) => `https://x/?state=${state}`, pExchangeCode: async () => identity},
 			config: {
 				appOrigin: ORIGIN,
 				cookieSecret: "x".repeat(32),
 				csrfSecret: "y".repeat(32),
-				allowedOAuthSubjects: Object.values(IDENTITIES).map(it => `github:${it.providerSubject}`),
 			},
 		});
 	});

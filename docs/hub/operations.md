@@ -29,17 +29,19 @@ maintenance and backup executions passed on 2026-09-13, completing V1-G1.
    `<HUB_APP_ORIGIN>/auth/github/callback`.
 5. Set `HUB_AUTH_PROVIDERS=github`. `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` is an incident-only kill switch;
    disabling the sole provider intentionally prevents startup.
-6. Add allowed numeric GitHub subjects to `HUB_ALLOWED_OAUTH_SUBJECTS`, for example `github:12345678`.
-   Usernames are intentionally unsupported because renamed usernames can be reclaimed.
+6. Leave `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false` until the r9 creator-entitlement layer is deployed and
+   approved. Existing identities continue to sign in. First-account creation uses a valid campaign invite, not
+   provider-subject configuration.
+   Configure an independent `HUB_INVITE_TOKEN_SECRET`; do not reuse cookie or CSRF secrets.
 7. Serve the static site and BFF behind the same HTTPS origin, forwarding `/api/*` and `/auth/*` to the BFF.
    Set `HUB_TRUST_PROXY` only to the exact proxy IP/CIDR list, and configure that proxy to replace incoming
    forwarded headers. Leave it empty for a directly exposed BFF.
 8. Start the BFF with `npm run hub:serve`.
 
-Layer 2 deploys Discord and Google disabled in normal production. Do not add an existing user's Discord or
-Google subject to the private-cohort allowlist before layer 3's explicit reauthentication and **Link provider**
-flow is deployed: an allowlisted unlinked identity correctly creates a separate account. For isolated staging
-acceptance only, use fresh identities, configure `HUB_AUTH_PROVIDERS=github,discord,google`, and run:
+Layer 2 deploys Discord and Google disabled in normal production. Existing users add another provider only
+through layer 3's explicit reauthentication and **Link provider** flow; linking never consumes another campaign
+invite. For isolated staging acceptance only, use fresh identities, configure
+`HUB_AUTH_PROVIDERS=github,discord,google`, and run:
 
 ```bash
 HUB_APP_ORIGIN=https://staging.example \
@@ -56,8 +58,7 @@ after admission.
 The process refuses to listen until PostgreSQL is reachable and the required ledger migration exists.
 `/api/health` also returns 503 if readiness fails. See [migrations.md](migrations.md).
 
-Before rolling back to a GitHub-only image, prove every currently admitted account still has an admitted GitHub
-identity:
+Before rolling back to a GitHub-only image, prove every active account still has a GitHub identity:
 
 ```bash
 DATABASE_URL=... \
@@ -66,7 +67,8 @@ HUB_ROLLBACK_SUPPORTED_AUTH_PROVIDERS=github \
 npm run hub:check-auth-rollback
 ```
 
-Exit status 2 blocks rollback without exposing account or subject identifiers. Follow the
+`HUB_ALLOWED_OAUTH_SUBJECTS` is read only by this legacy-image rollback preflight; the running r9 BFF does not
+use it for admission. Exit status 2 blocks rollback without exposing account or subject identifiers. Follow the
 [authentication provider registry runbook](runbooks/auth-provider-registry.md).
 
 ## Backup
@@ -94,7 +96,7 @@ After restore:
 
 1. Start the BFF against the drill database and check `/api/health`.
 2. Verify account, campaign, membership, character, audit, event, and outbox counts.
-3. Sign in with an allowlisted test account and open a representative campaign.
+3. Sign in with an existing test account and open a representative campaign.
 4. Record the backup timestamp, restore duration, checks, and operator.
 5. Destroy the drill database.
 
@@ -106,6 +108,8 @@ disposable cleanup. Repeat at least every 35 days and after a material recovery-
 
 - Canonical character JSON is limited to 1.5 MB after every import, patch, grant, action, and transfer.
 - Command receipts expire after 24 hours and character-returning receipts store only a character reference.
+- Invite-creation receipts store no raw invite. The BFF reconstructs an exact retry with
+  `HUB_INVITE_TOKEN_SECRET`.
 - Run `PostgresHubStore.pDeleteExpiredCommandReceipts()` from the scheduled maintenance worker until it
   returns zero. The expiry index keeps this bounded cleanup efficient.
 - Domain-event replay and immutable audit retention remain separate policies; do not delete audit rows as
@@ -136,10 +140,12 @@ See [observability.md](observability.md) and [backup/restore runbook](runbooks/b
 ## Secret and session rotation
 
 - Rotating `HUB_COOKIE_SECRET` invalidates all cookies.
-- Rotating `HUB_CSRF_SECRET` invalidates issued CSRF tokens; clients refresh `/api/session`. It also changes
-  deterministic invite-token derivation. Existing raw invite links still validate against their stored
-  hashes, but retrying an old invite-creation idempotency key can no longer reproduce the original raw token;
-  rotate only with this recovery consequence documented.
+- Rotating `HUB_CSRF_SECRET` invalidates issued CSRF tokens; clients refresh `/api/session`. Invite tokens use
+  the independent invite-token secret and are unaffected.
+- Rotating `HUB_INVITE_TOKEN_SECRET` prevents reconstruction of raw tokens for outstanding invite-creation
+  receipt retries unless the old key remains in `HUB_INVITE_TOKEN_PREVIOUS_SECRETS`. Add the new current key,
+  retain prior keys newest-first for at least 24 hours, then remove expired keys. Existing distributed invite
+  links continue to validate against stored hashes. More than four total keys or duplicate/short keys fail startup.
 - Rotate the GitHub client secret through the provider and deployment secret manager.
 - Revoke individual browser sessions through the database/admin path; logout revokes the current token.
 

@@ -27,6 +27,11 @@ describe("campaign hub BFF", () => {
 				displayName: "Allowed User",
 			})),
 		};
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "123",
+			displayName: "Allowed User",
+		});
 		app = await createHubApp({
 			store,
 			oauthProvider,
@@ -34,7 +39,7 @@ describe("campaign hub BFF", () => {
 				appOrigin: APP_ORIGIN,
 				cookieSecret: COOKIE_SECRET,
 				csrfSecret: CSRF_SECRET,
-				allowedOAuthSubjects: ["github:123"],
+				inviteTokenSecret: "invite-secret-at-least-thirty-two-characters",
 			},
 		});
 	});
@@ -108,7 +113,7 @@ describe("campaign hub BFF", () => {
 		}));
 	});
 
-	it("rejects tampered OAuth state and identities outside the private allowlist", async () => {
+	it("rejects tampered OAuth state and unknown identities without invite admission", async () => {
 		const badState = await app.inject({
 			method: "GET",
 			url: "/auth/github/callback?code=code&state=wrong",
@@ -131,7 +136,7 @@ describe("campaign hub BFF", () => {
 			headers: {cookie: `__Host-hub_oauth=${getSetCookie(start, "__Host-hub_oauth")}`},
 		});
 		expect(denied.statusCode).toBe(403);
-		expect(denied.json()).toEqual({error: "ACCOUNT_NOT_ALLOWED"});
+		expect(denied.json()).toEqual({error: "INVITE_ADMISSION_REQUIRED"});
 	});
 
 	it("does not allow a mutable login name to substitute for the stable provider subject", async () => {
@@ -153,6 +158,37 @@ describe("campaign hub BFF", () => {
 
 	it("normalizes OAuth return paths to the configured app origin", async () => {
 		const start = await app.inject({method: "GET", url: "/auth/github/start?returnTo=//evil.example/phish"});
+		const state = new URL(start.headers.location).searchParams.get("state");
+		const callback = await app.inject({
+			method: "GET",
+			url: `/auth/github/callback?code=code&state=${state}`,
+			headers: {cookie: `__Host-hub_oauth=${getSetCookie(start, "__Host-hub_oauth")}`},
+		});
+		expect(callback.headers.location).toBe("/hub.html");
+	});
+
+	it.each([
+		"/charactersheet.html?hubCampaign=00000000-0000-4000-8000-000000000001&characterId=00000000-0000-4000-8000-000000000002#sheet",
+		"/dmscreen.html?hubCampaign=00000000-0000-4000-8000-000000000001#board",
+	])("preserves safe same-origin product return paths", async returnTo => {
+		const start = await app.inject({
+			method: "GET",
+			url: `/auth/github/start?returnTo=${encodeURIComponent(returnTo)}`,
+		});
+		const state = new URL(start.headers.location).searchParams.get("state");
+		const callback = await app.inject({
+			method: "GET",
+			url: `/auth/github/callback?code=code&state=${state}`,
+			headers: {cookie: `__Host-hub_oauth=${getSetCookie(start, "__Host-hub_oauth")}`},
+		});
+		expect(callback.headers.location).toBe(returnTo);
+	});
+
+	it("drops invite-bearing fields from ordinary OAuth return paths", async () => {
+		const start = await app.inject({
+			method: "GET",
+			url: `/auth/github/start?returnTo=${encodeURIComponent("/charactersheet.html?invite=secret#invite=secret")}`,
+		});
 		const state = new URL(start.headers.location).searchParams.get("state");
 		const callback = await app.inject({
 			method: "GET",
@@ -368,8 +404,43 @@ describe("campaign hub BFF", () => {
 			payload: {role: "player"},
 		};
 		const first = await app.inject(request);
+		await app.close();
+		app = await createHubApp({
+			store,
+			oauthProvider,
+			config: {
+				appOrigin: APP_ORIGIN,
+				cookieSecret: COOKIE_SECRET,
+				csrfSecret: CSRF_SECRET,
+				inviteTokenSecrets: [
+					"new-invite-secret-at-least-thirty-two-characters",
+					"invite-secret-at-least-thirty-two-characters",
+				],
+			},
+		});
 		const retry = await app.inject(request);
+		expect(retry.statusCode).toBe(201);
 		expect(retry.json().token).toBe(first.json().token);
+		expect(JSON.stringify([...store._commandReceipts.values()])).not.toContain(first.json().token);
+		expect([...store._invites.values()][0]).toEqual(expect.objectContaining({
+			tokenHash: expect.any(String),
+		}));
+
+		await app.close();
+		app = await createHubApp({
+			store,
+			oauthProvider,
+			config: {
+				appOrigin: APP_ORIGIN,
+				cookieSecret: COOKIE_SECRET,
+				csrfSecret: CSRF_SECRET,
+				inviteTokenSecrets: ["new-invite-secret-at-least-thirty-two-characters"],
+			},
+		});
+		const missingLegacyKey = await app.inject(request);
+		expect(missingLegacyKey.statusCode).toBe(409);
+		expect(missingLegacyKey.json()).toEqual({error: "INVITE_TOKEN_RECOVERY_UNAVAILABLE"});
+		expect(missingLegacyKey.json()).not.toHaveProperty("token");
 	});
 
 	it("clears production host cookies with Secure attributes", async () => {

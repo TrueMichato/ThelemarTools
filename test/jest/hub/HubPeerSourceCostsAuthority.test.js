@@ -896,10 +896,6 @@ describe("peer source-cost memory authority", () => {
 				appOrigin: "https://tools.example",
 				cookieSecret: "x".repeat(32),
 				csrfSecret: "y".repeat(32),
-				allowedOAuthSubjects: [
-					ctx.sourceOwner.identity,
-					ctx.targetOwner.identity,
-				].map(identity => `${identity.provider}:${identity.providerSubject}`),
 			},
 		});
 		const getCookie = (response, name) => response.cookies.find(cookie => cookie.name === name)?.value;

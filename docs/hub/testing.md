@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-09-13
+> **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -19,6 +19,7 @@
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
 | Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
+| Invite admission | `HubInviteAdmission.test.js`, `HubMultiProviderIdentityPostgres.test.js`, `HubAuthServer.test.js` | Existing sign-in, unknown denial, opaque context binding, atomic first access, existing-account join, replay/expiry/revoke/race/status/privacy behavior, dedicated-secret token retry, lock ordering, and rollback |
 | Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, real Cure Wounds reject/cancel/accept/self-target effects, leases, reconnect, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
 | Content policy | `HubCampaignContentGating.test.js`, `HubRulesPolicyPostgres.test.js`, Character Sheet content/teardown tests | Canonical aliases, campaign brew, editions/species variants, grandfathering, imports/direct writes/grants/awards/transfers, stale pins, rollback, privacy, and memory/PostgreSQL parity |
@@ -87,6 +88,13 @@ event and prove replay advances by the server-scanned sequence even when a page 
 Both stores bound each read to `limit + 1` raw campaign-sequence rows before audience and projection filtering;
 the memory cursor test also proves a 150,000-event history remains stack-safe and pages audience-hidden rows
 without scanning the whole history.
+
+Invite-admission tests additionally assert the pre-account transaction boundary rather than only final state:
+account/identity/session/membership/invite-use/audit/event/outbox either all commit or none do. They cover
+max-use races, duplicate raw-token hash conflicts, provider failure after OAuth-state consumption, callback
+replay, two-tab cookie/state mismatch, creator purge/revoke interleaving, deletion/suspension status, safe
+return paths, final-cookie-jar multi-tab correlation, abandoned/consumed opaque retry replacement, and no raw invite/context material
+in receipts, logs, URLs, or backup paths.
 Realtime tests cover 26 exact continuation pages on one connection, one-time connection-scoped rate-limit
 exemptions, forged/replayed marker limiting, reconnect preservation, exact-once accumulation, and explicit
 campaign-client close/reset. They also interleave live delivery with a periodic multi-page replay and prove

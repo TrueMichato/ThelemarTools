@@ -1,7 +1,7 @@
 # Campaign Hub security model
 
 > **Status:** Implemented private-V1 controls; managed deployment review pending
-> **Last verified:** 2026-09-03
+> **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 ## Trust boundaries
@@ -15,7 +15,17 @@
 
 - OAuth authorization uses a validated concrete-route provider registry, PKCE according to adapter capability,
   signed browser correlation, hash-only expiring state, atomic one-time transaction consumption, exact redirect
-  binding, stable provider-subject allowlists, and same-origin return paths.
+  binding, invite-gated first-account admission, and same-origin return paths.
+- Existing identities sign in by immutable `(provider, subject)`. Unknown identities are not admitted by provider
+  subject: they require ADR 0018's valid five-minute campaign-invite context and the default-off new-account
+  admission switch.
+- The raw invite is sent once in a same-origin POST body. A random server-side context is bound to one provider,
+  OAuth transaction, transaction-specific signed correlation cookie, redirect, and state. It never enters `returnTo`, OAuth
+  state, cookies, referrers, logs, or browser history.
+- Each concurrent start has its own cookie name and state-selected transaction, so two empty-jar starts survive
+  the browser's final merged cookie jar. Failed, cancelled, or abandoned navigation may rotate a separate
+  hash-only opaque retry handle into a new same-provider context only when the old transaction cookie is present;
+  the original context is never rebound.
 - Authentication authority is `(provider, immutable subject)`. Email and mutable profile fields are discarded
   before store lookup and cannot link, admit, merge, or select an account.
 - Authorization codes and provider access/refresh tokens are never persisted. The callback-local access token is
@@ -29,9 +39,14 @@
 - Sessions use random tokens stored only as SHA-256 hashes; successful reauthentication revokes the prior
   browser session. New sessions record same-account external-identity provenance without changing campaign
   authorization.
-- Invite tokens are deterministic HMAC values derived from `HUB_CSRF_SECRET`, creator account, campaign, and
-  idempotency key so an idempotent retry can reproduce the same raw token while PostgreSQL stores only its
-  hash. Compromise/rotation of the CSRF secret therefore also affects invite issuance/recovery.
+- Invite tokens are cryptographically pseudorandom under an independent versioned key ring. Derivation is bound
+  to actor, campaign, idempotency key, and normalized request hash. The invite table and command receipt store no
+  raw token. Exact replay tries the current key then at most three retained prior keys and returns a token only
+  when its hash matches the stored invite hash; otherwise it fails closed. Invite-context and OAuth transaction
+  row data are excluded from backups.
+- First access commits account, identity, session, membership, invite use, account/invite audit, membership event,
+  and outbox atomically. Provider failure, cancellation, expiry, revocation, exhaustion, replay, a lost max-use
+  race, or session-write failure commits none of them.
 - Mutations require exact Origin, CSRF HMAC, protocol version, payload schema, role permission, and
   idempotency key. Reads whose response is an authorization envelope also require the protocol version, so an
   older client is told to update rather than silently misreading a newer shape.
@@ -93,6 +108,7 @@
   permissions-policy headers.
 - Database connections and queries have bounded timeouts; idle pool errors are handled.
 - Structured request logs strip query strings and redact auth/cookie/CSRF/idempotency fields.
+- Structured redaction also covers invite token/context field names. Auth request bodies are never logged.
 - Metrics require an independent bearer token and expose aggregate bounded labels only.
 - Backup archives are authenticated AES-256-GCM ciphertext; keys are separate from archives.
 - Provider client identity is fail-closed: only `do-connecting-ip` can be enabled, it cannot be combined with

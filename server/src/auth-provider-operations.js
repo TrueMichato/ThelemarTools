@@ -7,13 +7,6 @@ function normalizeProviderSet (providers) {
 	return normalized;
 }
 
-function normalizeAllowedSubjects (allowedSubjects) {
-	if (!Array.isArray(allowedSubjects) || !allowedSubjects.length) {
-		throw new TypeError(`At least one admitted provider subject is required for rollback preflight.`);
-	}
-	return [...new Set(allowedSubjects)];
-}
-
 export async function pGetAuthProviderRollbackBlockers ({
 	queryable,
 	supportedProviders,
@@ -21,17 +14,14 @@ export async function pGetAuthProviderRollbackBlockers ({
 }) {
 	if (!queryable?.query) throw new TypeError(`A queryable PostgreSQL client is required.`);
 	const providers = normalizeProviderSet(supportedProviders);
-	const admitted = normalizeAllowedSubjects(allowedSubjects);
+	if (!Array.isArray(allowedSubjects) || !allowedSubjects.length) {
+		throw new TypeError(`At least one legacy rollback provider subject is required.`);
+	}
+	const admitted = [...new Set(allowedSubjects)];
 	const result = await queryable.query(`
 		SELECT count(*)::bigint AS blocked_accounts
 		FROM hub.accounts account
 		WHERE account.status <> 'deleted'
-			AND EXISTS (
-				SELECT 1
-				FROM hub.external_identities admitted_identity
-				WHERE admitted_identity.account_id = account.id
-					AND admitted_identity.provider || ':' || admitted_identity.provider_subject = ANY($2::text[])
-			)
 			AND NOT EXISTS (
 				SELECT 1
 				FROM hub.external_identities identity

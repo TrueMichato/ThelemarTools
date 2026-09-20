@@ -13,14 +13,19 @@ function getCookie (response, name) {
 
 describe("Phase 2 campaign context and DM workspace", () => {
 	let app;
+	let store;
 	let identity;
 	let mutationIx;
 
 	beforeEach(async () => {
 		identity = IDENTITIES.dm;
 		mutationIx = 0;
+		store = new MemoryHubStore();
+		for (const current of Object.values(IDENTITIES)) {
+			await store.pUpsertOAuthAccount(current);
+		}
 		app = await createHubApp({
-			store: new MemoryHubStore(),
+			store,
 			oauthProvider: {
 				getAuthorizationUrl: ({state}) => `https://github.example/?state=${state}`,
 				pExchangeCode: async () => identity,
@@ -29,7 +34,6 @@ describe("Phase 2 campaign context and DM workspace", () => {
 				appOrigin: APP_ORIGIN,
 				cookieSecret: "x".repeat(32),
 				csrfSecret: "y".repeat(32),
-				allowedOAuthSubjects: ["github:123", "github:999"],
 			},
 		});
 	});

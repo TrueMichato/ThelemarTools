@@ -1,7 +1,7 @@
 # Campaign Hub event and audit catalog
 
-> **Status:** Current protocol-v4 catalog
-> **Last verified:** 2026-09-04
+> **Status:** Current protocol-v5 catalog
+> **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 ## Domain event envelope
@@ -149,6 +149,7 @@ Audit is distinct from domain events:
 
 Current audit actions include:
 
+- `account.created` with bounded `admission:"campaign_invite"` and no provider or invite secret;
 - `campaign.created`, `campaign.archived`, `campaign.ownership_transferred`;
 - `invite.created`, `invite.redeemed`, `invite.revoked`;
 - `membership.role_changed`, `membership.removed`, `membership.left`;

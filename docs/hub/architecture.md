@@ -1,7 +1,7 @@
 # Campaign Hub architecture
 
 > **Status:** Current architecture with launch gaps called out
-> **Last verified:** 2026-09-03
+> **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 ## Principles
@@ -87,6 +87,13 @@ sequenceDiagram
 Reads require a signed session where the route is private. Mutations additionally require exact Origin, CSRF,
 wire protocol, request schema, and an idempotency key. Route-specific store methods repeat ownership and
 tenant checks instead of trusting a client-supplied role.
+
+First-account OAuth is the pre-account exception to account-scoped receipts. A signed-out exact-Origin/current-
+protocol POST validates a raw campaign invite and creates a five-minute server-side invite context already bound
+to one OAuth transaction. Callback completion locks campaign then invite authority and commits account, identity,
+session, membership, invite use, audit, event, and outbox together. Existing identities use the same callback
+transaction but do not require an invite for ordinary sign-in. The new-account branch is default-off until the
+stacked creator-entitlement release layer lands.
 
 ## Character save/rebase
 

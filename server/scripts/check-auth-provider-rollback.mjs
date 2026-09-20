@@ -1,5 +1,6 @@
 import pg from "pg";
 import {pGetAuthProviderRollbackBlockers} from "../src/auth-provider-operations.js";
+import {getAllowedOAuthSubjects} from "../src/auth-provider-config.js";
 
 const {Pool} = pg;
 
@@ -29,7 +30,7 @@ try {
 	const result = await pGetAuthProviderRollbackBlockers({
 		queryable: pool,
 		supportedProviders: getCsv("HUB_ROLLBACK_SUPPORTED_AUTH_PROVIDERS", "github"),
-		allowedSubjects: getCsv("HUB_ALLOWED_OAUTH_SUBJECTS"),
+		allowedSubjects: getAllowedOAuthSubjects(requireEnv("HUB_ALLOWED_OAUTH_SUBJECTS")),
 	});
 	process.stdout.write(`${JSON.stringify(result)}\n`);
 	if (result.blockedAccounts) process.exitCode = 2;

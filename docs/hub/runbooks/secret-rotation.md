@@ -20,7 +20,9 @@
 ## CSRF secret
 
 - invalidates issued CSRF tokens;
-- changes deterministic invite derivation for retries;
+- rotate `HUB_INVITE_TOKEN_SECRET` by moving the old current key into
+  `HUB_INVITE_TOKEN_PREVIOUS_SECRETS` for at least 24 hours; verify an old invite-creation receipt retry returns
+  the original usable token, then remove the retired key after the receipt window;
 - existing raw invite links still match stored hashes;
 - old invite-creation idempotency retries cannot reproduce the original token;
 - refresh sessions/pages and verify mutation/invite behavior.

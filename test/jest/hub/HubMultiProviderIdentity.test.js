@@ -60,6 +60,11 @@ describe("Hub provider-neutral identity and OAuth transaction authority", () => 
 	});
 
 	it("creates identity provenance and rotates a prior session atomically", async () => {
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "200",
+			displayName: "Player",
+		});
 		const firstTokenHash = "a".repeat(64);
 		const first = await store.pCompleteOAuthSignIn({
 			identity: {provider: "github", subject: "200", displayName: "Player", handle: "player"},

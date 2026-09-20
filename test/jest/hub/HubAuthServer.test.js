@@ -10,6 +10,17 @@ function getCookie (response, name) {
 	return (response.cookies || []).find(cookie => cookie.name === name)?.value;
 }
 
+function getFinalCookieHeader (...responses) {
+	const jar = new Map();
+	for (const response of responses) {
+		for (const cookie of response.cookies || []) {
+			if (cookie.maxAge === 0 || cookie.value === "") jar.delete(cookie.name);
+			else jar.set(cookie.name, cookie.value);
+		}
+	}
+	return [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
 describe("Hub durable GitHub registry flow", () => {
 	let app;
 	let store;
@@ -17,6 +28,11 @@ describe("Hub durable GitHub registry flow", () => {
 
 	beforeEach(async () => {
 		store = new MemoryHubStore();
+		await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "123",
+			displayName: "Player",
+		});
 		oauthProvider = {
 			getAuthorizationUrl: jest.fn(({state, codeChallenge}) => `https://github.example/authorize?state=${state}&code_challenge=${codeChallenge}`),
 			pExchangeCode: jest.fn(async () => ({
@@ -34,7 +50,6 @@ describe("Hub durable GitHub registry flow", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "c".repeat(32),
 				csrfSecret: "s".repeat(32),
-				allowedOAuthSubjects: ["github:123"],
 			},
 		});
 	});
@@ -91,6 +106,20 @@ describe("Hub durable GitHub registry flow", () => {
 		expect(oauthProvider.pExchangeCode).toHaveBeenCalledTimes(1);
 	});
 
+	it("keeps two concurrent empty-jar starts bound by transaction-specific cookies", async () => {
+		const first = await pStart();
+		const second = await pStart();
+		const finalCookieHeader = getFinalCookieHeader(first.response, second.response);
+		for (const current of [second, first]) {
+			const callback = await app.inject({
+				method: "GET",
+				url: `/auth/github/callback?code=code&state=${encodeURIComponent(current.state)}`,
+				headers: {cookie: finalCookieHeader},
+			});
+			expect(callback.statusCode).toBe(302);
+		}
+	});
+
 	it("does not register disabled or unknown provider routes", async () => {
 		const response = await app.inject({method: "GET", url: "/auth/discord/start"});
 		expect(response.statusCode).toBe(404);
@@ -113,6 +142,26 @@ describe("Hub durable GitHub registry flow", () => {
 				csrfSecret: "s".repeat(32),
 			},
 		})).rejects.toThrow(/exact origin|HTTPS/);
+	});
+
+	it("rejects an empty, duplicate, oversized, or short invite-token key ring", async () => {
+		for (const inviteTokenSecrets of [
+			[],
+			["short"],
+			["a".repeat(32), "a".repeat(32)],
+			Array.from({length: 5}, (_, index) => `${index}`.repeat(32)),
+		]) {
+			await expect(createHubApp({
+				store: new MemoryHubStore(),
+				oauthProvider,
+				config: {
+					appOrigin: ORIGIN,
+					cookieSecret: "c".repeat(32),
+					csrfSecret: "s".repeat(32),
+					inviteTokenSecrets,
+				},
+			})).rejects.toThrow(/inviteTokenSecrets/);
+		}
 	});
 
 	it("rejects a validly signed legacy transaction cookie without reflecting it", async () => {
@@ -212,6 +261,13 @@ describe("Hub concrete multi-provider routes", () => {
 				};
 			}),
 		}));
+		for (const definition of definitions) {
+			await store.pUpsertOAuthAccount({
+				provider: definition.slug,
+				providerSubject: definition.subject,
+				displayName: `${definition.label} User`,
+			});
+		}
 		app = await createHubApp({
 			store,
 			authProviderRegistry: new AuthProviderRegistry({
@@ -221,7 +277,6 @@ describe("Hub concrete multi-provider routes", () => {
 				appOrigin: ORIGIN,
 				cookieSecret: "c".repeat(32),
 				csrfSecret: "s".repeat(32),
-				allowedOAuthSubjects: ["github:101", "discord:202", "google:google-sub"],
 			},
 		});
 	});

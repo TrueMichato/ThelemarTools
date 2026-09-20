@@ -8,6 +8,7 @@ const operationsSql = fs.readFileSync(new URL("../../../server/migrations/0003_o
 const semanticOperationsSql = fs.readFileSync(new URL("../../../server/migrations/0005_semantic_character_operations.sql", import.meta.url), "utf8");
 const identitySql = fs.readFileSync(new URL("../../../server/migrations/0006_multi_provider_identity.sql", import.meta.url), "utf8");
 const peerSourceCostsSql = fs.readFileSync(new URL("../../../server/migrations/0007_peer_source_costs.sql", import.meta.url), "utf8");
+const inviteAdmissionSql = fs.readFileSync(new URL("../../../server/migrations/0008_invite_gated_first_access.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 const migrationPolicy = JSON.parse(fs.readFileSync(new URL("../../../deploy/hub/migration-policy.json", import.meta.url), "utf8"));
 const migrationVersions = fs.readdirSync(new URL("../../../server/migrations/", import.meta.url))
@@ -202,9 +203,31 @@ describe("campaign hub first migration contract", () => {
 		expect(peerSourceCostsSql).not.toMatch(/CREATE INDEX[\s\S]*source_cost\s*\)/);
 	});
 
+	it("adds one-time invite contexts bound to one OAuth transaction in migration 0008", () => {
+		for (const required of [
+			"CREATE TABLE hub.invite_contexts",
+			"invite_id uuid NOT NULL REFERENCES hub.invites(id) ON DELETE CASCADE",
+			"retry_token_hash bytea NOT NULL UNIQUE",
+			"invite_contexts_expiry_check",
+			"interval '5 minutes'",
+			"invite_contexts_consumption_check",
+			"completed_account_id uuid",
+			"completed_session_id uuid",
+			"completed_membership_id uuid",
+			"ADD COLUMN invite_context_id uuid UNIQUE",
+			"REFERENCES hub.invite_contexts(id) ON DELETE CASCADE",
+			"oauth_transactions_invite_context_idx",
+		]) expect(inviteAdmissionSql).toContain(required);
+		expect(inviteAdmissionSql).not.toMatch(/raw_token|provider_subject|email/i);
+	});
+
 	it("classifies every immutable migration for release rollback compatibility", () => {
 		expect(Object.keys(migrationPolicy.migrations).sort()).toEqual(migrationVersions);
 		expect(migrationPolicy.migrations["0007"]).toMatchObject({
+			phase: "expand",
+			previousAppCompatible: true,
+		});
+		expect(migrationPolicy.migrations["0008"]).toMatchObject({
 			phase: "expand",
 			previousAppCompatible: true,
 		});

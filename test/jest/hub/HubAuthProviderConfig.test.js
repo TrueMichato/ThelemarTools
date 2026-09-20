@@ -11,21 +11,19 @@ function getEnv (overrides = {}) {
 		DISCORD_CLIENT_SECRET: "test-secret",
 		GOOGLE_CLIENT_ID: "google-client",
 		GOOGLE_CLIENT_SECRET: "test-secret",
-		HUB_ALLOWED_OAUTH_SUBJECTS: "github:123",
 		...overrides,
 	};
 }
 
 describe("Hub authentication provider configuration", () => {
 	it("defaults to GitHub and publishes disabled sibling metadata", () => {
-		const {authProviderRegistry, allowedOAuthSubjects} = createAuthProviderConfiguration({env: getEnv()});
+		const {authProviderRegistry} = createAuthProviderConfiguration({env: getEnv()});
 
 		expect(authProviderRegistry.getPublicMetadata()).toEqual([
 			expect.objectContaining({slug: "github", status: "available"}),
 			expect.objectContaining({slug: "discord", status: "disabled"}),
 			expect.objectContaining({slug: "google", status: "disabled"}),
 		]);
-		expect(allowedOAuthSubjects).toEqual(["github:123"]);
 	});
 
 	it("enables Discord and Google only as a pair", () => {
@@ -83,23 +81,18 @@ describe("Hub authentication provider configuration", () => {
 		})).toThrow();
 	});
 
-	it("validates exact provider-subject admission authority", () => {
-		expect(getAllowedOAuthSubjects(
-			"github:123,discord:900719925474099312,google:case-sensitive:opaque",
-		)).toEqual([
-			"github:123",
-			"discord:900719925474099312",
-			"google:case-sensitive:opaque",
-		]);
+	it("does not derive first-account admission from provider subjects", () => {
+		const configured = createAuthProviderConfiguration({
+			env: getEnv({HUB_ALLOWED_OAUTH_SUBJECTS: "github:123"}),
+		});
+		expect(configured).not.toHaveProperty("allowedOAuthSubjects");
+	});
 
-		for (const value of [
-			"github:0",
-			"github:01",
-			"discord:username",
-			"google:",
-			"email@example.com",
-			"unknown:123",
-			"github:123,github:123",
-		]) expect(() => getAllowedOAuthSubjects(value)).toThrow();
+	it("retains strict subject parsing only for legacy rollback preflight", () => {
+		expect(getAllowedOAuthSubjects("github:123,google:case-sensitive:opaque"))
+			.toEqual(["github:123", "google:case-sensitive:opaque"]);
+		for (const value of ["github:0", "email@example.com", "unknown:123", "github:123,github:123"]) {
+			expect(() => getAllowedOAuthSubjects(value)).toThrow();
+		}
 	});
 });

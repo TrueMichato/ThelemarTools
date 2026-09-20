@@ -381,10 +381,33 @@ describe("hub API client", () => {
 				? getResponse({body: {signedIn: true, csrfToken: "csrf-1"}})
 				: getResponse({body: {ok: true}}),
 		});
+
 		await client.pGetSession();
 		await client.pLogout();
 
 		await expect(client.pCreateCampaign({name: "Campaign"})).rejects.toBeInstanceOf(HubApiError);
+	});
+
+	it("starts and retries invite admission without authenticated mutation headers", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				return getResponse({body: {authorizationUrl: "https://provider.example", retryToken: "r".repeat(32)}});
+			},
+		});
+		await client.pCreateInviteAdmission({token: "t".repeat(32), provider: "github", returnTo: "/hub.html"});
+		await client.pRetryInviteAdmission({retryToken: "r".repeat(32), provider: "github", returnTo: "/hub.html"});
+		expect(calls.map(call => call.path)).toEqual([
+			"/api/auth/invite-contexts",
+			"/api/auth/invite-contexts/retry",
+		]);
+		for (const call of calls) {
+			expect(call.opts.method).toBe("POST");
+			expect(call.opts.headers["x-hub-protocol-version"]).toBe("5");
+			expect(call.opts.headers).not.toHaveProperty("x-csrf-token");
+			expect(call.opts.headers).not.toHaveProperty("idempotency-key");
+		}
 	});
 
 	it("uses the lifecycle administration routes and mutation headers", async () => {

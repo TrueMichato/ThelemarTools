@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-13
+> **Last updated:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -25,6 +25,22 @@ Google OIDC adapters, bounded provider HTTP/JWKS validation, paired first-enable
 guidance, and deterministic memory/PostgreSQL/real-stack coverage. Normal production configuration remains
 GitHub-only. Layer 3 still owns explicit reauthentication, link/unlink, last-identity protections, and account
 security UI; layer 4 owns final rollout/runbooks.
+
+The first r9 identity layer now adds ADR 0018 and migration 0008: signed-out invite links exchange the raw token
+once for a five-minute server-side context bound to one durable OAuth transaction. Existing identities sign in
+normally; a bound context signs an existing account in and joins the campaign atomically. When the default-off
+`HUB_INVITE_ACCOUNT_ADMISSION_ENABLED` switch is enabled, an unknown identity creates account, identity,
+session, and membership in that same transaction. Provider failure, replay, expiry, revoke, exhaustion, race,
+or session-write failure consumes no invite and leaves no orphan authority. The provider-subject allowlist is no
+longer first-account admission authority.
+Transaction-specific signed OAuth cookies support multiple simultaneous starts from an empty shared cookie jar.
+A failed, cancelled, or abandoned invite flow can rotate a separate five-minute opaque retry handle into a fresh
+same-provider context when the old transaction cookie is present, without retaining the raw invite.
+
+This foundation is intentionally **not deployable with new-account admission enabled** until the next stacked
+layer implements provider-neutral account-level `campaign:create` entitlement, backfills existing owners and
+designated operators, and adds audited freshly reauthenticated grant/revoke administration. Browser creator/admin
+and account-security polish also remains later-layer work.
 
 The Oracle deployment now has deliberate one-command release automation in `deploy/hub/release.sh`. It locks
 out concurrent operators, verifies an immutable annotated tag and clean exact checkout, records rollback
@@ -140,7 +156,8 @@ maintenance/backup timer evidence and the physical one-DM/two-player game day re
 
 ## Implemented
 
-- Private GitHub OAuth allowlist, server sessions, CSRF/origin checks, protocol gating.
+- Existing-identity OAuth sign-in, default-off invite-gated first access, server sessions, CSRF/origin checks,
+  and protocol gating.
 - Accounts, campaigns, roles, invites, membership, export, archive, and ownership transfer.
 - Local/cloud Character Sheet repository switch, non-destructive claim, clone, move, archive, lease takeover.
 - Character Sheet-native local copy, detached-character recovery, clone-by-default campaign reuse, and

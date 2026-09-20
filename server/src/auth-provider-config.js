@@ -66,16 +66,16 @@ export function getAllowedOAuthSubjects (rawValue) {
 	const seen = new Set();
 	for (const entry of entries) {
 		const separatorIndex = entry.indexOf(":");
-		if (separatorIndex <= 0) throw new TypeError(`OAuth admission subject is invalid.`);
+		if (separatorIndex <= 0) throw new TypeError(`OAuth rollback subject is invalid.`);
 		const provider = entry.slice(0, separatorIndex);
 		const subject = entry.slice(separatorIndex + 1);
 		if (!Object.hasOwn(PROVIDERS, provider) || !subject || subject !== subject.trim() || Array.from(subject).length > 255) {
-			throw new TypeError(`OAuth admission subject is invalid.`);
+			throw new TypeError(`OAuth rollback subject is invalid.`);
 		}
 		if ((provider === "github" || provider === "discord") && !/^[1-9][0-9]{0,19}$/.test(subject)) {
-			throw new TypeError(`OAuth admission subject is invalid.`);
+			throw new TypeError(`OAuth rollback subject is invalid.`);
 		}
-		if (seen.has(entry)) throw new TypeError(`Duplicate OAuth admission subject.`);
+		if (seen.has(entry)) throw new TypeError(`Duplicate OAuth rollback subject.`);
 		seen.add(entry);
 	}
 	return entries;
@@ -109,6 +109,5 @@ export function createAuthProviderConfiguration ({
 
 	return {
 		authProviderRegistry: new AuthProviderRegistry({registrations}),
-		allowedOAuthSubjects: getAllowedOAuthSubjects(env.HUB_ALLOWED_OAUTH_SUBJECTS),
 	};
 }

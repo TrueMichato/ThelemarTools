@@ -10,6 +10,7 @@ visibility is not authorization.
 | Operation | Campaign owner/DM | Co-DM | Player | Spectator |
 |---|---:|---:|---:|---:|
 | Read campaign metadata/members/context | Yes | Yes | Yes | Yes |
+| First Hub account creation | Valid campaign invite only | Valid campaign invite only | Valid campaign invite only | Valid campaign invite only |
 | Create campaign | Yes (becomes owner/DM) | N/A | Yes (becomes owner/DM) | Yes (becomes owner/DM) |
 | Archive campaign | Owner only | No | No | No |
 | Transfer campaign ownership | Owner only | No | No | No |

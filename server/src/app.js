@@ -41,6 +41,8 @@ import crypto from "node:crypto";
 const {normalizeIP} = rateLimit;
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
+const OAUTH_COOKIE_PREFIX = `${OAUTH_COOKIE}-`;
+const INVITE_ADMISSION_CAPABILITY = "auth.invite_admission.v1";
 const HUB_LEGACY_PROTOCOL_VERSION = "3";
 const SUPPORTED_HUB_PROTOCOL_VERSIONS = new Set([
 	HUB_LEGACY_PROTOCOL_VERSION,
@@ -109,10 +111,55 @@ function getSignedCookie (request, name) {
 	return unsigned.valid ? unsigned.value : null;
 }
 
+function getOAuthTransactionCookieName (transactionId) {
+	return `${OAUTH_COOKIE_PREFIX}${transactionId}`;
+}
+
+function getOAuthState (transactionId) {
+	return `${transactionId}.${getRandomToken()}`;
+}
+
+function getOAuthTransactionIdFromState (state) {
+	if (typeof state !== "string") return null;
+	const separatorIndex = state.indexOf(".");
+	if (separatorIndex === -1) return null;
+	const transactionId = state.slice(0, separatorIndex);
+	const secret = state.slice(separatorIndex + 1);
+	if (
+		!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(transactionId)
+		|| !/^[A-Za-z0-9_-]{32,}$/.test(secret)
+	) return null;
+	return transactionId;
+}
+
+function getOAuthTransactionCookieIds (request) {
+	return Object.keys(request.cookies || {})
+		.filter(name => name.startsWith(OAUTH_COOKIE_PREFIX))
+		.map(name => {
+			const transactionId = name.slice(OAUTH_COOKIE_PREFIX.length);
+			return getSignedCookie(request, name) === transactionId ? transactionId : null;
+		})
+		.filter(Boolean);
+}
+
 function validateConfig (config) {
 	if (!config?.appOrigin) throw new TypeError(`config.appOrigin is required.`);
 	if (!config?.cookieSecret || config.cookieSecret.length < 32) throw new TypeError(`config.cookieSecret must be at least 32 characters.`);
 	if (!config?.csrfSecret || config.csrfSecret.length < 32) throw new TypeError(`config.csrfSecret must be at least 32 characters.`);
+	const inviteTokenSecrets = config.inviteTokenSecrets
+		|| [
+			config.inviteTokenSecret
+			|| (process.env.NODE_ENV === "test" ? "test-only-invite-token-secret-value" : null),
+		];
+	if (
+		!Array.isArray(inviteTokenSecrets)
+		|| !inviteTokenSecrets.length
+		|| inviteTokenSecrets.length > 4
+		|| inviteTokenSecrets.some(secret => typeof secret !== "string" || secret.length < 32)
+		|| new Set(inviteTokenSecrets).size !== inviteTokenSecrets.length
+	) {
+		throw new TypeError(`config.inviteTokenSecrets must contain 1-4 unique secrets of at least 32 characters.`);
+	}
 	if (config.metricsToken != null && config.metricsToken.length < 32) throw new TypeError(`config.metricsToken must be at least 32 characters.`);
 	const parsedAppOrigin = new URL(config.appOrigin);
 	const appOrigin = parsedAppOrigin.origin;
@@ -125,11 +172,13 @@ function validateConfig (config) {
 	return {
 		sessionTtlSeconds: 60 * 60 * 24 * 30,
 		oauthStateTtlSeconds: 10 * 60,
+		inviteContextTtlSeconds: 5 * 60,
+		isInviteAccountAdmissionEnabled: false,
 		isSecure: new URL(appOrigin).protocol === "https:",
-		allowedOAuthSubjects: [],
 		trustProxy: false,
 		metricsToken: null,
 		...config,
+		inviteTokenSecrets,
 		appOrigin,
 		clientIpHeader,
 	};
@@ -141,8 +190,30 @@ function getSafeReturnTo ({rawReturnTo, appOrigin}) {
 		const url = new URL(rawReturnTo, appOrigin);
 		if (url.origin !== appOrigin) return "/hub.html";
 		if (url.pathname.startsWith("//")) return "/hub.html";
+		if (
+			[...url.searchParams.keys()].some(key => /invite|context/i.test(key))
+			|| /(?:^|[?&#])(?:invite|invitecontext|context)=/i.test(url.hash)
+		) return "/hub.html";
 		const returnTo = `${url.pathname}${url.search}${url.hash}`;
 		return returnTo.length <= 2_048 ? returnTo : "/hub.html";
+	} catch {
+		return "/hub.html";
+	}
+}
+
+function getSafeInviteReturnTo ({rawReturnTo, appOrigin}) {
+	const safe = getSafeReturnTo({rawReturnTo, appOrigin});
+	try {
+		const url = new URL(safe, appOrigin);
+		if (url.hash) return "/hub.html";
+		if (url.pathname === "/hub.html") return "/hub.html";
+		if (url.pathname !== "/campaign.html") return "/hub.html";
+		if ([...url.searchParams.keys()].some(key => key !== "id")) return "/hub.html";
+		const campaignId = url.searchParams.get("id");
+		if (campaignId != null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(campaignId)) {
+			return "/hub.html";
+		}
+		return campaignId == null ? "/campaign.html" : `/campaign.html?id=${encodeURIComponent(campaignId)}`;
 	} catch {
 		return "/hub.html";
 	}
@@ -550,10 +621,147 @@ export async function createHubApp ({
 		capabilities: [
 			AUTH_PROVIDER_REGISTRY_CAPABILITY,
 			ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY,
+			...(config.isInviteAccountAdmissionEnabled ? [INVITE_ADMISSION_CAPABILITY] : []),
 			...(config.isCampaignRulesPolicyEnabled ? [CAMPAIGN_RULES_POLICY_CAPABILITY] : []),
 		],
 		authProviders: providerRegistry.getPublicMetadata(),
 	}));
+
+	app.post("/api/auth/invite-contexts", {
+		config: {rateLimit: {max: 10, timeWindow: "1 minute"}},
+		schema: {
+			body: {
+				type: "object",
+				required: ["token", "provider", "returnTo"],
+				additionalProperties: false,
+				properties: {
+					token: {type: "string", minLength: 32, maxLength: 500},
+					provider: {type: "string", minLength: 1, maxLength: 32},
+					returnTo: {type: "string", minLength: 1, maxLength: 2_048},
+				},
+			},
+		},
+	}, async (request, reply) => {
+		if (request.headers.origin !== config.appOrigin) return reply.code(403).send({error: "INVALID_ORIGIN"});
+		if (request.headers["x-hub-protocol-version"] !== HUB_PROTOCOL_VERSION) {
+			return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
+		}
+		const provider = providerRegistry.getAvailableProviders()
+			.find(it => it.slug === request.body.provider);
+		if (!provider) return reply.code(403).send({error: "INVITE_ADMISSION_INVALID"});
+		const transactionId = crypto.randomUUID();
+		const state = getOAuthState(transactionId);
+		const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
+		const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
+		const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
+		const returnTo = getSafeInviteReturnTo({
+			rawReturnTo: request.body.returnTo,
+			appOrigin: config.appOrigin,
+		});
+		const authorizationUrl = provider.getAuthorizationUrl({
+			state,
+			codeChallenge: pkceVerifier == null ? null : getPkceChallenge(pkceVerifier),
+			nonce: oidcNonce,
+			redirectUri,
+		});
+		const retryToken = getRandomToken();
+		await store.pCreateInviteOAuthTransaction({
+			transaction: {
+				id: transactionId,
+				stateHash: getSha256(state),
+				provider: provider.slug,
+				operation: "sign_in",
+				redirectUri,
+				returnTo,
+				pkceVerifier,
+				oidcNonce,
+				ttlSeconds: config.oauthStateTtlSeconds,
+			},
+			inviteTokenHash: getSha256(request.body.token),
+			retryTokenHash: getSha256(retryToken),
+			contextTtlSeconds: config.inviteContextTtlSeconds,
+		});
+		reply.setCookie(getOAuthTransactionCookieName(transactionId), transactionId, getCookieOptions({
+			isSecure: config.isSecure,
+			maxAge: config.oauthStateTtlSeconds,
+		}));
+		// Preserve one legacy correlation cookie for in-flight pre-r9 starts. New callbacks use
+		// the transaction-specific cookie selected by the transaction id embedded in state.
+		reply.setCookie(OAUTH_COOKIE, transactionId, getCookieOptions({
+			isSecure: config.isSecure,
+			maxAge: config.oauthStateTtlSeconds,
+		}));
+		metrics.observeAuth?.({provider: provider.slug, outcome: "invite_started"});
+		return reply.code(201).send({authorizationUrl, retryToken});
+	});
+
+	app.post("/api/auth/invite-contexts/retry", {
+		config: {rateLimit: {max: 10, timeWindow: "1 minute"}},
+		schema: {
+			body: {
+				type: "object",
+				required: ["retryToken", "provider", "returnTo"],
+				additionalProperties: false,
+				properties: {
+					retryToken: {type: "string", minLength: 32, maxLength: 500},
+					provider: {type: "string", minLength: 1, maxLength: 32},
+					returnTo: {type: "string", minLength: 1, maxLength: 2_048},
+				},
+			},
+		},
+	}, async (request, reply) => {
+		if (request.headers.origin !== config.appOrigin) return reply.code(403).send({error: "INVALID_ORIGIN"});
+		if (request.headers["x-hub-protocol-version"] !== HUB_PROTOCOL_VERSION) {
+			return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
+		}
+		const provider = providerRegistry.getAvailableProviders()
+			.find(it => it.slug === request.body.provider);
+		if (!provider) return reply.code(403).send({error: "INVITE_ADMISSION_INVALID"});
+		const transactionId = crypto.randomUUID();
+		const state = getOAuthState(transactionId);
+		const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
+		const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
+		const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
+		const returnTo = getSafeInviteReturnTo({
+			rawReturnTo: request.body.returnTo,
+			appOrigin: config.appOrigin,
+		});
+		const authorizationUrl = provider.getAuthorizationUrl({
+			state,
+			codeChallenge: pkceVerifier == null ? null : getPkceChallenge(pkceVerifier),
+			nonce: oidcNonce,
+			redirectUri,
+		});
+		const retryToken = getRandomToken();
+		const retried = await store.pRetryInviteOAuthTransaction({
+			transaction: {
+				id: transactionId,
+				stateHash: getSha256(state),
+				provider: provider.slug,
+				operation: "sign_in",
+				redirectUri,
+				returnTo,
+				pkceVerifier,
+				oidcNonce,
+				ttlSeconds: config.oauthStateTtlSeconds,
+			},
+			retryTokenHash: getSha256(request.body.retryToken),
+			nextRetryTokenHash: getSha256(retryToken),
+			contextTtlSeconds: config.inviteContextTtlSeconds,
+			browserTransactionIds: getOAuthTransactionCookieIds(request),
+		});
+		reply.clearCookie(getOAuthTransactionCookieName(retried.replacedTransactionId), getClearCookieOptions({isSecure: config.isSecure}));
+		reply.setCookie(getOAuthTransactionCookieName(transactionId), transactionId, getCookieOptions({
+			isSecure: config.isSecure,
+			maxAge: config.oauthStateTtlSeconds,
+		}));
+		reply.setCookie(OAUTH_COOKIE, transactionId, getCookieOptions({
+			isSecure: config.isSecure,
+			maxAge: config.oauthStateTtlSeconds,
+		}));
+		metrics.observeAuth?.({provider: provider.slug, outcome: "invite_restarted"});
+		return reply.code(201).send({authorizationUrl, retryToken});
+	});
 
 	app.get("/ws/campaign/:campaignId", {
 		websocket: true,
@@ -595,7 +803,8 @@ export async function createHubApp ({
 				},
 			},
 		}, async (request, reply) => {
-			const state = getRandomToken();
+			const transactionId = crypto.randomUUID();
+			const state = getOAuthState(transactionId);
 			const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
 			const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
 			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
@@ -609,7 +818,6 @@ export async function createHubApp ({
 				nonce: oidcNonce,
 				redirectUri,
 			});
-			const transactionId = crypto.randomUUID();
 			await store.pCreateOAuthTransaction({
 				id: transactionId,
 				stateHash: getSha256(state),
@@ -621,6 +829,10 @@ export async function createHubApp ({
 				oidcNonce,
 				ttlSeconds: config.oauthStateTtlSeconds,
 			});
+			reply.setCookie(getOAuthTransactionCookieName(transactionId), transactionId, getCookieOptions({
+				isSecure: config.isSecure,
+				maxAge: config.oauthStateTtlSeconds,
+			}));
 			reply.setCookie(OAUTH_COOKIE, transactionId, getCookieOptions({
 				isSecure: config.isSecure,
 				maxAge: config.oauthStateTtlSeconds,
@@ -643,12 +855,25 @@ export async function createHubApp ({
 				},
 			},
 		}, async (request, reply) => {
-			const transactionId = getSignedCookie(request, OAUTH_COOKIE);
-			reply.clearCookie(OAUTH_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
-			if (!transactionId || typeof request.query?.state !== "string") {
+			const stateTransactionId = getOAuthTransactionIdFromState(request.query?.state);
+			const legacyTransactionCookie = getSignedCookie(request, OAUTH_COOKIE);
+			const transactionId = stateTransactionId || legacyTransactionCookie;
+			const transactionCookie = transactionId == null
+				? null
+				: getSignedCookie(request, getOAuthTransactionCookieName(transactionId));
+			if (
+				!transactionId
+				|| (transactionCookie !== transactionId && legacyTransactionCookie !== transactionId)
+			) {
 				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
 				return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
 			}
+			const clearTransactionCookies = () => {
+				reply.clearCookie(getOAuthTransactionCookieName(transactionId), getClearCookieOptions({isSecure: config.isSecure}));
+				if (legacyTransactionCookie === transactionId) {
+					reply.clearCookie(OAUTH_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
+				}
+			};
 			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
 			let transaction;
 			try {
@@ -660,6 +885,7 @@ export async function createHubApp ({
 					redirectUri,
 				});
 			} catch (error) {
+				clearTransactionCookies();
 				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
 				throw error;
 			}
@@ -681,21 +907,29 @@ export async function createHubApp ({
 				if (error instanceof AuthProviderError) throw error;
 				throw new AuthProviderError();
 			}
-			const isAllowed = config.allowedOAuthSubjects.includes(`${identity.provider}:${identity.subject}`);
-			if (!isAllowed) {
-				metrics.observeAuth?.({provider: provider.slug, outcome: "not_allowed"});
-				return reply.code(403).send({error: "ACCOUNT_NOT_ALLOWED"});
-			}
-
 			const priorAuth = await pGetAuth(request);
 			const token = getRandomToken();
-			const completed = await store.pCompleteOAuthSignIn({
-				identity,
-				tokenHash: getSha256(token),
-				expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
-				userAgent: request.headers["user-agent"] || null,
-				priorSessionId: priorAuth?.session.id || null,
-			});
+			let completed;
+			try {
+				completed = await store.pCompleteOAuthSignIn({
+					identity,
+					tokenHash: getSha256(token),
+					expiresAt: new Date(Date.now() + config.sessionTtlSeconds * 1_000),
+					userAgent: request.headers["user-agent"] || null,
+					priorSessionId: priorAuth?.session.id || null,
+					oauthTransactionId: transaction.id,
+					isNewAccountAdmissionEnabled: config.isInviteAccountAdmissionEnabled,
+				});
+			} catch (error) {
+				if (["INVITE_ADMISSION_REQUIRED", "INVITE_ADMISSION_INVALID", "ACCOUNT_UNAVAILABLE"].includes(error?.code)) {
+					clearTransactionCookies();
+				}
+				if (["INVITE_ADMISSION_REQUIRED", "INVITE_ADMISSION_INVALID", "INVITE_ADMISSION_UNAVAILABLE"].includes(error?.code)) {
+					metrics.observeAuth?.({provider: provider.slug, outcome: "not_allowed"});
+				}
+				throw error;
+			}
+			clearTransactionCookies();
 			completed.revokedSessionIds.forEach(sessionId => realtime.closeSession({sessionId}));
 			reply.setCookie(SESSION_COOKIE, token, getCookieOptions({
 				isSecure: config.isSecure,
@@ -1518,11 +1752,17 @@ export async function createHubApp ({
 		},
 	}, async (request, reply) => {
 		const idempotencyKey = getIdempotencyKey(request);
-		const token = getDeterministicToken({
-			secret: config.csrfSecret,
-			namespace: "invite",
-			parts: [request.hubAuth.account.id, request.params.campaignId, idempotencyKey.key],
+		const getToken = secret => getDeterministicToken({
+			secret,
+			namespace: "campaign-invite",
+			parts: [
+				request.hubAuth.account.id,
+				request.params.campaignId,
+				idempotencyKey.key,
+				idempotencyKey.requestHash,
+			],
 		});
+		const token = getToken(config.inviteTokenSecrets[0]);
 		const created = await store.pCreateInvite({
 			accountId: request.hubAuth.account.id,
 			campaignId: request.params.campaignId,
@@ -1532,7 +1772,18 @@ export async function createHubApp ({
 			maxUses: request.body.maxUses || 1,
 			idempotencyKey,
 		});
-		return reply.code(201).send({...created, token});
+		const replayToken = config.inviteTokenSecrets
+			.map(getToken)
+			.find(candidate => isConstantTimeEqual(getSha256(candidate), created.inviteTokenHash));
+		if (!replayToken) {
+			throw new HubStoreError(
+				"INVITE_TOKEN_RECOVERY_UNAVAILABLE",
+				`Invite token cannot be recovered with the configured key ring.`,
+				{status: 409},
+			);
+		}
+		const {inviteTokenHash: _inviteTokenHash, ...response} = created;
+		return reply.code(201).send({...response, token: replayToken});
 	});
 
 	app.post("/api/campaigns/:campaignId/invites/:inviteId/revoke", {
