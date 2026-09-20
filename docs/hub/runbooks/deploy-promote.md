@@ -72,9 +72,10 @@ by the Oracle host.
 
 Strict phases are: process lock; preflight/current health; rollback capture; encrypted backup plus
 authentication/hash/`pg_restore --list` verification; immutable checkout; candidate build and migration plan;
-operator approval; forward migration and role grants; BFF/static/edge cutover; then complete health, TLS,
-WebSocket, metrics, migration, container, icon, service-worker, and backup-age checks. JSON and text
-evidence are mode 0600 under `~/.local/state/thelemar-hub/releases/`.
+operator approval; forward migration and role grants; account-entitlement reconciliation/readiness; BFF/static/
+edge cutover; then complete health, TLS, WebSocket, metrics, migration, container, icon, service-worker, and
+backup-age checks. JSON and text evidence are mode 0600 under
+`~/.local/state/thelemar-hub/releases/`.
 
 `compose.hub.release.yml` binds the prerelease backup to the exact current operations image and binds migration,
 grant, BFF, and static services to the exact image IDs captured after the candidate build. It removes the
@@ -101,6 +102,8 @@ failure path, and never run Compose `down`, remove services, or delete volumes.
 - BFF using owner database role;
 - origin/cookie/proxy mismatch;
 - privacy/authorization regression;
+- missing r9 designated operator, failed account-entitlement backfill/reconciliation, or an attempt to enable
+  invite admission before entitlement enforcement;
 - outbox starts aging.
 
 ## Configuration knobs

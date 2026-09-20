@@ -94,6 +94,15 @@ import {
 	normalizeItemAwardResolution,
 	resolveItemAwardAuthority,
 } from "./item-award-catalog.js";
+import {
+	ACCOUNT_ENTITLEMENT_NAMES,
+	CAMPAIGN_CREATE_ENTITLEMENT,
+	isFreshReauthentication,
+	isAccountEntitlementName,
+	PLATFORM_OPERATE_ENTITLEMENT,
+	redactEntitlementAuditForAccount,
+	redactEntitlementForAccount,
+} from "./account-entitlements.js";
 
 function copy (value) {
 	return value === undefined ? undefined : structuredClone(value);
@@ -106,13 +115,18 @@ export class MemoryHubStore {
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
 		fnResolveAwardItem = resolveItemAwardAuthority,
+		isAccountEntitlementsEnabled = false,
+		fnBeforeSensitiveCommit = null,
 	} = {}) {
 		this._fnNow = fnNow;
 		this._semanticOperationRegistry = semanticOperationRegistry;
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._isPeerSourceCostsEnabled = createPeerSourceCostsGate(peerSourceCostsEnabled);
 		this._fnResolveAwardItem = fnResolveAwardItem;
+		this._isAccountEntitlementsEnabled = isAccountEntitlementsEnabled;
+		this._fnBeforeSensitiveCommit = fnBeforeSensitiveCommit;
 		this._accounts = new Map();
+		this._accountEntitlements = new Map();
 		this._identityToAccount = new Map();
 		this._externalIdentities = new Map();
 		this._sessions = new Map();
@@ -138,6 +152,89 @@ export class MemoryHubStore {
 		this._semanticOperationCommands = new Map();
 		this._transfers = new Map();
 		this._operationalRuns = [];
+		this._memoryLocks = new Map();
+	}
+
+	setAccountEntitlementsEnabled (isEnabled) {
+		this._isAccountEntitlementsEnabled = !!isEnabled;
+	}
+
+	_getActiveEntitlement ({accountId, entitlementName}) {
+		return [...this._accountEntitlements.values()].find(entitlement => (
+			entitlement.accountId === accountId
+			&& entitlement.entitlementName === entitlementName
+			&& !entitlement.revokedAt
+		)) || null;
+	}
+
+	_getActiveEntitlementNames (accountId) {
+		return ACCOUNT_ENTITLEMENT_NAMES.filter(entitlementName => this._getActiveEntitlement({accountId, entitlementName}));
+	}
+
+	_getAccountEntitlementSummary (accountId) {
+		const account = this._accounts.get(accountId);
+		if (!account || account.status === "deleted") return null;
+		return {
+			id: account.id,
+			displayName: account.displayName,
+			status: account.status,
+			entitlements: this._getActiveEntitlementNames(account.id),
+		};
+	}
+
+	_assertActiveOperator (accountId) {
+		const account = this._accounts.get(accountId);
+		if (
+			account?.status !== "active"
+			|| !this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+		) throw new HubStoreError("NOT_FOUND", `Resource was not found.`, {status: 404});
+		return account;
+	}
+
+	_assertFreshReauthentication ({accountId, sessionId}) {
+		const session = [...this._sessions.values()].find(current => (
+			current.id === sessionId
+			&& current.accountId === accountId
+			&& !current.revokedAt
+			&& new Date(current.expiresAt) > this._fnNow()
+		));
+		if (
+			!session
+			|| !session.authenticatedViaIdentityId
+			|| this._externalIdentities.get(session.authenticatedViaIdentityId)?.accountId !== accountId
+			|| !isFreshReauthentication({
+				recentReauthenticatedAt: session.recentReauthenticatedAt,
+				now: this._fnNow(),
+			})
+		) throw new HubStoreError("REAUTHENTICATION_REQUIRED", `Recent reauthentication is required.`, {status: 403});
+		return session;
+	}
+
+	async _pBeforeSensitiveCommit () {
+		await this._fnBeforeSensitiveCommit?.();
+	}
+
+	async _pWithMemoryLock ({key, fn}) {
+		const previous = this._memoryLocks.get(key) || Promise.resolve();
+		let release;
+		const gate = new Promise(resolve => { release = resolve; });
+		const tail = previous.then(() => gate);
+		this._memoryLocks.set(key, tail);
+		await previous;
+		try {
+			return await fn();
+		} finally {
+			release();
+			if (this._memoryLocks.get(key) === tail) this._memoryLocks.delete(key);
+		}
+	}
+
+	async _pWithSensitiveCommandLocks ({accountId, idempotencyKey, fn}) {
+		const {key} = this._normalizeIdempotencyKey(idempotencyKey);
+		return this._pWithMemoryLock({
+			key: `idempotency:${accountId}:${key}`,
+			fn: () => this._pWithMemoryLock({key: "operator-namespace", fn}),
+		});
 	}
 
 	_setCharacterData ({character, data}) {
@@ -344,6 +441,7 @@ export class MemoryHubStore {
 			expiresAt,
 			userAgent,
 			authenticatedViaIdentityId: resolved.identity.id,
+			recentReauthenticatedAt: resolved.account.status === "deletion_requested" ? this._fnNow() : null,
 		});
 		if (isNewAccount) {
 			this._appendAudit({
@@ -400,6 +498,63 @@ export class MemoryHubStore {
 			session,
 			membership,
 			revokedSessionIds,
+		});
+	}
+
+	async pCompleteOAuthReauthentication ({
+		identity,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		currentSessionId,
+		oauthTransactionId,
+	}) {
+		if (this._sessions.has(tokenHash)) throw new HubStoreError("SESSION_TOKEN_CONFLICT", `Session could not be created.`, {status: 409});
+		const normalizedIdentity = normalizeExternalIdentity(identity);
+		const transaction = this._oauthTransactions.get(oauthTransactionId);
+		const currentSession = [...this._sessions.values()].find(session => session.id === currentSessionId);
+		if (
+			!transaction
+			|| transaction.operation !== "reauthenticate"
+			|| transaction.provider !== normalizedIdentity.provider
+			|| !transaction.consumedAt
+			|| new Date(transaction.expiresAt) <= this._fnNow()
+			|| transaction.initiatingSessionId !== currentSessionId
+			|| !currentSession
+			|| currentSession.revokedAt
+			|| new Date(currentSession.expiresAt) <= this._fnNow()
+			|| currentSession.accountId !== transaction.initiatingAccountId
+		) throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
+		const externalIdentity = [...this._externalIdentities.values()].find(candidate => (
+			candidate.provider === normalizedIdentity.provider
+			&& candidate.subject === normalizedIdentity.subject
+		));
+		if (!externalIdentity || externalIdentity.accountId !== transaction.initiatingAccountId) {
+			throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
+		}
+		const account = this._accounts.get(transaction.initiatingAccountId);
+		if (!account || !["active", "deletion_requested"].includes(account.status)) {
+			throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
+		}
+		const now = this._fnNow();
+		const session = await this.pCreateSession({
+			accountId: account.id,
+			tokenHash,
+			expiresAt,
+			userAgent,
+			authenticatedViaIdentityId: externalIdentity.id,
+			recentReauthenticatedAt: now,
+		});
+		externalIdentity.handle = normalizedIdentity.handle;
+		externalIdentity.displayName = normalizedIdentity.displayName;
+		externalIdentity.updatedAt = now.toISOString();
+		externalIdentity.lastAuthenticatedAt = now.toISOString();
+		await this.pRevokeSession({sessionId: currentSessionId});
+		return copy({
+			account,
+			identity: externalIdentity,
+			session,
+			revokedSessionIds: [currentSessionId],
 		});
 	}
 
@@ -469,7 +624,12 @@ export class MemoryHubStore {
 		if (hasBinding) {
 			const session = [...this._sessions.values()]
 				.find(it => it.id === initiatingSessionId && it.accountId === initiatingAccountId);
-			if (!session) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
+			if (
+				!session
+				|| session.revokedAt
+				|| new Date(session.expiresAt) <= now
+				|| this._accounts.get(initiatingAccountId)?.status !== "active"
+			) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 		}
 		const transaction = {
 			id,
@@ -616,7 +776,7 @@ export class MemoryHubStore {
 			|| new Date(transaction.expiresAt) <= this._fnNow()
 			|| !isHashMatch
 			|| transaction.provider !== provider
-			|| transaction.operation !== operation
+			|| (operation != null && transaction.operation !== operation)
 			|| transaction.redirectUri !== redirectUri
 		) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 		const consumed = copy(transaction);
@@ -784,9 +944,300 @@ export class MemoryHubStore {
 		return this._setReceipt({accountId, idempotencyKey, response: {ok: true, revokedSessionIds}});
 	}
 
+	async pGetOwnEntitlements ({accountId}) {
+		if (this._accounts.get(accountId)?.status !== "active") return [];
+		return this._getActiveEntitlementNames(accountId);
+	}
+
+	async pHasActivePlatformOperator () {
+		return [...this._accounts.values()].some(account => (
+			account.status === "active"
+			&& this._getActiveEntitlement({accountId: account.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+		));
+	}
+
+	async pReconcileConfiguredOperatorEntitlements ({accountIds, onWarning = null}) {
+		return this._pWithMemoryLock({
+			key: "operator-namespace",
+			fn: () => this._pReconcileConfiguredOperatorEntitlements({accountIds, onWarning}),
+		});
+	}
+
+	async _pReconcileConfiguredOperatorEntitlements ({accountIds, onWarning = null}) {
+		const warnings = [];
+		const granted = [];
+		for (const accountId of accountIds) {
+			const account = this._accounts.get(accountId);
+			if (!account || account.status !== "active") {
+				const warning = {code: "CONFIGURED_OPERATOR_ACCOUNT_NOT_FOUND", accountId};
+				warnings.push(warning);
+				onWarning?.(warning);
+				continue;
+			}
+			for (const entitlementName of [CAMPAIGN_CREATE_ENTITLEMENT, PLATFORM_OPERATE_ENTITLEMENT]) {
+				if (this._getActiveEntitlement({accountId, entitlementName})) continue;
+				const now = this._fnNow().toISOString();
+				const entitlement = {
+					id: crypto.randomUUID(),
+					accountId,
+					entitlementName,
+					source: "configured_operator",
+					grantedByAccountId: null,
+					revokedByAccountId: null,
+					grantedAt: now,
+					revokedAt: null,
+					createdAt: now,
+					updatedAt: now,
+				};
+				this._accountEntitlements.set(entitlement.id, entitlement);
+				this._appendAudit({
+					actorAccountId: null,
+					action: "account.entitlement.granted",
+					targetType: "account_entitlement",
+					targetId: entitlement.id,
+					details: {targetAccountId: accountId, entitlementName, source: entitlement.source},
+				});
+				granted.push(copy(entitlement));
+			}
+		}
+		return {granted, warnings};
+	}
+
+	async pListAccountEntitlements ({accountId, sessionId, targetAccountId}) {
+		return this._pWithMemoryLock({
+			key: "operator-namespace",
+			fn: () => this._pListAccountEntitlements({accountId, sessionId, targetAccountId}),
+		});
+	}
+
+	async _pListAccountEntitlements ({accountId, sessionId, targetAccountId}) {
+		this._assertActiveOperator(accountId);
+		this._assertFreshReauthentication({accountId, sessionId});
+		const target = this._accounts.get(targetAccountId);
+		if (!target || target.status === "deleted") {
+			throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		}
+
+		await this._pBeforeSensitiveCommit();
+		this._assertActiveOperator(accountId);
+		this._assertFreshReauthentication({accountId, sessionId});
+		return {
+			account: {id: target.id, displayName: target.displayName, status: target.status},
+			entitlements: [...this._accountEntitlements.values()]
+				.filter(entitlement => entitlement.accountId === targetAccountId)
+				.sort((a, b) => `${a.grantedAt}`.localeCompare(`${b.grantedAt}`) || a.id.localeCompare(b.id))
+				.map(copy),
+		};
+	}
+
+	async pListOperatorAccounts ({accountId, sessionId}) {
+		return this._pWithMemoryLock({
+			key: "operator-namespace",
+			fn: () => this._pListOperatorAccounts({accountId, sessionId}),
+		});
+	}
+
+	async _pListOperatorAccounts ({accountId, sessionId}) {
+		this._assertActiveOperator(accountId);
+		this._assertFreshReauthentication({accountId, sessionId});
+		await this._pBeforeSensitiveCommit();
+		this._assertActiveOperator(accountId);
+		this._assertFreshReauthentication({accountId, sessionId});
+		return [...this._accounts.values()]
+			.filter(account => account.status !== "deleted")
+			.sort((a, b) => `${a.displayName}`.localeCompare(`${b.displayName}`) || a.id.localeCompare(b.id))
+			.map(account => this._getAccountEntitlementSummary(account.id));
+	}
+
+	async pGrantAccountEntitlement ({
+		accountId,
+		sessionId,
+		targetAccountId,
+		entitlementName,
+		idempotencyKey,
+	}) {
+		return this._pWithSensitiveCommandLocks({
+			accountId,
+			idempotencyKey,
+			fn: () => this._pGrantAccountEntitlement({
+				accountId,
+				sessionId,
+				targetAccountId,
+				entitlementName,
+				idempotencyKey,
+			}),
+		});
+	}
+
+	async _pGrantAccountEntitlement ({
+		accountId,
+		sessionId,
+		targetAccountId,
+		entitlementName,
+		idempotencyKey,
+	}) {
+		this._assertActiveOperator(accountId);
+		this._assertFreshReauthentication({accountId, sessionId});
+		if (!isAccountEntitlementName(entitlementName)) {
+			throw new HubStoreError("INVALID_ENTITLEMENT", `Account entitlement is invalid.`, {status: 400});
+		}
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		const target = this._accounts.get(targetAccountId);
+		if (!target || target.status === "deleted") {
+			throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		}
+		if (prior) {
+			return prior;
+		}
+		await this._pBeforeSensitiveCommit();
+		const concurrentPrior = this._getReceipt({accountId, idempotencyKey});
+		if (concurrentPrior) return concurrentPrior;
+		this._assertActiveOperator(accountId);
+		this._assertFreshReauthentication({accountId, sessionId});
+		let entitlement = this._getActiveEntitlement({accountId: targetAccountId, entitlementName});
+		let changed = false;
+		if (!entitlement) {
+			const now = this._fnNow().toISOString();
+			entitlement = {
+				id: crypto.randomUUID(),
+				accountId: targetAccountId,
+				entitlementName,
+				source: "operator",
+				grantedByAccountId: accountId,
+				revokedByAccountId: null,
+				grantedAt: now,
+				revokedAt: null,
+				createdAt: now,
+				updatedAt: now,
+			};
+			this._accountEntitlements.set(entitlement.id, entitlement);
+			this._appendAudit({
+				actorAccountId: accountId,
+				action: "account.entitlement.granted",
+				targetType: "account_entitlement",
+				targetId: entitlement.id,
+				details: {targetAccountId, entitlementName, source: entitlement.source},
+			});
+			changed = true;
+		}
+		return this._setReceipt({
+			accountId,
+			idempotencyKey,
+			response: {
+				account: this._getAccountEntitlementSummary(targetAccountId),
+				changed,
+			},
+		});
+	}
+
+	async pRevokeAccountEntitlement ({
+		accountId,
+		sessionId,
+		targetAccountId,
+		entitlementName,
+		idempotencyKey,
+	}) {
+		return this._pWithSensitiveCommandLocks({
+			accountId,
+			idempotencyKey,
+			fn: () => this._pRevokeAccountEntitlement({
+				accountId,
+				sessionId,
+				targetAccountId,
+				entitlementName,
+				idempotencyKey,
+			}),
+		});
+	}
+
+	async _pRevokeAccountEntitlement ({
+		accountId,
+		sessionId,
+		targetAccountId,
+		entitlementName,
+		idempotencyKey,
+	}) {
+		this._assertActiveOperator(accountId);
+		this._assertFreshReauthentication({accountId, sessionId});
+		if (!isAccountEntitlementName(entitlementName)) {
+			throw new HubStoreError("INVALID_ENTITLEMENT", `Account entitlement is invalid.`, {status: 400});
+		}
+		const prior = this._getReceipt({accountId, idempotencyKey});
+		const target = this._accounts.get(targetAccountId);
+		if (!target || target.status === "deleted") {
+			throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		}
+		if (prior) {
+			return prior;
+		}
+		const entitlement = this._getActiveEntitlement({accountId: targetAccountId, entitlementName});
+		if (
+			entitlement
+			&& entitlementName === PLATFORM_OPERATE_ENTITLEMENT
+			&& target.status === "active"
+			&& [...this._accounts.values()].filter(account => (
+				account.status === "active"
+				&& this._getActiveEntitlement({accountId: account.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+			)).length <= 1
+		) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot be removed.`, {status: 409});
+		await this._pBeforeSensitiveCommit();
+		const concurrentPrior = this._getReceipt({accountId, idempotencyKey});
+		if (concurrentPrior) return concurrentPrior;
+		this._assertActiveOperator(accountId);
+		this._assertFreshReauthentication({accountId, sessionId});
+		let changed = false;
+		if (entitlement && !entitlement.revokedAt) {
+			if (
+				entitlementName === PLATFORM_OPERATE_ENTITLEMENT
+				&& target.status === "active"
+				&& [...this._accounts.values()].filter(account => (
+					account.status === "active"
+						&& this._getActiveEntitlement({accountId: account.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+				)).length <= 1
+			) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot be removed.`, {status: 409});
+			const now = this._fnNow().toISOString();
+			entitlement.revokedAt = now;
+			entitlement.revokedByAccountId = accountId;
+			entitlement.updatedAt = now;
+			this._appendAudit({
+				actorAccountId: accountId,
+				action: "account.entitlement.revoked",
+				targetType: "account_entitlement",
+				targetId: entitlement.id,
+				details: {targetAccountId, entitlementName},
+			});
+			changed = true;
+		}
+		return this._setReceipt({
+			accountId,
+			idempotencyKey,
+			response: {
+				account: this._getAccountEntitlementSummary(targetAccountId),
+				changed,
+			},
+		});
+	}
+
 	async pCreateCampaign ({accountId, name, idempotencyKey}) {
+		if (!this._isAccountEntitlementsEnabled) {
+			return this._pCreateCampaign({accountId, name, idempotencyKey});
+		}
+		return this._pWithSensitiveCommandLocks({
+			accountId,
+			idempotencyKey,
+			fn: () => this._pCreateCampaign({accountId, name, idempotencyKey}),
+		});
+	}
+
+	async _pCreateCampaign ({accountId, name, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
 		if (prior) return prior;
+		if (
+			this._isAccountEntitlementsEnabled
+			&& !this._getActiveEntitlement({accountId, entitlementName: CAMPAIGN_CREATE_ENTITLEMENT})
+		) {
+			throw new HubStoreError("CAMPAIGN_CREATE_NOT_ENTITLED", `Account cannot create campaigns.`, {status: 403});
+		}
 		const campaign = {
 			id: crypto.randomUUID(),
 			ownerAccountId: accountId,
@@ -4166,17 +4617,54 @@ export class MemoryHubStore {
 		};
 	}
 
-	async pRequestAccountDeletion ({accountId, idempotencyKey, graceMs = 7 * 24 * 60 * 60 * 1000}) {
+	async pRequestAccountDeletion ({accountId, sessionId = null, idempotencyKey, graceMs = 7 * 24 * 60 * 60 * 1000}) {
+		if (!this._isAccountEntitlementsEnabled) {
+			return this._pRequestAccountDeletion({accountId, sessionId, idempotencyKey, graceMs});
+		}
+		return this._pWithSensitiveCommandLocks({
+			accountId,
+			idempotencyKey,
+			fn: () => this._pRequestAccountDeletion({accountId, sessionId, idempotencyKey, graceMs}),
+		});
+	}
+
+	async _pRequestAccountDeletion ({accountId, sessionId = null, idempotencyKey, graceMs = 7 * 24 * 60 * 60 * 1000}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
 		const account = this._accounts.get(accountId);
 		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		if (prior) {
+			if (this._isAccountEntitlementsEnabled) this._assertFreshReauthentication({accountId, sessionId});
+			return prior;
+		}
+		if (this._isAccountEntitlementsEnabled) {
+			if (
+				this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+				&& [...this._accounts.values()].filter(current => (
+					current.status === "active"
+					&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+				)).length <= 1
+			) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
+			this._assertFreshReauthentication({accountId, sessionId});
+		}
 		const ownedCampaigns = [...this._campaigns.values()].filter(campaign => campaign.ownerAccountId === accountId && campaign.status === "active");
 		if (ownedCampaigns.length) {
 			throw new HubStoreError("ACCOUNT_OWNS_CAMPAIGN", `Transfer ownership or archive campaigns before deleting the account.`, {
 				status: 409,
 				details: {campaignIds: ownedCampaigns.map(campaign => campaign.id)},
 			});
+		}
+		if (this._isAccountEntitlementsEnabled) {
+			await this._pBeforeSensitiveCommit();
+			const concurrentPrior = this._getReceipt({accountId, idempotencyKey});
+			if (concurrentPrior) return concurrentPrior;
+			if (
+				this._getActiveEntitlement({accountId, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+				&& [...this._accounts.values()].filter(current => (
+					current.status === "active"
+					&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+				)).length <= 1
+			) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
+			this._assertFreshReauthentication({accountId, sessionId});
 		}
 		if (account.status !== "deletion_requested") {
 			const requestedAt = this._fnNow();
@@ -4212,12 +4700,31 @@ export class MemoryHubStore {
 		return this._setReceipt({accountId, idempotencyKey, response});
 	}
 
-	async pCancelAccountDeletion ({accountId, idempotencyKey}) {
+	async pCancelAccountDeletion ({accountId, sessionId = null, idempotencyKey}) {
+		if (!this._isAccountEntitlementsEnabled) {
+			return this._pCancelAccountDeletion({accountId, sessionId, idempotencyKey});
+		}
+		return this._pWithSensitiveCommandLocks({
+			accountId,
+			idempotencyKey,
+			fn: () => this._pCancelAccountDeletion({accountId, sessionId, idempotencyKey}),
+		});
+	}
+
+	async _pCancelAccountDeletion ({accountId, sessionId = null, idempotencyKey}) {
 		const prior = this._getReceipt({accountId, idempotencyKey});
-		if (prior) return prior;
 		const account = this._accounts.get(accountId);
 		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		if (prior) {
+			if (this._isAccountEntitlementsEnabled) this._assertFreshReauthentication({accountId, sessionId});
+			return prior;
+		}
 		if (account.status !== "deletion_requested") throw new HubStoreError("ACCOUNT_DELETION_NOT_PENDING", `Account deletion is not pending.`, {status: 409});
+		if (this._isAccountEntitlementsEnabled) this._assertFreshReauthentication({accountId, sessionId});
+		await this._pBeforeSensitiveCommit();
+		const concurrentPrior = this._getReceipt({accountId, idempotencyKey});
+		if (concurrentPrior) return concurrentPrior;
+		if (this._isAccountEntitlementsEnabled) this._assertFreshReauthentication({accountId, sessionId});
 		account.status = "active";
 		account.deletionRequestedAt = null;
 		account.purgeAfter = null;
@@ -4249,12 +4756,31 @@ export class MemoryHubStore {
 	}
 
 	async pPurgeDueAccounts ({limit = 100} = {}) {
+		if (!this._isAccountEntitlementsEnabled) return this._pPurgeDueAccounts({limit});
+		return this._pWithMemoryLock({
+			key: "operator-namespace",
+			fn: () => this._pPurgeDueAccounts({limit}),
+		});
+	}
+
+	async _pPurgeDueAccounts ({limit = 100} = {}) {
 		const due = [...this._accounts.values()]
 			.filter(account => account.status === "deletion_requested" && new Date(account.purgeAfter) <= this._fnNow())
 			.slice(0, limit);
 		const purgedAccountIds = [];
 		const blockedAccountIds = [];
 		for (const account of due) {
+			if (
+				this._isAccountEntitlementsEnabled
+				&& this._getActiveEntitlement({accountId: account.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+				&& [...this._accounts.values()].filter(current => (
+					current.status === "active"
+					&& this._getActiveEntitlement({accountId: current.id, entitlementName: PLATFORM_OPERATE_ENTITLEMENT})
+				)).length < 1
+			) {
+				blockedAccountIds.push(account.id);
+				continue;
+			}
 			if ([...this._campaigns.values()].some(campaign => campaign.ownerAccountId === account.id && campaign.status !== "archived")) {
 				blockedAccountIds.push(account.id);
 				continue;
@@ -4303,7 +4829,18 @@ export class MemoryHubStore {
 			for (const [identity, id] of this._identityToAccount) if (id === account.id) this._identityToAccount.delete(identity);
 			for (const [id, identity] of this._externalIdentities) if (identity.accountId === account.id) this._externalIdentities.delete(id);
 			for (const [id, transaction] of this._oauthTransactions) if (transaction.initiatingAccountId === account.id) this._oauthTransactions.delete(id);
-			for (const [key] of this._commandReceipts) if (key.startsWith(`${account.id}::`)) this._commandReceipts.delete(key);
+			for (const [key, receipt] of this._commandReceipts) {
+				if (key.startsWith(`${account.id}::`) || receipt.response?.account?.id === account.id) {
+					this._commandReceipts.delete(key);
+				}
+			}
+			for (const [id, entitlement] of this._accountEntitlements) {
+				if (entitlement.accountId === account.id) this._accountEntitlements.delete(id);
+				else {
+					if (entitlement.grantedByAccountId === account.id) entitlement.grantedByAccountId = null;
+					if (entitlement.revokedByAccountId === account.id) entitlement.revokedByAccountId = null;
+				}
+			}
 			for (const [key, membership] of this._memberships) if (membership.accountId === account.id) this._memberships.delete(key);
 			for (const action of this._pendingActions.values()) if (action.actorAccountId === account.id) action.actorAccountId = null;
 			for (const transfer of this._transfers.values()) if (transfer.actorAccountId === account.id) transfer.actorAccountId = null;
@@ -4359,11 +4896,24 @@ export class MemoryHubStore {
 		}
 	}
 
-	async pExportAccountData ({accountId}) {
+	async pExportAccountData ({accountId, sessionId = null}) {
 		const account = this._accounts.get(accountId);
 		if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		if (this._isAccountEntitlementsEnabled && account.status === "deletion_requested") {
+			this._assertFreshReauthentication({accountId, sessionId});
+		}
 		const memberships = [...this._memberships.values()].filter(it => it.accountId === accountId);
 		const campaignIds = new Set(memberships.map(it => it.campaignId));
+		const entitlementAudits = this._audit.filter(audit => (
+			`${audit.action}`.startsWith("account.entitlement.")
+			&& audit.details?.targetAccountId === accountId
+		));
+		const audits = [...new Map(
+			[
+				...this._audit.filter(it => it.actorAccountId === accountId),
+				...entitlementAudits,
+			].map(audit => [audit.id, audit]),
+		).values()].map(audit => redactEntitlementAuditForAccount({audit: copy(audit), accountId}));
 		return {
 			exportedAt: this._fnNow().toISOString(),
 			account: copy(account),
@@ -4374,7 +4924,10 @@ export class MemoryHubStore {
 			memberships: copy(memberships),
 			campaigns: [...campaignIds].map(id => copy(this._campaigns.get(id))),
 			characters: [...this._characters.values()].filter(it => it.ownerAccountId === accountId).map(copy),
-			auditEntries: this._audit.filter(it => it.actorAccountId === accountId).map(copy),
+			entitlements: [...this._accountEntitlements.values()]
+				.filter(entitlement => entitlement.accountId === accountId)
+				.map(entitlement => redactEntitlementForAccount({entitlement: copy(entitlement)})),
+			auditEntries: audits,
 		};
 	}
 

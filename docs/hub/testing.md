@@ -20,6 +20,7 @@
 | Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
 | Invite admission | `HubInviteAdmission.test.js`, `HubMultiProviderIdentityPostgres.test.js`, `HubAuthServer.test.js` | Existing sign-in, unknown denial, opaque context binding, atomic first access, existing-account join, replay/expiry/revoke/race/status/privacy behavior, dedicated-secret token retry, lock ordering, and rollback |
+| Account entitlements/reauthentication | entitlement and multi-provider suites | Provider/account/session binding, five-minute commit-time freshness, creator enforcement, operator hiding/idempotency/concurrency, last-operator lifecycle protection, migration backfill/reconciliation, export redaction, and memory/PostgreSQL parity |
 | Real-stack browser | `test/e2e/hub/`, `test/e2e/pages/HubCampaignPage.ts` | Multi-user lifecycle, Character Sheet copy/attach/clone/move, real Cure Wounds reject/cancel/accept/self-target effects, leases, reconnect, keyboard focus, phone reflow, labels/touch targets, and six-member/replay/quota/contention budgets |
 | CI/supply chain | `.github/workflows/hub.yml`, `HubCiContract.test.js` | Pinned actions, deterministic gates, SBOM/image/provenance and test-auth isolation |
 | Content policy | `HubCampaignContentGating.test.js`, `HubRulesPolicyPostgres.test.js`, Character Sheet content/teardown tests | Canonical aliases, campaign brew, editions/species variants, grandfathering, imports/direct writes/grants/awards/transfers, stale pins, rollback, privacy, and memory/PostgreSQL parity |
@@ -63,6 +64,7 @@ npm audit --omit=dev --audit-level=high
 
 # Tracked-file secret scan, rollout/provider probes, and disposable HTTPS/PostgreSQL E2E
 npm run hub:check-secrets
+npm run hub:check-account-entitlements
 # Against a protected environment with exact campaign IDs configured:
 # npm run hub:check-peer-source-cost-rollout
 # Against isolated staging with both providers configured:
@@ -95,6 +97,11 @@ max-use races, duplicate raw-token hash conflicts, provider failure after OAuth-
 replay, two-tab cookie/state mismatch, creator purge/revoke interleaving, deletion/suspension status, safe
 return paths, final-cookie-jar multi-tab correlation, abandoned/consumed opaque retry replacement, and no raw invite/context material
 in receipts, logs, URLs, or backup paths.
+Entitlement tests additionally assert zero campaign/membership/audit/event/outbox/receipt writes on denied
+creation, revoke-vs-create serialization, concurrent mutual operator revocation, stale-at-commit rejection,
+add-only UUID reconciliation, actor-FK-safe purge, and no campaign event for account administration. A mutation
+probe must remove the transactional freshness or last-operator guard and demonstrate a targeted failure before
+the unmodified gate is trusted.
 Realtime tests cover 26 exact continuation pages on one connection, one-time connection-scoped rate-limit
 exemptions, forged/replayed marker limiting, reconnect preservation, exact-once accumulation, and explicit
 campaign-client close/reset. They also interleave live delivery with a periodic multi-page replay and prove

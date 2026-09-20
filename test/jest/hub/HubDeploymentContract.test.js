@@ -180,6 +180,8 @@ describe("Hub portable deployment contract", () => {
 		expect(compose).toContain("HUB_INVITE_TOKEN_SECRET: $" + "{HUB_INVITE_TOKEN_SECRET:?Set HUB_INVITE_TOKEN_SECRET}");
 		expect(compose).toContain("HUB_INVITE_TOKEN_PREVIOUS_SECRETS: $" + "{HUB_INVITE_TOKEN_PREVIOUS_SECRETS:-}");
 		expect(compose).toContain("HUB_INVITE_ACCOUNT_ADMISSION_ENABLED: $" + "{HUB_INVITE_ACCOUNT_ADMISSION_ENABLED:-false}");
+		expect(compose).toContain("HUB_ACCOUNT_ENTITLEMENTS_ENABLED: $" + "{HUB_ACCOUNT_ENTITLEMENTS_ENABLED:-false}");
+		expect(compose).toContain("HUB_OPERATOR_ACCOUNT_IDS: $" + "{HUB_OPERATOR_ACCOUNT_IDS:-}");
 		expect(compose).toContain("HUB_ALLOWED_OAUTH_SUBJECTS: $" + "{HUB_ALLOWED_OAUTH_SUBJECTS:-}");
 		expect(compose).toContain("subnet: $" + "{HUB_PRIVATE_SUBNET:-172.30.0.0/24}");
 		expect(compose).toContain("$" + "{HUB_EDGE_PORT:-8443}:8443");

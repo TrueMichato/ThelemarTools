@@ -11,7 +11,7 @@ visibility is not authorization.
 |---|---:|---:|---:|---:|
 | Read campaign metadata/members/context | Yes | Yes | Yes | Yes |
 | First Hub account creation | Valid campaign invite only | Valid campaign invite only | Valid campaign invite only | Valid campaign invite only |
-| Create campaign | Yes (becomes owner/DM) | N/A | Yes (becomes owner/DM) | Yes (becomes owner/DM) |
+| Create campaign | Active `campaign:create` only | Active `campaign:create` only | Active `campaign:create` only | Active `campaign:create` only |
 | Archive campaign | Owner only | No | No | No |
 | Transfer campaign ownership | Owner only | No | No | No |
 | Create invite | Yes | Yes | No | No |
@@ -50,6 +50,14 @@ visibility is not authorization.
 | Read `dm_only` event | Yes | Yes | No | No |
 | Read `actor_and_dm` event | Yes | Yes | If actor | No |
 | Read `explicit_accounts` event | Yes | Yes | If listed | If listed |
+
+Account-level operator permissions are independent of campaign role:
+
+| Operation | `platform:operate` + fresh reauthentication | Other account |
+|---|---:|---:|
+| List account entitlement summaries | Yes | Hidden 404 |
+| Grant/revoke `campaign:create` | Yes | Hidden 404 |
+| Grant/revoke `platform:operate` | Yes, except last-operator revoke | Hidden 404 |
 
 Every HTTP read/write and WebSocket subscription also checks:
 
@@ -90,3 +98,5 @@ account's campaign sockets immediately after the authoritative transaction commi
   their operation-specific owner/role checks.
 - Account deletion-pending sessions may read session/deletion state, export, cancel deletion, or logout;
   ordinary campaign routes return `ACCOUNT_DELETION_PENDING`.
+- Account deletion-pending sessions cannot use operator routes. The last active platform operator cannot request
+  deletion. Purging a non-last operator is allowed and nulls retained entitlement-audit actor references.

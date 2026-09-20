@@ -1,6 +1,6 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through invite-admission migration 0008
+> **Status:** Implemented through account-entitlement migration 0009
 > **Last verified:** 2026-09-20
 > **Owner:** Campaign Hub maintainers
 
@@ -100,6 +100,8 @@ Current migrations:
   `failed` state, and source/target revision observations for protocol-4 operation legs.
 - 0008 short-lived invite admission contexts, hash-only browser/retry correlation, their one-to-one OAuth
   transaction binding, and bounded terminal account/session/membership outcome evidence.
+- 0009 provider-neutral account entitlements, one-time current-owner creator backfill, nullable actor
+  provenance, active-row indexes, and deferred last-operator protection.
 
 Migration 0007 is additive and keeps protocol-3 cost-free rows readable while new source-cost rows require a
 protocol-4 application. Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old
@@ -107,9 +109,11 @@ application reads intact.
 Migration 0008 is additive and ignored by the previous application. Enabling invite-based creation is a separate
 application/data compatibility boundary: keep it disabled until the stacked creator-entitlement layer and
 rollback procedure are reviewed.
+Migration 0009 is additive and previous-application-compatible: older code ignores the new table. Application
+rollback leaves it in place and turns entitlement enforcement off; there is no database down migration.
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
-Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0008, grants the
-runtime role, boots the production image against required version 0008, and runs semantic role/replay/
+Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0009, grants the
+runtime role, boots the production image against required version 0009, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
 ## Readiness

@@ -441,6 +441,33 @@ describe("hub API client", () => {
 		expect(calls.find(call => call.path === "/api/account/deletion/request").opts.headers["idempotency-key"]).toBe("delete");
 	});
 
+	it("uses provider reauthentication and operator entitlement routes", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				if (path === "/api/operator/accounts") return getResponse({body: {accounts: []}});
+				return getResponse({body: {authorizationUrl: "https://provider.example/authorize"}});
+			},
+		});
+		await client.pGetSession();
+		await client.pStartReauthentication({provider: "github"});
+		await client.pListOperatorAccounts();
+		await client.pGrantAccountEntitlement({accountId: "account", entitlement: "campaign:create", idempotencyKey: "grant"});
+		await client.pRevokeAccountEntitlement({accountId: "account", entitlement: "campaign:create", idempotencyKey: "revoke"});
+		expect(calls.map(call => [call.path, call.opts.method || "GET"])).toEqual([
+			["/api/session", "GET"],
+			["/api/account/reauthentication/github", "POST"],
+			["/api/operator/accounts", "GET"],
+			["/api/operator/accounts/account/entitlements/campaign%3Acreate/grant", "POST"],
+			["/api/operator/accounts/account/entitlements/campaign%3Acreate/revoke", "POST"],
+		]);
+		expect(calls[1].opts.body).toBe(JSON.stringify({returnTo: "/hub.html"}));
+		expect(calls[3].opts.headers["idempotency-key"]).toBe("grant");
+		expect(calls[4].opts.headers["idempotency-key"]).toBe("revoke");
+	});
+
 	it("uses compact compatibility and current-session lease release routes", async () => {
 		const calls = [];
 		const client = new HubApiClient({

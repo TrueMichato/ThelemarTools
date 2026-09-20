@@ -20,6 +20,9 @@ a public third-party API. Schemas in `server/src/app.js` are authoritative if th
 - Account authority is only `(provider, immutable subject)`; email and mutable profile fields never select or
   link an account.
 - `GET /api/session` is the bootstrap call. Signed-in responses include the CSRF token.
+- Signed-in session responses include the available provider slugs already linked to that account for
+  reauthentication. When `account.entitlements.v1` is enabled, they also include active account entitlements.
+  Provider identity metadata is never entitlement authority.
 - Private reads require an active session. Campaign reads additionally require active membership.
 
 ### Mutation headers
@@ -76,11 +79,20 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `GET /api/account/deletion` | Authenticated, including deletion grace | none | Current deletion status/timestamps |
 | `POST /api/account/deletion/request` | Authenticated mutation | `{confirmation:"DELETE"}` | Blocks active campaign owners; schedules seven-day purge, revokes sessions/cookie |
 | `POST /api/account/deletion/cancel` | Reauthenticated deletion-grace mutation | none | Restores active account before purge begins |
+| `POST /api/account/reauthentication/:provider` | Authenticated active-account mutation | `{returnTo}` | Creates a provider/account/session-bound `reauthenticate` OAuth transaction and returns its authorization URL |
+| `GET /api/operator/accounts` | Freshly reauthenticated platform operator | none | Hidden account list with active entitlements; non-operators receive route-equivalent 404 |
+| `POST /api/operator/accounts/:accountId/entitlements/:entitlement/grant` | Freshly reauthenticated platform operator mutation | no body; idempotency required | Grants `campaign:create` or `platform:operate`; already-active is a no-audit success |
+| `POST /api/operator/accounts/:accountId/entitlements/:entitlement/revoke` | Freshly reauthenticated platform operator mutation | no body; idempotency required | Revokes an active entitlement; already-revoked is a no-audit success; last operator is protected |
 
 The concrete routes are `/auth/github/*`, `/auth/discord/*`, and `/auth/google/*`; disabled or
 configuration-error providers have no routes. Google validates RS256 signature, fixed issuer/audience/`azp`,
 expiry/issued-at bounds, nonce, and `sub`. Discord validates the `/api/v10/users/@me` decimal user id. Provider
 tokens and response bodies never cross the callback adapter boundary.
+
+A reauthentication callback accepts only the provider identity already linked to the initiating account and
+the exact initiating session. Success rotates that session, closes its socket, updates the cookie/CSRF state,
+records the identity used, and starts a five-minute freshness window. A provider mismatch, another account's
+identity, stale initiating session, or expired transaction cannot freshen authority.
 
 The raw invite token is accepted only in the JSON body of `POST /api/auth/invite-contexts`. It is never accepted
 in `returnTo`, OAuth state, cookies, query strings, or callback parameters. The server permits only `/hub.html`
@@ -99,7 +111,7 @@ the same bounded invalid-admission result.
 
 | Method/path | Authorization | Input | Result |
 |---|---|---|---|
-| `POST /api/campaigns` | Authenticated mutation, 10/min | `{name}` 1-120 chars | 201 campaign + owner DM membership |
+| `POST /api/campaigns` | Authenticated mutation, 10/min; active `campaign:create` when entitlement enforcement is enabled | `{name}` 1-120 chars | 201 campaign + owner DM membership, or `CAMPAIGN_CREATE_NOT_ENTITLED` with zero writes |
 | `GET /api/campaigns` | Authenticated | none | Active memberships' non-deleting campaigns |
 | `GET /api/campaigns/:campaignId` | Active member | none | Campaign with caller membership role/id |
 | `GET /api/campaigns/:campaignId/members` | Active member | none | Active member summaries |

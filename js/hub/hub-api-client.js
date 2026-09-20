@@ -385,6 +385,34 @@ export class HubApiClient {
 		});
 	}
 
+	async pStartReauthentication ({provider, returnTo = "/hub.html"}) {
+		return this._pRequest(`/api/account/reauthentication/${encodeURIComponent(provider)}`, {
+			method: "POST",
+			body: {returnTo},
+			isMutation: true,
+		});
+	}
+
+	async pListOperatorAccounts () {
+		return (await this._pRequest("/api/operator/accounts")).accounts;
+	}
+
+	async pGrantAccountEntitlement ({accountId, entitlement, idempotencyKey}) {
+		return this._pRequest(`/api/operator/accounts/${encodeURIComponent(accountId)}/entitlements/${encodeURIComponent(entitlement)}/grant`, {
+			method: "POST",
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pRevokeAccountEntitlement ({accountId, entitlement, idempotencyKey}) {
+		return this._pRequest(`/api/operator/accounts/${encodeURIComponent(accountId)}/entitlements/${encodeURIComponent(entitlement)}/revoke`, {
+			method: "POST",
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
 	async pGetCampaign ({campaignId, signal = null}) {
 		return (await this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}`, {signal})).campaign;
 	}

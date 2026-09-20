@@ -10,8 +10,8 @@ describe("Hub CI and real-stack test contract", () => {
 	const testDockerfile = read("server/test.Dockerfile");
 	const testServer = read("test/e2e/hub/test-server.mjs");
 	const composeOverride = read("compose.hub.test.yml");
-	const provenanceWriter = read("server/scripts/write-ci-provenance.mjs");
 	const e2eRunner = read("server/scripts/run-hub-e2e.mjs");
+	const provenanceWriter = read("server/scripts/write-ci-provenance.mjs");
 	const playwrightConfig = read("playwright.hub.config.ts");
 	const secretScanner = read("server/scripts/check-secrets.mjs");
 
@@ -72,7 +72,7 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(provenanceWriter).not.toMatch(/protocol: "\d+"/);
 		expect(provenanceWriter).not.toMatch(/migration: "\d+"/);
 		expect(HUB_PROTOCOL_VERSION).toBe("5");
-		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0008");
+		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0009");
 	});
 
 	it("isolates every E2E Compose run and records success evidence", () => {
@@ -117,5 +117,9 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(testServer).not.toMatch(/createSemanticOperationRegistry\(\{\s*templates:/);
 		expect(composeOverride).toContain(`NODE_ENV: test`);
 		expect(composeOverride).toContain(`HUB_TEST_AUTH_ENABLED: "true"`);
+	});
+
+	it("runs account-entitlement PostgreSQL parity before browser journeys", () => {
+		expect(e2eRunner).toContain("HubAccountEntitlementsPostgres.test.js");
 	});
 });

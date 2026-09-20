@@ -1,6 +1,6 @@
 # ADR 0018: Invite-gated first account access
 
-Status: Accepted for r9 foundation; account admission remains default-off until the stacked creator-entitlement layer
+Status: Accepted for r9 foundation; narrowed by ADR 0019 and still default-off until release preflight
 
 ## Context
 
@@ -14,10 +14,10 @@ linking, PKCE/nonce, sessions, and future link/unlink controls. This decision su
 campaign invites never bypass the provider-subject allowlist. Existing identities are already Hub accounts and
 must continue to sign in without another invite.
 
-Campaign creation is a separate authority. It will move in the next stacked layer to a provider-neutral
-account-level `campaign:create` entitlement, backfilled for existing campaign owners and explicitly designated
-operator accounts. Grant and revoke administration must be audited and require fresh reauthentication. Provider,
-subject, email, handle, and login are never creator authority.
+Campaign creation is a separate authority. [ADR 0019](0019-provider-neutral-account-entitlements.md) moves it
+to provider-neutral account-level `campaign:create`, backfilled for existing campaign owners and explicitly
+designated operator accounts. Grant and revoke administration is audited and requires fresh reauthentication.
+Provider, subject, email, handle, login, and campaign role are never creator authority.
 
 ## Decision
 

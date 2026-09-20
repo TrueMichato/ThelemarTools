@@ -123,6 +123,31 @@ assert_no_peer_source_cost_ambient_override () {
 	fi
 }
 
+assert_no_account_entitlement_ambient_override () {
+	local name
+	for name in \
+		HUB_ACCOUNT_ENTITLEMENTS_ENABLED \
+		HUB_INVITE_ACCOUNT_ADMISSION_ENABLED \
+		HUB_OPERATOR_ACCOUNT_IDS; do
+		if [[ "${!name+set}" == "set" ]]; then
+			fail "${name} must be configured only in .env.hub, not the invoking environment"
+		fi
+	done
+}
+
+assert_account_entitlement_config () {
+	local entitlement_enabled invite_enabled operator_ids
+	entitlement_enabled="$(env_value HUB_ACCOUNT_ENTITLEMENTS_ENABLED 2>/dev/null || true)"
+	invite_enabled="$(env_value HUB_INVITE_ACCOUNT_ADMISSION_ENABLED 2>/dev/null || true)"
+	operator_ids="$(env_value HUB_OPERATOR_ACCOUNT_IDS 2>/dev/null || true)"
+	if [[ "$invite_enabled" == "true" && "$entitlement_enabled" != "true" ]]; then
+		fail "HUB_INVITE_ACCOUNT_ADMISSION_ENABLED requires HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true"
+	fi
+	if [[ "$entitlement_enabled" == "true" && -z "$operator_ids" ]]; then
+		fail "HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true requires HUB_OPERATOR_ACCOUNT_IDS"
+	fi
+}
+
 sha256_file () {
 	"$HELPER" sha256 --file "$1"
 }
@@ -714,6 +739,7 @@ phase_preflight () {
 	ENV_FILE="$ROOT/.env.hub"
 	[[ "$(pwd -P)" == "$ROOT" ]] || fail "run this command from the deployment repository root: ${ROOT}"
 	assert_no_peer_source_cost_ambient_override
+	assert_no_account_entitlement_ambient_override
 	if [[ "$TEST_MODE" != "1" ]]; then
 		[[ "$ROOT" == "$EXPECTED_ROOT" ]] || fail "expected deployment root ${EXPECTED_ROOT}, got ${ROOT}"
 	fi
@@ -724,6 +750,7 @@ phase_preflight () {
 	local mode
 	mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE")"
 	(( (8#$mode & 077) == 0 )) || fail ".env.hub must not be group/world accessible"
+	assert_account_entitlement_config
 
 	local required
 	for required in \
@@ -984,6 +1011,11 @@ phase_deploy () {
 		replace_record schema_mutated true
 	fi
 	compose_release run --rm --no-deps grant-roles node server/scripts/grant-roles.mjs
+	local account_entitlement_rollout="${RELEASE_DIR}/account-entitlement-rollout.txt"
+	compose_release run --rm --no-deps bff \
+		node server/scripts/check-account-entitlement-rollout.mjs >"$account_entitlement_rollout"
+	record account_entitlement_rollout_sha256 "$(sha256_file "$account_entitlement_rollout")"
+	replace_record account_entitlement_rollout passed
 	local before_cutover="${RELEASE_DIR}/migration-before-cutover.json"
 	compose_release run --rm --no-deps migrate node server/scripts/migrate.mjs status >"$before_cutover"
 	[[ "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["pending"]))' "$before_cutover")" == "0" ]] \

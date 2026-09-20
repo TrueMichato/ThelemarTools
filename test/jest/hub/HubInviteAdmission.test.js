@@ -46,6 +46,7 @@ async function pSeedInvite ({store, now, maxUses = 1, expiresAt = new Date(now.g
 		providerSubject: `owner-${crypto.randomUUID()}`,
 		displayName: "Owner",
 	});
+	await store.pReconcileConfiguredOperatorEntitlements({accountIds: [owner.id]});
 	const {campaign} = await store.pCreateCampaign({
 		accountId: owner.id,
 		name: "Invite campaign",
@@ -122,6 +123,11 @@ describe("Hub invite-gated first OAuth access", () => {
 	beforeEach(async () => {
 		now = new Date("2026-09-20T00:00:00.000Z");
 		store = new MemoryHubStore({fnNow: () => new Date(now)});
+		const operator = await store.pUpsertOAuthAccount({
+			provider: "github",
+			providerSubject: "invite-bootstrap-operator",
+			displayName: "Invite Bootstrap Operator",
+		});
 		provider = getProvider();
 		app = await createHubApp({
 			store,
@@ -131,6 +137,8 @@ describe("Hub invite-gated first OAuth access", () => {
 				cookieSecret: "c".repeat(32),
 				csrfSecret: "s".repeat(32),
 				isInviteAccountAdmissionEnabled: true,
+				isAccountEntitlementsEnabled: true,
+				operatorAccountIds: [operator.id],
 			},
 		});
 	});
@@ -202,7 +210,7 @@ describe("Hub invite-gated first OAuth access", () => {
 		});
 		expect(denied.statusCode).toBe(403);
 		expect(denied.json()).toEqual({error: "INVITE_ADMISSION_REQUIRED"});
-		expect(store._accounts.size).toBe(0);
+		expect(store._accounts.size).toBe(1);
 		expect(store._sessions.size).toBe(0);
 
 		for (const token of ["x".repeat(32), "y".repeat(32)]) {

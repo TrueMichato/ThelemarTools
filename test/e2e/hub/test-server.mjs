@@ -10,6 +10,7 @@ import {
 	getSha256,
 	isConstantTimeEqual,
 } from "../../../server/src/security.js";
+import crypto from "node:crypto";
 
 if (process.env.NODE_ENV !== "test" || process.env.HUB_TEST_AUTH_ENABLED !== "true") {
 	throw new Error(`Hub test authentication can run only with NODE_ENV=test and HUB_TEST_AUTH_ENABLED=true.`);
@@ -48,6 +49,7 @@ const store = PostgresHubStore.fromConnectionString({
 	connectionString: requireEnv("DATABASE_URL"),
 	ssl: process.env.HUB_DATABASE_SSL !== "false",
 	semanticOperationRegistry,
+	isAccountEntitlementsEnabled: true,
 	peerSourceCostsEnabled: parsePeerSourceCostsCampaignIds(
 		process.env.HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS,
 		{allowWildcard: true},
@@ -101,6 +103,17 @@ const deterministicProviders = deterministicProviderDefinitions.map(definition =
 const authProviderRegistry = new AuthProviderRegistry({
 	registrations: deterministicProviders.map(provider => ({status: "available", provider})),
 });
+const providerAccounts = new Map();
+for (const definition of deterministicProviderDefinitions) {
+	const account = await store.pUpsertOAuthAccount({
+		provider: definition.slug,
+		providerSubject: definition.subject,
+		displayName: `Hub E2E ${definition.label}`,
+	});
+	providerAccounts.set(definition.slug, account);
+}
+const operatorAccount = providerAccounts.get("github");
+await store.pReconcileConfiguredOperatorEntitlements({accountIds: [operatorAccount.id]});
 
 const app = await createHubApp({
 	store,
@@ -115,6 +128,9 @@ const app = await createHubApp({
 		trustProxy: trustedProxies.length ? trustedProxies : false,
 		metricsToken: requireEnv("HUB_METRICS_TOKEN"),
 		isCampaignRulesPolicyEnabled: true,
+		isAccountEntitlementsEnabled: true,
+		operatorAccountIds: [operatorAccount.id],
+		isOperatorReconciliationComplete: true,
 	},
 });
 
@@ -157,6 +173,7 @@ app.post("/auth/__test/session", {
 			properties: {
 				providerSubject: {type: "string", minLength: 1, maxLength: 100},
 				displayName: {type: "string", minLength: 1, maxLength: 100},
+				grantCampaignCreate: {type: "boolean"},
 			},
 		},
 	},
@@ -169,13 +186,29 @@ app.post("/auth/__test/session", {
 		providerSubject: request.body.providerSubject,
 		displayName: request.body.displayName,
 	});
+	if (request.body.grantCampaignCreate !== false) {
+		await store._pool.query(`
+			INSERT INTO hub.account_entitlements (
+				id, account_id, entitlement_name, source
+			)
+			VALUES ($1, $2, 'campaign:create', 'test_auth')
+			ON CONFLICT (account_id, entitlement_name) WHERE revoked_at IS NULL DO NOTHING
+		`, [crypto.randomUUID(), account.id]);
+	}
 	const token = getRandomToken();
+	const [identity] = await store.pListExternalIdentities({accountId: account.id});
 	const session = await store.pCreateSession({
 		accountId: account.id,
 		tokenHash: getSha256(token),
 		expiresAt: new Date(Date.now() + 60 * 60 * 1000),
 		userAgent: request.headers["user-agent"] || "Hub E2E",
+		authenticatedViaIdentityId: identity.id,
 	});
+	await store._pool.query(`
+		UPDATE hub.sessions
+		SET recent_reauthenticated_at = clock_timestamp()
+		WHERE id = $1
+	`, [session.id]);
 	reply.setCookie(SESSION_COOKIE, token, {
 		path: "/",
 		httpOnly: true,
@@ -187,6 +220,7 @@ app.post("/auth/__test/session", {
 	return {
 		signedIn: true,
 		account,
+		entitlements: await store.pGetOwnEntitlements({accountId: account.id}),
 		csrfToken: getCsrfToken({csrfSecret, sessionId: session.id}),
 	};
 });

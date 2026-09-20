@@ -39,6 +39,13 @@
 - Sessions use random tokens stored only as SHA-256 hashes; successful reauthentication revokes the prior
   browser session. New sessions record same-account external-identity provenance without changing campaign
   authorization.
+- Reauthentication starts only as an authenticated exact-Origin/CSRF/current-protocol mutation. Its OAuth
+  transaction is bound to the current account, current session, operation, and concrete provider. The callback
+  accepts only an identity already linked to that account, rotates the session, closes the old socket, records
+  the exact identity provenance, and timestamps freshness at commit.
+- `campaign:create` and `platform:operate` are internal-account entitlements. Provider subject, email, handle,
+  login, display name, and campaign membership role are never creator/operator authority. Sensitive store
+  transactions recheck the <=5 minute freshness window and last-operator invariant under locks.
 - Invite tokens are cryptographically pseudorandom under an independent versioned key ring. Derivation is bound
   to actor, campaign, idempotency key, and normalized request hash. The invite table and command receipt store no
   raw token. Exact replay tries the current key then at most three retained prior keys and returns a token only
@@ -50,6 +57,9 @@
 - Mutations require exact Origin, CSRF HMAC, protocol version, payload schema, role permission, and
   idempotency key. Reads whose response is an authorization envelope also require the protocol version, so an
   older client is told to update rather than silently misreading a newer shape.
+- Operator routes are hidden from non-operators with route-equivalent 404 responses. Entitlement changes are
+  account-audit-only and never emit campaign domain events or outbox rows. Exact idempotent replays and already
+  active/revoked no-ops do not duplicate audit.
 - Character reads cross the trust boundary through one server-owned projector
   ([ADR 0011](adr/0011-authorization-scoped-character-projections.md)). Peer values are derived into a typed,
   closed catalog rather than copied from the document, so a new document field cannot become shared by

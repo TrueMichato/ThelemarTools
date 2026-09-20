@@ -1,11 +1,16 @@
 import {jest} from "@jest/globals";
 
 import {
+	HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS,
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
 	pLoadHubCapabilityModule,
 } from "../../../js/hub/hub-capabilities.js";
 
 describe("pLoadHubCapabilityModule", () => {
+	it("exports the provider-neutral account entitlement capability", () => {
+		expect(HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS).toBe("account.entitlements.v1");
+	});
+
 	it("does not request an optional chunk when the capability is disabled", async () => {
 		const pImport = jest.fn();
 		await expect(pLoadHubCapabilityModule({

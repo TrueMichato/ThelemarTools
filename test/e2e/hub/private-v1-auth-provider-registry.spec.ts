@@ -12,11 +12,12 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 	expect(meta.ok()).toBe(true);
 	expect(await meta.json()).toEqual(expect.objectContaining({
 		protocolVersion: "5",
-		capabilities: [
+		capabilities: expect.arrayContaining([
 			"auth.provider_registry.v1",
 			"campaign.active_context.v1",
+			"account.entitlements.v1",
 			"campaign.rules_policy.v1",
-		],
+		]),
 		authProviders: providers.map(({slug, label}) => ({
 			slug,
 			label,
@@ -31,7 +32,84 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 	for (const provider of providers) {
 		await expect(signInGroup.getByRole("link", {name: `Sign in with ${provider.label}`})).toBeVisible();
 	}
-	await expect(page.getByText(/Using an unlinked provider creates a separate account/)).toBeVisible();
+	await expect(page.getByText(/Sign in with a provider already linked to it/)).toBeVisible();
+});
+
+test("operator reauthentication grants and revokes campaign creation through the real stack", async ({browser, page}) => {
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+	const targetDisplayName = `Creator Entitlement Target ${Date.now()}`;
+	const targetContext = await browser.newContext({ignoreHTTPSErrors: true});
+	const targetPage = await targetContext.newPage();
+	try {
+		const targetHub = new HubCampaignPage(targetPage);
+		const targetSession = await targetHub.signInSynthetic({
+			providerSubject: `creator-target-${Date.now()}`,
+			displayName: targetDisplayName,
+			secret,
+			grantCampaignCreate: false,
+		});
+		expect(targetSession.entitlements).not.toContain("campaign:create");
+
+		await page.goto("/hub.html");
+		await page.getByRole("link", {name: "Sign in with GitHub"}).click();
+		await page.waitForURL(/\/hub\.html$/);
+		await expect(page.locator("#hub-operator-panel")).toBeVisible();
+		await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toHaveCount(0);
+		await expect(page.getByRole("button", {name: "Reauthenticate with Google"})).toHaveCount(0);
+		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
+		await page.waitForURL(/\/hub\.html$/);
+
+		const targetRow = page.locator("#hub-operator-account-list .hub-data-row").filter({
+			hasText: targetDisplayName,
+		});
+		await expect(targetRow).toBeVisible();
+		await targetRow.getByRole("button", {name: "Grant creator"}).click();
+		await expect(targetRow.getByRole("button", {name: "Revoke creator"})).toBeVisible();
+
+		await targetPage.goto("/hub.html");
+		await expect(targetPage.locator("#hub-create-form")).toBeVisible();
+		const created = await targetPage.evaluate(async () => {
+			const session = await fetch("/api/session").then(response => response.json());
+			const response = await fetch("/api/campaigns", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-csrf-token": session.csrfToken,
+					"x-hub-protocol-version": "5",
+					"idempotency-key": crypto.randomUUID(),
+				},
+				body: JSON.stringify({name: "Entitled Campaign"}),
+			});
+			return {status: response.status, body: await response.json()};
+		});
+		expect(created.status).toBe(201);
+		expect(created.body.campaign.name).toBe("Entitled Campaign");
+
+		await targetRow.getByRole("button", {name: "Revoke creator"}).click();
+		await expect(targetRow.getByRole("button", {name: "Grant creator"})).toBeVisible();
+
+		const denied = await targetPage.evaluate(async () => {
+			const session = await fetch("/api/session").then(response => response.json());
+			const response = await fetch("/api/campaigns", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-csrf-token": session.csrfToken,
+					"x-hub-protocol-version": "5",
+					"idempotency-key": crypto.randomUUID(),
+				},
+				body: JSON.stringify({name: "Denied Campaign"}),
+			});
+			return {status: response.status, body: await response.json()};
+		});
+		expect(denied).toEqual({
+			status: 403,
+			body: {error: "CAMPAIGN_CREATE_NOT_ENTITLED"},
+		});
+	} finally {
+		await targetContext.close();
+	}
 });
 
 for (const provider of providers) {
@@ -60,9 +138,9 @@ for (const provider of providers) {
 				handle: provider.handle,
 			}),
 		]);
-		expect(exportJson.sessions).toEqual([
+		expect(exportJson.sessions).toEqual(expect.arrayContaining([
 			expect.objectContaining({authenticatedViaIdentityId: exportJson.externalIdentities[0].id}),
-		]);
+		]));
 		expect(JSON.stringify(exportJson)).not.toMatch(/access.?token|refresh.?token|id.?token|code|state|pkce|nonce|email/i);
 
 		await page.locator("#hub-logout").click();

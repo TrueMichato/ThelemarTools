@@ -9,6 +9,7 @@ const semanticOperationsSql = fs.readFileSync(new URL("../../../server/migration
 const identitySql = fs.readFileSync(new URL("../../../server/migrations/0006_multi_provider_identity.sql", import.meta.url), "utf8");
 const peerSourceCostsSql = fs.readFileSync(new URL("../../../server/migrations/0007_peer_source_costs.sql", import.meta.url), "utf8");
 const inviteAdmissionSql = fs.readFileSync(new URL("../../../server/migrations/0008_invite_gated_first_access.sql", import.meta.url), "utf8");
+const accountEntitlementsSql = fs.readFileSync(new URL("../../../server/migrations/0009_account_entitlements.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 const migrationPolicy = JSON.parse(fs.readFileSync(new URL("../../../deploy/hub/migration-policy.json", import.meta.url), "utf8"));
 const migrationVersions = fs.readdirSync(new URL("../../../server/migrations/", import.meta.url))
@@ -219,6 +220,21 @@ describe("campaign hub first migration contract", () => {
 			"oauth_transactions_invite_context_idx",
 		]) expect(inviteAdmissionSql).toContain(required);
 		expect(inviteAdmissionSql).not.toMatch(/raw_token|provider_subject|email/i);
+	});
+
+	it("adds provider-neutral account entitlements and deferred last-operator protection in migration 0009", () => {
+		for (const required of [
+			"CREATE TABLE hub.account_entitlements",
+			"'campaign:create'",
+			"'platform:operate'",
+			"ON DELETE CASCADE",
+			"ON DELETE SET NULL",
+			"account_entitlements_active_key",
+			"campaign_owner_backfill",
+			"DEFERRABLE INITIALLY DEFERRED",
+			"pg_try_advisory_xact_lock",
+			"NEW.status IS NOT DISTINCT FROM OLD.status",
+		]) expect(accountEntitlementsSql).toContain(required);
 	});
 
 	it("classifies every immutable migration for release rollback compatibility", () => {

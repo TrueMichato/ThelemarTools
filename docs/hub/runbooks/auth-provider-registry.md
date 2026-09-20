@@ -1,6 +1,6 @@
 # Runbook: authentication provider registry and rollback
 
-> **Status:** Layers 1-2 plus ADR 0018 admission foundation
+> **Status:** Layers 1-2 plus ADR 0018/0019 r9 admission and entitlement foundation
 > **Owner:** Campaign Hub operator
 > **Last reviewed:** 2026-09-17
 
@@ -99,3 +99,20 @@ Migration 0008 and the server foundation may ship with
 provider-neutral `campaign:create` entitlement layer is merged, existing campaign owners and designated
 operators are backfilled, audited fresh-reauth grant/revoke administration is available, and rollback is
 reviewed against accounts created outside the pre-r9 subject allowlist.
+
+## ADR 0019 entitlement preflight
+
+1. Apply migration 0009 and rerun role grants in an isolated environment.
+2. Configure `HUB_OPERATOR_ACCOUNT_IDS` only with reviewed internal account UUIDs. Do not use provider subjects,
+   email, login, handle, or display name.
+3. Start with `HUB_ACCOUNT_ENTITLEMENTS_ENABLED=false`. Verify add-only reconciliation grants each configured
+   account `platform:operate` and `campaign:create`, audits additions, and emits only bounded warnings for
+   unknown UUIDs. Removing configuration must not revoke.
+4. Verify campaign-owner backfill includes active, archived, and deleting campaign owners exactly once and
+   excludes role-only DM/co-DM accounts.
+5. Complete a real provider reauthentication, then grant a synthetic account `campaign:create`, create a
+   campaign as that account, revoke it, and prove a second create is denied with zero side effects.
+6. Verify two operators cannot concurrently revoke each other to zero and the last operator cannot request
+   deletion.
+7. Enable `HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true` through the normal reviewed release. Only after this succeeds
+   may invite admission be enabled separately.

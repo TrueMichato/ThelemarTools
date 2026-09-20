@@ -94,6 +94,14 @@ import {
 	normalizeItemAwardResolution,
 	resolveItemAwardAuthority,
 } from "./item-award-catalog.js";
+import {
+	ACCOUNT_ENTITLEMENT_NAMES,
+	CAMPAIGN_CREATE_ENTITLEMENT,
+	isAccountEntitlementName,
+	PLATFORM_OPERATE_ENTITLEMENT,
+	redactEntitlementAuditForAccount,
+	redactEntitlementForAccount,
+} from "./account-entitlements.js";
 
 const {Pool} = pg;
 
@@ -155,6 +163,21 @@ function getOAuthTransaction (row) {
 	};
 }
 
+function getAccountEntitlement (row) {
+	return {
+		id: row.id,
+		accountId: row.account_id,
+		entitlementName: row.entitlement_name,
+		source: row.source,
+		grantedByAccountId: row.granted_by_account_id ?? null,
+		revokedByAccountId: row.revoked_by_account_id ?? null,
+		grantedAt: row.granted_at,
+		revokedAt: row.revoked_at ?? null,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+	};
+}
+
 function getCampaign (row) {
 	return {
 		id: row.id,
@@ -208,6 +231,8 @@ export class PostgresHubStore {
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
 		fnResolveAwardItem = resolveItemAwardAuthority,
+		isAccountEntitlementsEnabled = false,
+		fnBeforeSensitiveCommit = null,
 	}) {
 		if (!pool?.query || !pool?.connect) throw new TypeError(`A pg-compatible pool is required.`);
 		this._pool = pool;
@@ -215,6 +240,8 @@ export class PostgresHubStore {
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._isPeerSourceCostsEnabled = createPeerSourceCostsGate(peerSourceCostsEnabled);
 		this._fnResolveAwardItem = fnResolveAwardItem;
+		this._isAccountEntitlementsEnabled = isAccountEntitlementsEnabled;
+		this._fnBeforeSensitiveCommit = fnBeforeSensitiveCommit;
 		this._fnOnPoolError = fnOnPoolError || (error => {
 			process.stderr.write(`Campaign Hub PostgreSQL idle client error: ${error.stack || error.message}\n`);
 		});
@@ -231,6 +258,8 @@ export class PostgresHubStore {
 		semanticOperationRegistry,
 		peerSourceCostsEnabled = false,
 		fnResolveAwardItem,
+		isAccountEntitlementsEnabled = false,
+		fnBeforeSensitiveCommit = null,
 	}) {
 		if (!connectionString) throw new TypeError(`connectionString is required.`);
 		return new this({
@@ -247,7 +276,13 @@ export class PostgresHubStore {
 			semanticOperationRegistry,
 			peerSourceCostsEnabled,
 			fnResolveAwardItem,
+			isAccountEntitlementsEnabled,
+			fnBeforeSensitiveCommit,
 		});
+	}
+
+	setAccountEntitlementsEnabled (isEnabled) {
+		this._isAccountEntitlementsEnabled = !!isEnabled;
 	}
 
 	async pClose () {
@@ -501,9 +536,9 @@ export class PostgresHubStore {
 			const inserted = await client.query(`
 				INSERT INTO hub.sessions (
 					id, account_id, token_hash, expires_at, user_agent,
-					authenticated_via_identity_id
+					authenticated_via_identity_id, recent_reauthenticated_at
 				)
-				VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6)
+				VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6, CASE WHEN $7 THEN now() ELSE NULL END)
 				RETURNING
 					id AS session_id, account_id, user_agent, created_at, last_seen_at,
 					expires_at, revoked_at, authenticated_via_identity_id,
@@ -515,6 +550,7 @@ export class PostgresHubStore {
 				expiresAt,
 				userAgent,
 				resolved.identity.id,
+				resolved.account.status === "deletion_requested",
 			]);
 			if (isNewAccount) {
 				await this._pAppendAudit({
@@ -604,6 +640,139 @@ export class PostgresHubStore {
 		}
 	}
 
+	async pCompleteOAuthReauthentication ({
+		identity,
+		tokenHash,
+		expiresAt,
+		userAgent = null,
+		currentSessionId,
+		oauthTransactionId,
+	}) {
+		const normalizedIdentity = normalizeExternalIdentity(identity);
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const transaction = await client.query(`
+				SELECT id, provider, operation, initiating_account_id, initiating_session_id, consumed_at
+				FROM hub.oauth_transactions
+				WHERE id = $1 AND expires_at > clock_timestamp()
+				FOR UPDATE
+			`, [oauthTransactionId]);
+			const binding = transaction.rows[0];
+			if (
+				!binding
+				|| binding.provider !== normalizedIdentity.provider
+				|| binding.operation !== "reauthenticate"
+				|| !binding.consumed_at
+				|| binding.initiating_session_id !== currentSessionId
+			) throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
+			await client.query(`
+				SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
+			`, [normalizedIdentity.provider, normalizedIdentity.subject]);
+			const account = await client.query(`
+				SELECT id, display_name, status, deletion_requested_at, purge_after
+				FROM hub.accounts
+				WHERE id = $1 AND status IN ('active', 'deletion_requested')
+				FOR UPDATE
+			`, [binding.initiating_account_id]);
+			const externalIdentity = await client.query(`
+				SELECT
+					id AS identity_id, account_id, provider, provider_subject,
+					provider_handle, provider_display_name,
+					created_at AS identity_created_at, updated_at AS identity_updated_at,
+					last_authenticated_at
+				FROM hub.external_identities
+				WHERE provider = $1 AND provider_subject = $2
+				FOR UPDATE
+			`, [normalizedIdentity.provider, normalizedIdentity.subject]);
+			const currentSession = await client.query(`
+				SELECT id
+				FROM hub.sessions
+				WHERE id = $1
+					AND account_id = $2
+					AND revoked_at IS NULL
+					AND expires_at > now()
+				FOR UPDATE
+			`, [currentSessionId, binding.initiating_account_id]);
+			if (
+				!account.rowCount
+				|| !currentSession.rowCount
+				|| !externalIdentity.rowCount
+				|| externalIdentity.rows[0].account_id !== binding.initiating_account_id
+			) throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
+			await this._fnBeforeSensitiveCommit?.({client, operation: "oauth.reauthenticate"});
+			const finalAuthority = await client.query(`
+				SELECT 1
+				FROM hub.oauth_transactions tx
+				JOIN hub.sessions session
+					ON session.id = tx.initiating_session_id
+					AND session.account_id = tx.initiating_account_id
+				WHERE tx.id = $1
+					AND tx.operation = 'reauthenticate'
+					AND tx.provider = $2
+					AND tx.consumed_at IS NOT NULL
+					AND tx.expires_at > clock_timestamp()
+					AND session.id = $3
+					AND session.revoked_at IS NULL
+					AND session.expires_at > clock_timestamp()
+			`, [oauthTransactionId, normalizedIdentity.provider, currentSessionId]);
+			if (!finalAuthority.rowCount) {
+				throw new HubStoreError("REAUTHENTICATION_FAILED", `Reauthentication failed.`, {status: 403});
+			}
+			const updatedIdentity = await client.query(`
+				UPDATE hub.external_identities
+				SET provider_handle = $2,
+					provider_display_name = $3,
+					last_authenticated_at = clock_timestamp(),
+					updated_at = clock_timestamp()
+				WHERE id = $1
+				RETURNING
+					id AS identity_id, account_id, provider, provider_subject,
+					provider_handle, provider_display_name,
+					created_at AS identity_created_at, updated_at AS identity_updated_at,
+					last_authenticated_at
+			`, [
+				externalIdentity.rows[0].identity_id,
+				normalizedIdentity.handle,
+				normalizedIdentity.displayName,
+			]);
+			const sessionId = crypto.randomUUID();
+			const inserted = await client.query(`
+				INSERT INTO hub.sessions (
+					id, account_id, token_hash, expires_at, user_agent,
+					authenticated_via_identity_id, recent_reauthenticated_at
+				)
+				VALUES ($1, $2, decode($3, 'hex'), $4, $5, $6, clock_timestamp())
+				RETURNING
+					id AS session_id, account_id, user_agent, created_at, last_seen_at,
+					expires_at, revoked_at, authenticated_via_identity_id,
+					recent_reauthenticated_at
+			`, [
+				sessionId,
+				binding.initiating_account_id,
+				tokenHash,
+				expiresAt,
+				userAgent,
+				externalIdentity.rows[0].identity_id,
+			]);
+			await client.query(`UPDATE hub.sessions SET revoked_at = clock_timestamp() WHERE id = $1`, [currentSessionId]);
+			await client.query(`DELETE FROM hub.character_leases WHERE session_id = $1`, [currentSessionId]);
+			await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = $1`, [currentSessionId]);
+			await client.query("COMMIT");
+			return {
+				account: getAccount(account.rows[0]),
+				identity: getExternalIdentity(updatedIdentity.rows[0]),
+				session: getSession(inserted.rows[0]),
+				revokedSessionIds: [currentSessionId],
+			};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pListExternalIdentities ({accountId}) {
 		const account = await this._pool.query(`SELECT id FROM hub.accounts WHERE id = $1`, [accountId]);
 		if (!account.rows[0]) throw new HubStoreError("ACCOUNT_NOT_FOUND");
@@ -641,15 +810,26 @@ export class PostgresHubStore {
 		}
 		if (expiresAt == null && ttlSeconds == null) throw new TypeError(`OAuth transaction expiry is required.`);
 		const result = await this._pool.query(`
+			WITH bound_session AS (
+				SELECT session.id
+				FROM hub.sessions session
+				JOIN hub.accounts account ON account.id = session.account_id
+				WHERE session.id = $6
+					AND session.account_id = $5
+					AND session.revoked_at IS NULL
+					AND session.expires_at > now()
+					AND account.status = 'active'
+				FOR UPDATE OF session
+			)
 			INSERT INTO hub.oauth_transactions (
 				id, state_hash, provider, operation,
 				initiating_account_id, initiating_session_id,
 				redirect_uri, return_to, pkce_verifier, oidc_nonce, invite_context_id, expires_at
 			)
-			VALUES (
+			SELECT
 				$1, decode($2, 'hex'), $3, $4, $5, $6, $7, $8, $9, $10, $11,
 				COALESCE($12::timestamptz, now() + ($13::integer * interval '1 second'))
-			)
+			WHERE $4 = 'sign_in' OR EXISTS (SELECT 1 FROM bound_session)
 			RETURNING *
 		`, [
 			id,
@@ -666,6 +846,7 @@ export class PostgresHubStore {
 			expiresAt,
 			ttlSeconds,
 		]);
+		if (!result.rowCount) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 		return getOAuthTransaction(result.rows[0]);
 	}
 
@@ -880,7 +1061,7 @@ export class PostgresHubStore {
 				WHERE id = $1
 					AND state_hash = decode($2, 'hex')
 					AND provider = $3
-					AND operation = $4
+					AND ($4::text IS NULL OR operation = $4)
 					AND redirect_uri = $5
 					AND consumed_at IS NULL
 					AND expires_at > now()
@@ -1121,6 +1302,505 @@ export class PostgresHubStore {
 		}
 	}
 
+	async _pLockOperatorNamespace (client) {
+		await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 9))`, ["account-entitlements"]);
+	}
+
+	async _pLockEntitlementRows ({client, accountIds = null}) {
+		const result = await client.query(`
+			SELECT *
+			FROM hub.account_entitlements
+			WHERE ($1::uuid[] IS NULL OR account_id = ANY($1::uuid[]))
+			ORDER BY account_id, entitlement_name, granted_at, id
+			FOR UPDATE
+		`, [accountIds]);
+		return result.rows;
+	}
+
+	async _pAssertFreshOperatorAuthority ({
+		client,
+		accountId,
+		sessionId,
+		lockedEntitlements,
+		targetAccountId = null,
+		isLockAllAccounts = false,
+	}) {
+		const isOperator = lockedEntitlements.some(row => (
+			row.account_id === accountId
+			&& row.entitlement_name === PLATFORM_OPERATE_ENTITLEMENT
+			&& row.revoked_at == null
+		));
+		if (!isOperator) throw new HubStoreError("NOT_FOUND", `Resource was not found.`, {status: 404});
+		const accounts = await client.query(`
+			SELECT id, display_name, status, deletion_requested_at, purge_after
+			FROM hub.accounts
+			WHERE (
+				$1::boolean
+				OR id = ANY($2::uuid[])
+			)
+				AND status <> 'deleted'
+			ORDER BY id
+			FOR UPDATE
+		`, [isLockAllAccounts, [...new Set([accountId, targetAccountId].filter(Boolean))].sort()]);
+		const byId = new Map(accounts.rows.map(row => [row.id, row]));
+		if (byId.get(accountId)?.status !== "active") {
+			throw new HubStoreError("NOT_FOUND", `Resource was not found.`, {status: 404});
+		}
+		const sessionIdentity = await client.query(`
+			SELECT authenticated_via_identity_id
+			FROM hub.sessions
+			WHERE id = $1 AND account_id = $2
+		`, [sessionId, accountId]);
+		const identityId = sessionIdentity.rows[0]?.authenticated_via_identity_id;
+		if (identityId) {
+			await client.query(`
+				SELECT id
+				FROM hub.external_identities
+				WHERE id = $1 AND account_id = $2
+				FOR UPDATE
+			`, [identityId, accountId]);
+		}
+		const session = await client.query(`
+			SELECT id
+			FROM hub.sessions
+			WHERE id = $1
+				AND account_id = $2
+				AND revoked_at IS NULL
+				AND expires_at > clock_timestamp()
+				AND authenticated_via_identity_id IS NOT NULL
+				AND recent_reauthenticated_at >= clock_timestamp() - interval '5 minutes'
+				AND recent_reauthenticated_at <= clock_timestamp()
+			FOR UPDATE
+		`, [sessionId, accountId]);
+		if (!session.rowCount) {
+			throw new HubStoreError("REAUTHENTICATION_REQUIRED", `Recent reauthentication is required.`, {status: 403});
+		}
+		if (targetAccountId && !byId.has(targetAccountId)) {
+			throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		}
+		return byId;
+	}
+
+	async _pAssertFreshReauthentication ({client, accountId, sessionId}) {
+		const account = await client.query(`
+			SELECT id, display_name, status, deletion_requested_at, purge_after
+			FROM hub.accounts
+			WHERE id = $1
+			FOR UPDATE
+		`, [accountId]);
+		if (!account.rowCount) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		const sessionIdentity = await client.query(`
+			SELECT authenticated_via_identity_id
+			FROM hub.sessions
+			WHERE id = $1 AND account_id = $2
+		`, [sessionId, accountId]);
+		const identityId = sessionIdentity.rows[0]?.authenticated_via_identity_id;
+		if (identityId) {
+			await client.query(`
+				SELECT id
+				FROM hub.external_identities
+				WHERE id = $1 AND account_id = $2
+				FOR UPDATE
+			`, [identityId, accountId]);
+		}
+		const session = await client.query(`
+			SELECT id
+			FROM hub.sessions
+			WHERE id = $1
+				AND account_id = $2
+				AND revoked_at IS NULL
+				AND expires_at > clock_timestamp()
+				AND authenticated_via_identity_id IS NOT NULL
+				AND recent_reauthenticated_at >= clock_timestamp() - interval '5 minutes'
+				AND recent_reauthenticated_at <= clock_timestamp()
+			FOR UPDATE
+		`, [sessionId, accountId]);
+		if (!session.rowCount) {
+			throw new HubStoreError("REAUTHENTICATION_REQUIRED", `Recent reauthentication is required.`, {status: 403});
+		}
+		return getAccount(account.rows[0]);
+	}
+
+	async _pAssertReauthenticationTimestampFresh ({client, accountId, sessionId}) {
+		const result = await client.query(`
+			SELECT 1
+			FROM hub.sessions session
+			JOIN hub.external_identities identity
+				ON identity.id = session.authenticated_via_identity_id
+				AND identity.account_id = session.account_id
+			WHERE session.id = $1
+				AND session.account_id = $2
+				AND session.expires_at > clock_timestamp()
+				AND session.recent_reauthenticated_at >= clock_timestamp() - interval '5 minutes'
+				AND session.recent_reauthenticated_at <= clock_timestamp()
+		`, [sessionId, accountId]);
+		if (!result.rowCount) {
+			throw new HubStoreError("REAUTHENTICATION_REQUIRED", `Recent reauthentication is required.`, {status: 403});
+		}
+	}
+
+	async pGetOwnEntitlements ({accountId}) {
+		const result = await this._pool.query(`
+			SELECT entitlement.entitlement_name
+			FROM hub.account_entitlements entitlement
+			JOIN hub.accounts account ON account.id = entitlement.account_id
+			WHERE entitlement.account_id = $1
+				AND entitlement.revoked_at IS NULL
+				AND account.status = 'active'
+			ORDER BY entitlement_name
+		`, [accountId]);
+		return result.rows.map(row => row.entitlement_name);
+	}
+
+	async pHasActivePlatformOperator () {
+		const result = await this._pool.query(`
+			SELECT EXISTS (
+				SELECT 1
+				FROM hub.account_entitlements entitlement
+				JOIN hub.accounts account ON account.id = entitlement.account_id
+				WHERE entitlement.entitlement_name = $1
+					AND entitlement.revoked_at IS NULL
+					AND account.status = 'active'
+			) AS has_operator
+		`, [PLATFORM_OPERATE_ENTITLEMENT]);
+		return result.rows[0].has_operator;
+	}
+
+	async _pGetAccountEntitlementSummary ({client, accountId}) {
+		const result = await client.query(`
+			SELECT
+				account.id,
+				account.display_name,
+				account.status,
+				COALESCE(
+					array_agg(entitlement.entitlement_name ORDER BY entitlement.entitlement_name)
+						FILTER (WHERE entitlement.id IS NOT NULL),
+					ARRAY[]::text[]
+				) AS entitlements
+			FROM hub.accounts account
+			LEFT JOIN hub.account_entitlements entitlement
+				ON entitlement.account_id = account.id
+				AND entitlement.revoked_at IS NULL
+			WHERE account.id = $1 AND account.status <> 'deleted'
+			GROUP BY account.id, account.display_name, account.status
+		`, [accountId]);
+		if (!result.rowCount) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		return {
+			id: result.rows[0].id,
+			displayName: result.rows[0].display_name,
+			status: result.rows[0].status,
+			entitlements: result.rows[0].entitlements,
+		};
+	}
+
+	async pReconcileConfiguredOperatorEntitlements ({accountIds, onWarning = null}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			await this._pLockOperatorNamespace(client);
+			const granted = [];
+			const warnings = [];
+			for (const accountId of accountIds) {
+				await this._pLockEntitlementRows({client, accountIds: [accountId]});
+				const account = await client.query(`
+					SELECT id, status
+					FROM hub.accounts
+					WHERE id = $1 AND status = 'active'
+					FOR UPDATE
+				`, [accountId]);
+				if (!account.rowCount) {
+					const warning = {code: "CONFIGURED_OPERATOR_ACCOUNT_NOT_FOUND", accountId};
+					warnings.push(warning);
+					onWarning?.(warning);
+					continue;
+				}
+				for (const entitlementName of [CAMPAIGN_CREATE_ENTITLEMENT, PLATFORM_OPERATE_ENTITLEMENT]) {
+					const inserted = await client.query(`
+						INSERT INTO hub.account_entitlements (
+							id, account_id, entitlement_name, source
+						)
+						VALUES ($1, $2, $3, 'configured_operator')
+						ON CONFLICT (account_id, entitlement_name) WHERE revoked_at IS NULL DO NOTHING
+						RETURNING *
+					`, [crypto.randomUUID(), accountId, entitlementName]);
+					if (!inserted.rowCount) continue;
+					const entitlement = getAccountEntitlement(inserted.rows[0]);
+					await this._pAppendAudit({
+						client,
+						actorAccountId: null,
+						action: "account.entitlement.granted",
+						targetType: "account_entitlement",
+						targetId: entitlement.id,
+						details: {targetAccountId: accountId, entitlementName, source: entitlement.source},
+					});
+					granted.push(entitlement);
+				}
+			}
+			await client.query("COMMIT");
+			return {granted, warnings};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pListAccountEntitlements ({accountId, sessionId, targetAccountId}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			await this._pLockOperatorNamespace(client);
+			const locked = await this._pLockEntitlementRows({client});
+			await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				targetAccountId,
+			});
+			await this._fnBeforeSensitiveCommit?.({client, operation: "entitlement.list"});
+			await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				targetAccountId,
+			});
+			await client.query("COMMIT");
+			return {
+				account: getAccount(accounts.get(targetAccountId)),
+				entitlements: locked
+					.filter(row => row.account_id === targetAccountId)
+					.map(getAccountEntitlement),
+			};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pListOperatorAccounts ({accountId, sessionId}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			await this._pLockOperatorNamespace(client);
+			const locked = await this._pLockEntitlementRows({client});
+			const accounts = await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				isLockAllAccounts: true,
+			});
+			await this._fnBeforeSensitiveCommit?.({client, operation: "entitlement.accounts.list"});
+			await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				isLockAllAccounts: true,
+			});
+			await client.query("COMMIT");
+			return [...accounts.values()]
+				.sort((a, b) => `${a.display_name}`.localeCompare(`${b.display_name}`) || a.id.localeCompare(b.id))
+				.map(account => ({
+					id: account.id,
+					displayName: account.display_name,
+					status: account.status,
+					entitlements: ACCOUNT_ENTITLEMENT_NAMES.filter(entitlementName => locked.some(row => (
+						row.account_id === account.id
+						&& row.entitlement_name === entitlementName
+						&& row.revoked_at == null
+					))),
+				}));
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pGrantAccountEntitlement ({
+		accountId,
+		sessionId,
+		targetAccountId,
+		entitlementName,
+		idempotencyKey,
+	}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			await this._pLockOperatorNamespace(client);
+			const locked = await this._pLockEntitlementRows({client});
+			await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				targetAccountId,
+			});
+			if (!isAccountEntitlementName(entitlementName)) {
+				throw new HubStoreError("INVALID_ENTITLEMENT", `Account entitlement is invalid.`, {status: 400});
+			}
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			await this._fnBeforeSensitiveCommit?.({client, operation: "entitlement.grant"});
+			await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				targetAccountId,
+			});
+			const inserted = await client.query(`
+				INSERT INTO hub.account_entitlements (
+					id, account_id, entitlement_name, source, granted_by_account_id
+				)
+				VALUES ($1, $2, $3, 'operator', $4)
+				ON CONFLICT (account_id, entitlement_name) WHERE revoked_at IS NULL DO NOTHING
+				RETURNING *
+			`, [crypto.randomUUID(), targetAccountId, entitlementName, accountId]);
+			let entitlement;
+			let changed = false;
+			if (inserted.rowCount) {
+				entitlement = getAccountEntitlement(inserted.rows[0]);
+				changed = true;
+				await this._pAppendAudit({
+					client,
+					actorAccountId: accountId,
+					action: "account.entitlement.granted",
+					targetType: "account_entitlement",
+					targetId: entitlement.id,
+					details: {targetAccountId, entitlementName, source: entitlement.source},
+				});
+			} else {
+				const existing = await client.query(`
+					SELECT *
+					FROM hub.account_entitlements
+					WHERE account_id = $1 AND entitlement_name = $2 AND revoked_at IS NULL
+				`, [targetAccountId, entitlementName]);
+				entitlement = getAccountEntitlement(existing.rows[0]);
+			}
+			const response = {
+				account: await this._pGetAccountEntitlementSummary({client, accountId: targetAccountId}),
+				changed,
+			};
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "account.entitlement.grant", response});
+			await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				targetAccountId,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pRevokeAccountEntitlement ({
+		accountId,
+		sessionId,
+		targetAccountId,
+		entitlementName,
+		idempotencyKey,
+	}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
+			await this._pLockOperatorNamespace(client);
+			const locked = await this._pLockEntitlementRows({client});
+			const accounts = await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				targetAccountId,
+			});
+			if (!isAccountEntitlementName(entitlementName)) {
+				throw new HubStoreError("INVALID_ENTITLEMENT", `Account entitlement is invalid.`, {status: 400});
+			}
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			const active = locked.find(row => (
+				row.account_id === targetAccountId
+				&& row.entitlement_name === entitlementName
+				&& row.revoked_at == null
+			));
+			if (
+				active
+				&& entitlementName === PLATFORM_OPERATE_ENTITLEMENT
+				&& accounts.get(targetAccountId)?.status === "active"
+				&& locked.filter(row => (
+					row.entitlement_name === PLATFORM_OPERATE_ENTITLEMENT
+					&& row.revoked_at == null
+				)).length <= 1
+			) throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot be removed.`, {status: 409});
+			await this._fnBeforeSensitiveCommit?.({client, operation: "entitlement.revoke"});
+			await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				targetAccountId,
+			});
+			let changed = false;
+			if (active) {
+				await client.query(`
+					UPDATE hub.account_entitlements
+					SET revoked_at = now(), revoked_by_account_id = $2, updated_at = now()
+					WHERE id = $1 AND revoked_at IS NULL
+				`, [active.id, accountId]);
+				changed = true;
+				await this._pAppendAudit({
+					client,
+					actorAccountId: accountId,
+					action: "account.entitlement.revoked",
+					targetType: "account_entitlement",
+					targetId: active.id,
+					details: {targetAccountId, entitlementName},
+				});
+			}
+			const response = {
+				account: await this._pGetAccountEntitlementSummary({client, accountId: targetAccountId}),
+				changed,
+			};
+			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "account.entitlement.revoke", response});
+			await this._pAssertFreshOperatorAuthority({
+				client,
+				accountId,
+				sessionId,
+				lockedEntitlements: locked,
+				targetAccountId,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			if (error?.code === "23514" && /platform operator/i.test(error.message || "")) {
+				throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot be removed.`, {status: 409});
+			}
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async pCreateCampaign ({accountId, name, idempotencyKey}) {
 		const normalizedIdempotency = this._normalizeIdempotencyKey(idempotencyKey);
 		const client = await this._pool.connect();
@@ -1145,6 +1825,19 @@ export class PostgresHubStore {
 				}
 				await client.query("COMMIT");
 				return prior.rows[0].response;
+			}
+			if (this._isAccountEntitlementsEnabled) {
+				const entitlement = await client.query(`
+					SELECT id
+					FROM hub.account_entitlements
+					WHERE account_id = $1
+						AND entitlement_name = $2
+						AND revoked_at IS NULL
+					FOR SHARE
+				`, [accountId, CAMPAIGN_CREATE_ENTITLEMENT]);
+				if (!entitlement.rowCount) {
+					throw new HubStoreError("CAMPAIGN_CREATE_NOT_ENTITLED", `Account cannot create campaigns.`, {status: 403});
+				}
 			}
 
 			const campaignId = crypto.randomUUID();
@@ -6521,14 +7214,42 @@ export class PostgresHubStore {
 		};
 	}
 
-	async pRequestAccountDeletion ({accountId, idempotencyKey, graceMs = 7 * 24 * 60 * 60 * 1000}) {
+	async pRequestAccountDeletion ({accountId, sessionId = null, idempotencyKey, graceMs = 7 * 24 * 60 * 60 * 1000}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
-			if (prior) {
+			if (prior && !this._isAccountEntitlementsEnabled) {
 				await client.query("COMMIT");
 				return prior;
+			}
+			let lockedEntitlements = null;
+			if (this._isAccountEntitlementsEnabled) {
+				await this._pLockOperatorNamespace(client);
+				lockedEntitlements = await this._pLockEntitlementRows({client});
+				await this._pAssertFreshReauthentication({client, accountId, sessionId});
+				if (prior) {
+					await client.query("COMMIT");
+					return prior;
+				}
+				const isOperator = lockedEntitlements.some(row => (
+					row.account_id === accountId
+					&& row.entitlement_name === PLATFORM_OPERATE_ENTITLEMENT
+					&& row.revoked_at == null
+				));
+				if (isOperator) {
+					const activeOperators = await client.query(`
+						SELECT count(*)::integer AS count
+						FROM hub.account_entitlements entitlement
+						JOIN hub.accounts account ON account.id = entitlement.account_id
+						WHERE entitlement.entitlement_name = $1
+							AND entitlement.revoked_at IS NULL
+							AND account.status = 'active'
+					`, [PLATFORM_OPERATE_ENTITLEMENT]);
+					if (activeOperators.rows[0].count <= 1) {
+						throw new HubStoreError("LAST_OPERATOR_PROTECTED", `The final platform operator cannot request deletion.`, {status: 409});
+					}
+				}
 			}
 			const account = (await client.query(`SELECT * FROM hub.accounts WHERE id = $1 FOR UPDATE`, [accountId])).rows[0];
 			if (!account) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
@@ -6562,6 +7283,18 @@ export class PostgresHubStore {
 					purgeAfter: updated.rows[0].purge_after,
 				};
 			}
+			const accountSessions = await client.query(`
+				SELECT id
+				FROM hub.sessions
+				WHERE account_id = $1
+				ORDER BY id
+				FOR UPDATE
+			`, [accountId]);
+			const accountSessionIds = accountSessions.rows.map(row => row.id);
+			if (accountSessionIds.length) {
+				await client.query(`DELETE FROM hub.character_leases WHERE session_id = ANY($1::uuid[])`, [accountSessionIds]);
+				await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = ANY($1::uuid[])`, [accountSessionIds]);
+			}
 			const affectedCampaigns = await client.query(`
 				SELECT DISTINCT so.campaign_id
 				FROM hub.semantic_operations so
@@ -6591,6 +7324,10 @@ export class PostgresHubStore {
 					characterIds: ownedCharacters.rows.map(row => row.id),
 				});
 			}
+			if (this._isAccountEntitlementsEnabled) {
+				await this._fnBeforeSensitiveCommit?.({client, operation: "account.deletion_request"});
+				await this._pAssertFreshReauthentication({client, accountId, sessionId});
+			}
 			const sessions = await client.query(`
 				UPDATE hub.sessions
 				SET revoked_at = COALESCE(revoked_at, now())
@@ -6598,13 +7335,12 @@ export class PostgresHubStore {
 				RETURNING id
 			`, [accountId]);
 			const revokedSessionIds = sessions.rows.map(row => row.id);
-			if (revokedSessionIds.length) {
-				await client.query(`DELETE FROM hub.character_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
-				await client.query(`DELETE FROM hub.dm_workspace_leases WHERE session_id = ANY($1::uuid[])`, [revokedSessionIds]);
-			}
 			await this._pAppendAudit({client, actorAccountId: accountId, action: "account.deletion_requested", targetType: "account", targetId: accountId, details: {purgeAfter: deletion.purgeAfter}});
 			const response = {deletion, revokedSessionIds};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "account.deletion_request", response});
+			if (this._isAccountEntitlementsEnabled) {
+				await this._pAssertReauthenticationTimestampFresh({client, accountId, sessionId});
+			}
 			await client.query("COMMIT");
 			return response;
 		} catch (error) {
@@ -6615,14 +7351,25 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pCancelAccountDeletion ({accountId, idempotencyKey}) {
+	async pCancelAccountDeletion ({accountId, sessionId = null, idempotencyKey}) {
 		const client = await this._pool.connect();
 		try {
 			await client.query("BEGIN");
 			const prior = await this._pLockCommand({client, accountId, idempotencyKey});
-			if (prior) {
+			if (prior && !this._isAccountEntitlementsEnabled) {
 				await client.query("COMMIT");
 				return prior;
+			}
+			if (this._isAccountEntitlementsEnabled) {
+				await this._pLockOperatorNamespace(client);
+				await this._pLockEntitlementRows({client, accountIds: [accountId]});
+				await this._pAssertFreshReauthentication({client, accountId, sessionId});
+				if (prior) {
+					await client.query("COMMIT");
+					return prior;
+				}
+				await this._fnBeforeSensitiveCommit?.({client, operation: "account.deletion_cancel"});
+				await this._pAssertFreshReauthentication({client, accountId, sessionId});
 			}
 			const updated = await client.query(`
 				UPDATE hub.accounts
@@ -6639,6 +7386,9 @@ export class PostgresHubStore {
 			await this._pAppendAudit({client, actorAccountId: accountId, action: "account.deletion_cancelled", targetType: "account", targetId: accountId});
 			const response = {deletion};
 			await this._pSaveReceipt({client, accountId, idempotencyKey, commandType: "account.deletion_cancel", response});
+			if (this._isAccountEntitlementsEnabled) {
+				await this._pAssertFreshReauthentication({client, accountId, sessionId});
+			}
 			await client.query("COMMIT");
 			return response;
 		} catch (error) {
@@ -6663,16 +7413,10 @@ export class PostgresHubStore {
 			const purgedAccountIds = [];
 			const blockedAccountIds = [];
 			for (const candidate of accountCandidates.rows) {
-				const identityLocks = await client.query(`
-					SELECT provider, provider_subject
-					FROM hub.external_identities
-					WHERE account_id = $1
-					ORDER BY provider, provider_subject
-				`, [candidate.id]);
-				for (const identity of identityLocks.rows) {
-					await client.query(`
-						SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
-					`, [identity.provider, identity.provider_subject]);
+				let lockedEntitlements = [];
+				if (this._isAccountEntitlementsEnabled) {
+					await this._pLockOperatorNamespace(client);
+					lockedEntitlements = await this._pLockEntitlementRows({client});
 				}
 				const accountResult = await client.query(`
 					SELECT *
@@ -6684,11 +7428,59 @@ export class PostgresHubStore {
 				`, [candidate.id]);
 				const account = accountResult.rows[0];
 				if (!account) continue;
-				const blockingCampaign = await client.query(`SELECT 1 FROM hub.campaigns WHERE owner_account_id = $1 AND status <> 'archived' LIMIT 1 FOR UPDATE`, [account.id]);
+				if (
+					this._isAccountEntitlementsEnabled
+					&& lockedEntitlements.some(row => (
+						row.account_id === account.id
+						&& row.entitlement_name === PLATFORM_OPERATE_ENTITLEMENT
+						&& row.revoked_at == null
+					))
+				) {
+					const activeOperators = await client.query(`
+						SELECT count(*)::integer AS count
+						FROM hub.account_entitlements entitlement
+						JOIN hub.accounts operator_account ON operator_account.id = entitlement.account_id
+						WHERE entitlement.entitlement_name = $1
+							AND entitlement.revoked_at IS NULL
+							AND operator_account.status = 'active'
+					`, [PLATFORM_OPERATE_ENTITLEMENT]);
+					if (activeOperators.rows[0].count < 1) {
+						blockedAccountIds.push(account.id);
+						continue;
+					}
+				}
+				const blockingCampaign = await client.query(`SELECT 1 FROM hub.campaigns WHERE owner_account_id = $1 AND status <> 'archived' LIMIT 1`, [account.id]);
 				if (blockingCampaign.rowCount) {
 					blockedAccountIds.push(account.id);
 					continue;
 				}
+				const identityLocks = await client.query(`
+					SELECT provider, provider_subject
+					FROM hub.external_identities
+					WHERE account_id = $1
+					ORDER BY provider, provider_subject
+				`, [candidate.id]);
+				for (const identity of identityLocks.rows) {
+					await client.query(`
+						SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 1))
+					`, [identity.provider, identity.provider_subject]);
+				}
+				await client.query(`
+					SELECT id
+					FROM hub.sessions
+					WHERE account_id = $1
+					ORDER BY id
+					FOR UPDATE
+				`, [account.id]);
+				await client.query(`
+					DELETE FROM hub.character_leases
+					WHERE session_id IN (SELECT id FROM hub.sessions WHERE account_id = $1)
+						OR character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)
+				`, [account.id]);
+				await client.query(`
+					DELETE FROM hub.dm_workspace_leases
+					WHERE session_id IN (SELECT id FROM hub.sessions WHERE account_id = $1)
+				`, [account.id]);
 				const membershipDiscovery = await client.query(`
 					SELECT id, campaign_id, account_id, role, status
 					FROM hub.memberships
@@ -6755,6 +7547,12 @@ export class PostgresHubStore {
 				`, [account.id]);
 				await client.query(`DELETE FROM hub.characters WHERE owner_account_id = $1`, [account.id]);
 				await client.query(`DELETE FROM hub.campaigns WHERE owner_account_id = $1 AND status = 'archived'`, [account.id]);
+				await client.query(`
+					DELETE FROM hub.command_receipts
+					WHERE actor_account_id <> $1
+						AND command_type IN ('account.entitlement.grant', 'account.entitlement.revoke')
+						AND response->'account'->>'id' = $1::text
+				`, [account.id]);
 				await this._pAppendAudit({client, actorAccountId: account.id, action: "account.deletion_purged", targetType: "account", targetId: account.id});
 				await client.query(`DELETE FROM hub.accounts WHERE id = $1`, [account.id]);
 				purgedAccountIds.push(account.id);
@@ -6769,8 +7567,26 @@ export class PostgresHubStore {
 		}
 	}
 
-	async pExportAccountData ({accountId}) {
-		const [account, identities, sessions, memberships, campaigns, characters, audit] = await Promise.all([
+	async pExportAccountData ({accountId, sessionId = null}) {
+		if (this._isAccountEntitlementsEnabled) {
+			const status = await this._pool.query(`SELECT status FROM hub.accounts WHERE id = $1`, [accountId]);
+			if (status.rows[0]?.status === "deletion_requested") {
+				const client = await this._pool.connect();
+				try {
+					await client.query("BEGIN");
+					await this._pLockOperatorNamespace(client);
+					await this._pLockEntitlementRows({client, accountIds: [accountId]});
+					await this._pAssertFreshReauthentication({client, accountId, sessionId});
+					await client.query("COMMIT");
+				} catch (error) {
+					await client.query("ROLLBACK");
+					throw error;
+				} finally {
+					client.release();
+				}
+			}
+		}
+		const [account, identities, sessions, memberships, campaigns, characters, entitlements, audit] = await Promise.all([
 			this._pool.query(`SELECT id, display_name, status, deletion_requested_at, purge_after, created_at, updated_at FROM hub.accounts WHERE id = $1`, [accountId]),
 			this._pool.query(`
 				SELECT
@@ -6799,7 +7615,22 @@ export class PostgresHubStore {
 				WHERE m.account_id = $1
 			`, [accountId]),
 			this._pool.query(`SELECT * FROM hub.characters WHERE owner_account_id = $1`, [accountId]),
-			this._pool.query(`SELECT * FROM hub.audit_entries WHERE actor_account_id = $1 ORDER BY created_at`, [accountId]),
+			this._pool.query(`
+				SELECT *
+				FROM hub.account_entitlements
+				WHERE account_id = $1
+				ORDER BY granted_at, id
+			`, [accountId]),
+			this._pool.query(`
+				SELECT *
+				FROM hub.audit_entries
+				WHERE actor_account_id = $1
+					OR (
+						action LIKE 'account.entitlement.%'
+						AND details->>'targetAccountId' = $1::text
+					)
+				ORDER BY created_at
+			`, [accountId]),
 		]);
 		if (!account.rowCount) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
 		return {
@@ -6810,7 +7641,10 @@ export class PostgresHubStore {
 			memberships: memberships.rows.map(getMembership),
 			campaigns: campaigns.rows,
 			characters: characters.rows.map(getCharacter),
-			auditEntries: audit.rows,
+			entitlements: entitlements.rows
+				.map(getAccountEntitlement)
+				.map(entitlement => redactEntitlementForAccount({entitlement})),
+			auditEntries: audit.rows.map(entry => redactEntitlementAuditForAccount({audit: entry, accountId})),
 		};
 	}
 

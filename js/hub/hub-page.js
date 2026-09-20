@@ -13,6 +13,7 @@ import {
 import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js";
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
 import {
+	HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS,
 	HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT,
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
 	pLoadHubCapabilityModule,
@@ -243,6 +244,9 @@ function getErrorMessage (error) {
 		case "ACCOUNT_UNAVAILABLE": return "This Hub account cannot sign in.";
 		case "ACCOUNT_OWNS_CAMPAIGN": return "Transfer ownership or archive every active campaign before deleting your account.";
 		case "ACCOUNT_DELETION_PENDING": return "Your account is scheduled for deletion. Cancel deletion before using campaign features.";
+		case "CAMPAIGN_CREATE_NOT_ENTITLED": return "Campaign creation is not enabled for this account.";
+		case "REAUTHENTICATION_REQUIRED": return "Reauthenticate with a linked sign-in provider before changing creator access.";
+		case "LAST_OPERATOR_PROTECTED": return "The last platform operator cannot lose operator access or delete their account.";
 		case "MEMBERSHIP_OWNER_PROTECTED": return "The campaign owner must transfer ownership or archive the campaign first.";
 		case "PROTOCOL_UPDATE_REQUIRED": return "This page is out of date. Reload it before making campaign changes.";
 		case "PAYLOAD_TOO_LARGE":
@@ -1380,6 +1384,120 @@ async function pRenderAccountSessions () {
 	}));
 }
 
+function hasAccountEntitlement (session, entitlement) {
+	return Array.isArray(session?.entitlements) && session.entitlements.includes(entitlement);
+}
+
+function renderCampaignCreationEntitlement ({session}) {
+	const isEntitlementCapabilityEnabled = session?.capabilities?.includes(HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS);
+	const canCreate = !isEntitlementCapabilityEnabled || hasAccountEntitlement(session, "campaign:create");
+	setHidden(document.getElementById("hub-create-form"), !canCreate);
+	setHidden(document.getElementById("hub-create-not-entitled"), canCreate);
+	return canCreate;
+}
+
+function setOperatorStatus (message, {isError = false} = {}) {
+	const status = document.getElementById("hub-operator-status");
+	if (!status) return;
+	status.textContent = message;
+	status.classList.toggle("hub-inline-status--error", isError);
+}
+
+async function pRenderOperatorReauthentication ({session}) {
+	const container = document.getElementById("hub-operator-reauth");
+	if (!container) return;
+	const metadata = await api.pGetMeta();
+	const eligibleProviders = new Set(session.reauthenticationProviders || []);
+	const providers = (metadata.authProviders || []).filter(provider =>
+		provider.status === "available"
+		&& eligibleProviders.has(provider.slug),
+	);
+	if (!providers.length) {
+		setOperatorStatus("No linked sign-in provider is currently available for reauthentication.", {isError: true});
+	}
+	container.replaceChildren(...providers.map(provider => {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "hub-button";
+		button.textContent = `Reauthenticate with ${provider.label}`;
+		button.addEventListener("click", async () => {
+			button.disabled = true;
+			setOperatorStatus(`Opening ${provider.label} reauthentication...`);
+			try {
+				const result = await api.pStartReauthentication({
+					provider: provider.slug,
+					returnTo: "/hub.html",
+				});
+				window.location.assign(result.authorizationUrl);
+			} catch (error) {
+				setOperatorStatus(getErrorMessage(error), {isError: true});
+				button.disabled = false;
+			}
+		});
+		return button;
+	}));
+}
+
+async function pRenderOperatorAccounts () {
+	const list = document.getElementById("hub-operator-account-list");
+	if (!list) return;
+	const accounts = await api.pListOperatorAccounts();
+	list.replaceChildren(...accounts.map(account => {
+		const entitlements = new Set(account.entitlements || []);
+		const hasCreator = entitlements.has("campaign:create");
+		const row = document.createElement("div");
+		row.className = "hub-data-row";
+		const main = document.createElement("div");
+		main.className = "hub-data-row__main";
+		const name = document.createElement("span");
+		name.className = "hub-data-row__name";
+		name.textContent = account.displayName;
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		meta.textContent = hasCreator ? "Campaign creation enabled" : "Campaign creation disabled";
+		main.append(name, meta);
+		const controls = document.createElement("div");
+		controls.className = "hub-data-row__controls";
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = hasCreator ? "hub-button hub-button--danger" : "hub-button hub-button--primary";
+		button.textContent = hasCreator ? "Revoke creator" : "Grant creator";
+		button.addEventListener("click", async () => {
+			button.disabled = true;
+			setOperatorStatus("");
+			try {
+				const request = {
+					accountId: account.id,
+					entitlement: "campaign:create",
+					idempotencyKey: crypto.randomUUID(),
+				};
+				if (hasCreator) await api.pRevokeAccountEntitlement(request);
+				else await api.pGrantAccountEntitlement(request);
+				setOperatorStatus(`${account.displayName}'s creator access was ${hasCreator ? "revoked" : "granted"}.`);
+				await pRenderOperatorAccounts();
+			} catch (error) {
+				setOperatorStatus(getErrorMessage(error), {isError: true});
+				button.disabled = false;
+			}
+		});
+		controls.append(button);
+		row.append(main, controls);
+		return row;
+	}));
+}
+
+async function pInitOperatorPanel ({session}) {
+	const panel = document.getElementById("hub-operator-panel");
+	const isEnabled = session?.capabilities?.includes(HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS);
+	const isOperator = hasAccountEntitlement(session, "platform:operate");
+	setHidden(panel, !(isEnabled && isOperator));
+	if (!(isEnabled && isOperator)) return;
+	await Promise.all([
+		pRenderOperatorReauthentication({session}),
+		pRenderOperatorAccounts(),
+	]);
+}
+
 async function pInitHubIndex ({session}) {
 	const name = document.getElementById("hub-account-name");
 	if (name) name.textContent = session.account.displayName;
@@ -1415,6 +1533,7 @@ async function pInitHubIndex ({session}) {
 	]);
 	renderCampaignList(campaigns);
 	renderDetachedCharacterList(characters);
+	const canCreateCampaign = renderCampaignCreationEntitlement({session});
 	const inviteToken = sessionStorage.getItem("hub-pending-invite");
 	if (inviteToken) {
 		try {
@@ -1439,6 +1558,7 @@ async function pInitHubIndex ({session}) {
 	});
 	form?.addEventListener("submit", async event => {
 		event.preventDefault();
+		if (!canCreateCampaign) return;
 		renderError("");
 		const input = document.getElementById("hub-campaign-name");
 		const button = document.getElementById("hub-create-submit");
@@ -1462,7 +1582,10 @@ async function pInitHubIndex ({session}) {
 		}
 	});
 	try {
-		await pRenderAccountSessions();
+		await Promise.all([
+			pRenderAccountSessions(),
+			pInitOperatorPanel({session}),
+		]);
 	} catch (error) {
 		renderError(error);
 	}

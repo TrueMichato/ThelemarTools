@@ -45,6 +45,8 @@ environment and must not use copied production characters.
 - Provider-specific client-IP trust behavior proven against direct spoofing.
 - Keep `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false` for this foundation-only layer. Do not promote an
   admission-enabled r9 image until the stacked `campaign:create` entitlement/backfill/admin layer is reviewed.
+- Keep `HUB_ACCOUNT_ENTITLEMENTS_ENABLED=false` until migration 0009, designated-operator reconciliation,
+  fresh-reauth administration, last-operator protection, rollback, and restore evidence pass.
 
 ## Participants
 
@@ -67,6 +69,11 @@ environment and must not use copied production characters.
 - one-session and all-other-session revocation;
 - membership removal while connected;
 - OAuth secret/session/CSRF rotation rehearsal.
+- provider-bound reauthentication with old-session socket closure;
+- operator grant creator -> creator creates campaign -> operator revoke -> creator receives
+  `CAMPAIGN_CREATE_NOT_ENTITLED`;
+- wrong-account identity, stale reauthentication, non-operator hidden route, mutual revoke, and last-operator
+  deletion/revoke denials.
 
 ### Characters and content
 

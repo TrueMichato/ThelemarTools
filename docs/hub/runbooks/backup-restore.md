@@ -105,7 +105,8 @@ exact cleanup. Authentication failure/tampering must leave no plaintext output.
    - encrypted file SHA-256;
    - migrations through the required version, checksums unchanged, and no pending migration;
    - table/tenant/FK constraints;
-   - account/campaign/character/audit/event/outbox counts;
+   - account/entitlement/campaign/character/audit/event/outbox counts;
+   - at least one active platform operator and migration-0009 creator backfill invariants;
    - exact released migration and role-grant images complete successfully;
    - exact released production BFF reaches readiness as `hub_runtime`;
    - source backup remains immutable.

@@ -260,6 +260,58 @@ describe("Campaign Hub deliberate release automation", () => {
 		expect(result.stderr).toMatch(/configured only in \.env\.hub/);
 	});
 
+	it.each([
+		"HUB_ACCOUNT_ENTITLEMENTS_ENABLED",
+		"HUB_INVITE_ACCOUNT_ADMISSION_ENABLED",
+		"HUB_OPERATOR_ACCOUNT_IDS",
+	])("rejects ambient %s before Compose can override .env.hub", name => {
+		const result = spawnSync("bash", ["-c", [
+			`source ${JSON.stringify(releaseScript)}`,
+			`export ${name}=unexpected`,
+			"assert_no_account_entitlement_ambient_override",
+		].join("\n")], {encoding: "utf8"});
+		expect(result.status).not.toBe(0);
+		expect(result.stderr).toMatch(/configured only in \.env\.hub/);
+	});
+
+	it("fails release preflight when invite admission bypasses entitlement rollout", () => {
+		const dir = makeTempDir();
+		try {
+			const envFile = path.join(dir, ".env.hub");
+			const runCheck = contents => {
+				fs.writeFileSync(envFile, contents);
+				return spawnSync("bash", ["-c", [
+					`source ${JSON.stringify(releaseScript)}`,
+					`ENV_FILE=${JSON.stringify(envFile)}`,
+					"assert_account_entitlement_config",
+				].join("\n")], {encoding: "utf8"});
+			};
+			const bypass = runCheck([
+				"HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=true",
+				"HUB_ACCOUNT_ENTITLEMENTS_ENABLED=false",
+				"HUB_OPERATOR_ACCOUNT_IDS=",
+			].join("\n"));
+			expect(bypass.status).not.toBe(0);
+			expect(bypass.stderr).toMatch(/requires HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true/);
+
+			const operatorMissing = runCheck([
+				"HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false",
+				"HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true",
+				"HUB_OPERATOR_ACCOUNT_IDS=",
+			].join("\n"));
+			expect(operatorMissing.status).not.toBe(0);
+			expect(operatorMissing.stderr).toMatch(/requires HUB_OPERATOR_ACCOUNT_IDS/);
+
+			expect(runCheck([
+				"HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false",
+				"HUB_ACCOUNT_ENTITLEMENTS_ENABLED=true",
+				"HUB_OPERATOR_ACCOUNT_IDS=11111111-1111-4111-8111-111111111111",
+			].join("\n")).status).toBe(0);
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
 	it("marks a successful test simulation explicitly without production-shaped success evidence", () => {
 		const dir = makeTempDir();
 		try {
