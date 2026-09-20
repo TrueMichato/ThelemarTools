@@ -3,6 +3,37 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+### Round 59 — Character Sheet spell, combat, item, Respec, and homepage fixes
+
+#### S1 — Spell picker (`truemichato-redesigned-fishstick`)
+
+- **Bug 1 — Add Spell stops at 100 results:** replace the hard render cap with a bounded virtualized/lazy list while keeping every filtered spell reachable and selectable.
+- **Bug 3 — Gambler cannot find Dimension Door:** verify Gambler's intended Warlock-list eligibility independently of the render cap, then fix the proven failure without broadening unrelated spell access.
+- **Ownership:** `js/charactersheet/charactersheet-spells.js`; only spell-picker matching helpers in `charactersheet-class-utils.js` if a failing regression proves they are needed.
+
+#### S2 — Item bonuses and Gambler tools (`truemichato-item-and-gambler-fixes`)
+
+- **Bug 2 — Jester's Mask omits its +3 spell attack/save DC for Charisma casters:** locate the canonical item and make class-facing derived spell stats consume the canonical equipped-item bonus calculation.
+- **Bug 7 — Gambler's Cards/Dice/Coins edits do not stick:** preserve stable generated-item identity and edited values across feature reconciliation, rerender, and save/load.
+- **Ownership:** `charactersheet-state.js`, `charactersheet-inventory.js`; only spell-stat calculation helpers in `charactersheet-class-utils.js` if required.
+
+#### S3 — Combat panel (`truemichato-combat-panel-fixes`)
+
+- **Bug 4 — Cunning Action is disconnected from Dash/Disengage/Hide:** retain its card and group the three promoted Bonus Actions beneath it with an accessible semantic relationship.
+- **Bug 5 — Combat Methods are labelled Optional Features:** show the semantic label `Combat Method`.
+- **Bug 6 — Attack notes only work on unarmed/manual attacks:** resolve and persist notes for generated equipped-weapon attacks as well.
+- **Ownership:** `charactersheet-combat.js` and directly scoped Action Economy/attack-note styling and tests.
+
+#### S4 — Epic Boon Respec (`truemichato-epic-boon-respec-fix`)
+
+- **Bug 9 — Epic Boon selection and +1 ability disappear after Respec Apply/refresh:** atomically persist the feat, ability increase, and decision receipt through manifest rebuild and serialization/reload.
+- **Ownership:** `charactersheet-respec.js`, `charactersheet-respec-engine.js`, `charactersheet-progression.js`; only Epic Boon/improvement helpers in `charactersheet-class-utils.js` if required.
+
+#### S5 — Homepage Character Sheet tile (`truemichato-homepage-sheet-tile`)
+
+- **Bug 8 — No homepage Character Sheet link:** add a standard responsive Players-grid tile linking to `charactersheet.html`, with an original cute illustration and accessible day/night/focus treatment.
+- **Ownership:** `index.html`, `scss/index.scss`, and focused homepage contract/accessibility tests.
+
 ## Closed Bugs
 
 ### Round 58 — Encounter/Names table hashes and Items magic-row rendering
