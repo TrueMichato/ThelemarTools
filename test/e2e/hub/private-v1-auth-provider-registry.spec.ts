@@ -65,7 +65,6 @@ test("operator reauthentication grants and revokes campaign creation through the
 		await page.getByRole("link", {name: "Sign in with GitHub"}).click();
 		await page.waitForURL(/\/hub\.html$/);
 		await expect(page.locator("#hub-operator-panel")).toBeVisible();
-		await page.getByRole("button", {name: "Reauthenticate"}).click();
 		await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toHaveCount(0);
 		await expect(page.getByRole("button", {name: "Reauthenticate with Google"})).toHaveCount(0);
 		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
@@ -225,7 +224,6 @@ test("links a new provider to the same account, signs in through it, then unlink
 		const sameAccountSession = await secondPage.request.get("/api/session").then(response => response.json());
 		expect(sameAccountSession.account.id).toBe(initialSession.account.id);
 
-		await page.getByRole("button", {name: "Reauthenticate"}).click();
 		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
 		await page.waitForURL(/\/hub\.html$/);
 		const googleRow = page.locator("#hub-identity-list .hub-data-row").filter({hasText: "Google"});
