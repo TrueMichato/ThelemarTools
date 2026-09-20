@@ -86027,6 +86027,147 @@
 			]
 		},
 		{
+			"name": "Item Material Property: Color",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"The material's usual appearance. Natural variation is described in its entry.",
+				"Color is descriptive unless the material's own entry gives it a mechanical effect. A displayed swatch is a reference sample rather than a guarantee that every piece of the material has exactly that hue."
+			]
+		},
+		{
+			"name": "Item Material Property: Critical",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"Each positive point lowers the attack roll needed for a critical hit by 1; each negative point raises it by 1. A natural 20 still automatically hits.",
+				"Apply Critical only to weapons. Start from the weapon's current critical threshold, subtract the material's Critical value, and keep the final threshold between 2 and 20."
+			]
+		},
+		{
+			"name": "Item Material Property: Damage Dice",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"Moves a weapon this many steps along the Weapon Damage Progression. Negative values move it down; the damage type is unchanged unless stated otherwise.",
+				"A value of 0 leaves the weapon's normal damage dice unchanged. Stop at the first or last step if a change would move beyond the progression.",
+				{
+					"type": "table",
+					"caption": "Weapon Damage Progression",
+					"colLabels": [
+						"Step",
+						"Damage Dice",
+						"Equivalent"
+					],
+					"colStyles": [
+						"col-2 text-center",
+						"col-5 text-center",
+						"col-5 text-center"
+					],
+					"rows": [
+						[
+							"1",
+							"1d4",
+							"\u2014"
+						],
+						[
+							"2",
+							"1d6",
+							"\u2014"
+						],
+						[
+							"3",
+							"1d8",
+							"\u2014"
+						],
+						[
+							"4",
+							"1d10",
+							"\u2014"
+						],
+						[
+							"5",
+							"1d12",
+							"2d4"
+						],
+						[
+							"6",
+							"2d6",
+							"\u2014"
+						],
+						[
+							"7",
+							"2d8",
+							"\u2014"
+						],
+						[
+							"8",
+							"2d10",
+							"\u2014"
+						],
+						[
+							"9",
+							"2d12",
+							"3d6"
+						],
+						[
+							"10",
+							"3d8",
+							"\u2014"
+						],
+						[
+							"11",
+							"3d10",
+							"\u2014"
+						]
+					]
+				}
+			]
+		},
+		{
+			"name": "Item Material Property: Density",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"Mass per unit volume, measured in g/cm³. Magical and organic materials may instead be listed as Varies.",
+				"When a material replaces an item's ordinary substance, compare its density with the normal baseline for that kind of material to determine the item's new weight. Use iron (7.87 g/cm³) as the baseline for metals and other dense materials, and seasoned equipment wood (0.14 g/cm³) as the baseline for wood. An explicitly stated weight multiplier takes precedence. A material with Varies for Density does not supply a general weight multiplier."
+			]
+		},
+		{
+			"name": "Item Material Property: Magic Capacity",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"The number of distinct magical effects an item can hold without interference. Infinity never overloads; negative values suppress magic as described by the material.",
+				"When the number of effects on an item exceeds its Magic Capacity, it is overloaded. Whenever an overloaded item's magical property is activated, or it is used to make an attack roll, saving throw, or ability check, roll a {@dice d20}. If the result is lower than 15 + the number of effects above its Magic Capacity, roll on the Magical Interference table. Passive effects are checked when the item is first brought into use and again after each Short or Long Rest."
+			]
+		},
+		{
+			"name": "Item Material Property: Penetration",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"If an attack misses AC by no more than this value, it is a Penetrating Blow: piercing damage equal to the attacker's ability modifier, while remaining a miss with no on-hit effects.",
+				"Penetration normally applies only against nonmagical Armor Class. A material can explicitly allow its Penetration to apply against magical Armor Class."
+			]
+		},
+		{
+			"name": "Item Material Property: Protection",
+			"source": "TGTT",
+			"page": 0,
+			"ruleCategory": "materials",
+			"entries": [
+				"If nonzero, this is the base AC of armor made primarily from the material, before any allowed Dexterity modifier or shield. 0 leaves normal AC unchanged.",
+				"Protection applies only when the material forms the armor's protective body. It does not replace a shield's bonus or alter the normal Dexterity limit of the armor unless another material effect explicitly says so."
+			]
+		},
+		{
 			"name": "Magical Interference",
 			"source": "TGTT",
 			"page": 0,

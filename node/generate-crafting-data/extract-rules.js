@@ -62,6 +62,13 @@ const RULE_ALLOWLIST_BY_SOURCE = {
 		"Gemstone Empowerment": "crafting",
 		"Object Durability": "materials",
 		"Magical Interference": "materials",
+		"Item Material Property: Density": "materials",
+		"Item Material Property: Damage Dice": "materials",
+		"Item Material Property: Protection": "materials",
+		"Item Material Property: Critical": "materials",
+		"Item Material Property: Penetration": "materials",
+		"Item Material Property: Magic Capacity": "materials",
+		"Item Material Property: Color": "materials",
 	},
 };
 

@@ -1151,12 +1151,15 @@ Sorting and grouping answer different questions and fight each other, so an expl
 **flattens** the list the way a filter does: a "best damage" ranking split across eight
 collapsed category headers ranks nothing.
 
-Each compact property in a picker row carries native hover help sourced from the shared rule
-metadata. A collapsed, keyboard-accessible **Material Rules** disclosure at the foot of the
-picker defines all seven properties — Density, Damage Dice, Protection, Critical, Penetration,
-Magic Capacity, and Color — and includes the complete eleven-step Weapon Damage Progression
-with its `2d4` and `3d6` equivalents. The disclosure is the touch/mobile fallback, so no rule
-is available only on hover.
+Each compact property in a picker row carries a standard 5etools `Renderer.hover` target
+sourced from `Parser.ITEM_MATERIAL_RULES`. The target is the matching generated
+`craftingRule` entity (`Item Material Property: …|TGTT`) in `data/crafting.json`, which the
+sheet already loads for its item-material catalog. A collapsed, keyboard-accessible
+**Material Rules** disclosure at the foot of the picker defines all seven properties —
+Density, Damage Dice, Protection, Critical, Penetration, Magic Capacity, and Color — and
+includes the complete eleven-step Weapon Damage Progression with its `2d4` and `3d6`
+equivalents. Its headings use the same rule targets, while the visible definitions remain
+the touch/keyboard fallback, so no rule is available only on hover.
 
 ### An empty list says which kind of empty it is
 

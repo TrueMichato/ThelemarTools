@@ -1822,7 +1822,16 @@ class CharacterSheetMaterials {
 		const rule = Parser.ITEM_MATERIAL_RULE_BY_KEY[key];
 		if (!rule) return CharacterSheetMaterials._esc(label);
 		const esc = CharacterSheetMaterials._esc;
-		return `<abbr class="charsheet__material-rule-help" title="${esc(`${rule.full}: ${rule.summary}`)}">${esc(label)}</abbr>`;
+		if (!rule.reference || !Renderer.hover?.getHoverElementAttributes) return esc(label);
+
+		const page = UrlUtil.PG_CRAFTING;
+		const hash = UrlUtil.URL_TO_HASH_BUILDER["craftingRule"](rule.reference);
+		const hoverAttrs = Renderer.hover.getHoverElementAttributes({
+			page,
+			source: rule.reference.source,
+			hash,
+		});
+		return `<span class="charsheet__material-rule-help ve-help-subtle" ${hoverAttrs}>${esc(label)}</span>`;
 	}
 
 	static _getMaterialSummaryHtml (material, item) {
@@ -1834,7 +1843,7 @@ class CharacterSheetMaterials {
 	static _getMaterialRulesHtml () {
 		const esc = CharacterSheetMaterials._esc;
 		const rules = Parser.ITEM_MATERIAL_RULES
-			.map(rule => `<dt>${esc(rule.full)}</dt><dd>${esc(rule.summary)}</dd>`)
+			.map(rule => `<dt>${CharacterSheetMaterials._getMaterialRuleHelpHtml(rule.key, rule.full)}</dt><dd>${esc(rule.summary)}</dd>`)
 			.join("");
 		const progression = Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION;
 		return `
@@ -2205,6 +2214,7 @@ class CharacterSheetMaterials {
 			};
 
 			list.addEventListener("click", (evt) => {
+				if (evt.target.closest("[data-vet-page]")) return;
 				const btn = evt.target.closest(".charsheet__material-option-btn");
 				if (!btn) return;
 				const idx = Number(btn.closest(".charsheet__material-option").dataset.materialIdx);

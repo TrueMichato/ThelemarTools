@@ -309,12 +309,21 @@ class _RenderItemMaterialImpl extends RenderPageImplBase {
 	_getRuleLabel (key) {
 		const rule = Parser.ITEM_MATERIAL_RULE_BY_KEY[key];
 		if (!rule) return Parser.itemMaterialRuleToFull(key);
-		return `<abbr class="crafting__rule-help" title="${`${rule.full}: ${rule.summary}`.qq()}">${rule.full}</abbr>`;
+		if (!rule.reference || !Renderer.hover?.getHoverElementAttributes) return rule.full;
+
+		const page = UrlUtil.PG_CRAFTING;
+		const hash = UrlUtil.URL_TO_HASH_BUILDER["craftingRule"](rule.reference);
+		const hoverAttrs = Renderer.hover.getHoverElementAttributes({
+			page,
+			source: rule.reference.source,
+			hash,
+		});
+		return `<a class="crafting__rule-help ve-help-subtle" href="${page}#${hash}" ${hoverAttrs}>${rule.full}</a>`;
 	}
 
 	_getMaterialRulesRow () {
 		const rules = Parser.ITEM_MATERIAL_RULES
-			.map(rule => `<dt>${rule.full}</dt><dd>${rule.summary}</dd>`)
+			.map(rule => `<dt>${this._getRuleLabel(rule.key)}</dt><dd>${rule.summary}</dd>`)
 			.join("");
 		const progression = Parser.ITEM_MATERIAL_DAMAGE_DIE_PROGRESSION;
 		return `<tr><td colspan="6" class="ve-pt-1">

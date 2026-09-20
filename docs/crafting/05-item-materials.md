@@ -74,10 +74,12 @@ the full field-by-field breakdown. The page-relevant summary:
 
 1. **Axes strip** — five bordered cells (Damage Dice / Protection / Critical / Penetration /
    Magic Capacity). Sentinels render as `N/A`, `∞`, `−∞` and *Varies*, and signed axes get
-   an explicit `+`. Each label has native hover help from `Parser.ITEM_MATERIAL_RULES`.
+   an explicit `+`. Each label is a standard 5etools hover link to a generated
+   `craftingRule` entity.
 2. **Material Rules disclosure** — defines all seven properties and prints the complete
    eleven-step Weapon Damage Progression, including the `2d4` and `3d6` equivalents. This is
-   the keyboard/touch fallback for the compact hover help.
+   the keyboard/touch fallback for the compact hover help; its seven headings point to the
+   same rule entities.
 3. **Density and Color** — Density includes the derived weight multiplier relative to its
    category baseline; Color includes the authored swatch and hex value.
 4. **Price** — `price.display` verbatim, because trade units are heterogeneous.
@@ -149,27 +151,40 @@ npm run gen:crafting     # or `npm run gen`
 Expected counts in the run report:
 
 ```
-craftingMaterial 1875 / craftingRecipe 456 / craftingRule 46 / itemMaterial 72 / draconicResonance 18
+craftingMaterial 1875 / craftingRecipe 456 / craftingRule 53 / itemMaterial 72 / draconicResonance 18
 ```
 
-## The two Thelemar reference rules
+## The nine Thelemar reference rules
 
 Not every Thelemar rule belongs on the crafting hub, so `RULE_ALLOWLIST_BY_SOURCE.thelemar`
-in `node/generate-crafting-data/extract-rules.js` is the *only* gate between the brew's 40
-`variantrule` entries and the page. Two of them are material rules and are allowlisted into
+in `node/generate-crafting-data/extract-rules.js` is the *only* gate between the brew's
+`variantrule` entries and the page. Nine are material references and are allowlisted into
 the `materials` category:
 
 | Rule | Contains |
 |---|---|
 | **Object Durability** | The 15-row Object AC table, the Tiny→Large fragile/resilient HP table, and the damage-type notes. Reference only — the sheet automates none of it. |
 | **Magical Interference** | The d20-vs-`15 + overage` trigger, the passive-effect re-check rule, and the d8 effect table. |
+| **Item Material Property: Density** | Density units, category baselines, explicit multipliers, and *Varies*. |
+| **Item Material Property: Damage Dice** | Signed steps and the complete eleven-step Weapon Damage Progression. |
+| **Item Material Property: Protection** | Base armor AC and the boundary between material protection, Dexterity, and shields. |
+| **Item Material Property: Critical** | Signed critical-threshold movement and its 2–20 bounds. |
+| **Item Material Property: Penetration** | Penetrating Blow resolution and the magical-AC exception. |
+| **Item Material Property: Magic Capacity** | Capacity, overload checks, infinity, and suppression. |
+| **Item Material Property: Color** | Descriptive color, natural variation, and when color has mechanics. |
+
+`Parser.ITEM_MATERIAL_RULES` stores each compact label/summary plus the canonical
+`name|source` reference. Both `render-crafting.js` and the Character Sheet material picker
+build `Renderer.hover` attributes from that metadata, targeting the generated
+`craftingRule` copy in `data/crafting.json`. This keeps hovers available even when TGTT is
+not separately installed as brew and prevents `Failed to load renderable content` errors.
 
 ⚠️ **The Magical Interference table exists twice.** The sheet rolls on
 `CharacterSheetMaterials.MAGICAL_INTERFERENCE_TABLE`; the brew rule is the reader-facing
 copy. `test/jest/CraftingItemMaterials.test.js` asserts the eight row names match the JS
 constant in order, so the two cannot drift. Edit the JS constant and the brew together.
 
-Adding a third reference rule means: author the `variantrule` in the brew, add its name to
+Adding another reference rule means: author the `variantrule` in the brew, add its name to
 the allowlist, and re-run `npm run gen:crafting`. Forget the allowlist and it silently never
 appears.
 
