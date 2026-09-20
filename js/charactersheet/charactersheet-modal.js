@@ -60,6 +60,131 @@ class CharacterSheetModal {
 	}
 
 	/**
+	 * Create the immutable, explicit context shared by every post-roll prompt.
+	 *
+	 * This intentionally has no "current roll" fallback. A caller either supplies the roll that
+	 * triggered its prompt or opens an ordinary modal; that makes stale-result leakage impossible.
+	 *
+	 * @param {object} opts
+	 * @param {string} opts.label Human-readable roll name.
+	 * @param {string|number} opts.total Final total shown to the player.
+	 * @param {string|number} [opts.naturalRoll] Chosen natural die, when the roll has one.
+	 * @param {string} [opts.breakdown] Exact dice/modifier breakdown.
+	 * @param {string} [opts.outcome] Relevant result, such as "Critical Hit!" or "Failed vs DC 15".
+	 * @returns {{label:string,total:string,naturalRoll?:string,breakdown?:string,outcome?:string}}
+	 */
+	static buildRollFollowup ({label, total, naturalRoll = null, breakdown = "", outcome = ""} = {}) {
+		if (total == null) throw new TypeError("A roll follow-up requires a total.");
+		const out = {
+			label: String(label || "Triggering roll"),
+			total: String(total),
+		};
+		if (naturalRoll != null) out.naturalRoll = String(naturalRoll);
+		if (breakdown) out.breakdown = String(breakdown);
+		if (outcome) out.outcome = String(outcome);
+		return Object.freeze(out);
+	}
+
+	/**
+	 * Render a canonical roll summary suitable for both custom Character Sheet modals and
+	 * `InputUiUtil` descriptions.
+	 */
+	static getRollFollowupHtml (rollFollowup) {
+		const roll = CharacterSheetModal.buildRollFollowup(rollFollowup);
+		const label = CharacterSheetModal._escapeHtml(roll.label);
+		const total = CharacterSheetModal._escapeHtml(roll.total);
+		const natural = roll.naturalRoll == null
+			? ""
+			: `<div class="cs-roll-followup__datum">
+				<span class="cs-roll-followup__datum-label">Natural d20</span>
+				<span class="cs-roll-followup__datum-value">${CharacterSheetModal._escapeHtml(roll.naturalRoll)}</span>
+			</div>`;
+		const outcome = roll.outcome
+			? `<div class="cs-roll-followup__outcome">${CharacterSheetModal._escapeHtml(roll.outcome)}</div>`
+			: "";
+		const breakdown = roll.breakdown
+			? `<div class="cs-roll-followup__breakdown">
+				<span class="cs-roll-followup__breakdown-label">Breakdown</span>
+				<span class="cs-roll-followup__breakdown-value">${CharacterSheetModal._escapeHtml(roll.breakdown)}</span>
+			</div>`
+			: "";
+
+		return `<section class="cs-roll-followup" role="group" aria-label="Triggering roll result">
+			<div class="cs-roll-followup__heading">${label}</div>
+			<div class="cs-roll-followup__result">
+				<div class="cs-roll-followup__datum cs-roll-followup__datum--total">
+					<span class="cs-roll-followup__datum-label">Total</span>
+					<span class="cs-roll-followup__datum-value">${total}</span>
+				</div>
+				${natural}
+				${outcome}
+			</div>
+			${breakdown}
+		</section>`;
+	}
+
+	/**
+	 * Open a custom modal with the triggering roll pinned above a separate caller-owned content
+	 * host. Returning the nested host as `eleModalInner` means a caller can safely assign
+	 * `innerHTML` without deleting the roll summary.
+	 */
+	static async pGetRollFollowup (opts) {
+		const {rollFollowup, ...modalOpts} = opts || {};
+		const modal = await CharacterSheetModal.pGetShow(modalOpts);
+		const eleRoot = modal?.eleModalInner;
+		if (!eleRoot?.append) return modal;
+
+		const eleSummary = e_({outer: CharacterSheetModal.getRollFollowupHtml(rollFollowup)});
+		const eleContent = e_({outer: `<div class="cs-roll-followup__content"></div>`});
+		eleRoot.append(eleSummary, eleContent);
+		return {
+			...modal,
+			eleModalInner: eleContent,
+			eleRollFollowup: eleSummary,
+			eleRollFollowupRoot: eleRoot,
+		};
+	}
+
+	static pGetUserBoolean (opts) {
+		return globalThis.InputUiUtil.pGetUserBoolean(CharacterSheetModal._getRollFollowupInputOpts(opts, {isDescriptionHtml: true}));
+	}
+
+	static pGetUserEnum (opts) {
+		return globalThis.InputUiUtil.pGetUserEnum(CharacterSheetModal._getRollFollowupInputOpts(opts, {isDescriptionElement: true}));
+	}
+
+	static pGetUserNumber (opts) {
+		return globalThis.InputUiUtil.pGetUserNumber(CharacterSheetModal._getRollFollowupInputOpts(opts, {isDescriptionElement: true}));
+	}
+
+	static _getRollFollowupInputOpts (opts, {isDescriptionHtml = false, isDescriptionElement = false} = {}) {
+		const {rollFollowup, ...inputOpts} = opts || {};
+		if (!rollFollowup) return inputOpts;
+		const htmlDescription = `${CharacterSheetModal.getRollFollowupHtml(rollFollowup)}${inputOpts.htmlDescription || ""}`;
+		const out = {
+			...inputOpts,
+			fnGetShowModal: modalOpts => CharacterSheetModal.pGetShow(modalOpts),
+		};
+		if (isDescriptionHtml) out.htmlDescription = htmlDescription;
+		if (isDescriptionElement) {
+			delete out.htmlDescription;
+			const elePre = e_({outer: `<div class="cs-roll-followup__input-description">${htmlDescription}</div>`});
+			if (inputOpts.elePre) elePre.append(inputOpts.elePre);
+			out.elePre = elePre;
+		}
+		return out;
+	}
+
+	static _escapeHtml (value) {
+		return String(value)
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#39;");
+	}
+
+	/**
 	 * Drop-in replacement for `UiUtil.pGetShowModal`.
 	 *
 	 * @param {object} [opts] Passed through untouched, minus the options this owns.

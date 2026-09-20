@@ -1519,6 +1519,7 @@ class CharacterSheetCombat {
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
+		const attackBreakdown = this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr);
 		void this._page.pAnimateD20?.(rollResult);
 		const resultEl = this._page.showDiceResult({
 			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}${featureModLabel}${ammoLabel}${riderLabel}`,
@@ -1527,7 +1528,14 @@ class CharacterSheetCombat {
 			total,
 			resultClass,
 			resultNote: resultNote,
-			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr),
+			subtitle: attackBreakdown,
+		});
+		const rollFollowup = CharacterSheetModal.buildRollFollowup({
+			label: `${attack.name} Attack`,
+			total,
+			naturalRoll: rollResult.roll,
+			breakdown: attackBreakdown,
+			outcome: resultNote,
 		});
 
 		// (R26 #8) Non-blocking post-roll Guided Strike offer. FLAG (overlap #9 roll
@@ -1541,11 +1549,6 @@ class CharacterSheetCombat {
 			total,
 			isGuidedStrikeApplication: extraBonus?.label === "Guided Strike",
 		});
-
-		// Material Penetration offer. Non-blocking, and deliberately player-driven: the
-		// sheet never learns the target's AC, so only the player can say whether this
-		// missed and by how much.
-		this._offerPenetratingBlow({resultEl, attack, total});
 
 		const attackRollId = (this._attackRollSequence || 0) + 1;
 		this._attackRollSequence = attackRollId;
@@ -1617,11 +1620,20 @@ class CharacterSheetCombat {
 			rollResult,
 			total,
 			totalBonus,
+			rollModifier: totalBonus - exhaustionPenalty,
+			rollFollowup,
 			isCrit: rollResult.roll >= critRange,
 			isNat20: rollResult.roll === 20,
 			isFumble: rollResult.roll === 1,
 		};
 		await this._runPostAttackHooks(postCtx, {blocking: true});
+		// Material Penetration is a deferred, toast-attached prompt. Read the live context when
+		// the player clicks it so a preceding fortune intervention cannot leave a stale total.
+		this._offerPenetratingBlow({
+			resultEl,
+			attack,
+			getRollContext: () => ({total: postCtx.total, rollFollowup: postCtx.rollFollowup}),
+		});
 		void this._runPostAttackHooks(postCtx, {blocking: false}).catch(e => {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet Combat] post-attack hook error", e);
@@ -1811,10 +1823,13 @@ class CharacterSheetCombat {
 	 * @param {object} opts
 	 * @param {HTMLElement|null} opts.resultEl The dice-result toast.
 	 * @param {object} opts.attack
-	 * @param {number} opts.total The attack roll total.
+	 * @param {number} [opts.total] Fallback attack total for direct callers.
+	 * @param {object} [opts.rollFollowup] Fallback roll context for direct callers.
+	 * @param {() => {total:number, rollFollowup:object}} [opts.getRollContext] Reads the latest
+	 *        total/context if another post-roll feature revised the attack.
 	 * @returns {boolean} Whether an offer was attached.
 	 */
-	_offerPenetratingBlow ({resultEl = null, attack = null, total = 0} = {}) {
+	_offerPenetratingBlow ({resultEl = null, attack = null, total = 0, rollFollowup = null, getRollContext = null} = {}) {
 		if (!resultEl) return false;
 		if (typeof document === "undefined" || !document.body?.contains(resultEl)) return false;
 		if (resultEl.__penetrationOffered) return false;
@@ -1829,19 +1844,21 @@ class CharacterSheetCombat {
 		`});
 		const btn = offer.querySelector(".charsheet__penetration-btn");
 		btn.addEventListener("click", async () => {
-			const margin = await InputUiUtil.pGetUserNumber({
+			const currentRoll = getRollContext?.() || {total, rollFollowup};
+			const margin = await CharacterSheetModal.pGetUserNumber({
 				inputMode: "numeric",
 				title: "Penetrating Blow",
 				default: 1,
 				min: 1,
 				int: true,
+				rollFollowup: currentRoll.rollFollowup,
 			});
 			if (margin == null) return;
 			const isPenetrating = margin <= pen;
 			JqueryUtil.doToast(/** @type {*} */ ({
 				type: isPenetrating ? "success" : "info",
 				content: isPenetrating
-					? `Penetrating Blow \u2014 missed by ${margin}, within Penetration ${pen}. The attack hits (attack total ${total}).`
+					? `Penetrating Blow \u2014 missed by ${margin}, within Penetration ${pen}. The attack hits (attack total ${currentRoll.total}).`
 					: `Missed by ${margin}, beyond Penetration ${pen}. No penetration.`,
 			}));
 			offer.remove();
@@ -1864,6 +1881,19 @@ class CharacterSheetCombat {
 	 */
 	_getPostAttackHooks () {
 		return [
+			{
+				// Resolve roll-changing fortune features first so every later hit/crit/fumble
+				// predicate and prompt sees the revised roll rather than the discarded one.
+				id: "fortuneIntervention",
+				blocking: true,
+				predicate: (ctx) => (this._state.getD20InterventionOffers?.({
+					naturalRoll: ctx.rollResult?.roll,
+					effectiveRoll: ctx.rollResult?.roll,
+					isAdvantage: ctx.hasAdvantage && !ctx.hasDisadvantage,
+					rollType: "attack",
+				}) || []).length > 0,
+				handler: (ctx) => this._pOfferFortuneIntervention(ctx),
+			},
 			{
 				id: "triggeredFeatCriticalHit",
 				blocking: true,
@@ -1933,25 +1963,6 @@ class CharacterSheetCombat {
 				handler: (ctx) => this._pOfferFeatureOnHitOptions(ctx),
 			},
 			{
-				// GENERIC post-roll fortune interventions (TGTT Gambler's Extra Luck /
-				// Master of Fortune, and any future Lucky-style feature). The offer set
-				// comes from `CharacterSheetState#getD20InterventionOffers`, so this hook
-				// never needs to change when a new such feature is added.
-				//
-				// `_rollAttack` is synchronous and its result is already displayed by the
-				// time hooks run, so an accepted intervention re-displays a corrected
-				// result toast (the Blood Price / Guided Strike convention) rather than
-				// mutating the original roll in place.
-				id: "fortuneIntervention",
-				predicate: (ctx) => (this._state.getD20InterventionOffers?.({
-					naturalRoll: ctx.rollResult?.roll,
-					effectiveRoll: ctx.rollResult?.roll,
-					isAdvantage: ctx.hasAdvantage && !ctx.hasDisadvantage,
-					rollType: "attack",
-				}) || []).length > 0,
-				handler: (ctx) => this._pOfferFortuneIntervention(ctx),
-			},
-			{
 				id: "shadowKnightTriggers",
 				predicate: (ctx) => (!!ctx.attack?.isShadowWeapon || !!ctx.attack?.countsAsShadowWeapon)
 					&& !!this._state.getFeatureCalculations?.().hasShadowKnight,
@@ -2008,11 +2019,12 @@ class CharacterSheetCombat {
 			const what = spec?.destroys
 				? `<b>${cand.name}</b> (${cand.material.name}) shatters.`
 				: `<b>${cand.name}</b> (${cand.material.name}) degrades.`;
-			const isConfirm = await InputUiUtil.pGetUserBoolean({
+			const isConfirm = await CharacterSheetModal.pGetUserBoolean({
 				title: spec?.destroys ? "Material Shatters" : "Material Degrades",
 				htmlDescription: `<div>${what}</div><div class="ve-muted ve-small mt-1">${spec?.note || ""}</div><div class="mt-2">Apply it?</div>`,
 				textYes: "Apply",
 				textNo: "Skip",
+				rollFollowup: ctx.rollFollowup,
 			});
 			if (!isConfirm) continue;
 
@@ -2047,7 +2059,7 @@ class CharacterSheetCombat {
 	 * @param {object} ctx Post-attack context.
 	 */
 	async _pOfferMaterialInstability (ctx) {
-		await this.pResolveMaterialInstability(this._getInstabilityCandidates(ctx));
+		await this.pResolveMaterialInstability(this._getInstabilityCandidates(ctx), {rollFollowup: ctx.rollFollowup});
 	}
 
 	/**
@@ -2062,7 +2074,7 @@ class CharacterSheetCombat {
 	 *
 	 * @param {Array<{id, name, material, spec}>} candidates
 	 */
-	async pResolveMaterialInstability (candidates) {
+	async pResolveMaterialInstability (candidates, {rollFollowup = null} = {}) {
 		if (!candidates?.length) return;
 
 		for (const cand of candidates) {
@@ -2072,11 +2084,12 @@ class CharacterSheetCombat {
 				? `<b>${cand.name}</b> (${cand.material.name}) lashes back for ${effect.damage} ${effect.damageType} damage.`
 				: `<b>${cand.name}</b> (${cand.material.name}) destabilises.`;
 
-			const isConfirm = await InputUiUtil.pGetUserBoolean({
+			const isConfirm = await CharacterSheetModal.pGetUserBoolean({
 				title: "Material Instability",
 				htmlDescription: `<div>${what}</div><div class="ve-muted ve-small mt-1">${Renderer.stripTags(cand.spec?.note || "")}</div><div class="mt-2">Apply it?</div>`,
 				textYes: "Apply",
 				textNo: "Skip",
+				rollFollowup,
 			});
 			if (!isConfirm) continue;
 
@@ -2141,18 +2154,20 @@ class CharacterSheetCombat {
 		});
 		const hasTargetAware = options.some(opt => opt.targetAware && opt.targetEffect?.source);
 
-		const didHit = await InputUiUtil.pGetUserBoolean({
+		const didHit = await CharacterSheetModal.pGetUserBoolean({
 			title: `${ctx.attack?.name || "Attack"} — On Hit`,
 			htmlDescription: `Did this attack hit? On a hit you may use one of: ${labels.join("; ")}.`,
 			textYes: "Hit",
 			textNo: "Miss",
+			rollFollowup: ctx.rollFollowup,
 		});
 		if (!didHit) return;
 
-		const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+		const picked = await CharacterSheetModal.pGetUserEnum(/** @type {*} */ ({
 			title: `${ctx.attack?.name || "Attack"} — Choose an On-Hit Effect`,
 			values: [...labels, ...(hasTargetAware ? ["Track target only"] : []), "Skip"],
 			isResolveItem: false,
+			rollFollowup: ctx.rollFollowup,
 		}));
 		if (picked == null || picked > options.length || (picked === options.length && !hasTargetAware)) return;
 
@@ -2210,9 +2225,10 @@ class CharacterSheetCombat {
 			};
 			waitForPreviousModal();
 		});
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetRollFollowup({
 			title: `${opt.name} — Choose Target`,
 			isMinHeight0: true,
+			rollFollowup: ctx.rollFollowup,
 			focusRestoreTarget: trigger,
 			getFocusRestoreTarget: () => csGetAttackFocusTrigger(ctx.attack),
 		});
@@ -2326,18 +2342,19 @@ class CharacterSheetCombat {
 	 * @param {*} ctx Post-attack context from `_rollAttack`.
 	 */
 	async _pOfferFortuneIntervention (ctx) {
+		const rollModifier = ctx.rollModifier ?? ctx.totalBonus ?? 0;
 		const result = await this._page._pMaybeApplyFortuneIntervention?.({
 			rollResult: ctx.rollResult,
 			effectiveRoll: ctx.rollResult.roll,
 			rollLabel: `${ctx.attack?.name || "Attack"} Attack`,
 			rollType: "attack",
-			totalMod: ctx.totalBonus,
+			totalMod: rollModifier,
 			exhaustionPenalty: 0,
 		});
 		if (!result?.applied) return;
 
 		const critRange = this._state.getCriticalRange?.() || 20;
-		const newTotal = result.effectiveRoll + ctx.totalBonus;
+		const newTotal = result.effectiveRoll + rollModifier;
 		let resultClass = "";
 		let resultNote = "";
 		if (ctx.rollResult.roll >= critRange) {
@@ -2352,11 +2369,22 @@ class CharacterSheetCombat {
 		this._page.showDiceResult({
 			title: `${ctx.attack?.name || "Attack"} Attack (revised)`,
 			roll: result.effectiveRoll,
-			modifier: ctx.totalBonus,
+			modifier: rollModifier,
 			total: newTotal,
 			resultClass,
 			resultNote,
-			subtitle: `d20 (${result.effectiveRoll}) ${ctx.totalBonus >= 0 ? "+" : "-"} ${Math.abs(ctx.totalBonus)}`,
+			subtitle: this._page.formatD20Breakdown(ctx.rollResult, rollModifier),
+		});
+		ctx.total = newTotal;
+		ctx.isCrit = ctx.rollResult.roll >= critRange;
+		ctx.isNat20 = ctx.rollResult.roll === 20;
+		ctx.isFumble = ctx.rollResult.roll === 1;
+		ctx.rollFollowup = CharacterSheetModal.buildRollFollowup({
+			label: `${ctx.attack?.name || "Attack"} Attack`,
+			total: newTotal,
+			naturalRoll: ctx.rollResult.roll,
+			breakdown: this._page.formatD20Breakdown(ctx.rollResult, rollModifier),
+			outcome: resultNote,
 		});
 
 		// Keep the recorded attack context in step so Sneak Attack / damage riders that
@@ -2372,22 +2400,24 @@ class CharacterSheetCombat {
 		if (ctx.isFumble) return;
 		const didAttackHaveAdvantage = ctx.rollResult?.mode === "advantage";
 		if (!ctx.isCrit) {
-			const didHit = await InputUiUtil.pGetUserBoolean({
+			const didHit = await CharacterSheetModal.pGetUserBoolean({
 				title: "Shadow Weapon Attack",
 				htmlDescription: "Did this shadow weapon attack hit its target?",
 				textYes: "Hit",
 				textNo: "Miss",
+				rollFollowup: ctx.rollFollowup,
 			});
 			if (!didHit) return;
 		}
 
 		const shadowcasting = this._state.getShadowcastingResource?.();
 		if ((shadowcasting?.current || 0) > 0) {
-			const useShadowbite = await InputUiUtil.pGetUserBoolean({
+			const useShadowbite = await CharacterSheetModal.pGetUserBoolean({
 				title: "Shadowbite",
 				htmlDescription: `Use Shadowbite on this hit? The target makes a DC ${this._state.getFeatureCalculations().shadowcastingSaveDc} Constitution save${didAttackHaveAdvantage ? " with disadvantage" : ""}. On a failure, roll 1d8 psychic damage and its next attack has disadvantage.`,
 				textYes: "Use Shadowbite",
 				textNo: "Skip",
+				rollFollowup: ctx.rollFollowup,
 			});
 			if (useShadowbite) {
 				const result = this._state.useShadowbite?.({hadAttackAdvantage: didAttackHaveAdvantage});
@@ -2403,11 +2433,12 @@ class CharacterSheetCombat {
 
 		const shadowSneak = this._state.getShadowSneakResource?.();
 		if ((shadowSneak?.current || 0) > 0) {
-			const useShadowSneak = await InputUiUtil.pGetUserBoolean({
+			const useShadowSneak = await CharacterSheetModal.pGetUserBoolean({
 				title: "Shadow Sneak",
 				htmlDescription: "Teleport to an unoccupied space within 5 feet of the target and become invisible until the start of your next turn, or until you attack or cast a spell?",
 				textYes: "Use Shadow Sneak",
 				textNo: "Skip",
+				rollFollowup: ctx.rollFollowup,
 			});
 			if (useShadowSneak && this._state.useShadowSneak?.()) {
 				JqueryUtil.doToast({type: "success", content: "Shadow Sneak: teleport within 5 feet of the target; you are now Invisible."});
@@ -2507,9 +2538,10 @@ class CharacterSheetCombat {
 		let resolveOuter = null;
 		let isResolved = false;
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetRollFollowup({
 			title: `Arcane Shot — ${ctx.attack?.name || "Ranged Attack"}`,
 			isMinHeight0: true,
+			rollFollowup: ctx.rollFollowup,
 			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
 		});
 
@@ -2685,9 +2717,10 @@ class CharacterSheetCombat {
 		let resolveOuter = null;
 		let isResolved = false;
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetRollFollowup({
 			title: `Critical Hit Effect — ${ctx.attack?.name || "Weapon"}`,
 			isMinHeight0: true,
+			rollFollowup: ctx.rollFollowup,
 			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } csRestoreModalFocus(trigger); },
 		});
 
@@ -3840,7 +3873,7 @@ class CharacterSheetCombat {
 			? (this._state.getFeatureCalculations?.().demolishingMightObjectMultiplier || 1)
 			: 1;
 		const total = totalBeforeTargetMultiplier * targetMultiplier;
-		const juggernautOutcome = await this._pResolveJuggernautHitEffects(attack);
+		let juggernautOutcome = "";
 
 		// Build subtitle with breakdown
 		let subtitle = `${damageExpression}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
@@ -3873,6 +3906,13 @@ class CharacterSheetCombat {
 		if (channelSpellMaximized) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
 		if (destructiveWrathApplied) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
 		if (targetMultiplier > 1) subtitle += ` | <strong>Demolishing Might: ×${targetMultiplier} vs ${juggernautTarget}</strong>`;
+		const damageRollFollowup = CharacterSheetModal.buildRollFollowup({
+			label: `${attack.name} Damage`,
+			total,
+			breakdown: Renderer.stripTags(subtitle).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+			outcome: isCrit ? "Critical-hit damage" : "",
+		});
+		juggernautOutcome = await this._pResolveJuggernautHitEffects(attack, {rollFollowup: damageRollFollowup});
 		if (juggernautOutcome) subtitle += ` | ${juggernautOutcome}`;
 		const triggeredDamageTypes = new Set([weaponDamageType, ...riderParts.map(it => it.type), channelSpell?.damageType].filter(Boolean));
 		const triggeredEffects = [...triggeredDamageTypes].flatMap(type => this._state.getTriggeredDamageEffects?.(type) || []);
@@ -3993,14 +4033,17 @@ class CharacterSheetCombat {
 		return choice?.id || "normal";
 	}
 
-	async _pResolveJuggernautHitEffects (attack) {
+	async _pResolveJuggernautHitEffects (attack, {rollFollowup = null} = {}) {
 		const calc = this._state.getFeatureCalculations?.() || {};
 		if (!calc.hasThunderousBlows
 				|| !this._state.isStateTypeActive?.("rage")
 				|| attack.isSpell
 				|| !this._getAttackRollKind(attack).isMelee) return "";
+		const pChoose = (feature, choices) => rollFollowup
+			? this._showCombatActionChoiceModal(feature, choices, null, {rollFollowup})
+			: this._showCombatActionChoiceModal(feature, choices);
 
-		const usePush = await this._showCombatActionChoiceModal(
+		const usePush = await pChoose(
 			{name: "Thunderous Blows"},
 			[
 				{id: "push", name: "Push", description: `Push the target up to ${calc.thunderousBlowsDistance} feet.`},
@@ -4013,10 +4056,10 @@ class CharacterSheetCombat {
 		for (let distance = 5; distance <= calc.thunderousBlowsDistance; distance += 5) {
 			distances.push({id: `${distance}`, name: `${distance} ft`, description: `Push the target ${distance} feet.`});
 		}
-		const distanceChoice = await this._showCombatActionChoiceModal({name: "Thunderous Blows — Distance"}, distances);
+		const distanceChoice = await pChoose({name: "Thunderous Blows — Distance"}, distances);
 		if (!distanceChoice) return "";
 		const distance = Number(distanceChoice.id);
-		const directionChoice = await this._showCombatActionChoiceModal(
+		const directionChoice = await pChoose(
 			{name: "Thunderous Blows — Direction"},
 			[
 				{id: "away", name: "Away", description: "Push directly away from you."},
@@ -4027,7 +4070,7 @@ class CharacterSheetCombat {
 		);
 		if (!directionChoice) return "";
 
-		const sizeChoice = await this._showCombatActionChoiceModal(
+		const sizeChoice = await pChoose(
 			{name: "Thunderous Blows — Target Size"},
 			[
 				{id: "large", name: "Large or Smaller", description: "The push succeeds without a save."},
@@ -4037,7 +4080,7 @@ class CharacterSheetCombat {
 		let pushed = true;
 		let saveText = "";
 		if (sizeChoice?.id === "huge") {
-			const saveChoice = await this._showCombatActionChoiceModal(
+			const saveChoice = await pChoose(
 				{name: `Thunderous Blows — DC ${calc.juggernautSaveDc} Strength Save`},
 				[
 					{id: "fail", name: "Failed Save", description: "Apply the push."},
@@ -4052,7 +4095,7 @@ class CharacterSheetCombat {
 		let outcome = `Thunderous Blows: pushed ${distance} ft ${directionChoice.id}${saveText}`;
 		if (!calc.hasHurricaneStrike || distance < 5 || !this._isActionTypeAvailable("reaction")) return outcome;
 
-		const hurricaneChoice = await this._showCombatActionChoiceModal(
+		const hurricaneChoice = await pChoose(
 			{name: "Hurricane Strike"},
 			[
 				{id: "use", name: "Use Reaction", description: "Leap into the vacated space; the target makes the same Strength save against being knocked Prone."},
@@ -4061,7 +4104,7 @@ class CharacterSheetCombat {
 		);
 		if (hurricaneChoice?.id !== "use") return outcome;
 		this._consumeActionType("reaction");
-		const hurricaneSave = await this._showCombatActionChoiceModal(
+		const hurricaneSave = await pChoose(
 			{name: `Hurricane Strike — DC ${calc.juggernautSaveDc} Strength Save`},
 			[
 				{id: "fail", name: "Failed Save", description: "The target is knocked Prone."},
@@ -5698,9 +5741,10 @@ class CharacterSheetCombat {
 
 		let resolveOuter = null;
 		let isResolved = false;
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetRollFollowup({
 			title: `Baleful Interdict — ${ctx.attack?.name || "Weapon Attack"}`,
 			isMinHeight0: true,
+			rollFollowup: ctx.rollFollowup,
 			cbClose: () => { if (resolveOuter && !isResolved) { isResolved = true; resolveOuter(); } },
 		});
 
@@ -9352,21 +9396,25 @@ class CharacterSheetCombat {
 	 * @param {object} feature - The parent feature
 	 * @param {Array<{name: string, description?: string, effects?: object, id?: string}>} choices - Available sub-actions
 	 * @param {Function} [onChoice] - Callback receiving the chosen option
+	 * @param {{rollFollowup?: object}} [opts]
 	 * @returns {Promise<object|null>} The chosen option, or null if cancelled
 	 */
-	async _showCombatActionChoiceModal (feature, choices, onChoice) {
+	async _showCombatActionChoiceModal (feature, choices, onChoice, {rollFollowup = null} = {}) {
 		if (!choices?.length) return null;
 
 		// Capture the trigger BEFORE the modal opens (the site util blurs it),
 		// so focus can return there when the choice is made or cancelled.
 		const trigger = (typeof document !== "undefined" && document.activeElement) || null;
 
-		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+		const modalOpts = {
 			title: `${feature.name} — Choose`,
 			isMinHeight0: true,
 			zIndex: 10003,
 			isUncappedHeight: true,
-		});
+		};
+		const {eleModalInner: modalInner, doClose, pGetResolved} = rollFollowup
+			? await CharacterSheetModal.pGetRollFollowup({...modalOpts, rollFollowup})
+			: await CharacterSheetModal.pGetShow(modalOpts);
 
 		let resolved = null;
 

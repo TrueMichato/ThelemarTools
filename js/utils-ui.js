@@ -2856,6 +2856,7 @@ class InputUiUtil {
 			isSkippable,
 			isIgnoreRemembered,
 			zIndex,
+			fnGetShowModal,
 		},
 	) {
 		if (storageKey && !isIgnoreRemembered) {
@@ -2863,11 +2864,17 @@ class InputUiUtil {
 			if (prev != null) return prev;
 		}
 
-		const {eleModalInner, doClose, pGetResolved, doAutoResize: doAutoResizeModal} = await InputUiUtil._pGetShowModal({
-			title: title || "Choose",
-			isMinHeight0: true,
-			...(zIndex != null ? {zIndex} : {}),
-		});
+		const {eleModalInner, doClose, pGetResolved, doAutoResize: doAutoResizeModal} = fnGetShowModal
+			? await fnGetShowModal({
+				title: title || "Choose",
+				isMinHeight0: true,
+				...(zIndex != null ? {zIndex} : {}),
+			})
+			: await InputUiUtil._pGetShowModal({
+				title: title || "Choose",
+				isMinHeight0: true,
+				...(zIndex != null ? {zIndex} : {}),
+			});
 
 		const btns = buttons.map(btnInfo => btnInfo.getBtn({doClose, fnRemember, isGlobal, storageKey}));
 
@@ -2915,6 +2922,7 @@ class InputUiUtil {
 	 * @param [isSkippable] If the prompt is skippable.
 	 * @param [isAlert] If this prompt is just a notification/alert.
 	 * @param [isIgnoreRemembered] If the remembered value should be ignored, in favour of re-prompting the user.
+	 * @param [fnGetShowModal] Optional modal factory. Defaults to the standard InputUiUtil modal.
 	 * @return {Promise} A promise which resolves to true/false if the user chose, or null otherwise.
 	 */
 	static async pGetUserBoolean (
@@ -2933,6 +2941,7 @@ class InputUiUtil {
 			isAlert,
 			isIgnoreRemembered,
 			zIndex,
+			fnGetShowModal,
 		},
 	) {
 		const buttons = [];
@@ -2982,6 +2991,7 @@ class InputUiUtil {
 			isSkippable,
 			isIgnoreRemembered,
 			zIndex,
+			fnGetShowModal,
 		});
 	}
 
@@ -3010,6 +3020,7 @@ class InputUiUtil {
 	 *
 	 *        Note that `"numeric"` offers no minus key on iOS, so callers whose value may legitimately
 	 *        be negative should leave this unset.
+	 * @param [opts.fnGetShowModal] Optional modal factory. Defaults to the standard InputUiUtil modal.
 	 * @return {Promise<number>} A promise which resolves to the number if the user entered one, or null otherwise.
 	 */
 	static async pGetUserNumber (opts) {
@@ -3033,7 +3044,7 @@ class InputUiUtil {
 			});
 		if (defaultVal !== undefined) iptNumber.vee.val(defaultVal);
 
-		const {eleModalInner, doClose, pGetResolved, doAutoResize: doAutoResizeModal} = await InputUiUtil._pGetShowModal({
+		const {eleModalInner, doClose, pGetResolved, doAutoResize: doAutoResizeModal} = await (opts.fnGetShowModal || InputUiUtil._pGetShowModal)({
 			title: opts.title || "Enter a Number",
 			isMinHeight0: true,
 		});
@@ -3087,6 +3098,8 @@ class InputUiUtil {
 	 * @param [opts.fnGetExtraState] Function which returns additional state from, generally, other elements in the modal.
 	 * @param [opts.isAllowNull] If an empty input should be treated as null.
 	 * @param [opts.isSkippable] If the prompt is skippable.
+	 * @param [opts.elePre] Element to add before the select box.
+	 * @param [opts.fnGetShowModal] Optional modal factory. Defaults to the standard InputUiUtil modal.
 	 * @return {Promise} A promise which resolves to the index of the item the user selected (or an object if fnGetExtraState is passed), or null otherwise.
 	 */
 	static async pGetUserEnum (opts) {
@@ -3111,7 +3124,7 @@ class InputUiUtil {
 			} else selEnum.vee.val(`${opts.default}`);
 		} else selEnum.selectedIndex = 0;
 
-		const {eleModalInner, doClose, pGetResolved, doAutoResize: doAutoResizeModal} = await InputUiUtil._pGetShowModal({
+		const {eleModalInner, doClose, pGetResolved, doAutoResize: doAutoResizeModal} = await (opts.fnGetShowModal || InputUiUtil._pGetShowModal)({
 			title: opts.title || "Select an Option",
 			isMinHeight0: true,
 			...(opts.zIndex != null ? {zIndex: opts.zIndex} : {}),
@@ -3121,6 +3134,7 @@ class InputUiUtil {
 		const btnCancel = this._getBtnCancel({opts, doClose});
 		const btnSkip = this._getBtnSkip({opts, doClose});
 
+		if (opts.elePre) opts.elePre.vee.appendTo(eleModalInner);
 		selEnum.vee.appendTo(eleModalInner);
 		if (opts.elePost) opts.elePost.vee.appendTo(eleModalInner);
 		veT`<div class="ve-flex-v-center ve-flex-h-right ve-pb-1 ve-px-1">${btnOk}${btnCancel}${btnSkip}</div>`.vee.appendTo(eleModalInner);

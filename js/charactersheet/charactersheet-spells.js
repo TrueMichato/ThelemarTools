@@ -2369,23 +2369,31 @@ class CharacterSheetSpells {
 		if (current.status === "awaiting-choice") {
 			const options = [current.tableRoll?.roll, current.tableRoll?.secondRoll].filter(Number.isInteger);
 			const values = options.map((roll, ix) => `Result ${roll}: ${ix ? current.tableRoll.secondEffect : current.tableRoll.effect}`);
-			const selected = await InputUiUtil.pGetUserEnum({
+			const selected = await CharacterSheetModal.pGetUserEnum({
 				title: "Gambler's Folly — Choose Gambling Table Result",
 				htmlDescription: `<div><strong>${current.spellName || "Spell"}</strong> rolled twice. Choose which result applies.</div>`,
 				values,
 				fnDisplay: value => value,
 				isResolveItem: true,
+				rollFollowup: this._getGamblingTableRollFollowup(current.tableRoll, {
+					label: `${current.spellName || "Spell"} — Gambling Table`,
+					outcome: "Choose which d100 result applies",
+				}),
 			});
 			if (selected == null) return {resolution: current, cancelled: true};
 			const choice = values.indexOf(selected) + 1;
 			current = this._state.chooseGamblerTableResult?.(current.resolutionId, choice) || current;
 		}
 		if (current.status === "awaiting-confirmation") {
-			const confirmed = await InputUiUtil.pGetUserBoolean({
+			const confirmed = await CharacterSheetModal.pGetUserBoolean({
 				title: `Gambler's Folly — ${current.descriptor?.transaction === "freeSpell" ? "Color Spray" : "Delayed Spell"}`,
 				htmlDescription: `<div>${current.descriptor?.text || "Confirm this Gambling Table result before the cast proceeds."}</div>`,
 				textYes: "Apply result",
 				textNo: "Cancel cast",
+				rollFollowup: this._getGamblingTableRollFollowup(current.tableRoll, {
+					label: `${current.spellName || "Spell"} — Gambling Table`,
+					outcome: current.descriptor?.text || "Confirm this result",
+				}),
 			});
 			if (!confirmed) return {resolution: current, cancelled: true};
 			current = this._state.applyGamblingTableResolution?.(current.resolutionId, {confirmAutomatic: true}) || current;
@@ -2395,6 +2403,18 @@ class CharacterSheetSpells {
 			cancelled: false,
 			deferCast: current.delayedCast != null || current.descriptor?.transaction === "delayedCast",
 		};
+	}
+
+	_getGamblingTableRollFollowup (tableRoll, {label = "Gambling Table", outcome = ""} = {}) {
+		if (!Number.isInteger(tableRoll?.roll)) return null;
+		const rolls = [tableRoll.roll, tableRoll.secondRoll].filter(Number.isInteger);
+		const effects = [tableRoll.effect, tableRoll.secondEffect].filter(Boolean);
+		return CharacterSheetModal.buildRollFollowup({
+			label,
+			total: rolls.join(" / "),
+			breakdown: rolls.map(roll => `d100 (${roll})`).join(" and "),
+			outcome: outcome || effects.join(" / "),
+		});
 	}
 
 	/**
@@ -4135,12 +4155,20 @@ class CharacterSheetSpells {
 	async _pMaybeApplySeekingSpell (opts = {}) {
 		const {spell, attackRoll = 0, attackTotal = 0, castMeta = null} = opts;
 		if (castMeta?.appliedMetamagic?.key !== "seeking") return castMeta;
+		const attackBonus = attackTotal - attackRoll;
 
-		const shouldReroll = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+		const shouldReroll = await CharacterSheetModal.pGetUserBoolean(/** @type {*} */ ({
 			title: "Seeking Spell",
 			htmlDescription: `<div><strong>${spell?.name || "This spell"}</strong> rolled <strong>${attackTotal}</strong> to hit. If the spell attack missed, you can use Seeking Spell to reroll the d20 once.</div>`,
 			textYes: "Reroll Missed Attack",
 			textNo: "Keep Original Roll",
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: `${spell?.name || "Spell"} Attack`,
+				total: attackTotal,
+				naturalRoll: attackRoll,
+				breakdown: `1d20 (${attackRoll}) ${attackBonus >= 0 ? "+" : "-"} ${Math.abs(attackBonus)}`,
+				outcome: "Confirm whether the spell attack missed",
+			}),
 		}));
 
 		if (!shouldReroll) return castMeta;
@@ -4430,7 +4458,7 @@ class CharacterSheetSpells {
 
 			// Transmuted Spell: prompt to change damage type
 			if (damageResult?.damageType && this._state.isMetamagicTuned?.("transmuted")) {
-				const transmutedResult = await this._pMaybeApplyTransmutedDamage(damageResult);
+				const transmutedResult = await this._pMaybeApplyTransmutedDamage(damageResult, {rollLabel: `${spell.name} Damage`});
 				if (transmutedResult) {
 					metamagicNotes.push(`Transmuted Spell changed ${transmutedResult.originalDamageType} → ${transmutedResult.damageType} damage`);
 					damageResult = transmutedResult;
@@ -4440,7 +4468,7 @@ class CharacterSheetSpells {
 
 			// Empowered Spell: prompt to reroll damage dice
 			if (damageResult?.dice && this._state.isMetamagicTuned?.("empowered")) {
-				const empoweredResult = await this._pMaybeApplyEmpoweredReroll(damageResult);
+				const empoweredResult = await this._pMaybeApplyEmpoweredReroll(damageResult, {rollLabel: `${spell.name} Damage`});
 				if (empoweredResult) {
 					metamagicNotes.push(`Empowered Spell rerolled ${empoweredResult.rerolledCount} damage ${empoweredResult.rerolledCount === 1 ? "die" : "dice"} (${empoweredResult.originalTotal} → ${empoweredResult.total})`);
 					damageResult = empoweredResult;
@@ -4716,11 +4744,15 @@ class CharacterSheetSpells {
 		const table = CharacterSheetState.GAMBLER_GAMBLING_TABLE;
 		if (!table || !table.length) return;
 
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const modalOpts = {
 			title: "\u{1F3B0} Gambling Table",
 			isMinHeight0: true,
 			isWidth100: true,
-		});
+		};
+		const rollFollowup = this._getGamblingTableRollFollowup(prerolled);
+		const {eleModalInner: modalInner, doClose} = rollFollowup
+			? await CharacterSheetModal.pGetRollFollowup({...modalOpts, rollFollowup})
+			: await CharacterSheetModal.pGetShow(modalOpts);
 
 		// Receipt-specific queue. Cast receipts are intentionally separate from the
 		// global last-roll record so Master of Fortune choices survive a save/load
@@ -6971,7 +7003,7 @@ class CharacterSheetSpells {
 	 * @param {object} damageResult - Damage result from _rollSpellDamage/_rollCantripDamage
 	 * @returns {Promise<*>} Modified damage result with new type, or null if unchanged
 	 */
-	async _pMaybeApplyTransmutedDamage (damageResult) {
+	async _pMaybeApplyTransmutedDamage (damageResult, {rollLabel = "Spell Damage"} = {}) {
 		if (!damageResult?.damageType) return null;
 
 		const transmutableTypes = ["acid", "cold", "fire", "lightning", "poison", "thunder"];
@@ -6981,12 +7013,18 @@ class CharacterSheetSpells {
 		const keepLabel = `Keep ${damageResult.damageType}`;
 		const values = [keepLabel, ...otherTypes.map(t => t.charAt(0).toUpperCase() + t.slice(1))];
 
-		const choice = await InputUiUtil.pGetUserEnum({
+		const choice = await CharacterSheetModal.pGetUserEnum({
 			title: "Transmuted Spell",
 			htmlDescription: `<div>Transmuted Spell is tuned. Change <strong>${damageResult.damageType}</strong> damage to another type?</div>`,
 			values,
 			fnDisplay: v => v,
 			isResolveItem: true,
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: rollLabel,
+				total: damageResult.total,
+				breakdown: Renderer.stripTags(damageResult.text || damageResult.dice || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+				outcome: `${damageResult.damageType} damage${damageResult.maximized ? " (maximized)" : ""}`,
+			}),
 		});
 
 		if (choice == null || choice === keepLabel) return null;
@@ -7007,7 +7045,7 @@ class CharacterSheetSpells {
 	 * @param {object} damageResult - Damage result from _rollSpellDamage/_rollCantripDamage
 	 * @returns {Promise<*>} Modified damage result with rerolled dice, or null if unchanged
 	 */
-	async _pMaybeApplyEmpoweredReroll (damageResult) {
+	async _pMaybeApplyEmpoweredReroll (damageResult, {rollLabel = "Spell Damage"} = {}) {
 		if (!damageResult?.dice) return null;
 
 		const chaMod = Math.max(1, this._state.getAbilityMod("cha"));
@@ -7018,12 +7056,18 @@ class CharacterSheetSpells {
 		const diceSize = Number(diceMatch[2]);
 		const maxReroll = Math.min(chaMod, numDice);
 
-		const rerollCount = await InputUiUtil.pGetUserEnum({
+		const rerollCount = await CharacterSheetModal.pGetUserEnum({
 			title: "Empowered Spell",
 			htmlDescription: `<div>Empowered Spell is tuned. Reroll up to <strong>${maxReroll}</strong> damage ${maxReroll === 1 ? "die" : "dice"} (CHA mod).<br>Current damage: <strong>${damageResult.total}</strong> (${damageResult.dice}${damageResult.damageType ? ` ${damageResult.damageType}` : ""})</div>`,
 			values: ["Keep current", ...Array.from({length: maxReroll}, (_, i) => `Reroll ${i + 1} ${(i + 1) === 1 ? "die" : "dice"}`)],
 			fnDisplay: v => v,
 			isResolveItem: true,
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: rollLabel,
+				total: damageResult.total,
+				breakdown: Renderer.stripTags(damageResult.text || damageResult.dice || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+				outcome: `${damageResult.damageType || "Spell"} damage${damageResult.maximized ? " (maximized)" : ""}`,
+			}),
 		});
 
 		if (rerollCount == null || rerollCount === "Keep current") return null;

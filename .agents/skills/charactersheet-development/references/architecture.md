@@ -462,6 +462,73 @@ Escape hatch: `opts.isSkipCharacterSheetEnhancements` behaves exactly like the r
 `CharacterSheetModal.test.js` locks the whole contract, including the missing-`eleModal` guard and
 the `cbClose` composition.
 
+### Roll follow-up prompts
+
+A modal opened during or immediately after a roll must not force the player to remember a toast
+hidden behind the backdrop. Use the stateless `CharacterSheetModal` roll-follow-up contract:
+
+```js
+const rollFollowup = CharacterSheetModal.buildRollFollowup({
+	label: "Longsword Attack",
+	total,
+	naturalRoll: rollResult.roll, // omit for damage/d100 rolls without one canonical d20
+	breakdown,
+	outcome: resultNote,
+});
+
+const confirmed = await CharacterSheetModal.pGetUserBoolean({
+	title: "On-hit effect",
+	htmlDescription: "Apply the effect?",
+	textYes: "Apply",
+	textNo: "Skip",
+	rollFollowup,
+});
+```
+
+`buildRollFollowup` returns an immutable `{label, total, naturalRoll?, breakdown?, outcome?}` value.
+There is deliberately no global "last roll": each prompt receives the exact roll that triggered it,
+so an ordinary modal cannot inherit stale data. The summary is escaped and rendered as a named
+semantic group with a prominent tabular total, optional natural d20, breakdown, and outcome.
+
+Use the entry point that matches the existing prompt:
+
+| Prompt shape | Entry point |
+|---|---|
+| Custom modal whose caller writes to `eleModalInner` | `CharacterSheetModal.pGetRollFollowup({...modalOpts, rollFollowup})` |
+| Yes/no prompt | `CharacterSheetModal.pGetUserBoolean({...opts, rollFollowup})` |
+| Choice prompt | `CharacterSheetModal.pGetUserEnum({...opts, rollFollowup})` |
+| Number prompt | `CharacterSheetModal.pGetUserNumber({...opts, rollFollowup})` |
+
+`pGetRollFollowup` mounts the summary and returns a separate nested `eleModalInner`, so later caller
+rendering cannot erase the result. It delegates to `pGetShow`, preserving the same close button,
+Escape behavior, focus trap, focus restoration, backdrop, and spawn-harness fallback. Standard
+boolean, enum, and number wrappers keep `InputUiUtil`'s result/cancellation semantics, but opt into
+`pGetShow` through `fnGetShowModal`; enum/number summaries use an `elePre` host because those
+utilities do not render `htmlDescription`. Both hooks are optional in `InputUiUtil`, so every
+ordinary non-roll prompt keeps its existing modal and layout behavior.
+
+Current inventory:
+
+| Pipeline | Follow-up prompts using the contract |
+|---|---|
+| Ability/skill/tool checks | Red Cant; fortune interventions; Tactical Mind (offer and refund); contested-check outcome |
+| Saving throws | Fortune interventions; Blood Price; Indomitable |
+| Weapon attacks | Penetrating Blow; Arcane Shot; critical weapon riders; Baleful Interdict; generic on-hit and target forms; Shadow Weapon/Shadowbite/Shadow Sneak; material degradation/instability; fortune interventions |
+| Damage | Thunderous Blows/Hurricane Strike choices after weapon damage; Transmuted Spell; Empowered Spell |
+| Gambling Table | Double-result choice, confirmation, and a pre-rolled table modal |
+
+Pre-roll conditional-modifier, damage-type, component, target, and feature-choice dialogs remain
+ordinary modals. Concentration checks own and display their roll inside one dialog. Zero-HP
+intervention questions happen before their save. Damage-entry material reactions have no Character
+Sheet roll to attach. None of these may consult or cache a previous `rollFollowup`.
+
+Attack fortune interventions run before the remaining post-attack hooks. If they revise the natural
+die, they also replace `ctx.total`, crit/fumble flags, and `ctx.rollFollowup`; later hit/critical and
+material prompts therefore show and evaluate the revised roll.
+
+`CharacterSheetRollFollowup.test.js` locks exact-value rendering, escaping, the separate content
+host, representative feature adoption, and the no-stale-result invariant.
+
 ### Data Validation Patterns
 
 - **Defensive nullish coalescing everywhere**: `spell?.name?.toLowerCase()`, `Math.max(0, Math.floor(Number(x) || 0))`

@@ -12999,11 +12999,18 @@ class CharacterSheetPage {
 		const result = await this._rollSkillCheck(contest.skill, contest.skillLabel, null, contest.ability);
 		if (!result) return false;
 		const abilityFull = typeof Parser !== "undefined" ? Parser.attAbvToFull(contest.ability) : contest.ability.toUpperCase();
-		const won = await InputUiUtil.pGetUserBoolean({
+		const won = await CharacterSheetModal.pGetUserBoolean({
 			title: feature?.name || "Contested Check",
 			htmlDescription: `Your ${abilityFull} (${contest.skillLabel}) check totalled <strong>${result.total}</strong>.<br>Did it beat the target's ${contest.opposedBy} check?`,
 			textYes: "Yes — contest won",
 			textNo: "No",
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: `${contest.skillLabel} Check`,
+				total: result.total,
+				naturalRoll: result.roll,
+				breakdown: result.breakdown,
+				outcome: `Compare against the target's ${contest.opposedBy} check`,
+			}),
 		});
 		if (!won) {
 			JqueryUtil.doToast({type: "info", content: `${feature?.name || "Contested check"}: the contest was lost — no effect.`});
@@ -16460,7 +16467,16 @@ class CharacterSheetPage {
 			rollLabel,
 		});
 
-		const ok = await this._pPromptRedCant(preview);
+		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+		const currentTotal = effectiveRoll + totalMod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
+		const rollFollowup = CharacterSheetModal.buildRollFollowup({
+			label: rollLabel,
+			total: currentTotal,
+			naturalRoll: rollResult.roll,
+			breakdown: `${this._formatD20Breakdown(rollResult, totalMod, exhaustionStr)}${effectiveRoll !== rollResult.roll ? `; effective die ${effectiveRoll}` : ""}`,
+			outcome: `Eligible for Red Cant's d20 floor of ${floor}`,
+		});
+		const ok = await this._pPromptRedCant(preview, {rollFollowup});
 		if (!ok) return noChange;
 		if (this._state.spendSeal(1) <= 0) return noChange;
 		// Repaint the Interdiction panel's seal pool and persist the spent seal.
@@ -16517,16 +16533,17 @@ class CharacterSheetPage {
 	 * @param {ReturnType<typeof CharacterSheetPage._getRedCantPreview>} preview
 	 * @returns {Promise<boolean>}
 	 */
-	async _pPromptRedCant (preview) {
+	async _pPromptRedCant (preview, {rollFollowup} = {}) {
 		const {naturalRoll, floor, sealsBefore, sealsAfter, totalBefore, totalAfter, delta, rollLabel} = preview;
 		const safeLabel = (rollLabel || "Charisma check").replace(/[<>]/g, "");
 		const fmtSigned = (/** @type {number} */ n) => `${n >= 0 ? "+" : "\u2212"}${Math.abs(n)}`;
 
 		let resolveOuter = null;
 		let isResolved = false;
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetRollFollowup({
 			title: "Red Cant",
 			isMinHeight0: true,
+			rollFollowup,
 			cbClose: () => {
 				// Backdrop / X dismissal == decline (only if no button already resolved).
 				if (resolveOuter && !isResolved) {
@@ -16724,13 +16741,22 @@ class CharacterSheetPage {
 	 */
 	async _pPromptFortuneIntervention ({offers, rollResult, effectiveRoll, rollLabel, totalMod = 0, exhaustionPenalty = 0}) {
 		const safeLabel = (rollLabel || "roll").replace(/[<>]/g, "");
-		const currentTotal = effectiveRoll + totalMod - exhaustionPenalty;
+		const currentTotal = effectiveRoll + totalMod - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
+		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+		const rollFollowup = CharacterSheetModal.buildRollFollowup({
+			label: rollLabel,
+			total: currentTotal,
+			naturalRoll: rollResult.roll,
+			breakdown: `${this._formatD20Breakdown(rollResult, totalMod, exhaustionStr)}${effectiveRoll !== rollResult.roll ? `; effective die ${effectiveRoll}` : ""}`,
+			outcome: "A fortune feature can change this roll",
+		});
 
 		let resolveOuter = null;
 		let isResolved = false;
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetRollFollowup({
 			title: "Press Your Luck",
 			isMinHeight0: true,
+			rollFollowup,
 			cbClose: () => {
 				if (resolveOuter && !isResolved) {
 					isResolved = true;
@@ -16966,6 +16992,13 @@ class CharacterSheetPage {
 			baseTotal: total,
 			breakdown: acBreakdown,
 			resultNote,
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: `${Parser.attAbvToFull(ability)} Check`,
+				total,
+				naturalRoll: rollResult.roll,
+				breakdown: acBreakdown,
+				outcome: resultNote,
+			}),
 		});
 	}
 
@@ -17135,24 +17168,36 @@ class CharacterSheetPage {
 		// Show animated dice if enabled
 		await this.pAnimateD20(rollResult);
 
+		const saveBreakdown = this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr + diceBonusStr;
 		this._showDiceResult(
 			`${Parser.attAbvToFull(ability)} Save${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			totalWithDice,
-			this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr + diceBonusStr,
+			saveBreakdown,
 			resultClass,
 			resultNote,
 		);
+		const rollFollowup = CharacterSheetModal.buildRollFollowup({
+			label: `${Parser.attAbvToFull(ability)} Save`,
+			total: totalWithDice,
+			naturalRoll: rollResult.roll,
+			breakdown: saveBreakdown,
+			outcome: resultNote,
+		});
 
 		// Blood Price (Hellspeaker L10): after a save is rolled, offer to spend a Hit Die and
 		// add the rolled value to the result. Reactive and player-driven — prompted here rather
 		// than auto-applied. Only offered when the feature is present and a Hit Die remains.
-		await this._pMaybeApplyBloodPrice({
+		const saveFollowupContext = {
+			baseTotal: totalWithDice,
+			breakdown: saveBreakdown,
+			resultNote,
+			rollFollowup,
+		};
+		const bloodPriceResult = await this._pMaybeApplyBloodPrice({
 			ability,
 			mode: rollResult.mode,
 			stateEffectStr,
-			baseTotal: totalWithDice,
-			breakdown: this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? aggregated.minimum : null) + sourcesStr + diceBonusStr,
-			resultNote,
+			...saveFollowupContext,
 		});
 
 		// Indomitable (Fighter L9): after a failed save, offer to spend an Indomitable use and
@@ -17161,8 +17206,7 @@ class CharacterSheetPage {
 			ability,
 			exhaustionPenalty,
 			stateEffectStr,
-			baseTotal: totalWithDice,
-			resultNote,
+			...(bloodPriceResult || saveFollowupContext),
 		});
 	}
 
@@ -17172,16 +17216,17 @@ class CharacterSheetPage {
 	 * character lacks the feature or has no Hit Dice left.
 	 * @private
 	 */
-	async _pMaybeApplyBloodPrice ({ability, mode, stateEffectStr, baseTotal, breakdown, resultNote}) {
+	async _pMaybeApplyBloodPrice ({ability, mode, stateEffectStr, baseTotal, breakdown, resultNote, rollFollowup}) {
 		if (!this._state.hasBloodPrice?.()) return;
 		const hd = this._state.getHitDiceSummary?.();
 		if (!hd || (hd.current || 0) <= 0) return;
 
-		const confirmed = await InputUiUtil.pGetUserBoolean({
+		const confirmed = await CharacterSheetModal.pGetUserBoolean({
 			title: "Blood Price",
 			htmlDescription: `You rolled a total of <strong>${baseTotal}</strong>. Spend a Hit Die to add its roll to this save? (${hd.current} Hit Di${hd.current === 1 ? "e" : "ce"} left)`,
 			textYes: "Spend Hit Die",
 			textNo: "No",
+			rollFollowup,
 		});
 		if (!confirmed) return;
 
@@ -17212,6 +17257,19 @@ class CharacterSheetPage {
 		JqueryUtil.doToast({type: "info", content: bloodNote});
 		this._renderCharacter?.();
 		await this._saveCurrentCharacter?.();
+		const updatedBreakdown = `${breakdown} + ${res.roll} (Blood Price 1${res.dieType})`;
+		return {
+			baseTotal: newTotal,
+			breakdown: updatedBreakdown,
+			resultNote: mergedNote,
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: `${Parser.attAbvToFull(ability)} Save`,
+				total: newTotal,
+				naturalRoll: rollFollowup?.naturalRoll,
+				breakdown: updatedBreakdown,
+				outcome: mergedNote,
+			}),
+		};
 	}
 
 	/**
@@ -17221,7 +17279,7 @@ class CharacterSheetPage {
 	 * the feature is present, a Second Wind use remains, and the player opts in.
 	 * @private
 	 */
-	async _pMaybeApplyTacticalMind ({rollLabel, mode, stateEffectStr, baseTotal, breakdown, resultNote}) {
+	async _pMaybeApplyTacticalMind ({rollLabel, mode, stateEffectStr, baseTotal, breakdown, resultNote, rollFollowup}) {
 		const calcs = this._state.getFeatureCalculations?.() || {};
 		if (!calcs.hasTacticalMind) return;
 		if ((this._state.getSecondWindUsesRemaining?.() || 0) <= 0) return;
@@ -17253,11 +17311,12 @@ class CharacterSheetPage {
 					<span>If the check <strong>still fails</strong> with the +1d10, the Second Wind use is <strong>refunded</strong>.</span>
 				</div>
 			</div>`;
-		const offer = await InputUiUtil.pGetUserBoolean({
+		const offer = await CharacterSheetModal.pGetUserBoolean({
 			title: "Tactical Mind",
 			htmlDescription,
 			textYes: "Add 1d10 (expend Second Wind)",
 			textNo: "Keep the roll",
+			rollFollowup,
 		});
 		if (!offer) return;
 
@@ -17283,7 +17342,14 @@ class CharacterSheetPage {
 		this._renderCharacter?.();
 		await this._saveCurrentCharacter?.();
 
-		const stillFailed = await InputUiUtil.pGetUserBoolean({
+		const revisedRollFollowup = CharacterSheetModal.buildRollFollowup({
+			label: rollLabel,
+			total: newTotal,
+			naturalRoll: rollFollowup?.naturalRoll,
+			breakdown: `${breakdown} + ${die} (Tactical Mind 1d10)`,
+			outcome: "Tactical Mind applied; confirm whether the check succeeded",
+		});
+		const stillFailed = await CharacterSheetModal.pGetUserBoolean({
 			title: "Tactical Mind — refund?",
 			htmlDescription: `
 			<div class="charsheet__combat-modal charsheet__combat-modal--tactical">
@@ -17301,6 +17367,7 @@ class CharacterSheetPage {
 			</div>`,
 			textYes: "Still failed — refund the use",
 			textNo: "It succeeded",
+			rollFollowup: revisedRollFollowup,
 		});
 		if (stillFailed) {
 			this._state.setSecondWindUsesRemaining(prevRemaining);
@@ -17317,7 +17384,7 @@ class CharacterSheetPage {
 	 * remains, and the player opts in.
 	 * @private
 	 */
-	async _pMaybeApplyIndomitable ({ability, exhaustionPenalty = 0, stateEffectStr, baseTotal, resultNote}) {
+	async _pMaybeApplyIndomitable ({ability, exhaustionPenalty = 0, stateEffectStr, baseTotal, resultNote, rollFollowup}) {
 		if (!this._state.hasIndomitable?.()) return;
 		if ((this._state.getIndomitableRemaining?.() || 0) <= 0) return;
 		if ((/** @type {*} */ (this._state.getSettings?.() || {})).skipIndomitablePrompt) return;
@@ -17345,11 +17412,12 @@ class CharacterSheetPage {
 				</div>
 				<div class="charsheet__combat-modal-note">If the save <strong>failed</strong>, spend a use of <strong>Indomitable</strong> to reroll the d20. You must use the new roll.</div>
 			</div>`;
-		const offer = await InputUiUtil.pGetUserBoolean({
+		const offer = await CharacterSheetModal.pGetUserBoolean({
 			title: "Indomitable",
 			htmlDescription,
 			textYes: "Reroll (spend Indomitable)",
 			textNo: "Keep the roll",
+			rollFollowup,
 		});
 		if (!offer) return;
 		if (!this._state.useIndomitable()) return;
@@ -17734,6 +17802,13 @@ class CharacterSheetPage {
 			baseTotal: totalWithDice,
 			breakdown: skillBreakdown,
 			resultNote,
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: `${skillName}${abilityLabel} Check`,
+				total: totalWithDice,
+				naturalRoll: rollResult.roll,
+				breakdown: skillBreakdown,
+				outcome: resultNote,
+			}),
 		});
 
 		return {
@@ -17743,6 +17818,8 @@ class CharacterSheetPage {
 			isSuccess,
 			isNat20: rollResult.roll === 20,
 			isNat1: rollResult.roll === 1,
+			breakdown: skillBreakdown,
+			resultNote,
 		};
 	}
 

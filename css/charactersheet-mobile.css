@@ -18,6 +18,24 @@
 
 @media (max-width: 768px), (max-height: 480px) and (orientation: landscape) and (pointer: coarse) {
 
+	.cs-roll-followup {
+		margin-bottom: 0.625rem;
+		padding: 0.625rem;
+	}
+
+	.cs-roll-followup__result {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.cs-roll-followup__datum {
+		min-width: 0;
+	}
+
+	.cs-roll-followup__outcome {
+		grid-column: 1 / -1;
+	}
+
 	/* ====================================================================
 	   Viewport Reclamation
 	   --------------------------------------------------------------------

@@ -272,7 +272,8 @@ describe("R25 S7 — source-pin: Red Cant uses the polished modal, not a plain c
 		const body = m[0];
 		// Routed through the shared character-sheet wrapper, which adds the dialog role,
 		// the close button, Escape-from-input and focus restore on top of `UiUtil.pGetShowModal`.
-		expect(body).toMatch(/CharacterSheetModal\.pGetShow/);
+		expect(body).toMatch(/CharacterSheetModal\.pGetRollFollowup/);
+		expect(body).toContain("rollFollowup");
 		expect(body).toMatch(/charsheet__red-cant/);
 		expect(body).toMatch(/data-act="confirm"/);
 		expect(body).toMatch(/data-act="decline"/);

@@ -95,10 +95,10 @@ Every feature needs tests. See [Testing Strategy](./09-testing-strategy.md).
 
 ```bash
 # Run all character sheet tests
-NODE_OPTIONS='--experimental-vm-modules' npx jest test/jest/charactersheet/ --no-coverage
+npm run test:unit -- test/jest/charactersheet/ --no-coverage
 
 # Run specific test file
-NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetState --no-coverage
+npm run test:unit -- test/jest/charactersheet/CharacterSheetState.test.js --no-coverage
 ```
 
 ### 6. Submit PR
@@ -181,6 +181,36 @@ getAbilityMod (ability) {
 ---
 
 ## Implementation Patterns
+
+### Roll-dependent follow-up prompts
+
+If a prompt asks the player to decide based on a roll that just happened, pass that exact roll
+through the shared, stateless modal contract. Do not depend on the result toast behind the backdrop
+and do not cache a "last roll":
+
+```javascript
+const rollFollowup = CharacterSheetModal.buildRollFollowup({
+	label: `${attack.name} Attack`,
+	total,
+	naturalRoll: rollResult.roll,
+	breakdown,
+	outcome: resultNote,
+});
+```
+
+- Use `pGetRollFollowup({...modalOpts, rollFollowup})` for custom modals. It returns a nested
+  `eleModalInner`, so caller rendering cannot erase the pinned result.
+- Use `CharacterSheetModal.pGetUserBoolean`, `pGetUserEnum`, or `pGetUserNumber` for standard
+  prompts. They preserve the corresponding `InputUiUtil` return and cancellation behavior while
+  opting into the Character Sheet modal's focus trap and accessibility contract.
+- Pass no `rollFollowup` to pre-roll questions or unrelated dialogs. Ordinary modal behavior is
+  intentionally unchanged.
+- Include the final total and exact breakdown; include `naturalRoll` for d20 rolls and `outcome` when
+  hit/miss, critical, DC, or another result is known.
+- If an intervention changes the roll, replace the context before later sequential prompts run.
+
+The normal backdrop, focus trap, Escape handling, screen-reader naming, and focus restoration stay
+active because the result is embedded in the dialog instead of exposed by weakening modal safety.
 
 ### Adding Class Features
 

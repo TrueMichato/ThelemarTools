@@ -67,6 +67,106 @@
 	line-height: 1;
 }
 
+/* Roll-dependent decisions keep the safety backdrop and place the exact triggering result inside
+   the dialog instead. This is intentionally an inset summary rather than a second floating card:
+   it belongs to the question below it and remains legible in both themes. */
+.cs-roll-followup {
+	min-width: 0;
+	margin: 0 0 var(--cs-space-md, 0.75rem);
+	padding: var(--cs-space-md, 0.75rem);
+	border: 1px solid var(--cs-border, rgb(255 255 255 / 12%));
+	border-radius: var(--cs-radius-md, 10px);
+	background: var(--cs-bg-base, var(--rgb-bg));
+	color: var(--cs-text-primary, inherit);
+}
+
+.cs-roll-followup__heading {
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: 700;
+	line-height: 1.25;
+	overflow-wrap: anywhere;
+}
+
+.cs-roll-followup__result {
+	display: flex;
+	align-items: stretch;
+	flex-wrap: wrap;
+	gap: var(--cs-space-sm, 0.5rem);
+	min-width: 0;
+}
+
+.cs-roll-followup__datum {
+	display: flex;
+	flex: 0 1 auto;
+	flex-direction: column;
+	justify-content: center;
+	min-width: 5rem;
+	padding: 0.375rem 0.625rem;
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-bg-surface, var(--rgb-bg-alt));
+}
+
+.cs-roll-followup__datum--total {
+	border: 1px solid var(--cs-primary, #6366f1);
+}
+
+.cs-roll-followup__datum-label,
+.cs-roll-followup__breakdown-label {
+	color: var(--cs-text-muted, #5b6675);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	line-height: 1.2;
+	text-transform: uppercase;
+}
+
+.cs-roll-followup__datum-value {
+	font-size: var(--cs-text-2xl, 1.5rem);
+	font-variant-numeric: tabular-nums;
+	font-weight: 800;
+	line-height: 1.1;
+}
+
+.cs-roll-followup__outcome {
+	align-self: center;
+	flex: 1 1 10rem;
+	min-width: 0;
+	color: var(--cs-text-secondary, inherit);
+	font-weight: 700;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.cs-roll-followup__breakdown {
+	display: flex;
+	flex-direction: column;
+	gap: 0.125rem;
+	min-width: 0;
+	margin-top: var(--cs-space-sm, 0.5rem);
+	padding-top: var(--cs-space-sm, 0.5rem);
+	border-top: 1px solid var(--cs-border, rgb(255 255 255 / 12%));
+}
+
+.cs-roll-followup__breakdown-value {
+	min-width: 0;
+	color: var(--cs-text-secondary, inherit);
+	font-family: var(--cs-font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-variant-numeric: tabular-nums;
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+}
+
+.cs-roll-followup__content {
+	min-width: 0;
+}
+
+.cs-roll-followup__input-description {
+	width: 100%;
+	min-width: 0;
+}
+
 /* `InputUiUtil.pGetUserGenericButton` wraps every `htmlDescription` in a *row*
    flex container (`utils-ui.js`: `<div class="ve-flex ve-w-100 ve-mb-1">`), so a
    description made of several block elements is laid out as columns. Short prose
