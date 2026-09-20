@@ -51,6 +51,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("accountAction=delete");
 		expect(source).toContain("identities: result.identities");
 		expect(source).toContain("pendingIdentityUnlinks");
+		expect(source).toContain("pendingIdentityLinks");
 		expect(source).toContain("isMutationOutcomeUncertain(error)");
 		expect(source).toContain("Reload to refresh the device list.");
 		expect(source).toContain("pGrantAccountEntitlement");

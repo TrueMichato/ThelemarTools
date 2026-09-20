@@ -1190,6 +1190,7 @@ export class PostgresHubStore {
 				session: getSession(insertedSession.rows[0]),
 				revokedSessionIds,
 				identities: remainingIdentities,
+				otherDevicesSignedOut: revokedSessionIds.some(id => id !== currentSessionId),
 			}));
 			await this._pSaveReceipt({
 				client,

@@ -534,6 +534,7 @@ describe("Hub concrete multi-provider routes", () => {
 		expect(unlink.json()).toEqual(expect.objectContaining({
 			unlinkedIdentityId: googleIdentity.id,
 			csrfToken: expect.any(String),
+			otherDevicesSignedOut: false,
 		}));
 		const unlinkCookie = `__Host-hub_session=${getCookie(unlink, "__Host-hub_session")}`;
 		const lostResponseReplay = await app.inject({
@@ -562,6 +563,7 @@ describe("Hub concrete multi-provider routes", () => {
 		});
 		expect(unlinkReplay.statusCode).toBe(200);
 		expect(getCookie(unlinkReplay, "__Host-hub_session")).toBe(getCookie(unlink, "__Host-hub_session"));
+		expect(unlinkReplay.json().otherDevicesSignedOut).toBe(false);
 		const staleAfterUnlink = await app.inject({
 			method: "POST",
 			url: "/api/account/sessions/revoke-others",

@@ -60,6 +60,7 @@ import {
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
+const pendingIdentityLinks = new Map();
 const pendingIdentityUnlinks = new Map();
 let campaignAuthorizationErrorHandler = null;
 
@@ -1443,6 +1444,38 @@ async function pUnlinkAccountIdentityWithRecovery ({identityId}) {
 	throw lastError;
 }
 
+async function pCreateIdentityLinkIntentWithRecovery ({provider}) {
+	const request = pendingIdentityLinks.get(provider) || {
+		provider,
+		returnTo: "/hub.html?identityNotice=linked",
+		idempotencyKey: crypto.randomUUID(),
+	};
+	pendingIdentityLinks.set(provider, request);
+	let lastError = null;
+	let hasRefreshedSession = false;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			return await api.pCreateIdentityLinkIntent(request);
+		} catch (error) {
+			lastError = error;
+			if (error?.code === "INVALID_CSRF" && !hasRefreshedSession) {
+				const session = await api.pGetSession();
+				if (session.signedIn) {
+					hasRefreshedSession = true;
+					continue;
+				}
+			}
+			if (isMutationOutcomeUncertain(error) && attempt === 0) continue;
+			if (
+				!isMutationOutcomeUncertain(error)
+				&& !["AUTH_REQUIRED", "INVALID_CSRF"].includes(error?.code)
+			) pendingIdentityLinks.delete(provider);
+			break;
+		}
+	}
+	throw lastError;
+}
+
 async function pRenderAccountReauthentication ({
 	session,
 	containerId,
@@ -1647,12 +1680,9 @@ async function pRenderAccountIdentities ({
 			button.disabled = true;
 			setIdentityStatus("");
 			try {
-				const result = await api.pCreateIdentityLinkIntent({
-					provider: provider.slug,
-					returnTo: "/hub.html?identityNotice=linked",
-					idempotencyKey: crypto.randomUUID(),
-				});
+				const result = await pCreateIdentityLinkIntentWithRecovery({provider: provider.slug});
 				window.location.assign(result.authorizationUrl);
+				pendingIdentityLinks.delete(provider.slug);
 			} catch (error) {
 				if (error?.code === "REAUTHENTICATION_REQUIRED") {
 					setIdentityStatus("Reauthenticate before linking another sign-in provider.", {isError: true});

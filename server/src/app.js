@@ -1316,7 +1316,7 @@ export async function createHubApp ({
 				}, {
 					identities: completed.identities,
 				}),
-				otherDevicesSignedOut: completed.revokedSessionIds.some(id => id !== request.hubAuth.session.id),
+				otherDevicesSignedOut: completed.otherDevicesSignedOut,
 			};
 		});
 	}

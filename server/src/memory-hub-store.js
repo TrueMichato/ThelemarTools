@@ -856,6 +856,7 @@ export class MemoryHubStore {
 							session: replacementSession,
 							revokedSessionIds,
 							identities: remainingIdentities,
+							otherDevicesSignedOut: revokedSessionIds.some(id => id !== currentSessionId),
 						},
 					});
 				},
