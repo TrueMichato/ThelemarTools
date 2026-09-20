@@ -24,8 +24,18 @@
 import "./setup.js";
 import {readFileSync} from "node:fs";
 
+if (typeof globalThis.document === "undefined") {
+	globalThis.document = {
+		addEventListener () {},
+		getElementById () { return null; },
+		querySelector () { return null; },
+		querySelectorAll () { return []; },
+	};
+}
+
 let CharacterSheetState;
 let CharacterSheetSpells;
+let CharacterSheetInventory;
 let state;
 const canonicalGamblingTable = JSON.parse(
 	readFileSync(new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url), "utf8"),
@@ -69,6 +79,7 @@ const CANTRIP_PROGRESSION = [0, 0, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 
 beforeAll(async () => {
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
 	CharacterSheetSpells = (await import("../../../js/charactersheet/charactersheet-spells.js")).CharacterSheetSpells;
+	CharacterSheetInventory = (await import("../../../js/charactersheet/charactersheet-inventory.js")).CharacterSheetInventory;
 });
 
 /**
@@ -140,6 +151,7 @@ describe("Gambler's Tools (L3)", () => {
 		expect(names.some(n => /coins/i.test(n))).toBe(true);
 		expect(names.some(n => /dice/i.test(n))).toBe(true);
 		expect(names.some(n => /cards/i.test(n))).toBe(true);
+		expect(gamblerItems.map(item => item._gamblerWeaponId).sort()).toEqual(["cards", "coins", "dice"]);
 	});
 
 	it("gates same-named subclasses by TGTT source and cleans synthesized artifacts", () => {
@@ -155,7 +167,7 @@ describe("Gambler's Tools (L3)", () => {
 
 	it("surfaces the coin ricochet as a structured attack rider (not just item prose)", () => {
 		buildGambler(3);
-		const coins = state.getItems().find(i => i._isGamblerWeapon && /coins/i.test(i.name));
+		const coins = state.getItems().find(i => i._gamblerWeaponId === "coins");
 		expect(coins).toBeTruthy();
 
 		const riders = state.getAttackRiderNotes({id: `auto_${coins.id}`, name: coins.name, sourceItem: coins});
@@ -167,10 +179,109 @@ describe("Gambler's Tools (L3)", () => {
 
 	it("does not attach the ricochet rider to the dice or cards", () => {
 		buildGambler(3);
-		for (const item of state.getItems().filter(i => i._isGamblerWeapon && !/coins/i.test(i.name))) {
+		for (const item of state.getItems().filter(i => i._isGamblerWeapon && i._gamblerWeaponId !== "coins")) {
 			const riders = state.getAttackRiderNotes({id: `auto_${item.id}`, name: item.name, sourceItem: item});
 			expect(riders.some(r => r.id === "gamblerCoinRicochet")).toBe(false);
 		}
+	});
+
+	it("backfills stable identity onto legacy canonical rows without replacing them", () => {
+		buildGambler(3);
+		const legacyCoins = state._data.inventory.find(row => row.item?._gamblerWeaponId === "coins");
+		const originalId = legacyCoins.id;
+		delete legacyCoins.item._gamblerWeaponId;
+
+		state.getFeatureCalculations();
+
+		const migratedCoins = state.getItems().find(item => item.id === originalId);
+		expect(migratedCoins._gamblerWeaponId).toBe("coins");
+		expect(state.getItems().filter(item => item._gamblerWeaponId === "coins")).toHaveLength(1);
+	});
+
+	it("preserves edits, wrapper identity, attack linkage, and serialization for all three generated tools", () => {
+		buildGambler(3);
+		const inventory = new CharacterSheetInventory({
+			getState: () => state,
+			renderCharacter () {},
+			saveCharacter () {},
+		});
+		inventory._renderItemList = () => {};
+
+		state.addItem({name: "Gambler's Coins", source: "Custom", _isCustom: true, weight: 7});
+		const ordinaryItemId = state.getItems().find(item => item.source === "Custom" && !item._isGamblerWeapon).id;
+		const originals = state.getItems().filter(item => item._isGamblerWeapon);
+		expect(originals).toHaveLength(3);
+		const expected = new Map();
+		const renamedTools = ["Lucky Discs", "Bones of Fate", "Marked Deck"];
+
+		for (const [ix, item] of originals.entries()) {
+			const renamed = renamedTools[ix];
+			const weight = ix + 1;
+			const dmg1 = `${ix + 2}d4`;
+			inventory._saveCustomItem(renamed, 1, weight, {
+				type: "weapon",
+				weaponCategory: item.weaponCategory,
+				dmg1,
+				dmgType: item.dmgType,
+				property: item.properties || item.property || [],
+				range: item.range,
+			}, item.id);
+			expected.set(item.id, {name: renamed, weight, dmg1, attackId: `auto_${item.id}`});
+		}
+
+		state.getFeatureCalculations();
+		const settledInventory = state.toJson().inventory;
+		state.getFeatureCalculations();
+		state.getFeatureCalculations();
+		expect(state.toJson().inventory).toEqual(settledInventory);
+		expect(state.getSpellcastingFocusStatus()).toEqual(expect.objectContaining({
+			ok: true,
+			source: "Gambler's Spellcasting",
+		}));
+
+		const edited = state.getItems().filter(item => item._isGamblerWeapon);
+		expect(edited).toHaveLength(3);
+		expect(state.getItems().find(item => item.id === ordinaryItemId)).toMatchObject({
+			name: "Gambler's Coins",
+			source: "Custom",
+			weight: 7,
+		});
+		for (const item of edited) {
+			const wanted = expected.get(item.id);
+			expect(wanted).toBeDefined();
+			expect(item).toMatchObject({
+				id: item.id,
+				name: wanted.name,
+				weight: wanted.weight,
+				dmg1: wanted.dmg1,
+				equipped: true,
+			});
+			expect(`auto_${item.id}`).toBe(wanted.attackId);
+		}
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		loaded.getFeatureCalculations();
+		expect(loaded.getItems().filter(item => item._isGamblerWeapon)).toEqual(edited);
+	});
+
+	it("keys the ricochet rider to generated identity rather than mutable display text", () => {
+		buildGambler(3);
+		const coins = state.getItems().find(item => item._gamblerWeaponId === "coins");
+		const dice = state.getItems().find(item => item._gamblerWeaponId === "dice");
+		expect(coins).toBeTruthy();
+		expect(dice).toBeTruthy();
+
+		state.replaceItem(coins.id, {...state.getItemRaw(coins.id), name: "Lucky Discs"});
+		state.replaceItem(dice.id, {...state.getItemRaw(dice.id), name: "Coins of Misdirection"});
+		state.getFeatureCalculations();
+
+		const renamedCoins = state.getItems().find(item => item.id === coins.id);
+		const renamedDice = state.getItems().find(item => item.id === dice.id);
+		expect(state.getAttackRiderNotes({id: `auto_${coins.id}`, sourceItem: renamedCoins})
+			.some(rider => rider.id === "gamblerCoinRicochet")).toBe(true);
+		expect(state.getAttackRiderNotes({id: `auto_${dice.id}`, sourceItem: renamedDice})
+			.some(rider => rider.id === "gamblerCoinRicochet")).toBe(false);
 	});
 
 	it("returns no riders for spell attacks or plain weapons", () => {

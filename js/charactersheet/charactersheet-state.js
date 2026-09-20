@@ -23368,9 +23368,8 @@ class CharacterSheetState {
 					// Pact Magic - spellcasting
 					calculations.hasPactMagic = true;
 					calculations.spellcastingAbility = "cha";
-					calculations.spellSaveDc = 8 + profBonus + chaMod - exhaustionPenalty;
-					// Warlock spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
-					calculations.spellAttackBonus = profBonus + chaMod;
+					calculations.spellSaveDc = this.getSpellSaveDcForAbility("cha");
+					calculations.spellAttackBonus = this.getSpellAttackBonusForAbility("cha");
 
 					// Cantrips known: 2,2,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4
 					const cantripsKnown = level >= 10 ? 4 : level >= 4 ? 3 : 2;
@@ -23824,9 +23823,8 @@ class CharacterSheetState {
 					// Spellcasting
 					calculations.hasSpellcasting = true;
 					calculations.spellcastingAbility = "cha";
-					calculations.spellSaveDc = 8 + profBonus + this.getAbilityMod("cha") - exhaustionPenalty;
-					// Bard spell attack is a d20 bonus — exhaustion is applied at roll time only (Phase 1 doctrine)
-					calculations.spellAttackBonus = profBonus + this.getAbilityMod("cha");
+					calculations.spellSaveDc = this.getSpellSaveDcForAbility("cha");
+					calculations.spellAttackBonus = this.getSpellAttackBonusForAbility("cha");
 
 					// Cantrips known progression
 					const cantripsKnown = level >= 10 ? 6 : level >= 4 ? 5 : 4;
@@ -33752,12 +33750,16 @@ class CharacterSheetState {
 		}
 		// Reconcile only synthesized rows: preserve ordinary items and allow a
 		// player to remove/re-add the generated suite without duplication.
-		const templates = new Map(CharacterSheetState.GAMBLER_WEAPONS.map(i => [i.name, i]));
+		const templates = new Map(CharacterSheetState.GAMBLER_WEAPONS.map(item => [item._gamblerWeaponId, item]));
+		const existing = new Set();
 		this._data.inventory = (this._data.inventory || []).filter(invItem => {
 			if (!invItem?.item?._isGamblerWeapon) return true;
-			return templates.has(invItem.item.name);
+			const generatedId = CharacterSheetState._getGamblerWeaponId(invItem.item);
+			if (!templates.has(generatedId) || existing.has(generatedId)) return false;
+			invItem.item._gamblerWeaponId = generatedId;
+			existing.add(generatedId);
+			return true;
 		});
-		const existing = new Set(this._data.inventory.filter(i => i.item?._isGamblerWeapon).map(i => i.item.name));
 
 		// Inject all Gambler weapons, EQUIPPED. Gambler's Tools is the subclass's weapon
 		// suite — the cards/dice/coins are the gambler's arms and their spellcasting focus,
@@ -33765,7 +33767,9 @@ class CharacterSheetState {
 		// inventory. They are weightless trinkets (0.01-0.1 lb) with no AC or attunement
 		// impact, and the guard above means a player who unequips them is never overridden.
 		for (const weaponTemplate of CharacterSheetState.GAMBLER_WEAPONS) {
-			if (!existing.has(weaponTemplate.name)) this.addItem({...weaponTemplate}, 1, true, false);
+			if (!existing.has(weaponTemplate._gamblerWeaponId)) {
+				this.addItem(MiscUtil.copyFast(weaponTemplate), 1, true, false);
+			}
 		}
 	}
 
@@ -35154,7 +35158,8 @@ class CharacterSheetState {
 		if (this.hasFeat?.("War Caster") && has((i, it) => baseType(it) === "S" || !!it.shield)) return {ok: true, source: "War Caster", itemName: matched.name};
 		if (this.hasFeature?.("Star Map")) return {ok: true, source: "Star Map", itemName: null};
 		if ((this.hasFeature?.("Gambler's Spellcasting") || this.hasFeature?.("Spellcasting Focus"))
-			&& has((i, it) => /\b(cards?|dice|coins?)\b/.test((it.name || i.name || "").toLowerCase()))) return {ok: true, source: "Gambler's Spellcasting", itemName: matched.name};
+			&& has((i, it) => CharacterSheetState._getGamblerWeaponId(it) != null
+				|| /\b(cards?|dice|coins?)\b/.test((it.name || i.name || "").toLowerCase()))) return {ok: true, source: "Gambler's Spellcasting", itemName: matched.name};
 
 		// 4. A Bard's Spellcasting lets a Musical Instrument (item type "INS") serve as a
 		//    focus — in both the 2014 (PHB) and 2024 (XPHB) rules — provided the character
@@ -49101,7 +49106,7 @@ class CharacterSheetState {
 		// TGTT Gambler's Tools — the coins ricochet off surfaces, so a ranged attack made
 		// with them treats a target behind half cover as having no cover (i.e. the target
 		// loses its +2 AC / +2 DEX-save bonus from half cover).
-		if (item?._isGamblerWeapon && /coins/i.test(item.name || "")
+		if (item?._isGamblerWeapon && CharacterSheetState._getGamblerWeaponId(item) === "coins"
 			&& !riders.some(r => r.id === "gamblerCoinRicochet")) {
 			riders.push({
 				id: "gamblerCoinRicochet",
@@ -56046,11 +56051,26 @@ class CharacterSheetState {
 	static GAMBLER_LUCK_PROMPT_THRESHOLD = 10;
 
 	/**
+	 * Resolve a generated Gambler tool independently of its editable display name.
+	 * Canonical-name fallback upgrades legacy rows the next time they reconcile.
+	 * @param {object|null} item
+	 * @returns {string|null}
+	 */
+	static _getGamblerWeaponId (item) {
+		const generatedId = item?._gamblerWeaponId;
+		if (generatedId && CharacterSheetState.GAMBLER_WEAPONS.some(template => template._gamblerWeaponId === generatedId)) {
+			return generatedId;
+		}
+		return CharacterSheetState.GAMBLER_WEAPONS.find(template => template.name === item?.name)?._gamblerWeaponId || null;
+	}
+
+	/**
 	 * Gambler class unique weapons - injected when Gambler reaches level 3
 	 * These are custom weapons with special properties from TGTT
 	 */
 	static GAMBLER_WEAPONS = [
 		{
+			_gamblerWeaponId: "coins",
 			name: "Gambler's Coins",
 			source: "TGTT",
 			type: "M", // Melee weapon
@@ -56069,6 +56089,7 @@ class CharacterSheetState {
 			_isGamblerWeapon: true,
 		},
 		{
+			_gamblerWeaponId: "dice",
 			name: "Gambler's Dice",
 			source: "TGTT",
 			type: "M",
@@ -56084,6 +56105,7 @@ class CharacterSheetState {
 			_isGamblerWeapon: true,
 		},
 		{
+			_gamblerWeaponId: "cards",
 			name: "Gambler's Cards",
 			source: "TGTT",
 			type: "M",
