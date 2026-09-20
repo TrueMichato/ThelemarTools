@@ -88,6 +88,19 @@ describe("campaign hub pages", () => {
 		for (const id of ["campaign-invite-list", "campaign-leave"]) expect(campaignHtml).toContain(`id="${id}"`);
 	});
 
+	it("keeps ordinary reauthentication hidden until requested and handles callback success safely", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("getAccountReauthenticationReturnTo");
+		expect(source).toContain("createPendingIdentityLinkReauthenticationIntent");
+		expect(source).toContain("resolvePendingIdentityLinkReauthenticationIntent");
+		expect(source).toMatch(/isVisible = true[\s\S]*container\.classList\.toggle\("ve-hidden", !isVisible \|\| !providers\.length\)/);
+		expect(source).toContain("isVisible: false");
+		expect(source).toContain("Reauthentication complete. Sensitive account changes are available for five minutes.");
+		expect(source).toContain("Choose Link $" + "{pendingLinkProvider.label} again to continue.");
+		expect(source).toContain("linkButton.focus()");
+		expect(source).toContain("sessionStorage.removeItem(HUB_PENDING_IDENTITY_LINK_REAUTHENTICATION_STORAGE_KEY)");
+	});
+
 	it("organizes the campaign as a pinned session brief before administration", () => {
 		for (const id of [
 			"campaign-manifest-panel",

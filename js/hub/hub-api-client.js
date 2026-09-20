@@ -14,6 +14,57 @@ export class HubApiError extends Error {
 
 export const HUB_COMMAND_REPLAY_WINDOW_MS = 23 * 60 * 60 * 1000;
 export const HUB_TRANSFER_REPLAY_WINDOW_MS = HUB_COMMAND_REPLAY_WINDOW_MS;
+export const HUB_PENDING_IDENTITY_LINK_REAUTHENTICATION_STORAGE_KEY = "hub-pending-identity-link-reauthentication";
+
+const HUB_REAUTHENTICATION_FRESHNESS_MS = 5 * 60_000;
+const HUB_REAUTHENTICATED_ACCOUNT_ACTION = "reauthenticated";
+
+export function getAccountReauthenticationReturnTo () {
+	return `/hub.html?accountAction=${HUB_REAUTHENTICATED_ACCOUNT_ACTION}`;
+}
+
+export function createPendingIdentityLinkReauthenticationIntent ({provider, now = Date.now()}) {
+	if (typeof provider !== "string" || !provider) throw new TypeError("Provider is required.");
+	return {
+		version: 1,
+		operation: "link",
+		provider,
+		createdAt: now,
+	};
+}
+
+export function resolvePendingIdentityLinkReauthenticationIntent ({
+	rawIntent,
+	providers,
+	linkedProviderSlugs,
+	now = Date.now(),
+}) {
+	if (typeof rawIntent !== "string" || !rawIntent) return null;
+	let intent;
+	try {
+		intent = JSON.parse(rawIntent);
+	} catch {
+		return null;
+	}
+	if (
+		intent?.version !== 1
+		|| intent.operation !== "link"
+		|| typeof intent.provider !== "string"
+		|| !Number.isFinite(intent.createdAt)
+		|| intent.createdAt > now
+		|| now - intent.createdAt > HUB_REAUTHENTICATION_FRESHNESS_MS
+	) return null;
+	if (new Set(linkedProviderSlugs || []).has(intent.provider)) return null;
+	const provider = (providers || []).find(candidate =>
+		candidate?.slug === intent.provider
+		&& candidate.status === "available",
+	);
+	if (!provider) return null;
+	return {
+		provider: provider.slug,
+		label: provider.label,
+	};
+}
 
 export function isMutationOutcomeUncertain (error) {
 	return ["NETWORK_UNAVAILABLE", "REQUEST_ABORTED", "RESPONSE_INVALID"].includes(error?.code) || error?.status >= 500;

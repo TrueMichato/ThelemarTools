@@ -97,10 +97,16 @@ A reauthentication callback accepts only the provider identity already linked to
 the exact initiating session. Success rotates that session, closes its socket, updates the cookie/CSRF state,
 records the identity used, and starts a five-minute freshness window. A provider mismatch, another account's
 identity, stale initiating session, or expired transaction cannot freshen authority.
-The account page exposes this flow to ordinary users as well as operators. A deletion attempt without fresh
-proof starts the linked-provider flow and returns to an explicit confirmation step. A successful deletion
-request clears the session and returns the browser to sign-in; signing in again is the deletion-grace
-reauthentication path for export or cancellation.
+The account page exposes this flow to ordinary users as well as operators. Ordinary reauthentication controls
+are collapsed until the user opens them or a sensitive command reports `REAUTHENTICATION_REQUIRED`. A manual
+success returns through `/hub.html?accountAction=reauthenticated`; normal session bootstrap adopts the
+replacement cookie and CSRF token, then the page shows the five-minute success notice while keeping the controls
+collapsed. A rejected provider-link click may leave a short-lived same-origin `sessionStorage` retry hint; after
+reauthentication the page revalidates that provider against current metadata and focuses its Link button. The
+query marker alone never starts a provider-link transaction. A deletion attempt without fresh proof exposes the
+same provider choice and returns to an explicit confirmation step. A successful deletion request clears the
+session and returns the browser to sign-in; signing in again is the deletion-grace reauthentication path for
+export or cancellation.
 
 A link callback never enters invite admission or creates an account. An unknown subject attaches only to the
 initiating account; a subject owned elsewhere returns bounded `IDENTITY_ALREADY_LINKED`. Unlink returns bounded
