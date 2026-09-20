@@ -10,6 +10,17 @@ function getCookie (response, name) {
 	return (response.cookies || []).find(cookie => cookie.name === name)?.value;
 }
 
+function getFinalCookieHeader (...responses) {
+	const jar = new Map();
+	for (const response of responses) {
+		for (const cookie of response.cookies || []) {
+			if (cookie.maxAge === 0 || cookie.value === "") jar.delete(cookie.name);
+			else jar.set(cookie.name, cookie.value);
+		}
+	}
+	return [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
 describe("Hub durable GitHub registry flow", () => {
 	let app;
 	let store;
@@ -95,23 +106,15 @@ describe("Hub durable GitHub registry flow", () => {
 		expect(oauthProvider.pExchangeCode).toHaveBeenCalledTimes(1);
 	});
 
-	it("keeps concurrent tabs bound by state under one browser correlation cookie", async () => {
+	it("keeps two concurrent empty-jar starts bound by transaction-specific cookies", async () => {
 		const first = await pStart();
-		const secondResponse = await app.inject({
-			method: "GET",
-			url: "/auth/github/start?returnTo=/hub.html",
-			headers: {cookie: `__Host-hub_oauth=${first.cookie}`},
-		});
-		const second = {
-			state: new URL(secondResponse.headers.location).searchParams.get("state"),
-			cookie: getCookie(secondResponse, "__Host-hub_oauth"),
-		};
-		expect(app.unsignCookie(second.cookie).value).toBe(app.unsignCookie(first.cookie).value);
+		const second = await pStart();
+		const finalCookieHeader = getFinalCookieHeader(first.response, second.response);
 		for (const current of [second, first]) {
 			const callback = await app.inject({
 				method: "GET",
 				url: `/auth/github/callback?code=code&state=${encodeURIComponent(current.state)}`,
-				headers: {cookie: `__Host-hub_oauth=${current.cookie}`},
+				headers: {cookie: finalCookieHeader},
 			});
 			expect(callback.statusCode).toBe(302);
 		}

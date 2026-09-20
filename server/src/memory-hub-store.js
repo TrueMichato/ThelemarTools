@@ -423,7 +423,6 @@ export class MemoryHubStore {
 		pkceVerifier = null,
 		oidcNonce = null,
 		inviteContextId = null,
-		browserCorrelationHash = null,
 		expiresAt = null,
 		ttlSeconds = null,
 	}) {
@@ -457,7 +456,6 @@ export class MemoryHubStore {
 			|| (pkceVerifier != null && (typeof pkceVerifier !== "string" || pkceVerifier.length < 43 || pkceVerifier.length > 128))
 			|| (oidcNonce != null && (typeof oidcNonce !== "string" || oidcNonce.length < 32 || oidcNonce.length > 255))
 			|| (inviteContextId != null && !this._inviteContexts.has(inviteContextId))
-			|| (browserCorrelationHash != null && !/^[0-9a-f]{64}$/.test(browserCorrelationHash))
 		) throw new TypeError(`Invalid OAuth transaction.`);
 		if ([...this._oauthTransactions.values()].some(transaction => transaction.stateHash === stateHash)) {
 			throw new HubStoreError("OAUTH_STATE_CONFLICT", `OAuth transaction could not be created.`, {status: 409});
@@ -485,7 +483,6 @@ export class MemoryHubStore {
 			pkceVerifier,
 			oidcNonce,
 			inviteContextId,
-			browserCorrelationHash,
 			authorizationStartedAt: now.toISOString(),
 			expiresAt: resolvedExpiresAt.toISOString(),
 			consumedAt: null,
@@ -545,6 +542,7 @@ export class MemoryHubStore {
 		retryTokenHash,
 		nextRetryTokenHash,
 		contextTtlSeconds,
+		browserTransactionIds = [],
 	}) {
 		const priorContext = [...this._inviteContexts.values()].find(context => context.retryTokenHash === retryTokenHash);
 		const priorTransaction = priorContext == null
@@ -555,7 +553,8 @@ export class MemoryHubStore {
 			!priorContext
 			|| priorContext.consumedAt
 			|| new Date(priorContext.expiresAt) <= this._fnNow()
-			|| !priorTransaction?.consumedAt
+			|| !priorTransaction
+			|| !browserTransactionIds.includes(priorTransaction.id)
 			|| priorTransaction.provider !== transaction.provider
 			|| !invite
 			|| invite.revokedAt
@@ -586,7 +585,10 @@ export class MemoryHubStore {
 			createdAt: this._fnNow().toISOString(),
 		});
 		try {
-			return await this.pCreateOAuthTransaction({...transaction, inviteContextId: contextId});
+			return {
+				transaction: await this.pCreateOAuthTransaction({...transaction, inviteContextId: contextId}),
+				replacedTransactionId: priorTransaction.id,
+			};
 		} catch (error) {
 			this._inviteContexts.delete(contextId);
 			this._inviteContexts.set(priorContext.id, priorContext);
@@ -596,19 +598,13 @@ export class MemoryHubStore {
 	}
 
 	async pConsumeOAuthTransaction ({
-		id = null,
+		id,
 		stateHash,
-		browserCorrelationHash = null,
 		provider,
 		operation,
 		redirectUri,
 	}) {
-		const transaction = id == null
-			? [...this._oauthTransactions.values()].find(current => (
-				current.stateHash === stateHash
-				&& current.browserCorrelationHash === browserCorrelationHash
-			))
-			: this._oauthTransactions.get(id);
+		const transaction = this._oauthTransactions.get(id);
 		const expectedHash = Buffer.from(transaction?.stateHash || "", "utf8");
 		const actualHash = Buffer.from(stateHash || "", "utf8");
 		const isHashMatch = expectedHash.length === actualHash.length

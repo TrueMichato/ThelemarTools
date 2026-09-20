@@ -148,9 +148,6 @@ function getOAuthTransaction (row) {
 		pkceVerifier: row.pkce_verifier,
 		oidcNonce: row.oidc_nonce,
 		inviteContextId: row.invite_context_id ?? null,
-		browserCorrelationHash: row.browser_correlation_hash == null
-			? null
-			: Buffer.from(row.browser_correlation_hash).toString("hex"),
 		authorizationStartedAt: row.authorization_started_at,
 		expiresAt: row.expires_at,
 		consumedAt: row.consumed_at,
@@ -635,7 +632,6 @@ export class PostgresHubStore {
 		pkceVerifier = null,
 		oidcNonce = null,
 		inviteContextId = null,
-		browserCorrelationHash = null,
 		expiresAt = null,
 		ttlSeconds = null,
 	}) {
@@ -648,13 +644,11 @@ export class PostgresHubStore {
 			INSERT INTO hub.oauth_transactions (
 				id, state_hash, provider, operation,
 				initiating_account_id, initiating_session_id,
-				redirect_uri, return_to, pkce_verifier, oidc_nonce, invite_context_id,
-				browser_correlation_hash, expires_at
+				redirect_uri, return_to, pkce_verifier, oidc_nonce, invite_context_id, expires_at
 			)
 			VALUES (
 				$1, decode($2, 'hex'), $3, $4, $5, $6, $7, $8, $9, $10, $11,
-				CASE WHEN $12::text IS NULL THEN NULL ELSE decode($12, 'hex') END,
-				COALESCE($13::timestamptz, now() + ($14::integer * interval '1 second'))
+				COALESCE($12::timestamptz, now() + ($13::integer * interval '1 second'))
 			)
 			RETURNING *
 		`, [
@@ -669,7 +663,6 @@ export class PostgresHubStore {
 			pkceVerifier,
 			oidcNonce,
 			inviteContextId,
-			browserCorrelationHash,
 			expiresAt,
 			ttlSeconds,
 		]);
@@ -731,11 +724,11 @@ export class PostgresHubStore {
 					id, state_hash, provider, operation,
 					initiating_account_id, initiating_session_id,
 					redirect_uri, return_to, pkce_verifier, oidc_nonce,
-					invite_context_id, browser_correlation_hash, expires_at
+					invite_context_id, expires_at
 				)
 				VALUES (
 					$1, decode($2, 'hex'), $3, $4, $5, $6, $7, $8, $9, $10,
-					$11, decode($12, 'hex'), now() + ($13::integer * interval '1 second')
+					$11, now() + ($12::integer * interval '1 second')
 				)
 				RETURNING *
 			`, [
@@ -750,7 +743,6 @@ export class PostgresHubStore {
 				transaction.pkceVerifier ?? null,
 				transaction.oidcNonce ?? null,
 				contextId,
-				transaction.browserCorrelationHash,
 				transaction.ttlSeconds,
 			]);
 			await client.query("COMMIT");
@@ -768,6 +760,7 @@ export class PostgresHubStore {
 		retryTokenHash,
 		nextRetryTokenHash,
 		contextTtlSeconds,
+		browserTransactionIds = [],
 	}) {
 		const client = await this._pool.connect();
 		try {
@@ -813,7 +806,7 @@ export class PostgresHubStore {
 				!row
 				|| row.context_consumed_at
 				|| row.context_expires_at <= new Date()
-				|| !row.transaction_consumed_at
+				|| !browserTransactionIds.includes(row.transaction_id)
 				|| row.provider !== transaction.provider
 				|| row.revoked_at
 				|| row.invite_expires_at <= new Date()
@@ -836,11 +829,11 @@ export class PostgresHubStore {
 				INSERT INTO hub.oauth_transactions (
 					id, state_hash, provider, operation,
 					redirect_uri, return_to, pkce_verifier, oidc_nonce,
-					invite_context_id, browser_correlation_hash, expires_at
+					invite_context_id, expires_at
 				)
 				VALUES (
 					$1, decode($2, 'hex'), $3, 'sign_in', $4, $5, $6, $7,
-					$8, decode($9, 'hex'), now() + ($10::integer * interval '1 second')
+					$8, now() + ($9::integer * interval '1 second')
 				)
 				RETURNING *
 			`, [
@@ -852,11 +845,13 @@ export class PostgresHubStore {
 				transaction.pkceVerifier ?? null,
 				transaction.oidcNonce ?? null,
 				contextId,
-				transaction.browserCorrelationHash,
 				transaction.ttlSeconds,
 			]);
 			await client.query("COMMIT");
-			return getOAuthTransaction(result.rows[0]);
+			return {
+				transaction: getOAuthTransaction(result.rows[0]),
+				replacedTransactionId: row.transaction_id,
+			};
 		} catch (error) {
 			await client.query("ROLLBACK");
 			throw error;
@@ -866,9 +861,8 @@ export class PostgresHubStore {
 	}
 
 	async pConsumeOAuthTransaction ({
-		id = null,
+		id,
 		stateHash,
-		browserCorrelationHash = null,
 		provider,
 		operation,
 		redirectUri,
@@ -883,12 +877,11 @@ export class PostgresHubStore {
 			WITH candidate AS (
 				SELECT *
 				FROM hub.oauth_transactions
-				WHERE ($1::uuid IS NULL OR id = $1)
+				WHERE id = $1
 					AND state_hash = decode($2, 'hex')
-					AND ($3::text IS NULL OR browser_correlation_hash = decode($3, 'hex'))
-					AND provider = $4
-					AND operation = $5
-					AND redirect_uri = $6
+					AND provider = $3
+					AND operation = $4
+					AND redirect_uri = $5
 					AND consumed_at IS NULL
 					AND expires_at > now()
 				FOR UPDATE
@@ -904,7 +897,7 @@ export class PostgresHubStore {
 				RETURNING candidate.*
 			)
 			SELECT * FROM consumed
-		`, [id, stateHash, browserCorrelationHash, provider, operation, redirectUri]);
+		`, [id, stateHash, provider, operation, redirectUri]);
 		if (!result.rowCount) throw new HubStoreError("INVALID_OAUTH_STATE", `OAuth transaction is invalid.`, {status: 400});
 		return getOAuthTransaction(result.rows[0]);
 	}

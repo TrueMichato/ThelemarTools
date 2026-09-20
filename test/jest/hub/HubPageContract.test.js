@@ -656,8 +656,11 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("_pendingInviteToken = inviteFragment");
 		expect(providerSource).toContain("pCreateInviteAdmission");
 		expect(providerSource).toContain("pRetryInviteAdmission");
+		expect(providerSource).toContain("onInviteRetryInvalid");
 		expect(providerSource).toContain("window.location.assign(result.authorizationUrl)");
 		expect(source).toContain("sessionStorage.setItem(\"hub-invite-retry\"");
+		expect(source).toContain("sessionStorage.removeItem(\"hub-invite-retry\")");
+		expect(source).toContain("window.location.replace(\"hub.html\")");
 		expect(source).toContain("joinUrl.hash");
 		expect(source).not.toContain("searchParams.set(\"invite\"");
 	});

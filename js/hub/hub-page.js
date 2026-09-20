@@ -134,6 +134,11 @@ async function pRenderSignedOutProviders () {
 				_pendingInviteRetry = inviteRetry;
 				sessionStorage.setItem("hub-invite-retry", JSON.stringify(inviteRetry));
 			},
+			onInviteRetryInvalid: () => {
+				_pendingInviteRetry = null;
+				sessionStorage.removeItem("hub-invite-retry");
+				window.location.replace("hub.html");
+			},
 			onError: renderError,
 		});
 	})();

@@ -10,6 +10,24 @@ function getCookie (response, name) {
 	return (response.cookies || []).find(cookie => cookie.name === name)?.value;
 }
 
+function getCookieHeader (response) {
+	return (response.cookies || [])
+		.filter(cookie => cookie.value !== "")
+		.map(cookie => `${cookie.name}=${cookie.value}`)
+		.join("; ");
+}
+
+function getFinalCookieHeader (...responses) {
+	const jar = new Map();
+	for (const response of responses) {
+		for (const cookie of response.cookies || []) {
+			if (cookie.maxAge === 0 || cookie.value === "") jar.delete(cookie.name);
+			else jar.set(cookie.name, cookie.value);
+		}
+	}
+	return [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
 function getProvider ({subject = "new-player", pExchange = null} = {}) {
 	return {
 		getAuthorizationUrl: jest.fn(({state, codeChallenge}) => `https://github.example/authorize?state=${state}&code_challenge=${codeChallenge}`),
@@ -46,14 +64,13 @@ async function pSeedInvite ({store, now, maxUses = 1, expiresAt = new Date(now.g
 	return {owner, campaign, token, invite: created.invite};
 }
 
-async function pStartInvite ({app, token, provider = "github", browserCookie = null}) {
+async function pStartInvite ({app, token, provider = "github"}) {
 	const response = await app.inject({
 		method: "POST",
 		url: "/api/auth/invite-contexts",
 		headers: {
 			origin: ORIGIN,
 			"x-hub-protocol-version": "5",
-			...(browserCookie ? {cookie: `__Host-hub_oauth=${browserCookie}`} : {}),
 		},
 		payload: {token, provider, returnTo: "/hub.html"},
 	});
@@ -62,18 +79,19 @@ async function pStartInvite ({app, token, provider = "github", browserCookie = n
 		response,
 		state: authorizationUrl?.searchParams.get("state") || null,
 		cookie: getCookie(response, "__Host-hub_oauth"),
+		cookieHeader: getCookieHeader(response),
 		retryToken: response.statusCode === 201 ? response.json().retryToken : null,
 	};
 }
 
-async function pRetryInvite ({app, retryToken, provider = "github", browserCookie = null}) {
+async function pRetryInvite ({app, retryToken, provider = "github", cookieHeader = null}) {
 	const response = await app.inject({
 		method: "POST",
 		url: "/api/auth/invite-contexts/retry",
 		headers: {
 			origin: ORIGIN,
 			"x-hub-protocol-version": "5",
-			...(browserCookie ? {cookie: `__Host-hub_oauth=${browserCookie}`} : {}),
+			...(cookieHeader ? {cookie: cookieHeader} : {}),
 		},
 		payload: {retryToken, provider, returnTo: "/hub.html"},
 	});
@@ -82,15 +100,16 @@ async function pRetryInvite ({app, retryToken, provider = "github", browserCooki
 		response,
 		state: authorizationUrl?.searchParams.get("state") || null,
 		cookie: getCookie(response, "__Host-hub_oauth"),
+		cookieHeader: getCookieHeader(response),
 		retryToken: response.statusCode === 201 ? response.json().retryToken : null,
 	};
 }
 
-async function pCallback ({app, state, cookie, code = "code"}) {
+async function pCallback ({app, state, cookie, cookieHeader = null, code = "code"}) {
 	return app.inject({
 		method: "GET",
 		url: `/auth/github/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
-		headers: {cookie: `__Host-hub_oauth=${cookie}`},
+		headers: {cookie: cookieHeader || `__Host-hub_oauth=${cookie}`},
 	});
 }
 
@@ -275,7 +294,7 @@ describe("Hub invite-gated first OAuth access", () => {
 		const retry = await pRetryInvite({
 			app,
 			retryToken: failed.retryToken,
-			browserCookie: failed.cookie,
+			cookieHeader: failed.cookieHeader,
 		});
 		expect(retry.response.statusCode).toBe(201);
 		expect((await pCallback({app, ...retry, code: "retry-player"})).statusCode).toBe(302);
@@ -357,7 +376,7 @@ describe("Hub invite-gated first OAuth access", () => {
 		})).statusCode).toBe(302);
 	});
 
-	it("binds browser correlation per tab without consuming a second use for an active member", async () => {
+	it("supports two fresh concurrent starts under the browser's final shared cookie jar", async () => {
 		const existing = await store.pUpsertOAuthAccount({
 			provider: "github",
 			providerSubject: "new-player",
@@ -365,13 +384,39 @@ describe("Hub invite-gated first OAuth access", () => {
 		});
 		const seeded = await pSeedInvite({store, now});
 		const tabA = await pStartInvite({app, token: seeded.token});
-		const tabB = await pStartInvite({app, token: seeded.token, browserCookie: tabA.cookie});
-		expect(app.unsignCookie(tabA.cookie).value).toBe(app.unsignCookie(tabB.cookie).value);
-		expect((await pCallback({app, ...tabB})).statusCode).toBe(302);
-		expect((await pCallback({app, ...tabA})).statusCode).toBe(302);
+		const tabB = await pStartInvite({app, token: seeded.token});
+		const finalCookieHeader = getFinalCookieHeader(tabA.response, tabB.response);
+		expect((await pCallback({app, ...tabB, cookieHeader: finalCookieHeader})).statusCode).toBe(302);
+		expect((await pCallback({app, ...tabA, cookieHeader: finalCookieHeader})).statusCode).toBe(302);
 		expect(store._invites.get(getSha256(seeded.token)).useCount).toBe(1);
 		expect(await store.pGetMembership({accountId: existing.id, campaignId: seeded.campaign.id}))
 			.toEqual(expect.objectContaining({status: "active"}));
+	});
+
+	it("replaces abandoned transactions, rejects old state and cross-browser retry, and expires cleanly", async () => {
+		const seeded = await pSeedInvite({store, now});
+		const abandoned = await pStartInvite({app, token: seeded.token});
+		const crossBrowser = await pRetryInvite({app, retryToken: abandoned.retryToken});
+		expect(crossBrowser.response.json()).toEqual({error: "INVITE_ADMISSION_INVALID"});
+
+		const retried = await pRetryInvite({
+			app,
+			retryToken: abandoned.retryToken,
+			cookieHeader: abandoned.cookieHeader,
+		});
+		expect(retried.response.statusCode).toBe(201);
+		expect((await pCallback({app, ...abandoned})).json()).toEqual({error: "INVALID_OAUTH_STATE"});
+		expect((await pCallback({app, ...retried})).statusCode).toBe(302);
+
+		const expiring = await pSeedInvite({store, now});
+		const expired = await pStartInvite({app, token: expiring.token});
+		now = new Date(now.getTime() + 5 * 60_000 + 1);
+		const expiredRetry = await pRetryInvite({
+			app,
+			retryToken: expired.retryToken,
+			cookieHeader: expired.cookieHeader,
+		});
+		expect(expiredRetry.response.json()).toEqual({error: "INVITE_ADMISSION_INVALID"});
 	});
 
 	it("does not let a normal OAuth transaction consume an invite-bound context", async () => {

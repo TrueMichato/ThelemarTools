@@ -93,7 +93,7 @@ Invite-admission tests additionally assert the pre-account transaction boundary 
 account/identity/session/membership/invite-use/audit/event/outbox either all commit or none do. They cover
 max-use races, duplicate raw-token hash conflicts, provider failure after OAuth-state consumption, callback
 replay, two-tab cookie/state mismatch, creator purge/revoke interleaving, deletion/suspension status, safe
-return paths, shared-cookie multi-tab correlation, opaque retry replacement, and no raw invite/context material
+return paths, final-cookie-jar multi-tab correlation, abandoned/consumed opaque retry replacement, and no raw invite/context material
 in receipts, logs, URLs, or backup paths.
 Realtime tests cover 26 exact continuation pages on one connection, one-time connection-scoped rate-limit
 exemptions, forged/replayed marker limiting, reconnect preservation, exact-once accumulation, and explicit

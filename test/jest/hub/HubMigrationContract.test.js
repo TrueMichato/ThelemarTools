@@ -215,7 +215,6 @@ describe("campaign hub first migration contract", () => {
 			"completed_session_id uuid",
 			"completed_membership_id uuid",
 			"ADD COLUMN invite_context_id uuid UNIQUE",
-			"ADD COLUMN browser_correlation_hash bytea",
 			"REFERENCES hub.invite_contexts(id) ON DELETE CASCADE",
 			"oauth_transactions_invite_context_idx",
 		]) expect(inviteAdmissionSql).toContain(required);

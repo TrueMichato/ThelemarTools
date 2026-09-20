@@ -41,6 +41,7 @@ import crypto from "node:crypto";
 const {normalizeIP} = rateLimit;
 const SESSION_COOKIE = "__Host-hub_session";
 const OAUTH_COOKIE = "__Host-hub_oauth";
+const OAUTH_COOKIE_PREFIX = `${OAUTH_COOKIE}-`;
 const INVITE_ADMISSION_CAPABILITY = "auth.invite_admission.v1";
 const HUB_LEGACY_PROTOCOL_VERSION = "3";
 const SUPPORTED_HUB_PROTOCOL_VERSIONS = new Set([
@@ -108,6 +109,37 @@ function getSignedCookie (request, name) {
 	if (!raw) return null;
 	const unsigned = request.unsignCookie(raw);
 	return unsigned.valid ? unsigned.value : null;
+}
+
+function getOAuthTransactionCookieName (transactionId) {
+	return `${OAUTH_COOKIE_PREFIX}${transactionId}`;
+}
+
+function getOAuthState (transactionId) {
+	return `${transactionId}.${getRandomToken()}`;
+}
+
+function getOAuthTransactionIdFromState (state) {
+	if (typeof state !== "string") return null;
+	const separatorIndex = state.indexOf(".");
+	if (separatorIndex === -1) return null;
+	const transactionId = state.slice(0, separatorIndex);
+	const secret = state.slice(separatorIndex + 1);
+	if (
+		!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(transactionId)
+		|| !/^[A-Za-z0-9_-]{32,}$/.test(secret)
+	) return null;
+	return transactionId;
+}
+
+function getOAuthTransactionCookieIds (request) {
+	return Object.keys(request.cookies || {})
+		.filter(name => name.startsWith(OAUTH_COOKIE_PREFIX))
+		.map(name => {
+			const transactionId = name.slice(OAUTH_COOKIE_PREFIX.length);
+			return getSignedCookie(request, name) === transactionId ? transactionId : null;
+		})
+		.filter(Boolean);
 }
 
 function validateConfig (config) {
@@ -608,7 +640,8 @@ export async function createHubApp ({
 		const provider = providerRegistry.getAvailableProviders()
 			.find(it => it.slug === request.body.provider);
 		if (!provider) return reply.code(403).send({error: "INVITE_ADMISSION_INVALID"});
-		const state = getRandomToken();
+		const transactionId = crypto.randomUUID();
+		const state = getOAuthState(transactionId);
 		const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
 		const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
 		const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
@@ -622,8 +655,6 @@ export async function createHubApp ({
 			nonce: oidcNonce,
 			redirectUri,
 		});
-		const transactionId = crypto.randomUUID();
-		const browserCorrelation = getSignedCookie(request, OAUTH_COOKIE) || getRandomToken();
 		const retryToken = getRandomToken();
 		await store.pCreateInviteOAuthTransaction({
 			transaction: {
@@ -635,14 +666,19 @@ export async function createHubApp ({
 				returnTo,
 				pkceVerifier,
 				oidcNonce,
-				browserCorrelationHash: getSha256(browserCorrelation),
 				ttlSeconds: config.oauthStateTtlSeconds,
 			},
 			inviteTokenHash: getSha256(request.body.token),
 			retryTokenHash: getSha256(retryToken),
 			contextTtlSeconds: config.inviteContextTtlSeconds,
 		});
-		reply.setCookie(OAUTH_COOKIE, browserCorrelation, getCookieOptions({
+		reply.setCookie(getOAuthTransactionCookieName(transactionId), transactionId, getCookieOptions({
+			isSecure: config.isSecure,
+			maxAge: config.oauthStateTtlSeconds,
+		}));
+		// Preserve one legacy correlation cookie for in-flight pre-r9 starts. New callbacks use
+		// the transaction-specific cookie selected by the transaction id embedded in state.
+		reply.setCookie(OAUTH_COOKIE, transactionId, getCookieOptions({
 			isSecure: config.isSecure,
 			maxAge: config.oauthStateTtlSeconds,
 		}));
@@ -672,7 +708,8 @@ export async function createHubApp ({
 		const provider = providerRegistry.getAvailableProviders()
 			.find(it => it.slug === request.body.provider);
 		if (!provider) return reply.code(403).send({error: "INVITE_ADMISSION_INVALID"});
-		const state = getRandomToken();
+		const transactionId = crypto.randomUUID();
+		const state = getOAuthState(transactionId);
 		const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
 		const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
 		const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
@@ -686,11 +723,10 @@ export async function createHubApp ({
 			nonce: oidcNonce,
 			redirectUri,
 		});
-		const browserCorrelation = getSignedCookie(request, OAUTH_COOKIE) || getRandomToken();
 		const retryToken = getRandomToken();
-		await store.pRetryInviteOAuthTransaction({
+		const retried = await store.pRetryInviteOAuthTransaction({
 			transaction: {
-				id: crypto.randomUUID(),
+				id: transactionId,
 				stateHash: getSha256(state),
 				provider: provider.slug,
 				operation: "sign_in",
@@ -698,14 +734,19 @@ export async function createHubApp ({
 				returnTo,
 				pkceVerifier,
 				oidcNonce,
-				browserCorrelationHash: getSha256(browserCorrelation),
 				ttlSeconds: config.oauthStateTtlSeconds,
 			},
 			retryTokenHash: getSha256(request.body.retryToken),
 			nextRetryTokenHash: getSha256(retryToken),
 			contextTtlSeconds: config.inviteContextTtlSeconds,
+			browserTransactionIds: getOAuthTransactionCookieIds(request),
 		});
-		reply.setCookie(OAUTH_COOKIE, browserCorrelation, getCookieOptions({
+		reply.clearCookie(getOAuthTransactionCookieName(retried.replacedTransactionId), getClearCookieOptions({isSecure: config.isSecure}));
+		reply.setCookie(getOAuthTransactionCookieName(transactionId), transactionId, getCookieOptions({
+			isSecure: config.isSecure,
+			maxAge: config.oauthStateTtlSeconds,
+		}));
+		reply.setCookie(OAUTH_COOKIE, transactionId, getCookieOptions({
 			isSecure: config.isSecure,
 			maxAge: config.oauthStateTtlSeconds,
 		}));
@@ -753,7 +794,8 @@ export async function createHubApp ({
 				},
 			},
 		}, async (request, reply) => {
-			const state = getRandomToken();
+			const transactionId = crypto.randomUUID();
+			const state = getOAuthState(transactionId);
 			const pkceVerifier = provider.capabilities.pkce ? getRandomToken(48) : null;
 			const oidcNonce = provider.capabilities.oidcNonce ? getRandomToken() : null;
 			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
@@ -767,8 +809,6 @@ export async function createHubApp ({
 				nonce: oidcNonce,
 				redirectUri,
 			});
-			const transactionId = crypto.randomUUID();
-			const browserCorrelation = getSignedCookie(request, OAUTH_COOKIE) || getRandomToken();
 			await store.pCreateOAuthTransaction({
 				id: transactionId,
 				stateHash: getSha256(state),
@@ -778,10 +818,13 @@ export async function createHubApp ({
 				returnTo,
 				pkceVerifier,
 				oidcNonce,
-				browserCorrelationHash: getSha256(browserCorrelation),
 				ttlSeconds: config.oauthStateTtlSeconds,
 			});
-			reply.setCookie(OAUTH_COOKIE, browserCorrelation, getCookieOptions({
+			reply.setCookie(getOAuthTransactionCookieName(transactionId), transactionId, getCookieOptions({
+				isSecure: config.isSecure,
+				maxAge: config.oauthStateTtlSeconds,
+			}));
+			reply.setCookie(OAUTH_COOKIE, transactionId, getCookieOptions({
 				isSecure: config.isSecure,
 				maxAge: config.oauthStateTtlSeconds,
 			}));
@@ -803,17 +846,29 @@ export async function createHubApp ({
 				},
 			},
 		}, async (request, reply) => {
-			const browserCorrelation = getSignedCookie(request, OAUTH_COOKIE);
-			if (!browserCorrelation || typeof request.query?.state !== "string") {
+			const stateTransactionId = getOAuthTransactionIdFromState(request.query?.state);
+			const legacyTransactionCookie = getSignedCookie(request, OAUTH_COOKIE);
+			const transactionId = stateTransactionId || legacyTransactionCookie;
+			const transactionCookie = transactionId == null
+				? null
+				: getSignedCookie(request, getOAuthTransactionCookieName(transactionId));
+			if (
+				!transactionId
+				|| (transactionCookie !== transactionId && legacyTransactionCookie !== transactionId)
+			) {
 				metrics.observeAuth?.({provider: provider.slug, outcome: "invalid_state"});
 				return reply.code(400).send({error: "INVALID_OAUTH_STATE"});
+			}
+			reply.clearCookie(getOAuthTransactionCookieName(transactionId), getClearCookieOptions({isSecure: config.isSecure}));
+			if (legacyTransactionCookie === transactionId) {
+				reply.clearCookie(OAUTH_COOKIE, getClearCookieOptions({isSecure: config.isSecure}));
 			}
 			const redirectUri = `${config.appOrigin}${provider.callbackPath}`;
 			let transaction;
 			try {
 				transaction = await store.pConsumeOAuthTransaction({
+					id: transactionId,
 					stateHash: getSha256(request.query.state),
-					browserCorrelationHash: getSha256(browserCorrelation),
 					provider: provider.slug,
 					operation: "sign_in",
 					redirectUri,

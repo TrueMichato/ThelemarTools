@@ -16,10 +16,10 @@ describe("Campaign Hub invite admission ADR contract", () => {
 	it("keeps raw invite material out of OAuth and browser persistence", () => {
 		for (const required of [
 			"`POST /api/auth/invite-contexts`",
-			"The bound context is not reusable",
 			"hash-only retry",
 		]) expect(adr).toContain(required);
 		expect(adr).toMatch(/no raw invite or context identifier enters return paths, OAuth state,\s+cookies, referrers, or history/);
+		expect(adr).toMatch(/The bound\s+context is not reusable/);
 	});
 
 	it("records migration, lock order, lifecycle, and rollout boundaries", () => {
