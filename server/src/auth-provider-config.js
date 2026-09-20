@@ -5,6 +5,7 @@ import {
 import {DiscordOAuthProvider} from "./discord-oauth-provider.js";
 import {GitHubOAuthProvider} from "./github-oauth-provider.js";
 import {GoogleOAuthProvider} from "./google-oauth-provider.js";
+import {normalizeIdentityRetentionRequiredProviders} from "./account-identities.js";
 
 const PROVIDERS = Object.freeze({
 	github: {
@@ -91,7 +92,12 @@ export function createAuthProviderConfiguration ({
 	if (configured.has("discord") !== configured.has("google")) {
 		throw new TypeError(`Discord and Google must be configured together.`);
 	}
-
+	const identityRetentionRequiredProviders = normalizeIdentityRetentionRequiredProviders(
+		getCsv(env.HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS).length
+			? getCsv(env.HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS)
+			: ["github"],
+		{configuredProviders: configured},
+	);
 	const registrations = Object.entries(PROVIDERS).map(([slug, definition]) => {
 		const status = configured.has(slug) && !emergencyDisabled.has(slug) ? "available" : "disabled";
 		return createAuthProviderRegistration({
@@ -109,5 +115,6 @@ export function createAuthProviderConfiguration ({
 
 	return {
 		authProviderRegistry: new AuthProviderRegistry({registrations}),
+		identityRetentionRequiredProviders,
 	};
 }

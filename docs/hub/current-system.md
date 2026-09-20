@@ -45,7 +45,7 @@ The Campaign Hub is an optional online layer over the existing local-first site.
 | Test authority | `server/src/memory-hub-store.js` | Deterministic behavioral double for domain/API tests; never used by `server/src/index.js` |
 | Domain helpers | `server/src/hub-actions.js`, `server/src/semantic-operation-registry.js`, `server/src/campaign-content.js`, `server/src/cloud-data-validation.js` | Versioned semantic effects, source-derived template registry, inventory/escrow, rules, brew validation, character sanitization/quotas |
 | Realtime authority | `server/src/realtime.js`, `server/src/projections.js` | Presence, resync, visibility filtering, outbox dispatch |
-| Auth/security | `server/src/auth-provider-registry.js`, `server/src/auth-provider-config.js`, `server/src/*-oauth-provider.js`, `server/src/google-oauth-provider.js`, `server/src/oauth-provider-http.js`, `server/src/external-identity.js`, `server/src/security.js` | Validated provider registration/configuration, bounded GitHub/Discord OAuth and Google OIDC exchange, immutable identity normalization, durable OAuth state, PKCE/nonce, hashes, tokens, CSRF helpers |
+| Auth/security | `server/src/auth-provider-registry.js`, `server/src/auth-provider-config.js`, `server/src/account-identities.js`, `server/src/*-oauth-provider.js`, `server/src/google-oauth-provider.js`, `server/src/oauth-provider-http.js`, `server/src/external-identity.js`, `server/src/security.js` | Validated provider registration/configuration, bounded GitHub/Discord OAuth and Google OIDC exchange, immutable identity normalization, capability-gated own identity list/link/unlink, required-provider retention, durable OAuth state, PKCE/nonce, hashes, tokens, CSRF helpers |
 | Schema/operations | `server/migrations/`, `server/src/migration-runner.js`, `server/scripts/` | Immutable migrations, checksummed ledger, role grants, backup, restore, credential-safe DB access |
 | Character Sheet seams | `js/charactersheet/charactersheet.js`, `charactersheet-hub-effects.js`, `charactersheet-state.js`, `charactersheet-rollhistory.js` | Repository selection, context overlay, save/rebase/recovery, inline effect approvals/notices, campaign roll logging |
 | DM Screen seams | `js/dmscreen.js`, `js/dmscreen/partytracker/` | Workspace repository selection and non-persisted live character projections |
@@ -235,6 +235,7 @@ edge Compose topology verified locally and deployed on Oracle. Phase 6G currentl
 - Migration 0003 records bounded maintenance/backup/restore evidence.
 - Migration 0006 adds provider-neutral identity metadata, session identity provenance, deferred last-identity
   protection, and transient OAuth transactions without rewriting existing GitHub subjects or account ids.
+  Application authority now uses that substrate for link/unlink and configured retention-provider enforcement.
 - Protected Prometheus metrics expose aggregate HTTP/auth/WebSocket/outbox/session/deletion/maintenance/recovery
   signals. Structured logs use correlation ids and strip query strings/secrets.
 - A singleton maintenance job prunes only technical records, including consumed/expired OAuth transactions, and

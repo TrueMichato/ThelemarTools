@@ -47,6 +47,9 @@ environment and must not use copied production characters.
   admission-enabled r9 image until the stacked `campaign:create` entitlement/backfill/admin layer is reviewed.
 - Keep `HUB_ACCOUNT_ENTITLEMENTS_ENABLED=false` until migration 0009, designated-operator reconciliation,
   fresh-reauth administration, last-operator protection, rollback, and restore evidence pass.
+- Keep `HUB_ACCOUNT_IDENTITY_LINKING_ENABLED=false` and
+  `HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS=github` until the exact-head identity suites, rollback preflight,
+  and multi-browser link/sign-in/unlink journey pass. Deploying the code must not enable Discord or Google.
 
 ## Participants
 
@@ -70,6 +73,9 @@ environment and must not use copied production characters.
 - membership removal while connected;
 - OAuth secret/session/CSRF rotation rehearsal.
 - provider-bound reauthentication with old-session socket closure;
+- account-level reauthentication, own identity listing, unknown-subject link without account creation,
+  cross-account conflict, different-identity unlink, required-provider retention, and all-session/lease/socket
+  rotation;
 - operator grant creator -> creator creates campaign -> operator revoke -> creator receives
   `CAMPAIGN_CREATE_NOT_ENTITLED`;
 - wrong-account identity, stale reauthentication, non-operator hidden route, mutual revoke, and last-operator

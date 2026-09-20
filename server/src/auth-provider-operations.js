@@ -14,9 +14,7 @@ export async function pGetAuthProviderRollbackBlockers ({
 }) {
 	if (!queryable?.query) throw new TypeError(`A queryable PostgreSQL client is required.`);
 	const providers = normalizeProviderSet(supportedProviders);
-	if (!Array.isArray(allowedSubjects) || !allowedSubjects.length) {
-		throw new TypeError(`At least one legacy rollback provider subject is required.`);
-	}
+	if (!Array.isArray(allowedSubjects)) throw new TypeError(`Legacy rollback provider subjects must be an array.`);
 	const admitted = [...new Set(allowedSubjects)];
 	const result = await queryable.query(`
 		SELECT count(*)::bigint AS blocked_accounts
@@ -27,7 +25,10 @@ export async function pGetAuthProviderRollbackBlockers ({
 				FROM hub.external_identities identity
 				WHERE identity.account_id = account.id
 					AND identity.provider = ANY($1::text[])
-					AND identity.provider || ':' || identity.provider_subject = ANY($2::text[])
+					AND (
+						cardinality($2::text[]) = 0
+						OR identity.provider || ':' || identity.provider_subject = ANY($2::text[])
+					)
 			)
 	`, [providers, admitted]);
 	return {blockedAccounts: Number(result.rows[0]?.blocked_accounts || 0)};

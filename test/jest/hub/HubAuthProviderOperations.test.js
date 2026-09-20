@@ -21,7 +21,7 @@ describe("Hub authentication provider operations", () => {
 		expect(calls[0].params).toEqual([["github"], ["github:123", "github:456"]]);
 	});
 
-	it("fails closed on empty or malformed rollback provider policy", async () => {
+	it("accepts an empty optional legacy allowlist and fails closed on malformed provider policy", async () => {
 		const queryable = {query: async () => { throw new Error("should not query"); }};
 		await expect(pGetAuthProviderRollbackBlockers({
 			queryable,
@@ -33,10 +33,17 @@ describe("Hub authentication provider operations", () => {
 			supportedProviders: ["GitHub"],
 			allowedSubjects: ["github:123"],
 		})).rejects.toThrow(/lower-case registry slugs/);
+		const calls = [];
 		await expect(pGetAuthProviderRollbackBlockers({
-			queryable,
+			queryable: {
+				query: async (sql, params) => {
+					calls.push({sql, params});
+					return {rows: [{blocked_accounts: "0"}]};
+				},
+			},
 			supportedProviders: ["github"],
 			allowedSubjects: [],
-		})).rejects.toThrow(/legacy rollback provider subject/);
+		})).resolves.toEqual({blockedAccounts: 0});
+		expect(calls[0].params).toEqual([["github"], []]);
 	});
 });

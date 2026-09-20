@@ -30,7 +30,7 @@ try {
 	const result = await pGetAuthProviderRollbackBlockers({
 		queryable: pool,
 		supportedProviders: getCsv("HUB_ROLLBACK_SUPPORTED_AUTH_PROVIDERS", "github"),
-		allowedSubjects: getAllowedOAuthSubjects(requireEnv("HUB_ALLOWED_OAUTH_SUBJECTS")),
+		allowedSubjects: getAllowedOAuthSubjects(process.env.HUB_ALLOWED_OAUTH_SUBJECTS || ""),
 	});
 	process.stdout.write(`${JSON.stringify(result)}\n`);
 	if (result.blockedAccounts) process.exitCode = 2;

@@ -39,8 +39,8 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
-| **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 account linking/rollout retain their own acceptance gates |
-| **active** | r9 invite-gated identity | ADR 0018/migration 0008 foundation and ADR 0019/migration 0009 provider-neutral creator/operator entitlement layer are implemented; entitlement enforcement and new-account admission remain default-off until release preflight |
+| **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 provider rollout retain their own acceptance gates |
+| **active** | r9 invite-gated identity | ADR 0018/migration 0008 foundation, ADR 0019/migration 0009 provider-neutral entitlements, and ADR 0014 account link/unlink implementation are complete; entitlement, identity-linking, new-account-admission, and Discord/Google enablement switches remain default-off until their separate release preflights |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
 
 Oracle runs annotated release `hub-staging-2026-09-10-r7` at
@@ -451,7 +451,7 @@ Acceptance:
 - source-cost and target failures remain privacy-preserving and non-enumerating;
 - disabled downstream capabilities cannot be targeted through API or stale UI.
 
-### V2-T8 — Discord and Google identity-provider framework (**active — adapters/framework shipped; account linking and rollout incomplete**)
+### V2-T8 — Discord and Google identity-provider framework (**active — implementation complete; rollout incomplete**)
 
 Deliver:
 
@@ -467,13 +467,16 @@ Implemented:
   registry;
 - bounded Discord OAuth and Google OIDC adapters with provider-specific claim, PKCE/nonce, JWKS, and failure
   validation;
+- capability-gated identity listing, fresh-reauth link intent/callback, different-identity unlink, last-identity
+  and required-provider retention, account-level security UI, and all-session/lease/socket rotation;
+- paired first-enable acceptance of successful sign-in or linked outcomes and optional-legacy-allowlist rollback
+  preflight;
 - deterministic memory/PostgreSQL/production-stack coverage while normal production configuration remains
   GitHub-only.
 
 Still to deliver:
 
-- explicit reauthentication, link/unlink, last-identity protection, account-security UI, operator runbooks, and
-  separately approved provider rollout.
+- separately approved capability and paired-provider production rollout.
 
 Acceptance:
 
@@ -543,7 +546,7 @@ flowchart LR
     T1[V2-T1 shipped]
     T2[V2-T2 shipped]
     P13[ADR 0013 shipped] --> T5[V2-T5 shipped]
-    P14[ADR 0014 shipped] --> T8[V2-T8 adapters shipped; linking next]
+    P14[ADR 0014 shipped] --> T8[V2-T8 implementation shipped; rollout next]
     P15[ADR 0015 shipped] --> T6[V2-T6 active; content/carry shipped]
     P16[ADR 0016 shipped] --> T7[V2-T7 active; Cure Wounds shipped]
   end

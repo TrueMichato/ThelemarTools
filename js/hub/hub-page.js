@@ -14,6 +14,7 @@ import {HubActiveCampaignCoordinator} from "./hub-active-campaign-coordinator.js
 import {HubActiveCampaignSwitcher} from "./hub-active-campaign-switcher.js";
 import {
 	HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS,
+	HUB_CAPABILITY_ACCOUNT_IDENTITY_LINKING,
 	HUB_CAPABILITY_ACTIVE_CAMPAIGN_CONTEXT,
 	HUB_CAPABILITY_CAMPAIGN_RULES_POLICY,
 	pLoadHubCapabilityModule,
@@ -59,6 +60,8 @@ import {
 const api = new HubApiClient();
 const transferProposalDrafts = new HubTransferProposalDrafts();
 const transferResolutionDrafts = new HubTransferResolutionDrafts();
+const pendingIdentityLinks = new Map();
+const pendingIdentityUnlinks = new Map();
 let campaignAuthorizationErrorHandler = null;
 
 function getAwardDraftStorageKey ({accountId, campaignId}) {
@@ -116,6 +119,7 @@ function concealCampaignAuthorizationSurfaces () {
 let _pSignedOutProvidersRender = null;
 let _pendingInviteToken = null;
 let _pendingInviteRetry = null;
+let _accountProviderMetadata = null;
 async function pRenderSignedOutProviders () {
 	if (_pSignedOutProvidersRender) return _pSignedOutProvidersRender;
 	const signIn = document.getElementById("hub-sign-in");
@@ -245,7 +249,13 @@ function getErrorMessage (error) {
 		case "ACCOUNT_OWNS_CAMPAIGN": return "Transfer ownership or archive every active campaign before deleting your account.";
 		case "ACCOUNT_DELETION_PENDING": return "Your account is scheduled for deletion. Cancel deletion before using campaign features.";
 		case "CAMPAIGN_CREATE_NOT_ENTITLED": return "Campaign creation is not enabled for this account.";
-		case "REAUTHENTICATION_REQUIRED": return "Reauthenticate with a linked sign-in provider before changing creator access.";
+		case "REAUTHENTICATION_REQUIRED": return "Reauthenticate with a linked sign-in provider before changing account security.";
+		case "REAUTHENTICATION_IDENTITY_CONFLICT": return "Reauthenticate with a different sign-in method before unlinking this one.";
+		case "LAST_IDENTITY_PROTECTED": return "This is your account's only sign-in method and cannot be unlinked.";
+		case "IDENTITY_RETENTION_REQUIRED": return "Keep at least one required recovery sign-in method linked before removing this one.";
+		case "IDENTITY_ALREADY_LINKED": return "That sign-in identity is already linked to another Hub account.";
+		case "IDENTITY_NOT_FOUND": return "That sign-in method is no longer linked to this account.";
+		case "AUTH_PROVIDER_UNAVAILABLE": return "That sign-in provider is not currently available. No account changes were made.";
 		case "LAST_OPERATOR_PROTECTED": return "The last platform operator cannot lose operator access or delete their account.";
 		case "MEMBERSHIP_OWNER_PROTECTED": return "The campaign owner must transfer ownership or archive the campaign first.";
 		case "PROTOCOL_UPDATE_REQUIRED": return "This page is out of date. Reload it before making campaign changes.";
@@ -1384,6 +1394,319 @@ async function pRenderAccountSessions () {
 	}));
 }
 
+function setIdentityStatus (message, {isError = false} = {}) {
+	const status = document.getElementById("hub-identity-status");
+	if (!status) return;
+	status.textContent = message;
+	status.classList.toggle("hub-inline-status--error", isError);
+}
+
+function getUnlinkBlockMessage (reason) {
+	switch (reason) {
+		case "REAUTHENTICATION_IDENTITY_CONFLICT": return "Reauthenticate with a different method before unlinking this one.";
+		case "LAST_IDENTITY_PROTECTED": return "Your only sign-in method is protected.";
+		case "IDENTITY_RETENTION_REQUIRED": return "A required recovery provider must stay linked.";
+		case "ACCOUNT_LIFECYCLE_BLOCKED": return "Identity changes are unavailable while account deletion is pending.";
+		default: return "This sign-in method cannot be unlinked.";
+	}
+}
+
+async function pUnlinkAccountIdentityWithRecovery ({identityId}) {
+	const request = pendingIdentityUnlinks.get(identityId) || {
+		identityId,
+		idempotencyKey: crypto.randomUUID(),
+	};
+	pendingIdentityUnlinks.set(identityId, request);
+	let lastError = null;
+	let hasRefreshedSession = false;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			const result = await api.pUnlinkAccountIdentity(request);
+			pendingIdentityUnlinks.delete(identityId);
+			return result;
+		} catch (error) {
+			lastError = error;
+			if (error?.code === "INVALID_CSRF" && !hasRefreshedSession) {
+				const session = await api.pGetSession();
+				if (session.signedIn) {
+					hasRefreshedSession = true;
+					continue;
+				}
+			}
+			if (isMutationOutcomeUncertain(error) && attempt === 0) continue;
+			if (
+				!isMutationOutcomeUncertain(error)
+				&& !["AUTH_REQUIRED", "INVALID_CSRF"].includes(error?.code)
+			) pendingIdentityUnlinks.delete(identityId);
+			break;
+		}
+	}
+	throw lastError;
+}
+
+async function pCreateIdentityLinkIntentWithRecovery ({provider}) {
+	const request = pendingIdentityLinks.get(provider) || {
+		provider,
+		returnTo: "/hub.html?identityNotice=linked",
+		idempotencyKey: crypto.randomUUID(),
+	};
+	pendingIdentityLinks.set(provider, request);
+	let lastError = null;
+	let hasRefreshedSession = false;
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			return await api.pCreateIdentityLinkIntent(request);
+		} catch (error) {
+			lastError = error;
+			if (error?.code === "INVALID_CSRF" && !hasRefreshedSession) {
+				const session = await api.pGetSession();
+				if (session.signedIn) {
+					hasRefreshedSession = true;
+					continue;
+				}
+			}
+			if (isMutationOutcomeUncertain(error) && attempt === 0) continue;
+			if (
+				!isMutationOutcomeUncertain(error)
+				&& !["AUTH_REQUIRED", "INVALID_CSRF"].includes(error?.code)
+			) pendingIdentityLinks.delete(provider);
+			break;
+		}
+	}
+	throw lastError;
+}
+
+async function pRenderAccountReauthentication ({
+	session,
+	containerId,
+	buttonsId,
+	descriptionId = null,
+	description = null,
+	eligibleProviderSlugs = null,
+	returnTo = "/hub.html",
+	metadata = null,
+}) {
+	const container = document.getElementById(containerId);
+	if (!container) return;
+	if (descriptionId && description) {
+		const descriptionElement = document.getElementById(descriptionId);
+		if (descriptionElement) descriptionElement.textContent = description;
+	}
+	const providers = await pRenderReauthenticationControls({
+		session,
+		containerId,
+		buttonsId,
+		statusId: containerId === "hub-deletion-reauth"
+			? "hub-deletion-reauth-status"
+			: "hub-account-reauth-status",
+		returnTo,
+		eligibleProviderSlugs,
+		metadata,
+	});
+	container.classList.toggle("ve-hidden", !providers.length);
+}
+
+async function pShowAccountReauthentication ({
+	session,
+	identities = null,
+	excludedIdentityId = null,
+	description,
+}) {
+	const eligibleProviderSlugs = identities == null
+		? session.reauthenticationProviders || []
+		: [...new Set(
+			identities
+				.filter(identity => identity.id !== excludedIdentityId && identity.providerStatus === "available")
+				.map(identity => identity.provider),
+		)];
+	await pRenderAccountReauthentication({
+		session,
+		containerId: "hub-account-reauth",
+		buttonsId: "hub-account-reauth-buttons",
+		descriptionId: "hub-account-reauth-description",
+		description,
+		eligibleProviderSlugs,
+	});
+	document.getElementById("hub-account-reauth")?.scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+
+async function pRenderAccountIdentities ({
+	session,
+	identities: suppliedIdentities = null,
+	metadata: suppliedMetadata = null,
+}) {
+	const section = document.getElementById("hub-sign-in-methods");
+	const list = document.getElementById("hub-identity-list");
+	if (!section || !list) return;
+	const isEnabled = session.capabilities?.includes(HUB_CAPABILITY_ACCOUNT_IDENTITY_LINKING);
+	setHidden(section, false);
+	const description = document.getElementById("hub-sign-in-methods-description");
+	const showReauthentication = document.getElementById("hub-show-account-reauth");
+	if (!isEnabled) {
+		if (description) description.textContent = "Reauthenticate for sensitive account changes. Identity linking is not enabled.";
+		list.replaceChildren();
+		if (showReauthentication) {
+			showReauthentication.onclick = () => pShowAccountReauthentication({
+				session,
+				description: "Choose a linked sign-in method to refresh account-security access for five minutes.",
+			}).catch(error => renderError(error));
+		}
+		await pRenderAccountReauthentication({
+			session,
+			containerId: "hub-account-reauth",
+			buttonsId: "hub-account-reauth-buttons",
+		});
+		return;
+	}
+	if (description) description.textContent = "Link another provider for account access. Identity changes sign out every existing device.";
+	const [identities, metadata] = suppliedIdentities
+		? [suppliedIdentities, suppliedMetadata || _accountProviderMetadata]
+		: await Promise.all([
+			api.pListAccountIdentities(),
+			api.pGetMeta(),
+		]);
+	if (!metadata) throw new HubApiError({code: "RESPONSE_INVALID", status: 200});
+	_accountProviderMetadata = metadata;
+	const providers = metadata.authProviders || [];
+	const linkedProviders = new Set(identities.map(identity => identity.provider));
+	if (showReauthentication) {
+		showReauthentication.onclick = () => pShowAccountReauthentication({
+			session,
+			identities,
+			description: "Choose a linked sign-in method to refresh account-security access for five minutes.",
+		}).catch(error => renderError(error));
+	}
+	await pRenderAccountReauthentication({
+		session,
+		containerId: "hub-account-reauth",
+		buttonsId: "hub-account-reauth-buttons",
+		eligibleProviderSlugs: [...new Set(
+			identities
+				.filter(identity => identity.providerStatus === "available")
+				.map(identity => identity.provider),
+		)],
+		metadata,
+	});
+	const rows = identities.map(identity => {
+		const provider = providers.find(candidate => candidate.slug === identity.provider);
+		const row = document.createElement("div");
+		row.className = "hub-data-row";
+		const main = document.createElement("div");
+		main.className = "hub-data-row__main";
+		const name = document.createElement("span");
+		name.className = "hub-data-row__name";
+		name.textContent = provider?.label || identity.provider;
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		const presentation = identity.displayName || identity.handle || "Linked identity";
+		const status = identity.providerStatus === "available" ? "Available" : "Provider disabled";
+		meta.textContent = `${presentation} · ${status}${identity.isCurrentSessionIdentity ? " · Current session" : ""}`;
+		main.append(name, meta);
+		const controls = document.createElement("div");
+		controls.className = "hub-data-row__controls";
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "hub-button hub-button--danger";
+		button.textContent = "Unlink";
+		button.disabled = !identity.canUnlink;
+		if (!identity.canUnlink) button.title = getUnlinkBlockMessage(identity.unlinkBlockedReason);
+		button.addEventListener("click", async () => {
+			button.disabled = true;
+			setIdentityStatus("");
+			let result;
+			try {
+				result = await pUnlinkAccountIdentityWithRecovery({identityId: identity.id});
+			} catch (error) {
+				if (["REAUTHENTICATION_REQUIRED", "REAUTHENTICATION_IDENTITY_CONFLICT"].includes(error?.code)) {
+					setIdentityStatus(getErrorMessage(error), {isError: true});
+					await pShowAccountReauthentication({
+						session,
+						identities,
+						excludedIdentityId: identity.id,
+						description: "Use a different linked sign-in method, then return here to unlink this one.",
+					});
+				} else setIdentityStatus(getErrorMessage(error), {isError: true});
+				button.disabled = !identity.canUnlink;
+				return;
+			}
+			const successMessage = result.otherDevicesSignedOut
+				? "Sign-in method removed. Every other device was signed out."
+				: "Sign-in method removed. Your session was refreshed.";
+			setIdentityStatus(successMessage);
+			let isRefreshFailed = false;
+			for (const pRefresh of [
+				() => pRenderAccountIdentities({
+					session,
+					identities: result.identities,
+					metadata,
+				}),
+				() => pRenderAccountSessions(),
+			]) {
+				try {
+					await pRefresh();
+				} catch {
+					isRefreshFailed = true;
+				}
+			}
+			if (isRefreshFailed) {
+				setIdentityStatus(`${successMessage} Reload to refresh the device list.`, {isError: true});
+			}
+		});
+		controls.append(button);
+		row.append(main, controls);
+		return row;
+	});
+	for (const provider of providers) {
+		if (linkedProviders.has(provider.slug)) continue;
+		const row = document.createElement("div");
+		row.className = "hub-data-row";
+		const main = document.createElement("div");
+		main.className = "hub-data-row__main";
+		const name = document.createElement("span");
+		name.className = "hub-data-row__name";
+		name.textContent = provider.label;
+		const meta = document.createElement("span");
+		meta.className = "hub-data-row__meta";
+		meta.textContent = provider.status === "available" ? "Not linked" : "Provider disabled";
+		main.append(name, meta);
+		const controls = document.createElement("div");
+		controls.className = "hub-data-row__controls";
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "hub-button hub-button--primary";
+		button.textContent = `Link ${provider.label}`;
+		button.disabled = provider.status !== "available";
+		button.addEventListener("click", async () => {
+			button.disabled = true;
+			setIdentityStatus("");
+			try {
+				const result = await pCreateIdentityLinkIntentWithRecovery({provider: provider.slug});
+				window.location.assign(result.authorizationUrl);
+				pendingIdentityLinks.delete(provider.slug);
+			} catch (error) {
+				if (error?.code === "REAUTHENTICATION_REQUIRED") {
+					setIdentityStatus("Reauthenticate before linking another sign-in provider.", {isError: true});
+					await pShowAccountReauthentication({
+						session,
+						identities,
+						description: `Reauthenticate with a linked method, then return here to link ${provider.label}.`,
+					});
+				} else setIdentityStatus(getErrorMessage(error), {isError: true});
+				button.disabled = provider.status !== "available";
+			}
+		});
+		controls.append(button);
+		row.append(main, controls);
+		rows.push(row);
+	}
+	list.replaceChildren(...rows);
+	const notice = new URLSearchParams(window.location.search).get("identityNotice");
+	if (notice === "linked") {
+		setIdentityStatus("Sign-in method linked. Every previous device was signed out.");
+		history.replaceState(null, "", "/hub.html");
+	}
+}
+
 function hasAccountEntitlement (session, entitlement) {
 	return Array.isArray(session?.entitlements) && session.entitlements.includes(entitlement);
 }
@@ -1410,10 +1733,14 @@ function setAccountReauthenticationStatus (message, {isError = false, statusId =
 	status.classList.toggle("hub-inline-status--error", isError);
 }
 
-async function pGetEligibleReauthenticationProviders ({session}) {
-	const metadata = await api.pGetMeta();
-	const eligibleProviders = new Set(session.reauthenticationProviders || []);
-	return (metadata.authProviders || []).filter(provider =>
+async function pGetEligibleReauthenticationProviders ({
+	session,
+	eligibleProviderSlugs = null,
+	metadata = null,
+}) {
+	const resolvedMetadata = metadata || await api.pGetMeta();
+	const eligibleProviders = new Set(eligibleProviderSlugs || session.reauthenticationProviders || []);
+	return (resolvedMetadata.authProviders || []).filter(provider =>
 		provider.status === "available"
 		&& eligibleProviders.has(provider.slug),
 	);
@@ -1437,17 +1764,21 @@ async function pStartAccountReauthentication ({provider, returnTo, fnSetStatus, 
 async function pRenderReauthenticationControls ({
 	session,
 	containerId,
+	buttonsId = null,
 	statusId,
 	returnTo = "/hub.html",
+	eligibleProviderSlugs = null,
+	metadata = null,
 	fnSetStatus = (message, options) => setAccountReauthenticationStatus(message, {...options, statusId}),
 }) {
 	const container = document.getElementById(containerId);
-	if (!container) return [];
-	const providers = await pGetEligibleReauthenticationProviders({session});
+	const buttons = buttonsId ? document.getElementById(buttonsId) : container;
+	if (!container || !buttons) return [];
+	const providers = await pGetEligibleReauthenticationProviders({session, eligibleProviderSlugs, metadata});
 	if (!providers.length) {
 		fnSetStatus("No linked sign-in provider is currently available for reauthentication.", {isError: true});
 	}
-	container.replaceChildren(...providers.map(provider => {
+	buttons.replaceChildren(...providers.map(provider => {
 		const button = document.createElement("button");
 		button.type = "button";
 		button.className = "hub-button";
@@ -1461,15 +1792,6 @@ async function pRenderReauthenticationControls ({
 		return button;
 	}));
 	return providers;
-}
-
-async function pRenderOperatorReauthentication ({session}) {
-	return pRenderReauthenticationControls({
-		session,
-		containerId: "hub-operator-reauth",
-		statusId: "hub-operator-status",
-		fnSetStatus: setOperatorStatus,
-	});
 }
 
 async function pRenderOperatorAccounts () {
@@ -1526,10 +1848,7 @@ async function pInitOperatorPanel ({session}) {
 	const isOperator = hasAccountEntitlement(session, "platform:operate");
 	setHidden(panel, !(isEnabled && isOperator));
 	if (!(isEnabled && isOperator)) return;
-	await Promise.all([
-		pRenderOperatorReauthentication({session}),
-		pRenderOperatorAccounts(),
-	]);
+	await pRenderOperatorAccounts();
 }
 
 async function pInitHubIndex ({session}) {
@@ -1542,11 +1861,7 @@ async function pInitHubIndex ({session}) {
 	await activeCampaign.pResolve({trigger: "startup", session});
 	await pRenderActiveCampaignSwitcher();
 	const accountAction = new URLSearchParams(window.location.search).get("accountAction");
-	const accountReauthenticationProviders = await pRenderReauthenticationControls({
-		session,
-		containerId: session.account.status === "deletion_requested" ? "hub-deletion-reauth" : "hub-account-reauth",
-		statusId: session.account.status === "deletion_requested" ? "hub-deletion-reauth-status" : "hub-account-reauth-status",
-	});
+	const accountReauthenticationProviders = await pGetEligibleReauthenticationProviders({session});
 	document.getElementById("hub-cancel-deletion")?.addEventListener("click", async event => {
 		const button = event.currentTarget;
 		button.disabled = true;
@@ -1573,6 +1888,11 @@ async function pInitHubIndex ({session}) {
 		renderAccountDeletionPending({
 			purgeAfter: session.account.purgeAfter,
 			deletionRequestedAt: session.account.deletionRequestedAt,
+		});
+		await pRenderAccountReauthentication({
+			session,
+			containerId: "hub-deletion-reauth",
+			buttonsId: "hub-deletion-reauth-buttons",
 		});
 		if (accountAction === "cancel-deletion") {
 			setAccountReauthenticationStatus(
@@ -1647,6 +1967,7 @@ async function pInitHubIndex ({session}) {
 	});
 	try {
 		await Promise.all([
+			pRenderAccountIdentities({session}),
 			pRenderAccountSessions(),
 			pInitOperatorPanel({session}),
 		]);
@@ -1685,6 +2006,16 @@ async function pInitHubIndex ({session}) {
 				return;
 			}
 			renderError(error);
+			if (error?.code === "REAUTHENTICATION_REQUIRED") {
+				const identities = session.capabilities?.includes(HUB_CAPABILITY_ACCOUNT_IDENTITY_LINKING)
+					? await api.pListAccountIdentities()
+					: null;
+				await pShowAccountReauthentication({
+					session,
+					identities,
+					description: "Reauthenticate with a linked sign-in method, then request account deletion again.",
+				});
+			}
 			button.disabled = false;
 		}
 	});

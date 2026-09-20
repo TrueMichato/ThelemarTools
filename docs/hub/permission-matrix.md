@@ -21,6 +21,8 @@ visibility is not authorization.
 | Leave campaign | Owner must transfer/archive first | Yes | Yes | Yes |
 | Publish/activate legacy rules or brew | Yes | Yes | No | No |
 | Browse/publish/rollback catalog policy when capability-enabled | Yes | Yes | Read bounded active summary only | Read bounded active summary only |
+| List own sign-in methods when `account.identity_linking.v1` is enabled | Own account only | Own account only | Own account only | Own account only |
+| Link/unlink an own sign-in method | Active account + exact Origin/CSRF/protocol + fresh reauthentication; unlink uses a different identity and preserves retention | Same | Same | Same |
 | Read full campaign character | Any campaign character | Any campaign character | Own only | Own only if one already exists |
 | Read peer character profile | Yes, beside truth as `peerPreview` | Yes, beside truth as `peerPreview` | Yes | Yes |
 | Read own sharing policy | Own character only | Own character only | Own character only | Own character only |

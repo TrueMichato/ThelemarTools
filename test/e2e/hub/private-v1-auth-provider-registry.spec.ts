@@ -16,6 +16,7 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 			"auth.provider_registry.v1",
 			"campaign.active_context.v1",
 			"account.entitlements.v1",
+			"account.identity_linking.v1",
 			"auth.invite_admission.v1",
 			"campaign.rules_policy.v1",
 		]),
@@ -67,7 +68,7 @@ test("operator reauthentication grants and revokes campaign creation through the
 		await expect(page.locator("#hub-operator-panel")).toBeVisible();
 		await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toHaveCount(0);
 		await expect(page.getByRole("button", {name: "Reauthenticate with Google"})).toHaveCount(0);
-		await page.locator("#hub-operator-reauth").getByRole("button", {name: "Reauthenticate with GitHub"}).click();
+		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
 		await page.waitForURL(/\/hub\.html$/);
 
 		const targetRow = page.locator("#hub-operator-account-list .hub-data-row").filter({
@@ -189,6 +190,52 @@ test("ordinary accounts reauthenticate before requesting deletion", async ({page
 	await expect(page.locator("#hub-account-active")).toBeVisible();
 });
 
+test("links a new provider to the same account, signs in through it, then unlinks with session rotation", async ({browser, page}) => {
+	const secret = process.env.HUB_TEST_AUTH_SECRET;
+	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");
+	const linkedGoogleSubject = `google-linked-${Date.now()}`;
+	await page.goto("/hub.html");
+	await page.getByRole("link", {name: "Sign in with GitHub"}).click();
+	await page.waitForURL(/\/hub\.html$/);
+	const initialSession = await page.request.get("/api/session").then(response => response.json());
+
+	await page.getByRole("button", {name: "Link Google"}).click();
+	await expect(page.getByText("Reauthenticate before linking another sign-in provider.")).toBeVisible();
+	await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
+	await page.waitForURL(/\/hub\.html$/);
+	await page.request.post("/auth/__test/google/next-subject", {
+		headers: {"x-hub-test-auth": secret},
+		data: {subject: linkedGoogleSubject},
+	});
+	await page.getByRole("button", {name: "Link Google"}).click();
+	await expect(page.getByText("Sign-in method linked. Every previous device was signed out.")).toBeVisible();
+	const linkedSession = await page.request.get("/api/session").then(response => response.json());
+	expect(linkedSession.account.id).toBe(initialSession.account.id);
+
+	const secondContext = await browser.newContext({ignoreHTTPSErrors: true});
+	const secondPage = await secondContext.newPage();
+	try {
+		await secondPage.request.post("/auth/__test/google/next-subject", {
+			headers: {"x-hub-test-auth": secret},
+			data: {subject: linkedGoogleSubject},
+		});
+		await secondPage.goto("/hub.html");
+		await secondPage.getByRole("link", {name: "Sign in with Google"}).click();
+		await secondPage.waitForURL(/\/hub\.html$/);
+		const sameAccountSession = await secondPage.request.get("/api/session").then(response => response.json());
+		expect(sameAccountSession.account.id).toBe(initialSession.account.id);
+
+		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
+		await page.waitForURL(/\/hub\.html$/);
+		const googleRow = page.locator("#hub-identity-list .hub-data-row").filter({hasText: "Google"});
+		await googleRow.getByRole("button", {name: "Unlink"}).click();
+		await expect(page.getByText("Sign-in method removed. Every other device was signed out.")).toBeVisible();
+		await expect.poll(async () => (await secondPage.request.get("/api/session")).json())
+			.toEqual({signedIn: false});
+	} finally {
+		await secondContext.close();
+	}
+});
 test("Google first access requires and atomically redeems a campaign invite", async ({page}) => {
 	const secret = process.env.HUB_TEST_AUTH_SECRET;
 	if (!secret) throw new Error("HUB_TEST_AUTH_SECRET is required.");

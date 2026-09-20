@@ -393,6 +393,29 @@ export class HubApiClient {
 		});
 	}
 
+	async pListAccountIdentities () {
+		return (await this._pRequest("/api/account/identities")).identities;
+	}
+
+	async pCreateIdentityLinkIntent ({provider, returnTo = "/hub.html", idempotencyKey}) {
+		return this._pRequest(`/api/account/identities/${encodeURIComponent(provider)}/link-intents`, {
+			method: "POST",
+			body: {returnTo},
+			isMutation: true,
+			idempotencyKey,
+		});
+	}
+
+	async pUnlinkAccountIdentity ({identityId, idempotencyKey}) {
+		const result = await this._pRequest(`/api/account/identities/${encodeURIComponent(identityId)}`, {
+			method: "DELETE",
+			isMutation: true,
+			idempotencyKey,
+		});
+		this._csrfToken = result.csrfToken;
+		return result;
+	}
+
 	async pListOperatorAccounts () {
 		return (await this._pRequest("/api/operator/accounts")).accounts;
 	}

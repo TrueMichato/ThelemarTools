@@ -27,7 +27,8 @@ describe("Campaign Hub multi-provider identity ADR contract", () => {
 		expect(adr).toMatch(/Never auto-link by email/i);
 		expect(adr).toContain("Email is not part of the normalized identity");
 		expect(adr).toContain("IDENTITY_ALREADY_LINKED");
-		expect(adr).toContain("LAST_USABLE_IDENTITY");
+		expect(adr).toContain("LAST_IDENTITY_PROTECTED");
+		expect(adr).toContain("IDENTITY_RETENTION_REQUIRED");
 	});
 
 	it("covers admission and the protected link lifecycle", () => {
@@ -39,7 +40,7 @@ describe("Campaign Hub multi-provider identity ADR contract", () => {
 			"one-time state",
 			"PKCE",
 			"OIDC nonce",
-			"Provider configuration changes run the same preflight",
+			"HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS",
 		]) expect(adr).toContain(required);
 	});
 

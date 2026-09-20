@@ -49,7 +49,10 @@ await store.pReconcileConfiguredOperatorEntitlements({
 if (isAccountEntitlementsEnabled && !await store.pHasActivePlatformOperator()) {
 	throw new Error(`Account entitlement enforcement requires an active platform operator.`);
 }
-const {authProviderRegistry} = createAuthProviderConfiguration({
+const {
+	authProviderRegistry,
+	identityRetentionRequiredProviders,
+} = createAuthProviderConfiguration({
 	onConfigurationError: ({slug, code}) => {
 		process.stderr.write(`Authentication provider ${slug} configuration failed (${code}).\n`);
 	},
@@ -77,6 +80,8 @@ const app = await createHubApp({
 		isInviteAccountAdmissionEnabled,
 		isCampaignRulesPolicyEnabled: process.env.HUB_CAMPAIGN_RULES_POLICY_ENABLED === "true",
 		isAccountEntitlementsEnabled,
+		isAccountIdentityLinkingEnabled: process.env.HUB_ACCOUNT_IDENTITY_LINKING_ENABLED === "true",
+		identityRetentionRequiredProviders,
 		operatorAccountIds,
 		isOperatorReconciliationComplete: true,
 	},

@@ -13,11 +13,14 @@ function getMetaResponse (discord = "available", google = "available") {
 	}), {status: 200, headers: {"content-type": "application/json"}});
 }
 
-function getMetricsResponse ({discord, google}) {
-	return new Response([
+function getMetricsResponse ({discord, google, discordLinked = null, googleLinked = null}) {
+	const lines = [
 		`hub_auth_outcomes_total{provider="discord",outcome="succeeded"} ${discord}`,
 		`hub_auth_outcomes_total{provider="google",outcome="succeeded"} ${google}`,
-	].join("\n"), {status: 200, headers: {"content-type": "text/plain"}});
+	];
+	if (discordLinked != null) lines.push(`hub_auth_outcomes_total{provider="discord",outcome="linked"} ${discordLinked}`);
+	if (googleLinked != null) lines.push(`hub_auth_outcomes_total{provider="google",outcome="linked"} ${googleLinked}`);
+	return new Response(lines.join("\n"), {status: 200, headers: {"content-type": "text/plain"}});
 }
 
 describe("Hub paired provider first-enable preflight", () => {
@@ -70,6 +73,25 @@ describe("Hub paired provider first-enable preflight", () => {
 				return getMetricsResponse({discord: 0, google: 0});
 			},
 		})).rejects.toMatchObject({code: "PROVIDER_BECAME_UNAVAILABLE"});
+	});
+
+	it("accepts successful account links as paired first-enable evidence", async () => {
+		let metricsRead = 0;
+		await expect(pCheckAuthProviderFirstEnable({
+			appOrigin: ORIGIN,
+			metricsToken: TOKEN,
+			pollIntervalMs: 1,
+			timeoutMs: 100,
+			fnSleep: async () => {},
+			fnWrite: () => {},
+			fnFetch: async url => {
+				if (url.endsWith("/api/meta")) return getMetaResponse();
+				metricsRead++;
+				return metricsRead === 1
+					? getMetricsResponse({discord: 2, google: 3, discordLinked: 0, googleLinked: 0})
+					: getMetricsResponse({discord: 2, google: 3, discordLinked: 1, googleLinked: 1});
+			},
+		})).resolves.toEqual({ok: true});
 	});
 
 	it("blocks a metrics reset after the baseline", async () => {

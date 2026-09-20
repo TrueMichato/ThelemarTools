@@ -37,17 +37,23 @@ describe("campaign hub pages", () => {
 			"hub-deletion-reauth",
 			"hub-deletion-reauth-status",
 			"hub-operator-panel",
-			"hub-operator-reauth",
 			"hub-operator-status",
 			"hub-operator-account-list",
+			"hub-account-reauth",
+			"hub-account-reauth-buttons",
 		]) expect(hubHtml).toContain(`id="${id}"`);
 		const source = read("js/hub/hub-page.js");
 		expect(source).toContain("HUB_CAPABILITY_ACCOUNT_ENTITLEMENTS");
 		expect(source).toContain("hasAccountEntitlement(session, \"campaign:create\")");
-		expect(source).toContain("new Set(session.reauthenticationProviders || [])");
+		expect(source).toContain("pRenderAccountReauthentication");
 		expect(source).toContain("hasAccountEntitlement(session, \"platform:operate\")");
 		expect(source).toContain("pStartReauthentication");
 		expect(source).toContain("accountAction=delete");
+		expect(source).toContain("identities: result.identities");
+		expect(source).toContain("pendingIdentityUnlinks");
+		expect(source).toContain("pendingIdentityLinks");
+		expect(source).toContain("isMutationOutcomeUncertain(error)");
+		expect(source).toContain("Reload to refresh the device list.");
 		expect(source).toContain("pGrantAccountEntitlement");
 		expect(source).toContain("pRevokeAccountEntitlement");
 		expect(source).toMatch(/Account \$\{account\.id\}/);
@@ -67,6 +73,12 @@ describe("campaign hub pages", () => {
 
 	it("exposes account/session/deletion and campaign lifecycle controls", () => {
 		for (const id of [
+			"hub-sign-in-methods",
+			"hub-identity-list",
+			"hub-show-account-reauth",
+			"hub-account-reauth",
+			"hub-account-reauth-buttons",
+			"hub-identity-status",
 			"hub-session-list",
 			"hub-revoke-other-sessions",
 			"hub-request-deletion",

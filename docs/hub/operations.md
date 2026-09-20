@@ -29,6 +29,8 @@ maintenance and backup executions passed on 2026-09-13, completing V1-G1.
    `<HUB_APP_ORIGIN>/auth/github/callback`.
 5. Set `HUB_AUTH_PROVIDERS=github`. `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` is an incident-only kill switch;
    disabling the sole provider intentionally prevents startup.
+   Set `HUB_IDENTITY_RETENTION_REQUIRED_PROVIDERS=github` and keep
+   `HUB_ACCOUNT_IDENTITY_LINKING_ENABLED=false` until the layer-3 preflight is complete.
 6. Apply migration 0009, configure `HUB_OPERATOR_ACCOUNT_IDS` with explicitly designated internal account UUIDs,
    and leave both `HUB_ACCOUNT_ENTITLEMENTS_ENABLED=false` and
    `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false` until the r9 preflight passes. Startup reconciliation is
@@ -51,8 +53,9 @@ HUB_METRICS_TOKEN=... \
 npm run hub:check-auth-first-enable
 ```
 
-The command requires both providers to be `available`, snapshots their aggregate success counters, and passes
-only after a new complete callback increments each counter. A partial pass, provider reset, malformed response,
+The command requires both providers to be `available`, snapshots their aggregate successful sign-in plus link
+counters, and passes only after a new successful sign-in or link increments each provider's total. A partial
+pass, provider reset, malformed response,
 or timeout blocks enablement. It emits no subject, account, profile, or OAuth material. After layer 3, use the
 same paired preflight before first production enablement. Independent emergency disablement is allowed only
 after admission.
@@ -81,16 +84,18 @@ Before deploying the predecessor image, current code disables creator enforcemen
 writes ignore migration 0009's transaction-marked status guard rather than surfacing a raw database constraint
 error.
 
-Before rolling back to a GitHub-only image, prove every active account still has a GitHub identity:
+Before rolling back to a GitHub-only image, prove every active account still has a GitHub identity. Set the
+legacy allowlist only when the target image still requires it:
 
 ```bash
 DATABASE_URL=... \
-HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678 \
 HUB_ROLLBACK_SUPPORTED_AUTH_PROVIDERS=github \
 npm run hub:check-auth-rollback
 ```
 
-`HUB_ALLOWED_OAUTH_SUBJECTS` is read only by this legacy-image rollback preflight; the running r9 BFF does not
+Optional `HUB_ALLOWED_OAUTH_SUBJECTS=github:12345678` is read only by this legacy-image rollback preflight.
+When supplied because the target image still enforces that allowlist, every active account needs a supported
+identity present in it, including accounts originally admitted through an invite. The running r9 BFF does not
 use it for admission. Exit status 2 blocks rollback without exposing account or subject identifiers. Follow the
 [authentication provider registry runbook](runbooks/auth-provider-registry.md).
 

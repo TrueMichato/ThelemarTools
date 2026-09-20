@@ -22,7 +22,8 @@ a public third-party API. Schemas in `server/src/app.js` are authoritative if th
 - `GET /api/session` is the bootstrap call. Signed-in responses include the CSRF token.
 - Signed-in session responses include the available provider slugs already linked to that account for
   reauthentication. When `account.entitlements.v1` is enabled, they also include active account entitlements.
-  Provider identity metadata is never entitlement authority.
+  When `account.identity_linking.v1` is enabled, the separate own-identity routes are available. Provider
+  identity metadata is never entitlement authority.
 - Private reads require an active session. Campaign reads additionally require active membership.
 
 ### Mutation headers
@@ -69,7 +70,7 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `POST /api/auth/invite-contexts` | Public, exact Origin, current protocol, 10/min | `{token,provider,returnTo}` | Validates a campaign invite and atomically creates one server-side context plus its bound OAuth transaction; returns `{authorizationUrl,retryToken}` and sets that transaction's signed correlation cookie |
 | `POST /api/auth/invite-contexts/retry` | Public, exact Origin, current protocol, 10/min | `{retryToken,provider,returnTo}` | After a consumed callback which did not commit admission, replaces the old context/transaction with a fresh same-provider pair and rotated opaque retry token |
 | `GET /auth/:provider/start` | Public, 10/min | concrete `github`, `discord`, or `google` route; query `returnTo?` | Creates a one-time durable transaction, sets signed correlation cookie, and redirects using the adapter's declared PKCE/nonce capabilities |
-| `GET /auth/:provider/callback` | OAuth correlation cookie, 20/min | concrete route; query `code`, `state` | Atomically consumes exact provider/operation/redirect-bound state and validates immutable subject. Existing identities sign in normally. A bound invite context atomically signs in and joins the campaign; an unknown identity additionally requires the default-off `auth.invite_admission.v1` rollout capability |
+| `GET /auth/:provider/callback` | OAuth correlation cookie, 20/min | concrete route; query `code`, `state` | Atomically consumes exact provider/operation/redirect-bound state and validates immutable subject. Existing identities sign in normally; reauthentication rotates the initiating session; link attaches only to the initiating account. A bound invite context atomically signs in and joins the campaign; an unknown sign-in identity additionally requires the default-off `auth.invite_admission.v1` rollout capability |
 | `GET /api/session` | Public | session cookie optional | `{signedIn:false}` or account + CSRF token |
 | `POST /api/logout` | Mutation security | none | Revokes current session, closes its sockets, clears cookie |
 | `GET /api/account/export` | Authenticated | none | Download containing owned account/external-identity/session-provenance/membership/campaign/character/audit data; never provider tokens/OAuth transactions |
@@ -79,7 +80,10 @@ Path/query keys ending in `Id` must be UUID-shaped. Invalid values fail as `INVA
 | `GET /api/account/deletion` | Authenticated, including deletion grace | none | Current deletion status/timestamps |
 | `POST /api/account/deletion/request` | Freshly reauthenticated mutation | `{confirmation:"DELETE"}` | Blocks active campaign owners and the last platform operator; schedules seven-day purge, revokes sessions/cookie |
 | `POST /api/account/deletion/cancel` | Reauthenticated deletion-grace mutation | none | Restores active account before purge begins |
-| `POST /api/account/reauthentication/:provider` | Authenticated active-account mutation | `{returnTo}` | Creates a provider/account/session-bound `reauthenticate` OAuth transaction and returns its authorization URL |
+| `POST /api/account/reauthentication/:provider` | Authenticated account mutation, including deletion grace | `{returnTo}` | Creates a provider/account/session-bound `reauthenticate` OAuth transaction and returns its authorization URL |
+| `GET /api/account/identities` | Authenticated active account; `account.identity_linking.v1` | none | Returns only the caller's identity id, provider, bounded handle/display name, linked/last-authenticated timestamps, current-session marker, provider status, and explanatory unlink policy |
+| `POST /api/account/identities/:provider/link-intents` | Authenticated active-account mutation; exact Origin, CSRF, current protocol, idempotency, fresh reauthentication; `account.identity_linking.v1` | `{returnTo}` | Creates a provider-bound `link` transaction expiring within five minutes and returns its authorization URL |
+| `DELETE /api/account/identities/:identityId` | Authenticated active-account mutation; exact Origin, CSRF, current protocol, idempotency, fresh reauthentication through a different identity; `account.identity_linking.v1` | none | Unlinks one caller-owned identity, rotates the current session, revokes every old account session/lease/socket, and returns a fresh CSRF token |
 | `GET /api/operator/accounts` | Freshly reauthenticated platform operator | none | Hidden account list with active entitlements; non-operators receive route-equivalent 404 |
 | `POST /api/operator/accounts/:accountId/entitlements/:entitlement/grant` | Freshly reauthenticated platform operator mutation | no body; idempotency required | Grants `campaign:create` or `platform:operate`; already-active is a no-audit success |
 | `POST /api/operator/accounts/:accountId/entitlements/:entitlement/revoke` | Freshly reauthenticated platform operator mutation | no body; idempotency required | Revokes an active entitlement; already-revoked is a no-audit success; last operator is protected |
@@ -97,6 +101,14 @@ The account page exposes this flow to ordinary users as well as operators. A del
 proof starts the linked-provider flow and returns to an explicit confirmation step. A successful deletion
 request clears the session and returns the browser to sign-in; signing in again is the deletion-grace
 reauthentication path for export or cancellation.
+
+A link callback never enters invite admission or creates an account. An unknown subject attaches only to the
+initiating account; a subject owned elsewhere returns bounded `IDENTITY_ALREADY_LINKED`. Unlink returns bounded
+`IDENTITY_NOT_FOUND`, `REAUTHENTICATION_IDENTITY_CONFLICT`, `LAST_IDENTITY_PROTECTED`, or
+`IDENTITY_RETENTION_REQUIRED` without exposing another account or provider subject.
+Link and unlink rotation credentials are deterministically recoverable only from server secrets plus the exact
+OAuth transaction or idempotency command. A lost success response can therefore reissue the already-committed
+replacement cookie/CSRF without repeating the mutation; unrelated revoked sessions remain unauthenticated.
 
 The raw invite token is accepted only in the JSON body of `POST /api/auth/invite-contexts`. It is never accepted
 in `returnTo`, OAuth state, cookies, query strings, or callback parameters. The server permits only `/hub.html`

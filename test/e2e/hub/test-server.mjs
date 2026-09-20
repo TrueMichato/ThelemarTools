@@ -63,6 +63,7 @@ const deterministicProviderDefinitions = Object.freeze([
 	{slug: "google", label: "Google", subject: "google-e2e-303", pkce: "S256", oidcNonce: true},
 ]);
 const pendingCodes = new Map();
+const nextProviderSubjects = new Map();
 const deterministicProviders = deterministicProviderDefinitions.map(definition => ({
 	slug: definition.slug,
 	label: definition.label,
@@ -92,9 +93,11 @@ const deterministicProviders = deterministicProviderDefinitions.map(definition =
 			|| (definition.oidcNonce && (nonce !== pending.nonce || !nonce))
 			|| (!definition.oidcNonce && (nonce != null || pending.nonce != null))
 		) throw new Error("Invalid deterministic provider exchange.");
+		const subject = nextProviderSubjects.get(definition.slug) || definition.subject;
+		nextProviderSubjects.delete(definition.slug);
 		return {
 			provider: definition.slug,
-			subject: definition.subject,
+			subject,
 			handle: definition.slug === "google" ? null : `hub-e2e-${definition.slug}`,
 			displayName: `Hub E2E ${definition.label}`,
 		};
@@ -134,12 +137,31 @@ const app = await createHubApp({
 		isInviteAccountAdmissionEnabled: true,
 		isCampaignRulesPolicyEnabled: true,
 		isAccountEntitlementsEnabled: true,
+		isAccountIdentityLinkingEnabled: true,
+		identityRetentionRequiredProviders: ["github"],
 		operatorAccountIds: [operatorAccount.id],
 		isOperatorReconciliationComplete: true,
 	},
 });
 
 for (const definition of deterministicProviderDefinitions) {
+	app.post(`/auth/__test/${definition.slug}/next-subject`, {
+		schema: {
+			body: {
+				type: "object",
+				required: ["subject"],
+				additionalProperties: false,
+				properties: {subject: {type: "string", minLength: 1, maxLength: 255}},
+			},
+		},
+	}, async (request, reply) => {
+		if (!isConstantTimeEqual(request.headers["x-hub-test-auth"], testAuthSecret)) {
+			return reply.code(404).send({error: "NOT_FOUND"});
+		}
+		nextProviderSubjects.set(definition.slug, request.body.subject);
+		return {ok: true};
+	});
+
 	app.get(`/auth/__test/${definition.slug}/authorize`, {
 		schema: {
 			querystring: {
