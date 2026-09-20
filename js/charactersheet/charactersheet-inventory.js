@@ -6160,7 +6160,7 @@ class CharacterSheetInventory {
 				if (bonusType === "bonusAc" && item.effects?.some(effect => effect?.type === "acBonusConditional")) return false;
 				return item[bonusType];
 			})
-			.reduce((sum, item) => sum + (item[bonusType] || 0), 0);
+			.reduce((sum, item) => sum + CharacterSheetItemUtils.parseBonus(item[bonusType]), 0);
 	}
 
 	/**
@@ -6238,7 +6238,7 @@ class CharacterSheetInventory {
 		if (proseSaveBonus) bonuses.savingThrow = (bonuses.savingThrow || 0) + proseSaveBonus;
 
 		// Store bonuses and defenses in state for use by other modules
-		this._state.setItemBonuses(bonuses);
+		this._state.setItemBonuses(bonuses, {isManual: false});
 		this._state.setItemDefenses(defenses);
 		this._state.setItemAbilityOverrides(abilityOverrides);
 		this._state.setItemGrantedSpells(itemSpells);

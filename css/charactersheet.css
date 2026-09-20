@@ -10173,6 +10173,43 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--rgb-text-dim);
 }
 
+.charsheet__defense-editor-columns {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 1rem;
+}
+
+.charsheet__defense-editor-group {
+	padding: 0.5rem 0;
+	border-top: 1px solid var(--rgb-border-grey);
+}
+
+.charsheet__defense-editor-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-top: 0.35rem;
+}
+
+.charsheet__defense-editor-entry {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.2rem 0.4rem;
+	border: 1px solid var(--rgb-border-grey);
+	border-radius: 3px;
+}
+
+.charsheet__defense-editor-entry--automatic {
+	background: var(--rgb-bg--alt);
+}
+
+@media (max-width: 640px) {
+	.charsheet__defense-editor-columns {
+		grid-template-columns: 1fr;
+	}
+}
+
 /* Primal Focus (TGTT Ranger) — Combat-tab mode-ability rows.
    Two-line grid: name + action-type badge share row 1 (badge right-aligned),
    the description spans the full width on row 2. min-width:0 + overflow-wrap let

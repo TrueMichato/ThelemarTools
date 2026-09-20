@@ -547,6 +547,7 @@ void globalThis;
  * @property {string[]} resistances
  * @property {string[]} immunities
  * @property {string[]} vulnerabilities
+ * @property {{resistances: string[], immunities: string[], vulnerabilities: string[]}} manualDefenses
  * @property {string[]} conditionImmunities
  * @property {*} customModifiers
  * @property {Array<NamedModifier>} namedModifiers

@@ -549,6 +549,15 @@ _data.itemBonuses: {
 }
 ```
 
+Raw catalog bonuses are normalized when an item enters state, including signed
+strings such as `"+2"` and `reqAttune`. State-owned recalculation applies
+non-armor `bonusAc` and saving-throw bonuses only while the item is equipped
+and, when required, attuned. Equip, attune, remove, and load all rebuild these
+totals, while the Inventory renderer writes derived totals without turning
+them into manual overrides. This keeps direct-state consumers and rendered
+Inventory consumers on one lifecycle and prevents duplicate Ring/Cloak-style
+bonuses.
+
 Magic weapon bonuses are THREE separate fields on the item:
 - `bonusWeapon`: general bonus (applies to both attack and damage)
 - `bonusWeaponAttack`: attack-only bonus

@@ -7,6 +7,8 @@
  * the cost-bypass choice survives the rebuild that destroys its checkbox.
  */
 
+import {jest} from "@jest/globals";
+
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-modal.js";
 import "../../../js/charactersheet/charactersheet-upgrades.js";
@@ -19,12 +21,13 @@ const CharacterSheetModal = globalThis.CharacterSheetModal;
 const UPGRADES = [
 	{name: "Balanced", source: "TCAH", upgradeType: ["WU:1"], cost: "100 gp (base)", entries: ["+1 to attack rolls."]},
 	{name: "Brutal", source: "TCAH", upgradeType: ["WU:1"], cost: "1000 gp (base)", entries: ["Increases the damage die."]},
+	{name: "Specifically Tempered", source: "TGTT", upgradeType: ["AU"], cost: "600 gp", entries: ["Choose fire, cold, lightning, or thunder resistance."]},
 ];
 
 describe("Upgrade picker modal", () => {
 	let state; let page; let upgrades;
 	let modalInner; let doCloseCalls; let toasts;
-	let origPGetShow; let origDoToast; let origGetUserBoolean;
+	let origPGetShow; let origDoToast; let origGetUserBoolean; let origGetUserEnum;
 
 	/** The one element `renderBody()` empties and rebuilds — appended to the modal first. */
 	const getContent = () => modalInner.children[0];
@@ -51,6 +54,7 @@ describe("Upgrade picker modal", () => {
 		origDoToast = globalThis.JqueryUtil.doToast;
 		globalThis.JqueryUtil.doToast = (o) => toasts.push(o);
 		origGetUserBoolean = globalThis.InputUiUtil.pGetUserBoolean;
+		origGetUserEnum = globalThis.InputUiUtil.pGetUserEnum;
 		globalThis.Renderer.hover = globalThis.Renderer.hover || {getMakePredefinedHover: () => ({html: ""})};
 		globalThis.UrlUtil = globalThis.UrlUtil || {};
 		globalThis.UrlUtil.PG_ITEM_UPGRADES = globalThis.UrlUtil.PG_ITEM_UPGRADES || "itemupgrades.html";
@@ -60,6 +64,7 @@ describe("Upgrade picker modal", () => {
 		page = {
 			getState: () => state,
 			saveCharacter: () => {},
+			renderCharacter: jest.fn(),
 			getItemUpgrades: () => UPGRADES,
 			_inventory: {render: () => {}},
 		};
@@ -71,6 +76,7 @@ describe("Upgrade picker modal", () => {
 		CharacterSheetModal.pGetShow = origPGetShow;
 		globalThis.JqueryUtil.doToast = origDoToast;
 		globalThis.InputUiUtil.pGetUserBoolean = origGetUserBoolean;
+		globalThis.InputUiUtil.pGetUserEnum = origGetUserEnum;
 	});
 
 	// ==========================================================================
@@ -136,6 +142,7 @@ describe("Upgrade picker modal", () => {
 			expect(state.getTotalGold()).toBe(4900);
 			expect(getContent().innerHTML).toContain("4900");
 			expect(getContent().innerHTML).not.toContain("5000");
+			expect(page.renderCharacter).toHaveBeenCalledTimes(1);
 		});
 
 		it("moves an applied upgrade out of the eligible list and into the applied list", async () => {
@@ -190,6 +197,49 @@ describe("Upgrade picker modal", () => {
 			expect(state.getItemUpgrades(itemId).map(u => u.name)).toEqual(["Balanced"]);
 			expect(state.getTotalGold()).toBe(0);
 			expect(doCloseCalls).toEqual([]);
+		});
+	});
+
+	describe("upgrade choices", () => {
+		function replaceWeaponWithArmor () {
+			state.removeItem(state.getItems()[0].id);
+			state.addItem({name: "Leather Armor", source: "PHB", type: "LA", armor: true, armorType: "light", ac: 11}, 1, true);
+			return state.getItems()[0].id;
+		}
+
+		it("prompts before charging and persists the selected Specifically Tempered resistance", async () => {
+			const itemId = replaceWeaponWithArmor();
+			globalThis.InputUiUtil.pGetUserEnum = jest.fn(async () => 2);
+			await upgrades.showUpgradePickerModal(itemId);
+
+			await clickDelegated(".charsheet__upgrade-apply", {
+				upgradeName: "Specifically Tempered",
+				upgradeSource: "TGTT",
+				upgradeCost: "600",
+			});
+
+			expect(globalThis.InputUiUtil.pGetUserEnum).toHaveBeenCalledWith(expect.objectContaining({
+				title: expect.stringContaining("Specifically Tempered"),
+				values: ["Fire", "Cold", "Lightning", "Thunder"],
+			}));
+			expect(state.getItemUpgrades(itemId)[0].choices).toEqual({damageType: "lightning"});
+			expect(state.getResistances()).toContain("lightning");
+			expect(state.getTotalGold()).toBe(4400);
+		});
+
+		it("does not charge or mutate when the choice prompt is cancelled", async () => {
+			const itemId = replaceWeaponWithArmor();
+			globalThis.InputUiUtil.pGetUserEnum = jest.fn(async () => null);
+			await upgrades.showUpgradePickerModal(itemId);
+
+			await clickDelegated(".charsheet__upgrade-apply", {
+				upgradeName: "Specifically Tempered",
+				upgradeSource: "TGTT",
+				upgradeCost: "600",
+			});
+
+			expect(state.getItemUpgrades(itemId)).toEqual([]);
+			expect(state.getTotalGold()).toBe(5000);
 		});
 	});
 });

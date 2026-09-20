@@ -11,6 +11,7 @@ import {
 	getEligibleUpgrades,
 	getGemstoneDescriptor,
 	getGemstoneRegistryNames,
+	getUpgradeChoiceDefinitions,
 	isArmor,
 	isShield,
 	isSocketable,
@@ -22,6 +23,7 @@ import {
 
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee, InputUiUtil, Renderer} = /** @type {*} */ (globalThis);
+const _toTitleCase = value => String(value || "").replace(/\b\w/g, char => char.toUpperCase());
 
 class CharacterSheetUpgrades {
 	constructor (page) {
@@ -41,6 +43,28 @@ class CharacterSheetUpgrades {
 
 	static resetUpgradeCatalog () {
 		resetItemUpgradeCatalog();
+	}
+
+	static getUpgradeChoiceDefinitions (upgrade) {
+		return getUpgradeChoiceDefinitions(upgrade);
+	}
+
+	static async pGetUpgradeChoices (upgrade, {initialChoices = {}} = {}) {
+		const definitions = this.getUpgradeChoiceDefinitions(upgrade);
+		const choices = {};
+		for (const [key, definition] of Object.entries(definitions)) {
+			const values = definition.values || [];
+			if (!values.length) continue;
+			const selected = await InputUiUtil.pGetUserEnum({
+				title: definition.title || `${upgrade.name}: Choose ${definition.label || key}`,
+				values: values.map(value => _toTitleCase(value)),
+				default: Math.max(0, values.indexOf(initialChoices[key])),
+				isResolveItem: false,
+			});
+			if (selected == null) return null;
+			choices[key] = values[selected];
+		}
+		return choices;
 	}
 
 	// ==========================================
@@ -331,13 +355,23 @@ class CharacterSheetUpgrades {
 					const tierLabel = CharacterSheetUpgrades.getUpgradeTierLabel(upgrade.upgradeType);
 					const tierColor = CharacterSheetUpgrades.getUpgradeTierColor(upgrade.upgradeType);
 					const upgradeLink = CharacterSheetPage.getHoverLink(UrlUtil.PG_ITEM_UPGRADES, upgrade.name, upgrade.source);
+					const choiceDefinitions = CharacterSheetUpgrades.getUpgradeChoiceDefinitions(upgrade);
+					const choiceSummary = Object.entries(upgrade.choices || {})
+						.map(([key, value]) => `${choiceDefinitions[key]?.label || key}: ${_toTitleCase(value)}`)
+						.join(", ");
 					currentSection.append(e_({outer: `
 						<div class="charsheet__upgrade-applied ve-flex-v-center mb-1 p-1">
 							<div class="ve-flex-1">
 								<span class="badge ${tierColor} ve-small mr-1">${tierLabel}</span>
 								<span class="charsheet__upgrade-name">${upgradeLink}</span>
 								${upgrade.costPaid ? `<span class="ve-muted ve-small ml-1">(${upgrade.costPaid} gp)</span>` : ""}
+								${choiceSummary ? `<span class="ve-muted ve-small ml-1">(${choiceSummary})</span>` : ""}
 							</div>
+							${Object.keys(choiceDefinitions).length ? `
+								<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__upgrade-edit-choice mr-1" data-upgrade-name="${upgrade.name}" data-upgrade-source="${upgrade.source}" title="Change upgrade choice" aria-label="Change ${upgrade.name} choice">
+									<span class="glyphicon glyphicon-pencil" aria-hidden="true"></span>
+								</button>
+							` : ""}
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-danger charsheet__upgrade-remove" data-upgrade-name="${upgrade.name}" data-upgrade-source="${upgrade.source}" title="Remove upgrade" aria-label="Remove ${upgrade.name}">
 								<span class="glyphicon glyphicon-trash" aria-hidden="true"></span>
 							</button>
@@ -489,6 +523,11 @@ class CharacterSheetUpgrades {
 		// Event delegation for the modal. Bound to `content` itself, which `renderBody()`
 		// empties rather than replaces, so it survives every rebuild.
 		const getItemName = () => this._state.getItems().find(i => i.id === itemId)?.name || initialItem.name;
+		const refreshSheet = () => {
+			if (this._page.renderCharacter) this._page.renderCharacter();
+			else this._page._inventory?.render();
+			renderBody();
+		};
 
 		content.addEventListener("click", async (e) => {
 			// Apply upgrade
@@ -505,6 +544,9 @@ class CharacterSheetUpgrades {
 				);
 				if (!upgrade) return;
 
+				const choices = await CharacterSheetUpgrades.pGetUpgradeChoices(upgrade);
+				if (choices == null) return;
+
 				// Deduct gold
 				if (cost > 0) {
 					const result = this._state.deductGold(cost);
@@ -515,7 +557,7 @@ class CharacterSheetUpgrades {
 				}
 
 				// Apply upgrade
-				const result = this._state.applyItemUpgrade(itemId, upgrade, cost);
+				const result = this._state.applyItemUpgrade(itemId, upgrade, cost, choices);
 				if (!result.success) {
 					JqueryUtil.doToast({content: result.error, type: "danger"});
 					return;
@@ -524,8 +566,23 @@ class CharacterSheetUpgrades {
 				const costMsg = isOverride && rawCost > 0 ? "(cost bypassed)" : `for ${cost} gp`;
 				JqueryUtil.doToast({content: `Applied "${upgrade.name}" to ${getItemName()} ${costMsg}`, type: "success"});
 				this._page.saveCharacter();
-				this._page._inventory?.render();
-				renderBody();
+				refreshSheet();
+				return;
+			}
+
+			const editChoiceBtn = e.target.closest(".charsheet__upgrade-edit-choice");
+			if (editChoiceBtn) {
+				const name = editChoiceBtn.dataset.upgradeName;
+				const source = editChoiceBtn.dataset.upgradeSource;
+				const applied = this._state.getItemUpgrades(itemId).find(
+					u => u.name === name && u.source === source,
+				);
+				if (!applied) return;
+				const choices = await CharacterSheetUpgrades.pGetUpgradeChoices(applied, {initialChoices: applied.choices});
+				if (choices == null) return;
+				if (!this._state.setItemUpgradeChoices(itemId, name, source, choices)) return;
+				this._page.saveCharacter();
+				refreshSheet();
 				return;
 			}
 
@@ -570,8 +627,7 @@ class CharacterSheetUpgrades {
 				const refundStr = refund > 0 ? ` (refunded ${refund} gp)` : "";
 				JqueryUtil.doToast({content: `Removed "${name}" from ${getItemName()}${refundStr}`, type: "info"});
 				this._page.saveCharacter();
-				this._page._inventory?.render();
-				renderBody();
+				refreshSheet();
 				return;
 			}
 

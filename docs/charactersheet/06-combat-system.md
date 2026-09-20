@@ -657,7 +657,7 @@ The combat tab displays:
 4. **Conditions**: Active conditions with effects
 5. **Death Saves**: Tracker with success/failure buttons
 6. **Combat Spells**: Quick access to commonly used combat spells
-7. **Defenses**: AC, resistances, immunities
+7. **Defenses**: AC, resistances, immunities, and vulnerabilities
 
 ```javascript
 renderCombatTab() {
@@ -670,6 +670,19 @@ renderCombatTab() {
     this.renderCombatDefenses();
 }
 ```
+
+### Editing Damage Defenses
+
+The Defense card's **Edit** action manages only player-authored damage
+resistances, immunities, and vulnerabilities. These values persist under
+`manualDefenses`; class, species, feature, item, upgrade, and active-state
+defenses remain in their existing automatic channels.
+
+`getDefenseBreakdown()` keeps every owner visible even when multiple sources
+grant the same damage type. `getEffectiveDefenses()` deduplicates those entries
+for rules calculations and display. Removing a manual entry therefore cannot
+remove an overlapping automatic defense. Every modal mutation rerenders the
+Combat, Overview, and main defense summaries and saves immediately.
 
 ---
 

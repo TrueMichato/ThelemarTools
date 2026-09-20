@@ -86,6 +86,16 @@ const _ARMOR_EFFECT_DEFAULTS = Object.freeze({
 	formFitted: false,
 });
 
+const _UPGRADE_CHOICE_REGISTRY = Object.freeze({
+	"specifically tempered|tgtt": {
+		damageType: {
+			label: "Damage resistance",
+			title: "Specifically Tempered: Choose a Damage Resistance",
+			values: ["fire", "cold", "lightning", "thunder"],
+		},
+	},
+});
+
 let _itemUpgradeCatalog = [];
 
 function _getEntryText (value) {
@@ -138,54 +148,71 @@ function _isLegacySource (value, source) {
 	return actual ? actual === _key(source) : true;
 }
 
-function _getBuiltInUpgradeDescriptor (upgrade) {
-	if (!upgrade?.name || !_isLegacySource(upgrade, "TCAH")) return null;
+function _getBuiltInUpgradeDescriptor (upgrade, {appliedRef = upgrade} = {}) {
+	if (!upgrade?.name) return null;
 	const name = _key(upgrade.name);
+	const source = _key(upgrade.source);
+	const isLegacy = !source;
+	const isTcah = isLegacy || source === "tcah";
+	const isTgtt = isLegacy || source === "tgtt";
 	const out = {};
-	if (name === "balanced") out.bonusWeaponAttack = 1;
-	if (name.startsWith("wounding:")) out.bonusWeaponDamage = 1;
-	if (name.startsWith("critical:")) out.critThresholdReduction = 1;
-	if (name === "superior") out.damageDieIncrease = 1;
-	if (name === "masterwork") {
-		out.bonusWeaponAttack = 1;
-		out.bonusWeaponDamage = 1;
+	if (isTcah) {
+		if (name === "balanced") out.bonusWeaponAttack = 1;
+		if (name.startsWith("wounding:")) out.bonusWeaponDamage = 1;
+		if (name.startsWith("critical:")) out.critThresholdReduction = 1;
+		if (name === "superior") out.damageDieIncrease = 1;
+		if (name === "masterwork") {
+			out.bonusWeaponAttack = 1;
+			out.bonusWeaponDamage = 1;
+		}
+		if (name === "enchanted") out.bonusSpellAttack = 1;
+		if (name === "arcane") out.bonusSpellSaveDc = 1;
+		if (["silvered", "magical", "runic"].includes(name)) out.tags = [_toTitleCase(name)];
+		if (name === "saw-toothed") {
+			out.bonusDamageDice = "1d4";
+			out.bonusDamageType = "slashing";
+			out.notes = ["Saw-toothed: +1d4 slashing damage (no effect vs constructs/undead)"];
+		}
+		if (name === "brutal") {
+			out.explodingDamageDice = true;
+			out.notes = ["Brutal: Reroll max damage dice and add to total (repeats if max rolled again)"];
+		}
+		if (name === "flanged") out.notes = ["Flanged: On hit, target\u2019s medium/heavy armor takes cumulative \u22121 AC"];
 	}
-	if (name === "enchanted") out.bonusSpellAttack = 1;
-	if (name === "arcane") out.bonusSpellSaveDc = 1;
-	if (["silvered", "magical", "runic"].includes(name)) out.tags = [_toTitleCase(name)];
-	if (name === "saw-toothed") {
-		out.bonusDamageDice = "1d4";
-		out.bonusDamageType = "slashing";
-		out.notes = ["Saw-toothed: +1d4 slashing damage (no effect vs constructs/undead)"];
-	}
-	if (name === "brutal") {
-		out.explodingDamageDice = true;
-		out.notes = ["Brutal: Reroll max damage dice and add to total (repeats if max rolled again)"];
-	}
-	if (name === "flanged") out.notes = ["Flanged: On hit, target\u2019s medium/heavy armor takes cumulative \u22121 AC"];
 
 	const armor = {};
-	if (name === "muffled") armor.muffled = true;
-	if (name === "reinforced") {
-		armor.reinforced = true;
-		armor.critDamageReduction = 3;
-	}
-	if (name === "spiked") armor.spiked = true;
-	if (name === "breathable") armor.breathable = true;
-	if (name === "insulated") armor.insulated = true;
-	if (name === "climbing harness") armor.climbingHarness = true;
-	if (name === "locking joints") armor.lockingJoints = true;
-	if (name === "quick-release clasps") armor.quickRelease = true;
-	if (name === "decorated") armor.decorated = true;
-	if (name === "runic") armor.runic = true;
-	if (name === "burnished") armor.burnished = true;
-	if (name === "camouflaged") armor.camouflaged = true;
-	if (name === "form fitted") armor.formFitted = true;
-	if (name.startsWith("armor proofing")) {
-		const tier = Number(name.match(/(\d)(?:st|nd|rd)/)?.[1]);
-		if (tier) armor.armorProofingTier = tier;
+	if (isTcah || isTgtt) {
+		if (name === "muffled") armor.muffled = true;
+		if (name === "reinforced") {
+			armor.reinforced = true;
+			armor.critDamageReduction = 3;
+		}
+		if (name === "spiked") armor.spiked = true;
+		if (name === "breathable") armor.breathable = true;
+		if (name === "insulated") armor.insulated = true;
+		if (name === "climbing harness") armor.climbingHarness = true;
+		if (name === "locking joints") armor.lockingJoints = true;
+		if (name === "quick-release clasps") armor.quickRelease = true;
+		if (name === "decorated") armor.decorated = true;
+		if (name === "runic") armor.runic = true;
+		if (name === "burnished") armor.burnished = true;
+		if (name === "camouflaged") armor.camouflaged = true;
+		if (name === "form fitted") armor.formFitted = true;
+		if (name.startsWith("armor proofing")) {
+			const tier = Number(name.match(/(\d)(?:st|nd|rd)/)?.[1]);
+			if (tier) armor.armorProofingTier = tier;
+		}
 	}
 	if (Object.keys(armor).length) out.armor = armor;
+
+	const choiceDefinitions = _UPGRADE_CHOICE_REGISTRY[_uid(upgrade)];
+	if (choiceDefinitions) {
+		out.choiceDefinitions = _copy(choiceDefinitions);
+		const chosenDamageType = _key(appliedRef?.choices?.damageType);
+		if (choiceDefinitions.damageType.values.includes(chosenDamageType)) {
+			out.effects = [{type: "resistance", damageType: chosenDamageType}];
+		}
+	}
 	return Object.keys(out).length ? out : null;
 }
 
@@ -224,6 +251,7 @@ function _getStructuredUpgradeDescriptor (entity) {
 	if (entity.effects?.length) out.effects = _copy(entity.effects);
 	if (entity.itemPowers?.length) out.itemPowers = _copy(entity.itemPowers);
 	if (entity.attachedSpells?.length) out.attachedSpells = _copy(entity.attachedSpells);
+	if (entity.choiceDefinitions) out.choiceDefinitions = _copy(entity.choiceDefinitions);
 	for (const prop of ["charges", "recharge", "rechargeAmount", "reqAttune", "focus", "ability", "modifySpeed"]) {
 		if (entity[prop] != null) out[prop] = _copy(entity[prop]);
 	}
@@ -262,6 +290,7 @@ function _mergeUpgradeDescriptor (base, addition, {isNumericOverride = false} = 
 	for (const prop of ["bonusDamageDice", "bonusDamageType", "charges", "recharge", "rechargeAmount", "reqAttune", "focus", "ability", "modifySpeed"]) {
 		if (addition?.[prop] != null) out[prop] = _copy(addition[prop]);
 	}
+	if (addition?.choiceDefinitions) out.choiceDefinitions = _copy(addition.choiceDefinitions);
 	if (addition?.armor) out.armor = {...(out.armor || {}), ..._copy(addition.armor)};
 	return out;
 }
@@ -342,10 +371,14 @@ export function getUpgradeDescriptor (upgrade, {catalog = _itemUpgradeCatalog} =
 	if (!upgrade?.name) return null;
 	const entity = _getResolvedEntity(upgrade, catalog);
 	const identity = entity || upgrade;
-	const builtIn = _getBuiltInUpgradeDescriptor(identity);
+	const builtIn = _getBuiltInUpgradeDescriptor(identity, {appliedRef: upgrade});
 	const structured = _getStructuredUpgradeDescriptor(entity);
 	const descriptor = _mergeUpgradeDescriptor(builtIn, structured, {isNumericOverride: true});
 	return Object.keys(descriptor).length ? descriptor : null;
+}
+
+export function getUpgradeChoiceDefinitions (upgrade, {catalog = _itemUpgradeCatalog} = {}) {
+	return _copy(getUpgradeDescriptor(upgrade, {catalog})?.choiceDefinitions || {});
 }
 
 /**

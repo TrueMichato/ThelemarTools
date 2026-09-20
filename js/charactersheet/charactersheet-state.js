@@ -5,6 +5,7 @@
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetGamblerRules, GAMBLER_GAMBLING_TABLE} from "./charactersheet-gambler.js";
+import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
 import {CharacterSheetProgression} from "./charactersheet-progression.js";
 
 // Target-aware riders resolve through this registry rather than through attack-id
@@ -4436,12 +4437,50 @@ class CharacterSheetState {
 		this._migrateInventoryItemMetadata();
 	}
 
+	static _normalizeInventoryItemBonuses (item) {
+		if (!item || typeof item !== "object") return item;
+		item.requiresAttunement = item.requiresAttunement ?? item.reqAttune ?? false;
+		for (const prop of [
+			"bonusAc",
+			"bonusSpellAttack",
+			"bonusSpellSaveDc",
+			"bonusSavingThrow",
+			"bonusSavingThrowStr",
+			"bonusSavingThrowDex",
+			"bonusSavingThrowCon",
+			"bonusSavingThrowInt",
+			"bonusSavingThrowWis",
+			"bonusSavingThrowCha",
+			"bonusAbilityCheck",
+			"bonusAbilityCheckStr",
+			"bonusAbilityCheckDex",
+			"bonusAbilityCheckCon",
+			"bonusAbilityCheckInt",
+			"bonusAbilityCheckWis",
+			"bonusAbilityCheckCha",
+			"bonusProficiencyBonus",
+			"bonusSavingThrowConcentration",
+			"bonusSpellDamage",
+		]) {
+			if (item[prop] != null) item[prop] = CharacterSheetItemUtils.parseBonus(item[prop]);
+		}
+		return item;
+	}
+
+	_normalizeInventoryItems () {
+		for (const inventoryRow of this._data?.inventory || []) {
+			CharacterSheetState._normalizeInventoryItemBonuses(inventoryRow?.item);
+		}
+	}
+
 	/**
 	 * Restore catalog-only identity fields lost by the legacy inventory add path.
 	 * Exact source matching prevents a PHB row from adopting XPHB metadata.
 	 */
 	_migrateInventoryItemMetadata () {
-		if (!this._allItems?.length || !Array.isArray(this._data?.inventory)) return;
+		if (!Array.isArray(this._data?.inventory)) return;
+		this._normalizeInventoryItems();
+		if (!this._allItems?.length) return;
 		const catalog = new Map(this._allItems
 			.filter(item => item?.name && item?.source)
 			.map(item => [`${item.name}|${item.source}`.toLowerCase(), item]));
@@ -4453,6 +4492,7 @@ class CharacterSheetState {
 			if (item.typeCode == null && match.type != null) item.typeCode = match.type;
 			if (item.scfType == null && match.scfType != null) item.scfType = match.scfType;
 			if (item.focus == null && match.focus != null) item.focus = MiscUtil.copyFast(match.focus);
+			CharacterSheetState._normalizeInventoryItemBonuses(item);
 		}
 	}
 
@@ -5231,6 +5271,11 @@ class CharacterSheetState {
 			immunities: [],
 			vulnerabilities: [],
 			conditionImmunities: [],
+			manualDefenses: {
+				resistances: [],
+				immunities: [],
+				vulnerabilities: [],
+			},
 
 			// Custom modifiers (simple totals for quick access)
 			customModifiers: {
@@ -5495,6 +5540,13 @@ class CharacterSheetState {
 			this._data.migrationFlags = {};
 		}
 		this._data.ac = {...this._getDefaultState().ac, ...this._data.ac};
+		this._data.manualDefenses = {
+			...this._getDefaultState().manualDefenses,
+			...(this._data.manualDefenses || {}),
+		};
+		for (const kind of ["resistances", "immunities", "vulnerabilities"]) {
+			if (!Array.isArray(this._data.manualDefenses[kind])) this._data.manualDefenses[kind] = [];
+		}
 		this._data.customModifiers = {...this._getDefaultState().customModifiers, ...this._data.customModifiers};
 		// Ensure nested customModifiers objects exist
 		this._data.customModifiers.speed = {...this._getDefaultState().customModifiers.speed, ...this._data.customModifiers.speed};
@@ -5901,6 +5953,7 @@ class CharacterSheetState {
 		// Harness/Locking Joints) from the equipped inventory. Idempotent: strips any persisted
 		// `sourceType:"itemUpgrade"` modifiers restored verbatim, then rebuilds from current
 		// equip state — so old saves pick up the pipeline and no duplicates accrue.
+		this._recalculateItemBonuses();
 		this._recalculateEquipmentModifiers();
 
 		// Reapply history-backed optional features for saves which persisted history
@@ -13571,10 +13624,9 @@ class CharacterSheetState {
 	getItemAcBonus () { return this._data.ac.itemBonus || 0; }
 
 	// Item bonuses from equipped/attuned magic items
-	setItemBonuses (bonuses) {
+	setItemBonuses (bonuses, {isManual = true} = {}) {
 		this._data.itemBonuses = bonuses || /** @type {*} */ ({});
-		// Store manual overrides so _recalculateItemBonuses merges rather than overwrites
-		this._data._manualItemBonuses = {...(bonuses || {})};
+		if (isManual) this._data._manualItemBonuses = {...(bonuses || {})};
 	}
 	getItemBonuses () { return this._data.itemBonuses || {}; }
 	getItemBonus (type) { return this._data.itemBonuses?.[type] || 0; }
@@ -13595,6 +13647,16 @@ class CharacterSheetState {
 
 		// Aggregate Ki save DC bonus (take highest from all items)
 		let maxKiDcBonus = 0;
+		let itemAcBonus = 0;
+		const additiveBonuses = {
+			savingThrow: 0,
+			savingThrowStr: 0,
+			savingThrowDex: 0,
+			savingThrowCon: 0,
+			savingThrowInt: 0,
+			savingThrowWis: 0,
+			savingThrowCha: 0,
+		};
 		// Aggregate spell attack / save DC bonuses (take highest from all equipped items, including upgrades)
 		let maxSpellAttack = 0;
 		let maxSpellSaveDc = 0;
@@ -13605,13 +13667,14 @@ class CharacterSheetState {
 			const bonus = invItem.item?.kiSaveDcBonus || 0;
 			if (bonus > maxKiDcBonus) maxKiDcBonus = bonus;
 
-			// Only consider equipped items for combat bonuses
-			if (!invItem.equipped) continue;
+			if (!this._isItemEffectsActive(invItem)) continue;
 
 			// Base item bonuses
-			const baseSpellAtk = invItem.item?.bonusSpellAttack || 0;
-			const baseSpellDc = invItem.item?.bonusSpellSaveDc || 0;
+			const baseSpellAtk = CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSpellAttack);
+			const baseSpellDc = CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSpellSaveDc);
 			const baseCrit = invItem.item?.critThreshold || 20;
+			const itemType = String(invItem.item?.typeCode || invItem.item?.type || "").split("|")[0].toUpperCase();
+			const isArmorOrShield = !!invItem.item?.armor || !!invItem.item?.shield || ["LA", "MA", "HA", "S"].includes(itemType);
 
 			// Material crit contribution. Read from the projection so the clamps in
 			// `applyToItem` (never an impossible crit, never past the natural 20) apply here too.
@@ -13625,11 +13688,24 @@ class CharacterSheetState {
 			let upgradeSpellAtk = 0;
 			let upgradeSpellDc = 0;
 			let upgradeCritReduction = 0;
+			let upgradeAc = 0;
+			let upgradeSavingThrow = 0;
 			if (typeof CharacterSheetUpgrades !== "undefined" && invItem.item?.appliedUpgrades?.length) {
 				const effects = CharacterSheetUpgrades.getUpgradeEffects(invItem.item);
 				upgradeSpellAtk = effects.bonusSpellAttack;
 				upgradeSpellDc = effects.bonusSpellSaveDc;
 				upgradeCritReduction = effects.critThresholdReduction;
+				upgradeAc = effects.bonusAc || 0;
+				upgradeSavingThrow = effects.bonusSavingThrow || 0;
+			}
+
+			if (!isArmorOrShield) itemAcBonus += CharacterSheetItemUtils.parseBonus(invItem.item?.bonusAc) + upgradeAc;
+			additiveBonuses.savingThrow += CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSavingThrow) + upgradeSavingThrow;
+			for (const ability of Parser.ABIL_ABVS) {
+				const suffix = `${ability.charAt(0).toUpperCase()}${ability.slice(1)}`;
+				additiveBonuses[`savingThrow${suffix}`] += CharacterSheetItemUtils.parseBonus(
+					invItem.item?.[`bonusSavingThrow${suffix}`] ?? invItem.item?.[`bonusSavingThrow_${ability}`],
+				);
 			}
 
 			const totalSpellAtk = baseSpellAtk + upgradeSpellAtk;
@@ -13642,6 +13718,10 @@ class CharacterSheetState {
 		}
 
 		this._data.itemBonuses.kiSaveDc = maxKiDcBonus;
+		this._data.ac.itemBonus = itemAcBonus;
+		for (const [prop, value] of Object.entries(additiveBonuses)) {
+			this._data.itemBonuses[prop] = Math.max(value, CharacterSheetItemUtils.parseBonus(manual[prop]));
+		}
 		// Merge with manual overrides (take max of manual and calculated)
 		this._data.itemBonuses.spellAttack = Math.max(maxSpellAttack, manual.spellAttack || 0);
 		this._data.itemBonuses.spellSaveDc = Math.max(maxSpellSaveDc, manual.spellSaveDc || 0);
@@ -33925,6 +34005,7 @@ class CharacterSheetState {
 		} else {
 			// Extract item properties, excluding wrapper properties
 			const {quantity: _q, equipped: _e, attuned: _a, ...itemProps} = item;
+			CharacterSheetState._normalizeInventoryItemBonuses(itemProps);
 			// Use provided id if present, otherwise generate one
 			const itemId = item.id || CryptUtil.uid();
 
@@ -34653,6 +34734,7 @@ class CharacterSheetState {
 		}
 
 		this._data.inventory = this._data.inventory.filter(i => i.id !== itemId);
+		this._recalculateItemBonuses();
 
 		// A stone (or a host) leaving the inventory must not leave a dangling seat behind,
 		// and losing your last bond must revoke any bond-borne attunement waiver.
@@ -34688,6 +34770,7 @@ class CharacterSheetState {
 
 		// Strip any wrapper-level props that might be present on the incoming object
 		const {quantity: _q, equipped: _e, attuned: _a, starred: _s, note: _n, id: _id, ...itemProps} = newItemProps;
+		CharacterSheetState._normalizeInventoryItemBonuses(itemProps);
 
 		// Edited items are user-authored customs (prevents stack-merge with the catalog original)
 		itemProps._isCustom = true;
@@ -34754,6 +34837,7 @@ class CharacterSheetState {
 				this._unregisterItemEffects(itemId);
 			}
 			// Refresh derived armor/shield-upgrade conditional modifiers (equip state changed).
+			this._recalculateItemBonuses();
 			this._recalculateEquipmentModifiers();
 			// A set stone is by definition functioning, so stowing it must vacate its setting.
 			if (!equipped) {
@@ -34789,6 +34873,7 @@ class CharacterSheetState {
 			// Apply item effects now that it is equipped (if attunement gate also satisfied)
 			if (this._isItemEffectsActive(invItem)) this._registerItemEffects(invItem);
 			// Refresh derived armor/shield-upgrade conditional modifiers.
+			this._recalculateItemBonuses();
 			this._recalculateEquipmentModifiers();
 
 			return true;
@@ -34812,6 +34897,7 @@ class CharacterSheetState {
 			// Remove any effects the item was contributing while equipped
 			this._unregisterItemEffects(itemId);
 			// Refresh derived armor/shield-upgrade conditional modifiers (now unequipped).
+			this._recalculateItemBonuses();
 			this._recalculateEquipmentModifiers();
 			return true;
 		}
@@ -34833,6 +34919,7 @@ class CharacterSheetState {
 				this._unregisterItemEffects(itemId);
 			}
 			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
+			this._recalculateItemBonuses();
 			// Bonding or unbonding a stone can start or end a host's attunement waiver, and an
 			// unbonded stone can no longer occupy a setting.
 			if (CharacterSheetState.isIounStone(item.item || item)) {
@@ -35971,14 +36058,31 @@ class CharacterSheetState {
 	// Item Upgrades (TCAH weapon/armor tags)
 	// ==========================================
 
+	_normalizeItemUpgradeChoices (upgrade, choices = {}) {
+		const definitions = typeof CharacterSheetUpgrades !== "undefined"
+			? CharacterSheetUpgrades.getUpgradeChoiceDefinitions(upgrade)
+			: {};
+		const normalized = {};
+		for (const [key, definition] of Object.entries(definitions)) {
+			const value = String(choices?.[key] || "").trim().toLowerCase();
+			const allowed = definition.values || [];
+			if (!allowed.includes(value)) {
+				return {success: false, error: `${definition.label || key} must be one of: ${allowed.join(", ")}`};
+			}
+			normalized[key] = value;
+		}
+		return {success: true, choices: normalized};
+	}
+
 	/**
 	 * Apply an upgrade to an inventory item
 	 * @param {string} itemId - The item ID
 	 * @param {object} upgrade - The upgrade entity {name, source, upgradeType, cost, entries, ...}
 	 * @param {number} costPaid - Gold cost actually paid (in gp)
+	 * @param {object} choices - Persisted player choices required by the upgrade
 	 * @returns {object} {success: boolean, error?: string}
 	 */
-	applyItemUpgrade (itemId, upgrade, costPaid = 0) {
+	applyItemUpgrade (itemId, upgrade, costPaid = 0, choices = upgrade?.choices || {}) {
 		const item = this._findInventoryRow(itemId);
 		if (!item) return {success: false, error: "Item not found"};
 
@@ -35989,6 +36093,9 @@ class CharacterSheetState {
 			return {success: false, error: `${upgrade.name} is already applied to this item`};
 		}
 
+		const normalizedChoices = this._normalizeItemUpgradeChoices(upgrade, choices);
+		if (!normalizedChoices.success) return normalizedChoices;
+
 		item.item.appliedUpgrades.push({
 			name: upgrade.name,
 			source: upgrade.source,
@@ -35997,6 +36104,7 @@ class CharacterSheetState {
 			// to consult the catalog. Saves written before this field existed carry `undefined`
 			// and are resolved back to the catalog by `isUpgradeMagical`.
 			isMagical: upgrade.isMagical === true,
+			...(Object.keys(normalizedChoices.choices).length ? {choices: normalizedChoices.choices} : {}),
 			costPaid,
 			appliedAt: Date.now(),
 		});
@@ -36005,6 +36113,20 @@ class CharacterSheetState {
 		this._recalculateEquipmentModifiers();
 
 		return {success: true};
+	}
+
+	setItemUpgradeChoices (itemId, upgradeName, upgradeSource, choices) {
+		const item = this._findInventoryRow(itemId);
+		const upgrade = item?.item?.appliedUpgrades?.find(
+			it => it.name === upgradeName && it.source === upgradeSource,
+		);
+		if (!upgrade) return false;
+		const normalized = this._normalizeItemUpgradeChoices(upgrade, choices);
+		if (!normalized.success) return false;
+		upgrade.choices = normalized.choices;
+		this._recalculateItemBonuses();
+		this._recalculateEquipmentModifiers();
+		return true;
 	}
 
 	/**
@@ -51818,13 +51940,7 @@ class CharacterSheetState {
 	 * @returns {string[]} Combined unique resistance types
 	 */
 	getResistances () {
-		const base = [...this._data.resistances];
-		// Merge in resistances from active states (e.g., Rage, Stoneskin)
-		const stateResistances = this._getResistancesFromStates();
-		// Merge in resistances from magic items
-		const itemResistances = (this._data.itemDefenses?.resist || []).map(d => d.type);
-		const combined = new Set([...base, ...stateResistances, ...itemResistances]);
-		return [...combined];
+		return [...new Set(this.getDefenseBreakdown().resistances.map(entry => entry.type))];
 	}
 
 	/**
@@ -51832,11 +51948,7 @@ class CharacterSheetState {
 	 * @returns {string[]} Combined unique immunity types
 	 */
 	getImmunities () {
-		const base = [...this._data.immunities];
-		const stateImmunities = this._getImmunitiesFromStates();
-		const itemImmunities = (this._data.itemDefenses?.immune || []).map(d => d.type);
-		const combined = new Set([...base, ...stateImmunities, ...itemImmunities]);
-		return [...combined];
+		return [...new Set(this.getDefenseBreakdown().immunities.map(entry => entry.type))];
 	}
 
 	/**
@@ -51844,11 +51956,7 @@ class CharacterSheetState {
 	 * @returns {string[]} Combined unique vulnerability types
 	 */
 	getVulnerabilities () {
-		const base = [...this._data.vulnerabilities];
-		const stateVulnerabilities = this._getVulnerabilitiesFromStates();
-		const itemVulnerabilities = (this._data.itemDefenses?.vulnerable || []).map(d => d.type);
-		const combined = new Set([...base, ...stateVulnerabilities, ...itemVulnerabilities]);
-		return [...combined];
+		return [...new Set(this.getDefenseBreakdown().vulnerabilities.map(entry => entry.type))];
 	}
 
 	/**
@@ -51878,6 +51986,155 @@ class CharacterSheetState {
 			spellImmunities: Array.isArray(itemDef.spellImmunities) ? itemDef.spellImmunities : [],
 			combatEffects: Array.isArray(itemDef.combatEffects) ? itemDef.combatEffects : [],
 			regeneration: Array.isArray(itemDef.regeneration) ? itemDef.regeneration : [],
+			breakdown: this.getDefenseBreakdown(),
+		};
+	}
+
+	static _normalizeDamageType (type) {
+		const normalized = String(type || "").replace(/^damage:/i, "").trim().toLowerCase();
+		// Automatic/custom effects already support broader defense keys such as
+		// "spell" and homebrew damage types. The editor offers the canonical list,
+		// but normalization must not erase existing non-empty defense identities.
+		return normalized || null;
+	}
+
+	getManualDefenses () {
+		const manual = this._data.manualDefenses || {};
+		return {
+			resistances: [...(manual.resistances || [])],
+			immunities: [...(manual.immunities || [])],
+			vulnerabilities: [...(manual.vulnerabilities || [])],
+		};
+	}
+
+	addManualDefense (kind, type) {
+		if (!["resistances", "immunities", "vulnerabilities"].includes(kind)) return false;
+		const normalized = CharacterSheetState._normalizeDamageType(type);
+		if (!normalized) return false;
+		if (!this._data.manualDefenses) this._data.manualDefenses = this._getDefaultState().manualDefenses;
+		if (!Array.isArray(this._data.manualDefenses[kind])) this._data.manualDefenses[kind] = [];
+		if (this._data.manualDefenses[kind].includes(normalized)) return false;
+		this._data.manualDefenses[kind].push(normalized);
+		return true;
+	}
+
+	removeManualDefense (kind, type) {
+		if (!["resistances", "immunities", "vulnerabilities"].includes(kind)) return false;
+		const normalized = CharacterSheetState._normalizeDamageType(type);
+		const values = this._data.manualDefenses?.[kind];
+		if (!normalized || !Array.isArray(values)) return false;
+		const index = values.indexOf(normalized);
+		if (index === -1) return false;
+		values.splice(index, 1);
+		return true;
+	}
+
+	_getTrackedDefenseSourceLabels (kind, type) {
+		const labels = [];
+		const sourceIds = this._data.grantedDefensiveTraits?.[kind]?.[type] || [];
+		for (const sourceId of sourceIds) {
+			if (String(sourceId).startsWith("item:")) {
+				const itemId = String(sourceId).slice("item:".length);
+				const item = this._findInventoryRow(itemId);
+				labels.push(item?.item?.name || "Magic item");
+				continue;
+			}
+			const ability = (this._data.customAbilities || []).find(it => it.id === sourceId);
+			if (ability?.name) {
+				labels.push(ability.name);
+				continue;
+			}
+			const feature = (this._data.features || []).find(it => it.id === sourceId);
+			if (feature?.name) labels.push(feature.name);
+		}
+		const classTracker = kind === "resistances"
+			? this._data._classFeatureResistances
+			: kind === "immunities"
+				? this._data._classFeatureImmunities
+				: null;
+		if (classTracker?.includes(type)) labels.push("Class feature");
+		return [...new Set(labels)];
+	}
+
+	_getItemUpgradeDefenseEntries (kind) {
+		if (typeof CharacterSheetUpgrades === "undefined") return [];
+		const effectType = {
+			resistances: "resistance",
+			immunities: "immunity",
+			vulnerabilities: "vulnerability",
+		}[kind];
+		if (!effectType) return [];
+
+		const out = [];
+		for (const invItem of this._data.inventory || []) {
+			if (!this._isItemEffectsActive(invItem) || !invItem.item?.appliedUpgrades?.length) continue;
+			for (const upgrade of invItem.item.appliedUpgrades) {
+				const effects = CharacterSheetUpgrades.getUpgradeEffects({appliedUpgrades: [upgrade]}).effects || [];
+				for (const effect of effects) {
+					if (effect?.type !== effectType) continue;
+					const values = effect.types || [effect.damageType || effect.target];
+					for (const value of values) {
+						const type = CharacterSheetState._normalizeDamageType(value);
+						if (!type) continue;
+						out.push({
+							type,
+							source: `${upgrade.name} (${invItem.item.name || "item"})`,
+							ownership: "automatic",
+							removable: false,
+						});
+					}
+				}
+			}
+		}
+		return out;
+	}
+
+	_getDefenseBreakdownForKind (kind) {
+		const baseProp = kind;
+		const itemProp = {
+			resistances: "resist",
+			immunities: "immune",
+			vulnerabilities: "vulnerable",
+		}[kind];
+		const stateValues = kind === "resistances"
+			? this._getResistancesFromStates()
+			: kind === "immunities"
+				? this._getImmunitiesFromStates()
+				: this._getVulnerabilitiesFromStates();
+		const out = [];
+
+		for (const rawType of this._data.manualDefenses?.[kind] || []) {
+			const type = CharacterSheetState._normalizeDamageType(rawType);
+			if (type) out.push({type, source: "Manual", ownership: "manual", removable: true});
+		}
+		for (const rawType of this._data[baseProp] || []) {
+			const type = CharacterSheetState._normalizeDamageType(rawType);
+			if (!type) continue;
+			const labels = this._getTrackedDefenseSourceLabels(kind, type);
+			if (!labels.length) labels.push("Character feature");
+			labels.forEach(source => out.push({type, source, ownership: "automatic", removable: false}));
+		}
+		for (const entry of this._data.itemDefenses?.[itemProp] || []) {
+			const type = CharacterSheetState._normalizeDamageType(entry?.type ?? entry);
+			if (type) out.push({type, source: entry?.source || "Magic item", ownership: "automatic", removable: false});
+		}
+		out.push(...this._getItemUpgradeDefenseEntries(kind));
+		stateValues.forEach(type => out.push({type, source: "Active state", ownership: "automatic", removable: false}));
+
+		const seen = new Set();
+		return out.filter(entry => {
+			const key = `${entry.type}|${entry.source}|${entry.ownership}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		});
+	}
+
+	getDefenseBreakdown () {
+		return {
+			resistances: this._getDefenseBreakdownForKind("resistances"),
+			immunities: this._getDefenseBreakdownForKind("immunities"),
+			vulnerabilities: this._getDefenseBreakdownForKind("vulnerabilities"),
 		};
 	}
 
@@ -52033,7 +52290,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if resistant
 	 */
 	hasResistance (type) {
-		return this._data.resistances.includes(type) || this.hasResistanceFromStates(type);
+		return this.getResistances().includes(CharacterSheetState._normalizeDamageType(type));
 	}
 
 	/**
@@ -52042,7 +52299,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if immune
 	 */
 	hasImmunity (type) {
-		return this._data.immunities.includes(type) || this.hasImmunityFromStates(type);
+		return this.getImmunities().includes(CharacterSheetState._normalizeDamageType(type));
 	}
 
 	/**
@@ -52051,7 +52308,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if vulnerable
 	 */
 	hasVulnerability (type) {
-		return this._data.vulnerabilities.includes(type) || this.hasVulnerabilityFromStates(type);
+		return this.getVulnerabilities().includes(CharacterSheetState._normalizeDamageType(type));
 	}
 
 	/**

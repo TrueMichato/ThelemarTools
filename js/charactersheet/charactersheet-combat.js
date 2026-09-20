@@ -383,6 +383,8 @@ class CharacterSheetCombat {
 	}
 
 	_initEventListeners () {
+		document.getElementById("charsheet-combat-edit-defenses")?.addEventListener("click", () => this._showDefenseEditorModal());
+
 		// Add attack button - support both ID variants
 		document.getElementById("charsheet-add-attack")?.addEventListener("click", () => this._showAttackCreator());
 		document.getElementById("charsheet-btn-add-attack")?.addEventListener("click", () => this._showAttackCreator());
@@ -10722,6 +10724,109 @@ class CharacterSheetCombat {
 	/**
 	 * Render defenses (resistances, immunities, vulnerabilities, condition immunities)
 	 */
+	async _showDefenseEditorModal () {
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Edit Defenses",
+			isMinHeight0: true,
+			isWidth100: true,
+		});
+		const content = e_({outer: `<div class="charsheet__defense-editor"></div>`});
+		const groups = [
+			{kind: "resistances", label: "Damage Resistances"},
+			{kind: "immunities", label: "Damage Immunities"},
+			{kind: "vulnerabilities", label: "Damage Vulnerabilities"},
+		];
+
+		const renderBody = () => {
+			const manual = this._state.getManualDefenses?.() || {};
+			const breakdown = this._state.getDefenseBreakdown?.() || {};
+			const damageTypes = [...(this._state.constructor?.DAMAGE_TYPES || [])].sort();
+			content.innerHTML = `
+				<p class="ve-small ve-muted">Manual defenses can be changed here. Automatic defenses from features, items, upgrades, and active states are shown separately and remain owned by their source.</p>
+				<div class="charsheet__defense-editor-columns">
+					<div>
+						<h5>Manual defenses</h5>
+						${groups.map(group => {
+		const entries = manual[group.kind] || [];
+		return `
+								<section class="charsheet__defense-editor-group">
+									<label class="ve-bold" for="charsheet-defense-${group.kind}">${group.label}</label>
+									<div class="charsheet__defense-editor-list">
+										${entries.length
+		? entries.map(type => `
+												<span class="charsheet__defense-editor-entry">
+													${this._formatDamageType(type)}
+													<button type="button" class="ve-btn ve-btn-xxs ve-btn-danger" data-defense-action="remove" data-defense-kind="${group.kind}" data-defense-type="${type}" aria-label="Remove manual ${type} ${group.label.toLowerCase()}">&times;</button>
+												</span>
+											`).join("")
+		: `<span class="ve-muted ve-small">None</span>`}
+									</div>
+									<div class="ve-flex-v-center mt-1">
+										<select id="charsheet-defense-${group.kind}" class="form-control input-xs mr-1" data-defense-select="${group.kind}" aria-label="Add ${group.label.toLowerCase()}">
+											${damageTypes.map(type => `<option value="${type}">${this._formatDamageType(type)}</option>`).join("")}
+										</select>
+										<button type="button" class="ve-btn ve-btn-xs ve-btn-primary" data-defense-action="add" data-defense-kind="${group.kind}">Add</button>
+									</div>
+								</section>
+							`;
+	}).join("")}
+					</div>
+					<div>
+						<h5>Automatic defenses</h5>
+						${groups.map(group => {
+		const entries = (breakdown[group.kind] || []).filter(entry => entry.ownership === "automatic");
+		return `
+								<section class="charsheet__defense-editor-group">
+									<div class="ve-bold">${group.label}</div>
+									<div class="charsheet__defense-editor-list">
+										${entries.length
+		? entries.map(entry => `
+												<span class="charsheet__defense-editor-entry charsheet__defense-editor-entry--automatic" title="${CharacterSheetClassUtils.escapeHtml(entry.source)}">
+													${this._formatDamageType(entry.type)}
+													<span class="ve-muted">— ${CharacterSheetClassUtils.escapeHtml(entry.source)}</span>
+												</span>
+											`).join("")
+		: `<span class="ve-muted ve-small">None</span>`}
+									</div>
+								</section>
+							`;
+	}).join("")}
+					</div>
+				</div>
+			`;
+		};
+
+		const refresh = () => {
+			this.renderCombatDefenses();
+			this._page._renderDefenses?.();
+			this._page._renderOverviewDefenses?.();
+			this._page._renderDamageIntakes?.();
+			if (this._page.saveCharacter) this._page.saveCharacter();
+			else this._page._saveCurrentCharacter?.();
+			renderBody();
+		};
+
+		content.addEventListener("click", (event) => {
+			const button = event.target.closest?.("[data-defense-action]");
+			if (!button) return;
+			const {defenseAction: action, defenseKind: kind, defenseType: type} = button.dataset;
+			if (action === "remove") {
+				if (this._state.removeManualDefense?.(kind, type)) refresh();
+				return;
+			}
+			if (action === "add") {
+				const select = content.querySelector(`[data-defense-select="${kind}"]`);
+				if (select?.value && this._state.addManualDefense?.(kind, select.value)) refresh();
+			}
+		});
+
+		renderBody();
+		modalInner.append(content);
+		const footer = ee`<div class="ve-flex-v-center ve-flex-h-right mt-2"><button type="button" class="ve-btn ve-btn-primary">Done</button></div>`;
+		modalInner.append(footer);
+		footer.querySelector("button")?.addEventListener("click", () => doClose(false));
+	}
+
 	renderCombatDefenses () {
 		// Get base defenses from character state
 		const effectiveDefenses = this._state.getEffectiveDefenses?.() || {};
@@ -10731,33 +10836,23 @@ class CharacterSheetCombat {
 		const vulnerabilities = effectiveDefenses.vulnerabilities || this._state.getVulnerabilities?.() || [];
 		const conditionImmunities = effectiveDefenses.conditionImmunities || this._state.getConditionImmunities?.() || [];
 		const spellImmunities = effectiveDefenses.spellImmunities || this._state.getItemDefenses?.()?.spellImmunities || [];
-
-		// Also get defenses from active states (like Rage giving resistance to B/P/S)
-		// Strip "damage:" prefix to match base resistance format
-		const activeStateEffects = this._state.getActiveStateEffects?.() || [];
-		const stateResistances = activeStateEffects
-			.filter(e => e.type === "resistance" && !e.conditional)
-			.map(e => (e.target || "").replace(/^damage:/i, ""));
-		const stateImmunities = activeStateEffects
-			.filter(e => e.type === "immunity")
-			.map(e => (e.target || "").replace(/^damage:/i, ""));
-		const stateConditionImmunities = activeStateEffects
-			.filter(e => e.type === "conditionImmunity")
-			.map(e => e.target);
-
-		// Merge and deduplicate
-		const allResistances = [...new Set([...resistances, ...stateResistances])];
-		const allImmunities = [...new Set([...immunities, ...stateImmunities])];
-		const allVulnerabilities = [...new Set([...vulnerabilities])];
-		const allConditionImmunities = [...new Set([...conditionImmunities, ...stateConditionImmunities])];
+		const breakdown = effectiveDefenses.breakdown || this._state.getDefenseBreakdown?.() || {};
+		const allResistances = [...new Set(resistances)];
+		const allImmunities = [...new Set(immunities)];
+		const allVulnerabilities = [...new Set(vulnerabilities)];
+		const allConditionImmunities = [...new Set(conditionImmunities)];
+		const getSourceTitle = (kind, type, fallback) => {
+			const sources = [...new Set((breakdown[kind] || []).filter(entry => entry.type === type).map(entry => entry.source))];
+			return sources.length ? sources.join(", ") : fallback;
+		};
 
 		// Render resistances
 		const resistancesEl = document.getElementById("charsheet-resistances");
 		if (resistancesEl) {
 			if (allResistances.length || conditionalResistances.length) {
 				const unconditionalHtml = allResistances.map(r => {
-					const isFromState = stateResistances.includes(r) && !resistances.includes(r);
-					return `<span class="badge ${isFromState ? "badge-warning" : "badge-success"} mr-1" title="${isFromState ? "From active state" : "Base resistance"}">${this._formatDamageType(r)}</span>`;
+					const title = CharacterSheetClassUtils.escapeHtml(getSourceTitle("resistances", r, "Resistance"));
+					return `<span class="badge badge-success mr-1" title="${title}">${this._formatDamageType(r)}</span>`;
 				}).join("");
 				const conditionalHtml = conditionalResistances.map(r => {
 					const condition = CharacterSheetClassUtils.escapeHtml(r.conditional);
@@ -10774,8 +10869,8 @@ class CharacterSheetCombat {
 		if (immunitiesEl) {
 			if (allImmunities.length) {
 				immunitiesEl.innerHTML = allImmunities.map(i => {
-					const isFromState = stateImmunities.includes(i) && !immunities.includes(i);
-					return `<span class="badge ${isFromState ? "badge-warning" : "badge-primary"} mr-1" title="${isFromState ? "From active state" : "Base immunity"}">${this._formatDamageType(i)}</span>`;
+					const title = CharacterSheetClassUtils.escapeHtml(getSourceTitle("immunities", i, "Immunity"));
+					return `<span class="badge badge-primary mr-1" title="${title}">${this._formatDamageType(i)}</span>`;
 				}).join("");
 			} else {
 				immunitiesEl.innerHTML = `<span class="ve-muted">—</span>`;
@@ -10787,7 +10882,7 @@ class CharacterSheetCombat {
 		if (vulnerabilitiesEl) {
 			if (allVulnerabilities.length) {
 				vulnerabilitiesEl.innerHTML = allVulnerabilities.map(v =>
-					`<span class="badge badge-danger mr-1">${this._formatDamageType(v)}</span>`,
+					`<span class="badge badge-danger mr-1" title="${CharacterSheetClassUtils.escapeHtml(getSourceTitle("vulnerabilities", v, "Vulnerability"))}">${this._formatDamageType(v)}</span>`,
 				).join("");
 			} else {
 				vulnerabilitiesEl.innerHTML = `<span class="ve-muted">—</span>`;
@@ -10822,7 +10917,6 @@ class CharacterSheetCombat {
 				});
 
 				condImmunities.innerHTML = allConditionImmunities.map(c => {
-					const isFromState = stateConditionImmunities.includes(c) && !conditionImmunities.includes(c);
 					const conditionSource = conditionSourceMap.get(c.toLowerCase()) || Parser.SRC_XPHB;
 					const displayName = c.charAt(0).toUpperCase() + c.slice(1);
 
@@ -10841,7 +10935,7 @@ class CharacterSheetCombat {
 						conditionContent = displayName;
 					}
 
-					return `<span class="badge ${isFromState ? "badge-warning" : "badge-info"} mr-1" title="${isFromState ? "From active state" : "Base immunity"}">${conditionContent}</span>`;
+					return `<span class="badge badge-info mr-1" title="Condition immunity">${conditionContent}</span>`;
 				}).join("");
 			} else {
 				condImmunities.innerHTML = `<span class="ve-muted">—</span>`;

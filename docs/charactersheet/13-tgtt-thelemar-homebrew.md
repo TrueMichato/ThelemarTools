@@ -19,6 +19,7 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 | **Dreamwalker Abilities** | 11/11 | 0 | ✅ |
 | **Divine Favor** | 2 gods (Pan, Zeus) seeded | Extensible — more gods are data-only | ✅ |
 | **Item Materials** | 72/72 entities, P1 engine | P2 Magic Capacity, P3 draconic/blood/ioun, P4 durability/degradation | ✅ |
+| **Armor Upgrades** | Source-qualified TGTT descriptors, persisted choices, equipment-gated effects | Narrative upgrades remain reference-only | ✅ |
 | **Gemstone Empowerment** | 39/39 descriptors; host-scoped resources, standard passives, item powers, typed riders, Chalice storage | Narrative/world-state outcomes remain DM-adjudicated | ✅ |
 
 **Total TGTT Tests**: 737 passing
@@ -31,6 +32,27 @@ spellcasting, resources, synthesized implements, pending receipts, and
 table-owned effects. Gambling Table self effects use the shared condition,
 named-modifier, and active-state expiry paths. Radius effects remain explicit
 `area`/manual outcomes, and manual outcomes may be persisted as sticky notes.
+
+---
+
+## Armor Upgrades
+
+Armor-upgrade mechanics resolve by exact `name|source` through the shared
+item-upgrade registry. Legacy source-less/TCAH snapshots remain compatible, but
+TGTT entities such as `Form Fitted|TGTT` and
+`Specifically Tempered|TGTT` no longer depend on display-name-only matching.
+
+- **Form Fitted** contributes its +3 Acrobatics modifier through the normal
+  named-modifier pipeline. It appears in the skill breakdown and roll result
+  only while the host armor is equipped, and disappears when the upgrade is
+  removed.
+- **Specifically Tempered** requires a fire, cold, lightning, or thunder choice
+  before any gold is spent. The applied-upgrade snapshot persists that choice,
+  exposes it for later replacement, and grants only the selected resistance
+  while the host armor is active.
+
+Upgrade choice data lives on the inventory item's `appliedUpgrades[]` entry, so
+save/load, removal, and choice changes all use the same state-owned lifecycle.
 
 ---
 
