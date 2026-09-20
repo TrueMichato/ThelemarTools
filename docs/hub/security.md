@@ -43,6 +43,9 @@
   transaction is bound to the current account, current session, operation, and concrete provider. The callback
   accepts only an identity already linked to that account, rotates the session, closes the old socket, records
   the exact identity provenance, and timestamps freshness at commit.
+- The browser's reauthentication success marker is presentation-only. A provider-link retry hint is accepted
+  only from short-lived same-origin `sessionStorage`, then revalidated against current available provider
+  metadata and the caller's current linked identities; a crafted callback query cannot initiate linking.
 - Memory and PostgreSQL revalidate transaction expiry, initiating session, account status, provider, and
   identity/account binding after awaited work and immediately before rotation. Account deletion/cancellation
   uses the same commit-time freshness rule even while creator-entitlement enforcement is disabled.

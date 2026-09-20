@@ -88,6 +88,26 @@ describe("campaign hub pages", () => {
 		for (const id of ["campaign-invite-list", "campaign-leave"]) expect(campaignHtml).toContain(`id="${id}"`);
 	});
 
+	it("keeps ordinary reauthentication hidden until requested and handles callback success safely", () => {
+		const source = read("js/hub/hub-page.js");
+		expect(source).toContain("getAccountReauthenticationReturnTo");
+		expect(source).toContain("createPendingIdentityLinkReauthenticationIntent");
+		expect(source).toContain("resolvePendingIdentityLinkReauthenticationIntent");
+		expect(source).toContain(`trigger = "initial"`);
+		expect(source).toContain(`trigger = "manual"`);
+		for (const trigger of [
+			"link-required",
+			"unlink-required",
+			"operator-required",
+			"deletion-required",
+			"deletion-pending",
+		]) expect(source).toContain(`trigger: "${trigger}"`);
+		expect(source).toContain("Reauthentication complete. Sensitive account changes are available for five minutes.");
+		expect(source).toContain("Choose Link $" + "{pendingLinkProvider.label} again to continue.");
+		expect(source).toContain("linkButton.focus()");
+		expect(source).toContain("sessionStorage.removeItem(HUB_PENDING_IDENTITY_LINK_REAUTHENTICATION_STORAGE_KEY)");
+	});
+
 	it("organizes the campaign as a pinned session brief before administration", () => {
 		for (const id of [
 			"campaign-manifest-panel",
@@ -687,6 +707,7 @@ describe("campaign hub pages", () => {
 		const providerSource = read("js/hub/hub-auth-providers.js");
 		expect(source).toContain("window.location.search");
 		expect(source).toContain("import(\"./hub-auth-providers.js\")");
+		expect(source.split(`import("./hub-auth-providers.js")`)).toHaveLength(3);
 		expect(providerSource).toContain("new URLSearchParams({returnTo})");
 		expect(source).toContain("sessionStorage.setItem(\"hub-pending-invite\"");
 		expect(source).toContain("_pendingInviteToken = inviteFragment");

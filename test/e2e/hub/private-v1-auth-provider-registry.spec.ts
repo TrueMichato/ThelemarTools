@@ -1,4 +1,4 @@
-import {expect, test} from "@playwright/test";
+import {expect, test, type Page} from "@playwright/test";
 import {HubCampaignPage} from "../pages/HubCampaignPage";
 
 const providers = [
@@ -6,6 +6,32 @@ const providers = [
 	{slug: "discord", label: "Discord", subject: "202", handle: "hub-e2e-discord"},
 	{slug: "google", label: "Google", subject: "google-e2e-303", handle: null},
 ] as const;
+
+async function getAccountSessions (page: Page) {
+	const response = await page.request.get("/api/account/sessions");
+	expect(response.ok()).toBe(true);
+	return (await response.json()).sessions as Array<{
+		id: string;
+		isCurrent: boolean;
+		revokedAt: string | null;
+	}>;
+}
+
+function expectSingleSessionRotation ({
+	before,
+	after,
+}: {
+	before: Awaited<ReturnType<typeof getAccountSessions>>;
+	after: Awaited<ReturnType<typeof getAccountSessions>>;
+}) {
+	const priorCurrent = before.find(session => session.isCurrent);
+	const nextCurrent = after.find(session => session.isCurrent);
+	expect(priorCurrent).toBeTruthy();
+	expect(nextCurrent).toBeTruthy();
+	expect(nextCurrent?.id).not.toBe(priorCurrent?.id);
+	expect(after).toHaveLength(before.length + 1);
+	expect(after.find(session => session.id === priorCurrent?.id)?.revokedAt).toBeTruthy();
+}
 
 test("publishes bounded provider metadata and accessible signed-out guidance", async ({page}) => {
 	const meta = await page.request.get("/api/meta");
@@ -66,10 +92,22 @@ test("operator reauthentication grants and revokes campaign creation through the
 		await page.getByRole("link", {name: "Sign in with GitHub"}).click();
 		await page.waitForURL(/\/hub\.html$/);
 		await expect(page.locator("#hub-operator-panel")).toBeVisible();
+		await expect(page.locator("#hub-account-reauth")).toBeHidden();
 		await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toHaveCount(0);
 		await expect(page.getByRole("button", {name: "Reauthenticate with Google"})).toHaveCount(0);
+		const sessionsBeforeReauthentication = await getAccountSessions(page);
+		await page.getByRole("button", {name: "Reauthenticate", exact: true}).click();
+		await expect(page.locator("#hub-account-reauth")).toBeVisible();
 		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
-		await page.waitForURL(/\/hub\.html$/);
+		await page.waitForURL(/\/hub\.html\?accountAction=reauthenticated$/);
+		await expect(page.locator("#hub-identity-status")).toContainText(
+			"Reauthentication complete. Sensitive account changes are available for five minutes.",
+		);
+		await expect(page.locator("#hub-account-reauth")).toBeHidden();
+		expectSingleSessionRotation({
+			before: sessionsBeforeReauthentication,
+			after: await getAccountSessions(page),
+		});
 
 		const targetRow = page.locator("#hub-operator-account-list .hub-data-row").filter({
 			hasText: targetSession.account.id,
@@ -173,13 +211,21 @@ test("ordinary accounts reauthenticate before requesting deletion", async ({page
 	await page.goto("/hub.html");
 	await page.getByRole("link", {name: "Sign in with Discord"}).click();
 	await page.waitForURL(/\/hub\.html$/);
-	await expect(page.locator("#hub-account-reauth")).toBeVisible();
-	await expect(page.getByRole("button", {name: "Reauthenticate with Discord"})).toBeVisible();
+	await expect(page.locator("#hub-account-reauth")).toBeHidden();
 
 	page.on("dialog", dialog => dialog.accept("DELETE"));
+	const sessionsBeforeReauthentication = await getAccountSessions(page);
 	await page.locator("#hub-request-deletion").click();
-	await expect(page.locator("#hub-account-reauth-status")).toContainText("Reauthentication complete");
+	await expect(page.locator("#hub-account-reauth")).toBeVisible();
+	await page.getByRole("button", {name: "Reauthenticate with Discord"}).click();
+	await page.waitForURL(/\/hub\.html\?accountAction=delete$/);
+	await expect(page.locator("#hub-identity-status")).toContainText("Reauthentication complete");
+	await expect(page.locator("#hub-account-reauth")).toBeHidden();
 	await expect(page.locator("#hub-request-deletion")).toBeFocused();
+	expectSingleSessionRotation({
+		before: sessionsBeforeReauthentication,
+		after: await getAccountSessions(page),
+	});
 	await page.locator("#hub-request-deletion").click();
 	await page.waitForURL(/\/hub\.html\?accountAction=cancel-deletion$/);
 	await expect(page.getByRole("group", {name: "Sign-in providers"})).toBeVisible();
@@ -201,8 +247,14 @@ test("links a new provider to the same account, signs in through it, then unlink
 
 	await page.getByRole("button", {name: "Link Google"}).click();
 	await expect(page.getByText("Reauthenticate before linking another sign-in provider.")).toBeVisible();
+	await expect(page.locator("#hub-account-reauth")).toBeVisible();
 	await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
-	await page.waitForURL(/\/hub\.html$/);
+	await page.waitForURL(/\/hub\.html\?accountAction=reauthenticated$/);
+	await expect(page.locator("#hub-identity-status")).toContainText(
+		"Reauthentication complete. Choose Link Google again to continue.",
+	);
+	await expect(page.locator("#hub-account-reauth")).toBeHidden();
+	await expect(page.getByRole("button", {name: "Link Google"})).toBeFocused();
 	await page.request.post("/auth/__test/google/next-subject", {
 		headers: {"x-hub-test-auth": secret},
 		data: {subject: linkedGoogleSubject},
@@ -225,8 +277,10 @@ test("links a new provider to the same account, signs in through it, then unlink
 		const sameAccountSession = await secondPage.request.get("/api/session").then(response => response.json());
 		expect(sameAccountSession.account.id).toBe(initialSession.account.id);
 
+		await page.getByRole("button", {name: "Reauthenticate", exact: true}).click();
 		await page.getByRole("button", {name: "Reauthenticate with GitHub"}).click();
-		await page.waitForURL(/\/hub\.html$/);
+		await page.waitForURL(/\/hub\.html\?accountAction=reauthenticated$/);
+		await expect(page.locator("#hub-account-reauth")).toBeHidden();
 		const googleRow = page.locator("#hub-identity-list .hub-data-row").filter({hasText: "Google"});
 		await googleRow.getByRole("button", {name: "Unlink"}).click();
 		await expect(page.getByText("Sign-in method removed. Every other device was signed out.")).toBeVisible();
