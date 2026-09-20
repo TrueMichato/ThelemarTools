@@ -268,6 +268,11 @@ describe("Gambler's Spellcasting - spell slots (L3+)", () => {
 			source: "PHB",
 			subclass: {...canonical.subclass, source: "PHB"},
 		}, 3)).toBe(0);
+
+		state = new CharacterSheetState();
+		buildGambler(19);
+		spells._state = state;
+		expect(spells._getMaxSpellLevel(state.getClasses()[0], 19)).toBe(4);
 	});
 
 	it("does not disturb a subclass with no declared slot table (Eldritch Knight)", () => {
@@ -283,6 +288,38 @@ describe("Gambler's Spellcasting - spell slots (L3+)", () => {
 		const slots = slotCounts(state);
 		// Generic third-caster math at L11 is 4/3, NOT the Gambler's 4/2.
 		expect([slots[1], slots[2]]).toEqual([4, 3]);
+	});
+
+	it("uses another subclass's declared slot table for picker spell-level breakpoints", () => {
+		const rowsSpellProgression = Array.from({length: 20}, (_, index) => {
+			const level = index + 1;
+			if (level >= 19) return [4, 3, 3, 1];
+			if (level >= 13) return [4, 3, 2, 0];
+			if (level >= 7) return [4, 2, 0, 0];
+			if (level >= 3) return [2, 0, 0, 0];
+			return [0, 0, 0, 0];
+		});
+		const getPickerMax = level => {
+			state = new CharacterSheetState();
+			state.addClass({
+				name: "Fighter",
+				source: "PHB",
+				level,
+				casterProgression: "1/3",
+				subclass: {
+					name: "Eldritch Knight",
+					shortName: "EK",
+					source: "PHB",
+					subclassTableGroups: [{rowsSpellProgression}],
+				},
+			});
+			const spells = Object.create(CharacterSheetSpells.prototype);
+			spells._state = state;
+			return spells._getMaxSpellLevel(state.getClasses()[0], level);
+		};
+
+		expect(getPickerMax(7)).toBe(2);
+		expect(getPickerMax(19)).toBe(4);
 	});
 });
 
