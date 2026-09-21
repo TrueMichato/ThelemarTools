@@ -1185,7 +1185,9 @@ export class HubCampaignPage {
 	}
 
 	async getEvents (campaignId: string, limit = 500): Promise<any[]> {
-		const response = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/events?afterSequence=0&limit=${limit}`);
+		const response = await this.page.request.get(`/api/campaigns/${encodeURIComponent(campaignId)}/events?afterSequence=0&limit=${limit}`, {
+			headers: {"x-hub-protocol-version": "6"},
+		});
 		expect(response.ok()).toBe(true);
 		return (await response.json()).events;
 	}
