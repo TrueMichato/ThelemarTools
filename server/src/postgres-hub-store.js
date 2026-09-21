@@ -10798,7 +10798,8 @@ export class PostgresHubStore {
 				ORDER BY created_at
 			`, [accountId]),
 			this._pool.query(`
-				SELECT operation.*, membership.role AS viewer_role
+				SELECT operation.*,
+					CASE WHEN membership.status = 'active' THEN membership.role ELSE 'player' END AS viewer_role
 				FROM hub.semantic_operations operation
 				LEFT JOIN hub.memberships membership
 					ON membership.campaign_id = operation.campaign_id

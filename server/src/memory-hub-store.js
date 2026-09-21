@@ -7039,11 +7039,14 @@ export class MemoryHubStore {
 				|| this._getMultiTargetTargets(operation.id)
 					.some(target => target.targetOwnerAccountIdAtProposal === accountId)
 			))
-			.map(operation => this._getMultiTargetOperationView({
-				operation,
-				accountId,
-				role: this._memberships.get(`${operation.campaignId}::${accountId}`)?.role || "player",
-			}));
+			.map(operation => {
+				const membership = this._memberships.get(`${operation.campaignId}::${accountId}`);
+				return this._getMultiTargetOperationView({
+					operation,
+					accountId,
+					role: membership?.status === "active" ? membership.role : "player",
+				});
+			});
 		return {
 			exportedAt: this._fnNow().toISOString(),
 			account: copy(account),

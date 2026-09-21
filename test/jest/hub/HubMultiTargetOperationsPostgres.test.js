@@ -366,6 +366,37 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 				]),
 			}),
 		]);
+
+		const membership = await store.pGetMembership({
+			accountId: ctx.targetOwners[1].account.id,
+			campaignId: ctx.campaign.id,
+		});
+		await store.pChangeMemberRole({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: membership.id,
+			role: "co_dm",
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await store.pRemoveMember({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: membership.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const removedExport = await store.pExportAccountData({
+			accountId: ctx.targetOwners[1].account.id,
+		});
+		expect(removedExport.multiTargetOperations).toEqual([
+			expect.objectContaining({
+				operationId: proposed.operation.operationId,
+				targets: [expect.objectContaining({invitationId: targetInvitation.invitationId})],
+			}),
+		]);
+		expect(removedExport.multiTargetOperations[0]).not.toHaveProperty("candidateCount");
+		const serializedRemovedExport = JSON.stringify(removedExport.multiTargetOperations);
+		expect(serializedRemovedExport).not.toContain(ctx.targets[0].id);
+		expect(serializedRemovedExport).not.toContain(proposed.operation.targets[0].invitationId);
 	});
 
 	test("fails protocols 3/4/5 and duplicate targets without workflow evidence", async () => {

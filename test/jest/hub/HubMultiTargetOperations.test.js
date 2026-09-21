@@ -533,6 +533,46 @@ describe("Campaign Hub multi-target Memory authority", () => {
 			}),
 		]);
 		expect(exported.multiTargetOperations[0]).not.toHaveProperty("candidateCount");
+
+		for (const target of proposed.operation.targets) {
+			await ctx.pRespond({
+				operationId: proposed.operation.operationId,
+				invitationId: target.invitationId,
+				actor: target.invitationId === otherInvitation.invitationId ? ctx.other : ctx.targetOwner,
+			});
+		}
+		await ctx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: proposed.operation.targets.map(target => target.invitationId),
+		});
+		const membership = await ctx.store.pGetMembership({
+			accountId: ctx.other.account.id,
+			campaignId: ctx.campaign.id,
+		});
+		await ctx.store.pChangeMemberRole({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: membership.id,
+			role: "co_dm",
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await ctx.store.pRemoveMember({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: membership.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const removedExport = await ctx.store.pExportAccountData({accountId: ctx.other.account.id});
+		expect(removedExport.multiTargetOperations).toEqual([
+			expect.objectContaining({
+				operationId: proposed.operation.operationId,
+				targets: [expect.objectContaining({invitationId: otherInvitation.invitationId})],
+			}),
+		]);
+		expect(removedExport.multiTargetOperations[0]).not.toHaveProperty("candidateCount");
+		const serializedRemovedExport = JSON.stringify(removedExport.multiTargetOperations);
+		expect(serializedRemovedExport).not.toContain(ctx.targetA.id);
+		expect(serializedRemovedExport).not.toContain(proposed.operation.targets[0].invitationId);
 	});
 
 	it("omits aggregate candidate and response counts from target-only detail and response DTOs", async () => {
