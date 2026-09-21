@@ -125,8 +125,12 @@
   stable source-plus-N lock order. No cost is reserved while consent is collected; a selected batch commits one
   cost and every leg or none. A reviewed healing template may mark a full-HP selected leg applied/no-change while
   consuming the single cost; source-visible responses/events/timing cannot identify which target was full.
-  Migration 0010 and protocol 6 are required before capability enablement, and protocol 4/5 inbox/detail/replay
-  must fail closed.
+  DM/co-DM receive bounded workflow projections intentionally for support, abuse moderation, lifecycle diagnosis,
+  and audit, but target-owner views never expose a co-target identity or decision. Migration 0010 and protocol 6
+  are required before capability enablement, and every protocol 3/4/5 create/respond/finalize/cancel/read/
+  WebSocket/resync/replay surface fails closed. Transactional source/account/campaign/target-owner caps plus
+  route-level 429 throttles and oldest-pending cursor pagination bound abuse without revealing private target
+  state.
 - WebSocket upgrades require same origin, session, active membership, and protocol version.
 - Event visibility is enforced server-side (`all_members`, `dm_only`, `actor_and_dm`,
   `explicit_accounts`) before replay or broadcast.

@@ -1,7 +1,7 @@
 # Campaign Hub migration guide
 
 > **Status:** Implemented through account-entitlement migration 0009
-> **Last verified:** 2026-09-20
+> **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
 ## Invariants
@@ -120,6 +120,14 @@ Migration 0005 is additive apart from terminalizing legacy `structured_effect` r
 Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0009, grants the
 runtime role, boots the production image against required version 0009, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
+
+ADR 0020 requires a future additive `0010_multi_target_semantic_operations.sql`, but Wave A0 intentionally adds
+neither that SQL file nor a migration-policy entry. When A3 authors it, the policy phase is `expand` and
+`previousAppCompatible: true` describes only schema-before-use: a true pre-0010 binary is operationally
+compatible only while zero multi-target parent/child rows have ever been created. After the first row exists,
+normal rollback must target a bridge/r10+ binary which understands `target_set_version`, normalized target
+history, expiry, retention, and purge cleanup. A true pre-0010 rollback is blocked unless preflight proves zero
+total multi-target rows; destructive history export/purge requires separate review and is not normal rollback.
 
 ## Readiness
 

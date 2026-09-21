@@ -363,7 +363,15 @@ drops an invalid submitted invitation. A rejected finalization has no workflow/a
 effect; source authority, cost, rules, or template invalidity terminally fails the whole operation without any
 target mutation. A reviewed healing template with `allowTargetNoOp=true` may apply a selected full-HP leg with no
 target revision/invalidation while consuming the single cost; source-visible output cannot identify it. Protocol
-4/5 multi-target inbox/detail/replay fails closed. All successful responses are `Cache-Control: no-store`.
+3/4/5 fails closed for create/respond/finalize/cancel, inbox/detail/outgoing reads, WebSocket delivery, resync,
+and replay; protocol 6 is the first successful version. All successful responses are `Cache-Control: no-store`.
+
+Planned transactional capacity limits are 3 live collections/source character, 5/source account, 50/campaign,
+and 20 pending invitations/target owner. Planned route limits are propose 10/minute/account and
+30/minute/campaign, respond 30/120, and finalize/cancel 20/60; excess requests return privacy-safe
+`429 RATE_LIMITED`. Inbox pages contain at most 100 rows and use an exclusive
+`collectionClosesAt + operationId + targetCharacterId` cursor ordered oldest-pending-first so continuous new
+traffic cannot starve an older invitation.
 
 ## Party inventory and transfer routes
 

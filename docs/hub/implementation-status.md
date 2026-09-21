@@ -111,6 +111,13 @@ cost. **No multi-target production capability is implemented by Wave A0:** the d
 migration; future additive migration 0010, protocol 6, routes, store methods, events, browser UX, and templates
 remain absent and default-off. The draft is held pending the physical game-day GO/NO-GO.
 
+The accepted design now also fixes bounded abuse/fairness limits (3 live collections/source character,
+5/source account, 50/campaign, 20 pending invitations/target owner, explicit mutation throttles, and
+oldest-pending cursor pagination), intentional bounded DM/co-DM workflow observation, and protocol-3/4/5
+fail-closed behavior across mutation/read/WebSocket/resync/replay. Schema is predecessor-readable before use,
+but the first multi-target row fences normal rollback to a true pre-0010 binary; later rollback requires an
+aware bridge release unless a separately reviewed destructive history export/purge is approved.
+
 V2-T9 Campaign Overview is shipped by PR #243. The page is now a role-adaptive pinned session brief centered on
 campaign identity, party readiness, attention, recent activity, and one role-specific next action. Existing effects,
 transfers, XP, item awards, membership, homebrew, and rules capabilities remain available through progressive

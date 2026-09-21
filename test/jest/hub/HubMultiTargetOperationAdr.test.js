@@ -7,9 +7,12 @@ const adr = fs.readFileSync(
 );
 const normalizedAdr = adr.replace(/\s+/g, " ");
 const proofSql = fs.readFileSync(
-	new URL("../../fixtures/hub/adr-0020-multi-target-lock-proof.sql", import.meta.url),
+	new URL("../../fixtures/hub/adr-0020-multi-target-set-shaping.sql", import.meta.url),
 	"utf8",
 );
+const apiReference = fs.readFileSync(new URL("../../../docs/hub/api-reference.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+const eventCatalog = fs.readFileSync(new URL("../../../docs/hub/event-catalog.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+const security = fs.readFileSync(new URL("../../../docs/hub/security.md", import.meta.url), "utf8").replace(/\s+/g, " ");
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
 
 describe("Campaign Hub multi-target operation ADR contract", () => {
@@ -40,7 +43,14 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 			"globally unique target-leg address",
 		]) expect(normalizedAdr).toContain(anchor);
 		expect(normalizedAdr).toContain("\"maxTargets\": 8");
-		expect(normalizedAdr).toContain("at most 20 concurrently live collection operations per source character");
+		for (const limit of [
+			"at most 3 live collection operations per source character",
+			"at most 5 live collection operations per source account",
+			"at most 50 live collection operations per campaign",
+			"at most 20 pending invitations per target owner",
+			"`429 RATE_LIMITED`",
+			"oldest-pending-first cursor pagination",
+		]) expect(normalizedAdr).toContain(limit);
 	});
 
 	it("requires normalized migration 0010 tables and concrete constraints", () => {
@@ -70,17 +80,62 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 			"target child rows ordered by `(operation_id, target_character_id)`",
 			"unique character advisory locks (seed 2)",
 			"compute every next document/leg/event before any canonical write",
-			"emit a source-owner-only cost/combined event first",
+			"emit a source cost/combined event first to source owner plus DM/co-DM",
 			"emit one target applied event per selected invitation in proposal ordinal order",
 			"one collapsed metadata-only projection invalidation",
 			"accepted base, live state, latest-submitted state, durable recovery queue, or visible state",
 			"Unrelated users receive no workflow event.",
 			"protocol 6",
-			"Protocol 4 and 5 clients fail closed",
+			"Every protocol `<6`, explicitly 3, 4, and 5, fails closed",
 			"capability is disabled",
-			"No rollback drops columns/tables or reverses applied character state",
+			"No ordinary rollback drops columns/tables or reverses applied character state",
 			"Opposing source/target UUID order",
+			"parent semantic operation rows in ascending operation UUID order",
+			"`ORDER BY collection_closes_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`",
+			"command advisory lock -> campaign advisory/row -> parent operation rows ascending by UUID",
 		]) expect(normalizedAdr).toContain(anchor);
+	});
+
+	it("fences true pre-0010 rollback after the first multi-target row", () => {
+		for (const anchor of [
+			"`previousAppCompatible: true` only for the schema-before-use state",
+			"After the first multi-target parent or target row exists",
+			"operational rollback to a true pre-0010 binary is forbidden",
+			"bridge/r10+ release",
+			"total count of all multi-target parents and children is exactly zero",
+			"separately reviewed destructive history-export/purge procedure",
+		]) expect(normalizedAdr).toContain(anchor);
+	});
+
+	it("pins bounded event audiences and cross-target privacy across current docs", () => {
+		for (const text of [normalizedAdr, eventCatalog]) {
+			expect(text).toContain("source owner plus DM/co-DM");
+			expect(text).toContain("target owner");
+			expect(text).toContain("source owner");
+			expect(text).toContain("DM/co-DM");
+		}
+		expect(normalizedAdr).toContain("No target-owner payload exposes a co-target identity, decision");
+		expect(eventCatalog).toContain("no rationale, hidden target truth, or co-target identity/decision");
+		expect(security).toContain("target-owner views never expose a co-target identity or decision");
+		expect(normalizedAdr).toContain("DM/co-DM observation is intentional");
+	});
+
+	it("closes every multi-target surface to protocols 3, 4, and 5", () => {
+		for (const surface of [
+			"create",
+			"respond",
+			"finalize",
+			"cancel",
+			"inbox",
+			"detail",
+			"outgoing",
+			"WebSocket",
+			"resync",
+			"replay",
+		]) expect(normalizedAdr).toContain(surface);
+		expect(normalizedAdr).toContain("Protocol 6 is the first successful version.");
+		expect(apiReference).toContain("Protocol 3/4/5 fails closed");
+		expect(security).toContain("every protocol 3/4/5");
 	});
 
 	it("covers the required race and lifecycle hazards", () => {
@@ -138,19 +193,23 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		]) expect(adr).toContain(handoff);
 	});
 
-	it("keeps the PostgreSQL feasibility proof read-only and deterministic", () => {
+	it("keeps the PostgreSQL set-shaping example read-only and deterministic", () => {
 		expect(proofSql).toContain("candidate_targets");
 		expect(proofSql).toContain("selected_targets");
-		expect(proofSql).toContain("ORDER BY character_id");
+		expect(proofSql).toContain("array_agg(target_index ORDER BY target_index)");
+		expect(proofSql).toContain("array_agg(character_id ORDER BY character_id)");
 		expect(proofSql).toContain("target_set_unique");
 		expect(proofSql).toContain("selection_is_subset");
 		expect(proofSql).toContain("self_target_collapsed");
+		expect(proofSql).toContain("duplicate_target_detected");
+		expect(proofSql).toContain("gapped_ordinal_detected");
+		expect(proofSql).not.toContain("FOR UPDATE");
 		expect(proofSql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE|LOCK)\b/i);
 	});
 });
 
-describePostgres("Campaign Hub multi-target lock/query proof (real PostgreSQL)", () => {
-	it("proves target uniqueness, subset membership, and stable unique lock ordering", async () => {
+describePostgres("Campaign Hub multi-target set-shaping example (real PostgreSQL)", () => {
+	it("proves valid shapes and detects duplicate/gapped invalid shapes", async () => {
 		const pool = new pg.Pool({
 			connectionString: process.env.HUB_TEST_POSTGRES_URL,
 			ssl: false,
@@ -165,8 +224,10 @@ describePostgres("Campaign Hub multi-target lock/query proof (real PostgreSQL)",
 				candidate_order_contiguous: true,
 				selection_is_subset: true,
 				selection_unique: true,
-				stable_unique_lock_order: true,
+				stable_unique_character_order: true,
 				self_target_collapsed: true,
+				duplicate_target_detected: true,
+				gapped_ordinal_detected: true,
 			}]);
 			await client.query("ROLLBACK");
 		} finally {

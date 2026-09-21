@@ -449,6 +449,12 @@ Empty selection is explicit cancellation. One source cost and every selected leg
 Reviewed healing templates may set `allowTargetNoOp=true`: a selected full-HP target records an applied no-op
 without revealing that target state to the source, while the single source cost is still consumed.
 
+Protocol-6 v1 also caps live work transactionally at 3 collections/source character, 5/source account,
+50/campaign, and 20 pending invitations/target owner, with explicit mutation throttles and oldest-pending cursor
+pagination. Protocol 3/4/5 fails closed on every multi-target mutation, read, WebSocket, resync, and replay
+surface. DM/co-DM receive bounded workflow projections intentionally for support, abuse moderation, lifecycle
+diagnosis, and audit; a target owner never sees co-target identity or decisions.
+
 This is **planned, not implemented**. Migration 0010, protocol 6, routes, both stores, events, capability
 advertisement, Character Sheet UX, and templates remain future A1-A5 work. The sequence is:
 
@@ -461,6 +467,11 @@ advertisement, Character Sheet UX, and templates remain future A1-A5 work. The s
 NPC/monster targets, arbitrary prose, damage combat resolution, offline writes, repeated partial commits,
 per-target costs, and post-proposal target additions remain deferred. Wave A0 may be reviewed as a draft but is
 held from merge until the coordinator records the physical game-day GO/NO-GO.
+
+Migration 0010 is additive before use. After the first multi-target row exists, normal rollback to a true
+pre-0010 binary is forbidden; rollback must use a bridge/r10+ release which understands child history/cleanup.
+A pre-0010 rollback target requires a zero-total-row preflight or a separately reviewed destructive export/purge
+process outside normal rollback.
 
 Acceptance:
 

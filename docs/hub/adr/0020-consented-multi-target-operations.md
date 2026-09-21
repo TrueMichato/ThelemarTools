@@ -57,8 +57,24 @@ Version 1 supports:
 - one exact ordered final selected subset;
 - zero selected targets as explicit cancellation;
 - one source cost plus all selected target legs in one atomic transaction;
-- at most 20 concurrently live collection operations per source character;
-- inbox reads capped at 100 rows and expiry/cleanup batches capped at 100 operations.
+- at most 3 live collection operations per source character;
+- at most 5 live collection operations per source account;
+- at most 50 live collection operations per campaign;
+- at most 20 pending invitations per target owner;
+- cursor-paginated inbox/outgoing reads capped at 100 rows per page;
+- expiry/cleanup batches capped at 100 parent operations.
+
+Proposal creation enforces every live-cap transactionally under the campaign and parent/source authority locks.
+The first concurrent proposal which remains within all caps wins; later proposals fail with
+`COLLECTION_LIMIT_REACHED` and create no operation, invitation, event, outbox, audit, or command result.
+
+The BFF additionally applies explicit mutation rate limits before store entry:
+
+- propose: 10/minute per account and 30/minute per campaign;
+- respond: 30/minute per account and 120/minute per campaign;
+- finalize/cancel: 20/minute per account and 60/minute per campaign.
+
+Rate-limit rejection is `429 RATE_LIMITED`, carries no target/cost detail, and creates no workflow evidence.
 
 The candidate set is immutable. A roster, party, visibility, or targetability change may revoke a leg but never
 adds or substitutes a target. Proposal creation resolves every opaque target ref and rejects duplicate resolved
@@ -135,6 +151,13 @@ evaluates elapsed pending legs inline, writes their `expired` responses in ordin
 all legs are terminal. A bounded maintenance sweep and bounded lazy sweep use the same parent-first transition.
 Response expiry does not consume cost or expire the whole operation.
 
+The live parent states are exactly `collecting_responses` and `awaiting_source_selection`.
+
+Maintenance processes at most 100 parents per run. Each short transaction selects exactly one due parent with
+`ORDER BY collection_closes_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, completes that locked parent, and commits
+before selecting another. A lazy sweep uses the same ordering and one-parent transaction. No maintenance worker
+locks a child directly.
+
 Target-side move/removal/archive/ownership/ref/access loss revokes only that leg. Source-side ownership,
 membership, character, campaign, or source-template lifecycle change cancels the whole operation. If target-side
 revocation leaves no approved leg, the parent becomes `cancelled`. Lifecycle and expiry reach child legs only
@@ -197,7 +220,7 @@ Every proposal/response/finalization/expiry/lifecycle path uses this total order
 1. command advisory lock (seed 9) and payload-aware replay lookup;
 2. authenticated session/account rows;
 3. campaign advisory lock (seed 6) then active campaign row;
-4. parent semantic operation `FOR UPDATE`;
+4. parent semantic operation rows in ascending operation UUID order `FOR UPDATE`;
 5. target child rows ordered by `(operation_id, target_character_id)`;
 6. required membership rows in ascending account UUID order;
 7. unique character advisory locks (seed 2) in ascending character UUID order;
@@ -208,6 +231,11 @@ Every proposal/response/finalization/expiry/lifecycle path uses this total order
 12. compute every next document/leg/event before any canonical write;
 13. write workflow, unique character updates, audit, events/outbox, watermarks, and command result; commit once.
 
+The normative multi-target aggregate sequence is command advisory lock -> campaign advisory/row -> parent
+operation rows ascending by UUID -> child legs by `(operation_id,target_character_id)` -> character advisory
+locks ascending -> character rows ascending -> leases. Session/account and membership checks remain in their
+listed positions but never invert that aggregate sequence.
+
 Discovery may read immutable ids before the parent lock only to identify the parent; after locking, all ids must
 match. Lifecycle/expiry reaches children only through the locked parent. No path locks a child before its parent
 or upgrades from character locks back to operation/campaign authority.
@@ -215,9 +243,15 @@ or upgrades from character locks back to operation/campaign authority.
 Response paths stop after the child/membership rows. Reject/cancel/expiry take no character locks. Finalization
 dedupes source plus selected target ids before acquiring character locks.
 
-The read-only proof at `test/fixtures/hub/adr-0020-multi-target-lock-proof.sql` demonstrates resolved-target
-uniqueness, subset membership, source/target deduplication, and ascending UUID lock order. It creates no schema
-and is not implementation evidence.
+Maintenance uses the bounded `SKIP LOCKED` query above and processes one locked parent per transaction. Lifecycle paths
+which affect several operations lock all affected parent ids in ascending order before locking any child. A3
+must run concurrent PostgreSQL tests with overlapping operation sets discovered in opposite orders and opposing
+source/target UUID orders; neither may deadlock or partially transition.
+
+The read-only set-shaping feasibility example at
+`test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` demonstrates valid target uniqueness, exact contiguous
+ordinals, subset membership, source/target deduplication, ascending UUID order, and negative duplicate/gapped
+candidate detection. It performs no `FOR UPDATE`, creates no schema, and is not a lock or implementation proof.
 
 ### Concurrency and hazard outcomes
 
@@ -250,21 +284,29 @@ For a successful finalization:
 3. update each changed unique character exactly once in ascending UUID order;
 4. insert one durable leg row per selected unique character plus source-only leg when the source is not selected;
 5. append one bounded finalization audit summary;
-6. emit a source-owner-only cost/combined event first;
-7. emit one target applied event per selected invitation in proposal ordinal order, including no-op legs, visible
-   only to that target owner plus DM/co-DM;
+6. emit a source cost/combined event first to source owner plus DM/co-DM;
+7. emit one target applied event per selected invitation in proposal ordinal order, including no-op legs, to that
+   target owner, the source owner where the coarse response status is authorized, and DM/co-DM;
 8. emit one collapsed metadata-only projection invalidation for the union audience of all changed character
    projections; the payload remains empty and contains no roster/target ids;
 9. persist the source-owner finalization result and commit once.
 
-Proposal emits one source-owner event and one target-request event per invitation. Response emits one target-leg
-response event to that target owner plus DM/co-DM and a separate coarse source-owner status event. No event
-contains the full private roster or selected target list. Events are allocated in deterministic batches:
-source event, target events by proposal ordinal, then the collapsed invalidation.
+Source proposal, ready, source-cost, finalization, and source-terminal events are visible to source owner plus
+DM/co-DM. Per-leg request, response, applied, revoked, expired, and declined events are visible to that target
+owner, the source owner where that response status is authorized, and DM/co-DM. Event presentation is projected
+per viewer: a target owner sees only their leg; a source owner sees only authorized labels and coarse leg status;
+DM/co-DM sees the bounded management projection. No target-owner payload exposes a co-target identity, decision,
+ordinal mapping, selection, changed flag, or applicability.
+
+DM/co-DM observation is intentional: they need bounded support, abuse moderation, lifecycle diagnosis, and
+campaign audit without character documents, hidden resource values, or co-target disclosures.
+
+No event contains the full private roster or selected target list. Events are allocated in deterministic
+batches: source event, target events by proposal ordinal, then the collapsed invalidation.
 
 Target events carry operation id, invitation id, leg id, normalized target operation, resulting revision when
-changed, and a bounded changed flag visible only to that owner/DM. Source responses/events omit per-leg changed
-flags and target state. Unrelated users receive no workflow event.
+changed, and a bounded changed flag visible only to that target owner/DM. Source projections remove the changed
+flag and target state. Unrelated users receive no workflow event.
 
 Reconciliation applies durable legs:
 
@@ -334,12 +376,18 @@ Required indexes:
 - parent `(campaign_id,status,collection_closes_at,id)` partial on collection;
 - parent `(campaign_id,status,expires_at,id)` partial on finalization-ready/live;
 - source `(source_character_id,status,created_at DESC)` for live-collection cap/outgoing list;
-- target inbox `(target_owner_account_id_at_proposal,response_state,operation_id)` with `LIMIT 100`;
+- target inbox `(target_owner_account_id_at_proposal,response_state,collection_closes_at,operation_id,
+  target_character_id)` for oldest-pending-first cursor pagination with `LIMIT 100`;
 - target lifecycle `(target_character_id,operation_id)` partial while not revoked;
 - invitation unique lookup;
 - response/selection/ordinal/leg unique indexes;
 - bounded terminal cleanup/retention indexes;
 - no indexes on private source-cost/choice/operation/snapshot JSON.
+
+Inbox pagination is ordered by `collection_closes_at, operation_id, target_character_id` ascending. The exclusive
+cursor carries all three values, so churn at the front cannot starve an older pending invitation behind a
+100-row page. Source outgoing collections use `created_at, operation_id` ascending while live, then a separate
+newest-first terminal-history cursor.
 
 Every current singular read must be explicitly rewritten to union legacy parents with child legs:
 
@@ -355,20 +403,37 @@ Purge must delete command/finalization/target rows through explicit parent histo
 delete so `ON DELETE RESTRICT` cannot leave silent orphan rows or permanently block due-account purge. Lifecycle
 state changes remain workflow transitions, never FK cascades.
 
-Migration 0010 is `phase: "expand"` and `previousAppCompatible: true` only while the multi-target capability is
-disabled: predecessor code reads legacy rows because all legacy singular fields preserve their shape, ignores
-new tables/nullable columns, and never creates `target_set_version=1`. Before predecessor rollback, disable
-creation, run a drain preflight, terminalize live `collecting_responses`/`awaiting_source_selection`, verify zero
-live multi-target parents, and retain all tables/terminal history. No rollback drops columns/tables or reverses
-applied character state.
+Detailed terminal multi-target parent/target/finalization/command/leg rows are retained for 90 days, then removed
+in oldest-terminal-time/id order in batches of 100 only after every related outbox row is published and the
+operation is outside the idempotency/recovery window. Audit and domain events retain their existing independent
+policy. Cleanup exposes aggregate counts/status/age only.
+
+Migration 0010 is `phase: "expand"`. Its migration-policy entry may say `previousAppCompatible: true` only for
+the schema-before-use state: while capability remains disabled and zero multi-target rows have ever existed, a
+pre-0010 binary reads legacy rows, ignores additive tables/nullable columns, and never creates
+`target_set_version=1`.
+
+After the first multi-target parent or target row exists, operational rollback to a true pre-0010 binary is
+forbidden. Terminal child/FK/history rows remain meaningful authority and may block lifecycle purge even after
+live parents are drained. The normal rollback target must be a bridge/r10+ release which understands
+`target_set_version`, child history, projection filtering, expiry, retention, and explicit cleanup. A pre-0010
+rollback preflight checks that the total count of all multi-target parents and children is exactly zero, not only
+that live status count is zero.
+
+Returning to a true pre-0010 binary after data creation requires a separately reviewed destructive
+history-export/purge procedure with backup, participant/audit export, FK-safe cleanup, and explicit human
+authorization. It is not normal rollback and is not defined by this ADR. No ordinary rollback drops
+columns/tables or reverses applied character state.
 
 Role grants run after migration: runtime gets CRUD on new tables/sequences, backup gets SELECT, operations gets no
 new mutation grant, and no role gets schema create.
 
 ### Protocol, capability, API, rollout, and rollback
 
-Implementation requires protocol 6. Protocol 4 and 5 clients fail closed for multi-target inbox/detail/replay and
-never receive shapes they could misread. Current one-target protocol-4 routes/events remain unchanged.
+Implementation requires protocol 6. Every protocol `<6`, explicitly 3, 4, and 5, fails closed for multi-target
+create, respond, finalize, cancel, inbox, detail, outgoing projections, WebSocket delivery, resync, and replay.
+Those clients never receive shapes they could misread. Protocol 6 is the first successful version. Current
+one-target protocol-4 routes/events remain unchanged.
 
 Capability:
 
@@ -399,9 +464,12 @@ Memory/PostgreSQL and real-stack proof, one allowlisted campaign/template canary
 Disabling stops creation; response/reject/cancel/expiry/read remain available. Finalization after deliberate
 disablement terminally fails without mutation.
 
-Drain-before-rollback preflight reports live parent count by status, oldest collection/finalization deadlines,
-unsupported template versions, and incomplete response/finalization/leg rows without private identities. Rollback
-is blocked until live count is zero.
+The capability is disabled by default.
+
+Bridge-release rollback preflight reports total and live parent/child counts, oldest
+collection/finalization/terminal deadlines, unsupported template versions, incomplete
+response/finalization/leg rows, and cleanup readiness without private identities. A true pre-0010 target is
+blocked unless total multi-target row count is zero.
 
 ### A1-A5 handoff
 
@@ -422,17 +490,23 @@ is blocked until live count is zero.
 5. Source-cost spend/restore ABA and independent mutation contention.
 6. Target move/removal/archive/ref/ownership change and source lifecycle cancellation.
 7. Account/campaign purge with no silent orphan/restrict blockage.
-8. Protocol 4/5 fail-closed inbox/detail/replay and protocol-6 compatibility.
+8. Protocol 3/4/5 fail-closed mutation/read/WebSocket/resync/replay and protocol-6 compatibility.
 9. Privacy canaries for hidden targets and all-changed/some-full/all-full allowed-no-op sets.
 10. Fault injection after every target write, unique character update, event/outbox, audit, and response/finalization
     receipt step.
 11. Memory/PostgreSQL byte-equivalent status, projection, ordering, replay, and failure behavior.
 12. Opposing source/target UUID order and concurrent finalizations with zero deadlocks/partial commits.
-13. Duplicate resolved target/invitation/ordinal/selection rejection.
-14. Rejected finalization zero-side-effect proof.
-15. Per-leg accepted/latest/live/durable/visible reconciliation across reconnect/replay.
-16. Fresh/0009 upgrade/concurrent/failure/checksum/roles/backup/restore/predecessor-image migration proof.
-17. Drain/default-off/disable/rollback preflight.
+13. Overlapping lifecycle/expiry parent sets discovered in opposite order, proving ascending parent locks and
+    `SKIP LOCKED` maintenance progress.
+14. Duplicate resolved target/invitation/ordinal/selection rejection, plus explicit duplicate/gapped set-shaping
+    proof failures.
+15. Rejected finalization zero-side-effect proof.
+16. Per-leg accepted/latest/live/durable/visible reconciliation across reconnect/replay.
+17. Protocol 3/4/5 failure for every multi-target surface and protocol-6 success.
+18. Concurrent live-cap winners, create/respond/finalize churn, 429 mutation throttles, and oldest-pending cursor
+    pagination without starvation.
+19. Fresh/0009 upgrade/concurrent/failure/checksum/roles/backup/restore/bridge-release compatibility proof.
+20. Default-off/disable/bridge rollback and true pre-0010 zero-total-row preflight.
 
 ## Consequences
 
@@ -441,6 +515,8 @@ is blocked until live count is zero.
 - Reviewed healing no-ops protect hidden target state without refund or re-proposal oracles.
 - Normalized child rows make invitation, response, lifecycle, cleanup, and reconciliation enforceable.
 - Existing one-target rows/routes remain readable and unchanged.
+- Schema-before-use remains additive, but the first multi-target row permanently fences normal rollback to a true
+  pre-0010 binary.
 
 ## Rejected alternatives
 

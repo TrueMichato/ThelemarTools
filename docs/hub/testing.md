@@ -19,7 +19,7 @@
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
 | Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
-| Multi-target Wave A0 design contract | `HubMultiTargetOperationAdr.test.js`, `test/fixtures/hub/adr-0020-multi-target-lock-proof.sql` | ADR completeness, normalized migration-0010 decision, fixed-set/response/finalization/leg constraints, hazards, A1-A5 handoff, and read-only PostgreSQL uniqueness/subset/lock-order reasoning; no production behavior claim |
+| Multi-target Wave A0 design contract | `HubMultiTargetOperationAdr.test.js`, `test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` | ADR completeness, normalized migration-0010 decision, fixed-set/response/finalization/leg constraints, hazards, audiences, fairness, A1-A5 handoff, and read-only PostgreSQL positive/negative set-shaping reasoning; no production behavior claim |
 | Invite admission | `HubInviteAdmission.test.js`, `HubMultiProviderIdentityPostgres.test.js`, `HubAuthServer.test.js` | Existing sign-in, unknown denial, opaque context binding, atomic first access, existing-account join, replay/expiry/revoke/race/status/privacy behavior, dedicated-secret token retry, lock ordering, and rollback |
 | Account entitlements/reauthentication | entitlement and multi-provider suites | Provider/account/session binding, five-minute commit-time freshness, creator enforcement, operator hiding/idempotency/concurrency, last-operator lifecycle protection, migration backfill/reconciliation, export redaction, and memory/PostgreSQL parity |
 | Account identity lifecycle | `HubMultiProviderIdentity`, `HubAuthServer`, `HubApiClient`, provider operations/config, PostgreSQL parity, `test-hub-account-identity-mutations.mjs`, real-stack provider journey | Bounded own-identity listing, no account creation during link, cross-account conflict, transaction replay, display-name stability, commit-time freshness, provider disable, different-identity unlink, last/retention protection, concurrent/idempotent unlink, session/lease/socket rotation, fresh CSRF, purge/export/deletion-grace behavior |
@@ -135,8 +135,11 @@ fresh/upgrade/concurrency/fault-injection PostgreSQL implementation tests.
 
 A3's required implementation matrix includes same-owner/two-target invitations, source-as-target, response versus
 finalization/collection-expiry, maintenance expiry without readers, source-cost ABA, move/archive/removal/purge,
-protocol-4/5 fail-closed reads/replay, allowed full-HP privacy canaries, opposing UUID deadlock probes, fault
-injection after every target/event/receipt, Memory/PostgreSQL parity, and drain-before-rollback.
+protocol-3/4/5 fail-closed mutation/read/WebSocket/resync/replay with protocol-6 success, allowed full-HP and
+cross-target audience privacy canaries, opposing UUID and opposite-parent-discovery deadlock probes, fault
+injection after every target/event/receipt, Memory/PostgreSQL parity, transactional live-cap winners, churn/429,
+oldest-pending pagination without starvation, 90-day bounded cleanup, bridge-release rollback, and true pre-0010
+zero-total-row preflight.
 
 ## Test data rules
 
