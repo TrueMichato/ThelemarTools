@@ -54,6 +54,15 @@ class CharacterSheetClassUtils {
 		];
 	}
 
+	static getChoiceSkillCatalog () {
+		return [
+			"acrobatics", "animal handling", "arcana", "athletics", "deception",
+			"history", "insight", "intimidation", "investigation", "medicine",
+			"nature", "perception", "performance", "persuasion", "religion",
+			"sleight of hand", "stealth", "survival",
+		];
+	}
+
 	// ==========================================
 	// Psionic manifesters (5etools `psionic` prop)
 	// ==========================================
@@ -4013,11 +4022,39 @@ class CharacterSheetClassUtils {
 				});
 			}
 
-			const skills = getTaggedValues(text, "skill");
+			// Only inspect the local proficiency item. A background entry can
+			// contain an unrelated "Choose A or B" equipment sentence after a
+			// fixed skill grant; scanning the whole list node turns that fixed
+			// grant into a false player choice (XPHB Acolyte is the canonical
+			// example). Prefer the named list item, and only use the complete
+			// text for a standalone prose node.
+			const findSkillItemText = value => {
+				if (Array.isArray(value)) {
+					for (const item of value) {
+						const found = findSkillItemText(item);
+						if (found) return found;
+					}
+					return null;
+				}
+				if (!value || typeof value !== "object") return null;
+				if (/skill|proficien(?:cy|cies)/i.test(String(value.name || ""))) {
+					return getText(value.entries || value.entry || value.items || value);
+				}
+				return findSkillItemText(value.entries || value.entry || value.items);
+			};
+			const localGrantText = findSkillItemText(node.items)
+				|| findSkillItemText(node.entries || node.entry);
+			const skillGrantText = localGrantText
+				|| (/(?:skill|proficien(?:cy|cies))/i.test(String(node.name || ""))
+					? text
+					: text.match(
+						/(?:proficien(?:cy|cies)|gain proficiency|proficiency)[^.]*?(?:\.|$)/i,
+					)?.[0] || "");
+			const skills = getTaggedValues(skillGrantText || text, "skill");
 			if (
 				skills.length
-				&& /proficien(?:cy|cies)|choose to gain proficiency/.test(lower)
-				&& /either|choice|choose/.test(lower)
+				&& /proficien(?:cy|cies)|choose to gain proficiency/.test(skillGrantText.toLowerCase())
+				&& /either|choice|choose|one of/.test(skillGrantText.toLowerCase())
 			) {
 				add({
 					kind: "skill",
@@ -4257,8 +4294,14 @@ class CharacterSheetClassUtils {
 				values.forEach((value, ix) => {
 					if (!value || typeof value !== "object") return;
 					const choose = value.choose || value;
-					if (!choose || (!choose.from && !choose.options && !choose.weighted && !Array.isArray(choose))) return;
+					if (!choose) return;
+					const isAny = Number(choose.any) > 0;
+					if (!isAny && (!choose.from && !choose.options && !choose.weighted && !Array.isArray(choose))) return;
 					const options = getOptions(normalizeChoose(choose));
+					const catalog = kind === "skill"
+						? CharacterSheetClassUtils.getChoiceSkillCatalog?.() || []
+						: [];
+					if (isAny && !options.length) options.push(...catalog);
 					add({
 						kind,
 						label: value.name || field,
@@ -4271,6 +4314,38 @@ class CharacterSheetClassUtils {
 								kind: "explicitList",
 								values: options,
 							},
+						},
+					});
+				});
+			}
+
+			// XPHB species/background feat grants use an explicit category
+			// descriptor rather than a normal `choose` node. Fixed feat refs
+			// (e.g. Acolyte's Magic Initiate) deliberately do not enter the
+			// choice ledger.
+			if (Array.isArray(node.feats)) {
+				node.feats.forEach((grant, ix) => {
+					const anyFromCategory = grant?.anyFromCategory;
+					if (!anyFromCategory || typeof anyFromCategory !== "object") return;
+					const categories = (Array.isArray(anyFromCategory.category)
+						? anyFromCategory.category
+						: [anyFromCategory.category]).filter(Boolean).map(value => String(value).toLowerCase());
+					const options = (opts.feats || []).filter(feat => {
+						const featCategories = (Array.isArray(feat?.category) ? feat.category : [feat?.category])
+							.filter(Boolean)
+							.map(value => String(value).toLowerCase());
+						return !categories.length || featCategories.some(category => categories.includes(category));
+					});
+					add({
+						kind: "feat",
+						label: grant.name || "Origin Feat",
+						count: Math.max(1, Number(anyFromCategory.count) || 1),
+						options,
+						grantKey: `feats.${ix}.anyFromCategory`,
+						sourcePath: `${path}.feats[${ix}].anyFromCategory`,
+						rules: {
+							uniqueWithinSeries: true,
+							optionSource: {kind: "explicitList", values: options, category: categories},
 						},
 					});
 				});
@@ -4333,6 +4408,8 @@ class CharacterSheetClassUtils {
 									kind: typeof choose?.from === "string" ? "filter" : "additionalSpells",
 									filter,
 									values: options,
+									spellSource: opts.spellSource
+										|| (String(opts.classSource || "").toUpperCase() === "PHB" ? "PHB" : "XPHB"),
 									className: opts.className,
 									classSource: opts.classSource,
 								},
@@ -4382,7 +4459,7 @@ class CharacterSheetClassUtils {
 	 * pure and independent of page/catalog availability, so the census can report
 	 * a reachable but catalog-dependent shape separately from a runtime-only one.
 	 */
-	static classifyChoiceShape (/** @type {*} */ node, path = "") {
+	static classifyChoiceShape (/** @type {*} */ node, path = "", opts = {}) {
 		if (!node || typeof node !== "object") return {classification: "none", path};
 		if (node.nonRespec === true || node.respec === false) {
 			return {classification: "nonRespec", family: node.family || node.type || "non-respec", path, required: false};
@@ -4409,7 +4486,39 @@ class CharacterSheetClassUtils {
 			if (descriptors.length) return {classification: "supported", family: descriptors[0].kind, path, required: node.required !== false};
 			return {classification: "unclassified", family: "choose", path, required: node.required !== false};
 		}
-		if (node.additionalSpells) return {classification: "supported", family: "spell", path, required: node.required !== false};
+		if (node.anyFromCategory && typeof node.anyFromCategory === "object") {
+			// An anyFromCategory node is only a supported choice when the caller
+			// supplied a reachable, non-empty legal catalog.  Treating the shape
+			// itself as supported hid missing feat catalogs and made the census
+			// report false closure.
+			const descriptors = CharacterSheetClassUtils.getChoiceDescriptors(
+				{feats: [node]},
+				{sourcePath: path, feats: opts.feats || []},
+			);
+			const descriptor = descriptors.find(it => it.kind === "feat");
+			if (descriptor?.options?.length) {
+				return {
+					classification: "supported",
+					family: "feat",
+					path,
+					required: node.required !== false,
+				};
+			}
+			return {
+				classification: "unclassified",
+				family: "feat",
+				path,
+				required: node.required !== false,
+				reason: "anyFromCategory-produced-no-legal-descriptor",
+			};
+		}
+		// `additionalSpells` is a container, not itself a player-authored
+		// obligation. Its leaf `choose` nodes are visited separately below, so
+		// classifying the parent would count the same fixed or selectable grants
+		// a second time (and made fixed grant blocks inflate the census).
+		if (node.additionalSpells) {
+			return {classification: "none", path};
+		}
 		return {classification: "none", path};
 	}
 
@@ -4417,11 +4526,11 @@ class CharacterSheetClassUtils {
 	 * Produce a data-backed census without freezing snapshot counts in tests.
 	 * `entities` may be a class/feature/feat/race/background collection.
 	 */
-	static getChoiceDescriptorCensus (/** @type {*} */ entities) {
+	static getChoiceDescriptorCensus (/** @type {*} */ entities, opts = {}) {
 		const result = {total: 0, supported: 0, runtime: 0, nonRespec: 0, unclassified: 0, byFamily: {}, entries: []};
 		const visit = (node, path) => {
 			if (!node || typeof node !== "object") return;
-			const classification = CharacterSheetClassUtils.classifyChoiceShape(node, path);
+			const classification = CharacterSheetClassUtils.classifyChoiceShape(node, path, opts);
 			if (classification.classification !== "none") {
 				result.total++;
 				result[classification.classification]++;

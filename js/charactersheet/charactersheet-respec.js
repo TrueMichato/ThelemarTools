@@ -912,7 +912,6 @@ class CharacterSheetRespec {
 			const result = doRemove();
 			if (result.success) {
 				doClose();
-				this._engine?.markDirty();
 				this.render();
 				JqueryUtil.doToast({type: "success", content: `Removed ${preview.className} level ${preview.classLevel}.`});
 			} else {
@@ -1180,7 +1179,9 @@ class CharacterSheetRespec {
 	 * @returns {Array} Array of {type, label, current} objects
 	 */
 	_getEditableChoices (level, history) {
-		const manifestDecisions = this._engine?.manifest?.decisions?.filter(decision => decision.characterLevel === level) || [];
+		const manifestDecisions = this._engine?.manifest?.decisions?.filter(decision =>
+			Number(decision.characterLevel) === Number(level),
+		) || [];
 		if (manifestDecisions.length) {
 			const editable = manifestDecisions.map(decision => {
 				const out = {
@@ -1385,6 +1386,7 @@ class CharacterSheetRespec {
 					${choice.hasCascade ? `<span class="charsheet__respec-choice-warning" title="Changing this will remove dependent features">\u26a0\ufe0f</span>` : ""}
 				</div>
 			`});
+			if (choice.decision?.id) choiceRow.dataset.decisionId = choice.decision.id;
 
 			const editBtn = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", txt: "Change"});
 			editBtn.addEventListener("click", () => this._editChoice(level, history, choice, doClose, {
@@ -1421,7 +1423,7 @@ class CharacterSheetRespec {
 			race: () => this._editRace(level, history, closeParentModal),
 			background: () => this._editBackground(level, history, closeParentModal),
 			improvement: () => this._editImprovement(level, history, choice, closeParentModal),
-			"feature-choice": () => this._editFeatureChoice(level, history, choice, closeParentModal),
+			"feature-choice": () => this._editFeatureChoice(level, history, choice, closeParentModal, opts),
 			subclass: () => this._editSubclass(level, history, closeParentModal),
 			"combat-traditions": () => this._editCombatTraditions(level, history, choice, closeParentModal),
 			"weapon-masteries": () => this._editWeaponMasteries(level, history, choice, closeParentModal),
@@ -1442,7 +1444,7 @@ class CharacterSheetRespec {
 			"hit-points": () => this._editHpDecision(level, history, choice, closeParentModal),
 			asi: () => this._editAsi(level, history, closeParentModal, choice),
 			feat: () => this._editFeat(level, history, closeParentModal, choice),
-			featureChoice: () => this._editFeatureChoice(level, history, choice, closeParentModal),
+			featureChoice: () => this._editFeatureChoice(level, history, choice, closeParentModal, opts),
 			combatTraditions: () => this._editCombatTraditions(level, history, choice, closeParentModal),
 			weaponMasteries: () => this._editWeaponMasteries(level, history, choice, closeParentModal),
 			combatMethods: () => this._editCombatMethods(level, history, choice, closeParentModal),
@@ -1463,11 +1465,15 @@ class CharacterSheetRespec {
 		if (isNestedSpell) {
 			const source = decision.meta?.descriptorRules?.optionSource;
 			const allSpells = this._page.getFilteredSpellData?.() || this._page.getSpells?.() || [];
+			const exactSource = source?.spellSource || null;
 			if (source?.kind === "filter" && source.filter) {
 				const clauses = CharacterSheetClassUtils._parseFilterQuery?.(source.filter) || [];
-				options = allSpells.filter(spell => CharacterSheetClassUtils._spellMatchesFilterQuery?.(spell, clauses));
+				options = allSpells.filter(spell =>
+					(!exactSource || spell.source === exactSource)
+					&& CharacterSheetClassUtils._spellMatchesFilterQuery?.(spell, clauses),
+				);
 			} else if (source?.kind === "additionalSpells" && allSpells.length) {
-				options = allSpells;
+				options = exactSource ? allSpells.filter(spell => spell.source === exactSource) : allSpells;
 			} else if (source?.kind === "explicitList" && Array.isArray(source.values)) {
 				const fullSpellData = this._page.getSpells?.() || allSpells;
 				options = source.values
@@ -1475,7 +1481,8 @@ class CharacterSheetRespec {
 						const name = typeof value === "string" ? value : value?.name;
 						const sourceId = typeof value === "object" ? value?.source : null;
 						return fullSpellData.find(spell =>
-							spell?.name === name && (!sourceId || spell.source === sourceId),
+							spell?.name === name
+								&& (sourceId ? spell.source === sourceId : (!exactSource || spell.source === exactSource)),
 						) || value;
 					})
 					.filter(Boolean);
@@ -1585,6 +1592,7 @@ class CharacterSheetRespec {
 				const input = e_({tag: "input"});
 				input.type = decision.count === 1 ? "radio" : "checkbox";
 				input.name = `respec-${decision.id}`;
+				if (option?.source) input.dataset.source = option.source;
 				input.checked = selected.has(key);
 				const label = e_({tag: "span", txt: CharacterSheetRespec._getDecisionOptionLabel(option)});
 				input.addEventListener("change", () => {
@@ -1649,49 +1657,90 @@ class CharacterSheetRespec {
 	}
 
 	_applyManifestSelectionMechanics (decision, selection, options, targetState = this._state) {
+		const family = this._getDecisionMechanicsFamily(decision);
+		const method = {
+			class: "_applyDecisionMechanicsClass",
+			proficiencies: "_applyDecisionMechanicsProficiencies",
+			spells: "_applyDecisionMechanicsSpells",
+			improvement: "_applyDecisionMechanicsImprovement",
+			features: "_applyDecisionMechanicsFeatures",
+			origin: "_applyDecisionMechanicsOrigin",
+			configuration: "_applyDecisionMechanicsConfiguration",
+		}[family] || "_applyDecisionMechanicsConfiguration";
+		if (method !== "_applyManifestSelectionMechanics") {
+			return this[method](decision, selection, options, targetState);
+		}
+		return this._runDecisionMechanics(decision, selection, options, targetState);
+	}
+
+	_getDecisionMechanicsFamily (decision) {
+		const type = decision?.type;
+		if (["class", "subclass", "subclassChoice"].includes(type)) return "class";
+		if ([
+			"skills", "tools", "expertise", "languages", "nestedSkill",
+			"nestedSkillTool", "nestedExpertise", "nestedTool", "nestedLanguage",
+			"nestedSave", "nestedWeapon", "nestedArmor", "nestedResistance",
+			"nestedDamageType",
+		].includes(type)) return "proficiencies";
+		if ([
+			"spellbookSpells", "knownSpells", "cantrips", "preparedSpells",
+			"preparedCantrips", "spellSwap", "spellMastery", "signatureSpells",
+			"nestedSpell", "nestedCantrip",
+		].includes(type)) return "spells";
+		if (["asi", "feat", "asiOrFeat", "classFeatProgressionFeat"].includes(type)) return "improvement";
+		if (["optionalFeatures", "featureChoice", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(type)) return "features";
+		if (["originRace", "originBackground"].includes(type)) return "origin";
+		return "configuration";
+	}
+
+	_runDecisionMechanics (decision, selection, options, targetState = this._state, expectedFamily = null) {
+		if (expectedFamily && this._getDecisionMechanicsFamily(decision) !== expectedFamily) {
+			throw new Error(`Progression decision "${decision?.type || "unknown"}" was routed to the wrong mechanics family.`);
+		}
 		const previousState = this._state;
 		this._state = targetState;
 		try {
-			return this._applyManifestSelectionMechanicsInner(decision, selection, options);
+			return this._applyManifestSelectionMechanicsInner(decision, selection, options, expectedFamily);
 		} finally {
 			this._state = previousState;
 		}
 	}
 
-	// Concrete adapter entry points.  The progression registry binds each
-	// decision family to one of these methods rather than treating the generic
-	// dispatcher as proof that every family is executable.  Keeping the family
-	// wrappers thin preserves one mechanics implementation while making closure
-	// checks and future family-specific overrides explicit.
+	// Concrete adapter entry points. Each family is a real dispatch target used
+	// by the generic editor above; these are intentionally not aliases of the
+	// generic method so adapter closure verifies the executable paths.
 	_applyDecisionMechanicsClass (decision, selection, options, targetState = this._state) {
-		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+		return this._runDecisionMechanics(decision, selection, options, targetState, "class");
 	}
 
 	_applyDecisionMechanicsProficiencies (decision, selection, options, targetState = this._state) {
-		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+		return this._runDecisionMechanics(decision, selection, options, targetState, "proficiencies");
 	}
 
 	_applyDecisionMechanicsSpells (decision, selection, options, targetState = this._state) {
-		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+		return this._runDecisionMechanics(decision, selection, options, targetState, "spells");
 	}
 
 	_applyDecisionMechanicsImprovement (decision, selection, options, targetState = this._state) {
-		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+		return this._runDecisionMechanics(decision, selection, options, targetState, "improvement");
 	}
 
 	_applyDecisionMechanicsFeatures (decision, selection, options, targetState = this._state) {
-		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+		return this._runDecisionMechanics(decision, selection, options, targetState, "features");
 	}
 
 	_applyDecisionMechanicsOrigin (decision, selection, options, targetState = this._state) {
-		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+		return this._runDecisionMechanics(decision, selection, options, targetState, "origin");
 	}
 
 	_applyDecisionMechanicsConfiguration (decision, selection, options, targetState = this._state) {
-		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+		return this._runDecisionMechanics(decision, selection, options, targetState, "configuration");
 	}
 
-	_applyManifestSelectionMechanicsInner (decision, selection, options) {
+	_applyManifestSelectionMechanicsInner (decision, selection, options, family = null) {
+		if (family && this._getDecisionMechanicsFamily(decision) !== family) {
+			throw new Error(`Progression decision "${decision?.type || "unknown"}" has no ${family} mechanics.`);
+		}
 		const next = Array.isArray(selection) ? selection : (selection == null ? [] : [selection]);
 		const previous = Array.isArray(decision.selection)
 			? decision.selection
@@ -1893,6 +1942,8 @@ class CharacterSheetRespec {
 				this._state.removeChosenSubfeature?.(parentName, {
 					parentSource,
 					level: decision.classLevel || decision.characterLevel,
+					sourceDecisionKey: decision.semanticKey,
+					parentSourceDecisionKey: decision.parentSemanticKey || null,
 				});
 			}
 			const selected = next[0];
@@ -2130,14 +2181,33 @@ class CharacterSheetRespec {
 				}
 			},
 		});
-		this._engine.markDirty();
 	}
 
 	_rebuildClassProgression () {
 		const state = this._state;
 		const history = state.getLevelHistory().sort((a, b) => a.level - b.level);
 		const existingClasses = state.getClasses();
-		const oldResources = new Map((state.getResources?.() || []).map(resource => [resource.name, resource.current]));
+		const oldResources = (state.getResources?.() || []).map(resource => ({
+			identity: resource.sourceDecisionKey
+				? `decision:${resource.sourceDecisionKey}`
+				: resource.featureId
+					? `feature:${resource.featureId}`
+					: `unowned:${String(resource.name || "").toLowerCase()}`,
+			name: resource.name,
+			current: resource.current,
+			turnUsage: state._data?.resourceTurnUsage?.[resource.id],
+		}));
+		const oldFeatureDecisionKeys = new Map((state.getFeatures?.() || [])
+			.filter(feature => feature.sourceDecisionKey)
+			.map(feature => [
+				[
+					String(feature.name || "").toLowerCase(),
+					String(feature.className || "").toLowerCase(),
+					String(feature.classSource || "").toLowerCase(),
+					Number(feature.level) || 0,
+				].join("|"),
+				feature.sourceDecisionKey,
+			]));
 		const oldCurrentHp = state.getCurrentHp();
 
 		for (const entry of history) {
@@ -2242,7 +2312,15 @@ class CharacterSheetRespec {
 					const key = `${feature.name}|${feature.className}|${feature.subclassShortName || ""}|${feature.level}`.toLowerCase();
 					if (seenFeatures.has(key)) return;
 					seenFeatures.add(key);
-					state.addFeature(feature);
+					const featureKey = [
+						String(feature.name || "").toLowerCase(),
+						String(feature.className || "").toLowerCase(),
+						String(feature.classSource || "").toLowerCase(),
+						Number(feature.level) || 0,
+					].join("|");
+					state.addFeature(feature, {
+						sourceDecisionKey: oldFeatureDecisionKeys.get(featureKey) || feature.sourceDecisionKey || null,
+					});
 				});
 			}
 			CharacterSheetClassUtils.updateClassResources(state, classEntry, classLevel, classData);
@@ -2254,8 +2332,23 @@ class CharacterSheetRespec {
 		state.recalculateHp({syncCurrent: false});
 		state.setCurrentHp(Math.min(oldCurrentHp, state.getMaxHp()));
 		for (const resource of state.getResources?.() || []) {
-			if (!oldResources.has(resource.name)) continue;
-			state.setResourceCurrent?.(resource.id, Math.min(oldResources.get(resource.name), resource.max));
+			const identity = resource.sourceDecisionKey
+				? `decision:${resource.sourceDecisionKey}`
+				: resource.featureId
+					? `feature:${resource.featureId}`
+					: `unowned:${String(resource.name || "").toLowerCase()}`;
+			const prior = oldResources.find(item => item.identity === identity
+				|| (!resource.sourceDecisionKey && !resource.featureId && item.name === resource.name && item.identity.startsWith("unowned:")));
+			if (!prior) continue;
+			state.setResourceCurrent?.(resource.id, Math.min(prior.current, resource.max));
+			if (prior.turnUsage != null) {
+				state._data.resourceTurnUsage ||= {};
+				state._data.resourceTurnUsage[resource.id] = MiscUtil.copyFast(prior.turnUsage);
+			}
+		}
+		const liveResourceIds = new Set((state.getResources?.() || []).map(resource => resource.id));
+		for (const resourceId of Object.keys(state._data.resourceTurnUsage || {})) {
+			if (!liveResourceIds.has(resourceId)) delete state._data.resourceTurnUsage[resourceId];
 		}
 	}
 
@@ -2587,7 +2680,6 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
-			this._engine?.markDirty();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: `Updated level ${level} combat traditions.`});
 		});
@@ -2809,7 +2901,6 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
-			this._engine?.markDirty();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: "Updated combat methods."});
 		});
@@ -2922,7 +3013,6 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
-			this._engine?.markDirty();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: `Updated level ${level} weapon masteries.`});
 		});
@@ -3707,7 +3797,6 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
-			this._engine?.markDirty();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: `Changed ${entry.progressionName || "feat"} to ${selectedFeat.name}.`});
 		});
@@ -3766,14 +3855,24 @@ class CharacterSheetRespec {
 	 * @param {object} choice - The choice info (includes label, current, index)
 	 * @param {Function} closeParentModal - Function to close parent modal
 	 */
-	async _editFeatureChoice (level, history, choice, closeParentModal) {
-		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
-			title: `Change ${choice.label}`,
-			isMinHeight0: true,
-			isWidth100: true,
-			isUncappedWidth: true,
-			cbClose: () => {},
-		});
+	async _editFeatureChoice (level, history, choice, closeParentModal, {inlineHost = null} = {}) {
+		let modalInner;
+		let doClose;
+		if (inlineHost) {
+			inlineHost.replaceChildren();
+			modalInner = inlineHost;
+			doClose = () => inlineHost.replaceChildren();
+		} else {
+			const modal = await CharacterSheetModal.pGetShow({
+				title: `Change ${choice.label}`,
+				isMinHeight0: true,
+				isWidth100: true,
+				isUncappedWidth: true,
+				cbClose: () => {},
+			});
+			modalInner = modal.eleModalInner;
+			doClose = modal.doClose;
+		}
 
 		const currentChoice = history.choices.featureChoices[choice.index];
 		const content = e_({tag: "div", clazz: "charsheet__respec-feature-modal"});
@@ -3908,8 +4007,7 @@ class CharacterSheetRespec {
 			await this._applyFeatureChoiceChange(level, history, choice.index, currentChoice, selectedOption);
 
 			doClose();
-			closeParentModal();
-			this._engine?.markDirty();
+			if (!inlineHost) closeParentModal?.();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: `Changed ${choice.label} to ${selectedOption.name}.`});
 		});
@@ -4228,9 +4326,11 @@ class CharacterSheetRespec {
 				const featChoices = MiscUtil.copyFast(next.featChoices || feat.choices || feat._featChoices || {});
 				feat.choices = featChoices;
 				feat._featChoices = featChoices;
+				feat.sourceDecisionKey = decision.semanticKey;
 				const added = this._state.addFeat(feat, {
 					allSpells: this._page.getSpells?.() || [],
 					skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(feat),
+					sourceDecisionKey: decision.semanticKey,
 				});
 				if (!added) throw new Error(`${feat.name} is already selected.`);
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, feat, featChoices);
@@ -4252,6 +4352,7 @@ class CharacterSheetRespec {
 				const added = this._state.addFeat(pairedFeat.feat, {
 					allSpells: this._page.getSpells?.() || [],
 					skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(pairedFeat.feat),
+					sourceDecisionKey: pairedFeat.decision.semanticKey,
 				});
 				if (!added) throw new Error(`${pairedFeat.feat.name} could not be reapplied.`);
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, pairedFeat.feat, pairedFeat.feat.choices);
@@ -4458,7 +4559,6 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
-			this._engine?.markDirty();
 			this.render();
 			JqueryUtil.doToast({type: "success", content: `Changed subclass to ${selectedSubclass.name}.`});
 		});
@@ -4793,7 +4893,6 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
-			this._engine?.markDirty();
 			this.render();
 			JqueryUtil.doToast({
 				type: "success",
@@ -4968,7 +5067,6 @@ class CharacterSheetRespec {
 
 			doClose();
 			closeParentModal();
-			this._engine?.markDirty();
 			this.render();
 			JqueryUtil.doToast({
 				type: "success",

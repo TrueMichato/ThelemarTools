@@ -169,6 +169,103 @@ describe("CharacterSheetRespec workspace", () => {
 		expect(respec._state.getSkillProficiency("perception")).toBe(1);
 	});
 
+	it("reverses Protector grants while preserving an independent martial/armor source", () => {
+		const protector = {
+			name: "Protector",
+			source: "XPHB",
+			className: "Cleric",
+			classSource: "XPHB",
+			level: 1,
+			entries: ["You gain proficiency with {@filter Martial weapons|items|type=martial weapon} and training with {@filter Heavy armor|items|type=Heavy Armor}."],
+		};
+		const decision = {
+			type: "nestedEntity",
+			semanticKey: "nested:divine-order:protector:occ0:slot0",
+			selection: {name: "Protector", source: "XPHB"},
+			provenance: {ownerUid: "Divine Order|XPHB", grantKey: "options.0"},
+			className: "Cleric",
+			classSource: "XPHB",
+			classLevel: 1,
+			characterLevel: 1,
+		};
+		respec._state.addFeature({...protector, sourceDecisionKey: decision.semanticKey});
+		respec._state.addWeaponProficiency("Martial weapons");
+		respec._state.addArmorProficiency("Heavy armor");
+		respec._state.claimProgressionOwnership("weapons", "Martial weapons", decision.semanticKey);
+		respec._state.claimProgressionOwnership("armor", "Heavy armor", decision.semanticKey);
+		respec._state.addWeaponProficiency("Martial weapons");
+		respec._state.claimProgressionOwnership("weapons", "Martial weapons", "manual:training");
+		respec._state.addArmorProficiency("Heavy armor");
+		respec._state.claimProgressionOwnership("armor", "Heavy armor", "manual:training");
+
+		respec._state.reverseProgressionFeatureReceipt(decision);
+
+		expect(respec._state.getWeaponProficiencies()).toContain("Martial weapons");
+		expect(respec._state.getArmorProficiencies()).toContain("Heavy armor");
+		expect(respec._state.getFeatures().some(feature => feature.name === "Protector")).toBe(false);
+	});
+
+	it("preserves Cruel resource uses only for the surviving source decision", () => {
+		const cruel = {
+			name: "Cruel",
+			source: "TGTT",
+			className: "Fighter",
+			classSource: "XPHB",
+			level: 1,
+			uses: {max: 2, current: 2, recharge: "long"},
+			sourceDecisionKey: "nested:feat:cruel:occ0:slot0",
+			entries: [],
+		};
+		respec._state.addFeature(cruel, {sourceDecisionKey: cruel.sourceDecisionKey});
+		const resource = respec._state.getResources().find(item => item.name === "Cruel");
+		expect(resource).toBeTruthy();
+		respec._state.setResourceCurrent(resource.id, 1);
+		respec._state._data.resourceTurnUsage[resource.id] = 7;
+
+		const decision = {
+			semanticKey: cruel.sourceDecisionKey,
+			receipt: {effects: []},
+		};
+		respec._state.reverseProgressionFeatureReceipt(decision);
+		expect(respec._state.getResources().some(item => item.name === "Cruel")).toBe(false);
+		expect(respec._state._data.resourceTurnUsage[resource.id]).toBeUndefined();
+
+		respec._state.addFeature({...cruel, sourceDecisionKey: "nested:feat:other:occ0:slot0"}, {
+			sourceDecisionKey: "nested:feat:other:occ0:slot0",
+		});
+		const unrelated = respec._state.getResources().find(item => item.name === "Cruel");
+		expect(unrelated.current).toBe(unrelated.max);
+	});
+
+	it("tracks and reverses Cruel triggered dice by source and turn", () => {
+		const sourceDecisionKey = "nested:feat:cruel:triggered";
+		respec._state.addFeat({
+			name: "Cruel",
+			source: "TalDoreiCampaignSettingReborn",
+		}, {sourceDecisionKey});
+		const resource = respec._state.getResources().find(item => item.name === "Cruelty Dice");
+		expect(resource).toMatchObject({
+			sourceDecisionKey,
+			triggeredDiePool: expect.objectContaining({die: "d6", oncePerTurn: true}),
+		});
+		respec._state.startCombat();
+		const options = respec._state.getTriggeredFeatDieOptions("damage", {});
+		expect(options).toEqual(expect.arrayContaining([
+			expect.objectContaining({resourceId: resource.id, die: "d6"}),
+		]));
+		expect(respec._state.spendTriggeredFeatDie(resource.id, "damage", {}).ok).toBe(true);
+		expect(respec._state.spendTriggeredFeatDie(resource.id, "damage", {}).ok).toBe(false);
+		expect(respec._state._data.resourceTurnUsage[resource.id]).toBe(1);
+
+		respec._state.reverseProgressionFeatureReceipt({
+			semanticKey: sourceDecisionKey,
+			receipt: {sourceDecisionKey, effects: []},
+		});
+		expect(respec._state.getResources().some(item => item.sourceDecisionKey === sourceDecisionKey)).toBe(false);
+		expect(respec._state._data.resourceTurnUsage[resource.id]).toBeUndefined();
+		expect(respec._state.getFeats().some(feat => feat.sourceDecisionKey === sourceDecisionKey)).toBe(false);
+	});
+
 	it("applies subclass-specific choices to the canonical class entry", () => {
 		const decision = {
 			type: "subclassChoice",

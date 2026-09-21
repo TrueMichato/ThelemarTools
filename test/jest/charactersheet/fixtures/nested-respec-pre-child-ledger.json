@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "cases": {
+    "specialty-union": {
+      "history": [
+        {
+          "level": 1,
+          "class": {"name": "Rogue", "source": "TGTT"},
+          "decisions": [
+            {
+              "semanticKey": "nested:specialties:slot:0",
+              "type": "nestedSkillTool",
+              "selection": [{"kind": "skill", "value": "arcana"}],
+              "status": "resolved",
+              "receipt": {"version": 1, "sourceDecisionKey": "nested:specialties:slot:0", "effects": []}
+            }
+          ]
+        }
+      ],
+      "manifest": {
+        "levels": [
+          {
+            "characterLevel": 1,
+            "className": "Rogue",
+            "classSource": "TGTT",
+            "classLevel": 1,
+            "decisions": [
+              {
+                "semanticKey": "nested:specialties:slot:0",
+                "type": "nestedSkillTool",
+                "required": true,
+                "count": 1,
+                "selection": null,
+                "status": "missing"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "arcane-archer-siblings": {
+      "history": [
+        {
+          "level": 3,
+          "class": {"name": "Fighter", "source": "XPHB"},
+          "decisions": [
+            {"semanticKey": "nested:arcane-archer:slot:0", "type": "nestedEntity", "selection": {"name": "Seeking Arrow", "source": "XPHB"}, "status": "resolved"},
+            {"semanticKey": "nested:arcane-archer:slot:1", "type": "nestedEntity", "selection": {"name": "Shadow Arrow", "source": "XPHB"}, "status": "resolved"}
+          ]
+        }
+      ],
+      "manifest": {
+        "levels": [
+          {
+            "characterLevel": 3,
+            "className": "Fighter",
+            "classSource": "XPHB",
+            "classLevel": 3,
+            "decisions": [
+              {"semanticKey": "nested:arcane-archer:slot:0", "type": "nestedEntity", "required": true, "count": 1, "selection": null, "status": "missing"},
+              {"semanticKey": "nested:arcane-archer:slot:1", "type": "nestedEntity", "required": true, "count": 1, "selection": null, "status": "missing"}
+            ]
+          }
+        ]
+      }
+    },
+    "divine-order-thaumaturge": {
+      "history": [
+        {
+          "level": 1,
+          "class": {"name": "Cleric", "source": "XPHB"},
+          "decisions": [
+            {"semanticKey": "nested:divine-order:slot:0", "type": "nestedEntity", "selection": {"name": "Thaumaturge", "source": "XPHB"}, "status": "resolved"}
+          ]
+        }
+      ],
+      "manifest": {
+        "levels": [
+          {
+            "characterLevel": 1,
+            "className": "Cleric",
+            "classSource": "XPHB",
+            "classLevel": 1,
+            "decisions": [
+              {"semanticKey": "nested:divine-order:slot:0", "type": "nestedEntity", "required": true, "count": 1, "selection": null, "status": "missing"}
+            ]
+          }
+        ]
+      }
+    },
+    "lessons-feat-descendant": {
+      "history": [
+        {
+          "level": 4,
+          "class": {"name": "Warlock", "source": "XPHB"},
+          "decisions": [
+            {"semanticKey": "nested:lessons:slot:0", "type": "nestedFeat", "selection": {"name": "Alert", "source": "XPHB"}, "status": "resolved"},
+            {"semanticKey": "nested:lessons:slot:0:ability", "type": "nestedAbility", "selection": ["dex"], "status": "resolved"}
+          ]
+        }
+      ],
+      "manifest": {
+        "levels": [
+          {
+            "characterLevel": 4,
+            "className": "Warlock",
+            "classSource": "XPHB",
+            "classLevel": 4,
+            "decisions": [
+              {"semanticKey": "nested:lessons:slot:0", "type": "nestedFeat", "required": true, "count": 1, "selection": null, "status": "missing"},
+              {"semanticKey": "nested:lessons:slot:0:ability", "type": "nestedAbility", "required": true, "count": 1, "selection": null, "status": "missing"}
+            ]
+          }
+        ]
+      }
+    },
+    "recurring-pool": {
+      "history": [
+        {
+          "level": 5,
+          "class": {"name": "Rogue", "source": "TGTT"},
+          "decisions": [
+            {"semanticKey": "nested:specialties:slot:2", "type": "nestedSkill", "selection": ["history"], "status": "resolved"}
+          ]
+        }
+      ],
+      "manifest": {
+        "levels": [
+          {
+            "characterLevel": 5,
+            "className": "Rogue",
+            "classSource": "TGTT",
+            "classLevel": 5,
+            "decisions": [
+              {"semanticKey": "nested:specialties:slot:2", "type": "nestedSkill", "required": true, "count": 1, "selection": null, "status": "missing"}
+            ]
+          }
+        ]
+      }
+    },
+    "ambiguous": {
+      "history": [
+        {
+          "level": 2,
+          "class": {"name": "Rogue", "source": "TGTT"},
+          "decisions": [
+            {"semanticKey": "nested:legacy:ambiguous", "type": "nestedSkill", "selection": ["arcana"], "status": "ambiguous"}
+          ]
+        }
+      ],
+      "manifest": {
+        "levels": [
+          {
+            "characterLevel": 2,
+            "className": "Rogue",
+            "classSource": "TGTT",
+            "classLevel": 2,
+            "decisions": [
+              {"semanticKey": "nested:legacy:ambiguous", "type": "nestedSkill", "required": true, "count": 1, "selection": null, "status": "missing"}
+            ]
+          }
+        ]
+      }
+    },
+    "pending-policy": {
+      "history": [
+        {
+          "level": 1,
+          "class": {"name": "Rogue", "source": "TGTT"},
+          "pendingFeatureChoices": [{"featureName": "Legacy Specialty", "kind": "skill", "options": ["arcana", "history"]}]
+        }
+      ],
+      "manifest": {
+        "levels": [
+          {
+            "characterLevel": 1,
+            "className": "Rogue",
+            "classSource": "TGTT",
+            "classLevel": 1,
+            "decisions": []
+          }
+        ]
+      }
+    },
+    "origin": {
+      "history": [],
+      "base": {
+        "decisions": [
+          {
+            "semanticKey": "base:race:human:feat",
+            "type": "nestedFeat",
+            "selection": {"name": "Alert", "source": "XPHB"},
+            "status": "resolved",
+            "receipt": {"version": 1, "sourceDecisionKey": "base:race:human:feat", "effects": []}
+          }
+        ]
+      },
+      "manifest": {
+        "base": {
+          "decisions": [
+            {
+              "semanticKey": "base:race:human:feat",
+              "type": "nestedFeat",
+              "required": true,
+              "count": 1,
+              "selection": null,
+              "status": "missing"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

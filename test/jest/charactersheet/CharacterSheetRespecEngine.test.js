@@ -178,4 +178,27 @@ describe("CharacterSheetRespecEngine", () => {
 			]),
 		});
 	});
+
+	it("retains staged receipts through reconciliation and a single persistence pass", () => {
+		engine.begin();
+		const decision = engine.manifest.decisions.find(item => item.type === "skills");
+		const refreshSpy = jest.spyOn(engine, "refreshManifest");
+		const persistSpy = jest.spyOn(engine, "_persistManifest");
+		engine.stageGraphMutation(decision.id, ["perception"], {
+			reverseParent: true,
+			apply: ({state: candidate}) => {
+				candidate.addSkillProficiency("perception");
+				candidate.claimProgressionOwnership("skills", "perception", decision.semanticKey);
+			},
+		});
+		const next = engine.manifest.decisions.find(item => item.semanticKey === decision.semanticKey);
+		expect(next.receipt).toMatchObject({
+			sourceDecisionKey: decision.semanticKey,
+			effects: expect.arrayContaining([
+				expect.objectContaining({type: "ownership"}),
+			]),
+		});
+		expect(refreshSpy).toHaveBeenCalledTimes(1);
+		expect(persistSpy).toHaveBeenCalledTimes(1);
+	});
 });

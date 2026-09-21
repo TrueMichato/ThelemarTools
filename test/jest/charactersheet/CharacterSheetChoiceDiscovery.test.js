@@ -1,10 +1,12 @@
 import "./setup.js";
+import {jest} from "@jest/globals";
 import fs from "node:fs";
 import path from "node:path";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
+import "../../../js/charactersheet/charactersheet-respec-engine.js";
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 const CharacterSheetProgression = globalThis.CharacterSheetProgression;
@@ -87,6 +89,83 @@ describe("Character Sheet choice discovery contract", () => {
 		// The production closure must inspect the actual controller/state
 		// prototypes, not accept an unavailable-prototype bypass.
 		expect(CharacterSheetProgression.getAdapterClosureIssues()).toEqual([]);
+	});
+
+	it("dispatches every registered mechanics family through its concrete path", () => {
+		const respec = Object.create(globalThis.CharacterSheetRespec.prototype);
+		const applyCases = [
+			["class", "class", "_applyDecisionMechanicsClass"],
+			["skills", "nestedSkill", "_applyDecisionMechanicsProficiencies"],
+			["spells", "nestedCantrip", "_applyDecisionMechanicsSpells"],
+			["improvement", "feat", "_applyDecisionMechanicsImprovement"],
+			["features", "featureChoice", "_applyDecisionMechanicsFeatures"],
+			["origin", "originRace", "_applyDecisionMechanicsOrigin"],
+			["configuration", "nestedConfiguration", "_applyDecisionMechanicsConfiguration"],
+		];
+		for (const [family, type, method] of applyCases) {
+			const spy = jest.fn();
+			respec[method] = spy;
+			respec._applyManifestSelectionMechanics(
+				{type, semanticKey: `test:${type}`, meta: {}},
+				["selection"],
+				[],
+				{},
+			);
+			expect(spy).toHaveBeenCalledWith(
+				expect.objectContaining({type}),
+				["selection"],
+				[],
+				{},
+			);
+			expect(CharacterSheetProgression.DECISION_ADAPTERS[type].mechanics).toBeTruthy();
+			expect(family).toBeTruthy();
+		}
+
+		const state = Object.create(globalThis.CharacterSheetState.prototype);
+		const reverseCases = [
+			["class", "class", "reverseProgressionClassReceipt"],
+			["proficiencies", "nestedSkill", "reverseProgressionProficiencyReceipt"],
+			["spells", "nestedCantrip", "reverseProgressionSpellReceipt"],
+			["improvement", "feat", "reverseProgressionImprovementReceipt"],
+			["features", "featureChoice", "reverseProgressionFeatureReceipt"],
+			["origin", "originBackground", "reverseProgressionOriginReceipt"],
+			["configuration", "nestedConfiguration", "reverseProgressionConfigurationReceipt"],
+		];
+		for (const [family, type, method] of reverseCases) {
+			const spy = jest.fn(() => true);
+			state._reverseProgressionDecisionReceiptInner = spy;
+			expect(state[method]({type, semanticKey: `test:${type}`})).toBe(true);
+			expect(spy).toHaveBeenCalledWith(
+				expect.objectContaining({type}),
+				family,
+			);
+		}
+
+		const engine = Object.create(globalThis.CharacterSheetRespecEngine.prototype);
+		const reverseSpy = jest.fn(() => true);
+		engine._candidateState = {
+			reverseProgressionFeatureReceipt: reverseSpy,
+			reverseProgressionDecisionReceipt: jest.fn(),
+		};
+		engine._reverseDecisionReceipt({type: "featureChoice"});
+		expect(reverseSpy).toHaveBeenCalledTimes(1);
+
+		const respecProto = globalThis.CharacterSheetRespec.prototype;
+		const stateProto = globalThis.CharacterSheetState.prototype;
+		const savedApply = respecProto._applyDecisionMechanicsClass;
+		const savedReverse = stateProto.reverseProgressionClassReceipt;
+		try {
+			respecProto._applyDecisionMechanicsClass = undefined;
+			stateProto.reverseProgressionClassReceipt = undefined;
+			const issues = CharacterSheetProgression.getAdapterClosureIssues();
+			expect(issues).toEqual(expect.arrayContaining([
+				expect.objectContaining({code: "adapter-missing-apply", type: "class"}),
+				expect.objectContaining({code: "adapter-missing-reverse", type: "class"}),
+			]));
+		} finally {
+			respecProto._applyDecisionMechanicsClass = savedApply;
+			stateProto.reverseProgressionClassReceipt = savedReverse;
+		}
 	});
 
 	it("discovers the reviewed real-data prose families and named entities", () => {
@@ -177,7 +256,11 @@ describe("Character Sheet choice discovery contract", () => {
 			const parsed = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), file), "utf8"));
 			return Object.values(parsed).flatMap(value => Array.isArray(value) ? value : []);
 		});
-		const productionCensus = CharacterSheetClassUtils.getChoiceDescriptorCensus([...entities, ...catalogEntities]);
+		const featCatalog = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "data/feats.json"), "utf8")).feat;
+		const productionCensus = CharacterSheetClassUtils.getChoiceDescriptorCensus(
+			[...entities, ...catalogEntities],
+			{feats: featCatalog},
+		);
 		expect(productionCensus.total).toBeGreaterThan(0);
 		expect(productionCensus.supported).toBeGreaterThan(0);
 		expect(productionCensus.entries.filter(entry =>
@@ -197,5 +280,34 @@ describe("Character Sheet choice discovery contract", () => {
 			CharacterSheetClassUtils.getChoiceDescriptors = original;
 		}
 		expect(CharacterSheetClassUtils.getChoiceDescriptorCensus([entity]).supported).toBeGreaterThan(0);
+	});
+
+	it("keeps fixed spell grants out of the authored census and exposes Human/Acolyte origin choices", () => {
+		const read = file => JSON.parse(fs.readFileSync(path.resolve(process.cwd(), file), "utf8"));
+		const human = read("data/races.json").race.find(it => it.name === "Human" && it.source === "XPHB");
+		const acolyte = read("data/backgrounds.json").background.find(it => it.name === "Acolyte" && it.source === "XPHB");
+		const feats = read("data/feats.json").feat;
+		const humanDescriptors = CharacterSheetClassUtils.getChoiceDescriptors(human, {feats});
+		expect(humanDescriptors).toEqual(expect.arrayContaining([
+			expect.objectContaining({kind: "skill"}),
+			expect.objectContaining({kind: "feat", label: "Origin Feat"}),
+		]));
+		expect(humanDescriptors.find(it => it.kind === "feat")?.options?.length).toBeGreaterThan(0);
+
+		const acolyteDescriptors = CharacterSheetClassUtils.getChoiceDescriptors(acolyte, {feats});
+		expect(acolyteDescriptors.filter(it => it.kind === "skill")).toEqual([]);
+		expect(acolyteDescriptors.filter(it => it.kind === "feat")).toEqual([]);
+		expect(acolyteDescriptors.filter(it => it.kind === "ability")).toHaveLength(2);
+
+		const fixedSpells = {
+			name: "Fixed grant",
+			additionalSpells: [
+				{innate: {"1": ["Cure Wounds"]}},
+				{prepared: {"1": ["Bless"]}},
+				{known: {"1": ["Guidance"]}},
+			],
+		};
+		const fixedCensus = CharacterSheetClassUtils.getChoiceDescriptorCensus([fixedSpells]);
+		expect(fixedCensus.entries.filter(it => it.family === "spell")).toEqual([]);
 	});
 });

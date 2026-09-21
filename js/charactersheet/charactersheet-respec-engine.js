@@ -201,6 +201,41 @@ class CharacterSheetRespecEngine {
 		}
 	}
 
+	_reverseDecisionReceipt (decision) {
+		const type = decision?.type;
+		const family = ["class", "subclass", "subclassChoice"].includes(type)
+			? "class"
+			: [
+				"skills", "tools", "expertise", "languages", "nestedSkill",
+				"nestedSkillTool", "nestedExpertise", "nestedTool", "nestedLanguage",
+				"nestedSave", "nestedWeapon", "nestedArmor", "nestedResistance",
+				"nestedDamageType",
+			].includes(type)
+				? "proficiencies"
+				: [
+					"spellbookSpells", "knownSpells", "cantrips", "preparedSpells",
+					"preparedCantrips", "spellSwap", "spellMastery", "signatureSpells",
+					"nestedSpell", "nestedCantrip",
+				].includes(type)
+					? "spells"
+					: ["asi", "feat", "asiOrFeat", "classFeatProgressionFeat"].includes(type)
+						? "improvement"
+						: ["optionalFeatures", "featureChoice", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(type)
+							? "features"
+							: ["originRace", "originBackground"].includes(type) ? "origin" : "configuration";
+		const method = {
+			class: "reverseProgressionClassReceipt",
+			proficiencies: "reverseProgressionProficiencyReceipt",
+			spells: "reverseProgressionSpellReceipt",
+			improvement: "reverseProgressionImprovementReceipt",
+			features: "reverseProgressionFeatureReceipt",
+			origin: "reverseProgressionOriginReceipt",
+			configuration: "reverseProgressionConfigurationReceipt",
+		}[family];
+		if (typeof this._candidateState[method] === "function") return this._candidateState[method](decision);
+		return this._candidateState.reverseProgressionDecisionReceipt?.(decision);
+	}
+
 	_makeDecisionReceipt (decision, selection, state = this._candidateState) {
 		const typeMap = {
 			nestedSkill: "skills",
@@ -351,13 +386,14 @@ class CharacterSheetRespecEngine {
 			// handlers.  The ledger side is removed deepest-first before the parent
 			// is written, preventing stale choices from surviving a replacement.
 			for (const descendant of descendants) {
-				this._candidateState.reverseProgressionDecisionReceipt?.(descendant);
+				this._reverseDecisionReceipt(descendant);
 				const ownerUid = descendant.provenance?.ownerUid || "";
 				const [parentName, parentSource] = ownerUid.split("|");
 				if (parentName) {
 					this._candidateState.removeChosenSubfeature?.(parentName, {
 						parentSource: parentSource || null,
 						level: descendant.classLevel || descendant.characterLevel,
+						sourceDecisionKey: descendant.semanticKey,
 					});
 				}
 
@@ -372,7 +408,7 @@ class CharacterSheetRespecEngine {
 			// parent's compact receipt before applying its replacement. Legacy
 			// editors opt out because their callback performs the historical
 			// teardown itself.
-			if (reverseParent) this._candidateState.reverseProgressionDecisionReceipt?.(stored);
+			if (reverseParent) this._reverseDecisionReceipt(stored);
 			const applyResult = typeof apply === "function"
 				? apply({decision, stored, state: this._candidateState})
 				: null;
@@ -444,6 +480,7 @@ class CharacterSheetRespecEngine {
 			this._setDirty();
 			this.refreshManifest({persist: false});
 			this._assertNoNewUnrepresentedPending(pendingSnapshot, this._manifest);
+			this._persistManifest();
 			return result;
 		} catch (error) {
 			this._candidateState.loadFromJson(stateSnapshot);

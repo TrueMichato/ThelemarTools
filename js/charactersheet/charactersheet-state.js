@@ -9578,9 +9578,34 @@ class CharacterSheetState {
 	 * overlapping grants remain intact.
 	 */
 	reverseProgressionDecisionReceipt (decision) {
+		return this._reverseProgressionDecisionReceiptInner(decision, "generic");
+	}
+
+	_reverseProgressionDecisionReceiptInner (decision, family) {
+		if (!family) return;
 		const sourceId = decision?.semanticKey || decision?.receipt?.sourceDecisionKey;
 		if (!sourceId) return;
 		this.removePendingProgressionChoicesBySourceDecision?.(sourceId);
+		// Materialized descendants are source-owned even when an older save has
+		// no compact receipt. Remove by the stable decision key first; never fall
+		// back to display-name matching, which can tear down an independent
+		// Protector/Thaumaturge/feat instance.
+		const sourceFeatures = (this._data.features || [])
+			.filter(feature => feature.sourceDecisionKey === sourceId);
+		for (const feature of sourceFeatures) this.removeFeature(feature.id);
+		const sourceFeats = (this._data.feats || [])
+			.filter(feat => feat.sourceDecisionKey === sourceId);
+		for (const feat of sourceFeats) this.removeFeat(feat.name, feat.source);
+		this._data.chosenSubfeatures = (this._data.chosenSubfeatures || [])
+			.filter(record => record.sourceDecisionKey !== sourceId);
+		this._data.resources = (this._data.resources || [])
+			.filter(resource => resource.sourceDecisionKey !== sourceId);
+		for (const resourceId of Object.keys(this._data.resourceTurnUsage || {})) {
+			if (!(this._data.resources || []).some(resource => resource.id === resourceId)) {
+				delete this._data.resourceTurnUsage[resourceId];
+			}
+		}
+		this.removeModifiersBySourceDecision?.(sourceId);
 		const ownedKeys = new Set();
 		for (const effect of decision?.receipt?.effects || []) {
 			for (const owned of effect?.type === "ownership" ? effect.ownership || [] : []) {
@@ -9693,31 +9718,46 @@ class CharacterSheetState {
 	}
 
 	reverseProgressionClassReceipt (decision) {
-		return this.reverseProgressionDecisionReceipt(decision);
+		if (decision?.type && !["class", "subclass", "subclassChoice"].includes(decision.type)) return false;
+		return this._reverseProgressionDecisionReceiptInner(decision, "class");
 	}
 
 	reverseProgressionProficiencyReceipt (decision) {
-		return this.reverseProgressionDecisionReceipt(decision);
+		if (decision?.type && ![
+			"skills", "tools", "expertise", "languages", "nestedSkill", "nestedSkillTool",
+			"nestedExpertise", "nestedTool", "nestedLanguage", "nestedSave", "nestedWeapon",
+			"nestedArmor", "nestedResistance", "nestedDamageType",
+		].includes(decision.type)) return false;
+		return this._reverseProgressionDecisionReceiptInner(decision, "proficiencies");
 	}
 
 	reverseProgressionSpellReceipt (decision) {
-		return this.reverseProgressionDecisionReceipt(decision);
+		if (decision?.type && ![
+			"spellbookSpells", "knownSpells", "cantrips", "preparedSpells",
+			"preparedCantrips", "spellSwap", "spellMastery", "signatureSpells",
+			"nestedSpell", "nestedCantrip",
+		].includes(decision.type)) return false;
+		return this._reverseProgressionDecisionReceiptInner(decision, "spells");
 	}
 
 	reverseProgressionImprovementReceipt (decision) {
-		return this.reverseProgressionDecisionReceipt(decision);
+		if (decision?.type && !["asi", "feat", "asiOrFeat", "classFeatProgressionFeat"].includes(decision.type)) return false;
+		return this._reverseProgressionDecisionReceiptInner(decision, "improvement");
 	}
 
 	reverseProgressionFeatureReceipt (decision) {
-		return this.reverseProgressionDecisionReceipt(decision);
+		if (decision?.type && !["optionalFeatures", "featureChoice", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(decision.type)) return false;
+		return this._reverseProgressionDecisionReceiptInner(decision, "features");
 	}
 
 	reverseProgressionOriginReceipt (decision) {
-		return this.reverseProgressionDecisionReceipt(decision);
+		if (decision?.type && !["originRace", "originBackground"].includes(decision.type)) return false;
+		return this._reverseProgressionDecisionReceiptInner(decision, "origin");
 	}
 
 	reverseProgressionConfigurationReceipt (decision) {
-		return this.reverseProgressionDecisionReceipt(decision);
+		if (decision?.type && !["nestedSkillBonus", "nestedAbility", "nestedConfiguration"].includes(decision.type)) return false;
+		return this._reverseProgressionDecisionReceiptInner(decision, "configuration");
 	}
 
 	/**
@@ -19103,22 +19143,6 @@ class CharacterSheetState {
 				parentFeature: choice.featureName,
 			},
 		);
-		this._recordChosenSubfeature({
-			parent: choice.featureName,
-			parentSource: choice.featureSource || null,
-			parentClass: choice.featureClass || null,
-			parentClassSource: choice.featureClassSource || null,
-			level: choice.level != null ? choice.level : null,
-			characterLevel: this._getFeatureChoiceCharacterLevel(choice),
-			name: built.name,
-			source: built.source,
-			sourceDecisionKey: choice.sourceDecisionKey || null,
-		});
-
-		// Record the selected entity before materialising it, then stamp every
-		// resulting feature/resource/modifier with the child decision's source.
-		// This keeps descendant teardown source-specific when a parent has
-		// multiple selected siblings with overlapping names.
 		const childDecision = (this.getLevelHistory?.() || [])
 			.flatMap(entry => entry.decisions || [])
 			.concat(this.getCharacterBase?.()?.decisions || [])
@@ -19128,6 +19152,22 @@ class CharacterSheetState {
 				&& decision.selection?.name === built.name
 				&& decision.selection?.source === built.source,
 			);
+		this._recordChosenSubfeature({
+			parent: choice.featureName,
+			parentSource: choice.featureSource || null,
+			parentClass: choice.featureClass || null,
+			parentClassSource: choice.featureClassSource || null,
+			level: choice.level != null ? choice.level : null,
+			characterLevel: this._getFeatureChoiceCharacterLevel(choice),
+			name: built.name,
+			source: built.source,
+			sourceDecisionKey: childDecision?.semanticKey || choice.sourceDecisionKey || null,
+		});
+
+		// Record the selected entity before materialising it, then stamp every
+		// resulting feature/resource/modifier with the child decision's source.
+		// This keeps descendant teardown source-specific when a parent has
+		// multiple selected siblings with overlapping names.
 		this.addFeature(built, {
 			sourceDecisionKey: childDecision?.semanticKey || choice.sourceDecisionKey || null,
 		});
@@ -19327,17 +19367,6 @@ class CharacterSheetState {
 				sourceDecisionKey: parentInfo.sourceDecisionKey,
 			},
 		);
-		this._recordChosenSubfeature({
-			parent: parentInfo.parent,
-			parentSource: parentInfo.parentSource || null,
-			parentClass: parentInfo.parentClass || null,
-			parentClassSource: parentInfo.parentClassSource || null,
-			level: parentInfo.level != null ? parentInfo.level : null,
-			characterLevel: parentInfo.characterLevel ?? parentInfo.level,
-			name: built.name,
-			source: built.source,
-			sourceDecisionKey: parentInfo.sourceDecisionKey || null,
-		});
 		const childDecision = (this.getLevelHistory?.() || [])
 			.flatMap(entry => entry.decisions || [])
 			.concat(this.getCharacterBase?.()?.decisions || [])
@@ -19347,6 +19376,17 @@ class CharacterSheetState {
 				&& decision.selection?.name === built.name
 				&& decision.selection?.source === built.source,
 			);
+		this._recordChosenSubfeature({
+			parent: parentInfo.parent,
+			parentSource: parentInfo.parentSource || null,
+			parentClass: parentInfo.parentClass || null,
+			parentClassSource: parentInfo.parentClassSource || null,
+			level: parentInfo.level != null ? parentInfo.level : null,
+			characterLevel: parentInfo.characterLevel ?? parentInfo.level,
+			name: built.name,
+			source: built.source,
+			sourceDecisionKey: childDecision?.semanticKey || parentInfo.sourceDecisionKey || null,
+		});
 		this.addFeature(built, {sourceDecisionKey: childDecision?.semanticKey || parentInfo.sourceDecisionKey});
 		return built;
 	}
@@ -19362,7 +19402,16 @@ class CharacterSheetState {
 	 */
 	removeChosenSubfeature (parent, scope = {}) {
 		if (!parent) return [];
-		const {parentSource = null, parentClass = null, parentClassSource = null, level = null, name = null, source = null} = scope;
+		const {
+			parentSource = null,
+			parentClass = null,
+			parentClassSource = null,
+			level = null,
+			name = null,
+			source = null,
+			sourceDecisionKey = null,
+			parentSourceDecisionKey = null,
+		} = scope;
 		const eq = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
 		const recs = (this._data.chosenSubfeatures || []).filter(r =>
 			eq(r.parent, parent)
@@ -19371,7 +19420,9 @@ class CharacterSheetState {
 			&& (parentClassSource == null || eq(r.parentClassSource, parentClassSource))
 			&& (level == null || Number(r.level) === Number(level))
 			&& (name == null || eq(r.name, name))
-			&& (source == null || eq(r.source, source)));
+			&& (source == null || eq(r.source, source))
+			&& (sourceDecisionKey == null || eq(r.sourceDecisionKey, sourceDecisionKey)
+				|| (parentSourceDecisionKey != null && eq(r.sourceDecisionKey, parentSourceDecisionKey))));
 		if (!recs.length) return [];
 		recs.forEach(r => this.removeFeature(r.name, r.source));
 		this._data.chosenSubfeatures = (this._data.chosenSubfeatures || []).filter(r => !recs.includes(r));
@@ -39933,6 +39984,7 @@ class CharacterSheetState {
 				featId: feat.id,
 				registryKey,
 				registryManaged: true,
+				...(feat.sourceDecisionKey ? {sourceDecisionKey: feat.sourceDecisionKey} : {}),
 			});
 			resource = this._data.resources.at(-1);
 		}
@@ -39949,6 +40001,7 @@ class CharacterSheetState {
 		resource.featId = feat.id;
 		resource.registryKey = registryKey;
 		resource.registryManaged = true;
+		if (feat.sourceDecisionKey) resource.sourceDecisionKey = feat.sourceDecisionKey;
 
 		if (effect.type === "triggeredDiePool") {
 			resource.contextualOnly = effect.contextualOnly !== false;
@@ -46272,8 +46325,15 @@ class CharacterSheetState {
 			// such a row SHADOWS the synthetic pool and shows the wrong max (e.g. Indomitable
 			// 2 vs 1 at L9). The synthetic system is the single source of truth.
 			const isSyntheticTracked = CharacterSheetState.isSyntheticTrackedResourceFeature?.(feature.name);
-			// Check if resource already exists
-			const existingResource = this._data.resources.find(r => r.name === feature.name);
+			// Check identity before display name. Two unrelated decisions can grant
+			// same-named pools (notably feat/feature resources); transferring the
+			// old current value by name would leak spent uses across replacement.
+			const existingResource = this._data.resources.find(r =>
+				featureData.sourceDecisionKey
+					? r.sourceDecisionKey === featureData.sourceDecisionKey
+					: (r.featureId === featureData.id
+						|| (!r.sourceDecisionKey && !r.featureId && r.name === feature.name)),
+			);
 			if (!existingResource && !isRedundantRider && !isSyntheticTracked) {
 				this.addResource({
 					name: feature.name,
@@ -48854,6 +48914,9 @@ class CharacterSheetState {
 			id: CryptUtil.uid(),
 			name: feat.name,
 			source: feat.source,
+			...(opts.sourceDecisionKey || feat.sourceDecisionKey
+				? {sourceDecisionKey: opts.sourceDecisionKey || feat.sourceDecisionKey}
+				: {}),
 			description: description,
 			additionalSpells: feat.additionalSpells, // Preserve for spell processing
 			category: feat.category || null,
@@ -48897,6 +48960,7 @@ class CharacterSheetState {
 					max: uses.max,
 					recharge: uses.recharge,
 					featId: featData.id,
+					...(featData.sourceDecisionKey ? {sourceDecisionKey: featData.sourceDecisionKey} : {}),
 				});
 			}
 		}
@@ -48989,9 +49053,17 @@ class CharacterSheetState {
 		// Remove associated resource if it was auto-added
 		if (feat) {
 			const resourceIdsToRemove = this._data.resources
-				.filter(r => r.featId === feat.id || r.name === feat.name)
+				.filter(r => r.featId === feat.id
+					|| (feat.sourceDecisionKey
+						? r.sourceDecisionKey === feat.sourceDecisionKey
+						: r.name === feat.name))
 				.map(r => r.id);
-			this._data.resources = this._data.resources.filter(r => r.featId !== feat.id && r.name !== feat.name);
+			this._data.resources = this._data.resources.filter(r =>
+				r.featId !== feat.id
+				&& (feat.sourceDecisionKey
+					? r.sourceDecisionKey !== feat.sourceDecisionKey
+					: r.name !== feat.name),
+			);
 			for (const resourceId of resourceIdsToRemove) delete this._data.resourceTurnUsage?.[resourceId];
 			// Remove associated modifiers
 			this.removeModifiersByFeature(feat.id);

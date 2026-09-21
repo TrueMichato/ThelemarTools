@@ -1,4 +1,4 @@
-# Nested Respec choices — iteration 3 report
+# Nested Respec choices — iteration 4 report
 
 ## Implementation commit
 
@@ -12,7 +12,7 @@ The required ancestry is preserved in order:
 `aa763de9`, `05bfcbe2`, `1c581363`, and `2ee6c6df`.
 The goal file is intentionally unmodified and untracked.
 
-## Delivered contract
+## Implemented and verified in this iteration
 
 - The production choice census requires every reachable required `choose` or
   `options` shape to yield a legal descriptor/catalog or an explicit reviewed
@@ -40,9 +40,10 @@ The goal file is intentionally unmodified and untracked.
   replacement; legal children are retained by semantic identity; failures
   restore both candidate JSON and manifest.
 - The executable adapter closure runs against the loaded Respec and State
-  prototypes rather than accepting an unavailable-prototype bypass. Existing
-  unknown pending queues warn without blocking, while a mutation-created
-  unrepresented pending item is rejected and rolled back.
+  prototypes rather than accepting an unavailable-prototype bypass. Family
+  routing now validates the concrete mechanics family before execution.
+  Existing unknown pending queues warn without blocking, while a
+  mutation-created unrepresented pending item is rejected and rolled back.
 - Ownership and reversal cover skills, expertise, tools, languages, saves,
   weapons, armor, resistances, spells, cantrips, features, modifiers,
   resources, scalar ability effects, and configuration receipts. Overlapping
@@ -56,27 +57,24 @@ The goal file is intentionally unmodified and untracked.
   Page-object helpers target named decisions, preserve candidate isolation, and
   retain the mobile toolbar/action contract.
 
-## Validation
+## Validation status
 
-- Focused nested Jest gate: **PASS**, 4 suites / 60 tests.
-- Full Character Sheet Jest gate: **PASS**, 547 suites passed, 2 skipped;
-  16,248 tests passed, 208 skipped.
-- JavaScript lint: **PASS**.
-- CSS lint: **PASS**.
-- JSON/schema validation: **PASS**.
-- Production descriptor census and negative-control restoration: **PASS**.
-- Focused Respec Playwright on a fresh port: **PASS**, 3 tests.
-- Arcana Domain Cleric comprehensive browser coverage: **PASS**.
-- Arcana Domain Cleric `RUN_MEGA=1`: **PASS**, including the previously
-  failing Arcane Initiate milestone.
-- `npm run test:data`: **KNOWN BASELINE FAILURE** only in unchanged generated
-  links under `data/crafting.json` (COMCRAF, HHHVI, TGTT Identify, and
-  Arcadia cooking references). The Respec work does not alter or suppress this
-  repository-wide data baseline.
+- Focused nested Jest gate: **PASS** after the iteration-4 ownership,
+  resource, receipt, migration-fixture, and adapter-routing changes.
+- The full Character Sheet Jest gate, fresh-port Playwright matrix,
+  comprehensive TGTT/MEGA matrix, JavaScript/CSS/data/tags/schema gates, and
+  fresh-browser verification are **NOT YET RUN in this iteration** and must
+  not be represented as passing.
+- The production descriptor census, including the fixed-spell and
+  Human/Acolyte regressions, has targeted coverage. The required
+  mutate/fail/restore negative-control run remains to be recorded separately.
 
-## Explicit scope note
+## Explicit incomplete items
 
-No in-scope nested Respec implementation item is intentionally left as a
-follow-up. The only red gate is the documented, pre-existing crafting-data
-link baseline, which is outside the approved Respec scope and remains visible
-to maintainers.
+The implementation still requires the complete named apply/reverse,
+ambiguity/pending, origin/controller, edition-exact catalog, modal-count,
+390×844 browser, and full quality-gate matrix from the authoritative plan.
+Until those commands and the fresh-port browser checks are run and recorded,
+this report is intentionally not a closure claim. No baseline failure has
+been reclassified as unrelated because the complete gate set has not yet been
+executed for this iteration.

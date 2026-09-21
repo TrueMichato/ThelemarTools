@@ -317,12 +317,13 @@ ambiguous status, and Review lists actionable discovery diagnostics. The
 candidate remains isolated until Apply; Cancel, failed-save rollback, reload,
 and one-step Undo operate on the same serialized snapshot.
 
-The current `npm run test:data` failure is an unrelated repository data
-baseline in `data/crafting.json`: unresolved links to `Identify|TGTT`,
-`Crafting Material Descriptions|COMCRAF`, HHHVI spirit paper/enchanted vial and
-diseases, and Arcadia11 broth/fats/Cooking. The command is still run as a
-required gate; these pre-existing links are documented here rather than
-silenced or changed as part of the Character Sheet Respec scope.
+The current `npm run test:data` and `npm run test:tags` failures are unrelated
+repository data baselines in `data/crafting.json` and
+`data/bestiary/monstergroups.json`: the validators report unresolved links in
+those files, including COMCRAF, HHHVI, TGTT, and Arcadia references. The
+commands are still run as required gates; these pre-existing links are
+documented here rather than silenced or changed as part of the Character Sheet
+Respec scope.
 
 ## Iteration 3 implementation and verification
 
@@ -359,13 +360,14 @@ mutation which must fail before restoring the real descriptor path.
 
 The focused browser suite targets Divine Order → Thaumaturge by identity,
 checks the cantrip mechanic in the isolated candidate, and covers the existing
-Cancel/Apply/reload/Undo and 390×844 action contract. Arcana Domain Cleric
-comprehensive and `RUN_MEGA=1` runs pass on fresh ports. The focused and full
-Character Sheet Jest suites, JavaScript/CSS/JSON gates, and production census
-pass.
+Cancel/Apply/reload and 390×844 action contract. The focused and full Character
+Sheet Jest suites, JavaScript/CSS/JSON gates, and production census pass.
+The fresh-port TGTT `RUN_MEGA=1` matrix is still in progress for this
+iteration; its final result must be recorded before any closure claim.
 
-`npm run test:data` remains red only for the pre-existing generated-link
-baseline in `data/crafting.json` (COMCRAF, HHHVI, TGTT Identify, and Arcadia
-references). No source-data or schema suppression was added; fixing those
-unrelated links is outside this Respec change and is recorded as an explicit
-repository baseline rather than hidden.
+`npm run test:data` and `npm run test:tags` remain red for the pre-existing
+generated-link baseline in `data/crafting.json` and
+`data/bestiary/monstergroups.json` (including COMCRAF, HHHVI, TGTT, and
+Arcadia references). No source-data or schema suppression was added; fixing
+those unrelated links is outside this Respec change and is recorded as an
+explicit repository baseline rather than hidden.

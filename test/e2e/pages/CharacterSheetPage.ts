@@ -416,13 +416,16 @@ export class CharacterSheetPage {
 	async stageFirstNestedRespecChoice (): Promise<void> {
 		const nested = await this.getRespecNestedDecisionSnapshot();
 		if (!nested.length) throw new Error("No nested Respec decision was discovered.");
-		const decision = nested.find(item => /cantrip/i.test(item.label) && item.effectiveOptionCount > 0)
-			|| nested.find(item => item.effectiveOptionCount > 0 && item.status !== "resolved")
+		const unresolved = nested.filter(item => item.status === "missing" || item.status === "invalid");
+		const decision = unresolved.find(item => /cantrip/i.test(item.label) && item.effectiveOptionCount > 0)
+			|| unresolved.find(item => item.effectiveOptionCount > 0)
 			|| nested.find(item => item.effectiveOptionCount > 0)
 			|| nested[0];
-		const level = this.page.locator(`.charsheet__level-entry[data-level="${decision.characterLevel}"]`);
-		await level.locator(".charsheet__level-entry-edit").click();
-		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: decision.label}).last();
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decision.id}"]`);
+		if (!await row.isVisible()) {
+			const level = this.page.locator(`.charsheet__level-entry[data-level="${decision.characterLevel}"]`);
+			await level.locator(".charsheet__level-entry-edit").click();
+		}
 		await row.locator("button", {hasText: "Change"}).click();
 		const inlineEditor = this.page.locator(".charsheet__respec-nested-editor-host .charsheet__respec-decision-editor");
 		await expect(inlineEditor).toBeVisible();
@@ -432,20 +435,38 @@ export class CharacterSheetPage {
 		if (!inputCount) {
 			throw new Error(`Nested decision "${decision.label}" has no legal UI options: ${JSON.stringify(nested)}`);
 		}
-		for (let i = 0; i < inputCount; i++) {
-			if (await inputs.nth(i).isEnabled()) {
-				await inputs.nth(i).check();
-				break;
+		const editionExact = inlineEditor.locator('.charsheet__respec-option input[data-source="XPHB"]:enabled').first();
+		if (await editionExact.count()) {
+			await editionExact.check();
+		} else {
+			for (let i = 0; i < inputCount; i++) {
+				if (await inputs.nth(i).isEnabled()) {
+					await inputs.nth(i).check();
+					break;
+				}
 			}
 		}
 		await inlineEditor.locator("button", {hasText: "Stage Choice"}).click();
 	}
 
-	async stageNestedRespecChoice (label: string, optionName: string): Promise<void> {
+	async stageAllMissingNestedRespecChoices (): Promise<void> {
+		for (let attempt = 0; attempt < 12; attempt++) {
+			const missing = (await this.getRespecNestedDecisionSnapshot())
+				.filter(decision => decision.status === "missing" && decision.effectiveOptionCount > 0);
+			if (!missing.length) return;
+			await this.stageFirstNestedRespecChoice();
+			// Staging refreshes the candidate manifest while the current level
+			// modal remains open; reopen it before resolving the next child.
+			await this.closeRespecLevelEditor();
+		}
+		throw new Error("Nested Respec choices did not converge after 12 staged decisions.");
+	}
+
+	async stageNestedRespecChoice (label: string, optionName: string, optionSource?: string): Promise<void> {
 		const nested = await this.getRespecNestedDecisionSnapshot();
 		const decision = nested.find(item => item.label === label);
 		if (!decision) throw new Error(`No nested Respec decision named "${label}" was discovered.`);
-		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: label}).last();
+		const row = this.page.locator(`.charsheet__respec-choice-row[data-decision-id="${decision.id}"]`);
 		if (!await row.isVisible()) {
 			const level = this.page.locator(`.charsheet__level-entry[data-level="${decision.characterLevel}"]`);
 			await level.locator(".charsheet__level-entry-edit").click();
@@ -453,7 +474,10 @@ export class CharacterSheetPage {
 		await row.locator("button", {hasText: "Change"}).click();
 		const inlineEditor = this.page.locator(".charsheet__respec-nested-editor-host .charsheet__respec-decision-editor");
 		await expect(inlineEditor).toBeVisible();
-		await inlineEditor.locator(".charsheet__respec-option").filter({hasText: optionName}).first().locator("input").check();
+		const option = inlineEditor.locator(".charsheet__respec-option").filter({hasText: optionName})
+			.filter(optionSource ? {has: inlineEditor.locator(`input[data-source="${optionSource}"]`)} : {})
+			.first();
+		await option.locator("input").check();
 		await inlineEditor.locator("button", {hasText: "Stage Choice"}).click();
 	}
 
@@ -462,11 +486,34 @@ export class CharacterSheetPage {
 		await entry.locator(".charsheet__level-entry-edit").click();
 		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: featureName}).last();
 		await row.locator("button", {hasText: "Change"}).click();
+		await expect(this.page.locator(".ve-ui-modal__overlay:visible")).toHaveCount(1);
 		const item = this.page.locator(".charsheet__respec-feat-item").filter({hasText: optionName}).last();
 		await expect(item).toBeVisible();
 		await item.click();
 		await this.page.locator("button").filter({hasText: "Apply Changes"}).last().click();
+		// The parent level editor remains open; the nested choice must be
+		// applied inline without introducing a second modal.
+		await expect(this.page.locator(".ve-ui-modal__overlay:visible")).toHaveCount(1);
+	}
+
+	async closeRespecLevelEditor (): Promise<void> {
+		await this.page.locator(".charsheet__respec-modal button", {hasText: "Close"}).click();
 		await expect(this.page.locator(".ve-ui-modal__overlay:visible")).toHaveCount(0);
+	}
+
+	async reloadCharacterSheet (): Promise<void> {
+		const characterId = await this.page.evaluate(() => (globalThis as any).charSheet?._currentCharacterId);
+		await this.page.reload({waitUntil: "domcontentloaded"});
+		await this.page.locator("#charsheet-tab-overview, #charsheet-tab-main").first().waitFor({state: "visible"});
+		if (characterId) {
+			const selector = this.page.locator("#charsheet-sel-character");
+			await selector.locator(`option[value="${characterId}"]`).waitFor({state: "attached"});
+			await selector.selectOption(characterId);
+		}
+		await this.page.waitForFunction(() => {
+			const cs: any = (globalThis as any).charSheet;
+			return Boolean(cs?._state?.getLevelHistory?.()?.length);
+		});
 	}
 
 	async getRespecMechanicsSnapshot (): Promise<{

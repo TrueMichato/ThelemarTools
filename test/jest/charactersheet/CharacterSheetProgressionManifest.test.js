@@ -1,7 +1,13 @@
+import fs from "node:fs";
+import path from "node:path";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-progression.js";
 
 const CharacterSheetProgression = globalThis.CharacterSheetProgression;
+const PRE_CHILD_FIXTURES = JSON.parse(fs.readFileSync(
+	path.resolve(process.cwd(), "test/jest/charactersheet/fixtures/nested-respec-pre-child-ledger.json"),
+	"utf8",
+));
 
 const getPage = (opts = {}) => {
 	const fighter = {
@@ -123,6 +129,37 @@ const getState = ({
 });
 
 describe("CharacterSheetProgression manifest", () => {
+	it("migrates every frozen pre-child-ledger family without losing evidence", () => {
+		for (const [name, fixture] of Object.entries(PRE_CHILD_FIXTURES.cases)) {
+			if (fixture.base) {
+				const result = CharacterSheetProgression.reconcileCharacterBaseWithManifest({
+					base: fixture.manifest.base,
+					characterBase: fixture.base,
+				});
+				expect(result.decisions.find(item => item.semanticKey === fixture.base.decisions[0].semanticKey))
+					.toMatchObject({
+						selection: fixture.base.decisions[0].selection,
+						receipt: fixture.base.decisions[0].receipt,
+					});
+				continue;
+			}
+			const result = CharacterSheetProgression.reconcileHistoryWithManifest({
+				history: fixture.history,
+				manifest: fixture.manifest,
+			});
+			const expected = fixture.history.flatMap(entry => entry.decisions || []);
+			const decisions = result.flatMap(entry => entry.decisions || []);
+			for (const prior of expected) {
+				expect(decisions.find(item => item.semanticKey === prior.semanticKey)).toMatchObject({
+					selection: prior.selection,
+					status: prior.status,
+				});
+			}
+			if (name === "pending-policy") {
+				expect(result[0].pendingFeatureChoices).toHaveLength(1);
+			}
+		}
+	});
 	it("does not duplicate legacy prepared cantrips as known cantrips", () => {
 		const decisions = CharacterSheetProgression.projectLegacyChoices({
 			level: 1,
@@ -153,6 +190,47 @@ describe("CharacterSheetProgression manifest", () => {
 
 		expect(startingSkills).toMatchObject({characterLevel: 1, required: true, status: "missing", count: 2});
 		expect(asiOrFeat).toMatchObject({characterLevel: 4, required: true, status: "missing"});
+	});
+
+	it("persists Human origin choices in the base ledger and recovers the selected origin feat", () => {
+		const human = {
+			name: "Human",
+			source: "XPHB",
+			skillProficiencies: [{any: 1}],
+			feats: [{anyFromCategory: {category: ["O"], count: 1}}],
+		};
+		const feats = [
+			{name: "Alert", source: "XPHB", category: "O"},
+			{name: "Crafter", source: "XPHB", category: "O"},
+		];
+		const page = getPage({feats});
+		const base = {
+			raceUserChoices: {selectedSkills: ["arcana"]},
+			backgroundUserChoices: {},
+		};
+		const state = {
+			...getState({
+				classes: [{name: "Fighter", source: "XPHB", level: 1}],
+				history: [{level: 1, class: {name: "Fighter", source: "XPHB"}, choices: {}}],
+				race: human,
+			}),
+			getCharacterBase: () => base,
+			getOriginFeat: () => ({name: "Alert", source: "XPHB", isOriginFeat: true}),
+		};
+		const manifest = CharacterSheetProgression.buildManifest({
+			page: {...page, getRace: () => human},
+			state: {...state, getRace: () => human},
+		});
+		expect(manifest.base.decisions.some(decision =>
+			decision.scope === "origin" && decision.type === "nestedSkill" && decision.selection?.[0] === "arcana",
+		)).toBe(true);
+		expect(manifest.base.decisions.some(decision =>
+			decision.scope === "origin" && decision.type === "nestedFeat"
+				&& decision.selection?.name === "Alert" && decision.selection?.source === "XPHB",
+		)).toBe(true);
+		expect(manifest.decisions.filter(decision => decision.scope === "origin")).toEqual(
+			expect.arrayContaining([expect.objectContaining({semanticKey: expect.stringMatching(/^base:race:human-xphb:/)})]),
+		);
 	});
 
 	it("surfaces skipped class feat-progression choices and filters illegal feats", () => {

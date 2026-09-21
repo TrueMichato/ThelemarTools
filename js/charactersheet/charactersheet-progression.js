@@ -482,6 +482,19 @@ class CharacterSheetProgression {
 				};
 			}
 		}
+		// 2024 species origin-feat choices are materialized in the state as the
+		// origin feat itself, rather than in the legacy race-choice map. Use that
+		// exact feat identity as the selection for an anyFromCategory descriptor
+		// so Human's Origin Feat remains editable after save/reload.
+		if (descriptor.kind === "feat") {
+			const originFeat = state?.getOriginFeat?.();
+			if (originFeat?.name) {
+				return {
+					name: originFeat.name,
+					...(originFeat.source ? {source: originFeat.source} : {}),
+				};
+			}
+		}
 		return values.length ? values : null;
 	}
 
@@ -588,7 +601,9 @@ class CharacterSheetProgression {
 		descriptors = descriptors.map(descriptor =>
 			CharacterSheetProgression._filterDescriptorOptionsForLevel(descriptor, levelInfo?.classLevel),
 		);
-		const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity);
+		const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity, {
+			feats: page?.getFeats?.() || [],
+		});
 		for (const unsupported of census?.entries?.filter(entry =>
 			entry.classification === "unclassified" && entry.required !== false,
 		) || []) {
@@ -685,6 +700,7 @@ class CharacterSheetProgression {
 				options: descriptor.options,
 				selection,
 				status: exact?.status || null,
+				receipt: exact?.receipt || null,
 				isValid,
 				meta: {descriptorRules: descriptor.rules},
 				scope,
@@ -773,6 +789,7 @@ class CharacterSheetProgression {
 				count: 1,
 				options: [{name: entity.name, source: entity.source}],
 				selection: entityStored?.selection || {name: entity.name, source: entity.source},
+				receipt: entityStored?.receipt || null,
 				scope: "origin",
 				semanticKeyOverride: entityKey,
 				rootSemanticKey: entityKey,
@@ -796,7 +813,9 @@ class CharacterSheetProgression {
 				subclassFeatures: page?.getSubclassFeatures?.() || [],
 				optionalFeatures: page?.getOptionalFeatures?.() || [],
 			});
-			const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity);
+			const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity, {
+				feats: page?.getFeats?.() || [],
+			});
 			for (const unsupported of census?.entries?.filter(entry =>
 				entry.classification === "unclassified" && entry.required !== false,
 			) || []) {
@@ -864,6 +883,7 @@ class CharacterSheetProgression {
 					required: descriptor.required && !isUnassignedLegacyAbility,
 					options: descriptor.options,
 					selection: selectedFallback,
+					receipt: storedBasePool.get(key)?.find(item => item.selection != null)?.receipt || null,
 					meta: {descriptorRules: descriptor.rules},
 					scope: "origin",
 					semanticKeyOverride: key,
@@ -1764,6 +1784,7 @@ class CharacterSheetProgression {
 				status: matched.status === "ambiguous" || (matched.status === "deferred" && matched.selection == null)
 					? matched.status
 					: null,
+				receipt: storedPool.get(semanticKey)?.find(item => item.selection != null)?.receipt || null,
 				isValid,
 			});
 			decisions.push(decision);
@@ -2455,8 +2476,107 @@ class CharacterSheetProgression {
 	static syncCanonicalDecisions ({page, state} = {}) {
 		if (!page || !state) return null;
 		const manifest = CharacterSheetProgression.buildManifest({page, state});
+		CharacterSheetProgression._stampAcquisitionReceipts(manifest, state);
 		state.setProgressionManifest?.(manifest);
 		return manifest;
+	}
+
+	static _stampAcquisitionReceipts (manifest, state) {
+		const typeMap = {
+			skills: "skills",
+			tools: "tools",
+			expertise: "expertise",
+			languages: "languages",
+			knownSpells: "spells",
+			preparedSpells: "spells",
+			spellbookSpells: "spells",
+			cantrips: "cantrips",
+			preparedCantrips: "cantrips",
+			nestedSkill: "skills",
+			nestedSkillTool: "skills",
+			nestedExpertise: "expertise",
+			nestedTool: "tools",
+			nestedLanguage: "languages",
+			nestedSave: "saves",
+			nestedWeapon: "weapons",
+			nestedArmor: "armor",
+			nestedResistance: "resistances",
+			nestedDamageType: "resistances",
+		};
+		const valuesOf = selection => selection == null ? [] : (Array.isArray(selection) ? selection : [selection]);
+		const effectsFor = decision => {
+			const effects = [];
+			const values = valuesOf(decision.selection);
+			const ownershipType = typeMap[decision.type];
+			if (["nestedAbility", "nestedConfiguration"].includes(decision.type) && values.length) {
+				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
+				effects.push(...values.map(value => ({
+					type: decision.type === "nestedAbility" ? "abilityDelta" : "configuration",
+					sourceDecisionKey: decision.semanticKey,
+					ability: decision.type === "nestedAbility" ? String(value) : undefined,
+					amount: decision.type === "nestedAbility" ? amount : undefined,
+					before: decision.type === "nestedAbility"
+						? decision.meta?.receiptPreviousAbility?.[String(value || "").toLowerCase()]
+						: undefined,
+					value: decision.type === "nestedConfiguration" ? value : undefined,
+				})));
+			}
+			if (ownershipType && values.length) {
+				effects.push({
+					type: "ownership",
+					ownership: values.map(value => {
+						if (decision.type !== "nestedSkillTool" || !value || typeof value !== "object") {
+							return {type: ownershipType, value};
+						}
+						const kind = String(value.kind || "").toLowerCase();
+						return {
+							type: kind === "tool" ? "tools" : kind === "language" ? "languages" : "skills",
+							value: value.value ?? value.name ?? value,
+						};
+					}),
+				});
+			}
+			const featureIds = new Set((state.getFeatures?.() || [])
+				.filter(feature => feature.sourceDecisionKey === decision.semanticKey)
+				.map(feature => feature.id));
+			const features = (state.getFeatures?.() || [])
+				.filter(feature => featureIds.has(feature.id))
+				.map(feature => ({id: feature.id, name: feature.name, source: feature.source}));
+			const modifiers = [
+				...(state._data?.modifiers || []),
+				...(state._data?.namedModifiers || []),
+			]
+				.filter(modifier => featureIds.has(modifier.featureId) || modifier.sourceDecisionKey === decision.semanticKey)
+				.map(modifier => ({
+					id: modifier.id,
+					featureId: modifier.featureId,
+					sourceDecisionKey: modifier.sourceDecisionKey,
+				}));
+			const resources = (state.getResources?.() || [])
+				.filter(resource => resource.sourceDecisionKey === decision.semanticKey || featureIds.has(resource.featureId))
+				.map(resource => ({id: resource.id, name: resource.name, sourceDecisionKey: resource.sourceDecisionKey, featureId: resource.featureId}));
+			if (features.length || modifiers.length || resources.length) {
+				effects.push({type: "materialized", features, resources, modifiers});
+			}
+			if (["nestedSpell", "nestedCantrip", "knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips"].includes(decision.type) && values.length) {
+				effects.push({
+					type: "spells",
+					spellType: ["nestedCantrip", "cantrips", "preparedCantrips"].includes(decision.type) ? "cantrips" : "spells",
+					spells: values
+						.filter(value => value && typeof value === "object" && value.name)
+						.map(value => ({name: value.name, source: value.source})),
+				});
+			}
+			return effects;
+		};
+		for (const decision of manifest.decisions || []) {
+			if (decision.selection == null || decision.receipt) continue;
+			decision.receipt = {
+				version: 1,
+				sourceDecisionKey: decision.semanticKey,
+				effects: effectsFor(decision),
+			};
+		}
 	}
 
 	static reconcileHistoryWithManifest ({history, manifest}) {
@@ -2479,10 +2599,23 @@ class CharacterSheetProgression {
 			entry.ledgerVersion = CharacterSheetProgression.LEDGER_VERSION;
 			entry.manifestVersion = CharacterSheetProgression.MANIFEST_VERSION;
 			entry.manifestComplete = true;
-			const generatedDecisions = (level.decisions || []).map(decision => CharacterSheetProgression.normalizeDecision({
-				...decision,
-				options: [],
-			}, entry));
+			const priorByKey = new Map((entry.decisions || []).map(decision => [decision.semanticKey, decision]));
+			const generatedDecisions = (level.decisions || []).map(decision => {
+				const prior = priorByKey.get(decision.semanticKey);
+				// Legal catalogs are transient, but selections, statuses,
+				// provenance, and especially compact receipts are durable. Merge
+				// those fields from the existing ledger instead of replacing them
+				// with the discovery projection's null receipt.
+				return CharacterSheetProgression.normalizeDecision({
+					...decision,
+					options: [],
+					selection: prior?.selection ?? decision.selection,
+					status: prior?.status ?? decision.status,
+					meta: {...(decision.meta || {}), ...(prior?.meta || {})},
+					provenance: prior?.provenance || decision.provenance,
+					receipt: prior?.receipt || decision.receipt || null,
+				}, entry);
+			});
 			const generatedKeys = new Set(generatedDecisions.map(decision => decision.semanticKey));
 			const preservedUnknown = (entry.decisions || [])
 				.filter(decision => !CharacterSheetProgression.getDecisionAdapter(decision.type))
@@ -2497,11 +2630,20 @@ class CharacterSheetProgression {
 	static reconcileCharacterBaseWithManifest ({base, characterBase}) {
 		const out = CharacterSheetProgression._copy(characterBase || {});
 		out.v = Number(out.v) || 1;
-		const generatedDecisions = (base?.decisions || []).map(decision => CharacterSheetProgression.normalizeDecision({
-			...decision,
-			options: [],
-			scope: "origin",
-		}));
+		const priorByKey = new Map((out.decisions || []).map(decision => [decision.semanticKey, decision]));
+		const generatedDecisions = (base?.decisions || []).map(decision => {
+			const prior = priorByKey.get(decision.semanticKey);
+			return CharacterSheetProgression.normalizeDecision({
+				...decision,
+				options: [],
+				scope: "origin",
+				selection: prior?.selection ?? decision.selection,
+				status: prior?.status ?? decision.status,
+				meta: {...(decision.meta || {}), ...(prior?.meta || {})},
+				provenance: prior?.provenance || decision.provenance,
+				receipt: prior?.receipt || decision.receipt || null,
+			});
+		});
 		const generatedKeys = new Set(generatedDecisions.map(decision => decision.semanticKey));
 		const preservedUnknown = (out.decisions || [])
 			.filter(decision => !CharacterSheetProgression.getDecisionAdapter(decision.type))
