@@ -106,16 +106,17 @@ Old saves are normalized on load.
 
 - Exact recorded history becomes a resolved decision.
 - A uniquely reconstructable state value may be attached to its opportunity.
-- Legacy spells on a single spellcasting class are assigned across acquisition
-  levels as an aggregate legal set. Lower-level spells are assigned first and
-  every resulting level must satisfy the spell-level and class-list rules.
+- A legacy known caster with materialized class spells but no recorded
+  acquisition choices receives one current-repertoire decision for leveled
+  spells and one for cantrips. Respec does not fabricate acquisition levels
+  from the final spell list. Each cumulative decision owns its exact set so a
+  replacement removes only that class decision's old spell.
+- Recorded acquisition or replacement history still produces level-specific
+  decisions and is validated against the spell level available at that level.
 - A pre-manifest character with no tracked class spells or cantrips is treated
   as having left spell tracking unused. Its historical spell-acquisition rows
   remain explicitly deferred instead of blocking an unrelated Respec. The
   deferred marker is persisted so reopening Respec remains stable.
-- This exception applies only to wholly untracked legacy spell progression.
-  Once any class spell or cantrip is present, incomplete or illegal aggregate
-  selections remain required repair items.
 - Uncertain values remain `ambiguous`; Respec does not invent a historical
   choice.
 - Values with no recorded progression source are preserved rather than removed.
@@ -258,20 +259,29 @@ Wizard daily preparation and other freely replaceable runtime loadouts are not
 progression decisions. Legal spell options are filtered by class/subclass list
 and by the maximum spell level available at the acquisition level.
 
-When a legal aggregate reconstruction is possible, it is accepted
-automatically. If real choices are missing, Review groups all unresolved spell
-decisions into one repair item. The spell-repair flow walks them in acquisition
-order, prevents assigning the same permanent spell to two levels, and keeps
-partially completed work in the candidate when the player chooses **Finish
-later**. Pre-manifest characters which never used class spell tracking retain
-those empty spell rows as deferred; they are not forced to invent twenty levels
-of historical spell picks before applying an unrelated change.
+Modern saves and legacy saves with genuine acquisition evidence retain
+level-specific decisions. A legacy known caster whose save contains only the
+final repertoire instead gets a stable cumulative editor at the current class
+level. The editor validates the complete set, applies source-owned set
+differences, and round-trips through Apply, reload, Cancel, and one-step Undo.
+For a 2024 Bard at level 10 or later, the leveled-spell opportunity also admits
+the Cleric, Druid, and Wizard lists granted by Magical Secrets. Cantrips keep
+their own list rules.
+
+If real level-specific choices are missing, Review groups unresolved spell
+decisions into one repair item. The spell-repair flow prevents assigning the
+same permanent spell to two levels and keeps partially completed work in the
+candidate when the player chooses **Finish later**. Pre-manifest characters
+which never used class spell tracking retain empty spell rows as deferred; they
+are not forced to invent twenty levels of historical spell picks before
+applying an unrelated change.
 
 ## Tests
 
 Focused Jest contracts live in:
 
 - `CharacterSheetProgressionManifest.test.js`
+- `CharacterSheetRespecBardSpells.test.js`
 - `CharacterSheetRespecEngine.test.js`
 - `CharacterSheetRespecWorkspace.test.js`
 - the existing `CharacterSheetRespec*.test.js` regression suites

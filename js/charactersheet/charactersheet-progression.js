@@ -1733,6 +1733,30 @@ class CharacterSheetProgression {
 		return classHistory.every(entry => entry.manifestComplete !== true);
 	}
 
+	static _isLegacyCumulativeSpellProgression ({className, classSource, history, spellPool}) {
+		if (!Object.values(spellPool || {}).some(spells => spells?.length)) return false;
+		const classUid = CharacterSheetProgression.getClassUid(className, classSource);
+		const classHistory = (history || []).filter(entry =>
+			CharacterSheetProgression.getClassUid(entry?.class) === classUid,
+		);
+		if (!classHistory.length) return false;
+
+		const acquisitionTypes = new Set(["knownSpells", "cantrips"]);
+		if (classHistory.some(entry =>
+			(entry.decisions || []).some(decision =>
+				acquisitionTypes.has(decision.type) && decision.meta?.legacyCumulative,
+			),
+		)) return true;
+
+		const hasRecordedAcquisition = classHistory.some(entry =>
+			["knownSpells", "knownCantrips", "cantrips", "spellSwap", "spellSwaps"].some(key => {
+				const value = entry.choices?.[key];
+				return Array.isArray(value) ? value.length : value != null;
+			}),
+		);
+		return !hasRecordedAcquisition;
+	}
+
 	static _getExistingSelection ({
 		storedPool,
 		semanticKey,
@@ -1972,8 +1996,29 @@ class CharacterSheetProgression {
 				history: normalizedHistory,
 				spellPool,
 			});
+			const spellModel = CharacterSheetClassUtils.getClassSpellcastingModel({
+				name: classData.name,
+				source: classData.source,
+				classData,
+			});
+			const isLegacyCumulativeSpellProgression = spellModel === "known"
+				&& CharacterSheetProgression._isLegacyCumulativeSpellProgression({
+					className: classData.name,
+					classSource: classData.source,
+					history: normalizedHistory,
+					spellPool,
+				});
+			const isLegacyCumulativeSpellLevel = isLegacyCumulativeSpellProgression
+				&& Number(levelInfo.classLevel) === Number(stateClass?.level);
+			const progressionAdditionalClassNames = CharacterSheetClassUtils.getProgressionAdditionalSpellListClassNames({
+				className: classData.name,
+				classSource: classData.source,
+				classLevel: levelInfo.classLevel,
+				subclass,
+				subclassChoice: stateClass?.subclassChoice,
+			});
 			const allSpellOptions = page?.getFilteredSpellData?.() || page?.getSpells?.() || [];
-			const getLegalSpellOptions = maxSpellLevel => allSpellOptions.filter(spell => {
+			const getLegalSpellOptions = (maxSpellLevel, {includeProgressionAdditionalLists = false} = {}) => allSpellOptions.filter(spell => {
 				if (!Number.isFinite(Number(spell.level))) return false;
 				if (maxSpellLevel === 0 ? Number(spell.level) !== 0 : (Number(spell.level) < 1 || Number(spell.level) > maxSpellLevel)) return false;
 				return CharacterSheetClassUtils.spellIsAvailableForClass(spell, {
@@ -1981,6 +2026,7 @@ class CharacterSheetProgression {
 					classSource: classData.source,
 					subclass,
 					subclassChoice: stateClass?.subclassChoice,
+					additionalClassNames: includeProgressionAdditionalLists ? progressionAdditionalClassNames : [],
 					includeCoreSpellsForHomebrew: !["PHB", "XPHB"].includes(classData.source),
 				});
 			});
@@ -2336,12 +2382,52 @@ class CharacterSheetProgression {
 			});
 
 			const isWizard = CharacterSheetProgression._normalize(classData.name) === "wizard";
-			const spellModel = CharacterSheetClassUtils.getClassSpellcastingModel({
-				name: classData.name,
-				source: classData.source,
-				classData,
-			});
-			if (isWizard) {
+			if (isLegacyCumulativeSpellLevel) {
+				const currentCantrips = CharacterSheetClassUtils.getCantripsAtLevel(classData, classData.name, levelInfo.classLevel);
+				if (currentCantrips > 0) {
+					addDecision(levelInfo, {
+						type: "cantrips",
+						label: "Current Cantrip Repertoire",
+						sourceKey: "legacy-cantrip-repertoire",
+						count: currentCantrips,
+						options: getLegalSpellOptions(0),
+						fallbackSelection: (spellPool?.cantrips || []).map(spell => ({
+							name: spell.name,
+							source: spell.source,
+							level: 0,
+						})),
+						fallbackStatus: "resolved",
+						meta: {
+							maxSpellLevel: 0,
+							legacyCumulative: true,
+						},
+					});
+				}
+				const currentSpells = CharacterSheetClassUtils.getKnownSpellsAtLevel(classData, classData.name, levelInfo.classLevel);
+				if (currentSpells > 0) {
+					addDecision(levelInfo, {
+						type: "knownSpells",
+						label: "Current Spell Repertoire",
+						sourceKey: "legacy-known-spell-repertoire",
+						count: currentSpells,
+						options: getLegalSpellOptions(
+							CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, levelInfo.classLevel),
+							{includeProgressionAdditionalLists: true},
+						),
+						fallbackSelection: (spellPool?.knownSpells || []).map(spell => ({
+							name: spell.name,
+							source: spell.source,
+							level: spell.level,
+						})),
+						fallbackStatus: "resolved",
+						meta: {
+							maxSpellLevel: CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, levelInfo.classLevel),
+							legacyCumulative: true,
+							additionalClassNames: progressionAdditionalClassNames,
+						},
+					});
+				}
+			} else if (isWizard) {
 				const spellbookCount = levelInfo.classLevel === 1 ? 6 : 2;
 				const maxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, levelInfo.classLevel);
 				const fallback = CharacterSheetProgression._takeReconstructedSelection({
@@ -2371,7 +2457,7 @@ class CharacterSheetProgression {
 				? CharacterSheetClassUtils.getCantripsAtLevel(classData, classData.name, levelInfo.classLevel - 1)
 				: 0;
 			const cantripGain = Math.max(0, Number(currentCantrips || 0) - Number(previousCantrips || 0));
-			if (cantripGain > 0) {
+			if (!isLegacyCumulativeSpellProgression && cantripGain > 0) {
 				// Cantrips are permanent learned choices even for prepared casters.
 				// Keep them out of the runtime prepared-spell loadout bucket.
 				const key = "cantrips";
@@ -2392,7 +2478,7 @@ class CharacterSheetProgression {
 				});
 			}
 
-			if (!isWizard && spellModel === "known") {
+			if (!isLegacyCumulativeSpellProgression && !isWizard && spellModel === "known") {
 				const current = CharacterSheetClassUtils.getKnownSpellsAtLevel(classData, classData.name, levelInfo.classLevel);
 				const previous = levelInfo.classLevel > 1
 					? CharacterSheetClassUtils.getKnownSpellsAtLevel(classData, classData.name, levelInfo.classLevel - 1)
@@ -2453,7 +2539,7 @@ class CharacterSheetProgression {
 			}
 
 			const swapCount = CharacterSheetClassUtils.getSpellSwapCount?.(classData.name, classData.source, levelInfo.classLevel) || 0;
-			if (swapCount > 0) {
+			if (!isLegacyCumulativeSpellProgression && swapCount > 0) {
 				const maxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, levelInfo.classLevel);
 				addDecision(levelInfo, {
 					type: "spellSwap",

@@ -345,7 +345,7 @@ describe("CharacterSheetProgression manifest", () => {
 			.toEqual(expect.arrayContaining([expect.objectContaining({required: true, status: "missing"})]));
 	});
 
-	it("reconstructs a legal aggregate spell history for a single legacy caster", () => {
+	it("preserves a legacy caster's final repertoire without fabricating acquisition history", () => {
 		const bard = {
 			name: "Bard",
 			source: "TGTT",
@@ -405,11 +405,17 @@ describe("CharacterSheetProgression manifest", () => {
 		});
 
 		const choices = manifest.decisions.filter(it => it.type === "knownSpells");
-		expect(choices).toHaveLength(3);
-		expect(choices.map(it => it.status)).toEqual(["resolved", "resolved", "resolved"]);
-		expect(choices[0].selection.map(it => it.name)).toEqual(["Low A", "Low B"]);
-		expect(choices[1].selection.map(it => it.name)).toEqual(["Low C"]);
-		expect(choices[2].selection.map(it => it.name)).toEqual(["High"]);
+		expect(choices).toEqual([
+			expect.objectContaining({
+				characterLevel: 3,
+				classLevel: 3,
+				count: 4,
+				status: "resolved",
+				sourceKey: "legacy-known-spell-repertoire",
+				selection: expect.arrayContaining(spells.map(spell => expect.objectContaining({name: spell.name}))),
+				meta: expect.objectContaining({legacyCumulative: true}),
+			}),
+		]);
 	});
 
 	it("reconstructs gain slots from the pre-swap spell pool", () => {

@@ -9414,6 +9414,36 @@ class CharacterSheetState {
 
 	adoptLegacyProgressionEvidence (manifest) {
 		for (const decision of manifest?.decisions || []) {
+			if (
+				decision.meta?.legacyCumulative
+				&& ["knownSpells", "cantrips"].includes(decision.type)
+				&& decision.selection != null
+				&& !decision.receipt
+			) {
+				const values = Array.isArray(decision.selection) ? decision.selection : [decision.selection];
+				const ownershipType = decision.type === "cantrips" ? "cantrips" : "spells";
+				decision.receipt = {
+					version: 1,
+					sourceDecisionKey: decision.semanticKey,
+					effects: [
+						{
+							type: "ownership",
+							ownership: values.map(value => ({
+								type: ownershipType,
+								value: CharacterSheetProgression._copy(value),
+							})),
+						},
+						{
+							type: "spells",
+							spellType: ownershipType,
+							spells: values.map(value => ({
+								name: value.name,
+								source: value.source,
+							})),
+						},
+					],
+				};
+			}
 			const repair = decision.meta?.legacyEpicBoonRepair;
 			if (decision.type === "feat" && repair && decision.selection?.name === repair.feat?.name) {
 				const feat = this._data.feats.find(candidate =>

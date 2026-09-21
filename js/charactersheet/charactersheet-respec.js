@@ -1506,6 +1506,7 @@ class CharacterSheetRespec {
 					classSource: decision.classSource,
 					subclass: classEntry?.subclass,
 					subclassChoice: classEntry?.subclassChoice,
+					additionalClassNames: decision.meta?.additionalClassNames || [],
 					includeCoreSpellsForHomebrew: !["PHB", "XPHB"].includes(classData?.source),
 				});
 			});
@@ -1539,15 +1540,30 @@ class CharacterSheetRespec {
 		return MiscUtil.copyFast(option);
 	}
 
+	static _getDecisionEditorOptions (legalOptions, currentValues) {
+		const out = [...legalOptions];
+		const seen = new Set(out.map(option => CharacterSheetRespec._getDecisionOptionKey(option)));
+		const invalidOptionKeys = new Set();
+		for (const value of currentValues) {
+			const key = CharacterSheetRespec._getDecisionOptionKey(value);
+			if (seen.has(key)) continue;
+			seen.add(key);
+			invalidOptionKeys.add(key);
+			out.push(MiscUtil.copyFast(value));
+		}
+		return {options: out, invalidOptionKeys};
+	}
+
 	async _editManifestOptions (level, history, choice, closeParentModal, {inlineHost = null} = {}) {
 		const decision = choice.decision;
 		if (!decision) return;
-		const options = this._getDecisionOptions(decision);
+		const legalOptions = this._getDecisionOptions(decision);
 		const selected = new Map();
 		const currentValues = Array.isArray(decision.selection)
 			? decision.selection
 			: (decision.selection == null ? [] : [decision.selection]);
 		currentValues.forEach(value => selected.set(CharacterSheetRespec._getDecisionOptionKey(value), value));
+		const {options, invalidOptionKeys} = CharacterSheetRespec._getDecisionEditorOptions(legalOptions, currentValues);
 
 		let modalInner;
 		let doClose;
@@ -1594,7 +1610,10 @@ class CharacterSheetRespec {
 				input.name = `respec-${decision.id}`;
 				if (option?.source) input.dataset.source = option.source;
 				input.checked = selected.has(key);
-				const label = e_({tag: "span", txt: CharacterSheetRespec._getDecisionOptionLabel(option)});
+				const label = e_({
+					tag: "span",
+					txt: `${CharacterSheetRespec._getDecisionOptionLabel(option)}${invalidOptionKeys.has(key) ? " — currently selected, no longer legal" : ""}`,
+				});
 				input.addEventListener("change", () => {
 					if (decision.count === 1) selected.clear();
 					if (input.checked) {
@@ -1641,9 +1660,13 @@ class CharacterSheetRespec {
 			const selection = ["scholar", "subclassChoice"].includes(decision.type) && decision.count === 1
 				? values[0]
 				: values;
+			const setOwnedSpellTypes = new Set([
+				"knownSpells", "preparedSpells", "spellbookSpells", "cantrips",
+				"preparedCantrips", "nestedSpell", "nestedCantrip",
+			]);
 			this._engine.stageGraphMutation(decision.id, selection, {
-				reverseParent: true,
-				apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, options, state),
+				reverseParent: !setOwnedSpellTypes.has(decision.type),
+				apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, legalOptions, state),
 			});
 			doClose();
 			if (!inlineHost) closeParentModal?.();

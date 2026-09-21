@@ -3073,6 +3073,29 @@ class CharacterSheetClassUtils {
 		return [...out];
 	}
 
+	static getProgressionAdditionalSpellListClassNames ({
+		className,
+		classSource,
+		classLevel,
+		subclass,
+		subclassChoice,
+	} = /** @type {*} */ ({})) {
+		const out = new Set(this.getSpellListClassNames({
+			className,
+			classSource,
+			subclass,
+			subclassChoice,
+		}).filter(name => name !== className));
+		if (
+			String(className || "").toLowerCase() === "bard"
+			&& this.is2024Source(classSource)
+			&& Number(classLevel) >= 10
+		) {
+			["Cleric", "Druid", "Wizard"].forEach(name => out.add(name));
+		}
+		return [...out];
+	}
+
 	static spellIsAvailableForClass (/** @type {*} */ spell, /** @type {*} */ opts = {}) {
 		const {
 			className,
