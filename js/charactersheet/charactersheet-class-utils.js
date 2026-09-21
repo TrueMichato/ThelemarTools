@@ -3961,6 +3961,7 @@ class CharacterSheetClassUtils {
 		const entitySpellcastingContext = /spellcasting/i.test(
 			`${String(entity?.name || "")} ${String(opts.sourcePath || "")}`,
 		);
+		const hasStructuredSpellGrants = entity.additionalSpells != null;
 		const addProseDescriptors = (node, path) => {
 			const text = getText(node.entries || node.entry || "");
 			const lower = text.toLowerCase();
@@ -4050,7 +4051,10 @@ class CharacterSheetClassUtils {
 					: text.match(
 						/(?:proficien(?:cy|cies)|gain proficiency|proficiency)[^.]*?(?:\.|$)/i,
 					)?.[0] || "");
-			const skills = getTaggedValues(skillGrantText || text, "skill");
+			const explicitChoiceClause = skillGrantText.match(
+				/\b(?:can\s+)?(?:choose|select|pick)\b[\s\S]*?\b(?:between|from(?:\s+among)?|one\s+of)\b([\s\S]*)/i,
+			);
+			const skills = getTaggedValues(explicitChoiceClause?.[1] || skillGrantText || text, "skill");
 			if (
 				skills.length
 				&& /proficien(?:cy|cies)|choose to gain proficiency/.test(skillGrantText.toLowerCase())
@@ -4058,7 +4062,7 @@ class CharacterSheetClassUtils {
 			) {
 				add({
 					kind: "skill",
-					label: "Skill Proficiency",
+					label: node.name || entity.name || "Skill Proficiency",
 					count: 1,
 					options: skills.map(skill => skill.toLowerCase()),
 					grantKey: `${path}.prose.skills`,
@@ -4070,6 +4074,7 @@ class CharacterSheetClassUtils {
 			const spells = getTaggedValuesWithSource(text, "spell");
 			if (
 				spells.length
+				&& !hasStructuredSpellGrants
 				&& !isRuntimeSpellcastingProse
 				&& !/recommended/.test(lower)
 				&& /cantrip|learn either|choose to learn/.test(lower)
@@ -4218,6 +4223,9 @@ class CharacterSheetClassUtils {
 					return option?.name ? option : null;
 				}).filter(Boolean);
 				if (options.length) {
+					const isOptionalFeaturePool = options.every(option =>
+						String(option?.type || "").toLowerCase() === "optionalfeature",
+					);
 					add({
 						kind: "entity",
 						label: node.name || entity.name || "Feature",
@@ -4225,7 +4233,11 @@ class CharacterSheetClassUtils {
 						options,
 						grantKey: node.name || path || "options",
 						sourcePath: path,
-						rules: {uniqueWithinSeries: true, optionSource: {kind: "explicitList", values: options}},
+						rules: {
+							uniqueWithinSeries: true,
+							...(isOptionalFeaturePool ? {poolDefinition: "optionalFeature"} : {}),
+							optionSource: {kind: "explicitList", values: options},
+						},
 					});
 				}
 			}

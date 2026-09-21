@@ -347,7 +347,8 @@ class CharacterSheetProgression {
 	}
 
 	static _getEntityChoiceDescriptors (entity, opts = {}) {
-		const descriptors = CharacterSheetClassUtils.getChoiceDescriptors?.(entity, opts) || [];
+		const descriptors = (CharacterSheetClassUtils.getChoiceDescriptors?.(entity, opts) || [])
+			.filter(descriptor => descriptor.rules?.poolDefinition !== "optionalFeature");
 		for (const descriptor of descriptors) {
 			const source = descriptor.rules?.optionSource;
 			if (descriptor.options?.length || source?.kind !== "classFeature" || !source.ref) continue;
