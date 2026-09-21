@@ -9475,6 +9475,42 @@ class CharacterSheetState {
 				}
 			}
 			if (decision.type === "nestedAbility" && decision.selection && !decision.receipt) {
+				const isOriginAbility = decision.scope === "origin"
+					&& ["race", "background"].includes(decision.provenance?.ownerType);
+				if (isOriginAbility) {
+					const ability = String(decision.selection).toLowerCase();
+					const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
+					const current = Number(this._data.abilityBonuses?.[ability]) || 0;
+					if (current >= amount) {
+						const before = current - amount;
+						decision.meta ||= {};
+						decision.meta.receiptPreviousAbilityBonus = {
+							...(decision.meta.receiptPreviousAbilityBonus || {}),
+							[ability]: before,
+						};
+						decision.receipt = {
+							version: 1,
+							sourceDecisionKey: decision.semanticKey,
+							effects: [{
+								type: "abilityBonusDelta",
+								sourceDecisionKey: decision.semanticKey,
+								ability,
+								amount,
+								before,
+							}],
+						};
+						const stored = this._data.characterBase?.decisions?.find(candidate =>
+							candidate.semanticKey === decision.semanticKey,
+						);
+						if (stored) {
+							stored.selection = CharacterSheetProgression._copy(decision.selection);
+							stored.status = "resolved";
+							stored.meta = CharacterSheetProgression._copy(decision.meta);
+							stored.receipt = CharacterSheetProgression._copy(decision.receipt);
+						}
+					}
+					continue;
+				}
 				const parent = manifest.decisions.find(candidate =>
 					candidate.semanticKey === decision.parentSemanticKey,
 				);
@@ -9766,6 +9802,17 @@ class CharacterSheetState {
 					this.setAbilityBase(ability, Number.isFinite(before)
 						? before
 						: Math.max(1, (this.getAbilityBase(ability) || 0) - amount));
+				}
+				continue;
+			}
+			if (effect?.type === "abilityBonusDelta") {
+				const ability = String(effect.ability || "").toLowerCase();
+				const amount = Number(effect.amount) || 0;
+				if (ability && amount) {
+					const before = Number(effect.before);
+					this.setAbilityBonus(ability, Number.isFinite(before)
+						? before
+						: Math.max(0, (Number(this._data.abilityBonuses?.[ability]) || 0) - amount));
 				}
 				continue;
 			}

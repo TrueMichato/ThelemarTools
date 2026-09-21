@@ -1929,9 +1929,38 @@ class CharacterSheetRespec {
 		if (decision.type === "nestedAbility" || decision.type === "nestedConfiguration") {
 			if (decision.type === "nestedAbility") {
 				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
+				const isOriginAbility = decision.scope === "origin"
+					&& ["race", "background"].includes(decision.provenance?.ownerType);
 				next.forEach(value => {
 					const ability = String(value || "").toLowerCase();
 					if (!ability) return;
+					if (isOriginAbility) {
+						const before = Number(this._state._data.abilityBonuses?.[ability]) || 0;
+						decision.meta ||= {};
+						decision.meta.receiptPreviousAbilityBonus ||= {};
+						if (decision.meta.receiptPreviousAbilityBonus[ability] == null) {
+							decision.meta.receiptPreviousAbilityBonus[ability] = before;
+						}
+						this._state.setAbilityBonus(ability, before + amount);
+						if (decision.provenance?.ownerType === "race") {
+							const race = this._state.getRace?.();
+							const choices = MiscUtil.copyFast(this._state.getBaseRaceUserChoices?.() || {});
+							choices.selectedAbilityChoices ||= {};
+							const ownerUid = CharacterSheetProgression.getEntityUid(race);
+							const ownerKey = Object.keys(choices.selectedAbilityChoices)
+								.find(key => CharacterSheetProgression._normalize(key) === ownerUid)
+								|| `${race?.name || ""}|${race?.source || ""}`;
+							const ownerChoices = choices.selectedAbilityChoices[ownerKey] = {
+								...(choices.selectedAbilityChoices[ownerKey] || {}),
+							};
+							const choiceIndex = Number(String(decision.provenance?.sourcePath || "")
+								.match(/ability\[(\d+)\]/)?.[1] || 0);
+							ownerChoices[`choose_${choiceIndex}_0`] = ability;
+							ownerChoices[`choose_${choiceIndex}_0_amount`] = amount;
+							this._state.setBaseRaceUserChoices(choices);
+						}
+						return;
+					}
 					const before = this._state.getAbilityBase(ability) || 0;
 					decision.meta ||= {};
 					decision.meta.receiptPreviousAbility ||= {};
@@ -4787,6 +4816,39 @@ class CharacterSheetRespec {
 
 	// region Race/Background Respec
 
+	async _stageSameRaceAbilityChoices (userChoices) {
+		const selections = Object.entries(userChoices?.selectedAbilityChoices || {})
+			.filter(([key, value]) => !key.endsWith("_weight") && value)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([, value]) => value);
+		const parent = this._engine?.manifest?.base?.decisions?.find(decision => decision.type === "originRace");
+		const decisions = (this._engine?.manifest?.base?.decisions || [])
+			.filter(decision =>
+				decision.type === "nestedAbility"
+				&& decision.parentSemanticKey === parent?.semanticKey
+				&& decision.provenance?.ownerType === "race",
+			)
+			.sort((a, b) => Number(a.slot) - Number(b.slot));
+		if (!selections.length || selections.length !== decisions.length) return false;
+
+		for (let ix = 0; ix < decisions.length; ++ix) {
+			const current = this._engine.manifest.base.decisions.find(decision =>
+				decision.semanticKey === decisions[ix].semanticKey,
+			);
+			if (!current) return false;
+			await this._engine.stageGraphMutation(current.id, selections[ix], {
+				reverseParent: true,
+				apply: ({state}) => this._applyManifestSelectionMechanics(
+					current,
+					selections[ix],
+					current.options,
+					state,
+				),
+			});
+		}
+		return true;
+	}
+
 	async _editRace (level, history, closeParentModal) {
 		const races = this._page.filterByAllowedSources(this._page.getRaces());
 
@@ -4922,12 +4984,30 @@ class CharacterSheetRespec {
 			});
 
 			const originDecision = this._engine?.manifest?.base?.decisions?.find(decision => decision.type === "originRace");
-			if (originDecision) {
-				this._engine.stageGraphMutation(originDecision.id, {
-					name: selectedRace.name,
-					source: selectedRace.source,
-				}, {
-					apply: ({state}) => {
+			const isSameRaceAbilityOnly = isSameEntity
+				&& currentPickers.length
+				&& currentPickers.every(picker => picker.type === "ability");
+			const didStageOwnedAbilityChoices = isSameRaceAbilityOnly
+				? await this._stageSameRaceAbilityChoices(userChoices)
+				: false;
+			if (!didStageOwnedAbilityChoices) {
+				if (originDecision) {
+					await this._engine.stageGraphMutation(originDecision.id, {
+						name: selectedRace.name,
+						source: selectedRace.source,
+					}, {
+						apply: ({state}) => {
+							const previousState = this._state;
+							this._state = state;
+							try {
+								this._applyRaceChange(history, selectedRace, userChoices);
+							} finally {
+								this._state = previousState;
+							}
+						},
+					});
+				} else {
+					await this._engine.stageCandidateMutation(({state}) => {
 						const previousState = this._state;
 						this._state = state;
 						try {
@@ -4935,22 +5015,12 @@ class CharacterSheetRespec {
 						} finally {
 							this._state = previousState;
 						}
-					},
-				});
-			} else {
-				await this._engine.stageCandidateMutation(({state}) => {
-					const previousState = this._state;
-					this._state = state;
-					try {
-						this._applyRaceChange(history, selectedRace, userChoices);
-					} finally {
-						this._state = previousState;
-					}
-				});
+					});
+				}
 			}
 
 			doClose();
-			closeParentModal();
+			closeParentModal?.();
 			this.render();
 			JqueryUtil.doToast({
 				type: "success",

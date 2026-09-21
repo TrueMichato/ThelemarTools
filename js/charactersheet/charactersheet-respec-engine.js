@@ -268,13 +268,20 @@ class CharacterSheetRespecEngine {
 		const effects = [];
 		if (["nestedAbility", "nestedConfiguration"].includes(decision?.type) && values.length) {
 			const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
+			const isOriginAbility = decision.type === "nestedAbility"
+				&& decision.scope === "origin"
+				&& ["race", "background"].includes(decision.provenance?.ownerType);
 			effects.push(...values.map(value => ({
-				type: decision.type === "nestedAbility" ? "abilityDelta" : "configuration",
+				type: decision.type === "nestedAbility"
+					? isOriginAbility ? "abilityBonusDelta" : "abilityDelta"
+					: "configuration",
 				sourceDecisionKey: decision.semanticKey,
 				ability: decision.type === "nestedAbility" ? String(value) : undefined,
 				amount: decision.type === "nestedAbility" ? amount : undefined,
 				before: decision.type === "nestedAbility"
-					? decision.meta?.receiptPreviousAbility?.[String(value || "").toLowerCase()]
+					? isOriginAbility
+						? decision.meta?.receiptPreviousAbilityBonus?.[String(value || "").toLowerCase()]
+						: decision.meta?.receiptPreviousAbility?.[String(value || "").toLowerCase()]
 					: undefined,
 				value: decision.type === "nestedConfiguration" ? value : undefined,
 			})));

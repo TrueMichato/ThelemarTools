@@ -477,8 +477,14 @@ class CharacterSheetProgression {
 				if (selected != null) return selected;
 			}
 			if (sourcePath.includes(".ability[")) {
-				const selected = originChoices.selectedAbilityChoices?.[`choose_${choiceIndex}_0`] ??
-					originChoices.selectedAbilityChoices?.[sourcePath.match(/ability\[(\d+)\]/)?.[1] || choiceIndex];
+				const selectedAbilityChoices = originChoices.selectedAbilityChoices || {};
+				const ownerUid = CharacterSheetProgression.getEntityUid(entity);
+				const ownerChoices = Object.entries(selectedAbilityChoices)
+					.find(([key, value]) =>
+						value && typeof value === "object" && CharacterSheetProgression._normalize(key) === ownerUid,
+					)?.[1] || selectedAbilityChoices;
+				const selected = ownerChoices[`choose_${choiceIndex}_0`] ??
+					ownerChoices[sourcePath.match(/ability\[(\d+)\]/)?.[1] || choiceIndex];
 				if (selected != null) return CharacterSheetProgression._copy(selected);
 				const backgroundSelected = originChoices.selectedAbilityBonuses?.[`bg_${choiceIndex}`];
 				if (backgroundSelected != null) return backgroundSelected;
@@ -899,13 +905,14 @@ class CharacterSheetProgression {
 					grantKey: descriptor.grantKey,
 					slot,
 				});
+				const storedDecision = storedBasePool.get(key)?.find(item => item.selection != null);
 				const selected = CharacterSheetProgression._getSelectedDescriptorValue({
 					descriptor,
 					entity,
 					state,
 					legacyChoices: choices,
 				});
-				const selectedFallback = selected ??
+				const selectedFallback = storedDecision?.selection ?? selected ??
 					choices?.[`selected${descriptor.kind[0].toUpperCase()}${descriptor.kind.slice(1)}s`] ??
 					(descriptor.kind === "ability" && descriptor.sourcePath.includes("additionalSpells")
 						? descriptor.options?.[0]
@@ -934,7 +941,7 @@ class CharacterSheetProgression {
 					required: descriptor.required && !isUnassignedLegacyAbility,
 					options: descriptor.options,
 					selection: selectedFallback,
-					receipt: storedBasePool.get(key)?.find(item => item.selection != null)?.receipt || null,
+					receipt: storedDecision?.receipt || null,
 					meta: {descriptorRules: descriptor.rules},
 					scope: "origin",
 					semanticKeyOverride: key,
