@@ -25,7 +25,7 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(normalizedAdr).toContain("extends ADR 0016");
 		expect(normalizedAdr).toContain("narrowly supersedes ADR 0016's blanket prohibition");
 		expect(normalizedAdr).toContain("This design-only PR contains no production migration");
-		expect(normalizedAdr).toContain("requires future additive migration `0010_multi_target_semantic_operations.sql`");
+		expect(normalizedAdr).toContain("requires future additive migration `0011_multi_target_semantic_operations.sql`");
 		expect(normalizedAdr).toContain("must remain unmerged until the coordinator records the physical game-day GO/NO-GO");
 	});
 
@@ -58,8 +58,8 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(normalizedAdr.indexOf("quota advisory locks (seed 10)")).toBeLessThan(normalizedAdr.indexOf("campaign advisory lock (seed 6)"));
 	});
 
-	it("requires normalized migration 0010 tables and concrete constraints", () => {
-		expect(normalizedAdr).toContain("Migration `0010_multi_target_semantic_operations.sql` is required");
+	it("requires normalized migration 0011 tables and concrete constraints", () => {
+		expect(normalizedAdr).toContain("Migration `0011_multi_target_semantic_operations.sql` is required");
 		expect(normalizedAdr).toContain("`hub.semantic_operation_targets`");
 		expect(normalizedAdr).toContain("`semantic_operation_finalizations`");
 		expect(normalizedAdr).toContain("`hub.semantic_multi_target_usage`");
@@ -106,18 +106,18 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(normalizedAdr).toContain("global quota locks ascending by account UUID");
 	});
 
-	it("fences true pre-0010 rollback after the irreversible first-use marker", () => {
+	it("fences true pre-0011 rollback after the irreversible first-use marker", () => {
 		for (const anchor of [
 			"`previousAppCompatible: true` only for the schema-before-use state",
 			"usage marker is absent",
 			"After the first accepted multi-target proposal sets `hub.semantic_multi_target_usage`",
-			"operational rollback to a true pre-0010 binary is permanently forbidden",
+			"operational rollback to a true pre-0011 binary is permanently forbidden",
 			"bridge/r10+ release",
 			"current parent/child counts are diagnostic only",
 			"separately reviewed destructive history/event/outbox/recovery export-and-purge procedure",
 			"Deleting the usage marker is the final irreversible step",
 		]) expect(normalizedAdr).toContain(anchor);
-		expect(migrations).toContain("true pre-0010 rollback is blocked whenever the marker exists");
+		expect(migrations).toContain("true pre-0011 rollback is blocked whenever the marker exists");
 	});
 
 	it("serializes global cross-campaign quotas before campaign authority", () => {

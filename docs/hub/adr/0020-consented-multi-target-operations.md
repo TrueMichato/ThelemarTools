@@ -15,10 +15,10 @@ Status: Accepted design contract; Wave A0 proof only, not implemented (2026-09-2
 > **Implementation boundary:** This Wave A0 change records design and executable documentation/query proof only.
 > This design-only PR contains no production migration, routes, store methods, protocol 6, capability
 > advertisement, events, browser controls, or production state-machine behavior. ADR 0020 nevertheless requires
-> future additive migration `0010_multi_target_semantic_operations.sql` in A3. The draft must remain unmerged until the coordinator records the physical game-day GO/NO-GO.
+> future additive migration `0011_multi_target_semantic_operations.sql` in A3. The draft must remain unmerged until the coordinator records the physical game-day GO/NO-GO.
 
 In short, this contract extends ADR 0012 and extends ADR 0016 while superseding only the narrow rules stated
-above. It requires future additive migration `0010_multi_target_semantic_operations.sql`.
+above. It requires future additive migration `0011_multi_target_semantic_operations.sql`.
 
 ## Context
 
@@ -335,12 +335,12 @@ transform before adopting accepted base, live state, latest-submitted state, dur
 state. Unknown coverage triggers serialized canonical resync; it never repeats finalization or guesses from
 arrival order.
 
-### Schema decision: additive migration 0010 is required
+### Schema decision: additive migration 0011 is required
 
-Migration `0010_multi_target_semantic_operations.sql` is required in A3. The normalized target table is
+Migration `0011_multi_target_semantic_operations.sql` is required in A3. The normalized target table is
 `hub.semantic_operation_targets`; do not store target/response/selection arrays in JSON.
 
-Migration 0010 also creates singleton `hub.semantic_multi_target_usage`:
+Migration 0011 also creates singleton `hub.semantic_multi_target_usage`:
 
 - `singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton)`;
 - `first_used_at timestamptz NOT NULL`;
@@ -434,17 +434,17 @@ operation is outside the idempotency/recovery window. Audit and domain events re
 policy. Normal cleanup never deletes or rewrites `hub.semantic_multi_target_usage`. Cleanup exposes aggregate
 counts/status/age only.
 
-Migration 0010 is `phase: "expand"`. Its migration-policy entry may say `previousAppCompatible: true` only for
-the schema-before-use state: while capability remains disabled and the usage marker is absent, a pre-0010 binary
+Migration 0011 is `phase: "expand"`. Its migration-policy entry may say `previousAppCompatible: true` only for
+the schema-before-use state: while capability remains disabled and the usage marker is absent, a pre-0011 binary
 reads legacy rows, ignores additive tables/nullable columns, and never creates `target_set_version=1`.
 
 After the first accepted multi-target proposal sets `hub.semantic_multi_target_usage`, operational rollback to a
-true pre-0010 binary is permanently forbidden even if all parent/child history has been cleaned. The normal
+true pre-0011 binary is permanently forbidden even if all parent/child history has been cleaned. The normal
 rollback target must be a bridge/r10+ release which understands `target_set_version`, child history, projection
-filtering, expiry, retention, explicit cleanup, and the usage marker. A pre-0010 rollback preflight requires the
+filtering, expiry, retention, explicit cleanup, and the usage marker. A pre-0011 rollback preflight requires the
 usage marker to be absent; current parent/child counts are diagnostic only and cannot clear a present marker.
 
-Returning to a true pre-0010 binary after data creation requires a separately reviewed destructive
+Returning to a true pre-0011 binary after data creation requires a separately reviewed destructive
 history/event/outbox/recovery export-and-purge procedure with backup, participant/audit export, FK-safe cleanup,
 and explicit human authorization. Deleting the usage marker is the final irreversible step of that reviewed
 procedure. It is not normal rollback and is not defined by this ADR. No ordinary rollback drops columns/tables
@@ -497,7 +497,7 @@ The capability is disabled by default.
 Bridge-release rollback preflight reports total and live parent/child counts, oldest
 collection/finalization/terminal deadlines, unsupported template versions, incomplete
 response/finalization/leg rows, usage-marker state, and cleanup readiness without private identities. A true
-pre-0010 target is blocked whenever the usage marker exists, regardless of current row counts.
+pre-0011 target is blocked whenever the usage marker exists, regardless of current row counts.
 
 ### A1-A5 handoff
 
@@ -505,7 +505,7 @@ pre-0010 target is blocked whenever the usage marker exists, regardless of curre
 |---|---|---|
 | **A1 — DM typed effects** | Existing six-operation immediate DM/co-DM lane completed in the Wave A1 descendant implementation | No prose; pure fixtures; route/Memory/PostgreSQL parity; replay/no-op/privacy/reconciliation coverage; held pending physical game-day GO/NO-GO |
 | **A2 — source-cost authority** | Generalized deterministic one-time cost/ABA authority | No reservation; shared Memory/PostgreSQL parity |
-| **A3 — server state machine** | Migration 0010, protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, locks | Seed-10 cross-campaign quota races, opposing-order deadlock tests, usage-marker persistence, fault injection, purge/bridge rollback |
+| **A3 — server state machine** | Migration 0011, protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, locks | Seed-10 cross-campaign quota races, opposing-order deadlock tests, usage-marker persistence, fault injection, purge/bridge rollback |
 | **A4 — Character Sheet UX and reconciliation** | Proposal, invitation response, exact-subset finalization, per-leg recovery | Same-owner/two-target and source-as-target UX; dirty/in-flight/reconnect/access-loss coverage |
 | **A5 — Healing Word and Mass Healing Word templates** | First reviewed production templates | PHB/XPHB semantics and explicit `allowTargetNoOp=true` privacy evidence |
 
@@ -540,7 +540,7 @@ pre-0010 target is blocked whenever the usage marker exists, regardless of curre
     proposal, one stable `COLLECTION_LIMIT_REACHED` loser, no deadlock, and zero loser parent, child, audit, event,
     outbox, or command/receipt evidence.
 21. Fresh/0009 upgrade/concurrent/failure/checksum/roles/backup/restore proof for the irreversible usage marker.
-22. Default-off/disable/bridge rollback and true pre-0010 marker-absent preflight.
+22. Default-off/disable/bridge rollback and true pre-0011 marker-absent preflight.
 
 ## Consequences
 
@@ -550,7 +550,7 @@ pre-0010 target is blocked whenever the usage marker exists, regardless of curre
 - Normalized child rows make invitation, response, lifecycle, cleanup, and reconciliation enforceable.
 - Existing one-target rows/routes remain readable and unchanged.
 - Schema-before-use remains additive, but the first accepted proposal persists an irreversible usage marker which
-  permanently fences normal rollback to a true pre-0010 binary.
+  permanently fences normal rollback to a true pre-0011 binary.
 
 ## Rejected alternatives
 

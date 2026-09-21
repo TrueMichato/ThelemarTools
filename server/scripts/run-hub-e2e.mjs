@@ -316,6 +316,7 @@ try {
 	await run("node", [
 		"--experimental-vm-modules",
 		"./node_modules/jest/bin/jest.js",
+		"test/jest/hub/HubSourceCostAdapterAuthorityPostgres.test.js",
 		"test/jest/hub/HubSemanticOperationsPostgres.test.js",
 		"test/jest/hub/HubInventoryPostgres.test.js",
 		"test/jest/hub/HubMultiProviderIdentityPostgres.test.js",

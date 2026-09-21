@@ -13,37 +13,61 @@ const PARTIAL_TRANSFER_BLOCKERS = new Set([
 	"hosts Ioun items",
 ]);
 
-function hasItemReference (value, itemId) {
+function hasItemReference (value, itemId, fnNormalizeItemId) {
 	if (!value || typeof value !== "object") return false;
-	if (Array.isArray(value)) return value.some(it => hasItemReference(it, itemId));
+	if (Array.isArray(value)) return value.some(it => hasItemReference(it, itemId, fnNormalizeItemId));
 	for (const [key, child] of Object.entries(value)) {
-		if (ITEM_REFERENCE_KEYS.has(key) && child === itemId) return true;
-		if (hasItemReference(child, itemId)) return true;
+		if (ITEM_REFERENCE_KEYS.has(key) && fnNormalizeItemId(child) === itemId) return true;
+		if (hasItemReference(child, itemId, fnNormalizeItemId)) return true;
 	}
 	return false;
 }
 
-export function getWholeItemTransferBlockers ({container, entry}) {
-	const itemId = entry?.id;
+export function getWholeItemTransferBlockers ({
+	container,
+	entry,
+	fnNormalizeItemId = value => value,
+}) {
+	const itemId = fnNormalizeItemId(entry?.id);
 	if (!itemId) return ["missing inventory identity"];
 	const sourceFeatureId = `item:${itemId}`;
+	const normalizeSourceFeatureId = value => {
+		if (typeof value !== "string" || !value.startsWith("item:")) return value;
+		return `item:${fnNormalizeItemId(value.slice(5))}`;
+	};
 	const blockers = [];
 	if (entry.equipped) blockers.push("equipped");
 	if (entry.attuned) blockers.push("attuned");
 	if (entry.item?.containedItems?.length) blockers.push("contains items");
-	if ((container?.inventory || []).some(it => it.id !== itemId && it.item?.containedItems?.includes(itemId))) blockers.push("inside a container");
+	if ((container?.inventory || []).some(it =>
+		fnNormalizeItemId(it.id) !== itemId
+		&& it.item?.containedItems?.some(containedId => fnNormalizeItemId(containedId) === itemId),
+	)) blockers.push("inside a container");
 	if (entry.item?.iounSet?.length) blockers.push("hosts Ioun items");
-	if ((container?.inventory || []).some(it => it.id !== itemId && it.item?.iounSet?.includes(itemId))) blockers.push("seated in an Ioun host");
-	if (container?.selectedAmmo?.[itemId] || Object.values(container?.selectedAmmo || {}).includes(itemId)) blockers.push("selected ammunition");
-	if (Object.hasOwn(container?.ammunitionConsumed || {}, itemId)) blockers.push("tracked ammunition");
-	if ((container?.namedModifiers || []).some(it => it.sourceFeatureId === sourceFeatureId)) blockers.push("item effects");
-	if ((container?.acFormulas || []).some(it => it.sourceFeatureId === sourceFeatureId)) blockers.push("AC effects");
+	if ((container?.inventory || []).some(it =>
+		fnNormalizeItemId(it.id) !== itemId
+		&& it.item?.iounSet?.some(iounId => fnNormalizeItemId(iounId) === itemId),
+	)) blockers.push("seated in an Ioun host");
+	if (
+		Object.entries(container?.selectedAmmo || {}).some(([key, value]) =>
+			fnNormalizeItemId(key) === itemId || fnNormalizeItemId(value) === itemId,
+		)
+	) blockers.push("selected ammunition");
+	if (Object.keys(container?.ammunitionConsumed || {}).some(key => fnNormalizeItemId(key) === itemId)) blockers.push("tracked ammunition");
+	if ((container?.namedModifiers || []).some(it => normalizeSourceFeatureId(it.sourceFeatureId) === sourceFeatureId)) blockers.push("item effects");
+	if ((container?.acFormulas || []).some(it => normalizeSourceFeatureId(it.sourceFeatureId) === sourceFeatureId)) blockers.push("AC effects");
 	if (Object.values(container?.grantedDefensiveTraits || {}).some(byName =>
-		Object.values(byName || {}).some(sourceIds => Array.isArray(sourceIds) && sourceIds.includes(sourceFeatureId)),
+		Object.values(byName || {}).some(sourceIds =>
+			Array.isArray(sourceIds)
+			&& sourceIds.some(sourceId => normalizeSourceFeatureId(sourceId) === sourceFeatureId),
+		),
 	)) blockers.push("defensive effects");
-	if (hasItemReference(container?.activeStates, itemId)) blockers.push("active state");
-	if (hasItemReference(container?.itemGrantedSpells, itemId) || hasItemReference(container?.spellcasting, itemId)) blockers.push("spell or component link");
-	if (Object.hasOwn(container?.iounBonds || {}, itemId)) blockers.push("Ioun bond");
+	if (hasItemReference(container?.activeStates, itemId, fnNormalizeItemId)) blockers.push("active state");
+	if (
+		hasItemReference(container?.itemGrantedSpells, itemId, fnNormalizeItemId)
+		|| hasItemReference(container?.spellcasting, itemId, fnNormalizeItemId)
+	) blockers.push("spell or component link");
+	if (Object.keys(container?.iounBonds || {}).some(key => fnNormalizeItemId(key) === itemId)) blockers.push("Ioun bond");
 	return [...new Set(blockers)];
 }
 

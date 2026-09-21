@@ -10,6 +10,7 @@ const identitySql = fs.readFileSync(new URL("../../../server/migrations/0006_mul
 const peerSourceCostsSql = fs.readFileSync(new URL("../../../server/migrations/0007_peer_source_costs.sql", import.meta.url), "utf8");
 const inviteAdmissionSql = fs.readFileSync(new URL("../../../server/migrations/0008_invite_gated_first_access.sql", import.meta.url), "utf8");
 const accountEntitlementsSql = fs.readFileSync(new URL("../../../server/migrations/0009_account_entitlements.sql", import.meta.url), "utf8");
+const sourceCostBindingIdentitySql = fs.readFileSync(new URL("../../../server/migrations/0010_source_cost_binding_identity.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 const migrationPolicy = JSON.parse(fs.readFileSync(new URL("../../../deploy/hub/migration-policy.json", import.meta.url), "utf8"));
 const migrationVersions = fs.readdirSync(new URL("../../../server/migrations/", import.meta.url))
@@ -239,6 +240,28 @@ describe("campaign hub first migration contract", () => {
 		]) expect(accountEntitlementsSql).toContain(required);
 	});
 
+	it("aligns PostgreSQL source-cost binding identity with the shared version-1 resolver in migration 0010", () => {
+		for (const required of [
+			"CREATE OR REPLACE FUNCTION hub.normalize_peer_source_cost_resource_id",
+			"btrim(",
+			"\\0009\\000B\\000C\\0020\\00A0\\1680",
+			"\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A",
+			"\\202F\\205F\\3000\\FEFF\\000A\\000D\\2028\\2029",
+			"THEN lower(value)",
+			"ELSE value",
+			"CREATE OR REPLACE FUNCTION hub.peer_source_cost_binding_value",
+			"'matches'",
+			"'resources'",
+			"'features'",
+			"'innateSpells'",
+			"WITH ORDINALITY",
+			"jsonb_agg",
+			"WHEN resource_entry.value->>'featureId' IS NOT NULL",
+			"WHEN resource_entry.value->>'linkedInnateSpellId' IS NOT NULL",
+		]) expect(sourceCostBindingIdentitySql).toContain(required);
+		expect(sourceCostBindingIdentitySql).not.toContain("LIMIT 1");
+	});
+
 	it("classifies every immutable migration for release rollback compatibility", () => {
 		expect(Object.keys(migrationPolicy.migrations).sort()).toEqual(migrationVersions);
 		expect(migrationPolicy.migrations["0007"]).toMatchObject({
@@ -246,6 +269,10 @@ describe("campaign hub first migration contract", () => {
 			previousAppCompatible: true,
 		});
 		expect(migrationPolicy.migrations["0008"]).toMatchObject({
+			phase: "expand",
+			previousAppCompatible: true,
+		});
+		expect(migrationPolicy.migrations["0010"]).toMatchObject({
 			phase: "expand",
 			previousAppCompatible: true,
 		});

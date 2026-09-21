@@ -112,7 +112,10 @@
   through a closed server template and explicit target-owner approval, including self-targeting. Protocol-4
   Cure Wounds binds one standard spell slot; the private seed, source-cost binding, resource ids/values, true
   target state, and failed eligibility predicate never enter target/peer projections. Source costs fail closed
-  before persistence and are revalidated inside atomic acceptance.
+  before persistence and are revalidated inside atomic acceptance. Version-1 item and feature adapters require
+  one exact stable entry/resource id, canonical content identity plus campaign-brew provenance when applicable,
+  and unambiguous persisted mirror linkage; display names alone never authorize a spend. Full quantity removal
+  is refused when any wrapper or document linkage makes deletion unsafe.
 - Semantic creation/resolution revalidates the authenticated session, active account/campaign/membership/role,
   source/target truth, template policy, and approval authority inside one transaction. Stable command ids are
   actor/body bound, and no unsupported/stale operation can partially mutate character/event/outbox state.
@@ -126,7 +129,7 @@
   cost and every leg or none. A reviewed healing template may mark a full-HP selected leg applied/no-change while
   consuming the single cost; source-visible responses/events/timing cannot identify which target was full.
   DM/co-DM receive bounded workflow projections intentionally for support, abuse moderation, lifecycle diagnosis,
-  and audit, but target-owner views never expose a co-target identity or decision. Migration 0010 and protocol 6
+  and audit, but target-owner views never expose a co-target identity or decision. Migration 0011 and protocol 6
   are required before capability enablement, and every protocol 3/4/5 create/respond/finalize/cancel/read/
   WebSocket/resync/replay surface fails closed. Transactional source/account/campaign/target-owner caps plus
   route-level 429 throttles and oldest-pending cursor pagination bound abuse without revealing private target

@@ -107,6 +107,8 @@ exact cleanup. Authentication failure/tampering must leave no plaintext output.
    - table/tenant/FK constraints;
    - account/entitlement/campaign/character/audit/event/outbox counts;
    - at least one active platform operator and migration-0009 creator backfill invariants;
+   - migration-0010 source-cost binding functions preserve trimmed UUID-only case folding, case-sensitive
+     non-UUID ids, and duplicate match cardinality;
    - exact released migration and role-grant images complete successfully;
    - exact released production BFF reaches readiness as `hub_runtime`;
    - source backup remains immutable.

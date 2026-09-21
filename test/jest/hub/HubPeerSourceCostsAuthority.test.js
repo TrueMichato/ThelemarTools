@@ -391,6 +391,8 @@ describe("peer source-cost memory authority", () => {
 		expect(events[1].visibleAccountIds).toContain(ctx.sourceOwner.account.id);
 		expect(events[1].visibleAccountIds).not.toContain(ctx.targetOwner.account.id);
 		expect(events[2].payload).toMatchObject({leg: "target", operation: {kind: "hp.heal"}});
+		expect(events[2].payload).not.toHaveProperty("sourceCost");
+		expect(events[2].payload).not.toHaveProperty("sourceCharacterId");
 		expect(accepted.operation.appliedEventId).toBe(events[2].id);
 		expect(new Set(accepted.eventIds).size).toBe(accepted.eventIds.length);
 	});
@@ -532,6 +534,36 @@ describe("peer source-cost memory authority", () => {
 		const accepted = await ctx.resolve({operationId: proposed.operation.operationId});
 		expect(accepted.operation.status).toBe("applied");
 		expect(ctx.store._characters.get(ctx.source.id).data.spellcasting.spellSlots[1].current).toBe(0);
+	});
+
+	it("rederives the pinned effect from current source truth before any mutation", async () => {
+		const ctx = await fixture();
+		const proposed = await ctx.propose();
+		const lease = await ctx.store.pAcquireCharacterLease({
+			accountId: ctx.sourceOwner.account.id,
+			sessionId: ctx.sourceOwner.session.id,
+			characterId: ctx.source.id,
+		});
+		const source = ctx.store._characters.get(ctx.source.id);
+		await ctx.store.pPatchCharacter({
+			accountId: ctx.sourceOwner.account.id,
+			sessionId: ctx.sourceOwner.session.id,
+			characterId: ctx.source.id,
+			baseRevision: source.revision,
+			leaseEpoch: lease.epoch,
+			patches: [{op: "replace", path: "/abilities/wis", value: 18}],
+			idempotencyKey: crypto.randomUUID(),
+		});
+		const beforeSource = structuredClone(ctx.store._characters.get(ctx.source.id));
+		const beforeTarget = structuredClone(ctx.store._characters.get(ctx.target.id));
+
+		const result = await ctx.resolve({operationId: proposed.operation.operationId});
+		expect(result.operation).toMatchObject({
+			status: "failed",
+			sourceCostState: "not_consumed",
+		});
+		expect(ctx.store._characters.get(ctx.source.id)).toEqual(beforeSource);
+		expect(ctx.store._characters.get(ctx.target.id)).toEqual(beforeTarget);
 	});
 
 	it("commits a stable failed outcome when source, target, or capability changes", async () => {

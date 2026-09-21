@@ -104,7 +104,7 @@ JSON bytes remain unchanged. This revision-only ordering point is also required 
 which is a no-op on canonical `B` can still change a dirty local `L`, so clients must not infer coverage from
 unchanged bytes.
 
-This intentionally does not consume migration 0010, which ADR 0020 reserves for the future multi-target state
+This intentionally does not consume migration 0011, which ADR 0020 reserves for the future multi-target state
 machine. A later schema change may permit no-revision direct no-ops only if it preserves multiple ordered no-ops,
 durable replay, and dirty-track reconciliation without ambiguity.
 

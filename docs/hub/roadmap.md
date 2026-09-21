@@ -304,7 +304,7 @@ Acceptance:
 Wave A1 completes the existing immediate DM/co-DM lane for the six version-1 operations without enabling
 protocol-6 multi-target authority. Valid canonical no-ops are auditable and replayable, omit projection
 invalidation, and use a revision-only ordering point because migration 0005 requires a unique applied revision
-and migration 0010 remains reserved for ADR 0020. This implementation remains held as a draft descendant of
+and migration 0011 remains reserved for ADR 0020. This implementation remains held as a draft descendant of
 PR #285 pending the physical r10 game-day GO/NO-GO.
 
 ### V2-T4 — party inventory, carry, and item awards (**active — player stash/transfer/carry and DM award slices shipped**)
@@ -464,12 +464,12 @@ diagnosis, and audit; a target owner never sees co-target identity or decisions.
 Global source-account and target-owner caps are serialized across campaigns by dedicated seed-10 quota locks
 acquired in ascending account UUID order before campaign authority.
 
-This is **planned, not implemented**. Migration 0010, protocol 6, routes, both stores, events, capability
+This is **planned, not implemented**. Migration 0011, protocol 6, routes, both stores, events, capability
 advertisement, Character Sheet UX, and templates remain future A1-A5 work. The sequence is:
 
 1. **A1:** DM typed effects.
 2. **A2:** generalized source-cost authority.
-3. **A3:** normalized migration 0010 and server state machine.
+3. **A3:** normalized migration 0011 and server state machine.
 4. **A4:** Character Sheet proposal/response/finalization UX and per-leg reconciliation.
 5. **A5:** Healing Word and Mass Healing Word templates.
 
@@ -477,10 +477,10 @@ NPC/monster targets, arbitrary prose, damage combat resolution, offline writes, 
 per-target costs, and post-proposal target additions remain deferred. Wave A0 may be reviewed as a draft but is
 held from merge until the coordinator records the physical game-day GO/NO-GO.
 
-Migration 0010 is additive before use. The first accepted multi-target proposal permanently inserts an
+Migration 0011 is additive before use. The first accepted multi-target proposal permanently inserts an
 FK-independent usage marker which normal cleanup never deletes. Once that marker exists, rollback to a true
-pre-0010 binary is forbidden; rollback must use a bridge/r10+ release which understands child history/cleanup
-and the marker. A pre-0010 rollback target requires the marker to be absent or a separately reviewed destructive
+pre-0011 binary is forbidden; rollback must use a bridge/r10+ release which understands child history/cleanup
+and the marker. A pre-0011 rollback target requires the marker to be absent or a separately reviewed destructive
 history/event/outbox/recovery export/purge process, with marker deletion last, outside normal rollback.
 
 Acceptance:

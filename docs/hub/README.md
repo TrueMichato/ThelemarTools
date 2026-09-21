@@ -133,7 +133,7 @@ ADR 0019 defines that entitlement layer, provider-bound reauthentication, hidden
 the staged enablement/rollback boundary.
 ADR 0020 defines the accepted protocol-6 model with at most eight fixed target legs, opaque per-leg invitations,
 per-character owner consent, one exact source-selected subset, and one-cost atomic finalization. It requires a
-future normalized migration 0010; this design/proof change contains no production migration and changes no live
+future normalized migration 0011; this design/proof change contains no production migration and changes no live
 capability.
 
 ## Local BFF setup

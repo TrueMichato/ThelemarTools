@@ -72,7 +72,7 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(provenanceWriter).not.toMatch(/protocol: "\d+"/);
 		expect(provenanceWriter).not.toMatch(/migration: "\d+"/);
 		expect(HUB_PROTOCOL_VERSION).toBe("5");
-		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0009");
+		expect(HUB_REQUIRED_MIGRATION_VERSION).toBe("0010");
 	});
 
 	it("isolates every E2E Compose run and records success evidence", () => {
@@ -121,7 +121,8 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(composeOverride).toContain(`HUB_TEST_AUTH_ENABLED: "true"`);
 	});
 
-	it("runs account-entitlement PostgreSQL parity before browser journeys", () => {
+	it("runs source-cost and account-entitlement PostgreSQL parity before browser journeys", () => {
+		expect(e2eRunner).toContain("HubSourceCostAdapterAuthorityPostgres.test.js");
 		expect(e2eRunner).toContain("HubAccountEntitlementsPostgres.test.js");
 	});
 });

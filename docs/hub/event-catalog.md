@@ -72,7 +72,7 @@ sequence or outbox row.
 ### Planned protocol-6 multi-target events
 
 The following [ADR 0020](adr/0020-consented-multi-target-operations.md) events are **planned, not implemented**.
-They must not be emitted or accepted until migration 0010, both stores, protocol 6, and the default-off capability
+They must not be emitted or accepted until migration 0011, both stores, protocol 6, and the default-off capability
 land.
 
 | Planned event | Audience | Minimal payload and ordering |
