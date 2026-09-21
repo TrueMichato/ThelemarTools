@@ -94,9 +94,14 @@ owner are preserved as **unplaced feat** records on the Character Base card.
 Their stable semantic key is derived from the feat UID, while the record keeps
 the existing feat ID, recorded subchoices, unknown subchoice fields, and an
 exact materialized receipt. They have no acquisition level and are not matched
-to an open ASI/feat opportunity by name. This preservation slice is read-only:
-editing feat subchoices and resolving duplicate acquisitions remain separate
-transactions.
+to an open ASI/feat opportunity by name. An unplaced feat with exactly one
+ability-choice family exposes that choice as a stable child of the Character
+Base record. Legacy recorded evidence adopts the feat's exact canonical
+ability delta without changing the candidate score; replacement reverses only
+that delta and preserves the parent-owned feat, modifiers, resources, ID, and
+null-level provenance. Missing evidence remains a required incomplete choice
+rather than being inferred. Multi-family feat subchoices (such as Skill
+Expert) and duplicate-acquisition resolution remain separate transactions.
 
 Manifest discovery must be complete before it replaces the saved ledger. If
 class data is temporarily unavailable, Respec may report the discovery error,

@@ -9672,7 +9672,11 @@ class CharacterSheetState {
 					candidate.sourceDecisionKey === parent?.semanticKey,
 				);
 				const ability = String(decision.selection).toLowerCase();
-				const amount = Number(feat?.appliedEffects?.abilityDeltas?.[ability]) || 0;
+				const recordedAmount = Number(feat?.appliedEffects?.abilityDeltas?.[ability]) || 0;
+				const amount = recordedAmount
+					|| (decision.meta?.unplacedFeatAbility
+						? Number(decision.meta?.descriptorRules?.amount) || 1
+						: 0);
 				if (amount) {
 					const before = this.getAbilityBase(ability) - amount;
 					decision.meta ||= {};
@@ -9691,6 +9695,13 @@ class CharacterSheetState {
 							before,
 						}],
 					};
+					if (decision.meta.unplacedFeatAbility && feat) {
+						feat.appliedEffects ||= {};
+						feat.appliedEffects.abilityDeltas = {
+							...(feat.appliedEffects.abilityDeltas || {}),
+							[ability]: amount,
+						};
+					}
 				}
 			}
 			if (decision.type !== "nestedSkillBonus" || decision.selection == null) continue;

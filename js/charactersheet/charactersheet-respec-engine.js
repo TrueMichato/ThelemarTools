@@ -182,7 +182,7 @@ class CharacterSheetRespecEngine {
 	}
 
 	_getDecisionStore (decision) {
-		if (decision?.scope === "origin") {
+		if (["origin", "unplaced"].includes(decision?.scope)) {
 			const base = this._candidateState.getCharacterBase?.() || {};
 			return {container: base, key: "decisions"};
 		}
@@ -416,7 +416,9 @@ class CharacterSheetRespecEngine {
 				receipt: this._makeDecisionReceipt(decision, effectiveSelection, this._candidateState),
 			}, container);
 			Object.assign(stored, updated);
-			if (decision.scope !== "origin") Object.assign(container, CharacterSheetProgression.projectDecisionsToChoices(container));
+			if (!["origin", "unplaced"].includes(decision.scope)) {
+				Object.assign(container, CharacterSheetProgression.projectDecisionsToChoices(container));
+			}
 			this._setDirty();
 			const refreshed = this.refreshManifest({persist: false});
 			// A parent replacement may leave some child identities legal (for

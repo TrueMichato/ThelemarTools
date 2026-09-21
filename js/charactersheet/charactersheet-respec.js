@@ -469,6 +469,25 @@ class CharacterSheetRespec {
 			if (!evidence.hasExpectedChoices && !parts.length) parts.push("No recorded build-time subchoices");
 			else if (!parts.length) parts.push("Subchoice history is unavailable");
 			row.append(e_({tag: "span", clazz: "ve-muted", txt: ` — ${parts.join(" · ")}`}));
+			const abilityChild = (this._engine?.manifest?.base?.decisions || []).find(candidate =>
+				candidate.meta?.unplacedFeatAbility
+					&& candidate.parentSemanticKey === decision.semanticKey,
+			);
+			if (abilityChild) {
+				const editBtn = e_({
+					tag: "button",
+					clazz: `ve-btn ve-btn-xs ${abilityChild.status === "resolved" ? "ve-btn-default" : "ve-btn-warning"} ml-2`,
+					txt: abilityChild.status === "resolved" ? "Change ability" : "Choose ability",
+				});
+				editBtn.dataset.decisionId = abilityChild.id;
+				editBtn.addEventListener("click", () => this._editManifestOptions(
+					0,
+					{choices: {}},
+					{decision: abilityChild},
+					null,
+				));
+				row.append(editBtn);
+			}
 			section.append(row);
 		}
 		return section;
@@ -1635,6 +1654,9 @@ class CharacterSheetRespec {
 			: (decision.selection == null ? [] : [decision.selection]);
 		currentValues.forEach(value => selected.set(CharacterSheetRespec._getDecisionOptionKey(value), value));
 		const {options, invalidOptionKeys} = CharacterSheetRespec._getDecisionEditorOptions(legalOptions, currentValues);
+		const getOptionLabel = option => decision.type === "nestedAbility" && typeof option === "string"
+			? Parser.attAbvToFull(option)
+			: CharacterSheetRespec._getDecisionOptionLabel(option);
 
 		let modalInner;
 		let doClose;
@@ -1644,7 +1666,9 @@ class CharacterSheetRespec {
 			doClose = () => inlineHost.replaceChildren();
 		} else {
 			const modal = await CharacterSheetModal.pGetShow({
-				title: `${decision.label} · Level ${level}`,
+				title: decision.scope === "unplaced"
+					? `${decision.label} · Character Base`
+					: `${decision.label} · Level ${level}`,
 				isMinHeight0: true,
 				isWidth100: true,
 				isUncappedWidth: true,
@@ -1672,7 +1696,7 @@ class CharacterSheetRespec {
 		const renderOptions = () => {
 			list.innerHTML = "";
 			const query = search.value.trim().toLowerCase();
-			const filtered = options.filter(option => CharacterSheetRespec._getDecisionOptionLabel(option).toLowerCase().includes(query));
+			const filtered = options.filter(option => getOptionLabel(option).toLowerCase().includes(query));
 			filtered.slice(0, 150).forEach(option => {
 				const key = CharacterSheetRespec._getDecisionOptionKey(option);
 				const row = e_({tag: "label", clazz: "charsheet__respec-option"});
@@ -1683,7 +1707,7 @@ class CharacterSheetRespec {
 				input.checked = selected.has(key);
 				const label = e_({
 					tag: "span",
-					txt: `${CharacterSheetRespec._getDecisionOptionLabel(option)}${invalidOptionKeys.has(key) ? " — currently selected, no longer legal" : ""}`,
+					txt: `${getOptionLabel(option)}${invalidOptionKeys.has(key) ? " — currently selected, no longer legal" : ""}`,
 				});
 				input.addEventListener("change", () => {
 					if (decision.count === 1) selected.clear();
@@ -1722,7 +1746,7 @@ class CharacterSheetRespec {
 			actions.append(defer);
 		}
 		const apply = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Stage Choice"});
-		apply.addEventListener("click", () => {
+		apply.addEventListener("click", async () => {
 			if (selected.size !== decision.count) {
 				JqueryUtil.doToast({type: "warning", content: `Choose exactly ${decision.count} option${decision.count === 1 ? "" : "s"}.`});
 				return;
@@ -1735,7 +1759,7 @@ class CharacterSheetRespec {
 				"knownSpells", "preparedSpells", "spellbookSpells", "cantrips",
 				"preparedCantrips", "nestedSpell", "nestedCantrip",
 			]);
-			this._engine.stageGraphMutation(decision.id, selection, {
+			await this._engine.stageGraphMutation(decision.id, selection, {
 				reverseParent: !setOwnedSpellTypes.has(decision.type),
 				apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, legalOptions, state),
 			});
@@ -2070,14 +2094,17 @@ class CharacterSheetRespec {
 					if (decision.meta.receiptPreviousAbility[ability] == null) {
 						decision.meta.receiptPreviousAbility[ability] = before;
 					}
-					const after = CharacterSheetClassUtils.capAbilityIncrease(before, amount, 30);
+					const cap = Number(decision.meta?.descriptorRules?.max) || 20;
+					const after = CharacterSheetClassUtils.capAbilityIncrease(before, amount, cap);
 					this._state.setAbilityBase(ability, after);
 					const parent = this._engine?.manifest?.decisions?.find(candidate =>
 						candidate.semanticKey === decision.parentSemanticKey,
 					);
-					if (!["feat", "asiOrFeat"].includes(parent?.type)) return;
+					const isUnplacedFeat = parent?.type === "nestedFeat" && parent.meta?.unplacedFeat;
+					if (!["feat", "asiOrFeat"].includes(parent?.type) && !isUnplacedFeat) return;
 					const feat = this._state._data.feats.find(candidate =>
-						candidate.sourceDecisionKey === parent.semanticKey,
+						candidate.sourceDecisionKey === parent.semanticKey
+							|| (isUnplacedFeat && candidate.id === parent.meta?.featId),
 					);
 					if (!feat) return;
 					for (const previousValue of previous) {
