@@ -130,8 +130,8 @@ lifecycle, migration, lock-order, privacy/no-op, rollback, hazard, limit, singul
 is removed. When
 `HUB_TEST_POSTGRES_URL` is available, it executes the read-only SQL proof inside `BEGIN READ ONLY` and rolls back;
 the proof validates candidate uniqueness, selected-subset membership, source/target deduplication, self-target
-collapse, and ascending UUID lock order without creating or mutating schema. It is not a substitute for A3's
-fresh/upgrade/concurrency/fault-injection PostgreSQL implementation tests.
+collapse, and ascending UUID set-shaping/order without creating or mutating schema. It is not a lock proof and is
+not a substitute for A3's fresh/upgrade/concurrency/fault-injection PostgreSQL implementation tests.
 
 A3's required implementation matrix includes same-owner/two-target invitations, source-as-target, response versus
 finalization/collection-expiry, maintenance expiry without readers, source-cost ABA, move/archive/removal/purge,
@@ -139,7 +139,9 @@ protocol-3/4/5 fail-closed mutation/read/WebSocket/resync/replay with protocol-6
 cross-target audience privacy canaries, opposing UUID and opposite-parent-discovery deadlock probes, fault
 injection after every target/event/receipt, Memory/PostgreSQL parity, transactional live-cap winners, churn/429,
 oldest-pending pagination without starvation, 90-day bounded cleanup, bridge-release rollback, and true pre-0010
-zero-total-row preflight.
+usage-marker-absent preflight. It must also race cross-campaign proposals at the same target-owner cap under
+opposite account-discovery order, proving one seed-10 winner, one loser, and no deadlock; marker tests cover
+first-use insert, cleanup persistence, backup/restore, role grants, and rollback fencing.
 
 ## Test data rules
 

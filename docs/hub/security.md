@@ -131,6 +131,10 @@
   WebSocket/resync/replay surface fails closed. Transactional source/account/campaign/target-owner caps plus
   route-level 429 throttles and oldest-pending cursor pagination bound abuse without revealing private target
   state.
+- Multi-target proposal caps which cross campaign tenants for the same account use a dedicated seed-10 quota
+  advisory-lock namespace. Proposal creation locks the source account and all distinct target-owner accounts in
+  ascending UUID order before campaign authority, so two campaigns cannot race past the global
+  5-live/source-account or 20-pending/target-owner caps and opposite owner discovery cannot deadlock.
 - WebSocket upgrades require same origin, session, active membership, and protocol version.
 - Event visibility is enforced server-side (`all_members`, `dm_only`, `actor_and_dm`,
   `explicit_accounts`) before replay or broadcast.

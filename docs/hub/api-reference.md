@@ -373,6 +373,11 @@ and 20 pending invitations/target owner. Planned route limits are propose 10/min
 `collectionClosesAt + operationId + targetCharacterId` cursor ordered oldest-pending-first so continuous new
 traffic cannot starve an older invitation.
 
+The source-account and target-owner limits are global across campaigns. Proposal creation serializes them with a
+dedicated seed-10 quota advisory lock for the source account and every distinct target-owner account, acquired
+in ascending UUID order before the campaign lock. At the final available invitation slot, concurrent proposals
+from different campaigns produce one committed winner and one `COLLECTION_LIMIT_REACHED` loser.
+
 ## Party inventory and transfer routes
 
 | Method/path | Authorization | Input | Result |

@@ -115,8 +115,10 @@ The accepted design now also fixes bounded abuse/fairness limits (3 live collect
 5/source account, 50/campaign, 20 pending invitations/target owner, explicit mutation throttles, and
 oldest-pending cursor pagination), intentional bounded DM/co-DM workflow observation, and protocol-3/4/5
 fail-closed behavior across mutation/read/WebSocket/resync/replay. Schema is predecessor-readable before use,
-but the first multi-target row fences normal rollback to a true pre-0010 binary; later rollback requires an
-aware bridge release unless a separately reviewed destructive history export/purge is approved.
+with cross-campaign source-account/target-owner caps serialized by ascending seed-10 quota locks before campaign
+authority. The first accepted proposal sets a permanent FK-independent usage marker; later normal rollback to a
+true pre-0010 binary is forbidden even after workflow cleanup and requires an aware bridge release unless a
+separately reviewed destructive history/event/outbox/recovery export/purge is approved.
 
 V2-T9 Campaign Overview is shipped by PR #243. The page is now a role-adaptive pinned session brief centered on
 campaign identity, party readiness, attention, recent activity, and one role-specific next action. Existing effects,

@@ -64,7 +64,12 @@ Version 1 supports:
 - cursor-paginated inbox/outgoing reads capped at 100 rows per page;
 - expiry/cleanup batches capped at 100 parent operations.
 
-Proposal creation enforces every live-cap transactionally under the campaign and parent/source authority locks.
+Proposal creation enforces every live-cap transactionally. It first locks a dedicated global multi-target quota
+namespace (advisory-lock seed 10) for the source account and every distinct target-owner account in ascending
+account UUID order, before acquiring the campaign lifecycle lock. Those account locks serialize the global
+5-live/source-account and 20-pending-invitations/target-owner checks across different campaigns. The
+3-live/source-character and 50-live/campaign checks run later under campaign/character authority.
+
 The first concurrent proposal which remains within all caps wins; later proposals fail with
 `COLLECTION_LIMIT_REACHED` and create no operation, invitation, event, outbox, audit, or command result.
 
@@ -219,19 +224,22 @@ Every proposal/response/finalization/expiry/lifecycle path uses this total order
 
 1. command advisory lock (seed 9) and payload-aware replay lookup;
 2. authenticated session/account rows;
-3. campaign advisory lock (seed 6) then active campaign row;
-4. parent semantic operation rows in ascending operation UUID order `FOR UPDATE`;
-5. target child rows ordered by `(operation_id, target_character_id)`;
-6. required membership rows in ascending account UUID order;
-7. unique character advisory locks (seed 2) in ascending character UUID order;
-8. character rows in ascending UUID order `FOR UPDATE`;
-9. separately persisted resources in ascending `(kind,row UUID)` order;
-10. character lease rows in the same character order;
-11. pinned rules/brew/template reads;
-12. compute every next document/leg/event before any canonical write;
-13. write workflow, unique character updates, audit, events/outbox, watermarks, and command result; commit once.
+3. for proposal creation, quota advisory locks (seed 10) for source account plus distinct target-owner accounts
+   in ascending account UUID order;
+4. campaign advisory lock (seed 6) then active campaign row;
+5. parent semantic operation rows in ascending operation UUID order `FOR UPDATE`;
+6. target child rows ordered by `(operation_id, target_character_id)`;
+7. required membership rows in ascending account UUID order;
+8. unique character advisory locks (seed 2) in ascending character UUID order;
+9. character rows in ascending UUID order `FOR UPDATE`;
+10. separately persisted resources in ascending `(kind,row UUID)` order;
+11. character lease rows in the same character order;
+12. pinned rules/brew/template reads;
+13. compute every next document/leg/event before any canonical write;
+14. write workflow, unique character updates, audit, events/outbox, watermarks, and command result; commit once.
 
-The normative multi-target aggregate sequence is command advisory lock -> campaign advisory/row -> parent
+The normative multi-target aggregate sequence is command advisory lock -> global quota locks ascending by account
+UUID (proposal only) -> campaign advisory/row -> parent
 operation rows ascending by UUID -> child legs by `(operation_id,target_character_id)` -> character advisory
 locks ascending -> character rows ascending -> leases. Session/account and membership checks remain in their
 listed positions but never invert that aggregate sequence.
@@ -247,6 +255,11 @@ Maintenance uses the bounded `SKIP LOCKED` query above and processes one locked 
 which affect several operations lock all affected parent ids in ascending order before locking any child. A3
 must run concurrent PostgreSQL tests with overlapping operation sets discovered in opposite orders and opposing
 source/target UUID orders; neither may deadlock or partially transition.
+
+Cross-campaign proposal tests must fill a target owner's global pending-invitation cap, then race two proposals
+from different campaigns whose source/target-owner account lists are discovered in opposite orders. Ascending
+seed-10 quota locks produce exactly one quota-lock winner at the final slot, one
+`COLLECTION_LIMIT_REACHED` loser, no deadlock, and no loser workflow evidence.
 
 The read-only set-shaping feasibility example at
 `test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` demonstrates valid target uniqueness, exact contiguous
@@ -327,6 +340,18 @@ arrival order.
 Migration `0010_multi_target_semantic_operations.sql` is required in A3. The normalized target table is
 `hub.semantic_operation_targets`; do not store target/response/selection arrays in JSON.
 
+Migration 0010 also creates singleton `hub.semantic_multi_target_usage`:
+
+- `singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton)`;
+- `first_used_at timestamptz NOT NULL`;
+- `first_operation_id uuid NOT NULL`;
+- no foreign key to semantic-operation or campaign history.
+
+The first accepted multi-target proposal inserts
+`(true, now(), operationId)` transactionally with `ON CONFLICT DO NOTHING`. This irreversible high-water marker
+survives parent/child/finalization/command/leg cleanup and proves the schema has been used even after every
+cleanable workflow row has aged out.
+
 The existing `semantic_operations` parent remains the shared aggregate:
 
 - add `target_set_version integer`;
@@ -406,27 +431,30 @@ state changes remain workflow transitions, never FK cascades.
 Detailed terminal multi-target parent/target/finalization/command/leg rows are retained for 90 days, then removed
 in oldest-terminal-time/id order in batches of 100 only after every related outbox row is published and the
 operation is outside the idempotency/recovery window. Audit and domain events retain their existing independent
-policy. Cleanup exposes aggregate counts/status/age only.
+policy. Normal cleanup never deletes or rewrites `hub.semantic_multi_target_usage`. Cleanup exposes aggregate
+counts/status/age only.
 
 Migration 0010 is `phase: "expand"`. Its migration-policy entry may say `previousAppCompatible: true` only for
-the schema-before-use state: while capability remains disabled and zero multi-target rows have ever existed, a
-pre-0010 binary reads legacy rows, ignores additive tables/nullable columns, and never creates
-`target_set_version=1`.
+the schema-before-use state: while capability remains disabled and the usage marker is absent, a pre-0010 binary
+reads legacy rows, ignores additive tables/nullable columns, and never creates `target_set_version=1`.
 
-After the first multi-target parent or target row exists, operational rollback to a true pre-0010 binary is
-forbidden. Terminal child/FK/history rows remain meaningful authority and may block lifecycle purge even after
-live parents are drained. The normal rollback target must be a bridge/r10+ release which understands
-`target_set_version`, child history, projection filtering, expiry, retention, and explicit cleanup. A pre-0010
-rollback preflight checks that the total count of all multi-target parents and children is exactly zero, not only
-that live status count is zero.
+After the first accepted multi-target proposal sets `hub.semantic_multi_target_usage`, operational rollback to a
+true pre-0010 binary is permanently forbidden even if all parent/child history has been cleaned. The normal
+rollback target must be a bridge/r10+ release which understands `target_set_version`, child history, projection
+filtering, expiry, retention, explicit cleanup, and the usage marker. A pre-0010 rollback preflight requires the
+usage marker to be absent; current parent/child counts are diagnostic only and cannot clear a present marker.
 
 Returning to a true pre-0010 binary after data creation requires a separately reviewed destructive
-history-export/purge procedure with backup, participant/audit export, FK-safe cleanup, and explicit human
-authorization. It is not normal rollback and is not defined by this ADR. No ordinary rollback drops
-columns/tables or reverses applied character state.
+history/event/outbox/recovery export-and-purge procedure with backup, participant/audit export, FK-safe cleanup,
+and explicit human authorization. Deleting the usage marker is the final irreversible step of that reviewed
+procedure. It is not normal rollback and is not defined by this ADR. No ordinary rollback drops columns/tables
+or reverses applied character state.
 
-Role grants run after migration: runtime gets CRUD on new tables/sequences, backup gets SELECT, operations gets no
-new mutation grant, and no role gets schema create.
+Role grants run after migration: runtime gets CRUD on new workflow tables and `SELECT, INSERT` (not
+`UPDATE, DELETE`) on the usage marker; backup gets SELECT on every new table including the marker; operations
+gets no new mutation grant; no role gets schema create. Fresh/upgrade/restore tests prove the marker is absent
+before use, inserted once on first accepted proposal, retained by 90-day cleanup, restored by backup, and visible
+to rollback preflight.
 
 ### Protocol, capability, API, rollout, and rollback
 
@@ -468,8 +496,8 @@ The capability is disabled by default.
 
 Bridge-release rollback preflight reports total and live parent/child counts, oldest
 collection/finalization/terminal deadlines, unsupported template versions, incomplete
-response/finalization/leg rows, and cleanup readiness without private identities. A true pre-0010 target is
-blocked unless total multi-target row count is zero.
+response/finalization/leg rows, usage-marker state, and cleanup readiness without private identities. A true
+pre-0010 target is blocked whenever the usage marker exists, regardless of current row counts.
 
 ### A1-A5 handoff
 
@@ -477,7 +505,7 @@ blocked unless total multi-target row count is zero.
 |---|---|---|
 | **A1 — DM typed effects** | Typed effect catalog used by first templates | No prose; pure fixtures; policy/document validation |
 | **A2 — source-cost authority** | Generalized deterministic one-time cost/ABA authority | No reservation; shared Memory/PostgreSQL parity |
-| **A3 — server state machine** | Migration 0010, protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, locks | Opposing-order deadlock tests, fault injection, purge/rollback drain |
+| **A3 — server state machine** | Migration 0010, protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, locks | Seed-10 cross-campaign quota races, opposing-order deadlock tests, usage-marker persistence, fault injection, purge/bridge rollback |
 | **A4 — Character Sheet UX and reconciliation** | Proposal, invitation response, exact-subset finalization, per-leg recovery | Same-owner/two-target and source-as-target UX; dirty/in-flight/reconnect/access-loss coverage |
 | **A5 — Healing Word and Mass Healing Word templates** | First reviewed production templates | PHB/XPHB semantics and explicit `allowTargetNoOp=true` privacy evidence |
 
@@ -505,8 +533,10 @@ blocked unless total multi-target row count is zero.
 17. Protocol 3/4/5 failure for every multi-target surface and protocol-6 success.
 18. Concurrent live-cap winners, create/respond/finalize churn, 429 mutation throttles, and oldest-pending cursor
     pagination without starvation.
-19. Fresh/0009 upgrade/concurrent/failure/checksum/roles/backup/restore/bridge-release compatibility proof.
-20. Default-off/disable/bridge rollback and true pre-0010 zero-total-row preflight.
+19. Cross-campaign proposals targeting the same owner at the 20-invitation cap, with opposite owner-discovery
+    order, one seed-10 winner, one loser, and no deadlock.
+20. Fresh/0009 upgrade/concurrent/failure/checksum/roles/backup/restore proof for the irreversible usage marker.
+21. Default-off/disable/bridge rollback and true pre-0010 marker-absent preflight.
 
 ## Consequences
 
@@ -515,8 +545,8 @@ blocked unless total multi-target row count is zero.
 - Reviewed healing no-ops protect hidden target state without refund or re-proposal oracles.
 - Normalized child rows make invitation, response, lifecycle, cleanup, and reconciliation enforceable.
 - Existing one-target rows/routes remain readable and unchanged.
-- Schema-before-use remains additive, but the first multi-target row permanently fences normal rollback to a true
-  pre-0010 binary.
+- Schema-before-use remains additive, but the first accepted proposal persists an irreversible usage marker which
+  permanently fences normal rollback to a true pre-0010 binary.
 
 ## Rejected alternatives
 

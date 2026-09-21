@@ -455,6 +455,9 @@ pagination. Protocol 3/4/5 fails closed on every multi-target mutation, read, We
 surface. DM/co-DM receive bounded workflow projections intentionally for support, abuse moderation, lifecycle
 diagnosis, and audit; a target owner never sees co-target identity or decisions.
 
+Global source-account and target-owner caps are serialized across campaigns by dedicated seed-10 quota locks
+acquired in ascending account UUID order before campaign authority.
+
 This is **planned, not implemented**. Migration 0010, protocol 6, routes, both stores, events, capability
 advertisement, Character Sheet UX, and templates remain future A1-A5 work. The sequence is:
 
@@ -468,10 +471,11 @@ NPC/monster targets, arbitrary prose, damage combat resolution, offline writes, 
 per-target costs, and post-proposal target additions remain deferred. Wave A0 may be reviewed as a draft but is
 held from merge until the coordinator records the physical game-day GO/NO-GO.
 
-Migration 0010 is additive before use. After the first multi-target row exists, normal rollback to a true
-pre-0010 binary is forbidden; rollback must use a bridge/r10+ release which understands child history/cleanup.
-A pre-0010 rollback target requires a zero-total-row preflight or a separately reviewed destructive export/purge
-process outside normal rollback.
+Migration 0010 is additive before use. The first accepted multi-target proposal permanently inserts an
+FK-independent usage marker which normal cleanup never deletes. Once that marker exists, rollback to a true
+pre-0010 binary is forbidden; rollback must use a bridge/r10+ release which understands child history/cleanup
+and the marker. A pre-0010 rollback target requires the marker to be absent or a separately reviewed destructive
+history/event/outbox/recovery export/purge process, with marker deletion last, outside normal rollback.
 
 Acceptance:
 

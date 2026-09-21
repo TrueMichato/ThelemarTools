@@ -13,6 +13,8 @@ const proofSql = fs.readFileSync(
 const apiReference = fs.readFileSync(new URL("../../../docs/hub/api-reference.md", import.meta.url), "utf8").replace(/\s+/g, " ");
 const eventCatalog = fs.readFileSync(new URL("../../../docs/hub/event-catalog.md", import.meta.url), "utf8").replace(/\s+/g, " ");
 const security = fs.readFileSync(new URL("../../../docs/hub/security.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+const migrations = fs.readFileSync(new URL("../../../docs/hub/migrations.md", import.meta.url), "utf8").replace(/\s+/g, " ");
+const testing = fs.readFileSync(new URL("../../../docs/hub/testing.md", import.meta.url), "utf8").replace(/\s+/g, " ");
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
 
 describe("Campaign Hub multi-target operation ADR contract", () => {
@@ -50,13 +52,17 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 			"at most 20 pending invitations per target owner",
 			"`429 RATE_LIMITED`",
 			"oldest-pending-first cursor pagination",
+			"advisory-lock seed 10",
 		]) expect(normalizedAdr).toContain(limit);
+		expect(normalizedAdr).toContain("source account and every distinct target-owner account in ascending account UUID order");
+		expect(normalizedAdr.indexOf("quota advisory locks (seed 10)")).toBeLessThan(normalizedAdr.indexOf("campaign advisory lock (seed 6)"));
 	});
 
 	it("requires normalized migration 0010 tables and concrete constraints", () => {
 		expect(normalizedAdr).toContain("Migration `0010_multi_target_semantic_operations.sql` is required");
 		expect(normalizedAdr).toContain("`hub.semantic_operation_targets`");
 		expect(normalizedAdr).toContain("`semantic_operation_finalizations`");
+		expect(normalizedAdr).toContain("`hub.semantic_multi_target_usage`");
 		expect(normalizedAdr).toContain("`target_set_version integer`");
 		for (const constraint of [
 			"PK `(operation_id,target_character_id)`",
@@ -70,6 +76,9 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		]) expect(normalizedAdr).toContain(constraint);
 		expect(normalizedAdr).toContain("legacy rows have `target_set_version IS NULL`");
 		expect(normalizedAdr).toContain("Every current singular read must be explicitly rewritten");
+		expect(normalizedAdr).toContain("no foreign key to semantic-operation or campaign history");
+		expect(normalizedAdr).toContain("`ON CONFLICT DO NOTHING`");
+		expect(normalizedAdr).toContain("Normal cleanup never deletes or rewrites `hub.semantic_multi_target_usage`");
 	});
 
 	it("pins lock, event, privacy, reconciliation, and rollback ordering", () => {
@@ -92,19 +101,36 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 			"Opposing source/target UUID order",
 			"parent semantic operation rows in ascending operation UUID order",
 			"`ORDER BY collection_closes_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`",
-			"command advisory lock -> campaign advisory/row -> parent operation rows ascending by UUID",
+			"command advisory lock -> global quota locks ascending by account UUID (proposal only) -> campaign advisory/row",
 		]) expect(normalizedAdr).toContain(anchor);
+		expect(normalizedAdr).toContain("global quota locks ascending by account UUID");
 	});
 
-	it("fences true pre-0010 rollback after the first multi-target row", () => {
+	it("fences true pre-0010 rollback after the irreversible first-use marker", () => {
 		for (const anchor of [
 			"`previousAppCompatible: true` only for the schema-before-use state",
-			"After the first multi-target parent or target row exists",
-			"operational rollback to a true pre-0010 binary is forbidden",
+			"usage marker is absent",
+			"After the first accepted multi-target proposal sets `hub.semantic_multi_target_usage`",
+			"operational rollback to a true pre-0010 binary is permanently forbidden",
 			"bridge/r10+ release",
-			"total count of all multi-target parents and children is exactly zero",
-			"separately reviewed destructive history-export/purge procedure",
+			"current parent/child counts are diagnostic only",
+			"separately reviewed destructive history/event/outbox/recovery export-and-purge procedure",
+			"Deleting the usage marker is the final irreversible step",
 		]) expect(normalizedAdr).toContain(anchor);
+		expect(migrations).toContain("true pre-0010 rollback is blocked whenever the marker exists");
+	});
+
+	it("serializes global cross-campaign quotas before campaign authority", () => {
+		for (const anchor of [
+			"dedicated global multi-target quota namespace",
+			"source account and every distinct target-owner account",
+			"before acquiring the campaign lifecycle lock",
+			"Cross-campaign proposal tests",
+			"exactly one quota-lock winner at the final slot",
+			"one `COLLECTION_LIMIT_REACHED` loser",
+		]) expect(normalizedAdr).toContain(anchor);
+		expect(security).toContain("dedicated seed-10 quota advisory-lock namespace");
+		expect(apiReference).toContain("different campaigns produce one committed winner");
 	});
 
 	it("pins bounded event audiences and cross-target privacy across current docs", () => {
@@ -205,6 +231,8 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(proofSql).toContain("gapped_ordinal_detected");
 		expect(proofSql).not.toContain("FOR UPDATE");
 		expect(proofSql).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE|LOCK)\b/i);
+		expect(testing).toContain("ascending UUID set-shaping/order");
+		expect(testing).toContain("It is not a lock proof");
 	});
 });
 
