@@ -4087,7 +4087,10 @@ class CharacterSheetClassUtils {
 					options: skills.map(skill => skill.toLowerCase()),
 					grantKey: `${path}.prose.skills`,
 					sourcePath: `${path}.prose.skills`,
-					rules: {optionSource: {kind: "explicitList", values: skills.map(skill => skill.toLowerCase())}},
+					rules: {
+						identityMode: "opportunity",
+						optionSource: {kind: "explicitList", values: skills.map(skill => skill.toLowerCase())},
+					},
 				});
 			}
 

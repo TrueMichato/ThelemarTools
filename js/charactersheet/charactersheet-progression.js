@@ -437,6 +437,43 @@ class CharacterSheetProgression {
 			};
 	}
 
+	static getLegacyTrackedFeatureChoiceEvidence ({
+		state,
+		ownerUid,
+		options = [],
+		selection = null,
+		type = "skills",
+	} = {}) {
+		const normalizedOwner = CharacterSheetProgression._normalize(ownerUid);
+		const normalizeValue = value => type === "skills"
+			? String(value || "").trim().toLowerCase().replace(/['\s]+/g, "")
+			: CharacterSheetProgression._slug(value);
+		const optionByKey = new Map(options.map(option => {
+			const value = option?.value ?? option?.name ?? option;
+			return [normalizeValue(value), value];
+		}));
+		const selectedKey = selection == null
+			? null
+			: normalizeValue(selection?.value ?? selection?.name ?? selection);
+		const matches = [];
+		for (const feature of state?.getFeatures?.() || []) {
+			if (!feature?.id || CharacterSheetProgression.getEntityUid(feature) !== normalizedOwner) continue;
+			const sourceId = `feature-choice:${feature.id}`;
+			for (const [value, sources] of Object.entries(state?._data?.grantedProficiencies?.[type] || {})) {
+				const valueKey = normalizeValue(value);
+				if (!optionByKey.has(valueKey) || (selectedKey && valueKey !== selectedKey)) continue;
+				if (!(sources || []).includes(sourceId)) continue;
+				matches.push({
+					value: CharacterSheetProgression._copy(optionByKey.get(valueKey)),
+					featureId: feature.id,
+					sourceId,
+					type,
+				});
+			}
+		}
+		return matches.length === 1 ? matches[0] : null;
+	}
+
 	static _getSelectedDescriptorValue ({descriptor, entity, state, parentDecision = null, legacyChoices = null}) {
 		const values = [];
 		const choices = [
@@ -517,6 +554,14 @@ class CharacterSheetProgression {
 					source: current.source,
 				};
 			}
+		}
+		if (descriptor.kind === "skill") {
+			const evidence = CharacterSheetProgression.getLegacyTrackedFeatureChoiceEvidence({
+				state,
+				ownerUid: CharacterSheetProgression.getEntityUid(entity),
+				options: descriptor.options,
+			});
+			if (evidence) return evidence.value;
 		}
 		if (descriptor.kind === "skillBonus") {
 			const optionSkills = new Set((descriptor.options || [])

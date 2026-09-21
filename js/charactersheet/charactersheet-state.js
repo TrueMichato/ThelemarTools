@@ -9474,6 +9474,39 @@ class CharacterSheetState {
 					};
 				}
 			}
+			if (decision.type === "nestedSkill" && decision.selection != null && !decision.receipt) {
+				const evidence = CharacterSheetProgression.getLegacyTrackedFeatureChoiceEvidence({
+					state: this,
+					ownerUid: decision.provenance?.ownerUid,
+					options: decision.options,
+					selection: decision.selection,
+				});
+				if (evidence) {
+					decision.receipt = {
+						version: 1,
+						sourceDecisionKey: decision.semanticKey,
+						effects: [{
+							type: "ownership",
+							ownership: [{type: evidence.type, value: CharacterSheetProgression._copy(evidence.value)}],
+						}],
+					};
+					const sources = this._data.grantedProficiencies?.[evidence.type]?.[
+						this._getProgressionOwnershipKey(evidence.type, evidence.value)
+					];
+					if (sources) {
+						const remaining = sources.filter(source => source !== evidence.sourceId);
+						if (remaining.length) {
+							this._data.grantedProficiencies[evidence.type][
+								this._getProgressionOwnershipKey(evidence.type, evidence.value)
+							] = remaining;
+						} else {
+							delete this._data.grantedProficiencies[evidence.type][
+								this._getProgressionOwnershipKey(evidence.type, evidence.value)
+							];
+						}
+					}
+				}
+			}
 			if (decision.type === "nestedAbility" && decision.selection && !decision.receipt) {
 				const isOriginAbility = decision.scope === "origin"
 					&& ["race", "background"].includes(decision.provenance?.ownerType);
