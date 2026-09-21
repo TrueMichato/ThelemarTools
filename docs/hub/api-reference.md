@@ -2,7 +2,7 @@
 
 > **Status:** Current private-V1 contract
 > **Wire protocol:** `5`
-> **Last verified:** 2026-09-20
+> **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
 The browser uses relative same-origin paths through `HubApiClient`. This is an application BFF contract, not
@@ -344,6 +344,39 @@ remain unsupported.
 An otherwise-authorized resolution command received after the deadline performs the single `expired` transition
 and returns its stable terminal metadata; retries replay that response. The authority does not interpret
 arbitrary spell prose.
+
+### Planned multi-target operation API
+
+[ADR 0020](adr/0020-consented-multi-target-operations.md) reserves a protocol-6, default-off API contract. It is
+**not implemented** and the current `/actions` routes retain their one-target protocol-4 behavior.
+
+| Planned path | Authorization | Closed input | Planned result |
+|---|---|---|---|
+| `POST /api/campaigns/:campaignId/multi-target-operations` | Active player and source owner | contract/command id, source character/entity/template/choice, active rules id, 1-8 ordered unique opaque target refs | Fixed candidate operation in `collecting_responses`; no cost/resource/revision mutation |
+| `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/invitations/:invitationId/respond` | Current pinned target owner for that invitation; DM/co-DM reject only | command id and `approve` or `reject` | One immutable terminal leg response; exact replay returns the same response/event ids |
+| `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/finalize` | Current source owner | command id and exact ordered unique selected invitation ids; empty list means cancel | Empty list cancels with no character mutation; non-empty approved/current subset commits one source cost and all selected legs atomically |
+| `GET` operation/inbox/outgoing projections | Current participant only | bounded pagination/cursor | Source sees authorized labels/coarse status; each owner sees only their character request; unrelated users receive route-equivalent absence |
+
+The server enforces `maxTargets: 8`, rejects duplicate resolved characters, post-proposal additions,
+non-candidates, unapproved/expired/revoked invitations, and currently invalid selected legs. It never silently
+drops an invalid submitted invitation. A rejected finalization has no workflow/audit/event/outbox/character side
+effect; source authority, cost, rules, or template invalidity terminally fails the whole operation without any
+target mutation. A reviewed healing template with `allowTargetNoOp=true` may apply a selected full-HP leg with no
+target revision/invalidation while consuming the single cost; source-visible output cannot identify it. Protocol
+3/4/5 fails closed for create/respond/finalize/cancel, inbox/detail/outgoing reads, WebSocket delivery, resync,
+and replay; protocol 6 is the first successful version. All successful responses are `Cache-Control: no-store`.
+
+Planned transactional capacity limits are 3 live collections/source character, 5/source account, 50/campaign,
+and 20 pending invitations/target owner. Planned route limits are propose 10/minute/account and
+30/minute/campaign, respond 30/120, and finalize/cancel 20/60; excess requests return privacy-safe
+`429 RATE_LIMITED`. Inbox pages contain at most 100 rows and use an exclusive
+`collectionClosesAt + operationId + targetCharacterId` cursor ordered oldest-pending-first so continuous new
+traffic cannot starve an older invitation.
+
+The source-account and target-owner limits are global across campaigns. Proposal creation serializes them with a
+dedicated seed-10 quota advisory lock for the source account and every distinct target-owner account, acquired
+in ascending UUID order before the campaign lock. At the final available invitation slot, concurrent proposals
+from different campaigns produce one committed winner and one `COLLECTION_LIMIT_REACHED` loser.
 
 ## Party inventory and transfer routes
 

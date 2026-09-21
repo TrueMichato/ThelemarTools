@@ -2,6 +2,12 @@
 
 Status: Accepted architecture contract; source-cost reservation superseded by ADR 0016 (2026-09-03)
 
+> **Extended and narrowed by [ADR 0020](0020-consented-multi-target-operations.md) (2026-09-21):** the accepted
+> multi-target model uses one immutable bounded candidate set, independent per-character owner responses, and one
+> source-selected all-or-none finalization. It does not repeat this one-target operation or permit incremental
+> partial commits. For source-owned legs, source finalization is consent and deselection is a terminal decline,
+> superseding this ADR's separate self-target approval command only for protocol-6 multi-target operations.
+
 Implementation: The original protocol-v3 server/store/API/event substrate is implemented. Protocol 4 and
 [ADR 0016](0016-atomic-peer-source-costs.md) now add the first successful cost-bearing production template:
 PHB/XPHB Cure Wounds with one standard spell slot, one player-owned target, and atomic source/target acceptance.

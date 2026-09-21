@@ -1,7 +1,7 @@
 # Campaign Hub security model
 
 > **Status:** Implemented private-V1 controls; managed deployment review pending
-> **Last verified:** 2026-09-20
+> **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
 ## Trust boundaries
@@ -116,6 +116,26 @@
 - Semantic creation/resolution revalidates the authenticated session, active account/campaign/membership/role,
   source/target truth, template policy, and approval authority inside one transaction. Stable command ids are
   actor/body bound, and no unsupported/stale operation can partially mutate character/event/outbox state.
+- [ADR 0020](adr/0020-consented-multi-target-operations.md) is an accepted **planned, not implemented**
+  protocol-6 boundary capped at eight fixed targets. It assigns each target leg a unique opaque invitation id,
+  records one terminal response per leg,
+  exposes each target owner only their request, gives the source only policy-authorized labels and coarse status,
+  and gives unrelated users no private workflow data. Finalization accepts only an approved current subset and
+  rechecks source, cost, policy, membership, target authorization, targetability, and applicability under one
+  stable source-plus-N lock order. No cost is reserved while consent is collected; a selected batch commits one
+  cost and every leg or none. A reviewed healing template may mark a full-HP selected leg applied/no-change while
+  consuming the single cost; source-visible responses/events/timing cannot identify which target was full.
+  DM/co-DM receive bounded workflow projections intentionally for support, abuse moderation, lifecycle diagnosis,
+  and audit, but target-owner views never expose a co-target identity or decision. Migration 0010 is reserved for
+  A2 source-cost binding identity; migration 0011 and protocol 6 are required before multi-target
+  capability enablement, and every protocol 3/4/5 create/respond/finalize/cancel/read/
+  WebSocket/resync/replay surface fails closed. Transactional source/account/campaign/target-owner caps plus
+  route-level 429 throttles and oldest-pending cursor pagination bound abuse without revealing private target
+  state.
+- Multi-target proposal caps which cross campaign tenants for the same account use a dedicated seed-10 quota
+  advisory-lock namespace. Proposal creation locks the source account and all distinct target-owner accounts in
+  ascending UUID order before campaign authority, so two campaigns cannot race past the global
+  5-live/source-account or 20-pending/target-owner caps and opposite owner discovery cannot deadlock.
 - WebSocket upgrades require same origin, session, active membership, and protocol version.
 - Event visibility is enforced server-side (`all_members`, `dm_only`, `actor_and_dm`,
   `explicit_accounts`) before replay or broadcast.

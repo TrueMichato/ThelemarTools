@@ -241,6 +241,7 @@ stateDiagram-v2
 | 4 | campaign id | serialize party inventory creation/write |
 | 6 | campaign id | membership/campaign lifecycle serialization |
 | 7 | platform operator namespace | serialize operator grant/revoke/deletion checks before entitlement/account rows |
+| 10 | planned multi-target quota account UUID | serialize source-account and target-owner global multi-target caps across campaigns; ADR 0020/A3 only, not implemented |
 
 These seeds are implementation allocations, not a public API. New lock classes must avoid accidental overlap
 and document ordering.
