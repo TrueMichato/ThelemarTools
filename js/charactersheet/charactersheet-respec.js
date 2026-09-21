@@ -4046,12 +4046,12 @@ class CharacterSheetRespec {
 				}
 			});
 		}
-		this._engine.stageGraphMutation(decision.id, newOption, {
-			apply: ({state}) => {
+		return this._engine.stageGraphMutation(decision.id, newOption, {
+			apply: async ({state}) => {
 				const previousState = this._state;
 				this._state = state;
 				try {
-					return this._applyFeatureChoiceChangeInner(level, history, choiceIndex, oldChoice, newOption);
+					return await this._applyFeatureChoiceChangeInner(level, history, choiceIndex, oldChoice, newOption);
 				} finally {
 					this._state = previousState;
 				}

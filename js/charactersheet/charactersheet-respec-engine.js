@@ -348,6 +348,8 @@ class CharacterSheetRespecEngine {
 		const stateSnapshot = this._candidateState.toJson();
 		const manifestSnapshot = CharacterSheetProgression._copy(this._manifest);
 		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
+		const isDirtySnapshot = this._isDirty;
+		const undoSnapshot = this._undoSnapshot;
 		const {container} = this._getDecisionStore(decision);
 		const stored = container?.decisions?.find(it => it.id === decisionId || it.semanticKey === decision.semanticKey)
 			|| (container
@@ -363,57 +365,16 @@ class CharacterSheetRespecEngine {
 				})()
 				: null);
 		if (!stored) throw new Error("That progression decision could not be found in the draft ledger.");
-		try {
-			const descendants = [];
-			const pendingParents = [decision.semanticKey];
-			const seenDescendants = new Set();
-			while (pendingParents.length) {
-				const parentSemanticKey = pendingParents.shift();
-				for (const candidate of this._manifest.decisions || []) {
-					if (candidate.semanticKey === decision.semanticKey
-						|| candidate.parentSemanticKey !== parentSemanticKey
-						|| seenDescendants.has(candidate.semanticKey)) continue;
-					seenDescendants.add(candidate.semanticKey);
-					descendants.push(candidate);
-					pendingParents.push(candidate.semanticKey);
-				}
-			}
-			descendants.sort((a, b) => Number(b.depth || 0) - Number(a.depth || 0));
-			const descendantSnapshots = descendants.map(descendant => ({
-				decision: CharacterSheetProgression._copy(descendant),
-				selection: CharacterSheetProgression._copy(descendant.selection),
-				status: descendant.status,
-			}));
-			// Descendant state cleanup is owned by the existing state/controller
-			// handlers.  The ledger side is removed deepest-first before the parent
-			// is written, preventing stale choices from surviving a replacement.
-			for (const descendant of descendants) {
-				this._reverseDecisionReceipt(descendant);
-				const ownerUid = descendant.provenance?.ownerUid || "";
-				const [parentName, parentSource] = ownerUid.split("|");
-				if (parentName) {
-					this._candidateState.removeChosenSubfeature?.(parentName, {
-						parentSource: parentSource || null,
-						level: descendant.classLevel || descendant.characterLevel,
-						sourceDecisionKey: descendant.semanticKey,
-					});
-				}
 
-				const descendantStore = this._getDecisionStore(descendant).container;
-				if (descendantStore?.decisions) {
-					descendantStore.decisions = descendantStore.decisions
-						.filter(item => item.semanticKey !== descendant.semanticKey);
-				}
-			}
-			// Generic manifest editors do not have a legacy callback which
-			// knows how to tear down the previous selection.  Consume the
-			// parent's compact receipt before applying its replacement. Legacy
-			// editors opt out because their callback performs the historical
-			// teardown itself.
-			if (reverseParent) this._reverseDecisionReceipt(stored);
-			const applyResult = typeof apply === "function"
-				? apply({decision, stored, state: this._candidateState})
-				: null;
+		const rollback = error => {
+			this._candidateState.loadFromJson(stateSnapshot);
+			this._manifest = manifestSnapshot;
+			this._isDirty = isDirtySnapshot;
+			this._undoSnapshot = undoSnapshot;
+			throw error;
+		};
+
+		const finalize = applyResult => {
 			const effectiveSelection = applyResult && Object.prototype.hasOwnProperty.call(applyResult, "selection")
 				? applyResult.selection
 				: selection;
@@ -458,10 +419,68 @@ class CharacterSheetRespecEngine {
 			this._assertNoNewUnrepresentedPending(pendingSnapshot, this._manifest);
 			this._persistManifest();
 			return this._manifest;
+		};
+
+		let descendantSnapshots = [];
+		try {
+			const descendants = [];
+			const pendingParents = [decision.semanticKey];
+			const seenDescendants = new Set();
+			while (pendingParents.length) {
+				const parentSemanticKey = pendingParents.shift();
+				for (const candidate of this._manifest.decisions || []) {
+					if (candidate.semanticKey === decision.semanticKey
+						|| candidate.parentSemanticKey !== parentSemanticKey
+						|| seenDescendants.has(candidate.semanticKey)) continue;
+					seenDescendants.add(candidate.semanticKey);
+					descendants.push(candidate);
+					pendingParents.push(candidate.semanticKey);
+				}
+			}
+			descendants.sort((a, b) => Number(b.depth || 0) - Number(a.depth || 0));
+			descendantSnapshots = descendants.map(descendant => ({
+				decision: CharacterSheetProgression._copy(descendant),
+				selection: CharacterSheetProgression._copy(descendant.selection),
+				status: descendant.status,
+			}));
+			// Descendant state cleanup is owned by the existing state/controller
+			// handlers.  The ledger side is removed deepest-first before the parent
+			// is written, preventing stale choices from surviving a replacement.
+			for (const descendant of descendants) {
+				this._reverseDecisionReceipt(descendant);
+				const ownerUid = descendant.provenance?.ownerUid || "";
+				const [parentName, parentSource] = ownerUid.split("|");
+				if (parentName) {
+					this._candidateState.removeChosenSubfeature?.(parentName, {
+						parentSource: parentSource || null,
+						level: descendant.classLevel || descendant.characterLevel,
+						sourceDecisionKey: descendant.semanticKey,
+					});
+				}
+
+				const descendantStore = this._getDecisionStore(descendant).container;
+				if (descendantStore?.decisions) {
+					descendantStore.decisions = descendantStore.decisions
+						.filter(item => item.semanticKey !== descendant.semanticKey);
+				}
+			}
+			// Generic manifest editors do not have a legacy callback which
+			// knows how to tear down the previous selection.  Consume the
+			// parent's compact receipt before applying its replacement. Legacy
+			// editors opt out because their callback performs the historical
+			// teardown itself.
+			if (reverseParent) this._reverseDecisionReceipt(stored);
+			const applyResult = typeof apply === "function"
+				? apply({decision, stored, state: this._candidateState})
+				: null;
+			if (applyResult && typeof applyResult.then === "function") {
+				return Promise.resolve(applyResult)
+					.then(finalize)
+					.catch(rollback);
+			}
+			return finalize(applyResult);
 		} catch (error) {
-			this._candidateState.loadFromJson(stateSnapshot);
-			this._manifest = manifestSnapshot;
-			throw error;
+			return rollback(error);
 		}
 	}
 

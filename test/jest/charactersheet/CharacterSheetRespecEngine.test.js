@@ -92,6 +92,32 @@ describe("CharacterSheetRespecEngine", () => {
 		expect(engine.manifest).toEqual(expect.any(Object));
 	});
 
+	it("awaits graph mechanics and restores candidate state and manifest when they reject", async () => {
+		engine.begin();
+		const decision = engine.manifest.decisions.find(item => item.type === "skills");
+		const beforeState = engine.state.toJson();
+		const beforeManifest = JSON.parse(JSON.stringify(engine.manifest));
+		let releaseApply;
+		const applyGate = new Promise(resolve => { releaseApply = resolve; });
+
+		const mutation = engine.stageGraphMutation(decision.id, ["perception"], {
+			reverseParent: true,
+			apply: async ({state: candidate}) => {
+				candidate.updateLevelChoice(1, {skills: ["perception"]});
+				await applyGate;
+				candidate.addSkillProficiency("perception");
+				throw new Error("async graph mechanics failed");
+			},
+		});
+
+		expect(mutation).toEqual(expect.any(Promise));
+		releaseApply();
+		await expect(mutation).rejects.toThrow("async graph mechanics failed");
+		expect(engine.state.toJson()).toEqual(beforeState);
+		expect(engine.manifest).toEqual(beforeManifest);
+		expect(engine.isDirty).toBe(false);
+	});
+
 	it("applies a valid candidate atomically and supports one-step undo", async () => {
 		engine.begin();
 		engine.state.updateLevelChoice(1, {skills: ["perception"]});
@@ -207,12 +233,12 @@ describe("CharacterSheetRespecEngine", () => {
 		});
 	});
 
-	it("retains staged receipts through reconciliation and a single persistence pass", () => {
+	it("retains staged receipts through reconciliation and a single persistence pass", async () => {
 		engine.begin();
 		const decision = engine.manifest.decisions.find(item => item.type === "skills");
 		const refreshSpy = jest.spyOn(engine, "refreshManifest");
 		const persistSpy = jest.spyOn(engine, "_persistManifest");
-		engine.stageGraphMutation(decision.id, ["perception"], {
+		await engine.stageGraphMutation(decision.id, ["perception"], {
 			reverseParent: true,
 			apply: ({state: candidate}) => {
 				candidate.addSkillProficiency("perception");
