@@ -34,6 +34,8 @@ class CharacterSheetRespecEngine {
 	begin () {
 		this._originalSnapshot = this._liveState.toJson();
 		this._candidateState = new CharacterSheetState();
+		this._candidateState.setItemMaterialCatalog?.(this._liveState.getItemMaterialCatalog?.() || []);
+		this._candidateState.setDraconicResonanceCatalog?.(this._liveState.getDraconicResonanceCatalog?.() || []);
 		if (this._candidateState.loadFromJson(this._originalSnapshot) === false) {
 			throw new Error("Could not initialize the Respec draft.");
 		}

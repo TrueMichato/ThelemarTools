@@ -53,6 +53,7 @@ if (typeof globalThis.CharacterSheetUpgrades === "undefined") {
 	};
 }
 
+import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-inventory.js";
 
@@ -69,7 +70,12 @@ function newState () {
 
 function makeInventory (state) {
 	const inv = new CharacterSheetInventory({getState: () => state});
-	inv._page = {getState: () => state, renderCharacter: () => {}, saveCharacter: () => {}};
+	inv._page = {
+		getState: () => state,
+		getItemMaterials: () => state.getItemMaterialCatalog(),
+		renderCharacter: () => {},
+		saveCharacter: () => {},
+	};
 	return inv;
 }
 
@@ -231,6 +237,29 @@ describe("Attunement list — bonded stones are governed elsewhere", () => {
 
 		const html = captureAttunedList(inv);
 		expect(html).toContain("No attuned items");
+	});
+});
+
+describe("Inventory row — a seated stone names its current matrix", () => {
+	test("shows the host item and doubled status derived from the live seating state", () => {
+		const state = newState();
+		const inv = makeInventory(state);
+		const iounSand = {
+			name: "Ioun Sand",
+			source: "TGTT",
+			appliesTo: ["weapon", "armor", "shield", "other"],
+			effects: [{type: "doubleNumericProperties"}],
+		};
+		state.setItemMaterialCatalog([iounSand]);
+		state.addItem({name: "Sand Torc", source: "HB", type: "W"});
+		const host = state.getItems().at(-1);
+		state.setItemMaterial(host.id, iounSand, {quantity: 1});
+		const stone = addAttuned(state, {...makeStone("Ioun Stone, Leadership"), ability: {cha: 2}});
+		expect(state.setIounStone(host.id, stone.id).success).toBe(true);
+
+		const html = inv._renderItemRow(state.getItems().find(item => item.id === stone.id)).outerHTML;
+		expect(html).toContain("Set in Sand Torc");
+		expect(html).toContain("Numeric effects ×2");
 	});
 });
 

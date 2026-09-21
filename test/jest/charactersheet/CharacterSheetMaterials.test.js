@@ -1661,7 +1661,7 @@ describe("Item Materials", () => {
 			magicCapacity: "na",
 			rarity: "legendary",
 			price: {gp: 0, unit: "lb", display: "Priceless", isPriceless: true},
-			appliesTo: ["other"],
+			appliesTo: ["weapon", "armor", "shield", "other"],
 			roles: ["focus"],
 			effects: [{type: "doubleNumericProperties", note: "Each coherent numerical property granted by an intact Ioun Stone set in the matrix is doubled."}],
 		};
@@ -1710,6 +1710,17 @@ describe("Item Materials", () => {
 			expect(state.isIounMatrix(state.getItems().find(i => i.id === fakeId))).toBe(false);
 		});
 
+		it("allows the real Ioun Sand catalog entry on every supported matrix item kind", () => {
+			const realIounSand = REAL_MATERIALS.find(material => material.name === "Ioun Sand" && material.source === "TGTT");
+			expect(realIounSand).toBeDefined();
+			for (const item of [
+				{name: "Matrix Staff", type: "M", weapon: true},
+				{name: "Matrix Helm", type: "HA"},
+				{name: "Matrix Bracer", type: "S"},
+				{name: "Matrix Torc", type: "W"},
+			]) expect(CharacterSheetMaterials.isEligible(item, realIounSand)).toBe(true);
+		});
+
 		it("does not treat a matrix as one when materials are disabled", () => {
 			state.setSetting("enableMaterials", false);
 			expect(state.isIounMatrix(state.getItems().find(i => i.id === hostId))).toBe(false);
@@ -1747,7 +1758,6 @@ describe("Item Materials", () => {
 				.flatMap(family => ["Str", "Dex", "Con", "Int", "Wis", "Cha"].map(ability => `bonus${family}${ability}`));
 			const numericProps = [...new Set([...bonusProps, ...perAbilityProps, "reach"])];
 			const nonnumeric = {
-				ability: {str: 2},
 				critThreshold: 19,
 				damageRiders: [{damage: "1d6", damageType: "force"}],
 				effects: [{type: "skill:arcana", value: 1}],
@@ -1766,6 +1776,44 @@ describe("Item Materials", () => {
 			const stone = state.getItems().find(i => i.id === allPropsStoneId);
 			for (const prop of numericProps) expect(stone[prop]).toBe(4);
 			for (const [prop, value] of Object.entries(nonnumeric)) expect(stone[prop]).toEqual(value);
+		});
+
+		it("doubles direct numerical ability increases used by real Ioun Stones and restores them", () => {
+			const leadershipId = addStone("Ioun Stone, Leadership", {
+				source: "DMG",
+				ability: {cha: 2, choose: {from: ["int", "wis"], amount: 1}},
+			});
+
+			expect(state.setIounStone(hostId, leadershipId).success).toBe(true);
+			let leadership = state.getItems().find(i => i.id === leadershipId);
+			expect(leadership.ability).toEqual({cha: 4, choose: {from: ["int", "wis"], amount: 1}});
+			expect(leadership.iounMatrixBaseBonuses.ability).toEqual({cha: 2, choose: {from: ["int", "wis"], amount: 1}});
+
+			state.reconcileIounHosts();
+			state.reconcileIounHosts();
+			leadership = state.getItems().find(i => i.id === leadershipId);
+			expect(leadership.ability.cha).toBe(4);
+
+			expect(state.unsetIounStone(hostId, leadershipId).success).toBe(true);
+			leadership = state.getItems().find(i => i.id === leadershipId);
+			expect(leadership.ability).toEqual({cha: 2, choose: {from: ["int", "wis"], amount: 1}});
+			expect(leadership.iounMatrixBaseBonuses).toBeNull();
+		});
+
+		it("round-trips a doubled direct ability increase without compounding", () => {
+			const leadershipId = addStone("Ioun Stone, Leadership", {source: "DMG", ability: {cha: 2}});
+			expect(state.setIounStone(hostId, leadershipId).success).toBe(true);
+
+			const restored = new CharacterSheetState();
+			restored.setItemMaterialCatalog([...MATERIALS, IOUN_SAND, IOUN_CRYSTAL]);
+			restored.loadFromJson(JSON.parse(JSON.stringify(state.toJson())));
+
+			expect(restored.getItemRaw(leadershipId).ability.cha).toBe(4);
+			restored.reconcileIounHosts();
+			restored.reconcileIounHosts();
+			expect(restored.getItemRaw(leadershipId).ability.cha).toBe(4);
+			expect(restored.unsetIounStone(hostId, leadershipId).success).toBe(true);
+			expect(restored.getItemRaw(leadershipId).ability.cha).toBe(2);
 		});
 
 		it("restores the pristine value when the stone is pried out", () => {

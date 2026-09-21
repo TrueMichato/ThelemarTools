@@ -466,8 +466,10 @@ rules consequence, not an oversight.
 > coherent numerical property granted by that stone is doubled … Ioun Sand does not double
 > ordinary enchantments, Dragon Blood uses, or the effects of loose Ioun fragments."*
 
-Applying the **Ioun Sand** material to any item turns it into an Ioun host. Detection is keyed
-on the material's structured `doubleNumericProperties` effect, **never on its name**, so a
+Applying the **Ioun Sand** material to any item turns it into an Ioun host. Its authored
+`appliesTo` includes weapons, armour, shields and other items because the rules explicitly
+describe matrices as helms, bracers, staves, halos, pendants and torcs. Detection is keyed on
+the material's structured `doubleNumericProperties` effect, **never on its name**, so a
 homebrew material declaring the same effect behaves identically.
 
 The applied assignment stores a positive whole-number `material.quantity`; each unit grants
@@ -509,11 +511,13 @@ cross-host seat references.
 **Every canonical structured numeric bonus channel is doubled.**
 `CharacterSheetState.getIounMatrixDoubledProps()` derives the `bonus*` channels from
 `ITEM_SCHEMA_EFFECT_ADAPTERS`, expands the six per-ability save and check channels, and
-includes the sheet's structured `reach` range. This avoids a hand-maintained subset silently
-missing a newly supported bonus. Nonnumeric effects and inverse values such as
-`critThreshold` remain single. Prose-only ranges, areas, healing and durations remain the
-DM's call; the UI tooltip says so rather than pretending otherwise. Zero and non-finite
-values are skipped.
+includes the sheet's structured `reach` range. Direct numerical ability increases under the
+real item-data `ability` shape are also doubled per ability, so a Leadership stone's
+`{cha: 2}` becomes `{cha: 4}` while seated. Choice metadata and other nested nonnumeric values
+are copied unchanged. This avoids a hand-maintained subset silently missing a newly supported
+bonus. Nonnumeric effects and inverse values such as `critThreshold` remain single. Prose-only
+ranges, areas, healing and durations remain the DM's call; the UI tooltip says so rather than
+pretending otherwise. Zero and non-finite values are skipped.
 
 ### Capacity reductions
 
@@ -573,6 +577,8 @@ item-info modal. Nothing is automated — a geode is scenery, not gear.
 | **Matrix** badge + "a set stone's numeric properties are doubled" meta on the host row | `_getHostRowHtml` |
 | Unit count and matching `filled / total set` capacity | `_getHostRowHtml` |
 | **Doubled** / **Not doubled** badge on each seated stone | `_getStoneRowHtml` |
+| Hover preview for stone names in the manager and seating picker | `_bindStoneHoverPreviews` |
+| `Set in <host>` plus doubled/fragment status on the stone's Inventory row | `_renderItemRow` |
 | Bonus readout **suppressed** for a matrix that grants nothing | `_getHostRowHtml` (`isShowReadout`) |
 | Fragment and geode prose | `entries` on the Ioun Crystal material — item-info modal and `crafting.html` |
 
@@ -1517,6 +1523,12 @@ session. `setItemMaterialCatalog` and `setDraconicResonanceCatalog` now call
 `_recalculateEquipmentModifiers()` when a non-empty catalog changes size and an inventory exists.
 An empty catalog is ignored rather than allowed to wipe live modifiers.
 
+An isolated Respec draft is a fresh `CharacterSheetState`, not a shallow view of the live state.
+`CharacterSheetRespecEngine.begin()` therefore installs the live material and resonance catalogs
+**before** loading the snapshot. This ordering prevents draft projections from resolving a saved
+material against an empty catalog, emitting a false catalogless warning, and temporarily dropping
+its mechanics.
+
 ## Damage reduction is a tiered list, so every reader must gate it
 
 Adamantine authors **two** damage-reduction entries — 3 for heavy armour, 2 for medium — and
@@ -1670,8 +1682,10 @@ Graduating it would mean inventing that lifecycle, not wiring an existing one.
   items distinct names if they need different materials.
 - **`opposedStatesCountAsOne` and `makerForeknowledge` are advisory** — the sheet surfaces the
   rule text and offers the manual ±1 adjustment, but cannot decide for you.
-- **An Ioun Sand matrix doubles only the 13 structured numeric props.** Ranges, areas,
-  healing and durations stated in prose are the DM's call, as the rules themselves say.
+- **An Ioun Sand matrix doubles only structured numeric fields the sheet understands.**
+  This includes registry-derived `bonus*` channels, per-ability save/check bonuses, `reach`,
+  and direct numerical `ability` increases. Ranges, areas, healing and durations stated in
+  prose are the DM's call, as the rules themselves say.
 - **Fragment detection is name-based.** A fragment named without the word "fragment" is
   treated as an intact stone.
 - **Degradation is offered, never applied.** The sheet cannot know whether an attack hit,

@@ -7218,6 +7218,14 @@ class CharacterSheetInventory {
 		const iounHostPolicy = this._state.getIounHostPolicy?.(item);
 		const iounSettings = iounHostPolicy?.isHost ? iounHostPolicy.settings : 0;
 		const iounSetCount = iounSettings ? (this._state.getIounSetStoneIds?.(item.id)?.length || 0) : 0;
+		const iounHost = this._state.getIounHostOfStone?.(item.id);
+		const iounMatrixStatus = iounHost ? this._state.getIounMatrixStatus?.(iounHost.id) : null;
+		const isIounMatrixDoubled = !!iounMatrixStatus?.doubled?.some(row => row.id === item.id);
+		const isIounMatrixExcluded = !!iounMatrixStatus?.excluded?.some(row => row.id === item.id);
+		const iounHostName = iounHost?.item?.name || "Ioun host";
+		const iounSetStatusTitle = iounHost
+			? `Set in ${iounHostName}${isIounMatrixDoubled ? "; coherent numerical effects are doubled" : (isIounMatrixExcluded ? "; fragments are not doubled by Ioun Sand" : "")}`
+			: "";
 		const chargeUseLabel = item.chargeName || "Use";
 		const chargeUseTitle = item.chargeName
 			? `Use ${item.chargeName} (${item.chargesCurrent ?? item.charges}/${item.charges})`
@@ -7311,6 +7319,7 @@ class CharacterSheetInventory {
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
 						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity, item)}`).replace(/"/g, "&quot;")}"><span aria-hidden="true">⚙</span> <span class="sr-only">Material:</span>${materialEntity.name}<span class="sr-only"> — ${CharacterSheetMaterials.getSummary(materialEntity, item)}</span></span>` : ""}
+						${iounHost ? `<span class="ve-small charsheet__item-material-badge" title="${iounSetStatusTitle.qq()}"><span aria-hidden="true">◉</span> Set in ${iounHostName.qq()}${isIounMatrixDoubled ? " · Numeric effects ×2" : (isIounMatrixExcluded ? " · Fragment not doubled" : "")}</span>` : ""}
 						${mcStatus ? `<button type="button" class="ve-small charsheet__item-mc-badge charsheet__item-mc-badge--${mcStatus.isSuppressing ? "suppress" : mcStatus.isOverloaded ? "over" : "ok"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}" aria-label="${CharacterSheetMaterials.getMagicCapacityAriaLabel(materialEntity, mcStatus).replace(/"/g, "&quot;")}"><span aria-hidden="true">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span></button>` : ""}
 						${this._page.getMaterialsModule?.()?.getDegradationBadgeHtml(item.id) || ""}
 						${item.appliedUpgrades?.length ? `<span class="ve-small charsheet__item-upgrade-badges">${item.appliedUpgrades.map(u => {

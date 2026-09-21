@@ -646,6 +646,33 @@ describe("CharacterSheetIoun — the 'Set in items' zone", () => {
 		expect(CharacterSheetIoun._getSeatBenefitText(host)).not.toContain("by 0");
 	});
 
+	it("marks every rendered stone identity for the shared item-hover preview", () => {
+		const {ioun, state} = setup();
+		const stone = state.getItems().find(i => i.name.includes("#001"));
+		const html = ioun._getStoneRowHtml(stone);
+		expect(html).toContain(`data-ioun-preview="${stone.id}"`);
+	});
+
+	it("wires marked stone identities through the shared item-hover helper", () => {
+		const {ioun, state} = setup();
+		const stone = state.getItems().find(i => i.name.includes("#001"));
+		const element = {getAttribute: () => stone.id};
+		const prior = globalThis.CharacterSheetClassUtils;
+		const calls = [];
+		globalThis.CharacterSheetClassUtils = {
+			...(prior || {}),
+			applyItemHoverPreview: (target, item) => calls.push({target, item}),
+		};
+		try {
+			ioun._bindStoneHoverPreviews({
+				querySelectorAll: () => [element],
+			}, [stone]);
+		} finally {
+			globalThis.CharacterSheetClassUtils = prior;
+		}
+		expect(calls).toEqual([{target: element, item: stone}]);
+	});
+
 	it("moves a stone OUT of 'In orbit' when it is set — one place at a time", () => {
 		const {ioun, blade, state} = setup();
 		const stone = state.getItems().find(i => i.name.includes("#001"));

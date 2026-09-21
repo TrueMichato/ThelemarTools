@@ -37876,6 +37876,9 @@ class CharacterSheetState {
 		if (!data) return;
 		const isMatrix = !!this.getIounHostPolicy(data).isMatrix;
 		const seated = new Set(Array.isArray(data.iounSet) ? data.iounSet : []);
+		const copyValue = value => value && typeof value === "object"
+			? JSON.parse(JSON.stringify(value))
+			: value;
 
 		for (const row of this._data.inventory) {
 			const stone = row.item;
@@ -37891,7 +37894,7 @@ class CharacterSheetState {
 				if (stone.iounMatrixBaseBonuses.__hostId !== (hostRow.id ?? data.id)) continue;
 				for (const [key, base] of Object.entries(stone.iounMatrixBaseBonuses)) {
 					if (key === "__hostId") continue;
-					stone[key] = base;
+					stone[key] = copyValue(base);
 				}
 				stone.iounMatrixBaseBonuses = null;
 				continue;
@@ -37904,6 +37907,22 @@ class CharacterSheetState {
 				if (stone.iounMatrixBaseBonuses[key] == null) stone.iounMatrixBaseBonuses[key] = current;
 				stone[key] = current * 2;
 			}
+
+			const baseAbility = stone.iounMatrixBaseBonuses.ability ?? stone.ability;
+			if (!baseAbility || typeof baseAbility !== "object" || Array.isArray(baseAbility)) continue;
+			const doubledAbility = copyValue(baseAbility);
+			let hasNumericAbilityBonus = false;
+			for (const [ability, value] of Object.entries(doubledAbility)) {
+				const numeric = Number(value);
+				if (!Number.isFinite(numeric) || numeric === 0 || typeof value !== "number") continue;
+				doubledAbility[ability] = numeric * 2;
+				hasNumericAbilityBonus = true;
+			}
+			if (!hasNumericAbilityBonus) continue;
+			if (stone.iounMatrixBaseBonuses.ability == null) {
+				stone.iounMatrixBaseBonuses.ability = copyValue(baseAbility);
+			}
+			stone.ability = doubledAbility;
 		}
 	}
 

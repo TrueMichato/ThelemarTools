@@ -870,7 +870,7 @@ class CharacterSheetIoun {
 				${swatchHtml}
 				<span class="cs-ioun-row__identity">
 					${num ? `<span class="cs-ioun-row__num">${num}</span>` : ""}
-					<span class="cs-ioun-row__name">${CharacterSheetIoun._escapeAttr(desc)}</span>
+					<span class="cs-ioun-row__name" data-ioun-preview="${CharacterSheetIoun._escapeAttr(stone.id)}">${CharacterSheetIoun._escapeAttr(desc)}</span>
 					${CharacterSheetIoun.isSuperCharged(stone) ? `<span class="cs-ioun-badge cs-ioun-badge--super" title="Super-charged variant">Super-charged</span>` : ""}
 					${matrixBadgeHtml}
 					${CharacterSheetIoun._getTypeBadgesHtml(stone)}
@@ -1029,7 +1029,7 @@ class CharacterSheetIoun {
 								<span class="cs-ioun-swatch" style="background:${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getSwatchColor(s) || "#64748b")};color:${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getSwatchColor(s) || "#64748b")}" aria-hidden="true"></span>
 								<span class="cs-ioun-row__identity">
 									${CharacterSheetIoun.getStoneNumber(s) ? `<span class="cs-ioun-row__num">${CharacterSheetIoun.getStoneNumber(s)}</span>` : ""}
-									<span class="cs-ioun-row__name">${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getStoneDescriptor(s))}</span>
+									<span class="cs-ioun-row__name" data-ioun-preview="${CharacterSheetIoun._escapeAttr(s.id)}">${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getStoneDescriptor(s))}</span>
 								</span>
 								<span class="cs-ioun-bond-progress" role="img" aria-label="${s.bondDaysElapsed} of ${req} days">
 									<span class="cs-ioun-bond-progress__bar" style="--cs-ioun-bond-pct:${pct / 100}"></span>
@@ -1038,7 +1038,7 @@ class CharacterSheetIoun {
 								<button type="button" class="cs-combat-btn" data-ioun-cancel-bond="${s.id}" title="Stop forming this bond">Cancel</button>
 							</div>`;
 	}).join("")}</div>` : ""}
-					${bondable.length ? `<div class="cs-ioun-bondable"><span class="ve-muted ve-small">Not yet bonded:</span>${bondable.map(s => `<button type="button" class="cs-combat-btn" data-ioun-start-bond="${s.id}" title="Begin a ${summary.nextBondDays}-day Ioun bond">${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getStoneDescriptor(s))}</button>`).join("")}</div>` : ""}`,
+					${bondable.length ? `<div class="cs-ioun-bondable"><span class="ve-muted ve-small">Not yet bonded:</span>${bondable.map(s => `<button type="button" class="cs-combat-btn" data-ioun-start-bond="${s.id}" data-ioun-preview="${CharacterSheetIoun._escapeAttr(s.id)}" title="Begin a ${summary.nextBondDays}-day Ioun bond">${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getStoneDescriptor(s))}</button>`).join("")}</div>` : ""}`,
 			})
 			: "";
 
@@ -1075,6 +1075,7 @@ class CharacterSheetIoun {
 	_bindModalEvents () {
 		const body = this._modalBody;
 		if (!body) return;
+		this._bindStoneHoverPreviews(body, this.getAllStones());
 
 		body.querySelector("#cs-ioun-stow-all")?.addEventListener("click", () => {
 			const n = this.stowAll();
@@ -1135,6 +1136,16 @@ class CharacterSheetIoun {
 		});
 	}
 
+	_bindStoneHoverPreviews (root, stones) {
+		const applyPreview = globalThis.CharacterSheetClassUtils?.applyItemHoverPreview;
+		if (!root?.querySelectorAll || typeof applyPreview !== "function") return;
+		const stonesById = new Map((stones || []).map(stone => [stone.id, stone]));
+		root.querySelectorAll("[data-ioun-preview]").forEach(element => {
+			const stone = stonesById.get(element.getAttribute?.("data-ioun-preview"));
+			if (stone) applyPreview(element, stone);
+		});
+	}
+
 	/**
 	 * Choose a stone to seat in `hostId`.
 	 *
@@ -1171,7 +1182,7 @@ class CharacterSheetIoun {
 					<span class="cs-ioun-swatch${swatch ? "" : " cs-ioun-swatch--unknown"}"${style} aria-hidden="true"></span>
 					<span class="cs-ioun-row__identity">
 						${num ? `<span class="cs-ioun-row__num">${num}</span>` : ""}
-						<span class="cs-ioun-row__name">${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getStoneDescriptor(st))}</span>
+						<span class="cs-ioun-row__name" data-ioun-preview="${CharacterSheetIoun._escapeAttr(st.id)}">${CharacterSheetIoun._escapeAttr(CharacterSheetIoun.getStoneDescriptor(st))}</span>
 						${CharacterSheetIoun._getTypeBadgesHtml(st)}
 					</span>
 					<span class="cs-ioun-pick__where ve-muted ve-small">${st.equipped ? "in orbit" : "stowed"}</span>
@@ -1188,6 +1199,7 @@ class CharacterSheetIoun {
 					<div class="cs-ioun-list">${listHtml}</div>
 				</div>`,
 		}));
+		this._bindStoneHoverPreviews(eleModalInner, candidates);
 
 		eleModalInner.querySelectorAll("[data-ioun-pick]").forEach(btn => {
 			btn.addEventListener("click", () => {

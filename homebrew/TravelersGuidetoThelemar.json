@@ -41422,6 +41422,9 @@
 				"css": "linear-gradient(to right, #d9ffff, #ffe8a3, #f3c8ff, #ffffff)"
 			},
 			"appliesTo": [
+				"weapon",
+				"armor",
+				"shield",
 				"other"
 			],
 			"roles": [

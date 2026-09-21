@@ -1,10 +1,12 @@
 import "./setup.js";
 import {jest} from "@jest/globals";
+import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetRespecEngine = globalThis.CharacterSheetRespecEngine;
+const CharacterSheetMaterials = globalThis.CharacterSheetMaterials;
 
 describe("CharacterSheetRespecEngine", () => {
 	const classData = {
@@ -50,6 +52,32 @@ describe("CharacterSheetRespecEngine", () => {
 
 		engine.cancel();
 		expect(state.getLevelHistoryEntry(1).choices.skills).toEqual(["athletics"]);
+	});
+
+	it("installs runtime material catalogs before loading the isolated draft", () => {
+		const iounSand = {
+			name: "Ioun Sand",
+			source: "TGTT",
+			appliesTo: ["weapon", "armor", "shield", "other"],
+			effects: [{type: "doubleNumericProperties"}],
+		};
+		state.setItemMaterialCatalog([iounSand]);
+		state.setDraconicResonanceCatalog([{name: "Wyrm Echo", source: "TGTT"}]);
+		state.addItem({name: "Sand Torc", source: "HB", type: "W"});
+		const host = state.getItems().at(-1);
+		state.setItemMaterial(host.id, iounSand, {quantity: 1});
+		state.addItem({name: "Ioun Stone, Leadership", source: "DMG", type: "W", ability: {cha: 2}});
+		const stone = state.getItems().at(-1);
+		state.setItemAttuned(stone.id, true);
+		state.setIounStone(host.id, stone.id);
+
+		CharacterSheetMaterials.clearUnresolvedReferences();
+		engine.begin();
+
+		expect(engine.state.getItemMaterialCatalog()).toEqual([iounSand]);
+		expect(engine.state.getDraconicResonanceCatalog()).toEqual([{name: "Wyrm Echo", source: "TGTT"}]);
+		expect(engine.state.getItemRaw(stone.id).ability.cha).toBe(4);
+		expect(CharacterSheetMaterials.getUnresolvedReferences()).toEqual([]);
 	});
 
 	it("rolls back a legacy staged mutation when its mechanics callback fails", async () => {
