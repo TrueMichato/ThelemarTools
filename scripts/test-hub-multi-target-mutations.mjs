@@ -121,8 +121,9 @@ const MUTATIONS = [
 	{
 		name: "purge-deletes-live-parent-without-cancelling",
 		file: "server/src/memory-hub-store.js",
-		from: "if (operation.targetSetVersion === 1 && isMultiTargetLiveStatus(operation.status)) {\n\t\t\t\t\t\tthis._cancelMultiTargetOperationForLifecycle({\n\t\t\t\t\t\t\toperation,\n\t\t\t\t\t\t\tactorAccountId: account.id,\n\t\t\t\t\t\t\tisAll: true,\n\t\t\t\t\t\t});\n\t\t\t\t\t}",
+		from: "this._cancelMultiTargetOperationForLifecycle({\n\t\t\t\t\t\t\toperation,\n\t\t\t\t\t\t\tactorAccountId: account.id,\n\t\t\t\t\t\t\tisAll: true,\n\t\t\t\t\t\t});",
 		to: "void operation;",
+		replaceLast: true,
 		pattern: "purging one target owner",
 	},
 	{
