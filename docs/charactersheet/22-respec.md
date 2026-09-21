@@ -89,6 +89,15 @@ origin owner and remains at character level 0. This ownership does not infer a
 level for unrelated orphan feats or resolve duplicate acquisitions from later
 class/ASI feat choices.
 
+Mechanically present feats with no explicit origin, class-feature, or level
+owner are preserved as **unplaced feat** records on the Character Base card.
+Their stable semantic key is derived from the feat UID, while the record keeps
+the existing feat ID, recorded subchoices, unknown subchoice fields, and an
+exact materialized receipt. They have no acquisition level and are not matched
+to an open ASI/feat opportunity by name. This preservation slice is read-only:
+editing feat subchoices and resolving duplicate acquisitions remain separate
+transactions.
+
 Manifest discovery must be complete before it replaces the saved ledger. If
 class data is temporarily unavailable, Respec may report the discovery error,
 but it preserves the existing decisions and `manifestComplete` state rather

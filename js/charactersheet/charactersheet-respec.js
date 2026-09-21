@@ -413,8 +413,65 @@ class CharacterSheetRespec {
 		// Origin grants summary (speed/darkvision/skills/languages/ASI), reused from the level-1 renderer
 		const grants = this._renderRaceBackgroundGrants(level1History);
 		if (grants) card.append(grants);
+		const unplacedFeats = this._renderUnplacedFeatHistory();
+		if (unplacedFeats) card.append(unplacedFeats);
 
 		return card;
+	}
+
+	_renderUnplacedFeatHistory () {
+		const decisions = (this._engine?.manifest?.base?.decisions || [])
+			.filter(decision => decision.meta?.unplacedFeat)
+			.sort((a, b) => String(a.selection?.name || "").localeCompare(String(b.selection?.name || "")));
+		if (!decisions.length) return null;
+
+		const section = e_({tag: "div", clazz: "charsheet__level-grants-section mt-2"});
+		section.dataset.respecUnplacedFeats = "true";
+		section.append(
+			e_({tag: "div", clazz: "ve-small ve-bold", txt: "🧭 Unplaced feat history"}),
+			e_({
+				tag: "div",
+				clazz: "ve-small ve-muted ml-2 mb-1",
+				txt: "These feats are mechanically active, but their acquisition level is unknown. Respec preserves them without assigning them to an ASI.",
+			}),
+		);
+
+		const labels = {
+			ability: "Ability",
+			skills: "Skill",
+			expertise: "Expertise",
+			tools: "Tool",
+			languages: "Language",
+			spellList: "Spell list",
+			cantrips: "Cantrip",
+			spells: "Spell",
+			optionalFeatures: "Feature",
+		};
+		const formatValue = (key, value) => {
+			const values = Array.isArray(value) ? value : [value];
+			return values.map(item => {
+				const raw = item?.name || item?.choice || item?.value || item;
+				if (key === "ability") return Parser.attAbvToFull(String(raw || "").toLowerCase());
+				return String(raw || "").toTitleCase();
+			}).join(", ");
+		};
+
+		for (const decision of decisions) {
+			const row = e_({tag: "div", clazz: "ve-small ml-2 mt-1"});
+			const name = decision.selection?.name || decision.label;
+			const source = decision.selection?.source ? ` (${Parser.sourceJsonToAbv(decision.selection.source)})` : "";
+			row.append(e_({tag: "span", clazz: "ve-bold", txt: `${name}${source}`}));
+
+			const evidence = decision.meta?.choiceEvidence || {};
+			const parts = Object.entries(evidence.recorded || {})
+				.map(([key, value]) => `${labels[key] || key}: ${formatValue(key, value)}`);
+			for (const key of evidence.missing || []) parts.push(`${labels[key] || key}: Unknown`);
+			if (!evidence.hasExpectedChoices && !parts.length) parts.push("No recorded build-time subchoices");
+			else if (!parts.length) parts.push("Subchoice history is unavailable");
+			row.append(e_({tag: "span", clazz: "ve-muted", txt: ` — ${parts.join(" · ")}`}));
+			section.append(row);
+		}
+		return section;
 	}
 
 	/**

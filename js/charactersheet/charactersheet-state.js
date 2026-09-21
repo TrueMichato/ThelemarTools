@@ -9551,13 +9551,21 @@ class CharacterSheetState {
 					}
 				}
 			}
-			if (decision.type === "nestedFeat" && decision.meta?.fixedOriginGrant && decision.selection?.name) {
+			if (
+				decision.type === "nestedFeat"
+					&& (decision.meta?.fixedOriginGrant || decision.meta?.unplacedFeat)
+					&& decision.selection?.name
+			) {
+				const isFixedOriginGrant = !!decision.meta.fixedOriginGrant;
 				const sourceDecisionKey = decision.semanticKey;
-				let feat = this._data.feats.find(candidate =>
+				let feat = decision.meta?.featId
+					? this._data.feats.find(candidate => candidate.id === decision.meta.featId)
+					: null;
+				feat ||= this._data.feats.find(candidate =>
 					candidate.name === decision.selection.name
 						&& candidate.source === decision.selection.source,
 				);
-				if (!feat) {
+				if (!feat && isFixedOriginGrant) {
 					const featData = (decision.options || []).find(option =>
 						CharacterSheetProgression.getEntityUid(option) ===
 							CharacterSheetProgression.getEntityUid(decision.selection),
@@ -9577,10 +9585,12 @@ class CharacterSheetState {
 				}
 				if (!feat || (feat.sourceDecisionKey && feat.sourceDecisionKey !== sourceDecisionKey)) continue;
 				feat.sourceDecisionKey = sourceDecisionKey;
-				feat.isOriginFeat = true;
-				feat.backgroundName = decision.provenance?.ownerType === "background"
-					? this.getBackgroundName()
-					: null;
+				if (isFixedOriginGrant) {
+					feat.isOriginFeat = true;
+					feat.backgroundName = decision.provenance?.ownerType === "background"
+						? this.getBackgroundName()
+						: null;
+				}
 				const modifiers = [
 					...(this._data.modifiers || []),
 					...(this._data.namedModifiers || []),

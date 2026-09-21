@@ -240,6 +240,66 @@ class CharacterSheetProgression {
 		});
 	}
 
+	static getUnplacedFeatSemanticKey (feat) {
+		return [
+			"unplaced",
+			"feat",
+			CharacterSheetProgression._slug(feat?.name),
+			CharacterSheetProgression._slug(feat?.source),
+		].join(":");
+	}
+
+	static _getFeatDecisionSelections (decision) {
+		if (!["feat", "asiOrFeat", "classFeatProgressionFeat", "nestedFeat"].includes(decision?.type)) return [];
+		const selection = decision.selection;
+		if (selection == null) return [];
+		if (selection.mode === "asi") return [];
+		if (selection.mode === "feat") return selection.feat ? [selection.feat] : [];
+		const values = Array.isArray(selection) ? selection : [selection];
+		return values
+			.map(value => value?.feat?.name ? value.feat : value)
+			.filter(value => value?.name);
+	}
+
+	static _getUnplacedFeatChoiceEvidence ({feat, catalogFeat, page, state}) {
+		const spec = CharacterSheetClassUtils.buildFeatChoicesSpec(catalogFeat || feat, {page, state});
+		const choices = feat?.choices || feat?._featChoices || {};
+		const recorded = {};
+		const missing = [];
+		const addScalar = (key, expected) => {
+			if (choices[key] != null && choices[key] !== "") recorded[key] = CharacterSheetProgression._copy(choices[key]);
+			else if (expected) missing.push(key);
+		};
+		const addArray = (key, expected) => {
+			const values = Array.isArray(choices[key]) ? choices[key].filter(Boolean) : [];
+			if (values.length) recorded[key] = CharacterSheetProgression._copy(values);
+			if (expected && values.length < (Number(expected.count) || 1)) {
+				missing.push(key);
+			}
+		};
+		addScalar("ability", spec.ability);
+		addArray("skills", spec.skills);
+		addArray("expertise", spec.expertise);
+		addArray("tools", spec.tools);
+		addArray("languages", spec.languages);
+		if (spec.spells?.list) addScalar("spellList", spec.spells.list);
+		if (spec.spells?.cantrips) addArray("cantrips", spec.spells.cantrips);
+		if (spec.spells?.spells) addArray("spells", spec.spells.spells);
+		if (Array.isArray(spec.optionalFeatures) && spec.optionalFeatures.length) {
+			addArray("optionalFeatures", {count: spec.optionalFeatures.reduce((total, item) => total + (Number(item.count) || 1), 0)});
+		}
+		for (const key of ["ability", "skills", "expertise", "tools", "languages", "spellList", "cantrips", "spells", "optionalFeatures"]) {
+			if (key in recorded) continue;
+			if (Array.isArray(choices[key])) addArray(key, null);
+			else addScalar(key, null);
+		}
+		return {
+			recorded,
+			missing,
+			hasExpectedChoices: Object.values(spec).some(Boolean),
+		};
+	}
+
 	static _parseFixedOriginFeatGrant (key) {
 		if (!key || typeof key !== "string") return null;
 		const [nameRaw, sourceRaw = "PHB"] = key.split("|");
@@ -1318,6 +1378,68 @@ class CharacterSheetProgression {
 		addOrigin("background", state?.getBackground?.(), characterBase.backgroundUserChoices, 1);
 		return base;
 	}
+
+	static _appendUnplacedFeatDecisions ({base, decisions, page, state, storedBasePool}) {
+		const representedFeatUids = new Set(decisions
+			.flatMap(decision => CharacterSheetProgression._getFeatDecisionSelections(decision))
+			.map(selection => CharacterSheetProgression.getEntityUid(selection))
+			.filter(Boolean));
+		const catalogByUid = new Map((page?.getFeats?.() || []).map(feat => [
+			CharacterSheetProgression.getEntityUid(feat),
+			feat,
+		]));
+
+		for (const feat of state?.getFeats?.() || []) {
+			const featUid = CharacterSheetProgression.getEntityUid(feat);
+			if (!featUid) continue;
+			const catalogFeat = catalogByUid.get(featUid);
+			if (catalogFeat?.category === "EB") continue;
+			const semanticKey = CharacterSheetProgression.getUnplacedFeatSemanticKey(feat);
+			if (feat.sourceDecisionKey && feat.sourceDecisionKey !== semanticKey) continue;
+			if (!feat.sourceDecisionKey && representedFeatUids.has(featUid)) continue;
+
+			const stored = storedBasePool.get(semanticKey)?.find(decision => decision.selection != null);
+			const selection = {name: feat.name, source: feat.source};
+			const decision = CharacterSheetProgression._makeDecision({
+				characterLevel: null,
+				className: "",
+				classSource: "",
+				classLevel: null,
+				type: "nestedFeat",
+				label: `${feat.name} (Unplaced Feat)`,
+				sourceKey: `unplaced-feat:${featUid}`,
+				required: false,
+				count: 1,
+				options: [catalogFeat || selection],
+				selection,
+				receipt: stored?.receipt || null,
+				meta: {
+					unplacedFeat: true,
+					featId: feat.id,
+					choiceEvidence: CharacterSheetProgression._getUnplacedFeatChoiceEvidence({
+						feat,
+						catalogFeat,
+						page,
+						state,
+					}),
+				},
+				scope: "unplaced",
+				semanticKeyOverride: semanticKey,
+				provenance: {
+					ownerType: "unplacedFeat",
+					ownerUid: featUid,
+					acquisitionKey: "unknown",
+					selectedGrantKey: featUid,
+					grantKind: "feat",
+					grantKey: `unplaced-feat:${featUid}`,
+					sourcePath: "feats",
+				},
+			});
+			base.decisions.push(decision);
+			decisions.push(decision);
+		}
+	}
+
 	static _makeDecision ({
 		characterLevel,
 		className,
@@ -1472,12 +1594,13 @@ class CharacterSheetProgression {
 	}
 
 	static normalizeDecision (decision, entry = {}) {
+		const isUnplaced = decision?.scope === "unplaced" || decision?.meta?.unplacedFeat;
 		const normalized = {
 			...CharacterSheetProgression._copy(decision || {}),
-			characterLevel: Number(decision?.characterLevel ?? entry.level) || 0,
-			className: decision?.className || entry.class?.name || "Unknown",
-			classSource: decision?.classSource || entry.class?.source || "",
-			classLevel: Number(decision?.classLevel ?? entry.classLevel ?? entry.level) || 0,
+			characterLevel: isUnplaced ? null : (Number(decision?.characterLevel ?? entry.level) || 0),
+			className: isUnplaced ? "" : (decision?.className || entry.class?.name || "Unknown"),
+			classSource: isUnplaced ? "" : (decision?.classSource || entry.class?.source || ""),
+			classLevel: isUnplaced ? null : (Number(decision?.classLevel ?? entry.classLevel ?? entry.level) || 0),
 			required: decision?.required !== false,
 			count: Math.max(0, Number(decision?.count) || 1),
 			options: CharacterSheetProgression._copy(decision?.options || []),
@@ -2968,6 +3091,14 @@ class CharacterSheetProgression {
 			});
 		}
 
+		CharacterSheetProgression._appendUnplacedFeatDecisions({
+			base,
+			decisions,
+			page,
+			state,
+			storedBasePool: baseStoredPool,
+		});
+
 		return {
 			version: CharacterSheetProgression.MANIFEST_VERSION,
 			base,
@@ -3176,10 +3307,12 @@ class CharacterSheetProgression {
 			return CharacterSheetProgression.normalizeDecision({
 				...decision,
 				options: [],
-				scope: "origin",
+				scope: decision.scope || prior?.scope || "origin",
 				selection: prior?.selection ?? decision.selection,
 				status: prior?.status ?? decision.status,
-				meta: {...(decision.meta || {}), ...(prior?.meta || {})},
+				meta: decision.meta?.unplacedFeat
+					? {...(prior?.meta || {}), ...(decision.meta || {})}
+					: {...(decision.meta || {}), ...(prior?.meta || {})},
 				provenance: prior?.provenance || decision.provenance,
 				receipt: prior?.receipt || decision.receipt || null,
 			});
