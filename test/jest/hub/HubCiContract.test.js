@@ -1,4 +1,7 @@
 import fs from "node:fs";
+import {spawnSync} from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import {HUB_PROTOCOL_VERSION} from "../../../server/src/app.js";
 import {HUB_REQUIRED_MIGRATION_VERSION} from "../../../server/src/migration-version.js";
 
@@ -84,6 +87,7 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(e2eRunner).toContain(`terminating the active child and cleaning up`);
 		expect(e2eRunner).toContain(`process.exit(124)`);
 		expect(e2eRunner).toContain(`type: "hub_e2e_timeout"`);
+		expect(e2eRunner).toContain(`type: "hub_e2e_cleanup_complete"`);
 		expect(e2eRunner).toContain(`runId,`);
 		expect(e2eRunner).toContain(`projectName,`);
 		expect(e2eRunner).toContain(`phase: activePhase`);
@@ -123,6 +127,80 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(() => assertTimeoutContract({workflowSource: workflow, runnerSource: e2eRunner})).not.toThrow();
 		expect(() => assertTimeoutContract({workflowSource: withoutJobTimeout, runnerSource: e2eRunner})).toThrow();
 		expect(() => assertTimeoutContract({workflowSource: workflow, runnerSource: withoutChildTimeout})).toThrow();
+	});
+
+	it("exits 124 after a required child timeout, structured evidence, and cleanup", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hub-e2e-timeout-"));
+		const binDir = path.join(dir, "bin");
+		fs.mkdirSync(binDir);
+		fs.writeFileSync(path.join(binDir, "docker"), `#!/bin/sh
+if [ "$1 $2" = "network ls" ]; then
+  sleep 30
+fi
+exit 0
+`, {mode: 0o755});
+
+		try {
+			const result = spawnSync(process.execPath, ["server/scripts/run-hub-e2e.mjs"], {
+				cwd: new URL("../../../", import.meta.url),
+				encoding: "utf8",
+				timeout: 10_000,
+				env: {
+					...process.env,
+					NODE_ENV: "test",
+					PATH: `${binDir}:${process.env.PATH}`,
+					HUB_E2E_ALLOW_SHORT_TIMEOUTS: "true",
+					HUB_E2E_CHILD_TIMEOUT_MS: "50",
+					HUB_E2E_TIMEOUT_MS: "5000",
+				},
+			});
+
+			expect(result.error).toBeUndefined();
+			expect(result.status).toBe(124);
+			const diagnostic = result.stdout.split("\n")
+				.map(line => {
+					try {
+						return JSON.parse(line);
+					} catch {
+						return null;
+					}
+				})
+				.find(value => value?.type === "hub_e2e_timeout");
+			expect(diagnostic).toMatchObject({
+				type: "hub_e2e_timeout",
+				scope: "child",
+				timeoutMs: 50,
+				phase: "environment",
+				spec: "loopback ports and isolated Docker network",
+				process: "docker network ls --format {{.ID}}",
+				artifactPaths: [
+					"playwright-report/",
+					"test-results/hub-playwright-results.json",
+					"test-results/hub-playwright-output/",
+				],
+			});
+			expect(diagnostic.runId).toMatch(/^\d+-[0-9a-f]{8}$/);
+			expect(diagnostic.projectName).toBe(`hub-e2e-${diagnostic.runId}`);
+			expect(result.stderr).toContain("Campaign Hub E2E timeout:");
+			expect(result.stderr).toContain("phase=environment");
+			expect(result.stderr).toContain("evidence=playwright-report/");
+			const cleanupEvidence = result.stdout.split("\n")
+				.map(line => {
+					try {
+						return JSON.parse(line);
+					} catch {
+						return null;
+					}
+				})
+				.find(value => value?.type === "hub_e2e_cleanup_complete");
+			expect(cleanupEvidence).toEqual({
+				type: "hub_e2e_cleanup_complete",
+				runId: diagnostic.runId,
+				projectName: diagnostic.projectName,
+			});
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
 	});
 
 	it("scans each Hub credential class for hard-coded assignments", () => {

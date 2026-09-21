@@ -7,10 +7,21 @@ function getBoundedTimeoutMs ({environmentName, fallbackMs, maximumMs}) {
 	const value = process.env[environmentName]?.trim();
 	if (!value) return fallbackMs;
 	const parsed = Number(value);
-	if (!Number.isSafeInteger(parsed) || parsed < 60_000 || parsed > maximumMs) {
-		throw new Error(`${environmentName} must be a whole number from 60000 through ${maximumMs}.`);
+	const minimumMs = process.env.NODE_ENV === "test" && process.env.HUB_E2E_ALLOW_SHORT_TIMEOUTS === "true"
+		? 10
+		: 60_000;
+	if (!Number.isSafeInteger(parsed) || parsed < minimumMs || parsed > maximumMs) {
+		throw new Error(`${environmentName} must be a whole number from ${minimumMs} through ${maximumMs}.`);
 	}
 	return parsed;
+}
+
+class HubE2eTimeoutError extends Error {
+	constructor (message) {
+		super(message);
+		this.name = "HubE2eTimeoutError";
+		this.exitCode = 124;
+	}
 }
 
 const runId = `${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
@@ -145,7 +156,7 @@ function pRun (command, args, {isAllowFailure = false, isCapture = false, isClea
 			}
 			const exitStatus = status ?? 1;
 			if (isTimedOut) {
-				const error = new Error(`${command} exceeded its ${childTimeoutMs} ms child timeout during ${activePhase}.`);
+				const error = new HubE2eTimeoutError(`${command} exceeded its ${childTimeoutMs} ms child timeout during ${activePhase}.`);
 				if (!isAllowFailure) return reject(error);
 				return resolve({status: 124, stdout: stdout.trim()});
 			}
@@ -308,6 +319,7 @@ function cleanup () {
 		if (!externalBaseImage) {
 			await run("docker", ["image", "rm", "--force", baseImage], {isAllowFailure: true, isCleanup: true});
 		}
+		process.stdout.write(`${JSON.stringify({type: "hub_e2e_cleanup_complete", runId, projectName})}\n`);
 	})();
 	return cleanupPromise;
 }
@@ -455,7 +467,11 @@ try {
 	if (!isStopping) {
 		await run("docker", [...composeArgs, "ps", "--all"], {isAllowFailure: true});
 		await run("docker", [...composeArgs, "logs", "--tail=200"], {isAllowFailure: true});
-		throw error;
+		if (error instanceof HubE2eTimeoutError) {
+			exitCode = error.exitCode;
+		} else {
+			throw error;
+		}
 	}
 } finally {
 	clearTimeout(totalTimeout);
