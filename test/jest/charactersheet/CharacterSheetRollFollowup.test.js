@@ -225,13 +225,19 @@ describe("roll-triggered feature prompts use the shared contract", () => {
 	});
 
 	it("routes independent attack and critical follow-ups through CharacterSheetModal", () => {
+		const triggeredFeat = getMethodBody(SRC_PAGE, "async _pRollTriggeredFeatDie (", "async _pGetActivationTargets (");
 		const arcaneShot = getMethodBody(SRC_COMBAT, "async _pPickArcaneShot (", "_applyArcaneShot (");
 		const criticalRider = getMethodBody(SRC_COMBAT, "async _pOfferCritWeaponRiders (", "_getAmmoEffectText (");
+		const spectralChains = getMethodBody(SRC_COMBAT, "async _pOfferFeatureOnHitOptions (", "_pOfferChainedTargetEffect (");
 
-		for (const body of [arcaneShot, criticalRider]) {
+		for (const body of [arcaneShot, criticalRider, spectralChains]) {
 			expect(body).toContain("CharacterSheetModal.pGetRollFollowup");
 			expect(body).toContain("rollFollowup");
 		}
+		expect(triggeredFeat).toContain("CharacterSheetModal.pGetUserBoolean");
+		expect(triggeredFeat).toContain("CharacterSheetModal.pGetUserEnum");
+		expect(triggeredFeat).toContain("rollFollowup");
+		expect(SRC_COMBAT).toMatch(/_pRollTriggeredFeatDie\?\.\(\{[\s\S]*?criticalHit[\s\S]*?rollFollowup: ctx\.rollFollowup/);
 	});
 
 	it("routes spell attack and damage follow-ups through CharacterSheetModal", () => {

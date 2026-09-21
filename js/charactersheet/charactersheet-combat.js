@@ -2493,6 +2493,7 @@ class CharacterSheetCombat {
 			trigger: "criticalHit",
 			context: {isCriticalHit: true, attack: ctx.attack},
 			rollLabel: `${ctx.attack?.name || "Attack"} critical hit`,
+			rollFollowup: ctx.rollFollowup,
 		});
 		if (!die) return;
 		this._state.setTempHp(Math.max(this._state.getTempHp(), die.roll));
@@ -8590,18 +8591,18 @@ class CharacterSheetCombat {
 			const groupPowers = grouped.get(type) || [];
 			if (!groupPowers.length) continue;
 			const group = e_({tag: "div", clazz: "cs-combat-item-powers__group"});
-			group.append(e_({tag: "div", clazz: "cs-combat-item-powers__title", text: labels[type]}));
+			group.append(e_({tag: "div", clazz: "cs-combat-item-powers__title", txt: labels[type]}));
 			for (const power of groupPowers) {
 				const row = e_({tag: "div", clazz: "cs-combat-item-power"});
 				CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
 				const body = e_({tag: "div", clazz: "cs-combat-item-power__body"});
-				body.append(e_({tag: "div", clazz: "cs-combat-item-power__name", text: power.name}));
+				body.append(e_({tag: "div", clazz: "cs-combat-item-power__name", txt: power.name}));
 				const meta = power.chargesCost
 					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
 					: power.usesMax
 						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses`
 						: `${power.itemName}${power.isReferenceOnly ? " · rules reference" : ""}`;
-				body.append(e_({tag: "div", clazz: "cs-combat-item-power__meta", text: meta}));
+				body.append(e_({tag: "div", clazz: "cs-combat-item-power__meta", txt: meta}));
 				if (power.isReferenceOnly) {
 					row.append(body);
 					group.append(row);
@@ -8611,7 +8612,7 @@ class CharacterSheetCombat {
 				const use = e_({
 					tag: "button",
 					clazz: "ve-btn ve-btn-xs ve-btn-primary",
-					text: power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke",
+					txt: power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke",
 				});
 				use.disabled = !power.isAvailable || !actionAvailable;
 				use.title = power.unavailableReason || (!actionAvailable ? `${labels[type]} already used this turn.` : `${use.textContent} ${power.name}`);

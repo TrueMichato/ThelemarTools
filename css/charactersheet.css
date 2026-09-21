@@ -5685,8 +5685,6 @@ body[data-font="readable"] {
    Attacks - Modern combat display
    ======================================================================== */
 .charsheet__attacks-list {
-	max-height: 250px;
-	overflow-y: auto;
 	display: flex;
 	flex-direction: column;
 	gap: var(--cs-space-sm, 0.5rem);
@@ -5694,6 +5692,7 @@ body[data-font="readable"] {
 
 .charsheet__attack-row {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	padding: var(--cs-space-md, 0.75rem);
 	background: var(--cs-bg-base, var(--rgb-bg));
@@ -5728,7 +5727,7 @@ body[data-font="readable"] {
 }
 
 .charsheet__attack-info {
-	flex: 1;
+	flex: 1 1 12rem;
 	min-width: 0;
 }
 
@@ -5737,6 +5736,7 @@ body[data-font="readable"] {
 	font-size: var(--cs-text-base, 1rem);
 	display: block;
 	color: var(--cs-text-primary, var(--rgb-text));
+	overflow-wrap: anywhere;
 }
 
 .charsheet__attack-range {
@@ -5747,9 +5747,10 @@ body[data-font="readable"] {
 
 .charsheet__attack-stats {
 	display: flex;
+	flex: 0 1 auto;
 	flex-direction: column;
 	align-items: flex-end;
-	min-width: 90px;
+	min-width: 0;
 	gap: 2px;
 }
 
@@ -5767,6 +5768,8 @@ body[data-font="readable"] {
 	font-family: var(--cs-font-mono, monospace);
 	font-size: var(--cs-text-sm, 0.85rem);
 	color: var(--cs-danger, #ef4444);
+	overflow-wrap: anywhere;
+	text-align: right;
 }
 
 .charsheet__attack-hands {
@@ -6354,11 +6357,22 @@ body[data-font="readable"] {
    turn cost (Action / Bonus Action / Reaction). Read-only planner surface;
    token-driven so it follows the shared night/day palette automatically.
    ======================================================================== */
+.charsheet__combat-action-economy-section {
+	clear: both;
+	width: 100%;
+}
+
 .cs-combat-action-economy {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: var(--cs-space-md, 0.75rem);
 	align-items: start;
+}
+
+@media (max-width: 768px) {
+	.cs-combat-action-economy {
+		grid-template-columns: minmax(0, 1fr);
+	}
 }
 
 .cs-combat-action-economy__group {

@@ -19,6 +19,7 @@ import path from "path";
 const REPO_ROOT = process.cwd();
 const html = fs.readFileSync(path.resolve(REPO_ROOT, "charactersheet.html"), "utf8");
 const css = fs.readFileSync(path.resolve(REPO_ROOT, "css/charactersheet.css"), "utf8");
+const mobileCss = fs.readFileSync(path.resolve(REPO_ROOT, "css/charactersheet-mobile.css"), "utf8");
 const combatSrc = fs.readFileSync(path.resolve(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
 
 /** Inner body of the first CSS rule whose selector exactly matches `selector`. */
@@ -113,5 +114,38 @@ describe("#6/#7 standalone Arcane Shot section removed + folded in", () => {
 		// synthetic-resource descriptors and rendered with the same pip markup.
 		expect(m[0]).toContain("this._state.getSyntheticCombatResources?.()");
 		expect(m[0]).toContain("_bindSyntheticResourcePipClicks");
+	});
+});
+
+describe("Combat full-width Action Economy", () => {
+	it("places Action Economy after the reorderable masonry", () => {
+		const masonryStart = html.indexOf(`id="charsheet-combat-masonry"`);
+		const masonryEnd = html.indexOf("<!-- /charsheet__combat-masonry -->", masonryStart);
+		const actionEconomy = html.indexOf(`id="charsheet-combat-action-economy-section"`);
+
+		expect(masonryStart).toBeGreaterThan(-1);
+		expect(masonryEnd).toBeGreaterThan(masonryStart);
+		expect(actionEconomy).toBeGreaterThan(masonryEnd);
+	});
+
+	it("uses three explicit desktop columns and one mobile column", () => {
+		const grid = ruleBody(".cs-combat-action-economy");
+		expect(grid).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
+		expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.cs-combat-action-economy\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
+		expect(mobileCss).toMatch(/\.cs-combat-action-economy\s*\{\s*grid-template-columns: minmax\(0, 1fr\)/);
+	});
+});
+
+describe("Overview attack overflow hardening", () => {
+	it("lets the bounded attack list grow with the card instead of nesting a clipped scroller", () => {
+		const list = ruleBody(".charsheet__attacks-list");
+		expect(list).not.toContain("max-height");
+		expect(list).not.toContain("overflow-y");
+	});
+
+	it("wraps long attack rows and allows names and damage to break safely", () => {
+		expect(ruleBody(".charsheet__attack-row")).toContain("flex-wrap: wrap");
+		expect(ruleBody(".charsheet__attack-name")).toContain("overflow-wrap: anywhere");
+		expect(ruleBody(".charsheet__attack-damage")).toContain("overflow-wrap: anywhere");
 	});
 });

@@ -692,14 +692,27 @@ describe("Catalog magic-item powers and passive normalization", () => {
 
 		expect(power).toEqual(expect.objectContaining({kind: "toggle", actionType: "bonus", isActive: false}));
 		expect(state.getSpeed("walk")).toBe(30);
+		expect(state.getWalkSpeed()).toBe(30);
 
 		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, isActive: true}));
 		inventory._updateItemBonuses(state.getItems());
 		expect(state.getSpeed("walk")).toBe(60);
+		expect(state.getWalkSpeed()).toBe(60);
+		expect(state.getSpeed()).toContain("60 ft.");
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+		const restoredInventory = makeInventory(restored);
+		restoredInventory._updateItemBonuses(restored.getItems());
+		expect(restored.getItemPower(added.id, power.id)).toEqual(expect.objectContaining({isActive: true}));
+		expect(restored.getSpeed("walk")).toBe(60);
+		expect(restored.getWalkSpeed()).toBe(60);
 
 		expect(state.invokeItemPower(added.id, power.id)).toEqual(expect.objectContaining({ok: true, isActive: false}));
 		inventory._updateItemBonuses(state.getItems());
 		expect(state.getSpeed("walk")).toBe(30);
+		expect(state.getWalkSpeed()).toBe(30);
+		expect(state.getSpeed()).toContain("30 ft.");
 	});
 
 	it.each([
@@ -1270,5 +1283,17 @@ describe("Item-power hover previews", () => {
 			const source = readFileSync(resolve(REPO_ROOT, file), "utf8");
 			expect(source).toMatch(/CharacterSheetClassUtils\.applyItemPowerPreview\?\.\(row, power\)/);
 		}
+	});
+
+	it("uses the supported e_ text option for visible Combat Item Power content", () => {
+		const source = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-combat.js"), "utf8");
+		const start = source.indexOf("renderCombatItemPowers ()");
+		const end = source.indexOf("\n\t_createCustomAbilityElement (", start);
+		const body = source.slice(start, end);
+
+		expect(body).toContain("txt: power.name");
+		expect(body).toContain("txt: meta");
+		expect(body).toContain("txt: power.isToggle");
+		expect(body).not.toMatch(/\btext:/);
 	});
 });

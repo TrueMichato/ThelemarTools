@@ -13171,26 +13171,28 @@ class CharacterSheetPage {
 		return true;
 	}
 
-	async _pRollTriggeredFeatDie ({trigger, context = {}, rollLabel = "roll"}) {
+	async _pRollTriggeredFeatDie ({trigger, context = {}, rollLabel = "roll", rollFollowup = null}) {
 		const options = this._state.getTriggeredFeatDieOptions?.(trigger, context) || [];
 		if (!options.length) return null;
 		const option = options.length === 1
 			? options[0]
-			: await InputUiUtil.pGetUserEnum({
+			: await CharacterSheetModal.pGetUserEnum({
 				title: `Triggered Dice — ${rollLabel}`,
 				values: options,
 				fnDisplay: it => `${it.featName}: ${it.die} (${it.current}/${it.max})`,
 				isResolveItem: true,
+				rollFollowup,
 			});
 		if (!option) return null;
 		const promptDetail = option.trigger?.prompt
 			? `<div class="ve-muted ve-small mt-1">${CharacterSheetClassUtils.escapeHtml(option.trigger.prompt)}</div>`
 			: "";
-		const shouldUse = await InputUiUtil.pGetUserBoolean({
+		const shouldUse = await CharacterSheetModal.pGetUserBoolean({
 			title: option.featName,
 			htmlDescription: `Spend 1 ${CharacterSheetClassUtils.escapeHtml(option.resourceName || option.name)} (${option.die}) on this ${CharacterSheetClassUtils.escapeHtml(rollLabel)}?${promptDetail}`,
 			textYes: `Roll ${option.die}`,
 			textNo: "No",
+			rollFollowup,
 		});
 		if (!shouldUse) return null;
 
@@ -17694,12 +17696,22 @@ class CharacterSheetPage {
 		});
 		effectiveRoll = fortune.effectiveRoll;
 
+		const toolFlatBonus = (toolAggregated?.bonus || 0) - (toolProbe?.bonus || 0);
+		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+		const triggerTotal = effectiveRoll + mod + toolFlatBonus - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
+		const triggerBreakdown = `${this._formatD20BreakdownWithMinimum(rollResult, mod, exhaustionStr, minimumApplied ? minimumValue : (redCant.applied ? redCant.effectiveRoll : null))}${toolFlatBonus ? ` ${toolFlatBonus >= 0 ? "+" : "-"} ${Math.abs(toolFlatBonus)} (tool bonus)` : ""}`;
 		const triggeredFeatDie = await this._pRollTriggeredFeatDie({
 			trigger: "skillCheck",
 			context: {skill: skillKey, ability: skillAbility},
 			rollLabel: `${skillName} Check`,
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: `${skillName} Check`,
+				total: triggerTotal,
+				naturalRoll: rollResult.roll,
+				breakdown: triggerBreakdown,
+				outcome: [redCant.note, fortune.note].filter(Boolean).join("\n"),
+			}),
 		});
-		const toolFlatBonus = (toolAggregated?.bonus || 0) - (toolProbe?.bonus || 0);
 		const total = effectiveRoll + mod + toolFlatBonus - exhaustionPenalty + (rollResult.thelemar_critBonus || 0);
 
 		// Buff dice (e.g. Guidance's 1d4) rolled into the total. Match against the
@@ -17766,7 +17778,6 @@ class CharacterSheetPage {
 		}
 
 		const abilityLabel = overrideAbility ? ` (${overrideAbility.toUpperCase()})` : "";
-		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const stateEffectStr = (effAdvantage || effDisadvantage) ? this._getActiveStateEffectLabel(effAdvantage, effDisadvantage) : "";
 		const allSources = [
 			...aggregated.sources,

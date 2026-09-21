@@ -1242,13 +1242,6 @@
 							<div id="charsheet-combat-psionics"></div>
 						</div>
 
-						<!-- Action Economy overview (B9): attacks, spells & abilities grouped by turn cost -->
-						<div class="charsheet__section mt-3" id="charsheet-combat-action-economy-section" data-mobile-section-role="reference" style="display: none;">
-							<h4 class="charsheet__section-title">Action Economy</h4>
-							<p class="charsheet__section-caption ve-muted ve-small">Everything you can do this turn, grouped by what it costs.</p>
-							<div class="cs-combat-action-economy" id="charsheet-combat-action-economy"></div>
-						</div>
-
 						<div class="charsheet__section mt-3" id="charsheet-combat-item-powers-section" style="display: none;">
 							<h4 class="charsheet__section-title">Item Powers</h4>
 							<p class="charsheet__section-caption ve-muted ve-small">Invoke powers from equipped and attuned magic items.</p>
@@ -1371,6 +1364,12 @@
 								<button class="ve-btn ve-btn-xs ve-btn-info" id="charsheet-combat-conc-save" title="Roll concentration save (CON save vs DC 10 or half damage)" style="display: none;">🎯 Conc. Save</button>
 							</div>
 						</div>
+				</div><!-- /charsheet__combat-masonry -->
+				<!-- Fixed full-width planner: intentionally outside the reorderable masonry. -->
+				<div class="charsheet__section charsheet__combat-action-economy-section mt-3" id="charsheet-combat-action-economy-section" data-mobile-section-role="reference" style="display: none;">
+					<h4 class="charsheet__section-title">Action Economy</h4>
+					<p class="charsheet__section-caption ve-muted ve-small">Everything you can do this turn, grouped by what it costs.</p>
+					<div class="cs-combat-action-economy" id="charsheet-combat-action-economy"></div>
 				</div>
 			</div>
 

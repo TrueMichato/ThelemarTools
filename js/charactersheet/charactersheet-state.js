@@ -15200,6 +15200,8 @@ class CharacterSheetState {
 
 	getWalkSpeed () {
 		const speedMods = this._data.customModifiers.speed || {walk: 0};
+		const itemSpeedBonus = this._data.itemBonuses?.speedBonus || {};
+		const itemSpeedMultiply = this._data.itemBonuses?.speedMultiply || {};
 		const stateBonus = this.getSpeedBonusFromStates();
 		const unarmoredBonus = this.getUnarmoredMovementBonus();
 		const adeptSpeedBonus = this.getAdeptSpeedBonus();
@@ -15208,9 +15210,20 @@ class CharacterSheetState {
 		const darkAugmentationSpeedBonus = this.getDarkAugmentationSpeedBonus() + this.getStalkersProwessSpeedBonus();
 		const ignoresSpeedReductions = this.hasSpeedReductionImmunityFromStates();
 		const armorPenalty = ignoresSpeedReductions ? 0 : this.getArmorStrengthPenalty(); // -10 if STR requirement not met
-		const raw = (this._data.speed.walk || 30) + (speedMods.walk || 0) + stateBonus + unarmoredBonus + adeptSpeedBonus + gemstoneSpeedBonus + materialSpeedBonus + darkAugmentationSpeedBonus + armorPenalty;
+		const raw = (this._data.speed.walk || 30)
+			+ (speedMods.walk || 0)
+			+ stateBonus
+			+ unarmoredBonus
+			+ adeptSpeedBonus
+			+ gemstoneSpeedBonus
+			+ materialSpeedBonus
+			+ darkAugmentationSpeedBonus
+			+ (itemSpeedBonus.walk || 0)
+			+ (itemSpeedBonus["*"] || 0)
+			+ armorPenalty;
+		const itemMultiplier = (itemSpeedMultiply.walk || 1) * (itemSpeedMultiply["*"] || 1);
 		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
-		return Math.max(0, Math.floor(raw * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
+		return Math.max(0, Math.floor(raw * itemMultiplier * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
 	}
 
 	getSpeedByType (type) {
