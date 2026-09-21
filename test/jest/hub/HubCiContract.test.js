@@ -79,15 +79,50 @@ describe("Hub CI and real-stack test contract", () => {
 		expect(e2eRunner).toContain(`"--project-name", projectName`);
 		expect(e2eRunner).toContain(`process.once(signal`);
 		expect(e2eRunner).toContain(`cleanup();`);
+		expect(e2eRunner).toContain(`HUB_E2E_TIMEOUT_MS`);
+		expect(e2eRunner).toContain(`HUB_E2E_CHILD_TIMEOUT_MS`);
+		expect(e2eRunner).toContain(`terminating the active child and cleaning up`);
+		expect(e2eRunner).toContain(`process.exit(124)`);
+		expect(e2eRunner).toContain(`type: "hub_e2e_timeout"`);
+		expect(e2eRunner).toContain(`runId,`);
+		expect(e2eRunner).toContain(`projectName,`);
+		expect(e2eRunner).toContain(`phase: activePhase`);
+		expect(e2eRunner).toContain(`spec: activeSpec`);
+		expect(e2eRunner).toContain(`process: activeProcess`);
+		expect(e2eRunner).toContain(`artifactPaths`);
+		expect(e2eRunner).toContain(`scope: "child"`);
+		expect(e2eRunner).toContain(`playwright-report/`);
+		expect(e2eRunner).toContain(`test-results/hub-playwright-results.json`);
+		expect(e2eRunner).toContain(`test-results/hub-playwright-output/`);
+		expect(e2eRunner).toContain(`sanitizeProcessDescription`);
+		expect(e2eRunner).toContain(`Campaign Hub E2E timeout: runId=`);
 		expect(e2eRunner).toContain(`productionSmokeName`);
 		expect(e2eRunner).toContain(`pCheckProductionProviderMetadata`);
 		expect(e2eRunner).toMatch(
-			/await pCheckProductionProviderMetadata\(\{name: productionSmokeName\}\);\s+await pRemoveProductionSmoke\(\);\s+await run\("node"/,
+			/await pCheckProductionProviderMetadata\(\{name: productionSmokeName\}\);\s+await pRemoveProductionSmoke\(\);\s+setActivePhase\("postgresql-parity"[\s\S]*?await run\("node"/,
 		);
 		expect(e2eRunner).toMatch(/catch \(error\)[\s\S]*?composeArgs, "ps", "--all"[\s\S]*?composeArgs, "logs", "--tail=200"/);
 		expect(playwrightConfig).toContain("hub-playwright-results.json");
 		expect(workflow).toContain("test-results/hub-playwright-results.json");
 		expect(workflow).toContain("if-no-files-found: error");
+		expect(workflow).toMatch(/real-stack-e2e:[\s\S]*timeout-minutes: 60/);
+		expect(workflow).toMatch(/Run disposable multi-context Hub E2E[\s\S]*timeout-minutes: 50/);
+		expect(workflow).toContain(`HUB_E2E_TIMEOUT_MS: "2700000"`);
+		expect(workflow).toContain(`HUB_E2E_CHILD_TIMEOUT_MS: "2700000"`);
+	});
+
+	it("fails the CI contract if the real-stack job or runner child loses its timeout", () => {
+		const assertTimeoutContract = ({workflowSource, runnerSource}) => {
+			expect(workflowSource).toMatch(/real-stack-e2e:[\s\S]*?runs-on: ubuntu-latest\s+timeout-minutes: 60/);
+			expect(runnerSource).toContain("HUB_E2E_CHILD_TIMEOUT_MS");
+			expect(runnerSource).toContain(`writeTimeoutDiagnostic({scope: "child"`);
+		};
+		const withoutJobTimeout = workflow.replace(/(\s+real-stack-e2e:[\s\S]*?runs-on: ubuntu-latest)\s+timeout-minutes: 60/, "$1");
+		const withoutChildTimeout = e2eRunner.replace(/const childTimeoutMs = getBoundedTimeoutMs\([\s\S]*?\n\}\);/, "");
+
+		expect(() => assertTimeoutContract({workflowSource: workflow, runnerSource: e2eRunner})).not.toThrow();
+		expect(() => assertTimeoutContract({workflowSource: withoutJobTimeout, runnerSource: e2eRunner})).toThrow();
+		expect(() => assertTimeoutContract({workflowSource: workflow, runnerSource: withoutChildTimeout})).toThrow();
 	});
 
 	it("scans each Hub credential class for hard-coded assignments", () => {

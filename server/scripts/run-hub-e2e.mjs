@@ -3,6 +3,16 @@ import crypto from "node:crypto";
 import https from "node:https";
 import net from "node:net";
 
+function getBoundedTimeoutMs ({environmentName, fallbackMs, maximumMs}) {
+	const value = process.env[environmentName]?.trim();
+	if (!value) return fallbackMs;
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed < 60_000 || parsed > maximumMs) {
+		throw new Error(`${environmentName} must be a whole number from 60000 through ${maximumMs}.`);
+	}
+	return parsed;
+}
+
 const runId = `${process.pid}-${crypto.randomBytes(4).toString("hex")}`;
 const projectName = `hub-e2e-${runId}`;
 const composeArgs = ["compose", "--project-name", projectName, "-f", "compose.hub.yml", "-f", "compose.hub.test.yml"];
@@ -10,6 +20,21 @@ const externalBaseImage = process.env.HUB_TEST_BASE_IMAGE?.trim() || null;
 const baseImage = externalBaseImage || `thelemartools-hub-bff:e2e-${runId}`;
 const testBffImage = `${projectName}-test-bff:latest`;
 const productionSmokeName = `${projectName}-production-smoke`;
+const totalTimeoutMs = getBoundedTimeoutMs({
+	environmentName: "HUB_E2E_TIMEOUT_MS",
+	fallbackMs: 45 * 60 * 1_000,
+	maximumMs: 60 * 60 * 1_000,
+});
+const childTimeoutMs = getBoundedTimeoutMs({
+	environmentName: "HUB_E2E_CHILD_TIMEOUT_MS",
+	fallbackMs: 45 * 60 * 1_000,
+	maximumMs: 45 * 60 * 1_000,
+});
+const artifactPaths = [
+	"playwright-report/",
+	"test-results/hub-playwright-results.json",
+	"test-results/hub-playwright-output/",
+];
 const env = {
 	...process.env,
 	HUB_POSTGRES_PASSWORD: crypto.randomBytes(24).toString("base64url"),
@@ -38,8 +63,52 @@ const env = {
 };
 
 let activeChild = null;
+let activePhase = "initializing";
+let activeSpec = "runner bootstrap";
+let activeProcess = null;
 let isStopping = false;
 let cleanupPromise = null;
+
+function setActivePhase (phase, spec = phase) {
+	activePhase = phase;
+	activeSpec = spec;
+}
+
+function sanitizeProcessDescription (value) {
+	return value
+		.replace(/(postgres(?:ql)?:\/\/)[^@\s]+@/gi, "$1***@")
+		.replace(/([?&](?:access_token|api_key|key|secret|token)=)[^&\s]+/gi, "$1***");
+}
+
+function writeTimeoutDiagnostic ({scope, timeoutMs}) {
+	const diagnostic = {
+		type: "hub_e2e_timeout",
+		runId,
+		projectName,
+		scope,
+		timeoutMs,
+		phase: activePhase,
+		spec: activeSpec,
+		process: activeProcess,
+		artifactPaths,
+	};
+	process.stdout.write(`${JSON.stringify(diagnostic)}\n`);
+	process.stderr.write(
+		`Campaign Hub E2E timeout: runId=${runId} project=${projectName} scope=${scope} `
+		+ `phase=${activePhase} spec=${activeSpec} process=${activeProcess || "none"} `
+		+ `evidence=${artifactPaths.join(",")}\n`,
+	);
+}
+
+function stopChild (child, signal) {
+	if (!child?.pid) return;
+	try {
+		if (process.platform === "win32") child.kill(signal);
+		else process.kill(-child.pid, signal);
+	} catch (error) {
+		if (error.code !== "ESRCH") throw error;
+	}
+}
 
 function pRun (command, args, {isAllowFailure = false, isCapture = false, isCleanup = false} = {}) {
 	if (isStopping && !isCleanup) return Promise.reject(new Error(`Campaign Hub E2E run is stopping.`));
@@ -49,15 +118,37 @@ function pRun (command, args, {isAllowFailure = false, isCapture = false, isClea
 			stdio: isCapture ? ["ignore", "pipe", "pipe"] : "inherit",
 			detached: process.platform !== "win32",
 		});
-		if (!isCleanup) activeChild = child;
+		if (!isCleanup) {
+			activeChild = child;
+			activeProcess = sanitizeProcessDescription([command, ...args].join(" ")).slice(0, 500);
+		}
 		let stdout = "";
 		let stderr = "";
+		let isTimedOut = false;
+		const childTimeout = setTimeout(() => {
+			isTimedOut = true;
+			writeTimeoutDiagnostic({scope: "child", timeoutMs: childTimeoutMs});
+			stopChild(child, "SIGTERM");
+		}, childTimeoutMs);
+		childTimeout.unref();
 		child.stdout?.on("data", chunk => stdout += chunk);
 		child.stderr?.on("data", chunk => stderr += chunk);
-		child.once("error", reject);
+		child.once("error", error => {
+			clearTimeout(childTimeout);
+			reject(error);
+		});
 		child.once("close", (status, signal) => {
-			if (activeChild === child) activeChild = null;
+			clearTimeout(childTimeout);
+			if (activeChild === child) {
+				activeChild = null;
+				activeProcess = null;
+			}
 			const exitStatus = status ?? 1;
+			if (isTimedOut) {
+				const error = new Error(`${command} exceeded its ${childTimeoutMs} ms child timeout during ${activePhase}.`);
+				if (!isAllowFailure) return reject(error);
+				return resolve({status: 124, stdout: stdout.trim()});
+			}
 			if (!isAllowFailure && exitStatus !== 0) {
 				return reject(new Error(`${command} exited with status ${exitStatus}${signal ? ` (${signal})` : ""}${stderr.trim() ? `: ${stderr.trim()}` : ""}.`));
 			}
@@ -222,13 +313,7 @@ function cleanup () {
 }
 
 function stopActiveChild (signal) {
-	if (!activeChild?.pid) return;
-	try {
-		if (process.platform === "win32") activeChild.kill(signal);
-		else process.kill(-activeChild.pid, signal);
-	} catch (error) {
-		if (error.code !== "ESRCH") throw error;
-	}
+	stopChild(activeChild, signal);
 }
 
 for (const [signal, exitCode] of [["SIGINT", 130], ["SIGTERM", 143]]) {
@@ -239,13 +324,26 @@ for (const [signal, exitCode] of [["SIGINT", 130], ["SIGTERM", 143]]) {
 	});
 }
 
+const totalTimeout = setTimeout(() => {
+	if (isStopping) return;
+	isStopping = true;
+	writeTimeoutDiagnostic({scope: "total", timeoutMs: totalTimeoutMs});
+	process.stderr.write(`Campaign Hub E2E exceeded its ${totalTimeoutMs} ms total timeout; terminating the active child and cleaning up.\n`);
+	stopActiveChild("SIGTERM");
+	void cleanup().finally(() => process.exit(124));
+}, totalTimeoutMs);
+totalTimeout.unref();
+
 let exitCode = 0;
 try {
+	setActivePhase("environment", "loopback ports and isolated Docker network");
 	await pAssignLoopbackPorts();
 	await pAssignPrivateNetwork();
 	if (externalBaseImage) {
+		setActivePhase("production-image", "inspect verified production image");
 		await getOutput("docker", ["image", "inspect", baseImage]);
 	} else {
+		setActivePhase("production-image", "build production Hub BFF image");
 		await run("docker", [
 			"build",
 			"-f", "server/Dockerfile",
@@ -256,6 +354,7 @@ try {
 			".",
 		]);
 	}
+	setActivePhase("test-image", "build synthetic-auth test image");
 	await run("docker", [
 		"build",
 		"-f", "server/test.Dockerfile",
@@ -264,15 +363,19 @@ try {
 		".",
 	]);
 	if (externalBaseImage) {
+		setActivePhase("compose-start", "tag verified images and start isolated Compose stack");
 		await run("docker", ["image", "tag", baseImage, `${projectName}-migrate:latest`]);
 		await run("docker", ["image", "tag", baseImage, `${projectName}-grant-roles:latest`]);
 		await run("docker", ["image", "tag", testBffImage, `${projectName}-bff:latest`]);
 		await run("docker", [...composeArgs, "build", "static"]);
 		await run("docker", [...composeArgs, "up", "--no-build", "-d"]);
 	} else {
+		setActivePhase("compose-start", "build and start isolated Compose stack");
 		await run("docker", [...composeArgs, "up", "--build", "-d"]);
 	}
+	setActivePhase("stack-readiness", "wait for HTTPS /api/ready");
 	await pWaitForReady();
+	setActivePhase("backup-smoke", "encrypted backup container");
 	await run("docker", [...composeArgs, "--profile", "backup", "run", "--rm", "backup"]);
 	Object.assign(env, {
 		DATABASE_URL: `postgresql://hub_runtime:${env.HUB_RUNTIME_DB_PASSWORD}@db:5432/hub`,
@@ -280,6 +383,7 @@ try {
 		HUB_HOST: "0.0.0.0",
 		HUB_TEST_POSTGRES_URL: `postgresql://hub_runtime:${env.HUB_RUNTIME_DB_PASSWORD}@127.0.0.1:${env.HUB_TEST_POSTGRES_PORT}/hub`,
 	});
+	setActivePhase("production-smoke", "production image provider metadata");
 	await run("docker", [
 		"run", "--detach",
 		"--name", productionSmokeName,
@@ -313,6 +417,7 @@ try {
 	await pWaitForContainerHealthy({name: productionSmokeName});
 	await pCheckProductionProviderMetadata({name: productionSmokeName});
 	await pRemoveProductionSmoke();
+	setActivePhase("postgresql-parity", "six Hub PostgreSQL authority suites");
 	await run("node", [
 		"--experimental-vm-modules",
 		"./node_modules/jest/bin/jest.js",
@@ -326,6 +431,10 @@ try {
 		"--no-coverage",
 		"--forceExit",
 	]);
+	setActivePhase(
+		"playwright",
+		process.argv.slice(2).join(" ") || "all Hub Playwright specs",
+	);
 	exitCode = await run("npx", [
 		"playwright",
 		"test",
@@ -334,8 +443,10 @@ try {
 		...process.argv.slice(2),
 	], {isAllowFailure: true});
 	if (exitCode === 0) {
+		setActivePhase("bff-restart", "BFF restart recovery");
 		await run("docker", [...composeArgs, "restart", "bff"]);
 		await pWaitForReady();
+		setActivePhase("database-restart", "PostgreSQL restart recovery");
 		await run("docker", [...composeArgs, "restart", "db"]);
 		await pWaitForReady();
 	}
@@ -347,6 +458,8 @@ try {
 		throw error;
 	}
 } finally {
+	clearTimeout(totalTimeout);
+	setActivePhase("cleanup", "isolated Compose, image, network, and volume cleanup");
 	await cleanup();
 }
 if (!isStopping) process.exit(exitCode);
