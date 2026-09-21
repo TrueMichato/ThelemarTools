@@ -36,6 +36,62 @@ function getSharing (overrides = {}) {
 	});
 }
 
+function getDomNode (tagName = "div") {
+	const node = {
+		tagName: `${tagName}`.toUpperCase(),
+		className: "",
+		_textContent: "",
+		children: [],
+		attrs: {},
+		handlers: {},
+		checked: false,
+		hidden: false,
+		value: "",
+		setAttribute (name, value) {
+			this.attrs[name] = `${value}`;
+			if (name === "hidden") this.hidden = true;
+		},
+		getAttribute (name) {
+			return this.attrs[name] ?? null;
+		},
+		get textContent () {
+			return `${this._textContent}${this.children.map(child => child.textContent || "").join("")}`;
+		},
+		set textContent (value) {
+			this._textContent = `${value}`;
+		},
+		addEventListener (type, handler) {
+			(this.handlers[type] ||= []).push(handler);
+		},
+		append (...children) {
+			this.children.push(...children);
+		},
+		click () {
+			for (const handler of this.handlers.click || []) handler({preventDefault () {}});
+		},
+		dispatchEvent ({type}) {
+			for (const handler of this.handlers[type] || []) handler({type});
+		},
+		querySelector (selector) {
+			return this._walk().find(candidate => {
+				if (selector.startsWith(".")) return `${candidate.className || ""}`.split(/\s+/).includes(selector.slice(1));
+				if (selector.startsWith("#")) return candidate.getAttribute?.("id") === selector.slice(1);
+				return false;
+			}) || null;
+		},
+		_walk () {
+			const out = [];
+			const visit = candidate => {
+				out.push(candidate);
+				for (const child of candidate.children || []) visit(child);
+			};
+			for (const child of this.children) visit(child);
+			return out;
+		},
+	};
+	return node;
+}
+
 describe("character sheet sharing controls", () => {
 	it("offers every catalog field and every documented mode without exposing JSON", () => {
 		expect(FIELD_KEYS).toEqual(CATALOG_KEYS);
@@ -294,6 +350,53 @@ describe("character sheet sharing controls", () => {
 		expect(presentation.shared.find(row => row.field === "hp")).toEqual(expect.objectContaining({value: "steady", status: "replace"}));
 		expect(presentation.shared.find(row => row.field === "identity")).toEqual(expect.objectContaining({value: "Mira", status: "shared"}));
 		expect(presentation.omitted).toContain("Ability scores");
+	});
+
+	it("renders the complete sharing form as an accessible collapsed disclosure and preserves unsaved choices", async () => {
+		const previousDocument = globalThis.document;
+		let rendered = null;
+		globalThis.document = {
+			createElement: tagName => getDomNode(tagName),
+			createTextNode: textContent => ({tagName: "#TEXT", textContent, children: []}),
+		};
+		const sharing = getSharing();
+		await sharing.pLoad();
+		const rerender = () => {
+			rendered = sharing.render({fnRerender: rerender});
+		};
+
+		try {
+			rerender();
+			const toggle = rendered.querySelector(".charsheet__sharing-toggle");
+			const content = rendered.querySelector("#charsheet-sharing-content");
+
+			expect(toggle).not.toBeNull();
+			expect(toggle.tagName).toBe("BUTTON");
+			expect(toggle.getAttribute("aria-expanded")).toBe("false");
+			expect(toggle.getAttribute("aria-controls")).toBe("charsheet-sharing-content");
+			expect(toggle.textContent).toContain("What other players can see");
+			expect(toggle.textContent).toContain("Expand");
+			expect(content.hidden).toBe(true);
+
+			toggle.click();
+			expect(toggle.getAttribute("aria-expanded")).toBe("true");
+			expect(toggle.textContent).toContain("Collapse");
+			expect(content.hidden).toBe(false);
+
+			const openPreset = rendered._walk().find(candidate => candidate.getAttribute?.("value") === "open");
+			openPreset.checked = true;
+			openPreset.dispatchEvent({type: "change"});
+			expect(sharing.getSubmittablePolicy().preset).toBe("open");
+
+			const rerenderedToggle = rendered.querySelector(".charsheet__sharing-toggle");
+			expect(rerenderedToggle.getAttribute("aria-expanded")).toBe("true");
+			rerenderedToggle.click();
+			rerenderedToggle.click();
+			expect(sharing.getSubmittablePolicy().preset).toBe("open");
+			expect(rendered._walk().find(candidate => candidate.getAttribute?.("value") === "open").checked).toBe(true);
+		} finally {
+			globalThis.document = previousDocument;
+		}
 	});
 });
 

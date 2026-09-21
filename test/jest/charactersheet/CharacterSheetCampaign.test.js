@@ -156,6 +156,23 @@ describe("Character Sheet campaign control", () => {
 		expect(control._sharing).toBeNull();
 	});
 
+	it("keeps explicit local mode free of campaign sharing controls", async () => {
+		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
+			_page: {
+				_isHubCharacter: false,
+				_currentCharacterId: "local-character",
+				isCurrentCharacterReadOnly: () => false,
+			},
+			_currentCharacter: null,
+			_sharing: {pLoad: jest.fn()},
+			render: jest.fn(),
+		});
+
+		await control.pRefreshSharing();
+
+		expect(control._sharing).toBeNull();
+	});
+
 	it("describes DM truth as read-only instead of implying edits will sync", () => {
 		const control = Object.assign(Object.create(CharacterSheetCampaign.prototype), {
 			_isLoading: false,

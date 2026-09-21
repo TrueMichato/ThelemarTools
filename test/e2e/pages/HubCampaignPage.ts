@@ -1366,6 +1366,33 @@ export class HubCampaignPage {
 		});
 	}
 
+	async expectSharingDisclosurePreservesDraft (): Promise<void> {
+		const toggle = this.page.locator(".charsheet__sharing-toggle");
+		const content = this.page.locator("#charsheet-sharing-content");
+		await expect(toggle).toBeVisible();
+		await expect(toggle).toHaveAttribute("aria-controls", "charsheet-sharing-content");
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await expect(toggle).toContainText("Expand");
+		await expect(content).toBeHidden();
+
+		await toggle.press("Enter");
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await expect(toggle).toContainText("Collapse");
+		await expect(content).toBeVisible();
+
+		const openPreset = this.page.getByLabel("Open book");
+		await openPreset.check();
+		await expect(openPreset).toBeChecked();
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+		await toggle.press(" ");
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await expect(content).toBeHidden();
+		await toggle.press("Enter");
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await expect(openPreset).toBeChecked();
+	}
+
 	async waitForCharacterRealtimeLive (): Promise<void> {
 		await expect.poll(
 			() => this.page.evaluate(() => (window as any).charSheet?._hubRealtime?._active?.client?.getConnectionState?.().state),
