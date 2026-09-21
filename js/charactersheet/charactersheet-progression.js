@@ -217,12 +217,24 @@ class CharacterSheetProgression {
 		].join(":");
 	}
 
-	static getNestedSemanticKey ({parentSemanticKey = null, acquisitionKey = "", grantKey = "", selectedGrantKey = "", occurrence = 0, slot = 0}) {
+	static getNestedSemanticKey ({
+		parentSemanticKey = null,
+		acquisitionKey = "",
+		grantKey = "",
+		selectedGrantKey = "",
+		occurrence = 0,
+		slot = 0,
+		identityMode = "selection",
+	}) {
 		const anchor = parentSemanticKey || acquisitionKey || "nested";
+		const opportunityIdentity = [acquisitionKey, grantKey].filter(Boolean).join("|");
+		const identity = identityMode === "opportunity"
+			? opportunityIdentity
+			: selectedGrantKey || grantKey || "choice";
 		return [
 			"nested",
 			CharacterSheetProgression._slug(anchor),
-			CharacterSheetProgression._slug(selectedGrantKey || grantKey || "choice"),
+			CharacterSheetProgression._slug(identity),
 			`occ${Number(occurrence) || 0}`,
 			`slot${Number(slot) || 0}`,
 		].join(":");
@@ -351,6 +363,23 @@ class CharacterSheetProgression {
 			.filter(descriptor => descriptor.rules?.poolDefinition !== "optionalFeature");
 		for (const descriptor of descriptors) {
 			const source = descriptor.rules?.optionSource;
+			if (source?.kind === "proficientSkillsAtDecision" && !descriptor.options?.length) {
+				const skillCatalog = (opts.skills?.length
+					? opts.skills
+					: CharacterSheetClassUtils.getChoiceSkillCatalog?.() || [])
+					.map(skill => String(skill?.name || skill || "").trim().toLowerCase())
+					.filter(Boolean);
+				descriptor.options = [...new Set(skillCatalog)]
+					.filter(skill => Number(opts.state?.getSkillProficiency?.(skill)) > 0)
+					.sort((a, b) => a.localeCompare(b));
+				descriptor.rules = {
+					...descriptor.rules,
+					optionSource: {
+						...source,
+						values: CharacterSheetProgression._copy(descriptor.options),
+					},
+				};
+			}
 			if (descriptor.options?.length || source?.kind !== "classFeature" || !source.ref) continue;
 			const referenced = CharacterSheetClassUtils.getClassFeatureData?.(
 				opts.classFeatures || [],
@@ -594,6 +623,8 @@ class CharacterSheetProgression {
 			sourcePath: entity.name || "entity",
 			className: levelInfo?.className,
 			classSource: levelInfo?.classSource,
+			state,
+			skills: page?.getSkillsList?.() || [],
 			classFeatures: page?.getClassFeatures?.() || [],
 			subclassFeatures: page?.getSubclassFeatures?.() || [],
 			optionalFeatures: page?.getOptionalFeatures?.() || [],
@@ -677,6 +708,7 @@ class CharacterSheetProgression {
 				selectedGrantKey: selectedKeys.join("|"),
 				occurrence: descriptor.occurrence,
 				slot: descriptorIx,
+				identityMode: descriptor.rules?.identityMode,
 			});
 			const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
 			const selection = exact?.selection ?? selectedGrant;

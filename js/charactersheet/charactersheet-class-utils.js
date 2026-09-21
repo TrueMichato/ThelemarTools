@@ -4023,6 +4023,26 @@ class CharacterSheetClassUtils {
 				});
 			}
 
+			if (
+				/\bchoose\s+(?:one|a)\s+skill\s+(?:in\s+which\s+|that\s+|you\s+are\s+)?proficient\b/i.test(text)
+				&& /\bbonus\s+to\s+checks?\s+with\s+that\s+skill\s+equal\s+to\s+your\s+proficiency\s+bonus\b/i.test(text)
+			) {
+				add({
+					kind: "skillBonus",
+					label: `${entity.name || "Feature"} Skill Bonus`,
+					count: 1,
+					options: [],
+					grantKey: `${path}.prose.skillBonus`,
+					sourcePath: `${path}.prose.skillBonus`,
+					rules: {
+						identityMode: "opportunity",
+						bonusFormula: "proficiencyBonus",
+						requiresCurrentProficiency: true,
+						optionSource: {kind: "proficientSkillsAtDecision"},
+					},
+				});
+			}
+
 			// Only inspect the local proficiency item. A background entry can
 			// contain an unrelated "Choose A or B" equipment sentence after a
 			// fixed skill grant; scanning the whole list node turns that fixed
