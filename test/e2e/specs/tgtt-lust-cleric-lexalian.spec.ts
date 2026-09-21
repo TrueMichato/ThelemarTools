@@ -39,20 +39,19 @@ const LUST_CLERIC_FEATURES_MATRIX: FeatureCheck[] = [
 	{level: 1, name: /divine order/i, kind: "passive"},
 	// L2: Channel Divinity is the iconic resource — pool starts at 2,
 	// scales to 3 at L6 and 4 at L18 per the TGTT class table. Use
-	// ranges to tolerate sheet-side under/over-counting (the milestone
-	// assertions hint the implementation may surface a smaller pool
-	// than the table prescribes — see the spec milestones above).
+	// Resource rows remain in the matrix at later levels, so each range must
+	// allow the final L18 increase to 4 uses.
 	{level: 2, name: /channel divinity/i, kind: "passive"},
 	// Channel Divinity refreshes on a short or long rest per RAW
 	// (XPHB cleric); probe via shortRestRestores on the resource entry.
-	{level: 2, name: "Channel Divinity", kind: "resource", resourceMax: [1, 3], effects: [
+	{level: 2, name: "Channel Divinity", kind: "resource", resourceMax: [1, 4], effects: [
 		{kind: "shortRestRestores", resource: "Channel Divinity"},
 	]},
 	// Phase 8: re-assert short-rest restoration at the L6/L18 scaling
 	// tiers — the resource pool grows but must still refill on a short
 	// rest. Mirrors the L2 probe so a regression in the refill path at
 	// any tier fails loudly with the offending milestone.
-	{level: 6, name: "Channel Divinity", kind: "resource", resourceMax: [2, 3], effects: [
+	{level: 6, name: "Channel Divinity", kind: "resource", resourceMax: [2, 4], effects: [
 		{kind: "shortRestRestores", resource: "Channel Divinity"},
 	]},
 	{level: 18, name: "Channel Divinity", kind: "resource", resourceMax: [2, 4], effects: [
