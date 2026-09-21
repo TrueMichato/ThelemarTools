@@ -1843,19 +1843,28 @@ class CharacterSheetRespec {
 			const rules = decision.meta?.descriptorRules || {};
 			const sourceDecisionKey = decision.semanticKey;
 			const remove = () => this._state.removeModifiersBySourceDecision?.(sourceDecisionKey);
+			const ownerName = String(decision.label || "Skill Bonus").replace(/\s+Skill Bonus$/i, "");
+			const toTitleCase = value => String(value || "")
+				.split(/\s+/)
+				.map(part => part ? `${part[0].toUpperCase()}${part.slice(1)}` : "")
+				.join(" ");
 			remove();
 			next.forEach(value => {
 				const skill = normalizeValue(value);
 				if (!skill) return;
 				this._state.addNamedModifier({
-					name: decision.label || "Skill Bonus",
+					name: `${ownerName} (${toTitleCase(valueName(value))})`,
 					type: `skill:${skill}`,
 					value: 0,
-					abilityMod: rules.bonusAbility || "wis",
-					minValue: Number(rules.minValue) || 0,
+					...(rules.bonusFormula === "proficiencyBonus"
+						? {proficiencyBonus: true}
+						: {
+							abilityMod: rules.bonusAbility || "wis",
+							minValue: Number(rules.minValue) || 0,
+						}),
 					sourceDecisionKey,
 					sourceType: "progression",
-					note: `From ${decision.label || "Skill Bonus"}`,
+					note: `From ${ownerName}`,
 					enabled: true,
 				});
 			});

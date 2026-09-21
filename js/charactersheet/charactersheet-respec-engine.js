@@ -160,6 +160,7 @@ class CharacterSheetRespecEngine {
 			.some(issue => discoveryBlockingCodes.has(issue.code))
 			|| (this._manifest.levels || []).some(level => !level.classData);
 		if (hasIncompleteClassDiscovery) return false;
+		this._candidateState.adoptLegacyProgressionEvidence?.(this._manifest);
 		this._candidateState.initializeProgressionOwnership?.(this._manifest);
 		this._candidateState.reconcileProgressionOwnership?.(this._manifest);
 		this._candidateState.setProgressionManifest(this._manifest);

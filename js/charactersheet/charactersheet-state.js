@@ -9412,6 +9412,37 @@ class CharacterSheetState {
 		return receiptValues;
 	}
 
+	adoptLegacyProgressionEvidence (manifest) {
+		for (const decision of manifest?.decisions || []) {
+			if (decision.type !== "nestedSkillBonus" || decision.selection == null) continue;
+			if (this._data.namedModifiers.some(modifier => modifier.sourceDecisionKey === decision.semanticKey)) continue;
+
+			const selected = Array.isArray(decision.selection) ? decision.selection : [decision.selection];
+			if (selected.length !== 1) continue;
+			const skill = String(selected[0]?.value ?? selected[0]?.name ?? selected[0] ?? "")
+				.trim()
+				.toLowerCase()
+				.replace(/['\s]+/g, "");
+			if (!skill) continue;
+
+			const ownerName = String(decision.label || "")
+				.replace(/\s+Skill Bonus$/i, "")
+				.trim()
+				.toLowerCase();
+			const rules = decision.meta?.descriptorRules || {};
+			const candidates = this._data.namedModifiers.filter(modifier => {
+				if (modifier.sourceDecisionKey) return false;
+				if (String(modifier.type || "").toLowerCase() !== `skill:${skill}`) return false;
+				if (rules.bonusFormula === "proficiencyBonus" && modifier.proficiencyBonus !== true) return false;
+				const modifierName = String(modifier.name || "").trim().toLowerCase();
+				return modifierName === ownerName || modifierName.startsWith(`${ownerName} `);
+			});
+			if (candidates.length !== 1) continue;
+			candidates[0].sourceDecisionKey = decision.semanticKey;
+			candidates[0].sourceType ||= "progression";
+		}
+	}
+
 	/**
 	 * Build conservative source ownership for progression-controlled values.
 	 * Exact ledger selections are treated as owned; values with no recorded source

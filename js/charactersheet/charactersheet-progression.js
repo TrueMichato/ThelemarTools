@@ -512,6 +512,24 @@ class CharacterSheetProgression {
 				};
 			}
 		}
+		if (descriptor.kind === "skillBonus") {
+			const optionSkills = new Set((descriptor.options || [])
+				.map(option => CharacterSheetProgression._normalize(option?.value ?? option?.name ?? option))
+				.filter(Boolean));
+			const ownerName = CharacterSheetProgression._normalize(entity?.name);
+			const candidates = (state?.getNamedModifiers?.() || [])
+				.filter(modifier => {
+					if (modifier.sourceDecisionKey) return false;
+					if (descriptor.rules?.bonusFormula === "proficiencyBonus" && modifier.proficiencyBonus !== true) return false;
+					const skill = CharacterSheetProgression._normalize(String(modifier.type || "").match(/^skill:(.+)$/)?.[1]);
+					if (!skill || !optionSkills.has(skill)) return false;
+					const modifierName = CharacterSheetProgression._normalize(modifier.name);
+					return modifierName === ownerName || modifierName.startsWith(`${ownerName} `);
+				});
+			if (candidates.length === 1) {
+				return CharacterSheetProgression._normalize(candidates[0].type.split(":")[1]);
+			}
+		}
 		// 2024 species origin-feat choices are materialized in the state as the
 		// origin feat itself, rather than in the legacy race-choice map. Use that
 		// exact feat identity as the selection for an anyFromCategory descriptor

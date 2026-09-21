@@ -105,7 +105,8 @@ describe("Character Sheet Respec Specialty opportunity identity", () => {
 		});
 		expect(children).toEqual([
 			expect.objectContaining({
-				status: "missing",
+				status: "resolved",
+				selection: "stealth",
 				options: ["intimidation", "stealth"],
 				parentSemanticKey: parent.semanticKey,
 				rootSemanticKey: parent.semanticKey,
