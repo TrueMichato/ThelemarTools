@@ -1,14 +1,14 @@
 # Campaign Hub realtime protocol
 
 > **Status:** Current private-V1 wire protocol
-> **Protocol version:** `5`
+> **Protocol version:** `6`
 > **Last verified:** 2026-09-17
 > **Owner:** Campaign Hub maintainers
 
 ## Connection
 
 ```text
-GET /ws/campaign/{campaignId}?v=5
+GET /ws/campaign/{campaignId}?v=6
 Origin: <exact HUB_APP_ORIGIN>
 Cookie: __Host-hub_session=...
 ```
@@ -16,7 +16,7 @@ Cookie: __Host-hub_session=...
 Upgrade requires:
 
 - UUID campaign id;
-- query protocol `v=5`;
+- query protocol `v=6`;
 - exact Origin;
 - valid signed/unexpired session;
 - active campaign membership.
@@ -185,6 +185,11 @@ explicit account audience intentionally avoid disclosing the changed character t
 hides identity. Protocol-3 and protocol-4 sockets are closed with `1008 Protocol update required` rather than
 receiving an event shape that their clients would silently ignore. Protocol 4 remains accepted for the
 source-cost event shapes it introduced.
+
+`character.multi_operation.*` is protocol-6-only. Protocol 3/4/5 upgrades, live delivery, resync, and replay
+fail closed whenever the campaign advertises multi-target authority or its permanent per-campaign usage marker
+shows that a multi-target proposal was accepted. Ordinary 90-day workflow cleanup cannot reopen an older
+protocol lane.
 
 ### Character semantic-operation lifecycle
 

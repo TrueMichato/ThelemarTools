@@ -119,8 +119,8 @@
 - Semantic creation/resolution revalidates the authenticated session, active account/campaign/membership/role,
   source/target truth, template policy, and approval authority inside one transaction. Stable command ids are
   actor/body bound, and no unsupported/stale operation can partially mutate character/event/outbox state.
-- [ADR 0020](adr/0020-consented-multi-target-operations.md) is an accepted **planned, not implemented**
-  protocol-6 boundary capped at eight fixed targets. It assigns each target leg a unique opaque invitation id,
+- [ADR 0020](adr/0020-consented-multi-target-operations.md) is the implemented default-off protocol-6 server
+  boundary capped at eight fixed targets. It assigns each target leg a unique opaque invitation id,
   records one terminal response per leg,
   exposes each target owner only their request, gives the source only policy-authorized labels and coarse status,
   and gives unrelated users no private workflow data. Finalization accepts only an approved current subset and
@@ -133,7 +133,10 @@
   are required before capability enablement, and every protocol 3/4/5 create/respond/finalize/cancel/read/
   WebSocket/resync/replay surface fails closed. Transactional source/account/campaign/target-owner caps plus
   route-level 429 throttles and oldest-pending cursor pagination bound abuse without revealing private target
-  state.
+  state. Wave A3 deliberately ships no production template or full Character Sheet multi-target UI.
+  Source-visible target-applied projections also replace the character aggregate id/revision envelope with the
+  semantic operation id and null revision, so a null no-op revision cannot be distinguished from a changed
+  target or used to recover canonical target identity.
 - Multi-target proposal caps which cross campaign tenants for the same account use a dedicated seed-10 quota
   advisory-lock namespace. Proposal creation locks the source account and all distinct target-owner accounts in
   ascending UUID order before campaign authority, so two campaigns cannot race past the global

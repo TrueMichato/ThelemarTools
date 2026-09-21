@@ -131,6 +131,30 @@ describe("campaign WebSocket", () => {
 		})).rejects.toThrow();
 	});
 
+	it("fails protocol 5 closed when multi-target history exists and admits protocol 6", async () => {
+		const session = await pSignIn();
+		const campaign = (await app.inject({
+			method: "POST",
+			url: "/api/campaigns",
+			headers: headers(session, "multi-target-campaign"),
+			payload: {name: "Multi-target realtime"},
+		})).json().campaign;
+		store._semanticOperations.set("00000000-0000-4000-8000-000000000099", {
+			id: "00000000-0000-4000-8000-000000000099",
+			campaignId: campaign.id,
+			targetSetVersion: 1,
+		});
+		store._multiTargetCampaignUsage.add(campaign.id);
+
+		await expect(app.injectWS(`/ws/campaign/${campaign.id}?v=5`, {
+			headers: {cookie: session.cookie, origin: APP_ORIGIN},
+		})).rejects.toThrow();
+		const socket = await app.injectWS(`/ws/campaign/${campaign.id}?v=6`, {
+			headers: {cookie: session.cookie, origin: APP_ORIGIN},
+		});
+		socket.close();
+	});
+
 	it("closes active sockets with a bounded server-shutdown code", async () => {
 		const session = await pSignIn();
 		const campaign = (await app.inject({

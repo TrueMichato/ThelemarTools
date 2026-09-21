@@ -1,6 +1,6 @@
 # Campaign Hub event and audit catalog
 
-> **Status:** Current protocol-v5 catalog
+> **Status:** Current protocol-v6 catalog
 > **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
@@ -69,26 +69,29 @@ Account entitlement grant/revoke and configured-operator reconciliation are deli
 campaign domain-event catalog. They append account-scoped audit entries only and never allocate a campaign
 sequence or outbox row.
 
-### Planned protocol-6 multi-target events
+### Protocol-6 multi-target events
 
-The following [ADR 0020](adr/0020-consented-multi-target-operations.md) events are **planned, not implemented**.
-They must not be emitted or accepted until migration 0011, both stores, protocol 6, and the default-off capability
-land.
+The following [ADR 0020](adr/0020-consented-multi-target-operations.md) events are implemented by both stores
+behind the default-off capability. They require protocol 6; Wave A3 ships no production template or full
+Character Sheet workflow.
 
-| Planned event | Audience | Minimal payload and ordering |
+| Event | Audience | Minimal payload and ordering |
 |---|---|---|
 | `character.multi_operation.proposed` | source owner + DM/co-DM | operation id, response/finalization deadlines, candidate count, safe source/effect summary; never the complete private target set |
 | `character.multi_operation.target_requested` | target owner + source owner + DM/co-DM | viewer-projected operation/invitation data; target sees only this leg, source sees authorized label/coarse status |
 | `character.multi_operation.target_responded` | target owner + source owner + DM/co-DM | viewer-projected approved/rejected/expired/revoked state; no rationale, hidden target truth, or co-target identity/decision |
 | `character.multi_operation.ready` | source owner + DM/co-DM | operation id and coarse candidate statuses after every response is terminal |
 | `character.multi_operation.source_cost_consumed` | source owner + DM/co-DM | operation id, stable leg id, closed source cost, resulting source revision; first mutation event unless self-target is combined |
-| `character.multi_operation.target_applied` | target owner + source owner + DM/co-DM | viewer-projected target/combined result; changed flag/revision visible only to that target owner and DM/co-DM; target events follow immutable proposal order |
+| `character.multi_operation.target_applied` | target owner + source owner + DM/co-DM | viewer-projected target/combined result; changed flag/revision and character aggregate envelope are visible only to that target owner and DM/co-DM. Source projection rewrites the envelope to `semantic_operation`/operation id/null revision and removes canonical target id, changed, and result revision; target events follow immutable proposal order |
 | `character.multi_operation.finalized` | source owner + DM/co-DM | operation id, selected-count, terminal result, source/combined event identity, and no target roster or per-leg changed flags |
 | `character.multi_operation.cancelled` / `.expired` / `.failed` | authorization-shaped participants | operation id, terminal state, generic reason and safe snapshots only |
 
 Successful finalization emits a separate source-owner cost/combined event first, target events in immutable
 proposal order, then one collapsed existing metadata-only `character.projection.invalidated` for the union
 audience of changed projections. No event exposes the complete selected recipient list or shared roster payload.
+A target-applied row retains a server-private source/target audience discriminator for the independent domain
+event lifetime, so 90-day workflow cleanup cannot degrade later target-owner replay into the source projection.
+Both HTTP and WebSocket projection remove that discriminator before returning any event.
 A reviewed `allowTargetNoOp=true` healing leg emits its target-owner applied event with no revision and produces
 no invalidation; the source event/result does not reveal which leg was full. Rejected finalization emits no
 workflow, character, projection, audit, or outbox event.

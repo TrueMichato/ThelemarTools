@@ -165,9 +165,28 @@ character/access/document-generation fencing.
 idempotency, invalidation, coverage, document-track, post-await fence, and duplicate-delivery call sites. The
 gate must demonstrate that every mutant is killed before the unmodified result is accepted.
 
-Wave A0 is documentation/proof evidence only. `HubMultiTargetOperationAdr.test.js` must fail when a required
-lifecycle, migration, lock-order, privacy/no-op, rollback, hazard, limit, singular-read rewrite, or handoff clause
-is removed. When
+Wave A3 server authority is covered by `HubMultiTargetOperations.test.js`,
+`HubMultiTargetOperationsPostgres.test.js`, migration/role/rollback suites, route/WebSocket protocol tests, and
+the real-call-site `scripts/test-hub-multi-target-mutations.mjs` gate. The Memory suite covers protocol 3/4/5
+closure, route 429s, 1/2/8 targets, same-owner invitations, source-as-target, privacy-preserving no-op, target
+authority retry, independent cancel, lifecycle, bounded expiry/cleanup, persistent protocol markers, pagination,
+and injected transaction faults. PostgreSQL's 20-test focused suite owns 1/2/8-target parity, both seed-10
+cross-campaign quota races, opposing character order, response/expiry, target-drift retry, ABA, source-as-target,
+privacy-preserving no-op, transaction fault rollback, nonblocking campaign/parent/child-first maintenance,
+immutable/consent/contiguous-selection constraints, persistent campaign protocol markers, FK-safe
+lifecycle/purge, cleanup, and pagination. The mutation gate plants eighteen real-call-site defects, including a
+blocking parent lock which lets a child-first locker stall maintenance, source envelope oracle, failed-leg
+selection drift, live-parent/candidate membership guard removal, unreviewed no-op retry, and retained audience
+discriminator loss, live-parent purge without cancellation, and omitted ready/elapsed receipt event identities,
+and must kill all eighteen.
+Privacy tests compare source HTTP replay and WebSocket projection against target-owner/DM views at both changed
+and allowed-no-op targets, including source-as-target, and assert the source receives neither payload result
+fields nor the character aggregate id/revision envelope. Failed-finalization parity tests assert PostgreSQL and
+Memory retain approved/unselected legs with no declined event. Direct PostgreSQL negative controls attempt live
+candidate delete/replacement and parent candidate-count mutation and require SQLSTATE `23514`.
+
+`HubMultiTargetOperationAdr.test.js` must fail when a required lifecycle, migration, lock-order,
+privacy/no-op, rollback, hazard, limit, singular-read rewrite, or handoff clause is removed. When
 `HUB_TEST_POSTGRES_URL` is available, it executes the read-only SQL proof inside `BEGIN READ ONLY` and rolls back;
 the proof validates candidate uniqueness, selected-subset membership, source/target deduplication, self-target
 collapse, and ascending UUID set-shaping/order without creating or mutating schema. It is not a lock proof and is

@@ -26,8 +26,8 @@ function evaluate (version, overrides = {}) {
 }
 
 describe("campaign rule evaluator", () => {
-	it("accepts current Hub transport protocol 5 without changing the rules contract version", () => {
-		expect(evaluate(rulesVersion(), {protocolVersion: 5})).toMatchObject({
+	it("accepts current Hub transport protocol 6 without changing the rules contract version", () => {
+		expect(evaluate(rulesVersion(), {protocolVersion: 6})).toMatchObject({
 			status: "compliant",
 			blocking: false,
 		});

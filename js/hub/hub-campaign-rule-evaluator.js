@@ -425,5 +425,5 @@ export function getCampaignSettingsOverlayFromRulesVersion (rulesVersion) {
 	return getCampaignSettingsOverlay(legacyDecision);
 }
 export function isCampaignRuleProtocolVersion (protocolVersion) {
-	return [CAMPAIGN_RULE_PROTOCOL_VERSION, 5].includes(Number(protocolVersion));
+	return [CAMPAIGN_RULE_PROTOCOL_VERSION, 5, 6].includes(Number(protocolVersion));
 }

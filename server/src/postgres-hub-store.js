@@ -86,6 +86,26 @@ import {
 	isCanonicalEqual,
 	isPeerSourceCostsPinCurrent,
 } from "./peer-source-cost-authority.js";
+import {
+	assertMultiTargetCandidateRefs,
+	assertMultiTargetProtocol,
+	assertUniqueResolvedTargets,
+	assertUniqueSelection,
+	createMultiTargetOperationsGate,
+	getMultiTargetCursor,
+	getMultiTargetLegAudience,
+	getMultiTargetOperationSummary,
+	getMultiTargetOperationsCampaignCapability,
+	getMultiTargetSourceAudience,
+	isMultiTargetLiveStatus,
+	MULTI_TARGET_COLLECTION_TTL_MS,
+	MULTI_TARGET_OPERATION_TTL_MS,
+	MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
+	MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
+	MULTI_TARGET_PAGE_LIMIT,
+	parseMultiTargetCursor,
+} from "./multi-target-operation-authority.js";
+import {pCheckMultiTargetOperationsCampaignReadiness} from "./multi-target-operation-rollout.js";
 import {canViewEvent} from "./projections.js";
 import {
 	getAccountDisplayName,
@@ -232,18 +252,26 @@ export class PostgresHubStore {
 		semanticOperationRegistry = createSemanticOperationRegistry(),
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
+		multiTargetOperationsEnabled = false,
+		multiTargetCollectionTtlMs = MULTI_TARGET_COLLECTION_TTL_MS,
+		multiTargetOperationTtlMs = MULTI_TARGET_OPERATION_TTL_MS,
 		fnResolveAwardItem = resolveItemAwardAuthority,
 		isAccountEntitlementsEnabled = false,
 		fnBeforeSensitiveCommit = null,
+		fnTestResolveStructuredActionFault = null,
 	}) {
 		if (!pool?.query || !pool?.connect) throw new TypeError(`A pg-compatible pool is required.`);
 		this._pool = pool;
 		this._semanticOperationRegistry = semanticOperationRegistry;
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._isPeerSourceCostsEnabled = createPeerSourceCostsGate(peerSourceCostsEnabled);
+		this._isMultiTargetOperationsEnabled = createMultiTargetOperationsGate(multiTargetOperationsEnabled);
+		this._multiTargetCollectionTtlMs = multiTargetCollectionTtlMs;
+		this._multiTargetOperationTtlMs = multiTargetOperationTtlMs;
 		this._fnResolveAwardItem = fnResolveAwardItem;
 		this._isAccountEntitlementsEnabled = isAccountEntitlementsEnabled;
 		this._fnBeforeSensitiveCommit = fnBeforeSensitiveCommit;
+		this._fnTestResolveStructuredActionFault = fnTestResolveStructuredActionFault;
 		this._fnOnPoolError = fnOnPoolError || (error => {
 			process.stderr.write(`Campaign Hub PostgreSQL idle client error: ${error.stack || error.message}\n`);
 		});
@@ -259,9 +287,13 @@ export class PostgresHubStore {
 		fnOnPoolError = null,
 		semanticOperationRegistry,
 		peerSourceCostsEnabled = false,
+		multiTargetOperationsEnabled = false,
+		multiTargetCollectionTtlMs,
+		multiTargetOperationTtlMs,
 		fnResolveAwardItem,
 		isAccountEntitlementsEnabled = false,
 		fnBeforeSensitiveCommit = null,
+		fnTestResolveStructuredActionFault = null,
 	}) {
 		if (!connectionString) throw new TypeError(`connectionString is required.`);
 		return new this({
@@ -277,9 +309,13 @@ export class PostgresHubStore {
 			fnOnPoolError,
 			semanticOperationRegistry,
 			peerSourceCostsEnabled,
+			multiTargetOperationsEnabled,
+			multiTargetCollectionTtlMs,
+			multiTargetOperationTtlMs,
 			fnResolveAwardItem,
 			isAccountEntitlementsEnabled,
 			fnBeforeSensitiveCommit,
+			fnTestResolveStructuredActionFault,
 		});
 	}
 
@@ -2751,6 +2787,12 @@ export class PostgresHubStore {
 					inviteContexts: await this.pDeleteExpiredInviteContexts({limit: batchSize}),
 					invites: await this.pDeleteExpiredInvites({limit: batchSize}),
 					leases: await this.pDeleteExpiredLeases({limit: batchSize}),
+					multiTargetOperations: await this.pExpireMultiTargetOperations({
+						limit: Math.min(batchSize, MULTI_TARGET_PAGE_LIMIT),
+					}),
+					multiTargetHistory: await this.pCleanupMultiTargetHistory({
+						limit: Math.min(batchSize, MULTI_TARGET_PAGE_LIMIT),
+					}),
 					accounts: await this.pPurgeDueAccounts({limit: Math.min(batchSize, 100)}),
 				};
 				await lockClient.query(`
@@ -4049,6 +4091,11 @@ export class PostgresHubStore {
 						&& Boolean(row.rules_id)
 						&& this._isPeerSourceCostsEnabled(campaignId),
 				}),
+				multiTargetOperations: getMultiTargetOperationsCampaignCapability({
+					isEnabled: row.campaign_status === "active"
+						&& Boolean(row.rules_id)
+						&& this._isMultiTargetOperationsEnabled(campaignId),
+				}),
 			},
 		};
 	}
@@ -4075,6 +4122,37 @@ export class PostgresHubStore {
 				FROM hub.semantic_operations
 				WHERE campaign_id = $1 AND source_cost_version IS NOT NULL
 			) AS required
+		`, [campaignId]);
+		return result.rows[0]?.required === true;
+	}
+
+	async pGetMultiTargetOperationsCapability ({accountId, campaignId}) {
+		const membership = await this.pGetMembership({accountId, campaignId});
+		if (!membership) throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		const result = await this._pool.query(`
+			SELECT status, active_rules_version_id
+			FROM hub.campaigns
+			WHERE id = $1 AND status <> 'deleting'
+		`, [campaignId]);
+		return getMultiTargetOperationsCampaignCapability({
+			isEnabled: result.rows[0]?.status === "active"
+				&& Boolean(result.rows[0]?.active_rules_version_id)
+				&& this._isMultiTargetOperationsEnabled(campaignId),
+		});
+	}
+
+	async pCheckMultiTargetOperationsCampaignReadiness ({campaignIds}) {
+		return pCheckMultiTargetOperationsCampaignReadiness({
+			queryable: this._pool,
+			campaignIds,
+		});
+	}
+
+	async pCampaignRequiresProtocol6 ({campaignId}) {
+		const result = await this._pool.query(`
+			SELECT multi_target_first_operation_id IS NOT NULL AS required
+			FROM hub.campaigns
+			WHERE id = $1
 		`, [campaignId]);
 		return result.rows[0]?.required === true;
 	}
@@ -4871,12 +4949,35 @@ export class PostgresHubStore {
 				? (await client.query(`SELECT id, owner_account_id, projection_policy FROM hub.characters WHERE id = ANY($1::uuid[])`, [characterIds])).rows
 				: [];
 			const charactersById = new Map(characters.map(row => [row.id, {ownerAccountId: row.owner_account_id, projectionPolicy: row.projection_policy}]));
+			const invitationIds = [...new Set(visibleRows
+				.filter(row => row.event_type?.startsWith("character.multi_operation."))
+				.map(row => row.payload?.invitationId)
+				.filter(Boolean))];
+			const multiTargetOwners = invitationIds.length
+				? (await client.query(`
+					SELECT
+						target.invitation_id,
+						target.target_owner_account_id_at_proposal,
+						operation.origin_actor_account_id
+					FROM hub.semantic_operation_targets target
+					JOIN hub.semantic_operations operation ON operation.id = target.operation_id
+					WHERE target.invitation_id = ANY($1::uuid[])
+				`, [invitationIds])).rows
+				: [];
+			const multiTargetViewerContextByInvitationId = new Map(multiTargetOwners.map(row => [
+				row.invitation_id,
+				{
+					targetOwnerAccountId: row.target_owner_account_id_at_proposal,
+					sourceOwnerAccountId: row.origin_actor_account_id,
+				},
+			]));
 			const visibleEvents = visibleRows.map(row => {
 				const redactedRow = this._redactRowForViewer({
 					row,
 					accountId,
 					role: membership.role,
 					character: charactersById.get(row.aggregate_id) || null,
+					multiTargetViewerContext: multiTargetViewerContextByInvitationId.get(row.payload?.invitationId) || null,
 				});
 				if (!redactedRow) return null;
 				const event = redactTransferEventForViewer({
@@ -4940,7 +5041,7 @@ export class PostgresHubStore {
 	 * Apply ADR 0011 actor redaction to a raw event row before it is mapped, so the shared
 	 * envelope cannot map a hidden character back to its named owner.
 	 */
-	_redactRowForViewer ({row, accountId, role, character}) {
+	_redactRowForViewer ({row, accountId, role, character, multiTargetViewerContext = null}) {
 		if (row.payload?.actorCommandId && row.actor_account_id !== accountId) {
 			const payload = {...row.payload};
 			delete payload.actorCommandId;
@@ -4957,6 +5058,39 @@ export class PostgresHubStore {
 					? {}
 					: {actor_account_id: null, actor_display_name: null}),
 			};
+		}
+		if (
+			row.event_type?.startsWith("character.multi_operation.")
+			&& row.visibility === "explicit_accounts"
+		) {
+			const payload = structuredClone(row.payload);
+			const sourceOwnerAccountId = payload?._sourceOwnerAccountId ??
+				multiTargetViewerContext?.sourceOwnerAccountId;
+			const targetOwnerAccountId = payload?._targetOwnerAccountId ??
+				multiTargetViewerContext?.targetOwnerAccountId;
+			delete payload._sourceOwnerAccountId;
+			delete payload._targetOwnerAccountId;
+			if (
+				row.event_type === "character.multi_operation.target_applied"
+				&& !["dm", "co_dm"].includes(role)
+				&& (
+					sourceOwnerAccountId === accountId
+					|| targetOwnerAccountId !== accountId
+				)
+			) {
+				delete payload.changed;
+				delete payload.resultingCharacterRevision;
+				if (payload.operation) delete payload.operation.targetCharacterId;
+				return {
+					...row,
+					aggregate_type: "semantic_operation",
+					aggregate_id: row.payload.operationId,
+					aggregate_revision: null,
+					visible_account_ids: null,
+					payload,
+				};
+			}
+			return {...row, visible_account_ids: null, payload};
 		}
 		if (row.visibility !== "all_members" || row.aggregate_type !== "character") return row;
 		// A hidden character contributes no shared rows at all, so no adjacent membership
@@ -4992,6 +5126,50 @@ export class PostgresHubStore {
 			const sanitized = {...event, visibleAccountIds: null};
 			if (["dm", "co_dm"].includes(role) || event.actorAccountId === accountId) return sanitized;
 			return redactEventActor(sanitized);
+		}
+		if (
+			event.type?.startsWith("character.multi_operation.")
+			&& event.visibility === "explicit_accounts"
+		) {
+			const invitationId = event.payload?.invitationId;
+			const viewerContext = invitationId
+				? (await this._pool.query(`
+					SELECT
+						target.target_owner_account_id_at_proposal,
+						operation.origin_actor_account_id
+					FROM hub.semantic_operation_targets target
+					JOIN hub.semantic_operations operation ON operation.id = target.operation_id
+					WHERE target.invitation_id = $1
+				`, [invitationId])).rows[0]
+				: null;
+			const payload = structuredClone(event.payload);
+			const sourceOwnerAccountId = payload?._sourceOwnerAccountId ??
+				viewerContext?.origin_actor_account_id;
+			const targetOwnerAccountId = payload?._targetOwnerAccountId ??
+				viewerContext?.target_owner_account_id_at_proposal;
+			delete payload._sourceOwnerAccountId;
+			delete payload._targetOwnerAccountId;
+			if (
+				event.type === "character.multi_operation.target_applied"
+				&& !["dm", "co_dm"].includes(role)
+				&& (
+					sourceOwnerAccountId === accountId
+					|| targetOwnerAccountId !== accountId
+				)
+			) {
+				delete payload.changed;
+				delete payload.resultingCharacterRevision;
+				if (payload.operation) delete payload.operation.targetCharacterId;
+				return {
+					...event,
+					aggregateType: "semantic_operation",
+					aggregateId: event.payload.operationId,
+					aggregateRevision: null,
+					visibleAccountIds: null,
+					payload,
+				};
+			}
+			return {...event, visibleAccountIds: null, payload};
 		}
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const result = await this._pool.query(`SELECT owner_account_id, projection_policy FROM hub.characters WHERE id = $1`, [event.aggregateId]);
@@ -5161,13 +5339,33 @@ export class PostgresHubStore {
 		return prior.rows[0].response;
 	}
 
-	async _pSaveSemanticCommand ({client, accountId, commandId, operationId, commandType, idempotencyKey, response, eventIds}) {
+	async _pSaveSemanticCommand ({
+		client,
+		accountId,
+		commandId,
+		operationId,
+		commandType,
+		idempotencyKey,
+		response,
+		eventIds,
+		invitationId = null,
+	}) {
 		const normalized = this._normalizeIdempotencyKey(idempotencyKey);
 		await client.query(`
 			INSERT INTO hub.semantic_operation_commands (
-				command_id, operation_id, actor_account_id, command_type, request_hash, response, event_ids
-			) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid[])
-		`, [commandId, operationId, accountId, commandType, normalized.requestHash, JSON.stringify(response), eventIds]);
+				command_id, operation_id, actor_account_id, command_type, request_hash, response, event_ids,
+				invitation_id
+			) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid[], $8)
+		`, [
+			commandId,
+			operationId,
+			accountId,
+			commandType,
+			normalized.requestHash,
+			JSON.stringify(response),
+			eventIds,
+			invitationId,
+		]);
 	}
 
 	async _pAssertSemanticSession ({client, accountId, sessionId}) {
@@ -5180,7 +5378,7 @@ export class PostgresHubStore {
 				AND s.revoked_at IS NULL
 				AND s.expires_at > now()
 				AND a.status = 'active'
-			FOR UPDATE OF s, a
+			FOR NO KEY UPDATE OF s, a
 		`, [sessionId, accountId]);
 		if (!result.rowCount) throw new HubStoreError("AUTH_REQUIRED", `The authenticated session is unavailable.`, {status: 401});
 	}
@@ -5192,6 +5390,8 @@ export class PostgresHubStore {
 			originActorAccountId: row.origin_actor_account_id,
 			sourceCharacterId: row.source_character_id,
 			targetCharacterId: row.target_character_id,
+			targetSetVersion: row.target_set_version == null ? null : Number(row.target_set_version),
+			candidateCount: row.candidate_count == null ? null : Number(row.candidate_count),
 			targetOwnerAccountIdAtProposal: row.target_owner_account_id_at_proposal,
 			targetRef: row.target_ref,
 			status: row.status,
@@ -5220,6 +5420,11 @@ export class PostgresHubStore {
 				: Number(row.resulting_source_character_revision),
 			sourceCostEventId: row.source_cost_event_id,
 			privateFailureCode: row.private_failure_code,
+			allowTargetNoOp: row.allow_target_no_op,
+			collectionClosesAt: row.collection_closes_at,
+			readyAt: row.ready_at,
+			readyEventId: row.ready_event_id,
+			finalizedEventId: row.finalized_event_id,
 			appliedEventId: row.applied_event_id,
 			terminalEventId: row.terminal_event_id,
 			resultingCharacterRevision: row.resulting_character_revision == null ? null : Number(row.resulting_character_revision),
@@ -5318,6 +5523,286 @@ export class PostgresHubStore {
 		return result.rows.map(row => row.account_id);
 	}
 
+	_getMultiTargetTarget (row) {
+		return {
+			operationId: row.operation_id,
+			campaignId: row.campaign_id,
+			targetCharacterId: row.target_character_id,
+			invitationId: row.invitation_id,
+			ordinal: Number(row.ordinal),
+			targetRef: row.target_ref,
+			targetOwnerAccountIdAtProposal: row.target_owner_account_id_at_proposal,
+			targetDisplaySnapshot: row.target_display_snapshot,
+			operation: row.target_operation,
+			rulesVersionId: row.rules_version_id,
+			targetRevisionObserved: Number(row.target_revision_observed),
+			resultingCharacterRevision: row.resulting_character_revision == null
+				? null
+				: Number(row.resulting_character_revision),
+			collectionClosesAt: row.collection_closes_at,
+			responseState: row.response_state,
+			responseActorAccountId: row.response_actor_account_id,
+			responseCommandId: row.response_command_id,
+			respondedAt: row.responded_at,
+			invitationEventId: row.invitation_event_id,
+			responseEventId: row.response_event_id,
+			selectionState: row.selection_state,
+			selectionIndex: row.selection_index == null ? null : Number(row.selection_index),
+			selectedAt: row.selected_at,
+			lifecycleInvalidatedAt: row.lifecycle_invalidated_at,
+			revokeReason: row.revoke_reason,
+			lifecycleEventId: row.lifecycle_event_id,
+			legId: row.leg_id,
+			legKind: row.leg_kind,
+			legEventId: row.leg_event_id,
+			changed: row.changed,
+			appliedAt: row.applied_at,
+		};
+	}
+
+	_getMultiTargetFinalization (row) {
+		if (!row) return null;
+		return {
+			operationId: row.operation_id,
+			commandId: row.command_id,
+			actorAccountId: row.actor_account_id,
+			selectedInvitationIds: row.selected_invitation_ids,
+			resultStatus: row.terminal_status,
+			result: row.result,
+			sourceLegEventId: row.source_event_id,
+			terminalEventId: row.terminal_event_id,
+			createdAt: row.created_at,
+			finalizedAt: row.finalized_at,
+		};
+	}
+
+	_getMultiTargetOperationView ({operation, targets, finalization = null, accountId, role}) {
+		const isDm = ["dm", "co_dm"].includes(role);
+		const isSource = operation.originActorAccountId === accountId;
+		const isSourceOrDm = isSource || isDm;
+		const visibleTargets = (isDm || isSource
+			? targets
+			: targets.filter(target => target.targetOwnerAccountIdAtProposal === accountId))
+			.map(target => ({
+				invitationId: target.invitationId,
+				status: target.responseState,
+				presentation: {
+					targetName: target.targetDisplaySnapshot?.identity?.name || "Campaign character",
+					effectLabel: operation.effectDisplaySnapshot?.label || "Campaign effect",
+				},
+				capabilities: {
+					canApprove: target.responseState === "pending"
+						&& target.targetOwnerAccountIdAtProposal === accountId,
+					canReject: target.responseState === "pending"
+						&& (target.targetOwnerAccountIdAtProposal === accountId || isDm),
+				},
+				...((isDm || target.targetOwnerAccountIdAtProposal === accountId) && target.selectionState === "applied"
+					? {
+						result: {
+							changed: target.changed,
+							resultingCharacterRevision: target.resultingCharacterRevision,
+							legId: target.legId,
+							legKind: target.legKind,
+							appliedEventId: target.legEventId,
+							operation: structuredClone(target.operation),
+						},
+					}
+					: {}),
+			}));
+		const summary = getMultiTargetOperationSummary({
+			operation,
+			targets,
+			canFinalize: isSource,
+			canCancel: isSource || isDm,
+		});
+		if (!isSourceOrDm) {
+			delete summary.candidateCount;
+			delete summary.counts;
+		}
+		const sourceTarget = targets.find(target =>
+			target.targetCharacterId === operation.sourceCharacterId
+			&& target.selectionState === "applied");
+		return {
+			...summary,
+			...(isSourceOrDm ? {sourceCharacterId: operation.sourceCharacterId} : {}),
+			...(isSourceOrDm && operation.status === "applied"
+				? {
+					sourceResult: {
+						sourceCharacterId: operation.sourceCharacterId,
+						sourceCost: structuredClone(operation.sourceCost),
+						resultingSourceCharacterRevision: operation.resultingSourceCharacterRevision,
+						appliedEventId: operation.sourceCostEventId,
+						legKind: sourceTarget ? "combined" : "source",
+						...(sourceTarget
+							? {
+								legId: sourceTarget.legId,
+								operation: structuredClone(sourceTarget.operation),
+							}
+							: {}),
+					},
+				}
+				: {}),
+			targets: visibleTargets,
+			finalization: finalization
+				? {
+					status: finalization.resultStatus,
+					selectedInvitationIds: isSource || isDm
+						? [...finalization.selectedInvitationIds]
+						: undefined,
+				}
+				: null,
+		};
+	}
+
+	async _pGetMultiTargetTargets ({client, operationId, isForUpdate = false, isSkipLocked = false}) {
+		const result = await client.query(`
+			SELECT *
+			FROM hub.semantic_operation_targets
+			WHERE operation_id = $1
+			ORDER BY operation_id, target_character_id
+			${isForUpdate ? `FOR UPDATE${isSkipLocked ? " SKIP LOCKED" : ""}` : ""}
+		`, [operationId]);
+		return result.rows
+			.map(row => this._getMultiTargetTarget(row))
+			.sort((left, right) => left.ordinal - right.ordinal);
+	}
+
+	async _pGetMultiTargetFinalization ({client, operationId}) {
+		const result = await client.query(`
+			SELECT *
+			FROM hub.semantic_operation_finalizations
+			WHERE operation_id = $1
+		`, [operationId]);
+		return this._getMultiTargetFinalization(result.rows[0]);
+	}
+
+	_injectTestMultiTargetFault ({stage, operation, details = null}) {
+		this._fnTestResolveStructuredActionFault?.({
+			stage: `multi-target:${stage}`,
+			operation: structuredClone(operation),
+			details,
+		});
+	}
+
+	async _pRefreshMultiTargetReadiness ({client, operation, targets, actorAccountId = null, dmAccountIds = null}) {
+		if (operation.status !== "collecting_responses") return null;
+		if (targets.some(target => target.responseState === "pending")) return null;
+		dmAccountIds ??= await this._pGetSemanticDmAccountIds({client, campaignId: operation.campaignId});
+		const event = await this._pAppendEvent({
+			client,
+			campaignId: operation.campaignId,
+			actorAccountId,
+			type: "character.multi_operation.ready",
+			aggregateType: "semantic_operation",
+			aggregateId: operation.id,
+			visibility: "explicit_accounts",
+			visibleAccountIds: getMultiTargetSourceAudience({
+				sourceOwnerAccountId: operation.originActorAccountId,
+				dmAccountIds,
+			}),
+			payload: {
+				operationId: operation.id,
+				status: "awaiting_source_selection",
+				approvedCount: targets.filter(target => ["approved", "approved_by_source"].includes(target.responseState)).length,
+			},
+		});
+		const updated = await client.query(`
+			UPDATE hub.semantic_operations
+			SET status = 'awaiting_source_selection',
+				ready_at = now(),
+				ready_event_id = $2,
+				updated_at = now()
+			WHERE id = $1 AND status = 'collecting_responses'
+			RETURNING *
+		`, [operation.id, event.id]);
+		if (!updated.rowCount) return null;
+		Object.assign(operation, this._getSemanticOperation(updated.rows[0]));
+		return event;
+	}
+
+	async _pTerminalizeElapsedMultiTarget ({client, operation, targets, dmAccountIds = null}) {
+		if (!isMultiTargetLiveStatus(operation.status)) return [];
+		const nowResult = await client.query(`SELECT now() AS now`);
+		const now = nowResult.rows[0].now;
+		const isOperationExpiry = new Date(operation.expiresAt) <= now;
+		const isCollectionExpiry = operation.status === "collecting_responses"
+			&& new Date(operation.collectionClosesAt) <= now;
+		if (!isOperationExpiry && !isCollectionExpiry) return [];
+		dmAccountIds ??= await this._pGetSemanticDmAccountIds({client, campaignId: operation.campaignId});
+		const eventIds = [];
+		for (const target of targets.sort((left, right) => left.ordinal - right.ordinal)) {
+			if (target.responseState !== "pending") continue;
+			const event = await this._pAppendEvent({
+				client,
+				campaignId: operation.campaignId,
+				actorAccountId: null,
+				type: "character.multi_operation.target_responded",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetLegAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+					dmAccountIds,
+				}),
+				payload: {
+					operationId: operation.id,
+					invitationId: target.invitationId,
+					status: "expired",
+				},
+			});
+			await client.query(`
+				UPDATE hub.semantic_operation_targets
+				SET response_state = 'expired',
+					responded_at = now(),
+					response_event_id = $3,
+					updated_at = now()
+				WHERE operation_id = $1 AND target_character_id = $2 AND response_state = 'pending'
+			`, [operation.id, target.targetCharacterId, event.id]);
+			target.responseState = "expired";
+			target.respondedAt = now;
+			target.responseEventId = event.id;
+			eventIds.push(event.id);
+		}
+		if (isOperationExpiry) {
+			const event = await this._pAppendEvent({
+				client,
+				campaignId: operation.campaignId,
+				actorAccountId: null,
+				type: "character.multi_operation.expired",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetSourceAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					dmAccountIds,
+				}),
+				payload: {operationId: operation.id, status: "expired", reason: "unavailable"},
+			});
+			const updated = await client.query(`
+				UPDATE hub.semantic_operations
+				SET status = 'expired',
+					terminal_reason = 'unavailable',
+					terminal_event_id = $2,
+					resolved_at = now(),
+					updated_at = now()
+				WHERE id = $1 AND status IN ('collecting_responses', 'awaiting_source_selection')
+				RETURNING *
+			`, [operation.id, event.id]);
+			if (updated.rowCount) Object.assign(operation, this._getSemanticOperation(updated.rows[0]));
+			eventIds.push(event.id);
+		} else {
+			const readyEvent = await this._pRefreshMultiTargetReadiness({
+				client,
+				operation,
+				targets,
+				dmAccountIds,
+			});
+			if (readyEvent) eventIds.push(readyEvent.id);
+		}
+		return eventIds;
+	}
+
 	_getSemanticLifecyclePayload (operation) {
 		const payload = {
 			operationId: operation.id,
@@ -5344,12 +5829,14 @@ export class PostgresHubStore {
 				target_owner_account_id_at_proposal, source_cost_version, source_cost,
 				rules_version_id, rules_pin, template_registry_version, effect_resolution_seed,
 				source_revision_observed, target_revision_observed,
-				resulting_source_character_revision, source_cost_event_id, private_failure_code
+				resulting_source_character_revision, source_cost_event_id, private_failure_code,
+				target_set_version, candidate_count, collection_closes_at, allow_target_no_op,
+				ready_at, ready_event_id, finalized_event_id
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb,
 				$11::jsonb, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
 				$17, $18, $19, $20, $21::jsonb, $22, $23::jsonb, $24, $25,
-				$26, $27, $28, $29, $30
+				$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37
 			)
 			RETURNING *
 		`, [
@@ -5383,6 +5870,13 @@ export class PostgresHubStore {
 			operation.resultingSourceCharacterRevision,
 			operation.sourceCostEventId,
 			operation.privateFailureCode,
+			operation.targetSetVersion,
+			operation.candidateCount,
+			operation.collectionClosesAt,
+			operation.allowTargetNoOp,
+			operation.readyAt,
+			operation.readyEventId,
+			operation.finalizedEventId,
 		]);
 		return this._getSemanticOperation(result.rows[0]);
 	}
@@ -5768,6 +6262,1791 @@ export class PostgresHubStore {
 		}
 	}
 
+	async pCreateMultiTargetOperation (args) {
+		assertMultiTargetProtocol(args);
+		const candidateRefs = assertMultiTargetCandidateRefs(args.targetRefs);
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockSemanticCommand({
+				client,
+				accountId: args.accountId,
+				commandId: args.commandId,
+				idempotencyKey: args.idempotencyKey,
+			});
+			await this._pAssertSemanticSession({
+				client,
+				accountId: args.accountId,
+				sessionId: args.sessionId,
+			});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+
+			const discovery = await client.query(`
+				SELECT id, owner_account_id, target_ref
+				FROM hub.characters
+				WHERE campaign_id = $1
+					AND status = 'active'
+					AND (id = $2 OR target_ref = ANY($3::uuid[]))
+			`, [args.campaignId, args.sourceCharacterId, candidateRefs]);
+			const discoveredTargetsByRef = new Map(discovery.rows.map(row => [row.target_ref, row]));
+			const discoveredTargets = candidateRefs.map(targetRef => discoveredTargetsByRef.get(targetRef));
+			if (discoveredTargets.some(target => !target)) {
+				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			}
+			assertUniqueResolvedTargets(discoveredTargets);
+			const quotaAccountIds = [...new Set([
+				args.accountId,
+				...discoveredTargets.map(target => target.owner_account_id),
+			])].sort();
+			for (const accountId of quotaAccountIds) {
+				await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 10))`, [accountId]);
+			}
+
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [args.campaignId]);
+			const campaignResult = await client.query(`
+				SELECT *
+				FROM hub.campaigns
+				WHERE id = $1 AND status = 'active'
+				FOR UPDATE
+			`, [args.campaignId]);
+			if (!campaignResult.rowCount) {
+				throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			}
+			const campaign = campaignResult.rows[0];
+			if (!this._isMultiTargetOperationsEnabled(args.campaignId)) {
+				throw new HubStoreError("CAPABILITY_UNAVAILABLE", `Multi-target operations are unavailable.`, {status: 409});
+			}
+			const memberships = await this._pLockSemanticMemberships({
+				client,
+				campaignId: args.campaignId,
+				accountIds: quotaAccountIds,
+			});
+			const membership = memberships.get(args.accountId);
+			if (!membership || membership.status !== "active" || membership.role !== "player") {
+				throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+			}
+			for (const target of discoveredTargets) {
+				const targetMembership = memberships.get(target.owner_account_id);
+				if (!targetMembership || targetMembership.status !== "active" || targetMembership.role !== "player") {
+					throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+				}
+			}
+
+			const characterIds = [...new Set([
+				args.sourceCharacterId,
+				...discoveredTargets.map(target => target.id),
+			])].sort();
+			for (const characterId of characterIds) {
+				await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
+			}
+			const charactersResult = await client.query(`
+				SELECT *
+				FROM hub.characters
+				WHERE campaign_id = $1 AND status = 'active' AND id = ANY($2::uuid[])
+				ORDER BY id
+				FOR UPDATE
+			`, [args.campaignId, characterIds]);
+			const charactersById = new Map(charactersResult.rows.map(row => [row.id, getCharacter(row)]));
+			const source = charactersById.get(args.sourceCharacterId);
+			const targets = discoveredTargets.map(target => charactersById.get(target.id));
+			if (
+				!source
+				|| source.ownerAccountId !== args.accountId
+				|| targets.some((target, index) => (
+					!target
+					|| target.targetRef !== candidateRefs[index]
+					|| target.ownerAccountId !== discoveredTargets[index].owner_account_id
+				))
+			) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			assertUniqueResolvedTargets(targets);
+			for (const target of targets) {
+				try {
+					this._assertTargetable({
+						character: target,
+						accountId: args.accountId,
+						role: membership.role,
+					});
+				} catch {
+					throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+				}
+			}
+
+			const sourceAccountCap = await client.query(`
+				SELECT count(*)::integer AS count
+				FROM hub.semantic_operations
+				WHERE target_set_version = 1
+					AND origin_actor_account_id = $1
+					AND status IN ('collecting_responses', 'awaiting_source_selection')
+			`, [args.accountId]);
+			const campaignCap = await client.query(`
+				SELECT count(*)::integer AS count
+				FROM hub.semantic_operations
+				WHERE target_set_version = 1
+					AND campaign_id = $1
+					AND status IN ('collecting_responses', 'awaiting_source_selection')
+			`, [args.campaignId]);
+			const sourceCharacterCap = await client.query(`
+				SELECT count(*)::integer AS count
+				FROM hub.semantic_operations
+				WHERE target_set_version = 1
+					AND source_character_id = $1
+					AND status IN ('collecting_responses', 'awaiting_source_selection')
+			`, [args.sourceCharacterId]);
+			if (
+				sourceAccountCap.rows[0].count >= 5
+				|| campaignCap.rows[0].count >= 50
+				|| sourceCharacterCap.rows[0].count >= 3
+			) throw new HubStoreError("COLLECTION_LIMIT_REACHED", `The collection limit was reached.`, {status: 409});
+			for (const ownerAccountId of [...new Set(targets.map(target => target.ownerAccountId))].sort()) {
+				const pendingResult = await client.query(`
+					SELECT count(*)::integer AS count
+					FROM hub.semantic_operation_targets target
+					JOIN hub.semantic_operations operation ON operation.id = target.operation_id
+					WHERE target.target_owner_account_id_at_proposal = $1
+						AND target.response_state = 'pending'
+						AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+				`, [ownerAccountId]);
+				const additions = targets.filter(target =>
+					target.ownerAccountId === ownerAccountId && ownerAccountId !== args.accountId).length;
+				if (pendingResult.rows[0].count + additions > 20) {
+					throw new HubStoreError("COLLECTION_LIMIT_REACHED", `The collection limit was reached.`, {status: 409});
+				}
+			}
+
+			const contextResult = await client.query(`
+				SELECT
+					r.id AS rules_id,
+					r.version AS rules_version,
+					r.schema_version AS rules_schema_version,
+					b.id AS brew_id,
+					b.version AS brew_version,
+					b.content_hash
+				FROM hub.campaigns c
+				LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+				LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
+				WHERE c.id = $1
+			`, [args.campaignId]);
+			const context = contextResult.rows[0];
+			const rulesPin = getPeerSourceCostsRulesPin({
+				rulesVersion: context.rules_id
+					? {
+						id: context.rules_id,
+						version: Number(context.rules_version),
+						schemaVersion: Number(context.rules_schema_version),
+					}
+					: null,
+				brewBundle: context.brew_id
+					? {
+						id: context.brew_id,
+						version: Number(context.brew_version),
+						contentHash: context.content_hash,
+					}
+					: null,
+			});
+			if (!rulesPin || rulesPin.rulesVersionId !== args.rulesVersionId) {
+				throw new HubStoreError("POLICY_VERSION_STALE", `Campaign rules changed.`, {status: 409});
+			}
+			if (!this._semanticOperationRegistry.isMultiTarget({
+				sourceEntity: args.sourceEntity,
+				effectTemplateId: args.effectTemplateId,
+			})) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+
+			const operationId = crypto.randomUUID();
+			const effectResolutionSeed = crypto.randomBytes(32).toString("hex");
+			const derived = this._semanticOperationRegistry.deriveMultiTarget({
+				sourceCharacter: source,
+				targetCharacters: targets,
+				targetRefs: candidateRefs,
+				sourceEntity: args.sourceEntity,
+				effectTemplateId: args.effectTemplateId,
+				choice: args.choice,
+				sourceProfile: computePeerProfile({character: source}),
+				targetProfiles: targets.map(target => computePeerProfile({character: target})),
+				operationId,
+				effectResolutionSeed,
+			});
+			const deadlines = (await client.query(`
+				SELECT
+					now() AS created_at,
+					now() + ($1::bigint * interval '1 millisecond') AS collection_closes_at,
+					now() + ($2::bigint * interval '1 millisecond') AS expires_at
+			`, [this._multiTargetCollectionTtlMs, this._multiTargetOperationTtlMs])).rows[0];
+			let operation = await this._pInsertSemanticOperation({
+				client,
+				operation: {
+					id: operationId,
+					campaignId: args.campaignId,
+					originActorAccountId: args.accountId,
+					sourceCharacterId: source.id,
+					targetCharacterId: null,
+					targetRef: null,
+					status: "collecting_responses",
+					version: 1,
+					kind: derived.targets[0].operation.kind,
+					arguments: {},
+					sourceEntity: derived.sourceEntity,
+					effectTemplateId: derived.effectTemplateId,
+					choice: derived.choice,
+					sourceDisplaySnapshot: derived.sourceDisplaySnapshot,
+					targetDisplaySnapshot: null,
+					effectDisplaySnapshot: derived.effectDisplaySnapshot,
+					resultingCharacterRevision: null,
+					expiresAt: deadlines.expires_at,
+					targetOwnerAccountIdAtProposal: null,
+					sourceCostVersion: derived.sourceCost.version,
+					sourceCost: derived.sourceCost,
+					rulesVersionId: rulesPin.rulesVersionId,
+					rulesPin,
+					templateRegistryVersion: MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
+					effectResolutionSeed,
+					sourceRevisionObserved: source.revision,
+					targetRevisionObserved: null,
+					resultingSourceCharacterRevision: null,
+					sourceCostEventId: null,
+					privateFailureCode: null,
+					targetSetVersion: 1,
+					candidateCount: targets.length,
+					collectionClosesAt: deadlines.collection_closes_at,
+					allowTargetNoOp: derived.allowTargetNoOp,
+					readyAt: null,
+					readyEventId: null,
+					finalizedEventId: null,
+				},
+			});
+			operation.createdAt = deadlines.created_at;
+			const dmAccountIds = await this._pGetSemanticDmAccountIds({client, campaignId: args.campaignId});
+			const eventIds = [];
+			const proposedEvent = await this._pAppendEvent({
+				client,
+				campaignId: args.campaignId,
+				actorAccountId: args.accountId,
+				type: "character.multi_operation.proposed",
+				aggregateType: "semantic_operation",
+				aggregateId: operationId,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetSourceAudience({
+					sourceOwnerAccountId: args.accountId,
+					dmAccountIds,
+				}),
+				payload: {
+					operationId,
+					status: operation.status,
+					candidateCount: targets.length,
+					collectionClosesAt: operation.collectionClosesAt,
+					expiresAt: operation.expiresAt,
+					effectDisplaySnapshot: operation.effectDisplaySnapshot,
+				},
+			});
+			await client.query(`
+				UPDATE hub.semantic_operations
+				SET created_event_id = $2, updated_at = now()
+				WHERE id = $1
+			`, [operationId, proposedEvent.id]);
+			eventIds.push(proposedEvent.id);
+			const targetRows = [];
+			for (let index = 0; index < targets.length; ++index) {
+				const target = targets[index];
+				const derivedTarget = derived.targets[index];
+				const invitationId = crypto.randomUUID();
+				const responseState = target.ownerAccountId === args.accountId ? "approved_by_source" : "pending";
+				const invitationEvent = await this._pAppendEvent({
+					client,
+					campaignId: args.campaignId,
+					actorAccountId: args.accountId,
+					type: "character.multi_operation.target_requested",
+					aggregateType: "semantic_operation",
+					aggregateId: operationId,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetLegAudience({
+						sourceOwnerAccountId: args.accountId,
+						targetOwnerAccountId: target.ownerAccountId,
+						dmAccountIds,
+					}),
+					payload: {
+						operationId,
+						invitationId,
+						status: responseState,
+						effectDisplaySnapshot: operation.effectDisplaySnapshot,
+						targetDisplaySnapshot: derivedTarget.targetDisplaySnapshot,
+						collectionClosesAt: operation.collectionClosesAt,
+					},
+				});
+				const targetResult = await client.query(`
+					INSERT INTO hub.semantic_operation_targets (
+						operation_id, target_character_id, campaign_id, invitation_id, ordinal,
+						target_ref, target_owner_account_id_at_proposal, target_display_snapshot,
+						target_operation, rules_version_id, target_revision_observed,
+						collection_closes_at, response_state, response_actor_account_id,
+						responded_at, invitation_event_id
+					) VALUES (
+						$1, $2, $3, $4, $5, $6, $7, $8::jsonb,
+						$9::jsonb, $10, $11, $12, $13, $14, $15, $16
+					)
+					RETURNING *
+				`, [
+					operationId,
+					target.id,
+					args.campaignId,
+					invitationId,
+					index + 1,
+					target.targetRef,
+					target.ownerAccountId,
+					JSON.stringify(derivedTarget.targetDisplaySnapshot),
+					JSON.stringify(derivedTarget.operation),
+					rulesPin.rulesVersionId,
+					target.revision,
+					operation.collectionClosesAt,
+					responseState,
+					responseState === "approved_by_source" ? args.accountId : null,
+					responseState === "approved_by_source" ? deadlines.created_at : null,
+					invitationEvent.id,
+				]);
+				targetRows.push(this._getMultiTargetTarget(targetResult.rows[0]));
+				eventIds.push(invitationEvent.id);
+			}
+			await client.query(`
+				INSERT INTO hub.semantic_multi_target_usage (singleton, first_used_at, first_operation_id)
+				VALUES (true, now(), $1)
+				ON CONFLICT (singleton) DO NOTHING
+			`, [operationId]);
+			await client.query(`
+				UPDATE hub.campaigns
+				SET multi_target_first_used_at = COALESCE(multi_target_first_used_at, now()),
+					multi_target_first_operation_id = COALESCE(multi_target_first_operation_id, $2),
+					updated_at = now()
+				WHERE id = $1
+			`, [args.campaignId, operationId]);
+			await this._pAppendAudit({
+				client,
+				campaignId: args.campaignId,
+				actorAccountId: args.accountId,
+				action: "character.multi_operation.proposed",
+				targetType: "semantic_operation",
+				targetId: operationId,
+				details: {
+					contractVersion: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
+					candidateCount: targets.length,
+					templateRegistryVersion: MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
+				},
+			});
+			const readyEvent = await this._pRefreshMultiTargetReadiness({
+				client,
+				operation,
+				targets: targetRows,
+				actorAccountId: args.accountId,
+				dmAccountIds,
+			});
+			if (readyEvent) eventIds.push(readyEvent.id);
+			const response = {
+				operation: this._getMultiTargetOperationView({
+					operation,
+					targets: targetRows,
+					accountId: args.accountId,
+					role: membership.role,
+				}),
+				eventIds,
+			};
+			await this._pSaveSemanticCommand({
+				client,
+				accountId: args.accountId,
+				commandId: args.commandId,
+				operationId,
+				commandType: "create_multi_target_proposal",
+				idempotencyKey: args.idempotencyKey,
+				response,
+				eventIds,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pRespondMultiTargetInvitation (args) {
+		assertMultiTargetProtocol(args);
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockSemanticCommand({
+				client,
+				accountId: args.accountId,
+				commandId: args.commandId,
+				idempotencyKey: args.idempotencyKey,
+			});
+			await this._pAssertSemanticSession({
+				client,
+				accountId: args.accountId,
+				sessionId: args.sessionId,
+			});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			if (!["approve", "reject"].includes(args.decision)) {
+				throw new HubStoreError("INVALID_REQUEST", `The response decision is invalid.`, {status: 400});
+			}
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [args.campaignId]);
+			const campaign = await client.query(`
+				SELECT id
+				FROM hub.campaigns
+				WHERE id = $1 AND status <> 'deleting'
+				FOR UPDATE
+			`, [args.campaignId]);
+			if (!campaign.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Invitation was not found.`, {status: 404});
+			const operationResult = await client.query(`
+				SELECT *
+				FROM hub.semantic_operations
+				WHERE campaign_id = $1 AND id = $2 AND target_set_version = 1
+				FOR UPDATE
+			`, [args.campaignId, args.operationId]);
+			if (!operationResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Invitation was not found.`, {status: 404});
+			const operation = this._getSemanticOperation(operationResult.rows[0]);
+			const targets = await this._pGetMultiTargetTargets({
+				client,
+				operationId: operation.id,
+				isForUpdate: true,
+			});
+			const target = targets.find(it => it.invitationId === args.invitationId);
+			if (!target) throw new HubStoreError("ACTION_NOT_FOUND", `Invitation was not found.`, {status: 404});
+			const memberships = await this._pLockSemanticMemberships({
+				client,
+				campaignId: args.campaignId,
+				accountIds: [
+					args.accountId,
+					operation.originActorAccountId,
+					...targets.map(it => it.targetOwnerAccountIdAtProposal),
+				],
+			});
+			const membership = memberships.get(args.accountId);
+			if (!membership || membership.status !== "active" || !["dm", "co_dm", "player"].includes(membership.role)) {
+				throw new HubStoreError("ACTION_NOT_FOUND", `Invitation was not found.`, {status: 404});
+			}
+			const dmAccountIds = await this._pGetSemanticDmAccountIds({client, campaignId: args.campaignId});
+			const elapsedEventIds = await this._pTerminalizeElapsedMultiTarget({
+				client,
+				operation,
+				targets,
+				dmAccountIds,
+			});
+			const isDm = ["dm", "co_dm"].includes(membership.role);
+			const isOwner = target.targetOwnerAccountIdAtProposal === args.accountId;
+			if (!isOwner && !isDm) throw new HubStoreError("ACTION_NOT_FOUND", `Invitation was not found.`, {status: 404});
+			if (args.decision === "approve" && (!isOwner || membership.role !== "player")) {
+				throw new HubStoreError("OPERATION_FORBIDDEN", `Only the target owner may approve.`, {status: 403});
+			}
+			if (target.responseState !== "pending") {
+				const finalization = await this._pGetMultiTargetFinalization({client, operationId: operation.id});
+				const operationView = this._getMultiTargetOperationView({
+					operation,
+					targets,
+					finalization,
+					accountId: args.accountId,
+					role: membership.role,
+				});
+				const response = {
+					operation: operationView,
+					invitation: operationView.targets.find(it => it.invitationId === args.invitationId),
+					eventIds: [...new Set([
+						...elapsedEventIds,
+						target.responseEventId,
+					].filter(Boolean))],
+				};
+				await this._pSaveSemanticCommand({
+					client,
+					accountId: args.accountId,
+					commandId: args.commandId,
+					operationId: operation.id,
+					commandType: "respond_multi_target",
+					idempotencyKey: args.idempotencyKey,
+					response,
+					eventIds: response.eventIds,
+					invitationId: args.invitationId,
+				});
+				await client.query("COMMIT");
+				return response;
+			}
+
+			target.responseState = args.decision === "approve" ? "approved" : "rejected";
+			target.responseActorAccountId = args.accountId;
+			target.responseCommandId = args.commandId;
+			target.respondedAt = (await client.query(`SELECT now() AS now`)).rows[0].now;
+			const responseEvent = await this._pAppendEvent({
+				client,
+				campaignId: args.campaignId,
+				actorAccountId: args.accountId,
+				type: "character.multi_operation.target_responded",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetLegAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+					dmAccountIds,
+				}),
+				payload: {
+					operationId: operation.id,
+					invitationId: target.invitationId,
+					status: target.responseState,
+				},
+			});
+			target.responseEventId = responseEvent.id;
+			const readyEvent = await this._pRefreshMultiTargetReadiness({
+				client,
+				operation,
+				targets,
+				actorAccountId: args.accountId,
+				dmAccountIds,
+			});
+			await this._pAppendAudit({
+				client,
+				campaignId: args.campaignId,
+				actorAccountId: args.accountId,
+				action: `character.multi_operation.${target.responseState}`,
+				targetType: "semantic_operation",
+				targetId: operation.id,
+			});
+			const eventIds = [responseEvent.id, readyEvent?.id].filter(Boolean);
+			const operationView = this._getMultiTargetOperationView({
+				operation,
+				targets,
+				accountId: args.accountId,
+				role: membership.role,
+			});
+			const response = {
+				operation: operationView,
+				invitation: operationView.targets.find(it => it.invitationId === args.invitationId),
+				eventIds,
+			};
+			await this._pSaveSemanticCommand({
+				client,
+				accountId: args.accountId,
+				commandId: args.commandId,
+				operationId: operation.id,
+				commandType: "respond_multi_target",
+				idempotencyKey: args.idempotencyKey,
+				response,
+				eventIds,
+				invitationId: args.invitationId,
+			});
+			await client.query(`
+				UPDATE hub.semantic_operation_targets
+				SET response_state = $3,
+					response_actor_account_id = $4,
+					response_command_id = $5,
+					responded_at = $6,
+					response_event_id = $7,
+					updated_at = now()
+				WHERE operation_id = $1 AND target_character_id = $2 AND response_state = 'pending'
+			`, [
+				operation.id,
+				target.targetCharacterId,
+				target.responseState,
+				args.accountId,
+				args.commandId,
+				target.respondedAt,
+				responseEvent.id,
+			]);
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pFinalizeMultiTargetOperation (args) {
+		assertMultiTargetProtocol(args);
+		const orderedSelection = assertUniqueSelection(args.selectedInvitationIds);
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockSemanticCommand({
+				client,
+				accountId: args.accountId,
+				commandId: args.commandId,
+				idempotencyKey: args.idempotencyKey,
+			});
+			await this._pAssertSemanticSession({
+				client,
+				accountId: args.accountId,
+				sessionId: args.sessionId,
+			});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [args.campaignId]);
+			const campaignResult = await client.query(`
+				SELECT *
+				FROM hub.campaigns
+				WHERE id = $1 AND status <> 'deleting'
+				FOR UPDATE
+			`, [args.campaignId]);
+			if (!campaignResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			const operationResult = await client.query(`
+				SELECT *
+				FROM hub.semantic_operations
+				WHERE campaign_id = $1 AND id = $2 AND target_set_version = 1
+				FOR UPDATE
+			`, [args.campaignId, args.operationId]);
+			if (!operationResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			const operation = this._getSemanticOperation(operationResult.rows[0]);
+			const targets = await this._pGetMultiTargetTargets({
+				client,
+				operationId: operation.id,
+				isForUpdate: true,
+			});
+			const memberships = await this._pLockSemanticMemberships({
+				client,
+				campaignId: args.campaignId,
+				accountIds: [
+					args.accountId,
+					operation.originActorAccountId,
+					...targets.map(target => target.targetOwnerAccountIdAtProposal),
+				],
+			});
+			const membership = memberships.get(args.accountId);
+			if (
+				!membership
+				|| membership.status !== "active"
+				|| membership.role !== "player"
+				|| operation.originActorAccountId !== args.accountId
+			) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			const dmAccountIds = await this._pGetSemanticDmAccountIds({client, campaignId: args.campaignId});
+			const elapsedEventIds = await this._pTerminalizeElapsedMultiTarget({
+				client,
+				operation,
+				targets,
+				dmAccountIds,
+			});
+			if (operation.status !== "awaiting_source_selection") {
+				if (!isMultiTargetLiveStatus(operation.status)) {
+					const finalization = await this._pGetMultiTargetFinalization({
+						client,
+						operationId: operation.id,
+					});
+					const response = {
+						operation: this._getMultiTargetOperationView({
+							operation,
+							targets,
+							finalization,
+							accountId: args.accountId,
+							role: membership.role,
+						}),
+						eventIds: [...new Set([
+							...elapsedEventIds,
+							operation.sourceCostEventId,
+							operation.terminalEventId,
+							operation.finalizedEventId,
+						].filter(Boolean))],
+					};
+					await this._pSaveSemanticCommand({
+						client,
+						accountId: args.accountId,
+						commandId: args.commandId,
+						operationId: operation.id,
+						commandType: "finalize_multi_target",
+						idempotencyKey: args.idempotencyKey,
+						response,
+						eventIds: response.eventIds,
+					});
+					await client.query("COMMIT");
+					return response;
+				}
+				throw new HubStoreError("COLLECTION_NOT_READY", `The operation is still collecting responses.`, {status: 409});
+			}
+			const selectedTargets = orderedSelection.map(invitationId =>
+				targets.find(target => target.invitationId === invitationId),
+			);
+			if (
+				selectedTargets.some(target => !target)
+				|| selectedTargets.some(target => !["approved", "approved_by_source"].includes(target.responseState))
+			) throw new HubStoreError("FINALIZATION_SELECTION_INVALID", `The final selection is invalid.`, {status: 409});
+
+			const eventIds = [...elapsedEventIds];
+			let finalization;
+			if (!orderedSelection.length) {
+				for (const target of targets) {
+					if (!["approved", "approved_by_source"].includes(target.responseState)) continue;
+					target.responseState = "declined";
+					target.selectionState = "declined";
+					const declinedEvent = await this._pAppendEvent({
+						client,
+						campaignId: args.campaignId,
+						actorAccountId: args.accountId,
+						type: "character.multi_operation.target_responded",
+						aggregateType: "semantic_operation",
+						aggregateId: operation.id,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetLegAudience({
+							sourceOwnerAccountId: args.accountId,
+							targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+							dmAccountIds,
+						}),
+						payload: {
+							operationId: operation.id,
+							invitationId: target.invitationId,
+							status: "declined",
+						},
+					});
+					eventIds.push(declinedEvent.id);
+					await client.query(`
+						UPDATE hub.semantic_operation_targets
+						SET response_state = 'declined',
+							selection_state = 'declined',
+							responded_at = COALESCE(responded_at, now()),
+							response_event_id = $3,
+							updated_at = now()
+						WHERE operation_id = $1 AND target_character_id = $2
+					`, [operation.id, target.targetCharacterId, declinedEvent.id]);
+				}
+				const terminal = await this._pAppendEvent({
+					client,
+					campaignId: args.campaignId,
+					actorAccountId: args.accountId,
+					type: "character.multi_operation.cancelled",
+					aggregateType: "semantic_operation",
+					aggregateId: operation.id,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetSourceAudience({
+						sourceOwnerAccountId: args.accountId,
+						dmAccountIds,
+					}),
+					payload: {operationId: operation.id, status: "cancelled", reason: "empty_selection"},
+				});
+				eventIds.push(terminal.id);
+				const updated = await client.query(`
+					UPDATE hub.semantic_operations
+					SET status = 'cancelled',
+						terminal_reason = 'empty_selection',
+						terminal_event_id = $2,
+						resolved_at = now(),
+						updated_at = now()
+					WHERE id = $1
+					RETURNING *
+				`, [operation.id, terminal.id]);
+				Object.assign(operation, this._getSemanticOperation(updated.rows[0]));
+				finalization = {
+					operationId: operation.id,
+					commandId: args.commandId,
+					actorAccountId: args.accountId,
+					selectedInvitationIds: [],
+					resultStatus: "cancelled",
+					result: {status: "cancelled"},
+					terminalEventId: terminal.id,
+				};
+			} else {
+				const characterIds = [...new Set([
+					operation.sourceCharacterId,
+					...selectedTargets.map(target => target.targetCharacterId),
+				])].sort();
+				for (const characterId of characterIds) {
+					await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 2))`, [characterId]);
+				}
+				const charactersResult = await client.query(`
+					SELECT *
+					FROM hub.characters
+					WHERE campaign_id = $1 AND status = 'active' AND id = ANY($2::uuid[])
+					ORDER BY id
+					FOR UPDATE
+				`, [args.campaignId, characterIds]);
+				await client.query(`
+					SELECT character_id
+					FROM hub.character_leases
+					WHERE character_id = ANY($1::uuid[])
+					ORDER BY character_id
+					FOR UPDATE
+				`, [characterIds]);
+				const charactersById = new Map(charactersResult.rows.map(row => [row.id, getCharacter(row)]));
+				const source = charactersById.get(operation.sourceCharacterId);
+				const selectedCharacters = selectedTargets.map(target => charactersById.get(target.targetCharacterId));
+				let privateFailureCode = null;
+				if (
+					!source
+					|| source.ownerAccountId !== args.accountId
+				) privateFailureCode = "SOURCE_COST_UNAVAILABLE";
+				if (
+					selectedCharacters.some(character => !character)
+					|| selectedTargets.some((target, index) => (
+						selectedCharacters[index]?.targetRef !== target.targetRef
+						|| selectedCharacters[index]?.ownerAccountId !== target.targetOwnerAccountIdAtProposal
+						|| memberships.get(target.targetOwnerAccountIdAtProposal)?.status !== "active"
+						|| memberships.get(target.targetOwnerAccountIdAtProposal)?.role !== "player"
+					))
+				) throw new HubStoreError("FINALIZATION_SELECTION_INVALID", `The final selection is invalid.`, {status: 409});
+				if (!privateFailureCode && operation.sourceCostInvalidated) {
+					privateFailureCode = "SOURCE_COST_UNAVAILABLE";
+				}
+				if (!privateFailureCode) {
+					for (const character of selectedCharacters) {
+						try {
+							this._assertTargetable({
+								character,
+								accountId: args.accountId,
+								role: membership.role,
+							});
+						} catch {
+							throw new HubStoreError("FINALIZATION_SELECTION_INVALID", `The final selection is invalid.`, {status: 409});
+						}
+					}
+				}
+				const context = (await client.query(`
+					SELECT
+						r.id AS rules_id,
+						r.version AS rules_version,
+						r.schema_version AS rules_schema_version,
+						b.id AS brew_id,
+						b.version AS brew_version,
+						b.content_hash
+					FROM hub.campaigns c
+					LEFT JOIN hub.rules_versions r ON r.id = c.active_rules_version_id
+					LEFT JOIN hub.brew_bundle_versions b ON b.id = c.active_brew_bundle_version_id
+					WHERE c.id = $1
+				`, [args.campaignId])).rows[0];
+				const currentPin = getPeerSourceCostsRulesPin({
+					rulesVersion: context.rules_id
+						? {
+							id: context.rules_id,
+							version: Number(context.rules_version),
+							schemaVersion: Number(context.rules_schema_version),
+						}
+						: null,
+					brewBundle: context.brew_id
+						? {
+							id: context.brew_id,
+							version: Number(context.brew_version),
+							contentHash: context.content_hash,
+						}
+						: null,
+				});
+				if (
+					!privateFailureCode
+					&& (
+						!this._isMultiTargetOperationsEnabled(args.campaignId)
+						|| operation.templateRegistryVersion !== MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION
+						|| !isCanonicalEqual(operation.rulesPin, currentPin)
+					)
+				) privateFailureCode = "POLICY_VERSION_STALE";
+				let derived;
+				if (!privateFailureCode) {
+					try {
+						derived = this._semanticOperationRegistry.deriveMultiTarget({
+							sourceCharacter: source,
+							targetCharacters: selectedCharacters,
+							targetRefs: selectedTargets.map(target => target.targetRef),
+							sourceEntity: operation.sourceEntity,
+							effectTemplateId: operation.effectTemplateId,
+							choice: operation.choice,
+							sourceProfile: computePeerProfile({character: source}),
+							targetProfiles: selectedCharacters.map(character => computePeerProfile({character})),
+							operationId: operation.id,
+							effectResolutionSeed: operation.effectResolutionSeed,
+						});
+					} catch (error) {
+						privateFailureCode = getPrivateAcceptanceFailureCode(error);
+						if (!privateFailureCode) throw error;
+					}
+				}
+				if (
+					!privateFailureCode
+					&& (
+						!isCanonicalEqual(derived.sourceCost, operation.sourceCost)
+						|| !isCanonicalEqual(derived.sourceEntity, operation.sourceEntity)
+						|| derived.effectTemplateId !== operation.effectTemplateId
+						|| !isCanonicalEqual(derived.choice, operation.choice)
+						|| derived.targets.some((derivedTarget, index) =>
+							!isCanonicalEqual(derivedTarget.operation, selectedTargets[index].operation))
+					)
+				) privateFailureCode = "SOURCE_COST_UNAVAILABLE";
+				const nextDataByCharacterId = new Map();
+				const legResults = [];
+				if (!privateFailureCode) {
+					try {
+						nextDataByCharacterId.set(
+							source.id,
+							applySourceCost({data: source.data, sourceCost: operation.sourceCost}).data,
+						);
+						for (let index = 0; index < selectedTargets.length; ++index) {
+							const target = selectedTargets[index];
+							const character = selectedCharacters[index];
+							const baseData = nextDataByCharacterId.get(character.id) ?? character.data;
+							const result = applySemanticOperationWithResult({
+								data: baseData,
+								operation: target.operation,
+							});
+							if (!result.changed && !operation.allowTargetNoOp) {
+								throw new HubStoreError("TARGET_EFFECT_UNAVAILABLE", `The target effect is unavailable.`, {status: 409});
+							}
+							if (result.changed) nextDataByCharacterId.set(character.id, result.data);
+							legResults.push({
+								target,
+								character,
+								changed: result.changed,
+								legId: crypto.randomUUID(),
+							});
+						}
+						for (const data of nextDataByCharacterId.values()) validateCloudCharacterData(data);
+					} catch (error) {
+						privateFailureCode = getPrivateAcceptanceFailureCode(error, {leg: "target"});
+						if (!privateFailureCode) throw error;
+					}
+				}
+				if (privateFailureCode) {
+					const terminal = await this._pAppendEvent({
+						client,
+						campaignId: args.campaignId,
+						actorAccountId: args.accountId,
+						type: "character.multi_operation.failed",
+						aggregateType: "semantic_operation",
+						aggregateId: operation.id,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetSourceAudience({
+							sourceOwnerAccountId: args.accountId,
+							dmAccountIds,
+						}),
+						payload: {operationId: operation.id, status: "failed", reason: "unavailable"},
+					});
+					eventIds.push(terminal.id);
+					const updated = await client.query(`
+						UPDATE hub.semantic_operations
+						SET status = 'failed',
+							terminal_reason = 'unavailable',
+							terminal_event_id = $2,
+							private_failure_code = $3,
+							resolved_at = now(),
+							updated_at = now()
+						WHERE id = $1
+						RETURNING *
+					`, [operation.id, terminal.id, privateFailureCode]);
+					Object.assign(operation, this._getSemanticOperation(updated.rows[0]));
+					finalization = {
+						operationId: operation.id,
+						commandId: args.commandId,
+						actorAccountId: args.accountId,
+						selectedInvitationIds: orderedSelection,
+						resultStatus: "failed",
+						result: {status: "failed"},
+						terminalEventId: terminal.id,
+					};
+				} else {
+					const now = (await client.query(`SELECT now() AS now`)).rows[0].now;
+					for (const target of targets) {
+						const selectedIndex = selectedTargets.indexOf(target);
+						if (selectedIndex === -1) {
+							if (["approved", "approved_by_source"].includes(target.responseState)) {
+								target.responseState = "declined";
+								target.selectionState = "declined";
+								await client.query(`
+									UPDATE hub.semantic_operation_targets
+									SET response_state = 'declined',
+										selection_state = 'declined',
+										responded_at = COALESCE(responded_at, $3),
+										updated_at = now()
+									WHERE operation_id = $1 AND target_character_id = $2
+								`, [operation.id, target.targetCharacterId, now]);
+							}
+							continue;
+						}
+						target.selectionState = "selected";
+						target.selectionIndex = selectedIndex + 1;
+						target.selectedAt = now;
+						await client.query(`
+							UPDATE hub.semantic_operation_targets
+							SET selection_state = 'selected',
+								selection_index = $3,
+								selected_at = $4,
+								updated_at = now()
+							WHERE operation_id = $1 AND target_character_id = $2
+						`, [operation.id, target.targetCharacterId, selectedIndex + 1, now]);
+					}
+
+					const updatedCharacters = new Map();
+					for (const [index, characterId] of [...nextDataByCharacterId.keys()].sort().entries()) {
+						const updated = await client.query(`
+							UPDATE hub.characters
+							SET data = $2::jsonb, revision = revision + 1, updated_at = now()
+							WHERE id = $1
+							RETURNING *
+						`, [characterId, JSON.stringify(nextDataByCharacterId.get(characterId))]);
+						updatedCharacters.set(characterId, getCharacter(updated.rows[0]));
+						this._injectTestMultiTargetFault({
+							stage: "character-write",
+							operation,
+							details: {index, characterId},
+						});
+					}
+					const sourceNxt = updatedCharacters.get(source.id) || source;
+					const sourceIsSelected = selectedTargets.some(target => target.targetCharacterId === source.id);
+					const sourceSelectedLeg = sourceIsSelected
+						? legResults.find(result => result.target.targetCharacterId === source.id)
+						: null;
+					const sourceEvent = await this._pAppendEvent({
+						client,
+						campaignId: args.campaignId,
+						actorAccountId: args.accountId,
+						type: sourceIsSelected
+							? "character.multi_operation.target_applied"
+							: "character.multi_operation.source_cost_consumed",
+						aggregateType: "character",
+						aggregateId: source.id,
+						aggregateRevision: sourceNxt.revision,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetSourceAudience({
+							sourceOwnerAccountId: args.accountId,
+							dmAccountIds,
+						}),
+						payload: {
+							operationId: operation.id,
+							_sourceOwnerAccountId: args.accountId,
+							_targetOwnerAccountId: source.ownerAccountId,
+							leg: sourceIsSelected ? "combined" : "source",
+							sourceCost: operation.sourceCost,
+							resultingSourceCharacterRevision: sourceNxt.revision,
+							...(sourceSelectedLeg
+								? {
+									invitationId: sourceSelectedLeg.target.invitationId,
+									legId: sourceSelectedLeg.legId,
+									operation: sourceSelectedLeg.target.operation,
+									resultingCharacterRevision: sourceNxt.revision,
+									changed: sourceSelectedLeg.changed,
+								}
+								: {}),
+						},
+					});
+					eventIds.push(sourceEvent.id);
+					await client.query(`UPDATE hub.characters SET operation_watermark = $2 WHERE id = $1`, [source.id, sourceEvent.sequence]);
+					sourceNxt.operationWatermark = sourceEvent.sequence;
+					this._injectTestMultiTargetFault({stage: "source-event", operation});
+					const legResultByTargetId = new Map(
+						legResults.map(result => [result.target.targetCharacterId, result]),
+					);
+					for (const target of targets.sort((left, right) => left.ordinal - right.ordinal)) {
+						const result = legResultByTargetId.get(target.targetCharacterId);
+						if (!result) {
+							if (target.responseState !== "declined") continue;
+							const declinedEvent = await this._pAppendEvent({
+								client,
+								campaignId: args.campaignId,
+								actorAccountId: args.accountId,
+								type: "character.multi_operation.target_responded",
+								aggregateType: "semantic_operation",
+								aggregateId: operation.id,
+								visibility: "explicit_accounts",
+								visibleAccountIds: getMultiTargetLegAudience({
+									sourceOwnerAccountId: args.accountId,
+									targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+									dmAccountIds,
+								}),
+								payload: {
+									operationId: operation.id,
+									invitationId: target.invitationId,
+									status: "declined",
+								},
+							});
+							target.responseEventId = declinedEvent.id;
+							eventIds.push(declinedEvent.id);
+							await client.query(`
+								UPDATE hub.semantic_operation_targets
+								SET response_event_id = $3, updated_at = now()
+								WHERE operation_id = $1 AND target_character_id = $2
+							`, [operation.id, target.targetCharacterId, declinedEvent.id]);
+							continue;
+						}
+						const characterNxt = updatedCharacters.get(result.character.id) || result.character;
+						const isCombined = result.character.id === source.id;
+						let event = sourceEvent;
+						if (!isCombined) {
+							event = await this._pAppendEvent({
+								client,
+								campaignId: args.campaignId,
+								actorAccountId: args.accountId,
+								type: "character.multi_operation.target_applied",
+								aggregateType: "character",
+								aggregateId: result.character.id,
+								aggregateRevision: result.changed ? characterNxt.revision : null,
+								visibility: "explicit_accounts",
+								visibleAccountIds: getMultiTargetLegAudience({
+									sourceOwnerAccountId: args.accountId,
+									targetOwnerAccountId: result.target.targetOwnerAccountIdAtProposal,
+									dmAccountIds,
+								}),
+								payload: {
+									operationId: operation.id,
+									_sourceOwnerAccountId: args.accountId,
+									_targetOwnerAccountId: result.target.targetOwnerAccountIdAtProposal,
+									invitationId: result.target.invitationId,
+									legId: result.legId,
+									leg: "target",
+									operation: result.target.operation,
+									...(result.changed ? {resultingCharacterRevision: characterNxt.revision} : {}),
+									changed: result.changed,
+								},
+							});
+							eventIds.push(event.id);
+							if (result.changed) {
+								await client.query(`
+									UPDATE hub.characters
+									SET operation_watermark = $2
+									WHERE id = $1
+								`, [result.character.id, event.sequence]);
+								characterNxt.operationWatermark = event.sequence;
+							}
+							this._injectTestMultiTargetFault({
+								stage: "target-event",
+								operation,
+								details: {ordinal: result.target.ordinal},
+							});
+						}
+						result.target.selectionState = "applied";
+						result.target.changed = result.changed;
+						result.target.resultingCharacterRevision = isCombined || result.changed
+							? characterNxt.revision
+							: null;
+						result.target.legId = result.legId;
+						result.target.legKind = isCombined ? "combined" : "target";
+						result.target.legEventId = event.id;
+						await client.query(`
+							UPDATE hub.semantic_operation_targets
+							SET selection_state = 'applied',
+								leg_id = $3,
+								leg_kind = $4,
+								leg_event_id = $5,
+								changed = $6,
+								resulting_character_revision = $7,
+								applied_at = $8,
+								updated_at = now()
+							WHERE operation_id = $1 AND target_character_id = $2
+						`, [
+							operation.id,
+							result.target.targetCharacterId,
+							result.legId,
+							result.target.legKind,
+							event.id,
+							result.changed,
+							result.target.resultingCharacterRevision,
+							now,
+						]);
+					}
+					const finalizedEvent = await this._pAppendEvent({
+						client,
+						campaignId: args.campaignId,
+						actorAccountId: args.accountId,
+						type: "character.multi_operation.finalized",
+						aggregateType: "semantic_operation",
+						aggregateId: operation.id,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetSourceAudience({
+							sourceOwnerAccountId: args.accountId,
+							dmAccountIds,
+						}),
+						payload: {
+							operationId: operation.id,
+							status: "applied",
+							selectedCount: selectedTargets.length,
+							sourceEventId: sourceEvent.id,
+						},
+					});
+					eventIds.push(finalizedEvent.id);
+					const invalidationAudience = new Set();
+					const allMemberships = (await client.query(`
+						SELECT account_id, role
+						FROM hub.memberships
+						WHERE campaign_id = $1 AND status = 'active'
+					`, [args.campaignId])).rows;
+					for (const characterId of [...nextDataByCharacterId.keys()].sort()) {
+						const character = updatedCharacters.get(characterId);
+						for (const candidate of allMemberships) {
+							if (canViewSharedCharacterProjection({
+								character,
+								accountId: candidate.account_id,
+								role: candidate.role,
+							})) invalidationAudience.add(candidate.account_id);
+						}
+					}
+					if (invalidationAudience.size) {
+						const invalidation = await this._pAppendEvent({
+							client,
+							campaignId: args.campaignId,
+							actorAccountId: args.accountId,
+							type: "character.projection.invalidated",
+							aggregateType: "campaign",
+							aggregateId: args.campaignId,
+							visibility: "explicit_accounts",
+							visibleAccountIds: [...invalidationAudience].sort(),
+							payload: {},
+						});
+						eventIds.push(invalidation.id);
+						this._injectTestMultiTargetFault({stage: "projection-invalidation", operation});
+					}
+					const updated = await client.query(`
+						UPDATE hub.semantic_operations
+						SET status = 'applied',
+							resulting_source_character_revision = $2,
+							source_cost_event_id = $3,
+							finalized_event_id = $4,
+							private_failure_code = NULL,
+							resolved_at = now(),
+							updated_at = now()
+						WHERE id = $1
+						RETURNING *
+					`, [operation.id, sourceNxt.revision, sourceEvent.id, finalizedEvent.id]);
+					Object.assign(operation, this._getSemanticOperation(updated.rows[0]));
+					finalization = {
+						operationId: operation.id,
+						commandId: args.commandId,
+						actorAccountId: args.accountId,
+						selectedInvitationIds: orderedSelection,
+						resultStatus: "applied",
+						result: {status: "applied"},
+						sourceLegEventId: sourceEvent.id,
+					};
+				}
+			}
+
+			await this._pAppendAudit({
+				client,
+				campaignId: args.campaignId,
+				actorAccountId: args.accountId,
+				action: `character.multi_operation.${operation.status}`,
+				targetType: "semantic_operation",
+				targetId: operation.id,
+				details: {
+					selectedCount: orderedSelection.length,
+					contractVersion: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
+				},
+			});
+			this._injectTestMultiTargetFault({stage: "audit", operation});
+			const response = {
+				operation: this._getMultiTargetOperationView({
+					operation,
+					targets,
+					finalization,
+					accountId: args.accountId,
+					role: membership.role,
+				}),
+				eventIds,
+			};
+			await this._pSaveSemanticCommand({
+				client,
+				accountId: args.accountId,
+				commandId: args.commandId,
+				operationId: operation.id,
+				commandType: "finalize_multi_target",
+				idempotencyKey: args.idempotencyKey,
+				response,
+				eventIds,
+			});
+			await client.query(`
+				INSERT INTO hub.semantic_operation_finalizations (
+					operation_id, campaign_id, command_id, actor_account_id,
+					selected_invitation_ids, terminal_status, result,
+					source_event_id, terminal_event_id
+				) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9)
+			`, [
+				operation.id,
+				args.campaignId,
+				args.commandId,
+				args.accountId,
+				JSON.stringify(finalization.selectedInvitationIds),
+				finalization.resultStatus,
+				JSON.stringify(finalization.result),
+				finalization.sourceLegEventId || null,
+				finalization.terminalEventId || null,
+			]);
+			this._injectTestMultiTargetFault({stage: "receipt", operation});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pCancelMultiTargetOperation (args) {
+		assertMultiTargetProtocol(args);
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const prior = await this._pLockSemanticCommand({
+				client,
+				accountId: args.accountId,
+				commandId: args.commandId,
+				idempotencyKey: args.idempotencyKey,
+			});
+			await this._pAssertSemanticSession({
+				client,
+				accountId: args.accountId,
+				sessionId: args.sessionId,
+			});
+			if (prior) {
+				await client.query("COMMIT");
+				return prior;
+			}
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [args.campaignId]);
+			await client.query(`SELECT id FROM hub.campaigns WHERE id = $1 AND status <> 'deleting' FOR UPDATE`, [args.campaignId]);
+			const operationResult = await client.query(`
+				SELECT *
+				FROM hub.semantic_operations
+				WHERE campaign_id = $1 AND id = $2 AND target_set_version = 1
+				FOR UPDATE
+			`, [args.campaignId, args.operationId]);
+			if (!operationResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			const operation = this._getSemanticOperation(operationResult.rows[0]);
+			const targets = await this._pGetMultiTargetTargets({
+				client,
+				operationId: operation.id,
+				isForUpdate: true,
+			});
+			const memberships = await this._pLockSemanticMemberships({
+				client,
+				campaignId: args.campaignId,
+				accountIds: [args.accountId, operation.originActorAccountId],
+			});
+			const membership = memberships.get(args.accountId);
+			const isDm = ["dm", "co_dm"].includes(membership?.role);
+			if (
+				!membership
+				|| membership.status !== "active"
+				|| (!isDm && operation.originActorAccountId !== args.accountId)
+			) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			const dmAccountIds = await this._pGetSemanticDmAccountIds({client, campaignId: args.campaignId});
+			const eventIds = await this._pTerminalizeElapsedMultiTarget({
+				client,
+				operation,
+				targets,
+				dmAccountIds,
+			});
+			if (isMultiTargetLiveStatus(operation.status)) {
+				for (const target of targets) {
+					if (!["pending", "approved", "approved_by_source"].includes(target.responseState)) continue;
+					const isPending = target.responseState === "pending";
+					target.responseState = isPending ? "revoked" : "declined";
+					if (!isPending) target.selectionState = "declined";
+					const targetEvent = await this._pAppendEvent({
+						client,
+						campaignId: args.campaignId,
+						actorAccountId: args.accountId,
+						type: "character.multi_operation.target_responded",
+						aggregateType: "semantic_operation",
+						aggregateId: operation.id,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetLegAudience({
+							sourceOwnerAccountId: operation.originActorAccountId,
+							targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+							dmAccountIds,
+						}),
+						payload: {
+							operationId: operation.id,
+							invitationId: target.invitationId,
+							status: target.responseState,
+							reason: "unavailable",
+						},
+					});
+					eventIds.push(targetEvent.id);
+					await client.query(`
+						UPDATE hub.semantic_operation_targets
+						SET response_state = $3,
+							selection_state = $4,
+							responded_at = now(),
+							lifecycle_invalidated_at = CASE WHEN $3 = 'revoked' THEN now() ELSE NULL END,
+							revoke_reason = CASE WHEN $3 = 'revoked' THEN 'campaign_unavailable' ELSE NULL END,
+							lifecycle_event_id = CASE WHEN $3 = 'revoked' THEN $5::uuid ELSE NULL END,
+							response_event_id = CASE WHEN $3 = 'declined' THEN $5::uuid ELSE response_event_id END,
+							updated_at = now()
+						WHERE operation_id = $1 AND target_character_id = $2
+					`, [
+						operation.id,
+						target.targetCharacterId,
+						target.responseState,
+						target.selectionState,
+						targetEvent.id,
+					]);
+				}
+				const terminalEvent = await this._pAppendEvent({
+					client,
+					campaignId: args.campaignId,
+					actorAccountId: args.accountId,
+					type: "character.multi_operation.cancelled",
+					aggregateType: "semantic_operation",
+					aggregateId: operation.id,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetSourceAudience({
+						sourceOwnerAccountId: operation.originActorAccountId,
+						dmAccountIds,
+					}),
+					payload: {operationId: operation.id, status: "cancelled", reason: "unavailable"},
+				});
+				eventIds.push(terminalEvent.id);
+				const updated = await client.query(`
+					UPDATE hub.semantic_operations
+					SET status = 'cancelled',
+						terminal_reason = 'unavailable',
+						terminal_event_id = $2,
+						resolved_at = now(),
+						updated_at = now()
+					WHERE id = $1
+					RETURNING *
+				`, [operation.id, terminalEvent.id]);
+				Object.assign(operation, this._getSemanticOperation(updated.rows[0]));
+				await this._pAppendAudit({
+					client,
+					campaignId: args.campaignId,
+					actorAccountId: args.accountId,
+					action: "character.multi_operation.cancelled",
+					targetType: "semantic_operation",
+					targetId: operation.id,
+				});
+			}
+			const response = {
+				operation: this._getMultiTargetOperationView({
+					operation,
+					targets,
+					accountId: args.accountId,
+					role: membership.role,
+				}),
+				eventIds,
+			};
+			await this._pSaveSemanticCommand({
+				client,
+				accountId: args.accountId,
+				commandId: args.commandId,
+				operationId: operation.id,
+				commandType: "cancel_multi_target",
+				idempotencyKey: args.idempotencyKey,
+				response,
+				eventIds,
+			});
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pListMultiTargetInbox ({
+		accountId,
+		campaignId,
+		cursor = null,
+		limit = MULTI_TARGET_PAGE_LIMIT,
+	}) {
+		const after = parseMultiTargetCursor(cursor, 3);
+		await this.pExpireMultiTargetOperations({limit: MULTI_TARGET_PAGE_LIMIT});
+		const membership = await this.pGetMembership({accountId, campaignId});
+		if (!membership || !["dm", "co_dm", "player"].includes(membership.role)) {
+			throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		}
+		const pageLimit = Math.min(limit, MULTI_TARGET_PAGE_LIMIT);
+		const result = await this._pool.query(`
+			SELECT target.*, operation.expires_at, operation.effect_display_snapshot
+			FROM hub.semantic_operation_targets target
+			JOIN hub.semantic_operations operation ON operation.id = target.operation_id
+			WHERE target.campaign_id = $1
+				AND target.response_state = 'pending'
+				AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+				AND ($2::boolean OR target.target_owner_account_id_at_proposal = $3)
+				AND (
+					$4::timestamptz IS NULL
+					OR (target.collection_closes_at, target.operation_id, target.target_character_id)
+						> ($4::timestamptz, $5::uuid, $6::uuid)
+				)
+			ORDER BY target.collection_closes_at, target.operation_id, target.target_character_id
+			LIMIT $7
+		`, [
+			campaignId,
+			["dm", "co_dm"].includes(membership.role),
+			accountId,
+			after?.[0] || null,
+			after?.[1] || null,
+			after?.[2] || null,
+			pageLimit + 1,
+		]);
+		const rows = result.rows.slice(0, pageLimit);
+		return {
+			invitations: rows.map(row => ({
+				operationId: row.operation_id,
+				invitationId: row.invitation_id,
+				status: row.response_state,
+				collectionClosesAt: row.collection_closes_at,
+				expiresAt: row.expires_at,
+				presentation: {
+					targetName: row.target_display_snapshot?.identity?.name || "Campaign character",
+					effectLabel: row.effect_display_snapshot?.label || "Campaign effect",
+				},
+				capabilities: {
+					canApprove: row.target_owner_account_id_at_proposal === accountId,
+					canReject: true,
+				},
+			})),
+			nextCursor: result.rows.length > pageLimit && rows.length
+				? getMultiTargetCursor([
+					rows.at(-1).collection_closes_at.toISOString(),
+					rows.at(-1).operation_id,
+					rows.at(-1).target_character_id,
+				])
+				: null,
+		};
+	}
+
+	async pListMultiTargetOutgoing ({
+		accountId,
+		campaignId,
+		cursor = null,
+		limit = MULTI_TARGET_PAGE_LIMIT,
+	}) {
+		const after = parseMultiTargetCursor(cursor, 2);
+		await this.pExpireMultiTargetOperations({limit: MULTI_TARGET_PAGE_LIMIT});
+		const membership = await this.pGetMembership({accountId, campaignId});
+		if (!membership || !["dm", "co_dm", "player"].includes(membership.role)) {
+			throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
+		}
+		const pageLimit = Math.min(limit, MULTI_TARGET_PAGE_LIMIT);
+		const result = await this._pool.query(`
+			SELECT *
+			FROM hub.semantic_operations
+			WHERE campaign_id = $1
+				AND target_set_version = 1
+				AND ($2::boolean OR origin_actor_account_id = $3)
+				AND (
+					$4::timestamptz IS NULL
+					OR (created_at, id) > ($4::timestamptz, $5::uuid)
+				)
+			ORDER BY created_at, id
+			LIMIT $6
+		`, [
+			campaignId,
+			["dm", "co_dm"].includes(membership.role),
+			accountId,
+			after?.[0] || null,
+			after?.[1] || null,
+			pageLimit + 1,
+		]);
+		const rows = result.rows.slice(0, pageLimit);
+		const operations = [];
+		for (const row of rows) {
+			const operation = this._getSemanticOperation(row);
+			const targets = await this._pGetMultiTargetTargets({client: this._pool, operationId: operation.id});
+			const finalization = await this._pGetMultiTargetFinalization({client: this._pool, operationId: operation.id});
+			operations.push(this._getMultiTargetOperationView({
+				operation,
+				targets,
+				finalization,
+				accountId,
+				role: membership.role,
+			}));
+		}
+		return {
+			operations,
+			nextCursor: result.rows.length > pageLimit && rows.length
+				? getMultiTargetCursor([rows.at(-1).created_at.toISOString(), rows.at(-1).id])
+				: null,
+		};
+	}
+
+	async pGetMultiTargetOperation ({accountId, campaignId, operationId}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
+			const campaign = await client.query(`
+				SELECT id FROM hub.campaigns WHERE id = $1 AND status <> 'deleting' FOR UPDATE
+			`, [campaignId]);
+			if (!campaign.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			const operationResult = await client.query(`
+				SELECT *
+				FROM hub.semantic_operations
+				WHERE campaign_id = $1 AND id = $2 AND target_set_version = 1
+				FOR UPDATE
+			`, [campaignId, operationId]);
+			if (!operationResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			const operation = this._getSemanticOperation(operationResult.rows[0]);
+			const targets = await this._pGetMultiTargetTargets({client, operationId, isForUpdate: true});
+			const memberships = await this._pLockSemanticMemberships({
+				client,
+				campaignId,
+				accountIds: [
+					accountId,
+					operation.originActorAccountId,
+					...targets.map(target => target.targetOwnerAccountIdAtProposal),
+				],
+			});
+			const membership = memberships.get(accountId);
+			const isParticipant = operation.originActorAccountId === accountId
+				|| targets.some(target => target.targetOwnerAccountIdAtProposal === accountId);
+			if (
+				!membership
+				|| membership.status !== "active"
+				|| !["dm", "co_dm", "player"].includes(membership.role)
+				|| (!isParticipant && !["dm", "co_dm"].includes(membership.role))
+			) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+			await this._pTerminalizeElapsedMultiTarget({client, operation, targets});
+			const finalization = await this._pGetMultiTargetFinalization({client, operationId});
+			const response = {
+				operation: this._getMultiTargetOperationView({
+					operation,
+					targets,
+					finalization,
+					accountId,
+					role: membership.role,
+				}),
+			};
+			await client.query("COMMIT");
+			return response;
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
+	async pExpireMultiTargetOperations ({limit = MULTI_TARGET_PAGE_LIMIT} = {}) {
+		const cappedLimit = Math.min(limit, MULTI_TARGET_PAGE_LIMIT);
+		let processed = 0;
+		const attemptedOperationIds = [];
+		while (processed < cappedLimit) {
+			const candidates = await this._pool.query(`
+				SELECT campaign_id, id, candidate_count
+				FROM hub.semantic_operations
+				WHERE target_set_version = 1
+					AND status IN ('collecting_responses', 'awaiting_source_selection')
+					AND (
+						(status = 'collecting_responses' AND collection_closes_at <= now())
+						OR expires_at <= now()
+					)
+					AND NOT (id = ANY($1::uuid[]))
+				ORDER BY collection_closes_at, id
+				LIMIT $2
+			`, [attemptedOperationIds, MULTI_TARGET_PAGE_LIMIT]);
+			if (!candidates.rowCount) break;
+			let madeProgress = false;
+			for (const candidate of candidates.rows) {
+				if (processed >= cappedLimit) break;
+				attemptedOperationIds.push(candidate.id);
+				const client = await this._pool.connect();
+				try {
+					await client.query("BEGIN");
+					const campaignLock = await client.query(`
+						SELECT pg_try_advisory_xact_lock(hashtextextended($1, 6)) AS locked
+					`, [candidate.campaign_id]);
+					if (!campaignLock.rows[0]?.locked) {
+						await client.query("ROLLBACK");
+						continue;
+					}
+					const campaign = await client.query(`
+						SELECT id
+						FROM hub.campaigns
+						WHERE id = $1
+						FOR UPDATE SKIP LOCKED
+					`, [candidate.campaign_id]);
+					if (!campaign.rowCount) {
+						await client.query("ROLLBACK");
+						continue;
+					}
+					const locked = await client.query(`
+						SELECT *
+						FROM hub.semantic_operations
+						WHERE id = $1
+							AND target_set_version = 1
+							AND status IN ('collecting_responses', 'awaiting_source_selection')
+							AND (
+								(status = 'collecting_responses' AND collection_closes_at <= now())
+								OR expires_at <= now()
+							)
+						ORDER BY collection_closes_at, id
+						LIMIT 1
+						FOR UPDATE SKIP LOCKED
+					`, [candidate.id]);
+					if (!locked.rowCount) {
+						await client.query("ROLLBACK");
+						continue;
+					}
+					const operation = this._getSemanticOperation(locked.rows[0]);
+					const targets = await this._pGetMultiTargetTargets({
+						client,
+						operationId: operation.id,
+						isForUpdate: true,
+						isSkipLocked: true,
+					});
+					if (targets.length !== operation.candidateCount) {
+						await client.query("ROLLBACK");
+						continue;
+					}
+					await this._pTerminalizeElapsedMultiTarget({client, operation, targets});
+					await client.query("COMMIT");
+					processed++;
+					madeProgress = true;
+				} catch (error) {
+					await client.query("ROLLBACK");
+					throw error;
+				} finally {
+					client.release();
+				}
+			}
+			if (!madeProgress && candidates.rowCount < MULTI_TARGET_PAGE_LIMIT) break;
+		}
+		return {processed};
+	}
+
+	async pCleanupMultiTargetHistory ({limit = MULTI_TARGET_PAGE_LIMIT} = {}) {
+		const client = await this._pool.connect();
+		try {
+			await client.query("BEGIN");
+			const due = await client.query(`
+				SELECT operation.id
+				FROM hub.semantic_operations operation
+				WHERE operation.target_set_version = 1
+					AND operation.status IN ('applied', 'cancelled', 'expired', 'failed')
+					AND operation.resolved_at <= now() - interval '90 days'
+					AND NOT EXISTS (
+						SELECT 1
+						FROM hub.domain_events event
+						JOIN hub.outbox_entries outbox ON outbox.event_id = event.id
+						WHERE (
+							event.aggregate_id = operation.id
+							OR event.payload->>'operationId' = operation.id::text
+							OR EXISTS (
+								SELECT 1
+								FROM hub.semantic_operation_commands command
+								WHERE command.operation_id = operation.id
+									AND event.id = ANY(command.event_ids)
+							)
+						)
+							AND outbox.status <> 'published'
+					)
+				ORDER BY operation.resolved_at, operation.id
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED
+			`, [Math.min(limit, MULTI_TARGET_PAGE_LIMIT)]);
+			for (const row of due.rows) {
+				await client.query(`DELETE FROM hub.semantic_operation_finalizations WHERE operation_id = $1`, [row.id]);
+				await client.query(`DELETE FROM hub.semantic_operation_targets WHERE operation_id = $1`, [row.id]);
+				await client.query(`DELETE FROM hub.semantic_operation_commands WHERE operation_id = $1`, [row.id]);
+				await client.query(`DELETE FROM hub.semantic_operations WHERE id = $1`, [row.id]);
+			}
+			await client.query("COMMIT");
+			return {deleted: due.rowCount};
+		} catch (error) {
+			await client.query("ROLLBACK");
+			throw error;
+		} finally {
+			client.release();
+		}
+	}
+
 	async _pExpireSemanticOperations ({client, campaignId}) {
 		const due = await client.query(`
 			SELECT so.*, target.owner_account_id AS target_owner_account_id
@@ -5775,6 +8054,7 @@ export class PostgresHubStore {
 			JOIN hub.characters target ON target.id = so.target_character_id
 			WHERE so.campaign_id = $1
 				AND so.status = 'proposed'
+				AND so.target_set_version IS NULL
 				AND so.expires_at <= now()
 			ORDER BY so.id
 			FOR UPDATE OF so
@@ -5833,6 +8113,7 @@ export class PostgresHubStore {
 				JOIN hub.characters c ON c.id = so.target_character_id
 				WHERE so.campaign_id = $1
 					AND so.status = 'proposed'
+					AND so.target_set_version IS NULL
 					AND (
 						$2::boolean
 						OR so.origin_actor_account_id = $3
@@ -5881,6 +8162,7 @@ export class PostgresHubStore {
 					AND source_character_id = $2
 					AND origin_actor_account_id = $3
 					AND source_cost_version IS NOT NULL
+					AND target_set_version IS NULL
 				ORDER BY created_at DESC, id
 				LIMIT 100
 			`, [campaignId, characterId, accountId]);
@@ -5922,6 +8204,7 @@ export class PostgresHubStore {
 				WHERE so.campaign_id = $1
 					AND so.target_character_id = $2
 					AND so.status = 'proposed'
+					AND so.target_set_version IS NULL
 				ORDER BY so.created_at DESC
 			`, [campaignId, characterId]);
 			await client.query("COMMIT");
@@ -5996,7 +8279,7 @@ export class PostgresHubStore {
 					target.owner_account_id AS current_target_owner_account_id
 				FROM hub.semantic_operations so
 				LEFT JOIN hub.characters target ON target.id = so.target_character_id
-				WHERE so.campaign_id = $1 AND so.id = $2
+				WHERE so.campaign_id = $1 AND so.id = $2 AND so.target_set_version IS NULL
 			`, [campaignId, actionId]);
 			if (!discovery.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
 			const discovered = discovery.rows[0];
@@ -6014,7 +8297,7 @@ export class PostgresHubStore {
 			const operationResult = await client.query(`
 				SELECT *
 				FROM hub.semantic_operations
-				WHERE campaign_id = $1 AND id = $2
+				WHERE campaign_id = $1 AND id = $2 AND target_set_version IS NULL
 				FOR UPDATE
 			`, [campaignId, actionId]);
 			if (!operationResult.rowCount) throw new HubStoreError("ACTION_NOT_FOUND", `Pending operation was not found.`, {status: 404});
@@ -7093,6 +9376,111 @@ export class PostgresHubStore {
 		}
 	}
 
+	async _pCancelMultiTargetParentsForHistoryDeletion ({
+		client,
+		operationIds,
+		actorAccountId,
+	}) {
+		if (!operationIds.length) return;
+		const parents = await client.query(`
+			SELECT *
+			FROM hub.semantic_operations
+			WHERE id = ANY($1::uuid[])
+				AND target_set_version = 1
+				AND status IN ('collecting_responses', 'awaiting_source_selection')
+			ORDER BY id
+			FOR UPDATE
+		`, [operationIds]);
+		for (const row of parents.rows) {
+			const operation = this._getSemanticOperation(row);
+			const targets = await this._pGetMultiTargetTargets({
+				client,
+				operationId: operation.id,
+				isForUpdate: true,
+			});
+			const dmAccountIds = await this._pGetSemanticDmAccountIds({
+				client,
+				campaignId: operation.campaignId,
+			});
+			for (const target of targets) {
+				if (!["pending", "approved", "approved_by_source"].includes(target.responseState)) continue;
+				const isPending = target.responseState === "pending";
+				const responseState = isPending ? "revoked" : "declined";
+				const selectionState = isPending ? target.selectionState : "declined";
+				const event = await this._pAppendEvent({
+					client,
+					campaignId: operation.campaignId,
+					actorAccountId,
+					type: "character.multi_operation.target_responded",
+					aggregateType: "semantic_operation",
+					aggregateId: operation.id,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetLegAudience({
+						sourceOwnerAccountId: operation.originActorAccountId,
+						targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+						dmAccountIds,
+					}),
+					payload: {
+						operationId: operation.id,
+						invitationId: target.invitationId,
+						status: responseState,
+						reason: "unavailable",
+					},
+				});
+				await client.query(`
+					UPDATE hub.semantic_operation_targets
+					SET response_state = $3,
+						selection_state = $4,
+						responded_at = COALESCE(responded_at, now()),
+						lifecycle_invalidated_at = CASE WHEN $3 = 'revoked' THEN now() ELSE NULL END,
+						revoke_reason = CASE WHEN $3 = 'revoked' THEN 'membership_unavailable' ELSE NULL END,
+						lifecycle_event_id = CASE WHEN $3 = 'revoked' THEN $5::uuid ELSE NULL END,
+						response_event_id = CASE WHEN $3 = 'declined' THEN $5::uuid ELSE response_event_id END,
+						updated_at = now()
+					WHERE operation_id = $1 AND target_character_id = $2
+				`, [
+					operation.id,
+					target.targetCharacterId,
+					responseState,
+					selectionState,
+					event.id,
+				]);
+			}
+			const terminalEvent = await this._pAppendEvent({
+				client,
+				campaignId: operation.campaignId,
+				actorAccountId,
+				type: "character.multi_operation.cancelled",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetSourceAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					dmAccountIds,
+				}),
+				payload: {operationId: operation.id, status: "cancelled", reason: "unavailable"},
+			});
+			await client.query(`
+				UPDATE hub.semantic_operations
+				SET status = 'cancelled',
+					terminal_reason = 'unavailable',
+					terminal_event_id = $2,
+					resolved_at = now(),
+					updated_at = now()
+				WHERE id = $1
+			`, [operation.id, terminalEvent.id]);
+			await this._pAppendAudit({
+				client,
+				campaignId: operation.campaignId,
+				actorAccountId,
+				action: "character.multi_operation.cancelled",
+				targetType: "semantic_operation",
+				targetId: operation.id,
+				details: {reason: "account_purge"},
+			});
+		}
+	}
+
 	async _pCancelSemanticOperationsForLifecycle ({
 		client,
 		campaignId,
@@ -7101,12 +9489,210 @@ export class PostgresHubStore {
 		characterIds = [],
 		isAll = false,
 	}) {
+		const multiParents = await client.query(`
+			SELECT operation.*
+			FROM hub.semantic_operations operation
+			WHERE operation.campaign_id = $1
+				AND operation.target_set_version = 1
+				AND operation.status IN ('collecting_responses', 'awaiting_source_selection')
+				AND (
+					$4::boolean
+					OR operation.origin_actor_account_id = $2
+					OR operation.source_character_id = ANY($3::uuid[])
+					OR EXISTS (
+						SELECT 1
+						FROM hub.semantic_operation_targets target
+						WHERE target.operation_id = operation.id
+							AND (
+								target.target_owner_account_id_at_proposal = $2
+								OR target.target_character_id = ANY($3::uuid[])
+							)
+					)
+				)
+			ORDER BY operation.id
+			FOR UPDATE
+		`, [campaignId, affectedAccountId, characterIds, isAll]);
+		if (multiParents.rowCount) {
+			const parentIds = multiParents.rows.map(row => row.id);
+			const children = await client.query(`
+				SELECT *
+				FROM hub.semantic_operation_targets
+				WHERE operation_id = ANY($1::uuid[])
+				ORDER BY operation_id, target_character_id
+				FOR UPDATE
+			`, [parentIds]);
+			const targetsByOperationId = new Map();
+			for (const row of children.rows) {
+				const target = this._getMultiTargetTarget(row);
+				const targets = targetsByOperationId.get(target.operationId) || [];
+				targets.push(target);
+				targetsByOperationId.set(target.operationId, targets);
+			}
+			const dmAccountIds = await this._pGetSemanticDmAccountIds({client, campaignId});
+			for (const row of multiParents.rows) {
+				const operation = this._getSemanticOperation(row);
+				const targets = (targetsByOperationId.get(operation.id) || [])
+					.sort((left, right) => left.ordinal - right.ordinal);
+				const isSourceAffected = isAll
+					|| operation.originActorAccountId === affectedAccountId
+					|| characterIds.includes(operation.sourceCharacterId);
+				if (isSourceAffected) {
+					for (const target of targets) {
+						if (!["pending", "approved", "approved_by_source"].includes(target.responseState)) continue;
+						const isPending = target.responseState === "pending";
+						target.responseState = isPending ? "revoked" : "declined";
+						if (!isPending) target.selectionState = "declined";
+						const targetEvent = await this._pAppendEvent({
+							client,
+							campaignId,
+							actorAccountId,
+							type: "character.multi_operation.target_responded",
+							aggregateType: "semantic_operation",
+							aggregateId: operation.id,
+							visibility: "explicit_accounts",
+							visibleAccountIds: getMultiTargetLegAudience({
+								sourceOwnerAccountId: operation.originActorAccountId,
+								targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+								dmAccountIds,
+							}),
+							payload: {
+								operationId: operation.id,
+								invitationId: target.invitationId,
+								status: target.responseState,
+								reason: "unavailable",
+							},
+						});
+						await client.query(`
+							UPDATE hub.semantic_operation_targets
+							SET response_state = $3,
+								selection_state = $4,
+								responded_at = now(),
+								lifecycle_invalidated_at = CASE WHEN $3 = 'revoked' THEN now() ELSE NULL END,
+								revoke_reason = CASE WHEN $3 = 'revoked' THEN 'campaign_unavailable' ELSE NULL END,
+								lifecycle_event_id = CASE WHEN $3 = 'revoked' THEN $5::uuid ELSE NULL END,
+								response_event_id = CASE WHEN $3 = 'declined' THEN $5::uuid ELSE response_event_id END,
+								updated_at = now()
+							WHERE operation_id = $1 AND target_character_id = $2
+						`, [
+							operation.id,
+							target.targetCharacterId,
+							target.responseState,
+							target.selectionState,
+							targetEvent.id,
+						]);
+					}
+					const event = await this._pAppendEvent({
+						client,
+						campaignId,
+						actorAccountId,
+						type: "character.multi_operation.cancelled",
+						aggregateType: "semantic_operation",
+						aggregateId: operation.id,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetSourceAudience({
+							sourceOwnerAccountId: operation.originActorAccountId,
+							dmAccountIds,
+						}),
+						payload: {operationId: operation.id, status: "cancelled", reason: "unavailable"},
+					});
+					await client.query(`
+						UPDATE hub.semantic_operations
+						SET status = 'cancelled',
+							terminal_reason = 'unavailable',
+							terminal_event_id = $2,
+							resolved_at = now(),
+							updated_at = now()
+						WHERE id = $1
+					`, [operation.id, event.id]);
+					continue;
+				}
+				for (const target of targets) {
+					if (
+						!characterIds.includes(target.targetCharacterId)
+						&& target.targetOwnerAccountIdAtProposal !== affectedAccountId
+					) continue;
+					if (!["pending", "approved", "approved_by_source"].includes(target.responseState)) continue;
+					const event = await this._pAppendEvent({
+						client,
+						campaignId,
+						actorAccountId,
+						type: "character.multi_operation.target_responded",
+						aggregateType: "semantic_operation",
+						aggregateId: operation.id,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetLegAudience({
+							sourceOwnerAccountId: operation.originActorAccountId,
+							targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+							dmAccountIds,
+						}),
+						payload: {
+							operationId: operation.id,
+							invitationId: target.invitationId,
+							status: "revoked",
+							reason: "unavailable",
+						},
+					});
+					await client.query(`
+						UPDATE hub.semantic_operation_targets
+						SET response_state = 'revoked',
+							responded_at = COALESCE(responded_at, now()),
+							lifecycle_invalidated_at = now(),
+							revoke_reason = $3,
+							lifecycle_event_id = $4,
+							updated_at = now()
+						WHERE operation_id = $1 AND target_character_id = $2
+					`, [
+						operation.id,
+						target.targetCharacterId,
+						affectedAccountId ? "membership_unavailable" : "target_unavailable",
+						event.id,
+					]);
+					target.responseState = "revoked";
+					target.respondedAt ||= new Date();
+					target.lifecycleEventId = event.id;
+				}
+				if (!targets.some(target => ["pending", "approved", "approved_by_source"].includes(target.responseState))) {
+					const event = await this._pAppendEvent({
+						client,
+						campaignId,
+						actorAccountId,
+						type: "character.multi_operation.cancelled",
+						aggregateType: "semantic_operation",
+						aggregateId: operation.id,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetSourceAudience({
+							sourceOwnerAccountId: operation.originActorAccountId,
+							dmAccountIds,
+						}),
+						payload: {operationId: operation.id, status: "cancelled", reason: "unavailable"},
+					});
+					await client.query(`
+						UPDATE hub.semantic_operations
+						SET status = 'cancelled',
+							terminal_reason = 'unavailable',
+							terminal_event_id = $2,
+							resolved_at = now(),
+							updated_at = now()
+						WHERE id = $1
+					`, [operation.id, event.id]);
+				} else {
+					await this._pRefreshMultiTargetReadiness({
+						client,
+						operation,
+						targets,
+						actorAccountId,
+						dmAccountIds,
+					});
+				}
+			}
+		}
 		const pending = await client.query(`
 			SELECT so.*, target.owner_account_id AS target_owner_account_id
 			FROM hub.semantic_operations so
 			LEFT JOIN hub.characters target ON target.id = so.target_character_id
 			WHERE so.campaign_id = $1
 				AND so.status = 'proposed'
+				AND so.target_set_version IS NULL
 				AND (
 					$4::boolean
 					OR so.origin_actor_account_id = $2
@@ -7810,11 +10396,26 @@ export class PostgresHubStore {
 				FROM hub.semantic_operations so
 				LEFT JOIN hub.characters source ON source.id = so.source_character_id
 				LEFT JOIN hub.characters target ON target.id = so.target_character_id
-				WHERE so.status = 'proposed'
+				WHERE (
+					(
+						so.target_set_version IS NULL
+						AND so.status = 'proposed'
+					)
+					OR (
+						so.target_set_version = 1
+						AND so.status IN ('collecting_responses', 'awaiting_source_selection')
+					)
+				)
 					AND (
 						so.origin_actor_account_id = $1
 						OR source.owner_account_id = $1
 						OR target.owner_account_id = $1
+						OR EXISTS (
+							SELECT 1
+							FROM hub.semantic_operation_targets multi_target
+							WHERE multi_target.operation_id = so.id
+								AND multi_target.target_owner_account_id_at_proposal = $1
+						)
 					)
 				ORDER BY so.campaign_id
 			`, [accountId]);
@@ -7988,7 +10589,32 @@ export class PostgresHubStore {
 					WHERE account_id = $1 AND status = 'active'
 					ORDER BY campaign_id, id
 				`, [account.id]);
-				const campaignIds = [...new Set(membershipDiscovery.rows.map(row => row.campaign_id))].sort();
+				const semanticCampaignDiscovery = await client.query(`
+					SELECT DISTINCT operation.campaign_id
+					FROM hub.semantic_operations operation
+					WHERE operation.target_owner_account_id_at_proposal = $1
+						OR operation.source_character_id IN (
+							SELECT id FROM hub.characters WHERE owner_account_id = $1
+						)
+						OR operation.target_character_id IN (
+							SELECT id FROM hub.characters WHERE owner_account_id = $1
+						)
+						OR EXISTS (
+							SELECT 1
+							FROM hub.semantic_operation_targets target
+							WHERE target.operation_id = operation.id
+								AND (
+									target.target_owner_account_id_at_proposal = $1
+									OR target.target_character_id IN (
+										SELECT id FROM hub.characters WHERE owner_account_id = $1
+									)
+								)
+						)
+				`, [account.id]);
+				const campaignIds = [...new Set([
+					...membershipDiscovery.rows.map(row => row.campaign_id),
+					...semanticCampaignDiscovery.rows.map(row => row.campaign_id),
+				])].sort();
 				for (const campaignId of campaignIds) {
 					await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 6))`, [campaignId]);
 				}
@@ -8035,17 +10661,58 @@ export class PostgresHubStore {
 						OR target_character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)
 				`, [account.id]);
 				await client.query(`DELETE FROM hub.character_leases WHERE character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)`, [account.id]);
-				await client.query(`
-					DELETE FROM hub.semantic_operations
-					WHERE target_owner_account_id_at_proposal = $1
-						OR source_character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)
-						OR target_character_id IN (SELECT id FROM hub.characters WHERE owner_account_id = $1)
-						OR campaign_id IN (
+				const semanticOperationIds = (await client.query(`
+					SELECT operation.id
+					FROM hub.semantic_operations operation
+					WHERE operation.target_owner_account_id_at_proposal = $1
+						OR operation.source_character_id IN (
+							SELECT id FROM hub.characters WHERE owner_account_id = $1
+						)
+						OR operation.target_character_id IN (
+							SELECT id FROM hub.characters WHERE owner_account_id = $1
+						)
+						OR EXISTS (
+							SELECT 1
+							FROM hub.semantic_operation_targets target
+							WHERE target.operation_id = operation.id
+								AND (
+									target.target_owner_account_id_at_proposal = $1
+									OR target.target_character_id IN (
+										SELECT id FROM hub.characters WHERE owner_account_id = $1
+									)
+								)
+						)
+						OR operation.campaign_id IN (
 							SELECT id
 							FROM hub.campaigns
 							WHERE owner_account_id = $1 AND status = 'archived'
 						)
-				`, [account.id]);
+					ORDER BY operation.id
+					FOR UPDATE OF operation
+				`, [account.id])).rows.map(row => row.id);
+				if (semanticOperationIds.length) {
+					await this._pCancelMultiTargetParentsForHistoryDeletion({
+						client,
+						operationIds: semanticOperationIds,
+						actorAccountId: account.id,
+					});
+					await client.query(`
+						DELETE FROM hub.semantic_operation_finalizations
+						WHERE operation_id = ANY($1::uuid[])
+					`, [semanticOperationIds]);
+					await client.query(`
+						DELETE FROM hub.semantic_operation_targets
+						WHERE operation_id = ANY($1::uuid[])
+					`, [semanticOperationIds]);
+					await client.query(`
+						DELETE FROM hub.semantic_operation_commands
+						WHERE operation_id = ANY($1::uuid[])
+					`, [semanticOperationIds]);
+					await client.query(`
+						DELETE FROM hub.semantic_operations
+						WHERE id = ANY($1::uuid[])
+					`, [semanticOperationIds]);
+				}
 				await client.query(`DELETE FROM hub.characters WHERE owner_account_id = $1`, [account.id]);
 				await client.query(`DELETE FROM hub.campaigns WHERE owner_account_id = $1 AND status = 'archived'`, [account.id]);
 				await client.query(`
@@ -8128,10 +10795,11 @@ export class PostgresHubStore {
 						action LIKE 'account.entitlement.%'
 						AND details->>'targetAccountId' = $1::text
 					)
-				ORDER BY created_at
+					ORDER BY created_at
 			`, [accountId]),
 		]);
 		if (!account.rowCount) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
+		const multiTargetOperations = await this._pExportMultiTargetOperations({accountId});
 		return {
 			exportedAt: new Date().toISOString(),
 			account: getAccount(account.rows[0]),
@@ -8143,8 +10811,65 @@ export class PostgresHubStore {
 			entitlements: entitlements.rows
 				.map(getAccountEntitlement)
 				.map(entitlement => redactEntitlementForAccount({entitlement})),
+			multiTargetOperations,
 			auditEntries: audit.rows.map(entry => redactEntitlementAuditForAccount({audit: entry, accountId})),
 		};
+	}
+
+	async _pExportMultiTargetOperations ({accountId}) {
+		for (let attempt = 0; attempt < 2; ++attempt) {
+			const client = await this._pool.connect();
+			try {
+				await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+				const membershipResult = await client.query(`
+					SELECT campaign_id, account_id, role, status
+					FROM hub.memberships
+					WHERE account_id = $1
+					ORDER BY campaign_id, account_id
+					FOR SHARE
+				`, [accountId]);
+				const membershipsByCampaign = new Map(membershipResult.rows
+					.map(row => [row.campaign_id, getMembership(row)]));
+				const parentResult = await client.query(`
+					SELECT operation.*
+					FROM hub.semantic_operations operation
+					WHERE operation.target_set_version = 1
+						AND (
+							operation.origin_actor_account_id = $1
+							OR EXISTS (
+								SELECT 1
+								FROM hub.semantic_operation_targets target
+								WHERE target.operation_id = operation.id
+									AND target.target_owner_account_id_at_proposal = $1
+							)
+						)
+					ORDER BY operation.created_at, operation.id
+				`, [accountId]);
+				const records = [];
+				for (const row of parentResult.rows) {
+					const operation = this._getSemanticOperation(row);
+					const targets = await this._pGetMultiTargetTargets({client, operationId: operation.id});
+					const finalization = await this._pGetMultiTargetFinalization({client, operationId: operation.id});
+					const membership = membershipsByCampaign.get(operation.campaignId);
+					records.push(this._getMultiTargetOperationView({
+						operation,
+						targets,
+						finalization,
+						accountId,
+						role: membership?.status === "active" ? membership.role : "player",
+					}));
+				}
+				await client.query("COMMIT");
+				return records;
+			} catch (error) {
+				await client.query("ROLLBACK");
+				if (error?.code === "40001" && attempt === 0) continue;
+				throw error;
+			} finally {
+				client.release();
+			}
+		}
+		throw new Error(`Multi-target account export retry exhausted.`);
 	}
 
 	async pArchiveCampaign ({accountId, campaignId, idempotencyKey}) {

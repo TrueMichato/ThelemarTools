@@ -447,7 +447,7 @@ describe("Hub account entitlement routes and reauthentication", () => {
 			cookie: session.cookie,
 			origin: ORIGIN,
 			"x-csrf-token": session.csrfToken,
-			"x-hub-protocol-version": "5",
+			"x-hub-protocol-version": "6",
 			"idempotency-key": idempotencyKey,
 		};
 	}
@@ -564,7 +564,7 @@ describe("Hub account entitlement routes and reauthentication", () => {
 		const stale = await app.inject({
 			method: "GET",
 			url: "/api/operator/accounts",
-			headers: {cookie: operatorSession.cookie, "x-hub-protocol-version": "5"},
+			headers: {cookie: operatorSession.cookie, "x-hub-protocol-version": "6"},
 		});
 		expect(stale.statusCode).toBe(403);
 		expect(stale.json()).toEqual({error: "REAUTHENTICATION_REQUIRED"});
@@ -577,7 +577,7 @@ describe("Hub account entitlement routes and reauthentication", () => {
 		const hidden = await app.inject({
 			method: "GET",
 			url: "/api/operator/accounts",
-			headers: {cookie: nonoperator.cookie, "x-hub-protocol-version": "5"},
+			headers: {cookie: nonoperator.cookie, "x-hub-protocol-version": "6"},
 		});
 		expect(hidden.statusCode).toBe(404);
 		expect(hidden.json()).toEqual({error: "NOT_FOUND"});
@@ -587,7 +587,7 @@ describe("Hub account entitlement routes and reauthentication", () => {
 		const accounts = await app.inject({
 			method: "GET",
 			url: "/api/operator/accounts",
-			headers: {cookie: freshOperator.cookie, "x-hub-protocol-version": "5"},
+			headers: {cookie: freshOperator.cookie, "x-hub-protocol-version": "6"},
 		});
 		expect(accounts.statusCode).toBe(200);
 		expect(accounts.json().accounts.find(account => account.id === target.id)).toEqual(expect.objectContaining({
@@ -628,8 +628,8 @@ describe("Hub account entitlement routes and reauthentication", () => {
 		const session = await pSignIn();
 		const transactionCount = store._oauthTransactions.size;
 		for (const [headers, expected] of [
-			[{cookie: session.cookie, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "5"}, "INVALID_ORIGIN"],
-			[{cookie: session.cookie, origin: ORIGIN, "x-csrf-token": "wrong", "x-hub-protocol-version": "5"}, "INVALID_CSRF"],
+			[{cookie: session.cookie, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "6"}, "INVALID_ORIGIN"],
+			[{cookie: session.cookie, origin: ORIGIN, "x-csrf-token": "wrong", "x-hub-protocol-version": "6"}, "INVALID_CSRF"],
 			[{cookie: session.cookie, origin: ORIGIN, "x-csrf-token": session.csrfToken, "x-hub-protocol-version": "3"}, "PROTOCOL_UPDATE_REQUIRED"],
 		]) {
 			const response = await app.inject({
@@ -680,7 +680,7 @@ describe("Hub account entitlement routes and reauthentication", () => {
 		expect((await app.inject({
 			method: "GET",
 			url: "/api/operator/accounts",
-			headers: {cookie: grace.cookie, "x-hub-protocol-version": "5"},
+			headers: {cookie: grace.cookie, "x-hub-protocol-version": "6"},
 		})).json()).toEqual({error: "NOT_FOUND"});
 		expect((await app.inject({
 			method: "GET",

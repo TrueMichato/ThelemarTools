@@ -18,6 +18,8 @@ describe("Hub database roles", () => {
 		})).resolves.toEqual({runtimeRole: "hub_runtime", backupRole: "hub_backup", operationsRole: "hub_operations"});
 		const sql = calls.map(it => it.sql).join("\n");
 		expect(sql).toContain(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA hub TO "hub_runtime"`);
+		expect(sql).toContain(`REVOKE UPDATE, DELETE ON hub.semantic_multi_target_usage FROM "hub_runtime"`);
+		expect(sql).toContain(`GRANT SELECT, INSERT ON hub.semantic_multi_target_usage TO "hub_runtime"`);
 		expect(sql).toContain(`GRANT SELECT ON ALL TABLES IN SCHEMA hub TO "hub_backup"`);
 		expect(sql).toContain(`REVOKE CREATE ON SCHEMA hub FROM "hub_runtime"`);
 		expect(sql).toContain(`REVOKE CREATE ON SCHEMA hub FROM "hub_backup"`);

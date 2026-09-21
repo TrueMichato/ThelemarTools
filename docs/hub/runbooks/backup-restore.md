@@ -109,6 +109,9 @@ exact cleanup. Authentication failure/tampering must leave no plaintext output.
    - at least one active platform operator and migration-0009 creator backfill invariants;
    - migration-0010 source-cost binding functions preserve trimmed UUID-only case folding, case-sensitive
      non-UUID ids, and duplicate match cardinality;
+   - migration-0011 normalized parent/target/finalization constraints and role grants are present;
+   - `hub.semantic_multi_target_usage` exactly matches the source archive: absent before use or present with one
+     unchanged singleton after use. Never clear it to make a rollback preflight pass;
    - exact released migration and role-grant images complete successfully;
    - exact released production BFF reaches readiness as `hub_runtime`;
    - source backup remains immutable.

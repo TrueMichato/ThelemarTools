@@ -170,6 +170,34 @@ describe("hub realtime", () => {
 		expect(current.sent).toContainEqual(expect.objectContaining({type: "event"}));
 	});
 
+	it("never delivers a protocol-6 multi-target event to a protocol-5 socket", async () => {
+		const realtime = new HubRealtime({store: {
+			pGetMembership: async () => ({role: "player"}),
+			pGetSessionById: async () => ({session: {}, account: {}}),
+		}});
+		const legacy = new FakeSocket();
+		const current = new FakeSocket();
+		for (const [socket, protocolVersion] of [[legacy, "5"], [current, "6"]]) {
+			realtime.addConnection({
+				socket,
+				account: {id: protocolVersion, displayName: protocolVersion},
+				session: {id: protocolVersion},
+				membership: {id: protocolVersion, role: "player"},
+				campaignId: "cmp",
+				protocolVersion,
+			});
+			socket.sent.length = 0;
+		}
+		await realtime.pPublishEvent({
+			campaignId: "cmp",
+			visibility: "all_members",
+			type: "character.multi_operation.target_requested",
+			payload: {operationId: "operation", invitationId: "invitation"},
+		});
+		expect(legacy.closeEvents).toContainEqual({code: 1008, reason: "Protocol update required"});
+		expect(current.sent).toContainEqual(expect.objectContaining({type: "event"}));
+	});
+
 	it("closes a protocol-4 socket instead of replaying a campaign-scoped projection invalidation", async () => {
 		const event = {
 			id: "projection-invalidation",

@@ -18,15 +18,16 @@ const testing = fs.readFileSync(new URL("../../../docs/hub/testing.md", import.m
 const describePostgres = process.env.HUB_TEST_POSTGRES_URL ? describe : describe.skip;
 
 describe("Campaign Hub multi-target operation ADR contract", () => {
-	it("records an accepted design-only contract and narrows the prior ADRs", () => {
-		expect(adr).toMatch(/^Status: Accepted design contract; Wave A0 proof only, not implemented \(2026-09-21\)$/m);
+	it("records the accepted default-off server authority and narrows the prior ADRs without claiming rollout", () => {
+		expect(adr).toMatch(/^Status: Accepted; Wave A3 server state machine implemented default-off, rollout held \(2026-09-21\)$/m);
 		expect(normalizedAdr).toContain("extends ADR 0012");
 		expect(normalizedAdr).toContain("supersedes ADR 0012's self-target rule");
 		expect(normalizedAdr).toContain("extends ADR 0016");
 		expect(normalizedAdr).toContain("narrowly supersedes ADR 0016's blanket prohibition");
-		expect(normalizedAdr).toContain("This design-only PR contains no production migration");
-		expect(normalizedAdr).toContain("requires future additive migration `0011_multi_target_semantic_operations.sql`");
-		expect(normalizedAdr).toContain("must remain unmerged until the coordinator records the physical game-day GO/NO-GO");
+		expect(normalizedAdr).toContain("Wave A3 adds the immutable migration/operations slice plus protocol-6 routes");
+		expect(normalizedAdr).toContain("capability remains default-off");
+		expect(normalizedAdr).toContain("Character Sheet proposal/response/finalization UI");
+		expect(normalizedAdr).toContain("draft/game-day hold remains in force");
 	});
 
 	it("fixes the target set and separates consent from one atomic finalization", () => {
@@ -59,7 +60,7 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 	});
 
 	it("requires normalized migration 0011 tables and concrete constraints", () => {
-		expect(normalizedAdr).toContain("Migration `0011_multi_target_semantic_operations.sql` is required");
+		expect(normalizedAdr).toContain("Migration `0011_multi_target_semantic_operations.sql` is implemented");
 		expect(normalizedAdr).toContain("`hub.semantic_operation_targets`");
 		expect(normalizedAdr).toContain("`semantic_operation_finalizations`");
 		expect(normalizedAdr).toContain("`hub.semantic_multi_target_usage`");

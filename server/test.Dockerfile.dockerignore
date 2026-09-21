@@ -20,6 +20,7 @@ server/**/.env*
 !js/hub/hub-effect-presentation.js
 !js/hub/hub-inventory-contract.js
 !js/hub/hub-inventory-equivalence.js
+!js/hub/hub-multi-target-operations.js
 !js/hub/hub-semantic-hp.js
 !js/hub/hub-semantic-operations.js
 !js/hub/hub-source-costs.js

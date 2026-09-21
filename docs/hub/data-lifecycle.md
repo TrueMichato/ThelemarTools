@@ -31,6 +31,8 @@
 | Command receipts | Idempotent retry | BFF/store | 24 hours; invite-creation receipts contain metadata only, never the raw invite |
 | Browser character recovery queue | Exact request identity, ordered local snapshots, closed activity descriptor, absolute activity replay deadline, and failure posture | signed-in character owner in bounded session storage; export only by explicit user choice | cleared after commit/use-server/discard; activity replay is capped at 23 hours and expired activity-bearing queues are quarantined; confirmed missing-server PATCH state is exported before its inaccessible local live copy is removed |
 | Semantic operations/commands | Effect lifecycle, stable exactly-once replay, resulting revision/event linkage | authorized participants; BFF/store command records | campaign/account lifecycle; not pruned as technical receipts |
+| Multi-target operation parents/targets/finalizations/commands | Fixed candidates, per-leg consent, exact source selection, atomic result/replay | viewer-shaped source/target/DM participants only | terminal detail 90 days, removed in published-outbox-safe batches of 100; domain events/audit retain independent policy |
+| Multi-target global/per-campaign usage markers | Irreversible rollback and protocol-compatibility high-water evidence | BFF/operators; no participant identity or content | permanent under ordinary retention, campaign cleanup, and account purge |
 | Character target references/watermarks | Opaque peer targeting and owner/DM replay reconciliation | target ref only in authorized profiles/truth; watermark owner/DM truth only | character lifetime; target ref rotates on detach/move/archive/reactivation |
 | Encrypted backup archives | Recovery | operators | nightly/off-machine policy; must age deleted data out |
 | Operational runs | Maintenance/backup/restore evidence | operators/metrics; no user content | bounded retention policy finalized with provider scheduling |
@@ -84,6 +86,12 @@
 - Explicit-account events still include all campaign DMs/co-DMs by policy.
 - Applied semantic-operation details are explicit-recipient data. Peer projections and peer resync refs never
   carry `operationWatermark`; shared projection invalidations remain metadata-only.
+- Multi-target target owners receive only their own invitation/result. Aggregate candidate/progress counts,
+  co-target identities/decisions, and another target's changed/revision result remain source/DM-scoped or
+  omitted; source-visible target-applied events remove the changed/revision/target-character oracle.
+- Target-applied domain events retain only a server-private source/target audience discriminator beyond the
+  90-day workflow-detail window. Projectors strip it from every HTTP/WebSocket result; it exists solely to keep
+  retained target-owner history fully shaped after parent/child cleanup.
 - Browser cache/service worker must never cache authenticated API/auth responses.
 - The Character Sheet realtime coordinator keeps no durable event queue or payload cache. It passes only the
   open target's projection metadata, explicit-recipient semantic-operation lifecycle payloads, and minimized
@@ -139,6 +147,11 @@ Character archive preserves the owned document and removes it from active listin
 - blocks while a reserved transfer exists;
 - cancels proposed actions;
 - terminalizes proposed semantic operations with minimized explicit-recipient events;
+- cancels live multi-target parents when source authority is lost, revokes only affected target legs when target
+  authority is lost, and emits each target terminal notification in immutable proposal order;
+- due-account purge upgrades any still-live affected multi-target parent to a whole-parent cancellation under
+  campaign/parent/child lock order before deleting retained workflow rows, so one departing target cannot make
+  immutable child guards block the account or the rest of the purge batch;
 - releases character leases;
 - detaches characters by setting campaign to null and clearing scoped import id;
 - preserves player ownership;
@@ -202,6 +215,9 @@ Approved private-V1 policy:
   export-then-discard and a fresh authoritative not-found result, with no character recreation;
 - semantic command/operation replay records: campaign/account lifecycle, so stable command/operation/event
   identity survives receipt cleanup;
+- detailed terminal multi-target parent/target/finalization/command rows: 90 days, then oldest-terminal-first in
+  batches of 100 only after related outbox publication and recovery/idempotency windows; global and per-campaign
+  usage markers are never ordinary-cleaned;
 - published outbox rows: 7 days;
 - expired/revoked sessions and invites: 30 days;
 - invite admission contexts: at most five minutes, then bounded cleanup after expiry or terminal consumption;

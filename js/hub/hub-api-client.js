@@ -818,6 +818,114 @@ export class HubApiClient {
 		});
 	}
 
+	async pCreateMultiTargetOperation ({
+		campaignId,
+		contractVersion = 1,
+		sourceCharacterId,
+		sourceEntity,
+		effectTemplateId,
+		choice,
+		targetRefs,
+		rulesVersionId,
+		idempotencyKey,
+	}) {
+		const commandId = idempotencyKey || crypto.randomUUID();
+		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/multi-target-operations`, {
+			method: "POST",
+			body: {
+				contractVersion,
+				commandId,
+				sourceCharacterId,
+				sourceEntity,
+				effectTemplateId,
+				choice,
+				targetRefs,
+				rulesVersionId,
+			},
+			isMutation: true,
+			idempotencyKey: commandId,
+		});
+	}
+
+	async pRespondMultiTargetInvitation ({
+		campaignId,
+		operationId,
+		invitationId,
+		decision,
+		contractVersion = 1,
+		idempotencyKey,
+	}) {
+		const commandId = idempotencyKey || crypto.randomUUID();
+		return this._pRequest(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/multi-target-operations/${encodeURIComponent(operationId)}/invitations/${encodeURIComponent(invitationId)}/respond`,
+			{
+				method: "POST",
+				body: {contractVersion, commandId, decision},
+				isMutation: true,
+				idempotencyKey: commandId,
+			},
+		);
+	}
+
+	async pFinalizeMultiTargetOperation ({
+		campaignId,
+		operationId,
+		selectedInvitationIds,
+		contractVersion = 1,
+		idempotencyKey,
+	}) {
+		const commandId = idempotencyKey || crypto.randomUUID();
+		return this._pRequest(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/multi-target-operations/${encodeURIComponent(operationId)}/finalize`,
+			{
+				method: "POST",
+				body: {contractVersion, commandId, selectedInvitationIds},
+				isMutation: true,
+				idempotencyKey: commandId,
+			},
+		);
+	}
+
+	async pCancelMultiTargetOperation ({
+		campaignId,
+		operationId,
+		contractVersion = 1,
+		idempotencyKey,
+	}) {
+		const commandId = idempotencyKey || crypto.randomUUID();
+		return this._pRequest(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/multi-target-operations/${encodeURIComponent(operationId)}/cancel`,
+			{
+				method: "POST",
+				body: {contractVersion, commandId},
+				isMutation: true,
+				idempotencyKey: commandId,
+			},
+		);
+	}
+
+	async pListMultiTargetInbox ({campaignId, cursor = null, limit = 100}) {
+		const query = new URLSearchParams({limit: `${limit}`});
+		if (cursor) query.set("cursor", cursor);
+		return this._pRequest(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/multi-target-operations/inbox?${query}`,
+		);
+	}
+
+	async pListMultiTargetOutgoing ({campaignId, cursor = null, limit = 100}) {
+		const query = new URLSearchParams({limit: `${limit}`});
+		if (cursor) query.set("cursor", cursor);
+		return this._pRequest(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/multi-target-operations/outgoing?${query}`,
+		);
+	}
+
+	async pGetMultiTargetOperation ({campaignId, operationId}) {
+		return this._pRequest(
+			`/api/campaigns/${encodeURIComponent(campaignId)}/multi-target-operations/${encodeURIComponent(operationId)}`,
+		);
+	}
+
 	async pGrantXp ({campaignId, characterId, amount, reason = null, idempotencyKey}) {
 		return this._pRequest(`/api/campaigns/${encodeURIComponent(campaignId)}/characters/${encodeURIComponent(characterId)}/xp-grants`, {
 			method: "POST", body: {amount, reason}, isMutation: true, idempotencyKey,

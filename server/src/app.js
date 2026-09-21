@@ -34,6 +34,11 @@ import {getSafeRequestId, HubMetrics} from "./observability.js";
 import {getClientIpHeader, getRequestClientIp} from "./client-ip.js";
 import {SAFE_ITEM_SUMMARY_FIELDS} from "./hub-actions.js";
 import {PEER_SOURCE_COSTS_PROTOCOL_VERSION} from "../../js/hub/hub-source-costs.js";
+import {
+	MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
+	MULTI_TARGET_OPERATIONS_MAX_TARGETS,
+	MULTI_TARGET_OPERATIONS_PROTOCOL_VERSION,
+} from "../../js/hub/hub-multi-target-operations.js";
 import {ACTIVE_CAMPAIGN_CONTEXT_CAPABILITY} from "./hub-capabilities.js";
 import {
 	ACCOUNT_ENTITLEMENTS_CAPABILITY,
@@ -54,9 +59,11 @@ const OAUTH_COOKIE = "__Host-hub_oauth";
 const OAUTH_COOKIE_PREFIX = `${OAUTH_COOKIE}-`;
 const INVITE_ADMISSION_CAPABILITY = "auth.invite_admission.v1";
 const HUB_LEGACY_PROTOCOL_VERSION = "3";
+const HUB_PROTOCOL_5_VERSION = "5";
 const SUPPORTED_HUB_PROTOCOL_VERSIONS = new Set([
 	HUB_LEGACY_PROTOCOL_VERSION,
 	PEER_SOURCE_COSTS_PROTOCOL_VERSION,
+	HUB_PROTOCOL_5_VERSION,
 	HUB_PROTOCOL_VERSION,
 ]);
 const SAFE_ITEM_SUMMARY_KEYS = new Set(SAFE_ITEM_SUMMARY_FIELDS);
@@ -452,7 +459,18 @@ export async function createHubApp ({
 	const requirePeerSourceCostsProtocol = async (request, reply) => {
 		const auth = await pGetAuth(request);
 		if (!auth) return reply.code(401).send({error: "AUTH_REQUIRED"});
-		if (![PEER_SOURCE_COSTS_PROTOCOL_VERSION, HUB_PROTOCOL_VERSION].includes(request.headers["x-hub-protocol-version"])) {
+		if (![PEER_SOURCE_COSTS_PROTOCOL_VERSION, HUB_PROTOCOL_5_VERSION, HUB_PROTOCOL_VERSION].includes(request.headers["x-hub-protocol-version"])) {
+			return reply.code(426).send({
+				error: "PROTOCOL_UPDATE_REQUIRED",
+				protocolVersion: HUB_PROTOCOL_VERSION,
+			});
+		}
+	};
+
+	const requireMultiTargetProtocol = async (request, reply) => {
+		const auth = await pGetAuth(request);
+		if (!auth) return reply.code(401).send({error: "AUTH_REQUIRED"});
+		if (request.headers["x-hub-protocol-version"] !== MULTI_TARGET_OPERATIONS_PROTOCOL_VERSION) {
 			return reply.code(426).send({
 				error: "PROTOCOL_UPDATE_REQUIRED",
 				protocolVersion: HUB_PROTOCOL_VERSION,
@@ -475,6 +493,35 @@ export async function createHubApp ({
 	const requireCurrentProtocolVersion = async (request, reply) => {
 		if (request.headers["x-hub-protocol-version"] === HUB_PROTOCOL_VERSION) return;
 		return reply.code(426).send({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: HUB_PROTOCOL_VERSION});
+	};
+	const multiTargetRateWindows = new Map();
+	const requireMultiTargetMutation = ({accountLimit, campaignLimit}) => async (request, reply) => {
+		await requireMutationSecurity(request, reply);
+		if (reply.sent) return;
+		await requireCurrentProtocolVersion(request, reply);
+		if (reply.sent) return;
+		const now = Date.now();
+		const minute = 60_000;
+		if (multiTargetRateWindows.size > 10_000) {
+			for (const [key, value] of multiTargetRateWindows) {
+				if (now - value.startedAt >= minute) multiTargetRateWindows.delete(key);
+			}
+		}
+		const keys = [
+			[`account:${request.routeOptions.url}:${request.hubAuth.account.id}`, accountLimit],
+			[`campaign:${request.routeOptions.url}:${request.params.campaignId}`, campaignLimit],
+		];
+		for (const [key, max] of keys) {
+			const current = multiTargetRateWindows.get(key);
+			const window = !current || now - current.startedAt >= minute
+				? {startedAt: now, count: 0}
+				: current;
+			if (window.count >= max) {
+				return reply.code(429).send({error: "RATE_LIMITED"});
+			}
+			window.count++;
+			multiTargetRateWindows.set(key, window);
+		}
 	};
 	const hasOnlyKeys = (value, allowedKeys) => (
 		!!value
@@ -643,7 +690,7 @@ export async function createHubApp ({
 			campaignId: request.params.campaignId,
 		});
 		if (!membership) return reply.code(404).send({error: "CAMPAIGN_NOT_FOUND"});
-		if (![PEER_SOURCE_COSTS_PROTOCOL_VERSION, HUB_PROTOCOL_VERSION].includes(request.query.v)) {
+		if (![PEER_SOURCE_COSTS_PROTOCOL_VERSION, HUB_PROTOCOL_5_VERSION, HUB_PROTOCOL_VERSION].includes(request.query.v)) {
 			const [capability, isProtocol4History] = await Promise.all([
 				store.pGetPeerSourceCostsCapability?.({
 					accountId: auth.account.id,
@@ -652,6 +699,21 @@ export async function createHubApp ({
 				store.pCampaignRequiresProtocol4?.({campaignId: request.params.campaignId}),
 			]);
 			if (capability?.enabled || isProtocol4History) {
+				return reply.code(426).send({
+					error: "PROTOCOL_UPDATE_REQUIRED",
+					protocolVersion: HUB_PROTOCOL_VERSION,
+				});
+			}
+		}
+		if (request.query.v !== MULTI_TARGET_OPERATIONS_PROTOCOL_VERSION) {
+			const [capability, isProtocol6History] = await Promise.all([
+				store.pGetMultiTargetOperationsCapability?.({
+					accountId: auth.account.id,
+					campaignId: request.params.campaignId,
+				}),
+				store.pCampaignRequiresProtocol6?.({campaignId: request.params.campaignId}),
+			]);
+			if (capability?.enabled || isProtocol6History) {
 				return reply.code(426).send({
 					error: "PROTOCOL_UPDATE_REQUIRED",
 					protocolVersion: HUB_PROTOCOL_VERSION,
@@ -1649,7 +1711,7 @@ export async function createHubApp ({
 	}));
 
 	app.get("/api/campaigns/:campaignId/events", {
-		preHandler: requireAuth,
+		preHandler: requireProtocolVersion,
 		schema: {
 			params: {
 				type: "object",
@@ -1670,6 +1732,18 @@ export async function createHubApp ({
 	}, async request => {
 		if (request.query.afterSequence != null && request.query.beforeSequence != null) {
 			throw new HubStoreError("INVALID_EVENT_CURSOR", "Only one event cursor may be supplied.", {status: 400});
+		}
+		if (request.headers["x-hub-protocol-version"] !== MULTI_TARGET_OPERATIONS_PROTOCOL_VERSION) {
+			const [capability, isProtocol6History] = await Promise.all([
+				store.pGetMultiTargetOperationsCapability?.({
+					accountId: request.hubAuth.account.id,
+					campaignId: request.params.campaignId,
+				}),
+				store.pCampaignRequiresProtocol6?.({campaignId: request.params.campaignId}),
+			]);
+			if (capability?.enabled || isProtocol6History) {
+				throw new HubStoreError("PROTOCOL_UPDATE_REQUIRED", `Hub protocol 6 is required.`, {status: 426});
+			}
 		}
 		return store.pListVisibleEventPage({
 			accountId: request.hubAuth.account.id,
@@ -1715,6 +1789,227 @@ export async function createHubApp ({
 			detail: request.body.detail || {},
 		},
 		idempotencyKey: getIdempotencyKey(request),
+	}));
+
+	const multiTargetParamsSchema = {
+		type: "object",
+		required: ["campaignId"],
+		additionalProperties: false,
+		properties: {campaignId: {type: "string", format: "uuid"}},
+	};
+	const multiTargetOperationParamsSchema = {
+		type: "object",
+		required: ["campaignId", "operationId"],
+		additionalProperties: false,
+		properties: {
+			campaignId: {type: "string", format: "uuid"},
+			operationId: {type: "string", format: "uuid"},
+		},
+	};
+	const multiTargetReadQuerySchema = {
+		type: "object",
+		additionalProperties: false,
+		properties: {
+			cursor: {type: "string", minLength: 1, maxLength: 1_000},
+			limit: {type: "integer", minimum: 1, maximum: 100, default: 100},
+		},
+	};
+
+	app.post("/api/campaigns/:campaignId/multi-target-operations", {
+		preHandler: requireMultiTargetMutation({accountLimit: 10, campaignLimit: 30}),
+		schema: {
+			params: multiTargetParamsSchema,
+			body: {
+				type: "object",
+				required: [
+					"contractVersion",
+					"commandId",
+					"sourceCharacterId",
+					"sourceEntity",
+					"effectTemplateId",
+					"choice",
+					"targetRefs",
+					"rulesVersionId",
+				],
+				additionalProperties: false,
+				properties: {
+					contractVersion: {type: "integer", const: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION},
+					commandId: {type: "string", format: "uuid"},
+					sourceCharacterId: {type: "string", format: "uuid"},
+					sourceEntity: {
+						type: "object",
+						required: ["type", "uid", "version"],
+						additionalProperties: false,
+						properties: {
+							type: {type: "string", enum: ["spell", "ability"]},
+							uid: {type: "string", minLength: 1, maxLength: 200},
+							version: {type: "string", minLength: 1, maxLength: 80},
+						},
+					},
+					effectTemplateId: {type: "string", minLength: 1, maxLength: 120},
+					choice: {
+						type: "object",
+						additionalProperties: false,
+						maxProperties: 10,
+						properties: {
+							amount: {type: "integer", minimum: 1, maximum: 100},
+							castLevel: {type: "integer", minimum: 1, maximum: 9},
+						},
+					},
+					targetRefs: {
+						type: "array",
+						minItems: 1,
+						maxItems: MULTI_TARGET_OPERATIONS_MAX_TARGETS,
+						items: {type: "string", format: "uuid"},
+					},
+					rulesVersionId: {type: "string", format: "uuid"},
+				},
+			},
+		},
+	}, async (request, reply) => {
+		const command = getSemanticCommand(request);
+		const response = await store.pCreateMultiTargetOperation({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
+			campaignId: request.params.campaignId,
+			...request.body,
+			protocolVersion: request.headers["x-hub-protocol-version"],
+			...command,
+			idempotencyKey: {key: command.commandId, requestHash: command.requestHash},
+		});
+		return reply.code(201).send(response);
+	});
+
+	app.post("/api/campaigns/:campaignId/multi-target-operations/:operationId/invitations/:invitationId/respond", {
+		preHandler: requireMultiTargetMutation({accountLimit: 30, campaignLimit: 120}),
+		schema: {
+			params: {
+				type: "object",
+				required: ["campaignId", "operationId", "invitationId"],
+				additionalProperties: false,
+				properties: {
+					campaignId: {type: "string", format: "uuid"},
+					operationId: {type: "string", format: "uuid"},
+					invitationId: {type: "string", format: "uuid"},
+				},
+			},
+			body: {
+				type: "object",
+				required: ["contractVersion", "commandId", "decision"],
+				additionalProperties: false,
+				properties: {
+					contractVersion: {type: "integer", const: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION},
+					commandId: {type: "string", format: "uuid"},
+					decision: {type: "string", enum: ["approve", "reject"]},
+				},
+			},
+		},
+	}, async request => {
+		const command = getSemanticCommand(request);
+		return store.pRespondMultiTargetInvitation({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
+			campaignId: request.params.campaignId,
+			operationId: request.params.operationId,
+			invitationId: request.params.invitationId,
+			decision: request.body.decision,
+			contractVersion: request.body.contractVersion,
+			protocolVersion: request.headers["x-hub-protocol-version"],
+			...command,
+			idempotencyKey: {key: command.commandId, requestHash: command.requestHash},
+		});
+	});
+
+	app.post("/api/campaigns/:campaignId/multi-target-operations/:operationId/finalize", {
+		preHandler: requireMultiTargetMutation({accountLimit: 20, campaignLimit: 60}),
+		schema: {
+			params: multiTargetOperationParamsSchema,
+			body: {
+				type: "object",
+				required: ["contractVersion", "commandId", "selectedInvitationIds"],
+				additionalProperties: false,
+				properties: {
+					contractVersion: {type: "integer", const: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION},
+					commandId: {type: "string", format: "uuid"},
+					selectedInvitationIds: {
+						type: "array",
+						maxItems: MULTI_TARGET_OPERATIONS_MAX_TARGETS,
+						uniqueItems: true,
+						items: {type: "string", format: "uuid"},
+					},
+				},
+			},
+		},
+	}, async request => {
+		const command = getSemanticCommand(request);
+		return store.pFinalizeMultiTargetOperation({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
+			campaignId: request.params.campaignId,
+			operationId: request.params.operationId,
+			selectedInvitationIds: request.body.selectedInvitationIds,
+			contractVersion: request.body.contractVersion,
+			protocolVersion: request.headers["x-hub-protocol-version"],
+			...command,
+			idempotencyKey: {key: command.commandId, requestHash: command.requestHash},
+		});
+	});
+
+	app.post("/api/campaigns/:campaignId/multi-target-operations/:operationId/cancel", {
+		preHandler: requireMultiTargetMutation({accountLimit: 20, campaignLimit: 60}),
+		schema: {
+			params: multiTargetOperationParamsSchema,
+			body: {
+				type: "object",
+				required: ["contractVersion", "commandId"],
+				additionalProperties: false,
+				properties: {
+					contractVersion: {type: "integer", const: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION},
+					commandId: {type: "string", format: "uuid"},
+				},
+			},
+		},
+	}, async request => {
+		const command = getSemanticCommand(request);
+		return store.pCancelMultiTargetOperation({
+			accountId: request.hubAuth.account.id,
+			sessionId: request.hubAuth.session.id,
+			campaignId: request.params.campaignId,
+			operationId: request.params.operationId,
+			contractVersion: request.body.contractVersion,
+			protocolVersion: request.headers["x-hub-protocol-version"],
+			...command,
+			idempotencyKey: {key: command.commandId, requestHash: command.requestHash},
+		});
+	});
+
+	app.get("/api/campaigns/:campaignId/multi-target-operations/inbox", {
+		preHandler: requireMultiTargetProtocol,
+		schema: {params: multiTargetParamsSchema, querystring: multiTargetReadQuerySchema},
+	}, async request => store.pListMultiTargetInbox({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+		cursor: request.query.cursor,
+		limit: request.query.limit,
+	}));
+
+	app.get("/api/campaigns/:campaignId/multi-target-operations/outgoing", {
+		preHandler: requireMultiTargetProtocol,
+		schema: {params: multiTargetParamsSchema, querystring: multiTargetReadQuerySchema},
+	}, async request => store.pListMultiTargetOutgoing({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+		cursor: request.query.cursor,
+		limit: request.query.limit,
+	}));
+
+	app.get("/api/campaigns/:campaignId/multi-target-operations/:operationId", {
+		preHandler: requireMultiTargetProtocol,
+		schema: {params: multiTargetOperationParamsSchema},
+	}, async request => store.pGetMultiTargetOperation({
+		accountId: request.hubAuth.account.id,
+		campaignId: request.params.campaignId,
+		operationId: request.params.operationId,
 	}));
 
 	app.get("/api/campaigns/:campaignId/actions", {

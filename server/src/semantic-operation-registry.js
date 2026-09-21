@@ -8,6 +8,11 @@ import {
 	resolveSourceCost,
 	SOURCE_COST_VERSION,
 } from "../../js/hub/hub-source-costs.js";
+import {
+	MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
+	MULTI_TARGET_OPERATIONS_MAX_TARGETS,
+	MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
+} from "../../js/hub/hub-multi-target-operations.js";
 
 const MAX_IDENTITY_LENGTH = 200;
 const MAX_TEMPLATE_ID_LENGTH = 120;
@@ -299,6 +304,130 @@ export class SemanticOperationRegistry {
 
 	isCostBearing ({sourceEntity, effectTemplateId}) {
 		return this.getTemplate({sourceEntity, effectTemplateId}).sourceCostVersion != null;
+	}
+
+	isMultiTarget ({sourceEntity, effectTemplateId}) {
+		const template = this.getTemplate({sourceEntity, effectTemplateId});
+		return template.multiTarget?.contractVersion === MULTI_TARGET_OPERATIONS_CONTRACT_VERSION;
+	}
+
+	deriveMultiTarget ({
+		sourceCharacter,
+		targetCharacters,
+		targetRefs,
+		sourceEntity,
+		effectTemplateId,
+		choice,
+		sourceProfile,
+		targetProfiles,
+		operationId,
+		effectResolutionSeed,
+	}) {
+		const template = this.getTemplate({sourceEntity, effectTemplateId});
+		if (
+			template.multiTarget?.contractVersion !== MULTI_TARGET_OPERATIONS_CONTRACT_VERSION
+			|| template.sourceCostVersion == null
+			|| !Array.isArray(targetCharacters)
+			|| targetCharacters.length < 1
+			|| targetCharacters.length > Math.min(
+				template.multiTarget.maxTargets || MULTI_TARGET_OPERATIONS_MAX_TARGETS,
+				MULTI_TARGET_OPERATIONS_MAX_TARGETS,
+			)
+			|| targetCharacters.length !== targetRefs.length
+			|| targetCharacters.length !== targetProfiles.length
+		) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		const normalizedChoice = template.normalizeChoice
+			? template.normalizeChoice(structuredClone(choice))
+			: (() => {
+				if (!choice || typeof choice !== "object" || Array.isArray(choice) || Object.keys(choice).length) {
+					throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+				}
+				return {};
+			})();
+		const hasSource = template.hasSource
+			? template.hasSource({character: sourceCharacter, sourceEntity: template.sourceEntity})
+			: template.sourceEntity.type === "spell"
+				? hasSpellSource({character: sourceCharacter, sourceEntity: template.sourceEntity})
+				: hasAbilitySource({character: sourceCharacter, sourceEntity: template.sourceEntity});
+		if (!hasSource || (template.canUse && !template.canUse({
+			sourceCharacter,
+			targetCharacters,
+			choice: normalizedChoice,
+		}))) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+
+		const sourceCost = normalizeSourceCost(template.buildSourceCost({
+			sourceCharacter,
+			targetCharacters,
+			choice: normalizedChoice,
+			effectResolutionSeed,
+		}));
+		resolveSourceCost({data: sourceCharacter.data, sourceCost});
+		const sourceFootprint = template.sourceFootprint?.({
+			sourceCost,
+			sourceCharacter,
+			targetCharacters,
+			choice: normalizedChoice,
+		}) || getSourceCostMutationFootprint(sourceCost);
+		const targets = targetCharacters.map((targetCharacter, index) => {
+			const targetRef = targetRefs[index];
+			if (
+				targetCharacter.targetRef !== targetRef
+				|| (template.canTarget && !template.canTarget({
+					sourceCharacter,
+					targetCharacter,
+					targetCharacters,
+					targetOrdinal: index + 1,
+					choice: normalizedChoice,
+				}))
+			) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			const derived = template.deriveOperation({
+				sourceCharacter,
+				targetCharacter,
+				targetCharacters,
+				targetOrdinal: index + 1,
+				choice: normalizedChoice,
+				effectResolutionSeed,
+			});
+			const operation = normalizeSemanticOperation({
+				...derived,
+				operationId,
+				targetCharacterId: targetCharacter.id,
+				version: SEMANTIC_OPERATION_VERSION,
+			});
+			const targetFootprint = template.targetFootprint?.({
+				operation,
+				sourceCharacter,
+				targetCharacter,
+				targetCharacters,
+				targetOrdinal: index + 1,
+				choice: normalizedChoice,
+			}) || [];
+			if (
+				sourceCharacter.id === targetCharacter.id
+				&& sourceFootprint.some(binding => targetFootprint.includes(binding))
+			) throw new HubStoreError("SOURCE_COST_UNSUPPORTED", `The source cost is not supported.`, {status: 409});
+			return {
+				targetRef,
+				operation,
+				targetFootprint,
+				targetDisplaySnapshot: {
+					targetRef,
+					...getSafeIdentitySnapshot(targetProfiles[index]),
+				},
+			};
+		});
+		return {
+			sourceCost,
+			sourceFootprint,
+			targets,
+			choice: normalizedChoice,
+			sourceEntity: structuredClone(template.sourceEntity),
+			effectTemplateId: template.effectTemplateId,
+			sourceDisplaySnapshot: getSafeIdentitySnapshot(sourceProfile),
+			effectDisplaySnapshot: structuredClone(template.display || {label: template.effectTemplateId}),
+			allowTargetNoOp: template.multiTarget.allowTargetNoOp === true,
+			templateRegistryVersion: MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
+		};
 	}
 
 	derive ({

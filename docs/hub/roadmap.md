@@ -39,7 +39,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
-| **next** | Wave A0 multi-target operation model | [ADR 0020](adr/0020-consented-multi-target-operations.md) is accepted as a design/proof contract; implementation and capability remain absent/default-off, and this draft is held pending the physical game-day GO/NO-GO |
+| **active** | Wave A3 multi-target server authority | [ADR 0020](adr/0020-consented-multi-target-operations.md), migration 0011, protocol-6 default-off routes/events, both stores, lifecycle/expiry/cleanup, quota locks, and rollback markers are implemented; A4/A5 client/templates remain, and this draft is held pending the physical game-day GO/NO-GO |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 provider rollout retain their own acceptance gates |
 | **active** | r9 invite-gated identity | ADR 0018/migration 0008 foundation, ADR 0019/migration 0009 provider-neutral entitlements, and ADR 0014 account link/unlink implementation are complete; entitlement, identity-linking, new-account-admission, and Discord/Google enablement switches remain default-off until their separate release preflights |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
@@ -233,7 +233,7 @@ Purpose: establish the versioned contract all richer live campaign features use.
 
 Shipped as [ADR 0011](adr/0011-authorization-scoped-character-projections.md): `server/src/character-projection.js`
 holds the versioned catalog, presets and overrides; migration `0004` persists per-character policy;
-the T2 rollout introduced protocol 2 and the current implementation has since advanced to protocol 5;
+the T2 rollout introduced protocol 2 and the current implementation has since advanced to protocol 6;
 `character.projection.updated` is replaced by metadata-only
 `character.projection.invalidated`; resync carries a cursor and cache-invalidation refs only; and owners
 configure sharing from the Character Sheet campaign panel against a server-computed preview.
@@ -464,12 +464,14 @@ diagnosis, and audit; a target owner never sees co-target identity or decisions.
 Global source-account and target-owner caps are serialized across campaigns by dedicated seed-10 quota locks
 acquired in ascending account UUID order before campaign authority.
 
-This is **planned, not implemented**. Migration 0011, protocol 6, routes, both stores, events, capability
-advertisement, Character Sheet UX, and templates remain future A1-A5 work. The sequence is:
+The migration/operations portion of A3 is implemented but the product remains **planned, not enabled**.
+Migration 0011, required-version/policy/role/backup/restore contracts, and marker-aware rollback preflight are
+checked in. Protocol 6, routes, both stores, events, capability advertisement, Character Sheet UX, and templates
+remain future held work. The sequence is:
 
 1. **A1:** DM typed effects.
 2. **A2:** generalized source-cost authority.
-3. **A3:** normalized migration 0011 and server state machine.
+3. **A3:** normalized migration 0011/operations substrate implemented; server state machine remains held.
 4. **A4:** Character Sheet proposal/response/finalization UX and per-leg reconciliation.
 5. **A5:** Healing Word and Mass Healing Word templates.
 

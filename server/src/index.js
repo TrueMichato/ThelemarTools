@@ -2,6 +2,7 @@ import {createHubApp} from "./app.js";
 import {createAuthProviderConfiguration} from "./auth-provider-config.js";
 import {getClientIpHeader} from "./client-ip.js";
 import {parsePeerSourceCostsCampaignIds} from "./peer-source-cost-rollout.js";
+import {parseMultiTargetOperationsCampaignIds} from "./multi-target-operation-rollout.js";
 import {PostgresHubStore} from "./postgres-hub-store.js";
 import {getSafeRequestLog, HUB_LOG_REDACT_PATHS} from "./observability.js";
 import {parseOperatorAccountIds} from "./account-entitlements.js";
@@ -28,6 +29,9 @@ const clientIpHeader = getClientIpHeader(process.env.HUB_CLIENT_IP_HEADER);
 const isAccountEntitlementsEnabled = process.env.HUB_ACCOUNT_ENTITLEMENTS_ENABLED === "true";
 const isInviteAccountAdmissionEnabled = process.env.HUB_INVITE_ACCOUNT_ADMISSION_ENABLED === "true";
 const operatorAccountIds = parseOperatorAccountIds(process.env.HUB_OPERATOR_ACCOUNT_IDS);
+const multiTargetOperationsCampaignIds = parseMultiTargetOperationsCampaignIds(
+	process.env.HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS,
+);
 if (isInviteAccountAdmissionEnabled && !isAccountEntitlementsEnabled) {
 	throw new Error(`Invite account admission requires account entitlement enforcement.`);
 }
@@ -37,9 +41,15 @@ const store = PostgresHubStore.fromConnectionString({
 	peerSourceCostsEnabled: parsePeerSourceCostsCampaignIds(
 		process.env.HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS,
 	),
+	multiTargetOperationsEnabled: multiTargetOperationsCampaignIds,
 	isAccountEntitlementsEnabled,
 });
 await store.pCheckHealth();
+if (multiTargetOperationsCampaignIds.length) {
+	await store.pCheckMultiTargetOperationsCampaignReadiness({
+		campaignIds: multiTargetOperationsCampaignIds,
+	});
+}
 await store.pReconcileConfiguredOperatorEntitlements({
 	accountIds: operatorAccountIds,
 	onWarning: ({accountId}) => {

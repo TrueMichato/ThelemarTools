@@ -66,7 +66,7 @@ describe("campaign hub pages", () => {
 
 	it("keeps legacy mutation coverage while releasing leases with the current protocol", () => {
 		expect(hubCampaignPage).toMatch(/private async getMutationHeaders[\s\S]*?"x-hub-protocol-version": "3"/);
-		expect(hubCampaignPage).toMatch(/private async getLeaseReleaseHeaders[\s\S]*?getMutationHeaders\(\)[\s\S]*?"x-hub-protocol-version": "5"/);
+		expect(hubCampaignPage).toMatch(/private async getLeaseReleaseHeaders[\s\S]*?getMutationHeaders\(\)[\s\S]*?"x-hub-protocol-version": "6"/);
 		expect(hubCampaignPage).toMatch(/async releaseCharacterLease[\s\S]*?headers: await this\.getLeaseReleaseHeaders\(\)/);
 		expect(hubCampaignPage).toMatch(/Lease release failed with HTTP \$\{response\.status\(\)\}: \$\{responseBody\}/);
 	});

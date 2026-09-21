@@ -197,7 +197,7 @@ describe("hub API client", () => {
 				headers: expect.objectContaining({
 					"x-csrf-token": "csrf-1",
 					"idempotency-key": "stable-key",
-					"x-hub-protocol-version": "5",
+					"x-hub-protocol-version": "6",
 				}),
 			}),
 		}));
@@ -275,6 +275,67 @@ describe("hub API client", () => {
 			rulesVersionId: "rules-1",
 		});
 		expect(calls[2].path).toBe("/api/campaigns/campaign-1/characters/source-1/outgoing-actions");
+	});
+
+	it("uses protocol-6 multi-target proposal, invitation, finalization, and read routes", async () => {
+		const calls = [];
+		const client = new HubApiClient({
+			fnFetch: async (path, opts = {}) => {
+				calls.push({path, opts});
+				if (path === "/api/session") return getResponse({body: {signedIn: true, csrfToken: "csrf-1"}});
+				return getResponse({body: {operation: {operationId: "operation-1"}}});
+			},
+		});
+		await client.pGetSession();
+		await client.pCreateMultiTargetOperation({
+			campaignId: "campaign-1",
+			sourceCharacterId: "source-1",
+			sourceEntity: {type: "ability", uid: "shared restoration|tst", version: "tst-v1"},
+			effectTemplateId: "ability.shared-restoration.heal",
+			choice: {amount: 4},
+			targetRefs: ["target-a", "target-b"],
+			rulesVersionId: "rules-1",
+			idempotencyKey: "proposal-1",
+		});
+		await client.pRespondMultiTargetInvitation({
+			campaignId: "campaign-1",
+			operationId: "operation-1",
+			invitationId: "invitation-1",
+			decision: "approve",
+			idempotencyKey: "response-1",
+		});
+		await client.pFinalizeMultiTargetOperation({
+			campaignId: "campaign-1",
+			operationId: "operation-1",
+			selectedInvitationIds: ["invitation-1"],
+			idempotencyKey: "finalization-1",
+		});
+		await client.pCancelMultiTargetOperation({
+			campaignId: "campaign-1",
+			operationId: "operation-2",
+			idempotencyKey: "cancel-1",
+		});
+		await client.pListMultiTargetInbox({campaignId: "campaign-1", cursor: "cursor-1", limit: 25});
+		await client.pListMultiTargetOutgoing({campaignId: "campaign-1"});
+		await client.pGetMultiTargetOperation({campaignId: "campaign-1", operationId: "operation-1"});
+
+		expect(calls.slice(1).map(call => call.path)).toEqual([
+			"/api/campaigns/campaign-1/multi-target-operations",
+			"/api/campaigns/campaign-1/multi-target-operations/operation-1/invitations/invitation-1/respond",
+			"/api/campaigns/campaign-1/multi-target-operations/operation-1/finalize",
+			"/api/campaigns/campaign-1/multi-target-operations/operation-2/cancel",
+			"/api/campaigns/campaign-1/multi-target-operations/inbox?limit=25&cursor=cursor-1",
+			"/api/campaigns/campaign-1/multi-target-operations/outgoing?limit=100",
+			"/api/campaigns/campaign-1/multi-target-operations/operation-1",
+		]);
+		expect(JSON.parse(calls[1].opts.body)).toMatchObject({
+			contractVersion: 1,
+			commandId: "proposal-1",
+			targetRefs: ["target-a", "target-b"],
+		});
+		for (const call of calls.slice(1, 5)) {
+			expect(call.opts.headers["x-hub-protocol-version"]).toBe("6");
+		}
 	});
 
 	it("refuses a mutation before session bootstrap", async () => {
@@ -438,7 +499,7 @@ describe("hub API client", () => {
 		]);
 		for (const call of calls) {
 			expect(call.opts.method).toBe("POST");
-			expect(call.opts.headers["x-hub-protocol-version"]).toBe("5");
+			expect(call.opts.headers["x-hub-protocol-version"]).toBe("6");
 			expect(call.opts.headers).not.toHaveProperty("x-csrf-token");
 			expect(call.opts.headers).not.toHaveProperty("idempotency-key");
 		}

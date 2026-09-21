@@ -13,7 +13,7 @@ export const SOURCE_COST_KINDS = Object.freeze([
 ]);
 
 export function isPeerSourceCostsProtocolVersion (protocolVersion) {
-	return ["4", "5"].includes(`${protocolVersion}`);
+	return ["4", "5", "6"].includes(`${protocolVersion}`);
 }
 
 export function getPeerSourceCostsCapability ({enabled = false} = {}) {

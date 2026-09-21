@@ -12,11 +12,36 @@ Use when the prior image supports the current schema:
 2. Record incident/request/build versions.
 3. Run `npm run hub:check-auth-rollback` with the exact providers supported by the target image and, only when
    that target still requires it, the optional legacy allowlist. Stop if it reports any blocked account.
-4. Confirm every pending/applied migration is classified in `deploy/hub/migration-policy.json`.
-5. Deploy prior immutable BFF/static digests.
-6. Verify required migration compatibility before readiness.
-7. Probe auth, character read/write, WebSocket, outbox, and local-only mode.
-8. Monitor errors/outbox for at least the promotion window.
+4. If schema 0011 is present, run the matching multi-target rollback preflight:
+
+   ```bash
+   DATABASE_URL=... \
+   HUB_MULTI_TARGET_ROLLBACK_TARGET=pre-0011 \
+   npm run hub:check-multi-target-rollback
+   ```
+
+   Exit status 2 blocks rollback. A present usage marker blocks a true pre-0011 target permanently, regardless
+   of current parent/child/finalization counts. Nonzero normalized-history counts also fail closed as inconsistent
+   with schema-before-use. The JSON result contains aggregate counts/deadlines only and never participant,
+   character, invitation, operation, or campaign identities.
+
+   Release automation first stops the candidate BFF to quiesce writes, then reruns this pre-0011 marker
+   preflight immediately before any automatic post-cutover application rollback whenever the database contains
+   migration 0011 and the previous image requires an older schema, including a retry where an earlier attempt
+   applied 0011. The BFF remains stopped through the rollback-or-isolate decision. If quiescing fails, automation
+   retries the Hub BFF stop once, then uses a bounded exact-container `docker stop --time 10` fallback and
+   verifies that no Compose BFF remains running. If verification still fails, it records a critical fence
+   failure and warns that the candidate may still accept writes; it does not claim isolation or start a previous
+   image. If the marker appeared after cutover, automation records the
+   incompatibility and keeps the quiesced BFF isolated.
+   A valid exit-2 preflight records the bounded marker/history blockers. A Docker, database, timeout, script, or
+   malformed-result failure is recorded separately as `multi-target-rollback-preflight-failed`; rollback remains
+   forbidden, but evidence never falsely claims that the irreversible marker was observed.
+5. Confirm every pending/applied migration is classified in `deploy/hub/migration-policy.json`.
+6. Deploy prior immutable BFF/static digests.
+7. Verify required migration compatibility before readiness.
+8. Probe auth, character read/write, WebSocket, outbox, and local-only mode.
+9. Monitor errors/outbox for at least the promotion window.
 
 For a rehearsal, do not retag mutable production references or replace live containers. Start the prior
 preserved BFF/static image IDs in a uniquely named isolated stack against the restored current-schema database.
@@ -39,6 +64,26 @@ Migration 0010 is also additive and previous-app-compatible. It only replaces th
 snapshot helpers with stricter identity/cardinality semantics; do not restore the migration-0007 `LIMIT 1`
 function as rollback. A predecessor application can run with migration 0010 in place because the schema and
 persisted source-cost descriptors are unchanged.
+
+Migration 0011 is previous-app-compatible only before use. A true pre-0011 rollback requires the preflight above
+to pass with an absent marker and zero normalized history. Once `hub.semantic_multi_target_usage` exists, the
+normal rollback target must be a bridge/r10+ release which understands `target_set_version`, normalized target
+and finalization history, expiry, retention, explicit purge cleanup, projection filtering, and the marker.
+For a bridge target, declare every template registry version it supports:
+
+```bash
+DATABASE_URL=... \
+HUB_MULTI_TARGET_ROLLBACK_TARGET=bridge \
+HUB_MULTI_TARGET_SUPPORTED_TEMPLATE_REGISTRY_VERSIONS=multi-target-effects-v1 \
+npm run hub:check-multi-target-rollback
+```
+
+The bridge preflight reports total/live parent and child counts, pending/selected/applied-leg counts, oldest
+collection/finalization/terminal deadlines, incomplete history, unsupported template counts, marker state, and
+90-day cleanup readiness. It fails on incomplete history or unsupported template versions. It does not delete
+history or the marker. Returning to a true pre-0011 binary after use requires a separately reviewed destructive
+history/event/outbox/recovery export-and-purge procedure, backup, explicit human authorization, and marker
+deletion last; that is not normal rollback and is not defined here.
 
 ### 2026-09-12 exact-release evidence
 

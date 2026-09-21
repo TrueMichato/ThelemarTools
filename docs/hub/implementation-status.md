@@ -107,7 +107,8 @@ locks and commits the slot decrement plus deterministic healing atomically exact
 currently usable class spell (including preparation where required), and changing the bound slot permanently
 invalidates that proposal even if the slot is later restored. Source, target, and combined self-target operation
 legs reconcile through unsaved/in-flight local edits and reconnect/resync. V2-T7 remains active: NPC/monster,
-party/multi-target, generic-effect, broader spell/ability/resource, and partial-resolution work is not implemented.
+player-facing party/multi-target UX/templates, generic effects, broader spell/ability/resource rollout, and
+incremental partial commits are not implemented.
 The capability remains default-off for every new campaign: an active immutable rules version and exact
 operator-managed campaign UUID enrollment are both required. Production rejects wildcard or malformed rollout
 configuration, release automation checks enrolled campaign readiness before traffic changes, and already-open
@@ -134,9 +135,11 @@ It accepts a future fixed 1-8 target set, opaque unique per-leg invitations, ind
 responses, source-finalization consent for source-owned legs, collection expiry, one exact ordered
 source-selected subset, and one-cost/all-selected-leg atomic finalization. Reviewed multi-target healing
 templates may privately record a full-HP selected leg as applied/no-change while consuming the single source
-cost. **No multi-target production capability is implemented by Wave A0:** the design-only PR contains no
-migration; future additive migration 0011, protocol 6, routes, store methods, events, browser UX, and templates
-remain absent and default-off. The draft is held pending the physical game-day GO/NO-GO.
+cost. Wave A3 implements migration 0011, protocol 6, default-off exact-campaign capability, HTTP/event DTOs,
+Memory/PostgreSQL state-machine authority, consent/finalization/cancel, lifecycle/expiry/retention, global quota
+locks, permanent global/per-campaign usage markers, and marker-aware rollback preflight. **No multi-target
+production capability is enabled:** full Character Sheet UX and production templates remain A4/A5, and the
+draft is held pending the physical game-day GO/NO-GO.
 
 The accepted design now also fixes bounded abuse/fairness limits (3 live collections/source character,
 5/source account, 50/campaign, 20 pending invitations/target owner, explicit mutation throttles, and
