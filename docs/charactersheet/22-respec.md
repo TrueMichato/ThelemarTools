@@ -85,9 +85,14 @@ the player does not choose them. Their semantic key is derived from the origin
 entity and feat UID, and the materialized feat plus its modifiers/resources
 are recorded in the decision receipt. Legacy saves adopt an existing exact
 feat in place rather than adding a duplicate; the feat is marked with its
-origin owner and remains at character level 0. This ownership does not infer a
-level for unrelated orphan feats or resolve duplicate acquisitions from later
-class/ASI feat choices.
+origin owner and remains at character level 0. If a later level opportunity
+also records the same non-repeatable feat, both opportunities remain visible:
+the fixed origin grant stays resolved, while the later selection is invalid
+until the player chooses another legal feat. The later editor excludes feats
+already granted by another documented owner, and replacement removes only
+artifacts owned by that level decision, preserving the origin feat and its
+exact modifiers/resources. This ownership does not infer a level for unrelated
+orphan feats.
 
 Mechanically present feats with no explicit origin, class-feature, or level
 owner are preserved as **unplaced feat** records on the Character Base card.
@@ -110,7 +115,7 @@ proficiencies after every staged skill change; a now-illegal expertise choice
 remains visible as invalid and blocks Apply until repaired. Existing
 independent proficiency or expertise sources are marked preserved, so replacing
 the feat's selection cannot remove them. Other multi-family feat shapes and
-duplicate-acquisition resolution remain separate transactions.
+their dependency rules remain separate transactions.
 
 Manifest discovery must be complete before it replaces the saved ledger. If
 class data is temporarily unavailable, Respec may report the discovery error,

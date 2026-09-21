@@ -2614,9 +2614,22 @@ class CharacterSheetProgression {
 			const historicalOwnedFeats = CharacterSheetClassUtils.getHistoricalOwnedFeats({
 				state,
 				history: normalizedHistory,
-				characterLevel: levelInfo.characterLevel,
+				characterLevel: levelInfo.characterLevel - 1,
 				featCatalog: featPool,
 			});
+			for (const priorDecision of decisions) {
+				if (priorDecision.scope === "unplaced") continue;
+				for (const selectedFeat of CharacterSheetProgression._getFeatDecisionSelections(priorDecision)) {
+					const selectedUid = CharacterSheetProgression.getEntityUid(selectedFeat);
+					if (historicalOwnedFeats.some(feat =>
+						CharacterSheetProgression.getEntityUid(feat) === selectedUid,
+					)) continue;
+					const canonical = featPool.find(feat =>
+						CharacterSheetProgression.getEntityUid(feat) === selectedUid,
+					);
+					historicalOwnedFeats.push({...CharacterSheetProgression._copy(canonical || {}), ...CharacterSheetProgression._copy(selectedFeat)});
+				}
+			}
 
 			const multiclassRequirementIssues = CharacterSheetProgression._getMulticlassRequirementIssues({
 				classData,
@@ -2713,10 +2726,8 @@ class CharacterSheetProgression {
 					state,
 					featPool,
 				});
-				const excludeFeatUid = CharacterSheetProgression.getEntityUid(legacyFeat || legacyEpicBoonRepair?.feat);
 				const eligibleFeats = CharacterSheetClassUtils.getEligibleFeats(featPool, state, {
 					totalLevel: levelInfo.characterLevel,
-					excludeFeatUid,
 					abilityScores: historicalAbilityScores,
 					ownedFeats: historicalOwnedFeats,
 					featCatalog: featPool,
@@ -2724,6 +2735,28 @@ class CharacterSheetProgression {
 					const categoryDelta = Number(b.category === "EB") - Number(a.category === "EB");
 					return categoryDelta || String(a.name || "").localeCompare(String(b.name || ""));
 				});
+				const legacyFeatUid = CharacterSheetProgression.getEntityUid(legacyFeat);
+				const legacyFeatData = featPool.find(feat =>
+					CharacterSheetProgression.getEntityUid(feat) === legacyFeatUid,
+				);
+				const conflictingDecision = legacyFeat?.name && !legacyFeatData?.repeatable
+					? decisions.find(decision =>
+						decision.scope !== "unplaced"
+							&& CharacterSheetProgression._getFeatDecisionSelections(decision).some(selected =>
+								CharacterSheetProgression.getEntityUid(selected) === legacyFeatUid,
+							),
+					)
+					: null;
+				const conflictMeta = conflictingDecision
+					? {
+						nonRepeatableFeatConflict: {
+							feat: CharacterSheetProgression._copy(legacyFeat),
+							ownerDecisionKey: conflictingDecision.semanticKey,
+							ownerLabel: conflictingDecision.label,
+						},
+						validationMessage: `${legacyFeat.name} is already granted by ${conflictingDecision.label}; choose a different feat for this opportunity.`,
+					}
+					: {};
 
 				if (improvement.kind === "asiAndFeat") {
 					addDecision(levelInfo, {type: "asi", label: "Ability Score Improvement", sourceKey: "asi", count: 1});
@@ -2733,7 +2766,8 @@ class CharacterSheetProgression {
 						sourceKey: "feat",
 						count: 1,
 						options: eligibleFeats,
-						meta: {improvement},
+						isValid: !conflictingDecision,
+						meta: {improvement, ...conflictMeta},
 					});
 				} else if (improvement.kind === "feat") {
 					const canAdoptLegacyBoon = legacyEpicBoonRepair
@@ -2755,7 +2789,9 @@ class CharacterSheetProgression {
 							improvement,
 							legacyAsiInvalid: !!legacyAsi,
 							...(canAdoptLegacyBoon ? {legacyEpicBoonRepair} : {}),
+							...conflictMeta,
 						},
+						isValid: !conflictingDecision,
 					});
 				} else {
 					addDecision(levelInfo, {
@@ -2764,7 +2800,8 @@ class CharacterSheetProgression {
 						sourceKey: "asi-or-feat",
 						count: 1,
 						options: eligibleFeats,
-						meta: {improvement},
+						isValid: !conflictingDecision,
+						meta: {improvement, ...conflictMeta},
 					});
 				}
 			}

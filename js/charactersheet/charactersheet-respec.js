@@ -4466,7 +4466,9 @@ class CharacterSheetRespec {
 			const stored = this._state.getFeats().find(feat =>
 				feat.name === previousFeat.name && feat.source === previousFeat.source,
 			);
-			if (JSON.stringify(stored?.choices || {}) === JSON.stringify(next.featChoices || {})) return true;
+			const isOwnedByDecision = !stored?.sourceDecisionKey || stored.sourceDecisionKey === decision.semanticKey;
+			if (isOwnedByDecision
+				&& JSON.stringify(stored?.choices || {}) === JSON.stringify(next.featChoices || {})) return true;
 		}
 		const hasAbilityChildReceipt = this._engine.manifest.decisions.some(candidate =>
 			candidate.type === "nestedAbility"
@@ -4516,6 +4518,13 @@ class CharacterSheetRespec {
 				: previous?.mode === "feat"
 					? previous.feat
 					: null;
+			const storedPreviousFeat = previousFeat?.name
+				? this._state.getFeats().find(feat =>
+					feat.name === previousFeat.name && feat.source === previousFeat.source,
+				)
+				: null;
+			const ownsPreviousFeat = !!storedPreviousFeat
+				&& (!storedPreviousFeat.sourceDecisionKey || storedPreviousFeat.sourceDecisionKey === decision.semanticKey);
 			let pairedFeat = null;
 			if (decision.type === "asi") {
 				const pairedDecision = this._engine.manifest.decisions.find(it =>
@@ -4557,8 +4566,8 @@ class CharacterSheetRespec {
 					if (feature.id) this._state.removeFeature(feature.id);
 					else this._state._data.features = this._state._data.features.filter(it => it !== feature);
 				});
-			if (previousFeat?.name) {
-				this._state.removeFeat(previousFeat.name, previousFeat.source, {
+			if (previousFeat?.name && ownsPreviousFeat) {
+				this._state.removeFeat(storedPreviousFeat.id || previousFeat.name, previousFeat.source, {
 					skipAbilityDeltas: skipPreviousFeatAbilityDeltas,
 				});
 			}
@@ -4589,7 +4598,8 @@ class CharacterSheetRespec {
 				if (!feat?.name || !feat?.source) throw new Error("Select a valid feat.");
 				const eligibility = CharacterSheetClassUtils.evaluateFeatPrerequisites(feat, this._state, {
 					totalLevel: decision.characterLevel,
-					excludeFeatUid: previousFeat ? `${previousFeat.name}|${previousFeat.source}` : "",
+					excludeFeatUid: ownsPreviousFeat ? `${previousFeat.name}|${previousFeat.source}` : "",
+					featCatalog: this._page.getFeats?.() || [],
 				});
 				if (!eligibility.eligible) throw new Error(eligibility.reasons[0] || "That feat's prerequisites are not met.");
 				const featChoices = MiscUtil.copyFast(next.featChoices || feat.choices || feat._featChoices || {});

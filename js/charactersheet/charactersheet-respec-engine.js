@@ -555,7 +555,7 @@ class CharacterSheetRespecEngine {
 				severity: "error",
 				code: `decision-${decision.status}`,
 				decisionId: decision.id,
-				message: `${decision.label} is ${decision.status}.`,
+				message: decision.meta?.validationMessage || `${decision.label} is ${decision.status}.`,
 			});
 		}
 		return {
