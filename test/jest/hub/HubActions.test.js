@@ -1,6 +1,7 @@
 import {
 	addTransferPayload,
 	applySemanticOperation,
+	applySemanticOperationWithResult,
 	applyStructuredEffect,
 	isDirectTransferAuthority,
 	normalizeCharacterInventory,
@@ -133,6 +134,32 @@ describe("semantic operations", () => {
 			conditions: [{name: "Prone", source: "PHB"}],
 			spellcasting: {spellSlots: {1: {current: 2, max: 4}}},
 		});
+	});
+
+	it.each([
+		["heal at maximum", {hp: {current: 20, max: 20, temp: 0}}, getOperation("hp.heal", {amount: 5})],
+		["add an existing condition", {conditions: [{name: "Poisoned", source: "XPHB"}]}, getOperation("condition.add", {condition: {name: "poisoned", source: "xphb"}})],
+		["remove an absent condition", {conditions: []}, getOperation("condition.remove", {condition: {name: "Poisoned", source: "XPHB"}})],
+		["restore a full slot", {spellcasting: {spellSlots: {1: {current: 2, max: 2}}}}, getOperation("spell_slot.restore", {level: 1, amount: 1})],
+	])("reports a semantic no-op for %s without changing canonical bytes", (_label, original, operation) => {
+		const result = applySemanticOperationWithResult({data: original, operation});
+
+		expect(result).toEqual({data: original, changed: false});
+		expect(result.data).not.toBe(original);
+	});
+
+	it("reports a changed semantic result when canonical bytes change", () => {
+		const original = {hp: {current: 10, max: 20, temp: 0}};
+		const result = applySemanticOperationWithResult({
+			data: original,
+			operation: getOperation("hp.heal", {amount: 5}),
+		});
+
+		expect(result).toEqual({
+			data: {hp: {current: 15, max: 20, temp: 0}},
+			changed: true,
+		});
+		expect(original.hp.current).toBe(10);
 	});
 
 	it("fails closed on missing state and insufficient resources", () => {

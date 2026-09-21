@@ -76,6 +76,17 @@ command/operation/event identity, owner/DM watermarks, opaque target refs, and t
 proposal/terminal state machine. Production deliberately enables no successful `cost=none` peer template;
 Cure Wounds was recognized and rejected as cost-bearing until the ADR 0016 slice below.
 
+The held Wave A1 descendant completes that existing immediate DM/co-DM lane for all six version-1 typed
+operations. Route/shared-catalog validation is parity-aligned, PostgreSQL direct-event audiences include every
+active DM/co-DM, and valid heal-at-max/add-existing/remove-absent/restore-full operations return an exact
+`changed:false` replay result. Under the existing migration-0005 uniqueness constraint they advance a
+revision-only ordering point while leaving character JSON unchanged; they append terminal audit/applied event/
+outbox/receipt evidence and deliberately omit projection invalidation. Character Sheet reconciliation advances
+every tracked document in operation order, skips redundant adoption/render when a live track is unchanged, and
+emits one accessible no-change notice. This does not add protocol 6, migration 0010, multi-target authority,
+new templates, NPC/monster targets, offline writes, or prose-derived effects, and remains unmerged pending the
+physical r10 game-day GO/NO-GO and PR #285.
+
 The V2-T6 selection foundation and source/species/edition content-policy slice are implemented behind the default-off
 `campaign.rules_policy.v1` capability. It adds a closed schema-v2 catalog, schema-v1 compatibility adapter,
 atomic immutable DM/co-DM publish/rollback, privacy-safe member summaries, and an accessible searchable manager.

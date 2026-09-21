@@ -413,6 +413,7 @@ describe("campaign hub pages", () => {
 		expect(source).toContain("if (!targetCharacterId) throw new Error(\"Choose a target character.\")");
 		expect(source).toMatch(/isProjectionInvalidation[\s\S]*concealCampaignProjectionAuthorization\(\)/);
 		expect(source).toMatch(/pRefreshLiveViews = async \(\) => \{[\s\S]*fillCharacterSelect\([\s\S]*"campaign-action-target"[\s\S]*setFormAvailability\(\{[\s\S]*formId: "campaign-action-form"/);
+		expect(source).toContain("Effect recorded; the character was already in that state.");
 		expect(source).toContain("const handleCampaignAuthorizationError = error =>");
 		expect(source).toMatch(/if \(error.code === "AUTH_REQUIRED"\) \{\s*stopCampaignLiveUpdates\(\);\s*showSignedOutAfterSessionExpiry\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);\s*return true;\s*\}\s*concealCampaignAuthorization\(\);\s*stopCampaignLiveUpdates\(\);\s*renderError\(error, \{isAuthorizationHandled: true\}\);/);
 		const sessionExpiryBranch = source.match(/if \(error.code === "AUTH_REQUIRED"\) \{([\s\S]*?)\n\t\t\}/)?.[1];

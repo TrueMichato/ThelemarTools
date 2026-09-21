@@ -143,7 +143,7 @@ function getApplicableMaxHp (hp) {
 	return applicableMax;
 }
 
-export function applySemanticOperation ({data, operation}) {
+export function applySemanticOperationWithResult ({data, operation}) {
 	const normalized = normalizeSemanticOperation(operation);
 	const out = structuredClone(data);
 	switch (normalized.kind) {
@@ -177,8 +177,9 @@ export function applySemanticOperation ({data, operation}) {
 		}
 		case "condition.remove": {
 			const identity = getConditionIdentity(normalized.arguments.condition);
-			out.conditions = (Array.isArray(out.conditions) ? out.conditions : [])
-				.filter(condition => getConditionIdentity(condition) !== identity);
+			if (Array.isArray(out.conditions)) {
+				out.conditions = out.conditions.filter(condition => getConditionIdentity(condition) !== identity);
+			}
 			break;
 		}
 		case "spell_slot.spend":
@@ -200,5 +201,9 @@ export function applySemanticOperation ({data, operation}) {
 			break;
 		}
 	}
-	return out;
+	return {data: out, changed: JSON.stringify(out) !== JSON.stringify(data)};
+}
+
+export function applySemanticOperation ({data, operation}) {
+	return applySemanticOperationWithResult({data, operation}).data;
 }

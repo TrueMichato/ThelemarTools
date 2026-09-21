@@ -125,6 +125,17 @@ with no active rules/capability, observes the disabled selector state, activates
 and then exercises PHB and XPHB targeting. Its `*` gate remains confined to the isolated test entry point; exact
 production enrollment is covered by the closed parser and read-only pre-cutover readiness check.
 
+Wave A1 additionally owns direct-operation parity for all six version-1 kinds, 30-character condition-source
+schema parity, exact changed-body rejection, and the migration-free no-op contract. Memory and PostgreSQL tests
+assert unchanged character JSON, a revision-only ordering point, terminal audit/applied-event/receipt evidence,
+and no projection invalidation for heal-at-max, add-existing-condition, remove-absent-condition, and
+restore-full-slot. Character Sheet tests assert per-track no-op transforms, zero redundant live adoption/render,
+one accessible notice, HTTP-plus-realtime dedupe, reverse-delivery resync, save interleavings, and
+character/access/document-generation fencing.
+`scripts/test-hub-semantic-operation-mutations.mjs` plants eleven defects at the real role, write/event ordering,
+idempotency, invalidation, coverage, document-track, post-await fence, and duplicate-delivery call sites. The
+gate must demonstrate that every mutant is killed before the unmodified result is accepted.
+
 Wave A0 is documentation/proof evidence only. `HubMultiTargetOperationAdr.test.js` must fail when a required
 lifecycle, migration, lock-order, privacy/no-op, rollback, hazard, limit, singular-read rewrite, or handoff clause
 is removed. When

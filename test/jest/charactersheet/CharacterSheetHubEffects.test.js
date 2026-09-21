@@ -602,6 +602,23 @@ describe("Character Sheet Hub effect controls", () => {
 		]);
 	});
 
+	it("reports an authoritative full-slot no-op explicitly", () => {
+		controller.activate({characterId: "character-1"});
+		controller.onApplied({
+			operation: makeOperation({
+				operationId: "restore-noop",
+				kind: "spell_slot.restore",
+				args: {level: 2, amount: 3},
+			}),
+			changed: false,
+			beforeData: {spellcasting: {spellSlots: {2: {current: 3, max: 3}}}},
+			afterData: {spellcasting: {spellSlots: {2: {current: 3, max: 3}}}},
+		});
+
+		expect([...controller._notices.values()][0].message)
+			.toBe("Campaign spell-slot restoration applied; level 2 slots were already full.");
+	});
+
 	it("moves focus to the request card while its decision controls are disabled", async () => {
 		api.pListCharacterPendingActions.mockResolvedValue([makeAction()]);
 		controller.activate({characterId: "character-1"});

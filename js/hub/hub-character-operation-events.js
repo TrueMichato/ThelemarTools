@@ -108,6 +108,7 @@ export function getCharacterOperationRouting (event) {
 					? {sourceCost: structuredClone(event.payload.sourceCost)}
 					: {}),
 				resultingCharacterRevision: event.payload.resultingCharacterRevision,
+				...(event.payload.changed === false ? {changed: false} : {}),
 			},
 			targetCharacterId: operation.targetCharacterId,
 			status: "applied",

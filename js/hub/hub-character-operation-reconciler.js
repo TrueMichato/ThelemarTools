@@ -1,4 +1,4 @@
-import {applySemanticOperation, normalizeSemanticOperation, SEMANTIC_OPERATION_KINDS, SEMANTIC_OPERATION_VERSION} from "./hub-semantic-operations.js";
+import {applySemanticOperationWithResult, normalizeSemanticOperation, SEMANTIC_OPERATION_KINDS, SEMANTIC_OPERATION_VERSION} from "./hub-semantic-operations.js";
 import * as SourceCosts from "./hub-source-costs.js";
 import {CHARACTER_OPERATION_LEGS, getOperationLegKey} from "./hub-character-operation-events.js";
 
@@ -193,7 +193,7 @@ export function validateDeliveredOperation (operation) {
  */
 export function applyToTrack ({data, operation}) {
 	try {
-		return {data: applySemanticOperation({data, operation})};
+		return applySemanticOperationWithResult({data, operation});
 	} catch (error) {
 		return {error: {code: error?.code || "OPERATION_STATE_INVALID", message: error?.message || `Operation could not be applied.`}};
 	}
@@ -228,7 +228,12 @@ export function applySourceCostToTrack ({data, sourceCost}) {
 		if (!dataNext || typeof dataNext !== "object" || Array.isArray(dataNext)) {
 			return {error: {code: "SOURCE_COST_INVALID", message: `Source-cost applicator returned invalid character data.`}};
 		}
-		return {data: dataNext};
+		return {
+			data: dataNext,
+			changed: typeof result?.changed === "boolean"
+				? result.changed
+				: JSON.stringify(dataNext) !== JSON.stringify(data),
+		};
 	} catch (error) {
 		return {error: {code: error?.code || "SOURCE_COST_STATE_INVALID", message: error?.message || `Source cost could not be applied.`}};
 	}
@@ -239,7 +244,10 @@ export function applyCombinedToTrack ({data, sourceCost, operation}) {
 	if (costResult.error) return {...costResult, blockedTransform: CHARACTER_OPERATION_LEGS.SOURCE};
 	const operationResult = applyToTrack({data: costResult.data, operation});
 	if (operationResult.error) return {...operationResult, blockedTransform: CHARACTER_OPERATION_LEGS.TARGET};
-	return operationResult;
+	return {
+		...operationResult,
+		changed: costResult.changed || operationResult.changed,
+	};
 }
 
 /**
@@ -349,6 +357,7 @@ export function planOperationLeg ({
 	}
 
 	const staged = {};
+	const changedTracks = {};
 	for (const name of names) {
 		if (decisions[name] !== TRACK_DECISION.APPLY) continue;
 		const result = leg === CHARACTER_OPERATION_LEGS.SOURCE
@@ -372,6 +381,7 @@ export function planOperationLeg ({
 			};
 		}
 		staged[name] = result.data;
+		changedTracks[name] = result.changed !== false;
 	}
 
 	if (!Object.keys(staged).length) {
@@ -387,6 +397,7 @@ export function planOperationLeg ({
 		sourceCost: normalizedSourceCost,
 		decisions,
 		staged,
+		changedTracks,
 		revisionNext: resultingCharacterRevision,
 	};
 }

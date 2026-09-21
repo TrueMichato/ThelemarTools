@@ -503,7 +503,7 @@ pre-0010 target is blocked whenever the usage marker exists, regardless of curre
 
 | PR | Scope | Required boundary |
 |---|---|---|
-| **A1 — DM typed effects** | Typed effect catalog used by first templates | No prose; pure fixtures; policy/document validation |
+| **A1 — DM typed effects** | Existing six-operation immediate DM/co-DM lane completed in the Wave A1 descendant implementation | No prose; pure fixtures; route/Memory/PostgreSQL parity; replay/no-op/privacy/reconciliation coverage; held pending physical game-day GO/NO-GO |
 | **A2 — source-cost authority** | Generalized deterministic one-time cost/ABA authority | No reservation; shared Memory/PostgreSQL parity |
 | **A3 — server state machine** | Migration 0010, protocol 6, capability/routes, both stores, events, lifecycle, privacy, expiry, locks | Seed-10 cross-campaign quota races, opposing-order deadlock tests, usage-marker persistence, fault injection, purge/bridge rollback |
 | **A4 — Character Sheet UX and reconciliation** | Proposal, invitation response, exact-subset finalization, per-leg recovery | Same-owner/two-target and source-as-target UX; dirty/in-flight/reconnect/access-loss coverage |

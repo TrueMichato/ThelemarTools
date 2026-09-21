@@ -25,6 +25,7 @@ import {
 	addAwardedEntryToCharacter,
 	addTransferPayload,
 	applySemanticOperation,
+	applySemanticOperationWithResult,
 	getItemAwardIdempotencyKey,
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
@@ -3476,6 +3477,7 @@ export class MemoryHubStore {
 			resultingCharacterRevision: operation.resultingCharacterRevision,
 			resultingTargetCharacterRevision: operation.resultingCharacterRevision,
 			...snapshots,
+			...(operation.changed === false ? {changed: false} : {}),
 		};
 		if (operation.sourceCost) {
 			const sourceOwnerAccountId = source?.ownerAccountId ?? operation.originActorAccountId;
@@ -3675,7 +3677,7 @@ export class MemoryHubStore {
 				operationId,
 				targetCharacterId,
 			});
-			const data = applySemanticOperation({data: target.data, operation: normalized});
+			const {data, changed} = applySemanticOperationWithResult({data: target.data, operation: normalized});
 			validateCloudCharacterData(data);
 			const semanticOperation = {
 				id: operationId,
@@ -3694,6 +3696,7 @@ export class MemoryHubStore {
 				targetDisplaySnapshot: null,
 				effectDisplaySnapshot: null,
 				resultingCharacterRevision: target.revision + 1,
+				...(!changed ? {changed: false} : {}),
 				expiresAt: null,
 				createdAt: now.toISOString(),
 				updatedAt: now.toISOString(),
@@ -3708,7 +3711,7 @@ export class MemoryHubStore {
 				action: "character.operation.applied",
 				targetType: "semantic_operation",
 				targetId: operationId,
-				details: {kind: normalized.kind, version: normalized.version, resultingCharacterRevision: target.revision},
+				details: {kind: normalized.kind, version: normalized.version, changed, resultingCharacterRevision: target.revision},
 			});
 			const appliedEvent = this._appendEvent({
 				campaignId,
@@ -3722,12 +3725,15 @@ export class MemoryHubStore {
 				payload: {
 					operation: normalized,
 					resultingCharacterRevision: target.revision,
+					...(!changed ? {changed: false} : {}),
 				},
 			});
 			semanticOperation.appliedEventId = appliedEvent.id;
 			semanticOperation.resolvedAt = now.toISOString();
 			target.operationWatermark = appliedEvent.sequence;
-			const invalidationEvent = this._commitCharacterMutation({character: target, actorAccountId: accountId, isRevisionBump: false});
+			const invalidationEvent = changed
+				? this._commitCharacterMutation({character: target, actorAccountId: accountId, isRevisionBump: false})
+				: null;
 			const response = {
 				operation: this._getSemanticOperationView(semanticOperation),
 				eventIds: [appliedEvent.id, invalidationEvent?.id].filter(Boolean),

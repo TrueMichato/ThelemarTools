@@ -1812,7 +1812,7 @@ export async function createHubApp ({
 										additionalProperties: false,
 										properties: {
 											name: {type: "string", minLength: 1, maxLength: 100},
-											source: {type: "string", minLength: 1, maxLength: 20},
+											source: {type: "string", minLength: 1, maxLength: 30},
 										},
 									},
 									level: {type: "integer", minimum: 1, maximum: 9},

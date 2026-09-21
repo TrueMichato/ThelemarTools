@@ -341,6 +341,13 @@ identity/value, and target truth never appear in peer projections. Proposal neit
 tests the effect against hidden target state; acceptance commits source and target mutations in one transaction
 or records a privacy-shaped unavailable outcome without spending. Pact slots and other production templates
 remain unsupported.
+
+For direct DM/co-DM operations, a valid heal at maximum, duplicate condition add, absent condition remove, or
+full-slot restore succeeds with `operation.changed: false`. The command is still an exactly-once terminal
+operation and advances the character revision/watermark under the migration-0005 ordering contract, but the
+character JSON is byte-equivalent and no projection invalidation is emitted. Exact retries return the stored
+response; reuse of the command/idempotency key with another body remains `IDEMPOTENCY_KEY_REUSED`. Insufficient
+`spell_slot.spend` remains `RESOURCE_INSUFFICIENT` with no canonical, audit, event, outbox, or receipt write.
 An otherwise-authorized resolution command received after the deadline performs the single `expired` transition
 and returns its stable terminal metadata; retries replay that response. The authority does not interpret
 arbitrary spell prose.

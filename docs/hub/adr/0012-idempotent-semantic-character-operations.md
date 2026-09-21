@@ -88,6 +88,26 @@ The initial catalog is:
 | `spell_slot.spend` | integer `level`, positive integer `amount` | Decrement the matching slot if available |
 | `spell_slot.restore` | integer `level`, positive integer `amount` | Increment the matching slot, clamped to its maximum |
 
+### Immediate-operation no-op policy (Wave A1)
+
+Direct DM/co-DM operations which are valid but leave canonical character JSON unchanged are successful,
+auditable semantic no-ops. This includes healing at the applicable maximum, adding an already-present condition,
+removing an absent condition, and restoring a full spell-slot pool. `spell_slot.spend` with insufficient
+availability remains a rejected operation with no character, audit, event, outbox, or receipt side effects.
+
+The current migration-0005 schema requires every applied operation to name a positive
+`resulting_character_revision` and uniquely associates that revision with the target character. Therefore Wave
+A1 uses the narrowest migration-free contract: an accepted no-op advances the character revision and operation
+watermark, records one terminal audit entry and one `character.operation.applied` event with `changed:false`,
+creates the exact replay receipt, but does not emit `character.projection.invalidated`. The canonical character
+JSON bytes remain unchanged. This revision-only ordering point is also required for `E(B)`/`E(L)`: an operation
+which is a no-op on canonical `B` can still change a dirty local `L`, so clients must not infer coverage from
+unchanged bytes.
+
+This intentionally does not consume migration 0010, which ADR 0020 reserves for the future multi-target state
+machine. A later schema change may permit no-revision direct no-ops only if it preserves multiple ordered no-ops,
+durable replay, and dirty-track reconciliation without ambiguity.
+
 ### The applicable hit-point maximum (added 2026-09-02)
 
 `hp.heal` clamps to *the applicable maximum*, which is a property of the character document — never of
@@ -442,6 +462,10 @@ The second slice implements the client half and freezes these choices:
 - successful notices are emitted only after repository adoption returns `applied`, or after a serialized resync
   returns per-operation adopted before/after outcomes. Duplicate/replayed operations therefore do not announce
   twice, while blocked/rejected adoption shows a persistent recovery error and never a success notice.
+- direct no-op events carry `changed:false`. Every document track still applies or covers the operation in
+  revision order; a track whose local bytes remain unchanged advances coverage without state adoption, document
+  generation, or rendering. The owner receives one non-blocking no-change notice, while DM read-only consumers
+  refresh only when an independently delivered metadata invalidation exists.
 
 Target discovery, successful production peer templates, the ADR 0016 peer source-cost implementation, and
 multi-target/monster operations remain deliberately deferred. Therefore ADR 0012 is not yet marked fully

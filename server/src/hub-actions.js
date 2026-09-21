@@ -10,6 +10,7 @@ import {HubStoreError} from "./hub-store-error.js";
 // Re-exported here so existing server import sites keep working unchanged.
 export {
 	applySemanticOperation,
+	applySemanticOperationWithResult,
 	getConditionIdentity,
 	normalizeSemanticOperation,
 	SEMANTIC_OPERATION_KINDS,

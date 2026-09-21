@@ -265,7 +265,7 @@ Acceptance:
   inaccessible;
 - projection generation cannot mutate or persist the canonical character/Board document.
 
-### V2-T3 — live semantic effects on the Character Sheet (**active — server/reconciliation slices implemented; broader Character Sheet effects remain**)
+### V2-T3 — live semantic effects on the Character Sheet (**active — Wave A1 six-kind immediate lane complete in held implementation; broader Character Sheet effects remain**)
 
 Dependency: V2-T2.
 
@@ -300,6 +300,12 @@ Acceptance:
   state without opening the generic revision-conflict modal as a catch-all;
 - unsupported or policy-forbidden effects do not partially mutate a character;
 - local sheets and campaigns without the capability retain current behavior.
+
+Wave A1 completes the existing immediate DM/co-DM lane for the six version-1 operations without enabling
+protocol-6 multi-target authority. Valid canonical no-ops are auditable and replayable, omit projection
+invalidation, and use a revision-only ordering point because migration 0005 requires a unique applied revision
+and migration 0010 remains reserved for ADR 0020. This implementation remains held as a draft descendant of
+PR #285 pending the physical r10 game-day GO/NO-GO.
 
 ### V2-T4 — party inventory, carry, and item awards (**active — player stash/transfer/carry and DM award slices shipped**)
 

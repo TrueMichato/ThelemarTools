@@ -639,6 +639,41 @@ describe("Live campaign effects on an open Character Sheet", () => {
 		expect(state.getCurrentHp()).toBe(25);
 	});
 
+	it("announces a canonical no-op once without re-rendering or stealing focus", async () => {
+		const {clients, host, hubEffects, state} = await pMakeHarness({seed: {hp: {current: 44, max: 44, temp: 0}}});
+		const renderCountBefore = host._renderCount;
+		const activeElement = {focus: jest.fn()};
+		document.activeElement = activeElement;
+		clients[0].emit("event", {
+			...makeAppliedEvent({kind: "hp.heal", args: {amount: 5}}),
+			payload: {
+				...makeAppliedEvent({kind: "hp.heal", args: {amount: 5}}).payload,
+				changed: false,
+			},
+		});
+		await pFlush();
+
+		expect(state.getCurrentHp()).toBe(44);
+		expect(host._renderCount).toBe(renderCountBefore);
+		expect(document.activeElement).toBe(activeElement);
+		expect(hubEffects.onApplied).toHaveBeenCalledTimes(1);
+		expect(hubEffects.onApplied).toHaveBeenCalledWith(expect.objectContaining({
+			changed: false,
+			beforeData: expect.objectContaining({hp: expect.objectContaining({current: 44})}),
+			afterData: expect.objectContaining({hp: expect.objectContaining({current: 44})}),
+		}));
+
+		clients[0].emit("event", {
+			...makeAppliedEvent({id: "event-replay", kind: "hp.heal", args: {amount: 5}}),
+			payload: {
+				...makeAppliedEvent({kind: "hp.heal", args: {amount: 5}}).payload,
+				changed: false,
+			},
+		});
+		await pFlush();
+		expect(hubEffects.onApplied).toHaveBeenCalledTimes(1);
+	});
+
 	it("adds and removes a condition using the server's identity", async () => {
 		const {clients, state} = await pMakeHarness();
 		clients[0].emit("event", makeAppliedEvent({

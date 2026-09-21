@@ -1132,7 +1132,7 @@ export class HubHttpCharacterRepository {
 		}
 
 		// ADOPT LIVE — the only externally visible step inside the transaction.
-		if (Object.hasOwn(plan.staged, "live") && typeof fnAdoptLive === "function") {
+		if (Object.hasOwn(plan.staged, "live") && plan.changedTracks?.live !== false && typeof fnAdoptLive === "function") {
 			try {
 				fnAdoptLive(structuredClone(plan.staged.live));
 			} catch (error) {
@@ -1149,6 +1149,7 @@ export class HubHttpCharacterRepository {
 			liveNext: Object.hasOwn(plan.staged, "live") ? structuredClone(plan.staged.live) : undefined,
 			acceptedNext: Object.hasOwn(plan.staged, "accepted") ? structuredClone(plan.staged.accepted) : undefined,
 			revisionNext: plan.revisionNext,
+			liveChanged: plan.changedTracks?.live !== false,
 		};
 	}
 
@@ -1468,7 +1469,7 @@ export class HubHttpCharacterRepository {
 				}
 
 				const liveNext = working.live?.data;
-				const isLiveChanged = !!plan.applied.length && liveNext !== undefined;
+				const isLiveChanged = plan.applied.some(entry => entry.liveChanged);
 				if (isLiveChanged && typeof fnAdoptLive === "function") {
 					try {
 						fnAdoptLive(structuredClone(liveNext));
@@ -1495,6 +1496,7 @@ export class HubHttpCharacterRepository {
 					appliedEffects: plan.applied
 						.filter(entry => entry.appliedEffect)
 						.map(entry => structuredClone(entry.appliedEffect)),
+					liveChanged: isLiveChanged,
 					liveNext: isLiveChanged ? structuredClone(liveNext) : undefined,
 				};
 			});
@@ -1595,11 +1597,13 @@ export class HubHttpCharacterRepository {
 					leg: plan.leg,
 					operationId: plan.operationId,
 					operationLegKey,
+					liveChanged: Object.hasOwn(plan.staged, "live") && plan.changedTracks?.live !== false,
 					...(Object.hasOwn(plan.staged, "live")
 						&& plan.operation
 						? {
 							appliedEffect: {
 								operation: structuredClone(entry.operation),
+								changed: plan.changedTracks?.live !== false,
 								beforeData: liveBefore,
 								afterData: structuredClone(plan.staged.live),
 							},

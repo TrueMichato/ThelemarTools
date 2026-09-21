@@ -1068,16 +1068,19 @@ class CharacterSheetPage {
 			case "applied":
 				// Rendering runs after the transaction committed; a paint failure must not roll back state that
 				// is already coherent.
-				try {
-					this._renderCharacter();
-				} catch (error) {
-					JqueryUtil.doToast({type: "danger", content: `A campaign effect was applied but the sheet could not be redrawn. Reload to refresh the display.`});
-					// eslint-disable-next-line no-console
-					console.error("Render after campaign effect failed:", error);
+				if (result.liveChanged !== false) {
+					try {
+						this._renderCharacter();
+					} catch (error) {
+						JqueryUtil.doToast({type: "danger", content: `A campaign effect was applied but the sheet could not be redrawn. Reload to refresh the display.`});
+						// eslint-disable-next-line no-console
+						console.error("Render after campaign effect failed:", error);
+					}
 				}
 				if (event.payload?.operation) {
 					this._hubEffects?.onApplied({
 						operation: event.payload.operation,
+						changed: event.payload.changed !== false,
 						beforeData,
 						afterData: this._getHubLiveCharacterData(),
 					});
@@ -1191,7 +1194,7 @@ class CharacterSheetPage {
 
 		switch (result?.status) {
 			case "recovered":
-				this._renderCharacter();
+				if (result.liveChanged !== false) this._renderCharacter();
 				this._updateSaveIndicator("saved");
 				for (const appliedEffect of result.appliedEffects || []) {
 					this._hubEffects?.onApplied(appliedEffect);
