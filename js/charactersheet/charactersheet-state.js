@@ -9704,6 +9704,68 @@ class CharacterSheetState {
 					}
 				}
 			}
+			if (
+				decision.meta?.unplacedFeatChoice
+					&& ["nestedSkill", "nestedExpertise"].includes(decision.type)
+					&& decision.selection != null
+					&& !decision.receipt
+			) {
+				const parent = manifest.decisions.find(candidate =>
+					candidate.semanticKey === decision.rootSemanticKey,
+				);
+				const feat = this._data.feats.find(candidate =>
+					candidate.id === parent?.meta?.featId
+						|| candidate.sourceDecisionKey === parent?.semanticKey,
+				);
+				const selected = Array.isArray(decision.selection) ? decision.selection : [decision.selection];
+				if (feat && selected.length === 1) {
+					const value = selected[0];
+					const skill = CharacterSheetClassUtils.normalizeSkillKey?.(value)
+						|| String(value || "").toLowerCase().replace(/['\s]+/g, "");
+					if (skill) {
+						const current = this.getSkillProficiency(skill);
+						const ownershipType = decision.type === "nestedExpertise" ? "expertise" : "skills";
+						const expertiseOwnership = this._getProgressionOwnershipEntry("expertise", skill);
+						const independentExpertise = decision.type === "nestedExpertise"
+							&& current >= 2
+							&& (
+								!!this._data.grantedProficiencies?.skills?.[skill]?.length
+								|| expertiseOwnership?.preserved
+								|| expertiseOwnership?.sources?.some(source =>
+									source !== decision.semanticKey && source !== `feat:${feat.id}`,
+								)
+								|| manifest.decisions.some(candidate =>
+									candidate.semanticKey !== decision.semanticKey
+										&& ["expertise", "nestedExpertise"].includes(candidate.type)
+										&& (Array.isArray(candidate.selection) ? candidate.selection : [candidate.selection])
+											.some(candidateSkill => this._getProgressionOwnershipKey("expertise", candidateSkill) === skill),
+								)
+							);
+						const before = decision.type === "nestedExpertise" && current >= 2 && !independentExpertise
+							? 1
+							: current;
+						const after = decision.type === "nestedExpertise"
+							? Math.max(2, current)
+							: Math.max(1, current);
+						if (after !== current) this.setSkillProficiency(skill, after);
+						decision.receipt = {
+							version: 1,
+							sourceDecisionKey: decision.semanticKey,
+							effects: [{
+								type: "ownership",
+								ownership: [{type: ownershipType, value: CharacterSheetProgression._copy(value)}],
+							}],
+						};
+						feat.appliedEffects ||= {};
+						feat.appliedEffects.skillProficiencies ||= {};
+						const existing = feat.appliedEffects.skillProficiencies[skill];
+						feat.appliedEffects.skillProficiencies[skill] = {
+							before: existing?.before ?? before,
+							after,
+						};
+					}
+				}
+			}
 			if (decision.type !== "nestedSkillBonus" || decision.selection == null) continue;
 			if (this._data.namedModifiers.some(modifier => modifier.sourceDecisionKey === decision.semanticKey)) continue;
 
@@ -9763,10 +9825,12 @@ class CharacterSheetState {
 		const nonProgression = this._getNonProgressionOwnershipKeys(manifest);
 		for (const [type, values] of Object.entries(actual)) {
 			for (const value of values) {
+				const wasTracked = !!this._getProgressionOwnershipEntry(type, value);
 				const entry = this._getProgressionOwnershipEntry(type, value, {isCreate: true});
 				if (!entry) continue;
 				const key = this._getProgressionOwnershipKey(type, value);
-				if (!entry.sources.length || nonProgression[type]?.has(key)) entry.preserved = true;
+				const isNonProgression = nonProgression[type]?.has(key);
+				if ((!wasTracked && !entry.sources.length) || isNonProgression) entry.preserved = true;
 			}
 		}
 		ownership.initialized = true;

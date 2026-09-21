@@ -100,8 +100,17 @@ Base record. Legacy recorded evidence adopts the feat's exact canonical
 ability delta without changing the candidate score; replacement reverses only
 that delta and preserves the parent-owned feat, modifiers, resources, ID, and
 null-level provenance. Missing evidence remains a required incomplete choice
-rather than being inferred. Multi-family feat subchoices (such as Skill
-Expert) and duplicate-acquisition resolution remain separate transactions.
+rather than being inferred.
+
+The ability/proficiency/expertise shape used by Skill Expert is also supported
+as three stable children of one unplaced feat record. Candidate adoption uses
+the recorded feat choices to claim only the feat-owned +1, gained proficiency,
+and expertise. The expertise catalog is recalculated from the candidate's
+proficiencies after every staged skill change; a now-illegal expertise choice
+remains visible as invalid and blocks Apply until repaired. Existing
+independent proficiency or expertise sources are marked preserved, so replacing
+the feat's selection cannot remove them. Other multi-family feat shapes and
+duplicate-acquisition resolution remain separate transactions.
 
 Manifest discovery must be complete before it replaces the saved ledger. If
 class data is temporarily unavailable, Respec may report the discovery error,

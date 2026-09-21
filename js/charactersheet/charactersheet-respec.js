@@ -469,21 +469,25 @@ class CharacterSheetRespec {
 			if (!evidence.hasExpectedChoices && !parts.length) parts.push("No recorded build-time subchoices");
 			else if (!parts.length) parts.push("Subchoice history is unavailable");
 			row.append(e_({tag: "span", clazz: "ve-muted", txt: ` — ${parts.join(" · ")}`}));
-			const abilityChild = (this._engine?.manifest?.base?.decisions || []).find(candidate =>
-				candidate.meta?.unplacedFeatAbility
-					&& candidate.parentSemanticKey === decision.semanticKey,
-			);
-			if (abilityChild) {
+			const childLabels = {ability: "ability", skills: "skill", expertise: "expertise"};
+			const children = (this._engine?.manifest?.base?.decisions || [])
+				.filter(candidate =>
+					candidate.meta?.unplacedFeatChoice
+						&& candidate.rootSemanticKey === decision.semanticKey,
+				)
+				.sort((a, b) => Number(a.slot) - Number(b.slot));
+			for (const child of children) {
+				const childLabel = childLabels[child.meta?.featChoiceKey] || "choice";
 				const editBtn = e_({
 					tag: "button",
-					clazz: `ve-btn ve-btn-xs ${abilityChild.status === "resolved" ? "ve-btn-default" : "ve-btn-warning"} ml-2`,
-					txt: abilityChild.status === "resolved" ? "Change ability" : "Choose ability",
+					clazz: `ve-btn ve-btn-xs ${child.status === "resolved" ? "ve-btn-default" : "ve-btn-warning"} ml-2`,
+					txt: `${child.status === "resolved" ? "Change" : "Choose"} ${childLabel}`,
 				});
-				editBtn.dataset.decisionId = abilityChild.id;
+				editBtn.dataset.decisionId = child.id;
 				editBtn.addEventListener("click", () => this._editManifestOptions(
 					0,
 					{choices: {}},
-					{decision: abilityChild},
+					{decision: child},
 					null,
 				));
 				row.append(editBtn);
@@ -1918,7 +1922,16 @@ class CharacterSheetRespec {
 				add: value => this._state.addExpertise(normalizeValue(value)),
 				remove: value => {
 					const skill = normalizeValue(value);
-					if (skill) this._state.setSkillProficiency(skill, 1);
+					if (!skill) return;
+					if (!decision.meta?.unplacedFeatExpertise) {
+						this._state.setSkillProficiency(skill, 1);
+						return;
+					}
+					const skillOwnership = this._state._getProgressionOwnershipEntry?.("skills", skill);
+					this._state.setSkillProficiency(
+						skill,
+						skillOwnership?.preserved || skillOwnership?.sources?.length ? 1 : 0,
+					);
 				},
 			},
 			nestedTool: {
@@ -2014,7 +2027,46 @@ class CharacterSheetRespec {
 			return;
 		}
 		if (nestedSet) {
+			const beforeLevels = Object.fromEntries(
+				[...previous, ...next].map(value => {
+					const skill = normalizeValue(value);
+					return [skill, skill ? this._state.getSkillProficiency(skill) : 0];
+				}),
+			);
 			applySetChoice(nestedSet.type, nestedSet.add, nestedSet.remove);
+			if (decision.meta?.unplacedFeatChoice && ["nestedSkill", "nestedExpertise"].includes(decision.type)) {
+				const parent = this._engine?.manifest?.decisions?.find(candidate =>
+					candidate.semanticKey === decision.rootSemanticKey,
+				);
+				const feat = this._state._data.feats.find(candidate =>
+					candidate.id === parent?.meta?.featId
+						|| candidate.sourceDecisionKey === parent?.semanticKey,
+				);
+				const choiceKey = decision.meta.featChoiceKey;
+				if (feat && choiceKey) {
+					const selectedValues = next.map(valueName);
+					feat.choices = {...(feat.choices || {}), [choiceKey]: selectedValues};
+					feat._featChoices = {...(feat._featChoices || feat.choices), [choiceKey]: selectedValues};
+					feat.appliedEffects ||= {};
+					feat.appliedEffects.skillProficiencies ||= {};
+					const otherChoiceKey = choiceKey === "skills" ? "expertise" : "skills";
+					const stillSelected = new Set([
+						...selectedValues,
+						...(feat.choices?.[otherChoiceKey] || []),
+					].map(normalizeValue));
+					for (const value of previous) {
+						const skill = normalizeValue(value);
+						if (skill && !stillSelected.has(skill)) delete feat.appliedEffects.skillProficiencies[skill];
+					}
+					for (const skill of stillSelected) {
+						const existing = feat.appliedEffects.skillProficiencies[skill];
+						feat.appliedEffects.skillProficiencies[skill] = {
+							before: existing?.before ?? beforeLevels[skill] ?? 0,
+							after: this._state.getSkillProficiency(skill),
+						};
+					}
+				}
+			}
 			return;
 		}
 
