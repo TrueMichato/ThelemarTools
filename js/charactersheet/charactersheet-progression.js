@@ -1468,6 +1468,41 @@ class CharacterSheetProgression {
 		}
 	}
 
+	static _getLegacyEpicBoonRepair ({improvement, legacyFeat, legacyAsi, state, featPool}) {
+		if (improvement?.kind !== "feat" || legacyFeat?.name || !legacyAsi) return null;
+		if (Object.values(legacyAsi).reduce((total, value) => total + (Number(value) || 0), 0) !== 2) return null;
+
+		const canonicalByUid = new Map((featPool || []).map(feat => [
+			CharacterSheetProgression.getEntityUid(feat),
+			feat,
+		]));
+		const candidates = (state?.getFeats?.() || []).filter(stored => {
+			if (stored.sourceDecisionKey) return false;
+			const canonical = canonicalByUid.get(CharacterSheetProgression.getEntityUid(stored));
+			if (canonical?.category !== "EB") return false;
+			const ability = String(stored.choices?.ability || "").toLowerCase();
+			const abilityGrant = CharacterSheetClassUtils.getEffectiveFeatAbility(canonical)
+				?.find(entry => entry?.choose?.from?.includes(ability));
+			if (!abilityGrant) return false;
+			const deltas = stored.appliedEffects?.abilityDeltas;
+			return deltas && typeof deltas === "object" && !Object.keys(deltas).length;
+		});
+		if (candidates.length !== 1) return null;
+
+		const stored = candidates[0];
+		const canonical = canonicalByUid.get(CharacterSheetProgression.getEntityUid(stored));
+		const ability = String(stored.choices.ability).toLowerCase();
+		const abilityGrant = CharacterSheetClassUtils.getEffectiveFeatAbility(canonical)
+			.find(entry => entry?.choose?.from?.includes(ability));
+		return {
+			feat: {name: canonical.name, source: canonical.source},
+			ability,
+			amount: Number(abilityGrant.choose.amount) || 1,
+			max: Number(abilityGrant.max) || 20,
+			legacyAsi: CharacterSheetProgression._copy(legacyAsi),
+		};
+	}
+
 	static _getSkillGrant (definitions, page) {
 		const out = {count: 0, options: [], fixed: []};
 		const allSkills = (page?.getSkillsList?.() || [])
@@ -1646,7 +1681,20 @@ class CharacterSheetProgression {
 		return classHistory.every(entry => entry.manifestComplete !== true);
 	}
 
-	static _getExistingSelection ({storedPool, semanticKey, history, type, sourceKey, slot, fallback = null, fallbackStatus = "ambiguous"}) {
+	static _getExistingSelection ({
+		storedPool,
+		semanticKey,
+		history,
+		type,
+		sourceKey,
+		slot,
+		fallback = null,
+		fallbackStatus = "ambiguous",
+		preferFallback = false,
+	}) {
+		if (preferFallback && fallback != null) {
+			return {selection: CharacterSheetProgression._copy(fallback), status: fallbackStatus};
+		}
 		const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
 		if (exact) return {selection: CharacterSheetProgression._copy(exact.selection), status: exact.status};
 		const entry = Array.isArray(history) ? history[0] : history;
@@ -1821,6 +1869,7 @@ class CharacterSheetProgression {
 				slot: config.slot || 0,
 				fallback: config.fallbackSelection,
 				fallbackStatus: config.fallbackStatus,
+				preferFallback: config.preferFallback,
 			});
 			const isValid = config.isValid !== false && CharacterSheetProgression._isSelectionValid({
 				selection: matched.selection,
@@ -1987,9 +2036,15 @@ class CharacterSheetProgression {
 			);
 			if (improvement) {
 				const legacyFeat = historyEntry?.choices?.feat || null;
-				const excludeFeatUid = legacyFeat?.name
-					? CharacterSheetProgression.getEntityUid(legacyFeat)
-					: "";
+				const legacyAsi = improvement.kind === "feat" ? historyEntry?.choices?.asi || null : null;
+				const legacyEpicBoonRepair = CharacterSheetProgression._getLegacyEpicBoonRepair({
+					improvement,
+					legacyFeat,
+					legacyAsi,
+					state,
+					featPool,
+				});
+				const excludeFeatUid = CharacterSheetProgression.getEntityUid(legacyFeat || legacyEpicBoonRepair?.feat);
 				const eligibleFeats = CharacterSheetClassUtils.getEligibleFeats(featPool, state, {
 					totalLevel: levelInfo.characterLevel,
 					excludeFeatUid,
@@ -2012,16 +2067,26 @@ class CharacterSheetProgression {
 						meta: {improvement},
 					});
 				} else if (improvement.kind === "feat") {
-					const legacyAsi = historyEntry?.choices?.asi || null;
+					const canAdoptLegacyBoon = legacyEpicBoonRepair
+						&& eligibleFeats.some(feat =>
+							CharacterSheetProgression.getEntityUid(feat) === CharacterSheetProgression.getEntityUid(legacyEpicBoonRepair.feat),
+						);
 					addDecision(levelInfo, {
 						type: "feat",
 						label: improvement.label,
 						sourceKey: "epic-boon-or-feat",
 						count: 1,
 						options: eligibleFeats,
-						fallbackSelection: legacyAsi ? {mode: "asi", legacyAsi: CharacterSheetProgression._copy(legacyAsi)} : null,
+						fallbackSelection: canAdoptLegacyBoon
+							? legacyEpicBoonRepair.feat
+							: legacyAsi ? {mode: "asi", legacyAsi: CharacterSheetProgression._copy(legacyAsi)} : null,
 						fallbackStatus: null,
-						meta: {improvement, legacyAsiInvalid: !!legacyAsi},
+						preferFallback: canAdoptLegacyBoon,
+						meta: {
+							improvement,
+							legacyAsiInvalid: !!legacyAsi,
+							...(canAdoptLegacyBoon ? {legacyEpicBoonRepair} : {}),
+						},
 					});
 				} else {
 					addDecision(levelInfo, {

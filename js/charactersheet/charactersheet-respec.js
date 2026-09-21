@@ -1938,7 +1938,26 @@ class CharacterSheetRespec {
 					if (decision.meta.receiptPreviousAbility[ability] == null) {
 						decision.meta.receiptPreviousAbility[ability] = before;
 					}
-					this._state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(before, amount, 30));
+					const after = CharacterSheetClassUtils.capAbilityIncrease(before, amount, 30);
+					this._state.setAbilityBase(ability, after);
+					const parent = this._engine?.manifest?.decisions?.find(candidate =>
+						candidate.semanticKey === decision.parentSemanticKey,
+					);
+					if (!["feat", "asiOrFeat"].includes(parent?.type)) return;
+					const feat = this._state._data.feats.find(candidate =>
+						candidate.sourceDecisionKey === parent.semanticKey,
+					);
+					if (!feat) return;
+					for (const previousValue of previous) {
+						delete feat.appliedEffects?.abilityDeltas?.[String(previousValue || "").toLowerCase()];
+					}
+					feat.choices = {...(feat.choices || {}), ability};
+					feat._featChoices = {...(feat._featChoices || feat.choices), ability};
+					feat.appliedEffects ||= {};
+					feat.appliedEffects.abilityDeltas = {
+						...(feat.appliedEffects.abilityDeltas || {}),
+						[ability]: after - before,
+					};
 				});
 			}
 			return;
@@ -4227,13 +4246,33 @@ class CharacterSheetRespec {
 
 	_applyImprovementChange (decision, next) {
 		if (!decision || !["asi", "feat", "asiOrFeat"].includes(decision.type)) return false;
+		const previousFeat = decision.type === "feat"
+			? decision.selection
+			: decision.selection?.mode === "feat" ? decision.selection.feat : null;
+		if (next?.mode === "feat"
+				&& previousFeat?.name === next.feat?.name
+				&& previousFeat?.source === next.feat?.source) {
+			const stored = this._state.getFeats().find(feat =>
+				feat.name === previousFeat.name && feat.source === previousFeat.source,
+			);
+			if (JSON.stringify(stored?.choices || {}) === JSON.stringify(next.featChoices || {})) return true;
+		}
+		const hasAbilityChildReceipt = this._engine.manifest.decisions.some(candidate =>
+			candidate.type === "nestedAbility"
+				&& candidate.parentSemanticKey === decision.semanticKey
+				&& candidate.receipt?.effects?.some(effect => effect.type === "abilityDelta"),
+		);
 		try {
 			this._engine.stageGraphMutation(decision.id, null, {
 				apply: ({state}) => {
 					const previousState = this._state;
 					this._state = state;
 					try {
-						const result = this._applyImprovementChangeInner(decision, next, {throwOnError: true, skipLedgerUpdate: true});
+						const result = this._applyImprovementChangeInner(decision, next, {
+							throwOnError: true,
+							skipLedgerUpdate: true,
+							skipPreviousFeatAbilityDeltas: hasAbilityChildReceipt,
+						});
 						return {selection: result?.selection};
 					} finally {
 						this._state = previousState;
@@ -4247,7 +4286,11 @@ class CharacterSheetRespec {
 		}
 	}
 
-	_applyImprovementChangeInner (decision, next, {throwOnError = false, skipLedgerUpdate = false} = {}) {
+	_applyImprovementChangeInner (
+		decision,
+		next,
+		{throwOnError = false, skipLedgerUpdate = false, skipPreviousFeatAbilityDeltas = false} = {},
+	) {
 		if (!decision || !["asi", "feat", "asiOrFeat"].includes(decision.type)) return false;
 		const snapshot = this._state.toJson();
 		try {
@@ -4303,7 +4346,11 @@ class CharacterSheetRespec {
 					if (feature.id) this._state.removeFeature(feature.id);
 					else this._state._data.features = this._state._data.features.filter(it => it !== feature);
 				});
-			if (previousFeat?.name) this._state.removeFeat(previousFeat.name, previousFeat.source);
+			if (previousFeat?.name) {
+				this._state.removeFeat(previousFeat.name, previousFeat.source, {
+					skipAbilityDeltas: skipPreviousFeatAbilityDeltas,
+				});
+			}
 
 			let selection;
 			if (next.mode === "asi") {

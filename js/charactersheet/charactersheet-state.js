@@ -9414,6 +9414,95 @@ class CharacterSheetState {
 
 	adoptLegacyProgressionEvidence (manifest) {
 		for (const decision of manifest?.decisions || []) {
+			const repair = decision.meta?.legacyEpicBoonRepair;
+			if (decision.type === "feat" && repair && decision.selection?.name === repair.feat?.name) {
+				const feat = this._data.feats.find(candidate =>
+					candidate.name === repair.feat.name
+						&& candidate.source === repair.feat.source
+						&& !candidate.sourceDecisionKey,
+				);
+				const child = manifest.decisions.find(candidate =>
+					candidate.type === "nestedAbility"
+						&& candidate.parentSemanticKey === decision.semanticKey
+						&& candidate.selection === repair.ability,
+				);
+				if (feat && child) {
+					for (const [ability, bonus] of Object.entries(repair.legacyAsi || {})) {
+						this.setAbilityBase(ability, Math.max(1, this.getAbilityBase(ability) - (Number(bonus) || 0)));
+					}
+					const before = this.getAbilityBase(repair.ability);
+					const after = CharacterSheetClassUtils.capAbilityIncrease(before, repair.amount, repair.max);
+					this.setAbilityBase(repair.ability, after);
+					feat.id ||= CryptUtil.uid();
+					feat.sourceDecisionKey = decision.semanticKey;
+					feat.category = "EB";
+					feat.choices = {...(feat.choices || {}), ability: repair.ability};
+					feat.appliedEffects = {
+						...(feat.appliedEffects || {}),
+						abilityDeltas: {[repair.ability]: after - before},
+					};
+					const historyEntry = this._data.levelHistory.find(entry =>
+						Number(entry.level) === Number(decision.characterLevel),
+					);
+					if (historyEntry) {
+						historyEntry.choices ||= {};
+						delete historyEntry.choices.asi;
+						historyEntry.choices.feat = CharacterSheetProgression._copy(repair.feat);
+						const historyDecision = (historyEntry.decisions || []).find(candidate =>
+							candidate.semanticKey === decision.semanticKey,
+						);
+						if (historyDecision) {
+							historyDecision.selection = CharacterSheetProgression._copy(repair.feat);
+							historyDecision.status = "resolved";
+						}
+					}
+					child.meta ||= {};
+					child.meta.receiptPreviousAbility = {
+						...(child.meta.receiptPreviousAbility || {}),
+						[repair.ability]: before,
+					};
+					child.receipt = {
+						version: 1,
+						sourceDecisionKey: child.semanticKey,
+						effects: [{
+							type: "abilityDelta",
+							sourceDecisionKey: child.semanticKey,
+							ability: repair.ability,
+							amount: after - before,
+							before,
+						}],
+					};
+				}
+			}
+			if (decision.type === "nestedAbility" && decision.selection && !decision.receipt) {
+				const parent = manifest.decisions.find(candidate =>
+					candidate.semanticKey === decision.parentSemanticKey,
+				);
+				const feat = this._data.feats.find(candidate =>
+					candidate.sourceDecisionKey === parent?.semanticKey,
+				);
+				const ability = String(decision.selection).toLowerCase();
+				const amount = Number(feat?.appliedEffects?.abilityDeltas?.[ability]) || 0;
+				if (amount) {
+					const before = this.getAbilityBase(ability) - amount;
+					decision.meta ||= {};
+					decision.meta.receiptPreviousAbility = {
+						...(decision.meta.receiptPreviousAbility || {}),
+						[ability]: before,
+					};
+					decision.receipt = {
+						version: 1,
+						sourceDecisionKey: decision.semanticKey,
+						effects: [{
+							type: "abilityDelta",
+							sourceDecisionKey: decision.semanticKey,
+							ability,
+							amount,
+							before,
+						}],
+					};
+				}
+			}
 			if (decision.type !== "nestedSkillBonus" || decision.selection == null) continue;
 			if (this._data.namedModifiers.some(modifier => modifier.sourceDecisionKey === decision.semanticKey)) continue;
 
@@ -48863,15 +48952,17 @@ class CharacterSheetState {
 		return false;
 	}
 
-	_revertFeatAppliedEffects (feat) {
+	_revertFeatAppliedEffects (feat, {skipAbilityDeltas = false} = {}) {
 		const effects = feat?.appliedEffects;
 		if (!effects) return false;
 		const sourceId = `feat:${feat.id}`;
 
-		Object.entries(effects.abilityDeltas || {}).forEach(([ability, delta]) => {
-			if (!delta) return;
-			this.setAbilityBase(ability, Math.max(1, this.getAbilityBase(ability) - Number(delta)));
-		});
+		if (!skipAbilityDeltas) {
+			Object.entries(effects.abilityDeltas || {}).forEach(([ability, delta]) => {
+				if (!delta) return;
+				this.setAbilityBase(ability, Math.max(1, this.getAbilityBase(ability) - Number(delta)));
+			});
+		}
 		Object.entries(effects.skillProficiencies || {}).forEach(([skill, values]) => {
 			const type = Number(values.after) >= 2 ? "expertise" : "skills";
 			if (!this.releaseProgressionOwnership(type, skill, sourceId)) return;
@@ -49107,7 +49198,7 @@ class CharacterSheetState {
 		});
 	}
 
-	removeFeat (featIdOrName, source) {
+	removeFeat (featIdOrName, source, {skipAbilityDeltas = false} = {}) {
 		// Find the feat first to get its id
 		const feat = this._data.feats.find(f =>
 			f.id === featIdOrName || (f.name === featIdOrName && f.source === source),
@@ -49135,7 +49226,7 @@ class CharacterSheetState {
 
 			// Reverse feat bonuses through the exact application receipt when available.
 			// Older saves fall back to the legacy selected-choice reversal below.
-			const revertedAppliedEffects = this._revertFeatAppliedEffects(feat);
+			const revertedAppliedEffects = this._revertFeatAppliedEffects(feat, {skipAbilityDeltas});
 			if (!revertedAppliedEffects) this.removeInnateSpellsByFeature(feat.name);
 			if (!revertedAppliedEffects && feat.choices) {
 				if (feat.choices.ability) {
