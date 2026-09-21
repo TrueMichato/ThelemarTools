@@ -1,6 +1,6 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through account-entitlement migration 0009
+> **Status:** Implemented through source-cost binding migration 0010
 > **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
@@ -102,6 +102,9 @@ Current migrations:
   transaction binding, and bounded terminal account/session/membership outcome evidence.
 - 0009 provider-neutral account entitlements, one-time current-owner creator backfill, nullable actor
   provenance, active-row indexes, and deferred last-operator protection.
+- 0010 source-cost ABA identity normalization aligned with the shared resolver: trim all ids, lowercase UUIDs
+  only, preserve non-UUID case, and retain every matching resource plus feature/innate mirror in the binding
+  snapshot so duplicate cardinality cannot disappear behind `LIMIT 1`.
 
 Migration 0007 is additive and keeps protocol-3 cost-free rows readable while new source-cost rows require a
 protocol-4 application. Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old
@@ -116,19 +119,24 @@ current application sets the transaction-local operator guard, so an exact prede
 schema does not receive an unknown raw constraint failure. Entitlement rows removed by an account cascade are
 also exempt: current code prevents last-operator deletion before the account transition, while predecessor
 request/purge remains schema-compatible.
+Migration 0010 is additive and previous-application-compatible. It replaces only immutable trigger helper
+functions used by the existing migration-0007 source-cost invalidation trigger; it adds no tables, columns,
+routes, descriptors, or capability. Exact predecessor code continues to read and write the same schema, while
+the trigger conservatively invalidates proposals whose trimmed/case-sensitive identity or duplicate cardinality
+changes.
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
-Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0009, grants the
-runtime role, boots the production image against required version 0009, and runs semantic role/replay/
+Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0010, grants the
+runtime role, boots the production image against required version 0010, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
-ADR 0020 requires a future additive `0010_multi_target_semantic_operations.sql`, but Wave A0 intentionally adds
+ADR 0020 requires a future additive `0011_multi_target_semantic_operations.sql`, but Wave A0 intentionally adds
 neither that SQL file nor a migration-policy entry. When A3 authors it, the policy phase is `expand` and
-`previousAppCompatible: true` describes only schema-before-use: a true pre-0010 binary is operationally
+`previousAppCompatible: true` describes only schema-before-use: a true pre-0011 binary is operationally
 compatible only while the planned singleton `hub.semantic_multi_target_usage` marker is absent. The first
 accepted proposal inserts that marker transactionally; it has no FK to cleanable history and normal retention
 never deletes it. Once present, normal rollback must target a bridge/r10+ binary which understands
 `target_set_version`, normalized target history, expiry, retention, purge cleanup, and the marker. A true
-pre-0010 rollback is blocked whenever the marker exists, regardless of current parent/child counts; destructive
+pre-0011 rollback is blocked whenever the marker exists, regardless of current parent/child counts; destructive
 history/event/outbox/recovery export and purge, with marker deletion last, requires separate review and is not
 normal rollback. Runtime receives only SELECT/INSERT on the marker, backup receives SELECT, and restore/preflight
 tests must preserve it.

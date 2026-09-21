@@ -2,6 +2,11 @@
 
 Status: Accepted; first protocol-4 Cure Wounds client/server slice implemented (2026-09-04)
 
+> **Hardened by migration `0010_source_cost_binding_identity.sql` (2026-09-21):** PostgreSQL ABA snapshots now
+> use the shared resolver's exact identity normalization (trim; lowercase UUIDs only; preserve non-UUID case) and
+> retain every matching entry/resource plus linked mirrors, so duplicate cardinality cannot be hidden by
+> `LIMIT 1`. This changes no source-cost version, descriptor, route, capability, or production template.
+>
 > **Extended by [ADR 0020](0020-consented-multi-target-operations.md) (2026-09-21):** the future multi-target
 > contract preserves this ADR's no-reservation and one-cost atomicity rules, but replaces the singular target
 > acceptance transaction with independent fixed-candidate responses followed by one source-selected all-or-none
@@ -44,7 +49,8 @@ normative for the protocol-3 `cost=none` substrate and its command, approval, op
 semantics. Transfer escrow is unaffected because it moves ownership of an asset rather than paying a deferred
 spell/ability cost.
 
-The first implementation slice includes migration `0007`, memory/PostgreSQL authority, operation-leg
+The first implementation slice includes migration `0007`, with identity/cardinality hardening in migration
+`0010`, memory/PostgreSQL authority, operation-leg
 reconciliation, and campaign Character Sheet targeting/approval for one source-derived Cure Wounds cast against
 one player-owned target. Multi-target orchestration, party/NPC targets, generic effects, and broader
 resource-template rollout remain outside the slice.

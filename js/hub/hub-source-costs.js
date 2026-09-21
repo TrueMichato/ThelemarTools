@@ -1,4 +1,5 @@
 import {HubStoreError} from "./hub-store-error.js";
+import {getWholeItemTransferBlockers} from "./hub-inventory-contract.js";
 
 export const SOURCE_COST_VERSION = 1;
 export const PEER_SOURCE_COSTS_CONTRACT_VERSION = 1;
@@ -99,6 +100,11 @@ function isSameContentRef (left, right) {
 		&& (left.brewContentHash ?? null) === (right.brewContentHash ?? null);
 }
 
+function getStoredResourceId (value) {
+	const out = `${value ?? ""}`.trim();
+	return UUID_RE.test(out) ? out.toLowerCase() : out;
+}
+
 function normalizeComponent (component) {
 	if (!isPlainObject(component) || !SOURCE_COST_KINDS.includes(component.kind)) failUnsupported();
 	switch (component.kind) {
@@ -183,37 +189,99 @@ function getIntegralPool ({current, max, level = null, expectedLevel = null}) {
 }
 
 function findInventoryEntry ({data, component}) {
-	const entry = Array.isArray(data?.inventory)
-		? data.inventory.find(it => {
-			const id = `${it?.id || ""}`.trim();
-			return (UUID_RE.test(id) ? id.toLowerCase() : id) === component.inventoryEntryId;
-		})
-		: null;
-	if (!entry || !isSameContentRef(getContentRef(entry.item, entry), component.itemRef)) failUnavailable();
+	const matches = Array.isArray(data?.inventory)
+		? data.inventory.filter(it => getStoredResourceId(it?.id) === component.inventoryEntryId)
+		: [];
+	if (matches.length !== 1) failUnavailable();
+	const [entry] = matches;
+	if (!isSameContentRef(getContentRef(entry.item, entry), component.itemRef)) failUnavailable();
 	return entry;
 }
 
-function findFeatureResource ({data, component}) {
-	const resource = Array.isArray(data?.resources)
-		? data.resources.find(it => {
-			const id = `${it?.id || ""}`.trim();
-			return (UUID_RE.test(id) ? id.toLowerCase() : id) === component.resourceId;
-		})
-		: null;
-	const linkedFeature = Array.isArray(data?.features)
-		? data.features.find(feature => feature?.id === resource?.featureId)
-		: null;
-	const content = resource?.featureRef || resource?.feature || linkedFeature;
-	if (!resource || !isSameContentRef(getContentRef(content, resource), component.featureRef)) failUnavailable();
-	return resource;
+function getFeatureResourceBinding ({data, component}) {
+	const resourceMatches = Array.isArray(data?.resources)
+		? data.resources.filter(it => getStoredResourceId(it?.id) === component.resourceId)
+		: [];
+	if (resourceMatches.length !== 1) failUnavailable();
+	const [resource] = resourceMatches;
+
+	const featureMatches = (Array.isArray(data?.features) ? data.features : [])
+		.filter(feature => resource.featureId != null
+			? feature?.id === resource.featureId
+			: resource.id != null && feature?.resourceId === resource.id,
+		);
+	if (featureMatches.length !== 1) failUnavailable();
+	const [feature] = featureMatches;
+
+	const content = resource.featureRef || resource.feature || feature;
+	if (!isSameContentRef(getContentRef(content, resource), component.featureRef)) failUnavailable();
+	const featureContentRef = getContentRef(feature);
+	if (featureContentRef.uid && !isSameContentRef(featureContentRef, component.featureRef)) failUnavailable();
+
+	const innateSpellMatches = (Array.isArray(data?.spellcasting?.innateSpells) ? data.spellcasting.innateSpells : [])
+		.filter(spell => resource.linkedInnateSpellId != null
+			? spell?.id === resource.linkedInnateSpellId
+			: resource.id != null
+				&& (spell?.resourceId === resource.id || spell?.linkedResourceId === resource.id),
+		);
+	if (innateSpellMatches.length > 1 || (resource.linkedInnateSpellId != null && innateSpellMatches.length !== 1)) {
+		failUnavailable();
+	}
+	return {resource, feature, innateSpell: innateSpellMatches[0] || null};
+}
+
+function assertFeatureResourceMirrors ({resource, feature, innateSpell}) {
+	const pool = getIntegralPool({current: resource.current, max: resource.max});
+	const featurePool = getIntegralPool({current: feature?.uses?.current, max: feature?.uses?.max});
+	if (featurePool.current !== pool.current || featurePool.max !== pool.max) failUnavailable();
+	if (innateSpell) {
+		const innatePool = getIntegralPool({current: innateSpell.uses?.current, max: innateSpell.uses?.max});
+		if (innatePool.current !== pool.current || innatePool.max !== pool.max) failUnavailable();
+	}
+	return pool;
 }
 
 function hasUnsafeZeroQuantityLink ({data, entry}) {
-	const harmlessKeys = new Set(["id", "item", "quantity", "note", "chargesUsed", "chargesCurrent"]);
-	if (Object.keys(entry).some(key => !harmlessKeys.has(key))) return true;
+	if (getWholeItemTransferBlockers({
+		container: data,
+		entry,
+		fnNormalizeItemId: getStoredResourceId,
+	}).length) return true;
+	const harmlessKeys = new Set([
+		"id",
+		"item",
+		"quantity",
+		"note",
+		"chargesUsed",
+		"chargesCurrent",
+		"equipped",
+		"attuned",
+	]);
+	const isBenignDefault = value =>
+		value == null
+		|| value === false
+		|| value === ""
+		|| (Array.isArray(value) && !value.length)
+		|| (isPlainObject(value) && !Object.keys(value).length);
+	if (Object.entries(entry).some(([key, value]) => !harmlessKeys.has(key) && !isBenignDefault(value))) return true;
 	const clone = structuredClone(data);
 	clone.inventory = (Array.isArray(clone.inventory) ? clone.inventory : []).filter(it => it.id !== entry.id);
-	return JSON.stringify(clone).includes(entry.id);
+	const itemId = getStoredResourceId(entry.id);
+	const isNormalizedReference = value => typeof value === "string"
+		&& (
+			getStoredResourceId(value) === itemId
+			|| (value.startsWith("item:") && getStoredResourceId(value.slice(5)) === itemId)
+		);
+	const hasNormalizedReference = value => {
+		if (typeof value === "string") return isNormalizedReference(value);
+		if (Array.isArray(value)) return value.some(hasNormalizedReference);
+		if (isPlainObject(value)) {
+			return Object.entries(value)
+				.some(([key, child]) => isNormalizedReference(key) || hasNormalizedReference(child));
+		}
+		return false;
+	};
+	return hasNormalizedReference(clone);
 }
 
 function resolveComponent ({data, component}) {
@@ -247,8 +315,8 @@ function resolveComponent ({data, component}) {
 			return {current: quantity, max: null, binding: getBindingIdentity(component)};
 		}
 		case "feature_use": {
-			const resource = findFeatureResource({data, component});
-			const pool = getIntegralPool({current: resource.current, max: resource.max});
+			const binding = getFeatureResourceBinding({data, component});
+			const pool = assertFeatureResourceMirrors(binding);
 			if (pool.current < component.amount) failUnavailable();
 			return {...pool, binding: getBindingIdentity(component)};
 		}
@@ -281,31 +349,29 @@ function getBindingSnapshot ({data, component}) {
 				: data?.spellcasting?.pactSlots ?? null);
 		case "item_charge":
 		case "inventory_quantity": {
-			const entry = Array.isArray(data?.inventory)
-				? data.inventory.find(it => normalizeResourceId(`${it?.id || ""}`) === component.inventoryEntryId)
-				: null;
-			return structuredClone(entry ?? null);
+			const matches = Array.isArray(data?.inventory)
+				? data.inventory.filter(it => getStoredResourceId(it?.id) === component.inventoryEntryId)
+				: [];
+			return structuredClone({matches});
 		}
 		case "feature_use": {
-			const resource = Array.isArray(data?.resources)
-				? data.resources.find(it => normalizeResourceId(`${it?.id || ""}`) === component.resourceId)
-				: null;
-			const features = resource
-				? (Array.isArray(data?.features) ? data.features : [])
-					.filter(feature =>
-						(resource.featureId != null && feature?.id === resource.featureId)
-						|| (resource.id != null && feature?.resourceId === resource.id),
-					)
+			const resources = Array.isArray(data?.resources)
+				? data.resources.filter(it => getStoredResourceId(it?.id) === component.resourceId)
 				: [];
-			const innateSpells = resource
-				? (Array.isArray(data?.spellcasting?.innateSpells) ? data.spellcasting.innateSpells : [])
-					.filter(spell =>
-						(resource.linkedInnateSpellId != null && spell?.id === resource.linkedInnateSpellId)
-						|| (resource.id != null && spell?.resourceId === resource.id)
-						|| (resource.id != null && spell?.linkedResourceId === resource.id),
-					)
-				: [];
-			return structuredClone({resource: resource ?? null, features, innateSpells});
+			const features = (Array.isArray(data?.features) ? data.features : [])
+				.filter(feature => resources.some(resource =>
+					resource.featureId != null
+						? feature?.id === resource.featureId
+						: resource.id != null && feature?.resourceId === resource.id,
+				));
+			const innateSpells = (Array.isArray(data?.spellcasting?.innateSpells) ? data.spellcasting.innateSpells : [])
+				.filter(spell => resources.some(resource =>
+					resource.linkedInnateSpellId != null
+						? spell?.id === resource.linkedInnateSpellId
+						: resource.id != null
+							&& (spell?.resourceId === resource.id || spell?.linkedResourceId === resource.id),
+				));
+			return structuredClone({resources, features, innateSpells});
 		}
 		default: failUnsupported();
 	}
@@ -356,27 +422,11 @@ export function applySourceCost ({data, sourceCost}) {
 				break;
 			}
 			case "feature_use": {
-				const resource = findFeatureResource({data: out, component});
+				const {resource, feature, innateSpell} = getFeatureResourceBinding({data: out, component});
+				assertFeatureResourceMirrors({resource, feature, innateSpell});
 				resource.current -= component.amount;
-				for (const feature of Array.isArray(out.features) ? out.features : []) {
-					if (
-						(
-							(resource.featureId != null && feature.id === resource.featureId)
-							|| (resource.id != null && feature.resourceId === resource.id)
-						)
-						&& isPlainObject(feature.uses)
-					) feature.uses.current = resource.current;
-				}
-				for (const spell of Array.isArray(out.spellcasting?.innateSpells) ? out.spellcasting.innateSpells : []) {
-					if (
-						(
-							(resource.linkedInnateSpellId != null && spell.id === resource.linkedInnateSpellId)
-							|| (resource.id != null && spell.resourceId === resource.id)
-							|| (resource.id != null && spell.linkedResourceId === resource.id)
-						)
-						&& isPlainObject(spell.uses)
-					) spell.uses.current = resource.current;
-				}
+				feature.uses.current = resource.current;
+				if (innateSpell) innateSpell.uses.current = resource.current;
 				break;
 			}
 		}

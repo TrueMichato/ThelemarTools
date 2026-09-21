@@ -83,7 +83,7 @@ active DM/co-DM, and valid heal-at-max/add-existing/remove-absent/restore-full o
 revision-only ordering point while leaving character JSON unchanged; they append terminal audit/applied event/
 outbox/receipt evidence and deliberately omit projection invalidation. Character Sheet reconciliation advances
 every tracked document in operation order, skips redundant adoption/render when a live track is unchanged, and
-emits one accessible no-change notice. This does not add protocol 6, migration 0010, multi-target authority,
+emits one accessible no-change notice. This does not add protocol 6, migration 0011, multi-target authority,
 new templates, NPC/monster targets, offline writes, or prose-derived effects, and remains unmerged pending the
 physical r10 game-day GO/NO-GO and PR #285.
 
@@ -113,13 +113,29 @@ operator-managed campaign UUID enrollment are both required. Production rejects 
 configuration, release automation checks enrolled campaign readiness before traffic changes, and already-open
 Character Sheets now clear and resynchronize targeting when authoritative campaign context changes.
 
+Wave A2 hardens the shared source-cost version-1 authority without widening that rollout. The pure server/browser
+contract keeps exactly four kinds (`spell_slot`, `item_charge`, `inventory_quantity`, and `feature_use`), resolves
+all components before cloning or mutation, rejects duplicate stable ids and ambiguous feature/innate-spell
+linkage, verifies campaign-brew item/feature provenance, preserves unrelated inventory metadata, and requires
+resource/feature/innate-use mirrors to agree before decrementing them exactly once. Full-stack quantity removal
+remains fail-closed for equipped, linked, container, ammunition, active, or custom wrapper shapes. These adapter
+handlers and their Character Sheet reconciliation path are infrastructure support only: PHB/XPHB Cure Wounds with
+one standard slot remains the only production template and real-stack resource fixture. Pact slots, item charges,
+inventory quantities, feature uses, and mixed costs remain blocked from production template rollout until a
+reviewed template supplies stable server-resolvable identities; no identity is fabricated from display text.
+Wave A2 adds immutable migration 0010 only to align PostgreSQL ABA binding identity with the existing shared
+version-1 resolver. It adds no protocol, capability, source-cost kind, multi-target migration 0011/state machine,
+production template, or player-facing UX. Memory authority now snapshots and restores the complete source-cost
+acceptance transaction on injected event, invalidation, audit, or receipt failure, preserving response/error/
+event parity with PostgreSQL rollback rather than leaving a half-written deterministic test double.
+
 Wave A0 adds [ADR 0020](adr/0020-consented-multi-target-operations.md) and an executable read-only query proof.
 It accepts a future fixed 1-8 target set, opaque unique per-leg invitations, independent per-character owner
 responses, source-finalization consent for source-owned legs, collection expiry, one exact ordered
 source-selected subset, and one-cost/all-selected-leg atomic finalization. Reviewed multi-target healing
 templates may privately record a full-HP selected leg as applied/no-change while consuming the single source
 cost. **No multi-target production capability is implemented by Wave A0:** the design-only PR contains no
-migration; future additive migration 0010, protocol 6, routes, store methods, events, browser UX, and templates
+migration; future additive migration 0011, protocol 6, routes, store methods, events, browser UX, and templates
 remain absent and default-off. The draft is held pending the physical game-day GO/NO-GO.
 
 The accepted design now also fixes bounded abuse/fairness limits (3 live collections/source character,
@@ -128,7 +144,7 @@ oldest-pending cursor pagination), intentional bounded DM/co-DM workflow observa
 fail-closed behavior across mutation/read/WebSocket/resync/replay. Schema is predecessor-readable before use,
 with cross-campaign source-account/target-owner caps serialized by ascending seed-10 quota locks before campaign
 authority. The first accepted proposal sets a permanent FK-independent usage marker; later normal rollback to a
-true pre-0010 binary is forbidden even after workflow cleanup and requires an aware bridge release unless a
+true pre-0011 binary is forbidden even after workflow cleanup and requires an aware bridge release unless a
 separately reviewed destructive history/event/outbox/recovery export/purge is approved.
 
 V2-T9 Campaign Overview is shipped by PR #243. The page is now a role-adaptive pinned session brief centered on

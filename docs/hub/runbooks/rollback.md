@@ -35,6 +35,11 @@ Migration 0009 is an additive previous-app-compatible expand migration. Revertin
 entitlement rows. Before rollback, set `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false` so a pre-entitlement image
 cannot admit accounts under a policy it does not enforce.
 
+Migration 0010 is also additive and previous-app-compatible. It only replaces the existing source-cost binding
+snapshot helpers with stricter identity/cardinality semantics; do not restore the migration-0007 `LIMIT 1`
+function as rollback. A predecessor application can run with migration 0010 in place because the schema and
+persisted source-cost descriptors are unchanged.
+
 ### 2026-09-12 exact-release evidence
 
 Release r7 evidence identified predecessor `hub-staging-2026-09-08-r6` at

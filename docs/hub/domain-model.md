@@ -4,7 +4,7 @@
 > **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
-The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0009. The PostgreSQL authority is
+The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0010. The PostgreSQL authority is
 `server/src/postgres-hub-store.js`; `MemoryHubStore` is a deterministic test double, not a production
 security boundary.
 

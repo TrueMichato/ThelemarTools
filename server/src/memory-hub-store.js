@@ -119,6 +119,7 @@ export class MemoryHubStore {
 		fnResolveAwardItem = resolveItemAwardAuthority,
 		isAccountEntitlementsEnabled = false,
 		fnBeforeSensitiveCommit = null,
+		fnTestResolveStructuredActionFault = null,
 	} = {}) {
 		this._fnNow = fnNow;
 		this._semanticOperationRegistry = semanticOperationRegistry;
@@ -127,6 +128,7 @@ export class MemoryHubStore {
 		this._fnResolveAwardItem = fnResolveAwardItem;
 		this._isAccountEntitlementsEnabled = isAccountEntitlementsEnabled;
 		this._fnBeforeSensitiveCommit = fnBeforeSensitiveCommit;
+		this._fnTestResolveStructuredActionFault = fnTestResolveStructuredActionFault;
 		this._accounts = new Map();
 		this._accountEntitlements = new Map();
 		this._identityToAccount = new Map();
@@ -3912,7 +3914,88 @@ export class MemoryHubStore {
 		});
 	}
 
-	async pResolveStructuredAction ({
+	_getSourceCostAcceptanceSnapshot () {
+		return {
+			_campaigns: copy(this._campaigns),
+			_characters: copy(this._characters),
+			_semanticOperations: copy(this._semanticOperations),
+			_semanticOperationCommands: copy(this._semanticOperationCommands),
+			_commandReceipts: copy(this._commandReceipts),
+			_events: copy(this._events),
+			_campaignEvents: copy(this._campaignEvents),
+			_outbox: copy(this._outbox),
+			_audit: copy(this._audit),
+		};
+	}
+
+	_createSourceCostAcceptanceTransactionStore () {
+		const baseline = this._getSourceCostAcceptanceSnapshot();
+		const transactionStore = Object.create(Object.getPrototypeOf(this));
+		Object.assign(transactionStore, this, copy(baseline));
+		return {baseline, transactionStore};
+	}
+
+	_publishSourceCostAcceptanceMap ({target, source, baseline}) {
+		for (const key of baseline.keys()) {
+			if (!source.has(key)) target.delete(key);
+		}
+		for (const [key, sourceValue] of source) {
+			if (baseline.has(key) && isCanonicalEqual(sourceValue, baseline.get(key))) continue;
+			const targetValue = target.get(key);
+			if (Array.isArray(targetValue) && Array.isArray(sourceValue)) {
+				targetValue.splice(0, targetValue.length, ...sourceValue);
+			} else if (
+				targetValue
+				&& sourceValue
+				&& typeof targetValue === "object"
+				&& typeof sourceValue === "object"
+			) {
+				for (const property of Object.keys(targetValue)) delete targetValue[property];
+				Object.assign(targetValue, sourceValue);
+			} else target.set(key, sourceValue);
+		}
+	}
+
+	_publishSourceCostAcceptanceTransactionStore ({baseline, transactionStore}) {
+		for (const [target, source, previous] of [
+			[this._campaigns, transactionStore._campaigns, baseline._campaigns],
+			[this._characters, transactionStore._characters, baseline._characters],
+			[this._semanticOperations, transactionStore._semanticOperations, baseline._semanticOperations],
+			[this._semanticOperationCommands, transactionStore._semanticOperationCommands, baseline._semanticOperationCommands],
+			[this._commandReceipts, transactionStore._commandReceipts, baseline._commandReceipts],
+		]) this._publishSourceCostAcceptanceMap({target, source, baseline: previous});
+		for (const event of transactionStore._events.slice(baseline._events.length)) {
+			const campaignEvents = this._getCampaignEvents(event.campaignId);
+			this._events.push(event);
+			campaignEvents.push(event);
+		}
+		this._outbox.push(...transactionStore._outbox.slice(baseline._outbox.length));
+		this._audit.push(...transactionStore._audit.slice(baseline._audit.length));
+	}
+
+	_injectTestResolveStructuredActionFault ({stage, operation}) {
+		if (!operation.sourceCost) return;
+		this._fnTestResolveStructuredActionFault?.({stage, operationId: operation.id});
+	}
+
+	async pResolveStructuredAction (args) {
+		const operation = this._semanticOperations.get(args.actionId);
+		if (args.decision !== "accept" || !operation?.sourceCost) {
+			return this._pResolveStructuredActionTransactionBody(args);
+		}
+		return this._pWithMemoryLock({
+			key: "source-cost-acceptance-transaction",
+			fn: () => {
+				const transaction = this._createSourceCostAcceptanceTransactionStore();
+				const {transactionStore} = transaction;
+				const response = transactionStore._pResolveStructuredActionTransactionBody(args);
+				this._publishSourceCostAcceptanceTransactionStore(transaction);
+				return response;
+			},
+		});
+	}
+
+	_pResolveStructuredActionTransactionBody ({
 		accountId,
 		sessionId,
 		campaignId,
@@ -3971,7 +4054,7 @@ export class MemoryHubStore {
 					? {watermarks: this._getSemanticWatermarksForViewer({operation, accountId, role: membership.role, source, target})}
 					: {}),
 			};
-			return this._setSemanticCommand({
+			const responseOut = this._setSemanticCommand({
 				accountId,
 				commandId,
 				operationId: operation.id,
@@ -3980,6 +4063,8 @@ export class MemoryHubStore {
 				response,
 				eventIds: response.eventIds,
 			});
+			this._injectTestResolveStructuredActionFault({stage: "receipt", operation});
+			return responseOut;
 		}
 		if (new Date(operation.expiresAt) <= this._fnNow()) decision = "expire";
 
@@ -4143,6 +4228,7 @@ export class MemoryHubStore {
 						resultingSourceCharacterRevision: target.revision,
 					},
 				});
+				this._injectTestResolveStructuredActionFault({stage: "combined-event", operation});
 				operation.appliedEventId = combinedEvent.id;
 				target.operationWatermark = combinedEvent.sequence;
 				eventIds.push(combinedEvent.id);
@@ -4175,6 +4261,7 @@ export class MemoryHubStore {
 							resultingSourceCharacterRevision: source.revision,
 						},
 					});
+					this._injectTestResolveStructuredActionFault({stage: "source-event", operation});
 					operation.sourceCostEventId = sourceEvent.id;
 					source.operationWatermark = sourceEvent.sequence;
 					eventIds.push(sourceEvent.id);
@@ -4194,6 +4281,7 @@ export class MemoryHubStore {
 						resultingCharacterRevision: target.revision,
 					},
 				});
+				this._injectTestResolveStructuredActionFault({stage: "target-event", operation});
 				operation.appliedEventId = targetEvent.id;
 				target.operationWatermark = targetEvent.sequence;
 				eventIds.push(targetEvent.id);
@@ -4207,6 +4295,7 @@ export class MemoryHubStore {
 						actorAccountId: accountId,
 						isRevisionBump: false,
 					});
+					this._injectTestResolveStructuredActionFault({stage: "projection-invalidation", operation});
 					if (invalidation) eventIds.push(invalidation.id);
 				}
 			}
@@ -4222,6 +4311,7 @@ export class MemoryHubStore {
 			targetType: "semantic_operation",
 			targetId: operation.id,
 		});
+		this._injectTestResolveStructuredActionFault({stage: "audit", operation});
 		if (operation.status !== "applied") {
 			const terminalEvent = this._appendEvent({
 				campaignId,
@@ -4253,7 +4343,7 @@ export class MemoryHubStore {
 				}
 				: {}),
 		};
-		return this._setSemanticCommand({
+		const responseOut = this._setSemanticCommand({
 			accountId,
 			commandId,
 			operationId: operation.id,
@@ -4262,6 +4352,8 @@ export class MemoryHubStore {
 			response,
 			eventIds: response.eventIds,
 		});
+		this._injectTestResolveStructuredActionFault({stage: "receipt", operation});
+		return responseOut;
 	}
 
 	_getSemanticWatermarksForViewer ({operation, accountId, role, source, target}) {

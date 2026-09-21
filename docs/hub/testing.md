@@ -19,7 +19,7 @@
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
 | Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
-| Multi-target Wave A0 design contract | `HubMultiTargetOperationAdr.test.js`, `test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` | ADR completeness, normalized migration-0010 decision, fixed-set/response/finalization/leg constraints, hazards, audiences, fairness, A1-A5 handoff, and read-only PostgreSQL positive/negative set-shaping reasoning; no production behavior claim |
+| Multi-target Wave A0 design contract | `HubMultiTargetOperationAdr.test.js`, `test/fixtures/hub/adr-0020-multi-target-set-shaping.sql` | ADR completeness, normalized migration-0011 decision, fixed-set/response/finalization/leg constraints, hazards, audiences, fairness, A1-A5 handoff, and read-only PostgreSQL positive/negative set-shaping reasoning; no production behavior claim |
 | Invite admission | `HubInviteAdmission.test.js`, `HubMultiProviderIdentityPostgres.test.js`, `HubAuthServer.test.js` | Existing sign-in, unknown denial, opaque context binding, atomic first access, existing-account join, replay/expiry/revoke/race/status/privacy behavior, dedicated-secret token retry, lock ordering, and rollback |
 | Account entitlements/reauthentication | entitlement and multi-provider suites | Provider/account/session binding, five-minute commit-time freshness, creator enforcement, operator hiding/idempotency/concurrency, last-operator lifecycle protection, migration backfill/reconciliation, export redaction, and memory/PostgreSQL parity |
 | Account identity lifecycle | `HubMultiProviderIdentity`, `HubAuthServer`, `HubApiClient`, provider operations/config, PostgreSQL parity, `test-hub-account-identity-mutations.mjs`, real-stack provider journey | Bounded own-identity listing, no account creation during link, cross-account conflict, transaction replay, display-name stability, commit-time freshness, provider disable, different-identity unlink, last/retention protection, concurrent/idempotent unlink, session/lease/socket rotation, fresh CSRF, purge/export/deletion-grace behavior |
@@ -87,6 +87,19 @@ mutated-body rejection, explicit target-owner approval under competing commands,
 target healing, source/target/combined watermarks, bounded expiry, lifecycle cancellation, and minimized
 explicit-recipient terminal payloads.
 
+The real-stack runner has a 45-minute child-process timeout and total watchdog, a 50-minute workflow-step
+timeout, and a 60-minute job timeout. Normal local/CI runs take roughly 6-10 minutes; the margins allow cold image
+pulls/builds and slower shared runners without approaching GitHub's broad default ceiling. A timeout prints a
+structured stdout diagnostic plus a bounded stderr summary containing the run/project identity, active phase,
+requested spec scope, sanitized active command, and Playwright artifact paths. The watchdog terminates the active
+child process group, runs isolated Compose/image cleanup, and exits 124; the outer budgets bound a stuck child,
+runner, or cleanup even if the inner diagnostic path fails.
+
+On 2026-09-21, run `35600079625` was cancelled after a timezone misread made a roughly two-minute live Playwright
+step appear three hours old. Terminal logs showed PostgreSQL parity had completed and Playwright was active; the
+cancelled run is not evidence of a product deadlock. It did expose that the job had no explicit timeout or
+phase diagnostic, which the bounded watchdog contract above now corrects.
+
 Memory and real-PostgreSQL tests put 501 privacy-redacted character events before a visible semantic lifecycle
 event and prove replay advances by the server-scanned sequence even when a page returns fewer than its limit.
 Both stores bound each read to `limit + 1` raw campaign-sequence rows before audience and projection filtering;
@@ -125,6 +138,22 @@ with no active rules/capability, observes the disabled selector state, activates
 and then exercises PHB and XPHB targeting. Its `*` gate remains confined to the isolated test entry point; exact
 production enrollment is covered by the closed parser and read-only pre-cutover readiness check.
 
+Wave A2 extends the source-cost proof without adding production templates. `HubSourceCosts` now covers exact
+schemas and safe-integer bounds, duplicate aggregation and canonical ordering, standard/pact slot integrity,
+campaign-brew item identity, charge/quantity metadata preservation, safe versus unsafe zero removal, unique
+feature-resource linkage, exact feature/innate-use mirrors, multi-component resolve-before-mutate behavior, and
+spend/restore ABA snapshots for every version-1 binding. Store-level adapter tests inject server-owned test
+templates so browser choices cannot select resource ids or amounts; production remains limited to the existing
+Cure Wounds standard-slot journey. The semantic mutation gate now plants 19 defects, including source-cost
+rederivation bypass, permanent-invalidation removal, ambiguous entry acceptance, partial staging, feature-mirror
+omission, unsafe zero removal, and target-event source-detail leakage.
+`HubMemorySourceCostAcceptanceAtomicity` injects failures at source/target/combined event creation, projection
+invalidation, audit, and semantic-command receipt persistence for distinct and self-target acceptance. Every
+failure must restore character data/revisions/watermarks, operation terminal/result ids, event/campaign-event/
+outbox/audit collections, and command receipts exactly, after which one retry commits once. The disposable stack
+runs `HubSourceCostAdapterAuthorityPostgres` before browser journeys so migration-0010 identity/cardinality,
+ordinary owner-write ABA, concurrency, replay, metadata, mirror, and privacy parity are proven under real locks.
+
 Wave A1 additionally owns direct-operation parity for all six version-1 kinds, 30-character condition-source
 schema parity, exact changed-body rejection, and the migration-free no-op contract. Memory and PostgreSQL tests
 assert unchanged character JSON, a revision-only ordering point, terminal audit/applied-event/receipt evidence,
@@ -132,7 +161,7 @@ and no projection invalidation for heal-at-max, add-existing-condition, remove-a
 restore-full-slot. Character Sheet tests assert per-track no-op transforms, zero redundant live adoption/render,
 one accessible notice, HTTP-plus-realtime dedupe, reverse-delivery resync, save interleavings, and
 character/access/document-generation fencing.
-`scripts/test-hub-semantic-operation-mutations.mjs` plants eleven defects at the real role, write/event ordering,
+`scripts/test-hub-semantic-operation-mutations.mjs` plants nineteen defects at the real role, write/event ordering,
 idempotency, invalidation, coverage, document-track, post-await fence, and duplicate-delivery call sites. The
 gate must demonstrate that every mutant is killed before the unmodified result is accepted.
 
@@ -149,7 +178,7 @@ finalization/collection-expiry, maintenance expiry without readers, source-cost 
 protocol-3/4/5 fail-closed mutation/read/WebSocket/resync/replay with protocol-6 success, allowed full-HP and
 cross-target audience privacy canaries, opposing UUID and opposite-parent-discovery deadlock probes, fault
 injection after every target/event/receipt, Memory/PostgreSQL parity, transactional live-cap winners, churn/429,
-oldest-pending pagination without starvation, 90-day bounded cleanup, bridge-release rollback, and true pre-0010
+oldest-pending pagination without starvation, 90-day bounded cleanup, bridge-release rollback, and true pre-0011
 usage-marker-absent preflight. It must also race cross-campaign proposals at the same target-owner cap under
 opposite account-discovery order, proving one seed-10 winner, one loser, and no deadlock; marker tests cover
 first-use insert, cleanup persistence, backup/restore, role grants, and rollback fencing.
