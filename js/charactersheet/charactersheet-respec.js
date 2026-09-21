@@ -4071,6 +4071,7 @@ class CharacterSheetRespec {
 	async _applyFeatureChoiceChangeInner (level, history, choiceIndex, oldChoice, newOption) {
 		// Remove old feature using proper API
 		const features = this._state.getFeatures();
+		const persistedFeatures = this._state._data?.features || features;
 		const replayChoice = history.choices.replayData?.featureChoices?.[choiceIndex];
 		const acquisitionLevel = Number(
 			oldChoice.acquisitionLevel
@@ -4082,13 +4083,14 @@ class CharacterSheetRespec {
 							&& entry.class?.source === history.class.source)
 					.length,
 		) || 1;
-		const oldFeature = features.find(f =>
+		const oldFeature = persistedFeatures.find(f =>
 			f.name === oldChoice.choice
 				&& f.parentFeature === oldChoice.featureName
 				&& f.className === history.class.name
-				&& Number(f.level) === acquisitionLevel,
+				&& Number(f.acquisitionLevel || f.level) === acquisitionLevel,
 		);
 		if (oldFeature) {
+			oldFeature.id ||= CryptUtil.uid();
 			this._state.removeFeature(oldFeature.id);
 		} else {
 			// Fallback: remove orphaned modifiers by name if feature lookup failed
