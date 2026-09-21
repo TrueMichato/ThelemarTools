@@ -317,6 +317,57 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 		});
 	});
 
+	test("exports retained operations with source detail and target-only privacy", async () => {
+		const ctx = await pFixture({targetCount: 2, sameTargetOwner: false});
+		const proposed = await ctx.pPropose();
+		for (let index = 0; index < proposed.operation.targets.length; ++index) {
+			await ctx.pRespond({
+				operationId: proposed.operation.operationId,
+				invitationId: proposed.operation.targets[index].invitationId,
+				actor: ctx.targetOwners[index],
+			});
+		}
+		await ctx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: proposed.operation.targets.map(target => target.invitationId),
+		});
+		const targetInvitation = proposed.operation.targets[1];
+		const targetExport = await store.pExportAccountData({
+			accountId: ctx.targetOwners[1].account.id,
+		});
+		expect(targetExport.multiTargetOperations).toEqual([
+			expect.objectContaining({
+				operationId: proposed.operation.operationId,
+				status: "applied",
+				finalization: expect.objectContaining({status: "applied"}),
+				targets: [expect.objectContaining({invitationId: targetInvitation.invitationId})],
+			}),
+		]);
+		expect(targetExport.multiTargetOperations[0]).not.toHaveProperty("candidateCount");
+		const serializedTargetExport = JSON.stringify(targetExport.multiTargetOperations);
+		expect(serializedTargetExport).not.toContain(ctx.targets[0].id);
+		expect(serializedTargetExport).not.toContain(ctx.targets[0].targetRef);
+		expect(serializedTargetExport).not.toContain(proposed.operation.targets[0].invitationId);
+
+		const sourceExport = await store.pExportAccountData({
+			accountId: ctx.sourceOwner.account.id,
+		});
+		expect(sourceExport.multiTargetOperations).toEqual([
+			expect.objectContaining({
+				operationId: proposed.operation.operationId,
+				candidateCount: 2,
+				finalization: {
+					status: "applied",
+					selectedInvitationIds: proposed.operation.targets.map(target => target.invitationId),
+				},
+				targets: expect.arrayContaining([
+					expect.objectContaining({invitationId: proposed.operation.targets[0].invitationId}),
+					expect.objectContaining({invitationId: targetInvitation.invitationId}),
+				]),
+			}),
+		]);
+	});
+
 	test("fails protocols 3/4/5 and duplicate targets without workflow evidence", async () => {
 		const ctx = await pFixture({targetCount: 1});
 		for (const protocolVersion of ["3", "4", "5"]) {
