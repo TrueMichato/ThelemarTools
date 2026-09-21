@@ -1,7 +1,7 @@
 # Campaign Hub HTTP API
 
 > **Status:** Current private-V1 contract
-> **Wire protocol:** `5`
+> **Wire protocol:** `6`
 > **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
@@ -33,9 +33,14 @@ Every mutation requires:
 ```http
 Origin: https://the-exact-app-origin.example
 X-CSRF-Token: <session HMAC>
-X-Hub-Protocol-Version: 3
+X-Hub-Protocol-Version: 6
 Idempotency-Key: <non-empty value, at most 200 characters>
 ```
+
+Protocol 3 remains a restricted compatibility lane for legacy cost-free one-target flows, protocol 4 adds
+source-cost operation legs, and protocol 5 adds campaign-scoped metadata-only projection invalidation. Protocol
+6 is current and is the only version accepted by multi-target routes/events/replay and other current-only
+surfaces.
 
 The server hashes method, route, params, query, and body (excluding `baseRevision` and `leaseEpoch`) and stores
 the hash with the per-account receipt. Reusing one key for a different logical request returns
@@ -203,7 +208,7 @@ List/event/log/export/backup surfaces never expose it.
 | `GET /api/characters/:characterId/projection-policy` | Owner only; protocol-versioned | none | `{policy, projectionRevision, preview}`; `preview` is the server-computed peer profile, and `error` reports `PROJECTION_POLICY_INVALID`. A character owned by somebody else and one that does not exist both return `404 PROJECTION_POLICY_NOT_AVAILABLE`, so the endpoint cannot confirm an id |
 | `PUT /api/characters/:characterId/projection-policy` | Owner mutation | `{policy, expectedProjectionRevision}` + `Idempotency-Key` | Updated policy/preview, `409 PROJECTION_POLICY_CONFLICT` with the current safe state, or `422 PROJECTION_POLICY_INVALID` |
 | `POST /api/characters/:characterId/lease` | Owner mutation | `{takeover?}` | Lease session, monotonic epoch, expiry |
-| `POST /api/characters/:characterId/lease/release` | Owner mutation; current protocol 5 required | Exact `{leaseEpoch, expiresAt}` returned by acquisition/renewal | `{released}`; protocol 3/4 clients receive `426 PROTOCOL_UPDATE_REQUIRED` before body validation |
+| `POST /api/characters/:characterId/lease/release` | Owner mutation; current protocol 6 required | Exact `{leaseEpoch, expiresAt}` returned by acquisition/renewal | `{released}`; protocol 3/4/5 clients receive `426 PROTOCOL_UPDATE_REQUIRED` before body validation |
 | `PATCH /api/characters/:characterId` | Owner mutation + held lease | `baseRevision`, `leaseEpoch`, up to 500 add/remove/replace patches; optional closed `spell.used` activity descriptor | Canonical character or revision/lease conflict |
 | `DELETE /api/characters/:characterId` | Owner mutation | none | Soft archive; blocks outgoing reserved transfer |
 | `POST /api/characters/:characterId/clone` | Owner + target non-spectator membership | `{campaignId, rulesVersionId}` + `Idempotency-Key` | Independent character with new id |
@@ -352,17 +357,21 @@ An otherwise-authorized resolution command received after the deadline performs 
 and returns its stable terminal metadata; retries replay that response. The authority does not interpret
 arbitrary spell prose.
 
-### Planned multi-target operation API
+### Protocol-6 multi-target operation API
 
-[ADR 0020](adr/0020-consented-multi-target-operations.md) reserves a protocol-6, default-off API contract. It is
-**not implemented** and the current `/actions` routes retain their one-target protocol-4 behavior.
+[ADR 0020](adr/0020-consented-multi-target-operations.md) defines the implemented server/store contract. The
+capability is default-off and has no production template or Character Sheet UI in Wave A3; the current
+`/actions` routes retain their one-target protocol-4 behavior.
 
-| Planned path | Authorization | Closed input | Planned result |
+| Path | Authorization | Closed input | Result |
 |---|---|---|---|
 | `POST /api/campaigns/:campaignId/multi-target-operations` | Active player and source owner | contract/command id, source character/entity/template/choice, active rules id, 1-8 ordered unique opaque target refs | Fixed candidate operation in `collecting_responses`; no cost/resource/revision mutation |
 | `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/invitations/:invitationId/respond` | Current pinned target owner for that invitation; DM/co-DM reject only | command id and `approve` or `reject` | One immutable terminal leg response; exact replay returns the same response/event ids |
 | `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/finalize` | Current source owner | command id and exact ordered unique selected invitation ids; empty list means cancel | Empty list cancels with no character mutation; non-empty approved/current subset commits one source cost and all selected legs atomically |
-| `GET` operation/inbox/outgoing projections | Current participant only | bounded pagination/cursor | Source sees authorized labels/coarse status; each owner sees only their character request; unrelated users receive route-equivalent absence |
+| `POST /api/campaigns/:campaignId/multi-target-operations/:operationId/cancel` | Current source owner or DM/co-DM | contract/command id | Cancels from either live collection state, terminalizes each live leg in proposal order, consumes no cost, and writes no character |
+| `GET /api/campaigns/:campaignId/multi-target-operations/inbox` | Current target participant or DM/co-DM | optional oldest-pending cursor and limit <=100 | Each target owner receives only their own invitations; DM/co-DM receive the bounded management projection |
+| `GET /api/campaigns/:campaignId/multi-target-operations/outgoing` | Current source participant or DM/co-DM | optional bounded cursor and limit <=100 | Source sees authorized labels, aggregate coarse status, and no per-target applicability result |
+| `GET /api/campaigns/:campaignId/multi-target-operations/:operationId` | Current participant or DM/co-DM | operation id | Viewer-shaped detail; unrelated users receive `ACTION_NOT_FOUND` |
 
 The server enforces `maxTargets: 8`, rejects duplicate resolved characters, post-proposal additions,
 non-candidates, unapproved/expired/revoked invitations, and currently invalid selected legs. It never silently
@@ -372,9 +381,15 @@ target mutation. A reviewed healing template with `allowTargetNoOp=true` may app
 target revision/invalidation while consuming the single cost; source-visible output cannot identify it. Protocol
 3/4/5 fails closed for create/respond/finalize/cancel, inbox/detail/outgoing reads, WebSocket delivery, resync,
 and replay; protocol 6 is the first successful version. All successful responses are `Cache-Control: no-store`.
+Without that reviewed flag, target inapplicability follows ADR 0016: finalization commits terminal `failed`,
+consumes no cost, mutates no character, and leaves approved legs approved/unselected with no synthetic decline.
+Applied source/DM detail carries the closed source cost, source/combined leg identity/event/revision, and the
+combined target operation only when the source is itself selected. Each target owner receives the normalized
+operation plus their own leg/event/revision/changed result needed for missed-event recovery; source views of
+other target legs omit changed, revision, and canonical target character id.
 
-Planned transactional capacity limits are 3 live collections/source character, 5/source account, 50/campaign,
-and 20 pending invitations/target owner. Planned route limits are propose 10/minute/account and
+Transactional capacity limits are 3 live collections/source character, 5/source account, 50/campaign,
+and 20 pending invitations/target owner. Route limits are propose 10/minute/account and
 30/minute/campaign, respond 30/120, and finalize/cancel 20/60; excess requests return privacy-safe
 `429 RATE_LIMITED`. Inbox pages contain at most 100 rows and use an exclusive
 `collectionClosesAt + operationId + targetCharacterId` cursor ordered oldest-pending-first so continuous new
@@ -384,6 +399,11 @@ The source-account and target-owner limits are global across campaigns. Proposal
 dedicated seed-10 quota advisory lock for the source account and every distinct target-owner account, acquired
 in ascending UUID order before the campaign lock. At the final available invitation slot, concurrent proposals
 from different campaigns produce one committed winner and one `COLLECTION_LIMIT_REACHED` loser.
+
+Campaign context advertises the exact default-off `multiTargetOperations` capability: contract/protocol
+versions, `maxTargets:8`, 600-second collection and 86,400-second operation deadlines, source-owned finalization
+consent, partial-selection-but-never-partial-commit flags, and `multi-target-effects-v1`. Exact campaign UUID
+enrollment and migration-0011 readiness are required before advertisement.
 
 ## Party inventory and transfer routes
 

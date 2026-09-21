@@ -3,7 +3,7 @@
 Status: Accepted as an architecture contract (2026-09-01)
 
 Implementation: Shipped. Migration `0004` persists the policy. This projection contract introduced
-`HUB_PROTOCOL_VERSION` 2; the merged implementation has since advanced to protocol 5. Protocol 4 introduced
+`HUB_PROTOCOL_VERSION` 2; the merged implementation has since advanced to protocol 6. Protocol 4 introduced
 source-cost events, while protocol 5 adds identity-minimized campaign-scoped projection invalidations.
 The required memory/PostgreSQL evidence lives in `test/jest/hub/HubCharacterProjection.test.js`,
 `HubProjectionPolicy.test.js`, `HubProjectionCanary.test.js` and `HubProjectionLifecycle.test.js`. Two

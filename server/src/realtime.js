@@ -24,6 +24,11 @@ export function requiresHubProtocol5Event (event) {
 		&& event?.aggregateType === "campaign";
 }
 
+export function requiresHubProtocol6Event (event) {
+	return typeof event?.type === "string"
+		&& event.type.startsWith("character.multi_operation.");
+}
+
 function isMessageRateLimitExceeded ({connection, isReplayContinuation = false}) {
 	const now = Date.now();
 	if (now - connection.messageWindowStartedAt >= 1000) {
@@ -176,15 +181,22 @@ export class HubRealtime {
 				limit: 500,
 			});
 			if (
-				!["4", "5"].includes(connection.protocolVersion)
+				!["4", "5", "6"].includes(connection.protocolVersion)
 				&& eventPage.events.some(requiresHubProtocol4Event)
 			) {
 				connection.socket.close(1008, "Protocol update required");
 				return;
 			}
 			if (
-				connection.protocolVersion !== "5"
+				!["5", "6"].includes(connection.protocolVersion)
 				&& eventPage.events.some(requiresHubProtocol5Event)
+			) {
+				connection.socket.close(1008, "Protocol update required");
+				return;
+			}
+			if (
+				connection.protocolVersion !== "6"
+				&& eventPage.events.some(requiresHubProtocol6Event)
 			) {
 				connection.socket.close(1008, "Protocol update required");
 				return;
@@ -222,11 +234,15 @@ export class HubRealtime {
 				: event;
 			// A null outcome means this viewer may not see the event at all.
 			if (!viewerEvent) continue;
-			if (!["4", "5"].includes(connection.protocolVersion) && requiresHubProtocol4Event(viewerEvent)) {
+			if (!["4", "5", "6"].includes(connection.protocolVersion) && requiresHubProtocol4Event(viewerEvent)) {
 				connection.socket.close(1008, "Protocol update required");
 				continue;
 			}
-			if (connection.protocolVersion !== "5" && requiresHubProtocol5Event(viewerEvent)) {
+			if (!["5", "6"].includes(connection.protocolVersion) && requiresHubProtocol5Event(viewerEvent)) {
+				connection.socket.close(1008, "Protocol update required");
+				continue;
+			}
+			if (connection.protocolVersion !== "6" && requiresHubProtocol6Event(viewerEvent)) {
 				connection.socket.close(1008, "Protocol update required");
 				continue;
 			}

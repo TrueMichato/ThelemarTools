@@ -41,6 +41,12 @@ visibility is not authorization.
 | Accept peer proposal | Target owner only | Target owner only | Target owner only; same account may later accept self-target | No |
 | Reject peer proposal | Yes | Yes | Target owner only | No |
 | Cancel peer proposal | Yes | Yes | Own proposal only | No |
+| Create protocol-6 multi-target proposal | No; use player-owned source authority | No; use player-owned source authority | Own active source and 1-8 active player-owned targets | No |
+| Approve multi-target invitation | No for another owner; own player leg only | No for another owner; own player leg only | Pinned target owner for that invitation only | No |
+| Reject/revoke multi-target invitation | Yes | Yes | Pinned target owner only | No |
+| Finalize exact multi-target subset | No for another source | No for another source | Original source owner only, after collection is terminal | No |
+| Cancel live multi-target collection | Yes | Yes | Original source owner only | No |
+| Read multi-target detail/inbox/outgoing | Bounded management projection | Bounded management projection | Own source collection or own target invitations only | No |
 | Grant XP or award one item batch to eligible campaign characters | Yes | Yes | No | No |
 | Read party inventory | Yes | Yes | Yes | Yes |
 | Move from party inventory | Yes | Yes | Request for own character only | No |
@@ -96,6 +102,9 @@ account's campaign sockets immediately after the authoritative transaction commi
   DM/co-DM resolves them.
 - DM/co-DM role alone never approves somebody else's peer proposal. The DM instead issues a distinct direct
   operation with its own actor/command identity.
+- Multi-target authority is protocol-6 and capability-gated. DM/co-DM observation and reject/cancel authority
+  do not grant approval or finalization on another player's behalf; target owners never receive co-target
+  identity/count/decision or another target's changed/revision result.
 - Action and transfer resolution are both explicitly limited to active DM/co-DM/player memberships before
   their operation-specific owner/role checks.
 - Account deletion-pending sessions may read session/deletion state, export, cancel deletion, or logout;

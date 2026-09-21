@@ -4,7 +4,7 @@
 > **Last verified:** 2026-09-03
 > **Owner:** Campaign Hub maintainers
 
-The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0010. The PostgreSQL authority is
+The authoritative schema is `server/migrations/0001_hub_core.sql` plus immutable migrations through 0011. The PostgreSQL authority is
 `server/src/postgres-hub-store.js`; `MemoryHubStore` is a deterministic test double, not a production
 security boundary.
 
@@ -33,7 +33,7 @@ security boundary.
 | `oauth_transactions` | Short-lived OAuth correlation | hash-only one-time state; concrete provider/operation/redirect; optional account/session, invite context, PKCE verifier, OIDC nonce; <=10 minutes | State-selected transaction-specific-cookie start/callback; link transactions use <=5 minutes and transaction id as command identity |
 | `invite_contexts` | First-access admission | one invite, hash-only retry handle, <=5 minutes, one unique OAuth transaction binding, terminal account/session/membership ids only after commit | Default-off r9 first-account admission and existing-account atomic invite join |
 | `account_entitlements` | Provider-neutral creator/operator authority | active `campaign:create`/`platform:operate`; account cascade; actor FKs set null; one active row/account/type; deferred last-operator protection | Capability-gated campaign creation and hidden operator administration |
-| `campaigns` | Campaign root | owner account; active/archived/deleting; monotonic next event sequence | active and archived used; deleting reserved |
+| `campaigns` | Campaign root | owner account; active/archived/deleting; monotonic next event sequence; permanent first multi-target use timestamp/operation marker | active and archived used; deleting reserved; campaign marker keeps protocol 3/4/5 closed after workflow cleanup |
 | `memberships` | Account role in campaign | unique campaign+account; dm/co_dm/player/spectator | active, removed, and left used; reinvite reuses row |
 | `invites` | Redeemable role grant | hash-only token, expiry, max/use count, optional revoke | create/list/redeem/revoke/expiry/max-use used |
 | `brew_bundle_versions` | Immutable campaign brew | campaign version and content hash unique; creator membership | content stored in JSONB; `object_key` reserved |
@@ -45,8 +45,11 @@ security boundary.
 | `party_inventories` | Shared campaign container | one per campaign; revision; denomination JSON currency | lazily created |
 | `inventory_entries` | Relational party inventory rows and future character-entry model | exactly one character/party parent; quantity >0; metadata JSON | current store writes party rows; character inventory remains embedded JSON |
 | `pending_actions` | Legacy pre-v3 structured effect workflow | actor, optional target character, status, payload, optional expiry | legacy history only; migration 0005 cancels arbitrary proposed rows |
-| `semantic_operations` | Versioned character intent lifecycle | one target, optional source, pinned template/choice/rules/content, optional closed source cost and deterministic seed, source/target result linkage, <=24h proposal expiry | direct applied operation or proposed -> applied/rejected/cancelled/expired/failed |
-| `semantic_operation_commands` | Persistent exactly-once command result | global command id, actor/body hash, operation, command type, response/event ids | create/resolve replay and mutated-body rejection |
+| `semantic_operations` | Versioned character intent lifecycle | legacy one-target rows remain unchanged; migration 0011 adds nullable normalized target-set parent shape, bounded candidate count, collection/finalization deadlines, pinned template/choice/rules/content, source result linkage; live parent delete and proposal identity updates are blocked | one-target active; protocol-6 multi-target active behind default-off exact enrollment |
+| `semantic_operation_targets` | Normalized immutable multi-target candidate/consent/leg history | one unique character/ref/invitation/ordinal per parent; owner/rules/event/command references are retention-safe; selected/applied/no-op shapes constrained; update plus post-construction insert/delete guards freeze membership while terminal cleanup remains allowed | protocol-6 proposal/respond/finalize/lifecycle authority |
+| `semantic_operation_finalizations` | One exact ordered source finalization per multi-target parent | unique parent/command; bounded ordered invitation fingerprint; normalized child selection remains authority | applied/cancelled/failed exact replay |
+| `semantic_operation_commands` | Persistent exactly-once command result | global command id, actor/body hash, operation, expanded multi-target command types, response invitation identity, response/event ids | one-target and protocol-6 multi-target command replay active |
+| `semantic_multi_target_usage` | Irreversible schema-use high-water marker | singleton; no history FK; runtime `SELECT, INSERT` only; backup `SELECT`; normal cleanup never deletes it | inserted transactionally on first accepted proposal; fences true pre-0011 rollback permanently |
 | `transfers` | Asset-transfer workflow | exactly one source and target container, status, escrow/request payload | direct authority is created as committed; approval-bound escrow is reserved -> committed/rejected/cancelled; player stash withdrawal is proposed -> committed/rejected/cancelled |
 | `domain_events` | Ordered client-visible history | unique campaign sequence; visibility and explicit-recipient constraint | replay/live fanout |
 | `audit_entries` | Security/admin history | nullable campaign/account/session refs; details JSON | mutations append relevant audit |
@@ -241,7 +244,7 @@ stateDiagram-v2
 | 4 | campaign id | serialize party inventory creation/write |
 | 6 | campaign id | membership/campaign lifecycle serialization |
 | 7 | platform operator namespace | serialize operator grant/revoke/deletion checks before entitlement/account rows |
-| 10 | planned multi-target quota account UUID | serialize source-account and target-owner global multi-target caps across campaigns; ADR 0020/A3 only, not implemented |
+| 10 | multi-target quota account UUID | serialize source-account and target-owner global multi-target caps across campaigns before campaign authority |
 
 These seeds are implementation allocations, not a public API. New lock classes must avoid accidental overlap
 and document ordering.

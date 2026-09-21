@@ -55,7 +55,7 @@ describe("Hub lifecycle API", () => {
 		const started = await app.inject({
 			method: "POST",
 			url: "/api/account/reauthentication/github",
-			headers: {...headers(session), "x-hub-protocol-version": "5"},
+			headers: {...headers(session), "x-hub-protocol-version": "6"},
 			payload: {returnTo: "/hub.html"},
 		});
 		const state = new URL(started.json().authorizationUrl).searchParams.get("state");
@@ -180,7 +180,11 @@ describe("Hub lifecycle API", () => {
 			app.inject({method: "GET", url: `/api/characters?campaignId=${campaign.id}`, headers: headers(player)}),
 			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/snapshot`, headers: headers(player)}),
 			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/context`, headers: {cookie: player.cookie}}),
-			app.inject({method: "GET", url: `/api/campaigns/${campaign.id}/events`, headers: {cookie: player.cookie}}),
+			app.inject({
+				method: "GET",
+				url: `/api/campaigns/${campaign.id}/events`,
+				headers: {cookie: player.cookie, "x-hub-protocol-version": "6"},
+			}),
 		]);
 		expect(authorizedReads.map(response => response.statusCode)).toEqual([200, 200, 200, 200, 200, 200]);
 		expect(authorizedReads[0].json().campaign.status).toBe("archived");

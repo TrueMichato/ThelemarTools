@@ -77,6 +77,7 @@
 		"hub:maintenance": "node server/scripts/maintenance.mjs",
 		"hub:check-secrets": "node server/scripts/check-secrets.mjs",
 		"hub:check-auth-rollback": "node server/scripts/check-auth-provider-rollback.mjs",
+		"hub:check-multi-target-rollback": "node server/scripts/check-multi-target-rollback.mjs",
 		"hub:check-auth-first-enable": "node server/scripts/check-auth-provider-first-enable.mjs",
 		"hub:check-account-entitlements": "node server/scripts/check-account-entitlement-rollout.mjs",
 		"hub:check-peer-source-cost-rollout": "node server/scripts/check-peer-source-cost-rollout.mjs",
@@ -86,7 +87,7 @@
 		"hub:restore:encrypted": "node server/scripts/restore-encrypted.mjs",
 		"test:hub": "node --localstorage-file test/localstorage.tmp --experimental-vm-modules node_modules/jest/bin/jest.js test/jest/hub/ --no-coverage --forceExit",
 		"test:hub:ops-image": "node scripts/test-hub-ops-image-permissions.mjs",
-		"test:hub:mutations": "node scripts/test-hub-active-context-mutations.mjs && node scripts/test-hub-rules-policy-mutations.mjs && node scripts/test-hub-content-policy-mutations.mjs && node scripts/test-hub-account-entitlement-mutations.mjs && node scripts/test-hub-account-identity-mutations.mjs && node scripts/test-hub-semantic-operation-mutations.mjs",
+		"test:hub:mutations": "node scripts/test-hub-active-context-mutations.mjs && node scripts/test-hub-rules-policy-mutations.mjs && node scripts/test-hub-content-policy-mutations.mjs && node scripts/test-hub-account-entitlement-mutations.mjs && node scripts/test-hub-account-identity-mutations.mjs && node scripts/test-hub-semantic-operation-mutations.mjs && node scripts/test-hub-multi-target-mutations.mjs",
 		"test:hub:e2e:stack": "node server/scripts/run-hub-e2e.mjs"
 	},
 	"lint-staged": {

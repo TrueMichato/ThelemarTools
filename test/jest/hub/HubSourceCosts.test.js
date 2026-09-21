@@ -23,11 +23,11 @@ describe("Hub shared source-cost contract", () => {
 		});
 	});
 
-	it("accepts source-cost requests from protocol 4 and the current protocol 5 only", () => {
+	it("accepts source-cost requests from protocols 4, 5, and current protocol 6 only", () => {
 		expect(isPeerSourceCostsProtocolVersion("3")).toBe(false);
 		expect(isPeerSourceCostsProtocolVersion("4")).toBe(true);
 		expect(isPeerSourceCostsProtocolVersion("5")).toBe(true);
-		expect(isPeerSourceCostsProtocolVersion("6")).toBe(false);
+		expect(isPeerSourceCostsProtocolVersion("6")).toBe(true);
 	});
 
 	it("normalizes, combines, and canonically orders closed descriptors", () => {

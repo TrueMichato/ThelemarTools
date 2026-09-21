@@ -1,6 +1,6 @@
 # Campaign Hub migration guide
 
-> **Status:** Implemented through source-cost binding migration 0010
+> **Status:** Implemented through schema-before-use multi-target migration 0011
 > **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
@@ -105,6 +105,9 @@ Current migrations:
 - 0010 source-cost ABA identity normalization aligned with the shared resolver: trim all ids, lowercase UUIDs
   only, preserve non-UUID case, and retain every matching resource plus feature/innate mirror in the binding
   snapshot so duplicate cardinality cannot disappear behind `LIMIT 1`.
+- 0011 additive ADR 0020 parent extensions, normalized target/finalization history, expanded command identities,
+  retention-safe constraints/indexes, and the irreversible FK-independent multi-target usage marker. This
+  migration does not add runtime routes, stores, protocol 6, capability advertisement, or enablement.
 
 Migration 0007 is additive and keeps protocol-3 cost-free rows readable while new source-cost rows require a
 protocol-4 application. Migration 0006 is additive and leaves existing GitHub subjects, account ids, and old
@@ -124,15 +127,26 @@ functions used by the existing migration-0007 source-cost invalidation trigger; 
 routes, descriptors, or capability. Exact predecessor code continues to read and write the same schema, while
 the trigger conservatively invalidates proposals whose trimmed/case-sensitive identity or duplicate cardinality
 changes.
+Migration 0011 is an expand migration and is previous-app-compatible only in the schema-before-use state:
+multi-target capability is absent/disabled, no `target_set_version=1` history exists, and
+`hub.semantic_multi_target_usage` is empty. The first accepted multi-target proposal inserts the
+singleton marker transactionally. After that marker exists, normal rollback to a true pre-0011 binary is
+permanently forbidden even after detailed history cleanup; use the checked-in rollback preflight and target a
+marker-aware bridge/r10+ application. The same transaction writes `campaigns.multi_target_first_used_at` and
+`multi_target_first_operation_id`; those per-campaign protocol markers are also never cleared by ordinary
+history cleanup, so protocol 3/4/5 replay cannot reopen after detailed rows age out.
+Migration-level guards freeze the live parent and candidate membership: proposal identity cannot be updated,
+live parents/candidates cannot be deleted, and no candidate can be inserted after `candidate_count` is complete.
+Terminal 90-day cleanup and purge may still delete history in the explicit parent-first cleanup transaction.
 Migration 0005 is additive apart from terminalizing legacy `structured_effect` rows still in `proposed`.
-Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0010, grants the
-runtime role, boots the production image against required version 0010, and runs semantic role/replay/
+Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack applies 0001-0011, grants the
+runtime role, boots the production image against required version 0011, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
-ADR 0020 requires a future additive `0011_multi_target_semantic_operations.sql`, but Wave A0 intentionally adds
-neither that SQL file nor a migration-policy entry. When A3 authors it, the policy phase is `expand` and
-`previousAppCompatible: true` describes only schema-before-use: a true pre-0011 binary is operationally
-compatible only while the planned singleton `hub.semantic_multi_target_usage` marker is absent. The first
+ADR 0020's additive `0011_multi_target_semantic_operations.sql` and migration-policy entry are now checked in.
+The policy phase is `expand` and `previousAppCompatible: true` describes only schema-before-use: a true pre-0011
+binary is operationally compatible only while the singleton `hub.semantic_multi_target_usage` marker is absent
+and normalized history counts remain zero. The first
 accepted proposal inserts that marker transactionally; it has no FK to cleanable history and normal retention
 never deletes it. Once present, normal rollback must target a bridge/r10+ binary which understands
 `target_set_version`, normalized target history, expiry, retention, purge cleanup, and the marker. A true
@@ -165,7 +179,8 @@ npm run hub:grant-roles
 Runtime role receives:
 
 - schema usage;
-- table select/insert/update/delete;
+- table select/insert/update/delete, except that `hub.semantic_multi_target_usage` is limited to
+  `SELECT, INSERT` and cannot be updated or deleted;
 - sequence usage/select;
 - matching default privileges;
 - explicit no schema create.
@@ -173,7 +188,7 @@ Runtime role receives:
 Backup role receives:
 
 - schema usage;
-- table/sequence select;
+- table/sequence select, including `hub.semantic_multi_target_usage`;
 - matching default privileges;
 - explicit no schema create.
 

@@ -145,6 +145,11 @@ function runSimulation ({
 	rollbackCompatible = true,
 	deployRollbackCompatible,
 	plannedMigrations = "0004",
+	multiTargetUsageMarkerPresent = false,
+	schemaHasMigration0011,
+	previousMigrationVersion = "0010",
+	quiesceFail = false,
+	quiesceMode,
 	holdSeconds,
 	lockFile = path.join(dir, "release.lock"),
 }) {
@@ -157,6 +162,13 @@ function runSimulation ({
 		HUB_RELEASE_EVIDENCE_DIR: evidenceDir,
 		HUB_RELEASE_TEST_ROLLBACK_COMPATIBLE: `${rollbackCompatible}`,
 		HUB_RELEASE_TEST_PLANNED_MIGRATIONS: plannedMigrations,
+		HUB_RELEASE_TEST_MULTI_TARGET_USAGE_MARKER_PRESENT: `${multiTargetUsageMarkerPresent}`,
+		HUB_RELEASE_TEST_PREVIOUS_MIGRATION_VERSION: previousMigrationVersion,
+		HUB_RELEASE_TEST_QUIESCE_FAIL: `${quiesceFail}`,
+		...(quiesceMode == null ? {} : {HUB_RELEASE_TEST_QUIESCE_MODE: quiesceMode}),
+		...(schemaHasMigration0011 == null
+			? {}
+			: {HUB_RELEASE_TEST_SCHEMA_HAS_MIGRATION_0011: `${schemaHasMigration0011}`}),
 		...(deployRollbackCompatible == null
 			? {}
 			: {HUB_RELEASE_TEST_DEPLOY_ROLLBACK_COMPATIBLE: `${deployRollbackCompatible}`}),
@@ -255,6 +267,16 @@ describe("Campaign Hub deliberate release automation", () => {
 			`source ${JSON.stringify(releaseScript)}`,
 			"HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS=11111111-1111-4111-8111-111111111111",
 			"assert_no_peer_source_cost_ambient_override",
+		].join("\n")], {encoding: "utf8"});
+		expect(result.status).not.toBe(0);
+		expect(result.stderr).toMatch(/configured only in \.env\.hub/);
+	});
+
+	it("rejects an ambient multi-target allowlist before Compose can override .env.hub", () => {
+		const result = spawnSync("bash", ["-c", [
+			`source ${JSON.stringify(releaseScript)}`,
+			"HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS=11111111-1111-4111-8111-111111111111",
+			"assert_no_multi_target_ambient_override",
 		].join("\n")], {encoding: "utf8"});
 		expect(result.status).not.toBe(0);
 		expect(result.stderr).toMatch(/configured only in \.env\.hub/);
@@ -566,6 +588,63 @@ describe("Campaign Hub deliberate release automation", () => {
 		}
 	});
 
+	it("classifies migration 0011 as schema-before-use compatible and requires marker-aware rollback", () => {
+		const policy = JSON.parse(fs.readFileSync(path.join(repoRoot, "deploy/hub/migration-policy.json"), "utf8"));
+		expect(policy.migrations["0011"]).toMatchObject({
+			phase: "expand",
+			previousAppCompatible: true,
+		});
+		expect(policy.migrations["0011"].notes).toMatch(/schema-before-use only/i);
+		expect(policy.migrations["0011"].notes).toMatch(/semantic_multi_target_usage/);
+		const rollbackRunbook = fs.readFileSync(path.join(repoRoot, "docs/hub/runbooks/rollback.md"), "utf8");
+		expect(rollbackRunbook).toContain("hub:check-multi-target-rollback");
+		expect(rollbackRunbook).toContain("HUB_MULTI_TARGET_ROLLBACK_TARGET=pre-0011");
+		expect(rollbackRunbook).toContain("HUB_MULTI_TARGET_ROLLBACK_TARGET=bridge");
+	});
+
+	it.each([
+		["compatible result", 0, {target: "pre-0011", compatible: true, blockers: []}, "compatible"],
+		["usage marker", 2, {target: "pre-0011", compatible: false, blockers: ["USAGE_MARKER_PRESENT"]}, "multi-target-usage-marker-present"],
+		["retained history", 2, {target: "pre-0011", compatible: false, blockers: ["MULTI_TARGET_HISTORY_PRESENT"]}, "multi-target-history-present"],
+		["infrastructure failure", 1, null, "multi-target-rollback-preflight-failed"],
+		["malformed result", 2, {compatible: false}, "multi-target-rollback-preflight-failed"],
+		["contradictory compatible blockers", 0, {target: "pre-0011", compatible: true, blockers: ["USAGE_MARKER_PRESENT"]}, "multi-target-rollback-preflight-failed"],
+		["incompatible result without blockers", 2, {target: "pre-0011", compatible: false, blockers: []}, "multi-target-rollback-preflight-failed"],
+		["incompatible result with unknown blocker", 2, {target: "pre-0011", compatible: false, blockers: ["UNKNOWN"]}, "multi-target-rollback-preflight-failed"],
+	])("classifies multi-target rollback preflight %s truthfully", (_label, status, body, expected) => {
+		const dir = makeTempDir();
+		try {
+			const resultFile = path.join(dir, "preflight.json");
+			fs.writeFileSync(resultFile, body == null ? "" : JSON.stringify(body));
+			const result = spawnSync("bash", ["-c", [
+				`source ${JSON.stringify(releaseScript)}`,
+				`classify_multi_target_rollback_preflight ${JSON.stringify(resultFile)} ${status}`,
+			].join("\n")], {encoding: "utf8"});
+			expect(result.status).toBe(0);
+			expect(result.stdout.trim()).toBe(expected);
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
+	it("does not treat a restarting Compose BFF as quiesced", () => {
+		const restarting = spawnSync("bash", ["-c", [
+			`source ${JSON.stringify(releaseScript)}`,
+			"compose_current () { printf '%s\\n' bff-container; }",
+			"docker () { printf '%s\\n' 'false true'; }",
+			"is_bff_quiesced",
+		].join("\n")], {encoding: "utf8"});
+		expect(restarting.status).not.toBe(0);
+
+		const stopped = spawnSync("bash", ["-c", [
+			`source ${JSON.stringify(releaseScript)}`,
+			"compose_current () { printf '%s\\n' bff-container; }",
+			"docker () { printf '%s\\n' 'false false'; }",
+			"is_bff_quiesced",
+		].join("\n")], {encoding: "utf8"});
+		expect(stopped.status).toBe(0);
+	});
+
 	it("automatically rolls back only the app after a compatible post-deploy health failure", () => {
 		const dir = makeTempDir();
 		try {
@@ -573,6 +652,172 @@ describe("Campaign Hub deliberate release automation", () => {
 			expect(result.status).not.toBe(0);
 			expect(result.trace).toContain("deploy");
 			expect(result.trace).toContain("failure:verify");
+			expect(result.trace).toContain("rollback");
+			expect(result.evidence.rollback_result).toBe("simulated-compatible");
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
+	it("blocks automatic pre-0011 rollback after the irreversible usage marker is present", () => {
+		const dir = makeTempDir();
+		try {
+			const source = fs.readFileSync(releaseScript, "utf8");
+			expect(source).toContain("HUB_MULTI_TARGET_ROLLBACK_TARGET=pre-0011");
+			expect(source).toContain("node server/scripts/check-multi-target-rollback.mjs");
+			expect(source).toContain("is_bff_quiesced");
+			expect(source).toContain("docker stop --time 10");
+			expect(source).toContain("{{.State.Running}} {{.State.Restarting}}");
+			const failureHandler = source.slice(
+				source.indexOf("handle_failure ()"),
+				source.indexOf("export_monitor_environment ()"),
+			);
+			expect(failureHandler.indexOf("compose_current stop bff"))
+				.toBeLessThan(failureHandler.indexOf("node server/scripts/check-multi-target-rollback.mjs"));
+			expect(failureHandler.indexOf("node server/scripts/check-multi-target-rollback.mjs"))
+				.toBeLessThan(failureHandler.indexOf("rollback_application ||"));
+			const result = runSimulation({
+				dir,
+				failPhase: "verify",
+				rollbackCompatible: true,
+				plannedMigrations: "0011",
+				multiTargetUsageMarkerPresent: true,
+			});
+			expect(result.status).not.toBe(0);
+			expect(result.trace).toContain("deploy");
+			expect(result.trace.indexOf("rollback-quiesce"))
+				.toBeLessThan(result.trace.indexOf("rollback-marker-check"));
+			expect(result.trace).toContain("rollback-marker-blocked");
+			expect(result.trace).toContain("isolate");
+			expect(result.trace).not.toContain("\nrollback\n");
+			expect(result.evidence).toMatchObject({
+				rollback_compatible: "false",
+				rollback_incompatibility: "multi-target-usage-marker-present",
+				rollback_result: "forbidden-schema-incompatible",
+			});
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
+	it("quiesces candidate writes before a compatible pre-0011 rollback check and rollback", () => {
+		const dir = makeTempDir();
+		try {
+			const result = runSimulation({
+				dir,
+				failPhase: "verify",
+				rollbackCompatible: true,
+				plannedMigrations: "0011",
+				multiTargetUsageMarkerPresent: false,
+			});
+			expect(result.status).not.toBe(0);
+			const quiesce = result.trace.indexOf("rollback-quiesce");
+			const markerCheck = result.trace.indexOf("rollback-marker-check");
+			const rollback = result.trace.indexOf("\nrollback\n");
+			expect(quiesce).toBeGreaterThanOrEqual(0);
+			expect(markerCheck).toBeGreaterThan(quiesce);
+			expect(rollback).toBeGreaterThan(markerCheck);
+			expect(result.evidence.rollback_result).toBe("simulated-compatible");
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
+	it("runs the marker check on a retry where 0011 was applied by an earlier attempt", () => {
+		const dir = makeTempDir();
+		try {
+			const result = runSimulation({
+				dir,
+				failPhase: "verify",
+				rollbackCompatible: true,
+				plannedMigrations: "none",
+				schemaHasMigration0011: true,
+				previousMigrationVersion: "0010",
+				multiTargetUsageMarkerPresent: true,
+			});
+			expect(result.status).not.toBe(0);
+			expect(result.trace).toContain("rollback-quiesce");
+			expect(result.trace).toContain("rollback-marker-check");
+			expect(result.trace).toContain("rollback-marker-blocked");
+			expect(result.trace).toContain("isolate");
+			expect(result.trace).not.toContain("\nrollback\n");
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
+	it.each([
+		["first Compose stop fails and the second succeeds", "first-fail-second-success", false],
+		["both Compose stops fail and the exact BFF container fallback succeeds", "both-fail-fallback-success", true],
+	])("verifies BFF isolation when %s", (_label, quiesceMode, isExpectFallback) => {
+		const dir = makeTempDir();
+		try {
+			const result = runSimulation({
+				dir,
+				failPhase: "verify",
+				rollbackCompatible: true,
+				plannedMigrations: "0011",
+				schemaHasMigration0011: true,
+				previousMigrationVersion: "0010",
+				multiTargetUsageMarkerPresent: true,
+				quiesceMode,
+			});
+			expect(result.status).not.toBe(0);
+			expect(result.trace).toContain("rollback-quiesce-attempt-1");
+			expect(result.trace).toContain("rollback-quiesce-attempt-2");
+			if (isExpectFallback) expect(result.trace).toContain("rollback-quiesce-fallback");
+			else expect(result.trace).not.toContain("rollback-quiesce-fallback");
+			expect(result.trace).toContain("rollback-marker-check");
+			expect(result.trace).toContain("isolate");
+			expect(result.evidence).toMatchObject({
+				rollback_candidate_quiesced: "true",
+				rollback_result: "forbidden-schema-incompatible",
+			});
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
+	it("reports a critical fence failure instead of claiming isolation when BFF quiescing fails", () => {
+		const dir = makeTempDir();
+		try {
+			const result = runSimulation({
+				dir,
+				failPhase: "verify",
+				rollbackCompatible: true,
+				plannedMigrations: "0011",
+				schemaHasMigration0011: true,
+				previousMigrationVersion: "0010",
+				quiesceFail: true,
+			});
+			expect(result.status).not.toBe(0);
+			expect(result.trace).toContain("rollback-quiesce-failed");
+			expect(result.trace).toContain("fence-failed");
+			expect(result.trace).not.toContain("isolate");
+			expect(result.trace).not.toContain("\nrollback\n");
+			expect(result.evidence).toMatchObject({
+				rollback_incompatibility: "multi-target-quiesce-failed",
+				rollback_result: "quiesce-failed-candidate-may-be-live",
+			});
+		} finally {
+			fs.rmSync(dir, {recursive: true, force: true});
+		}
+	});
+
+	it("allows rollback to a marker-aware previous application without the pre-0011 fence", () => {
+		const dir = makeTempDir();
+		try {
+			const result = runSimulation({
+				dir,
+				failPhase: "verify",
+				rollbackCompatible: true,
+				plannedMigrations: "none",
+				schemaHasMigration0011: true,
+				previousMigrationVersion: "0011",
+				multiTargetUsageMarkerPresent: true,
+			});
+			expect(result.status).not.toBe(0);
+			expect(result.trace).not.toContain("rollback-marker-check");
 			expect(result.trace).toContain("rollback");
 			expect(result.evidence.rollback_result).toBe("simulated-compatible");
 		} finally {

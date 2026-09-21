@@ -71,7 +71,7 @@ async function pStartInvite ({app, token, provider = "github"}) {
 		url: "/api/auth/invite-contexts",
 		headers: {
 			origin: ORIGIN,
-			"x-hub-protocol-version": "5",
+			"x-hub-protocol-version": "6",
 		},
 		payload: {token, provider, returnTo: "/hub.html"},
 	});
@@ -91,7 +91,7 @@ async function pRetryInvite ({app, retryToken, provider = "github", cookieHeader
 		url: "/api/auth/invite-contexts/retry",
 		headers: {
 			origin: ORIGIN,
-			"x-hub-protocol-version": "5",
+			"x-hub-protocol-version": "6",
 			...(cookieHeader ? {cookie: cookieHeader} : {}),
 		},
 		payload: {retryToken, provider, returnTo: "/hub.html"},
@@ -222,7 +222,7 @@ describe("Hub invite-gated first OAuth access", () => {
 		const wrongOrigin = await app.inject({
 			method: "POST",
 			url: "/api/auth/invite-contexts",
-			headers: {origin: "https://evil.example", "x-hub-protocol-version": "5"},
+			headers: {origin: "https://evil.example", "x-hub-protocol-version": "6"},
 			payload: {token: "z".repeat(32), provider: "github", returnTo: "/hub.html"},
 		});
 		expect(wrongOrigin.json()).toEqual({error: "INVALID_ORIGIN"});
@@ -232,7 +232,7 @@ describe("Hub invite-gated first OAuth access", () => {
 			headers: {origin: ORIGIN, "x-hub-protocol-version": "4"},
 			payload: {token: "z".repeat(32), provider: "github", returnTo: "/hub.html"},
 		});
-		expect(staleProtocol.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "5"});
+		expect(staleProtocol.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "6"});
 	});
 
 	it("matches PostgreSQL duplicate invite-token rejection", async () => {
@@ -492,7 +492,7 @@ describe("Hub invite-gated first OAuth access", () => {
 			const response = await app.inject({
 				method: "POST",
 				url: "/api/auth/invite-contexts",
-				headers: {origin: ORIGIN, "x-hub-protocol-version": "5"},
+				headers: {origin: ORIGIN, "x-hub-protocol-version": "6"},
 				payload: {token: seeded.token, provider: "github", returnTo},
 			});
 			expect(response.statusCode).toBe(201);

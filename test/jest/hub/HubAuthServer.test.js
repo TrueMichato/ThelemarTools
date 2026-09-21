@@ -68,7 +68,7 @@ describe("Hub durable GitHub registry flow", () => {
 	it("advertises only bounded registry capability metadata", async () => {
 		const response = await app.inject({method: "GET", url: "/api/meta"});
 		expect(response.json()).toEqual(expect.objectContaining({
-			protocolVersion: "5",
+			protocolVersion: "6",
 			capabilities: ["auth.provider_registry.v1", "campaign.active_context.v1"],
 			authProviders: [{
 				slug: "github",
@@ -328,7 +328,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie,
 				origin: ORIGIN,
 				"x-csrf-token": session.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 			},
 			payload: {returnTo: "/hub.html"},
 		});
@@ -425,7 +425,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: reauthenticated.cookie,
 				origin: ORIGIN,
 				"x-csrf-token": oldAuth.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "link-google",
 			},
 			payload: {returnTo: "/hub.html?identityNotice=linked"},
@@ -438,7 +438,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: reauthenticated.cookie,
 				origin: ORIGIN,
 				"x-csrf-token": oldAuth.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "link-google",
 			},
 			payload: {returnTo: "/hub.html?identityNotice=linked"},
@@ -468,7 +468,7 @@ describe("Hub concrete multi-provider routes", () => {
 			url: "/api/account/identities",
 			headers: {
 				cookie: nextCookie,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 			},
 		})).json();
 
@@ -488,7 +488,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: nextCookie,
 				origin: ORIGIN,
 				"x-csrf-token": oldAuth.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "old-csrf",
 			},
 		});
@@ -501,7 +501,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: nextCookie,
 				origin: ORIGIN,
 				"x-csrf-token": nextSession.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "fresh-csrf",
 			},
 		});
@@ -525,7 +525,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: unlinkReauth.cookie,
 				origin: ORIGIN,
 				"x-csrf-token": unlinkSession.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "unlink-google",
 			},
 		});
@@ -544,7 +544,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: unlinkReauth.cookie,
 				origin: ORIGIN,
 				"x-csrf-token": unlinkSession.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "unlink-google",
 			},
 		});
@@ -557,7 +557,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: unlinkCookie,
 				origin: ORIGIN,
 				"x-csrf-token": unlink.json().csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "unlink-google",
 			},
 		});
@@ -571,7 +571,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: unlinkCookie,
 				origin: ORIGIN,
 				"x-csrf-token": unlinkSession.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "unlink-old-csrf",
 			},
 		});
@@ -583,7 +583,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: unlinkCookie,
 				origin: ORIGIN,
 				"x-csrf-token": unlinkReplay.json().csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "unlink-fresh-csrf",
 			},
 		});
@@ -607,7 +607,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: githubReauth.cookie,
 				origin: ORIGIN,
 				"x-csrf-token": githubSession.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "link-mismatch",
 			},
 			payload: {returnTo: "/hub.html"},
@@ -637,7 +637,7 @@ describe("Hub concrete multi-provider routes", () => {
 				cookie: freshGitHub.cookie,
 				origin: ORIGIN,
 				"x-csrf-token": freshSession.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": "link-conflict",
 			},
 			payload: {returnTo: "/hub.html"},

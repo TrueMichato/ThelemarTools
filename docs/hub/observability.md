@@ -79,6 +79,12 @@ Metrics reset with the process for HTTP counters; database-backed operational ag
 Age metrics use `-1` when no successful run has ever been recorded, so a missing backup/drill cannot look
 fresh.
 
+Protocol-6 multi-target routes use only the existing method/route-template/status/latency labels; no account,
+campaign, operation, invitation, character, template choice, source-cost amount, target count, decision, or
+changed/no-op result becomes a metric label. Rollback/readiness/cleanup diagnostics expose aggregate
+count/status/age only. Request logs retain correlation plus bounded error/status identity and never serialize
+candidate sets, target operations, source costs, snapshots, or final selections.
+
 The paired first-enable command reads only `/api/meta` status and
 `hub_auth_outcomes_total{provider,outcome="succeeded"}`. It snapshots both Discord and Google counters and
 requires each to increase; its output is limited to fixed provider slugs, start URLs, and stable status codes.

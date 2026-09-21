@@ -87,6 +87,26 @@ import {
 	isPeerSourceCostsPinCurrent,
 } from "./peer-source-cost-authority.js";
 import {
+	assertMultiTargetCandidateRefs,
+	assertMultiTargetProtocol,
+	assertUniqueResolvedTargets,
+	assertUniqueSelection,
+	createMultiTargetOperationsGate,
+	getMultiTargetCursor,
+	getMultiTargetLegAudience,
+	getMultiTargetOperationSummary,
+	getMultiTargetOperationsCampaignCapability,
+	getMultiTargetSourceAudience,
+	isMultiTargetLiveStatus,
+	isMultiTargetResponseTerminal,
+	MULTI_TARGET_COLLECTION_TTL_MS,
+	MULTI_TARGET_OPERATION_TTL_MS,
+	MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
+	MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
+	MULTI_TARGET_PAGE_LIMIT,
+	parseMultiTargetCursor,
+} from "./multi-target-operation-authority.js";
+import {
 	getAccountDisplayName,
 	getExternalIdentityKey,
 	normalizeExternalIdentity,
@@ -116,6 +136,9 @@ export class MemoryHubStore {
 		semanticOperationRegistry = createSemanticOperationRegistry(),
 		semanticProposalTtlMs = 24 * 60 * 60 * 1_000,
 		peerSourceCostsEnabled = false,
+		multiTargetOperationsEnabled = false,
+		multiTargetCollectionTtlMs = MULTI_TARGET_COLLECTION_TTL_MS,
+		multiTargetOperationTtlMs = MULTI_TARGET_OPERATION_TTL_MS,
 		fnResolveAwardItem = resolveItemAwardAuthority,
 		isAccountEntitlementsEnabled = false,
 		fnBeforeSensitiveCommit = null,
@@ -125,6 +148,9 @@ export class MemoryHubStore {
 		this._semanticOperationRegistry = semanticOperationRegistry;
 		this._semanticProposalTtlMs = semanticProposalTtlMs;
 		this._isPeerSourceCostsEnabled = createPeerSourceCostsGate(peerSourceCostsEnabled);
+		this._isMultiTargetOperationsEnabled = createMultiTargetOperationsGate(multiTargetOperationsEnabled);
+		this._multiTargetCollectionTtlMs = multiTargetCollectionTtlMs;
+		this._multiTargetOperationTtlMs = multiTargetOperationTtlMs;
 		this._fnResolveAwardItem = fnResolveAwardItem;
 		this._isAccountEntitlementsEnabled = isAccountEntitlementsEnabled;
 		this._fnBeforeSensitiveCommit = fnBeforeSensitiveCommit;
@@ -154,6 +180,10 @@ export class MemoryHubStore {
 		this._pendingActions = new Map();
 		this._semanticOperations = new Map();
 		this._semanticOperationCommands = new Map();
+		this._semanticOperationTargets = new Map();
+		this._semanticOperationFinalizations = new Map();
+		this._semanticMultiTargetUsage = null;
+		this._multiTargetCampaignUsage = new Set();
 		this._transfers = new Map();
 		this._operationalRuns = [];
 		this._memoryLocks = new Map();
@@ -233,6 +263,14 @@ export class MemoryHubStore {
 		}
 	}
 
+	async _pWithMemoryLocks ({keys, fn}) {
+		const ordered = [...new Set(keys)].sort();
+		const run = index => index >= ordered.length
+			? fn()
+			: this._pWithMemoryLock({key: ordered[index], fn: () => run(index + 1)});
+		return run(0);
+	}
+
 	async _pWithSensitiveCommandLocks ({accountId, idempotencyKey, fn}) {
 		const {key} = this._normalizeIdempotencyKey(idempotencyKey);
 		return this._pWithMemoryLock({
@@ -244,7 +282,10 @@ export class MemoryHubStore {
 	_setCharacterData ({character, data}) {
 		for (const operation of this._semanticOperations.values()) {
 			if (
-				operation.status !== "proposed"
+				!(
+					operation.status === "proposed"
+					|| (operation.targetSetVersion === 1 && isMultiTargetLiveStatus(operation.status))
+				)
 				|| operation.sourceCharacterId !== character.id
 				|| !operation.sourceCost
 				|| operation.sourceCostInvalidated
@@ -307,6 +348,12 @@ export class MemoryHubStore {
 			inviteContexts: await this.pDeleteExpiredInviteContexts({limit: batchSize}),
 			invites: await this.pDeleteExpiredInvites({limit: batchSize}),
 			leases: {characterLeases: 0, workspaceLeases: 0},
+			multiTargetOperations: await this.pExpireMultiTargetOperations({
+				limit: Math.min(batchSize, MULTI_TARGET_PAGE_LIMIT),
+			}),
+			multiTargetHistory: await this.pCleanupMultiTargetHistory({
+				limit: Math.min(batchSize, MULTI_TARGET_PAGE_LIMIT),
+			}),
 			accounts: await this.pPurgeDueAccounts({limit: Math.min(batchSize, 100)}),
 		};
 		for (const [hash, session] of [...this._sessions]) {
@@ -1940,9 +1987,18 @@ export class MemoryHubStore {
 				reason: "membership_role_changed",
 			});
 			for (const operation of this._semanticOperations.values()) {
+				if (operation.campaignId !== campaignId) continue;
+				if (operation.targetSetVersion === 1) {
+					this._cancelMultiTargetOperationForLifecycle({
+						operation,
+						actorAccountId: accountId,
+						affectedCharacterIds: ownedCharacterIds,
+						affectedAccountId: membership.accountId,
+					});
+					continue;
+				}
 				if (
-					operation.campaignId === campaignId
-					&& operation.status === "proposed"
+					operation.status === "proposed"
 					&& (
 						operation.originActorAccountId === membership.accountId
 						|| ownedCharacterIds.has(operation.sourceCharacterId)
@@ -2063,7 +2119,17 @@ export class MemoryHubStore {
 			reason: "membership_lifecycle",
 		});
 		for (const operation of this._semanticOperations.values()) {
-			if (operation.campaignId !== campaign.id || operation.status !== "proposed") continue;
+			if (operation.campaignId !== campaign.id) continue;
+			if (operation.targetSetVersion === 1) {
+				this._cancelMultiTargetOperationForLifecycle({
+					operation,
+					actorAccountId,
+					affectedCharacterIds: characterIdSet,
+					affectedAccountId: membership.accountId,
+				});
+				continue;
+			}
+			if (operation.status !== "proposed") continue;
 			if (
 				operation.originActorAccountId === membership.accountId
 				|| characterIdSet.has(operation.sourceCharacterId)
@@ -2249,6 +2315,18 @@ export class MemoryHubStore {
 			visibleAccountIds,
 			payload: {},
 		});
+	}
+
+	_getProjectionInvalidationRecipients ({character}) {
+		if (!character?.campaignId) return [];
+		return [...this._memberships.values()]
+			.filter(membership => membership.campaignId === character.campaignId && membership.status === "active")
+			.filter(membership => canViewSharedCharacterProjection({
+				character,
+				accountId: membership.accountId,
+				role: membership.role,
+			}))
+			.map(membership => membership.accountId);
 	}
 
 	async pListCharacters ({accountId, campaignId = null}) {
@@ -2798,6 +2876,14 @@ export class MemoryHubStore {
 		});
 		this._cancelIncomingForCharacter({character});
 		for (const operation of this._semanticOperations.values()) {
+			if (operation.targetSetVersion === 1) {
+				this._cancelMultiTargetOperationForLifecycle({
+					operation,
+					actorAccountId: accountId,
+					affectedCharacterIds: new Set([characterId]),
+				});
+				continue;
+			}
 			if (
 				operation.status === "proposed"
 				&& [operation.sourceCharacterId, operation.targetCharacterId].includes(characterId)
@@ -2856,6 +2942,14 @@ export class MemoryHubStore {
 		}
 		this._cancelIncomingForCharacter({character});
 		for (const operation of this._semanticOperations.values()) {
+			if (operation.targetSetVersion === 1) {
+				this._cancelMultiTargetOperationForLifecycle({
+					operation,
+					actorAccountId: accountId,
+					affectedCharacterIds: new Set([characterId]),
+				});
+				continue;
+			}
 			if (
 				operation.status === "proposed"
 				&& [operation.sourceCharacterId, operation.targetCharacterId].includes(characterId)
@@ -2899,6 +2993,11 @@ export class MemoryHubStore {
 						&& Boolean(rules)
 						&& this._isPeerSourceCostsEnabled(campaignId),
 				}),
+				multiTargetOperations: getMultiTargetOperationsCampaignCapability({
+					isEnabled: campaign.status === "active"
+						&& Boolean(rules)
+						&& this._isMultiTargetOperationsEnabled(campaignId),
+				}),
 			},
 		};
 	}
@@ -2917,6 +3016,20 @@ export class MemoryHubStore {
 		return [...this._semanticOperations.values()].some(operation =>
 			operation.campaignId === campaignId && operation.sourceCost != null,
 		);
+	}
+
+	async pGetMultiTargetOperationsCapability ({accountId, campaignId}) {
+		this._getMembership({accountId, campaignId, isRequireActiveCampaign: false});
+		const campaign = this._campaigns.get(campaignId);
+		return getMultiTargetOperationsCampaignCapability({
+			isEnabled: campaign?.status === "active"
+				&& Boolean(campaign.activeRulesVersionId)
+				&& this._isMultiTargetOperationsEnabled(campaignId),
+		});
+	}
+
+	async pCampaignRequiresProtocol6 ({campaignId}) {
+		return this._multiTargetCampaignUsage.has(campaignId);
 	}
 
 	async pGetCampaignCompatibility ({accountId, campaignId}) {
@@ -3396,6 +3509,44 @@ export class MemoryHubStore {
 			if (["dm", "co_dm"].includes(role) || event.actorAccountId === accountId) return sanitized;
 			return redactEventActor(sanitized);
 		}
+		if (
+			event.type.startsWith("character.multi_operation.")
+			&& event.visibility === "explicit_accounts"
+		) {
+			const operation = this._semanticOperations.get(event.payload?.operationId || event.aggregateId);
+			const target = event.payload?.invitationId
+				? this._getMultiTargetByInvitation({
+					operationId: operation?.id,
+					invitationId: event.payload.invitationId,
+				})
+				: null;
+			const sanitized = {...event, visibleAccountIds: null, payload: copy(event.payload)};
+			const sourceOwnerAccountId = sanitized.payload?._sourceOwnerAccountId ??
+				operation?.originActorAccountId;
+			const targetOwnerAccountId = sanitized.payload?._targetOwnerAccountId ??
+				target?.targetOwnerAccountIdAtProposal;
+			delete sanitized.payload._sourceOwnerAccountId;
+			delete sanitized.payload._targetOwnerAccountId;
+			if (
+				event.type === "character.multi_operation.target_applied"
+				&& !["dm", "co_dm"].includes(role)
+				&& (
+					sourceOwnerAccountId === accountId
+					|| targetOwnerAccountId !== accountId
+				)
+			) {
+				delete sanitized.payload.changed;
+				delete sanitized.payload.resultingCharacterRevision;
+				if (sanitized.payload.operation) {
+					sanitized.payload.operation = {...sanitized.payload.operation};
+					delete sanitized.payload.operation.targetCharacterId;
+				}
+				sanitized.aggregateType = "semantic_operation";
+				sanitized.aggregateId = operation?.id || sanitized.payload.operationId;
+				sanitized.aggregateRevision = null;
+			}
+			return sanitized;
+		}
 		if (event.visibility !== "all_members" || event.aggregateType !== "character") return event;
 		const character = this._characters.get(event.aggregateId) || null;
 		// A hidden character contributes no shared rows at all, so no adjacent membership
@@ -3613,6 +3764,7 @@ export class MemoryHubStore {
 	_expireSemanticOperations ({campaignId}) {
 		const now = this._fnNow();
 		for (const operation of this._semanticOperations.values()) {
+			if (operation.targetSetVersion === 1) continue;
 			if (
 				operation.campaignId !== campaignId
 				|| operation.status !== "proposed"
@@ -3920,6 +4072,10 @@ export class MemoryHubStore {
 			_characters: copy(this._characters),
 			_semanticOperations: copy(this._semanticOperations),
 			_semanticOperationCommands: copy(this._semanticOperationCommands),
+			_semanticOperationTargets: copy(this._semanticOperationTargets),
+			_semanticOperationFinalizations: copy(this._semanticOperationFinalizations),
+			_semanticMultiTargetUsage: copy(this._semanticMultiTargetUsage),
+			_multiTargetCampaignUsage: copy(this._multiTargetCampaignUsage),
 			_commandReceipts: copy(this._commandReceipts),
 			_events: copy(this._events),
 			_campaignEvents: copy(this._campaignEvents),
@@ -3962,8 +4118,12 @@ export class MemoryHubStore {
 			[this._characters, transactionStore._characters, baseline._characters],
 			[this._semanticOperations, transactionStore._semanticOperations, baseline._semanticOperations],
 			[this._semanticOperationCommands, transactionStore._semanticOperationCommands, baseline._semanticOperationCommands],
+			[this._semanticOperationTargets, transactionStore._semanticOperationTargets, baseline._semanticOperationTargets],
+			[this._semanticOperationFinalizations, transactionStore._semanticOperationFinalizations, baseline._semanticOperationFinalizations],
 			[this._commandReceipts, transactionStore._commandReceipts, baseline._commandReceipts],
 		]) this._publishSourceCostAcceptanceMap({target, source, baseline: previous});
+		this._semanticMultiTargetUsage = copy(transactionStore._semanticMultiTargetUsage);
+		this._multiTargetCampaignUsage = copy(transactionStore._multiTargetCampaignUsage);
 		for (const event of transactionStore._events.slice(baseline._events.length)) {
 			const campaignEvents = this._getCampaignEvents(event.campaignId);
 			this._events.push(event);
@@ -3976,6 +4136,15 @@ export class MemoryHubStore {
 	_injectTestResolveStructuredActionFault ({stage, operation}) {
 		if (!operation.sourceCost) return;
 		this._fnTestResolveStructuredActionFault?.({stage, operationId: operation.id});
+	}
+
+	_injectTestMultiTargetFault ({stage, operation, details = null}) {
+		if (operation.targetSetVersion !== 1) return;
+		this._fnTestResolveStructuredActionFault?.({
+			stage: `multi-target:${stage}`,
+			operationId: operation.id,
+			details,
+		});
 	}
 
 	async pResolveStructuredAction (args) {
@@ -4356,6 +4525,1474 @@ export class MemoryHubStore {
 		return responseOut;
 	}
 
+	_getMultiTargetKey ({operationId, targetCharacterId}) {
+		return `${operationId}::${targetCharacterId}`;
+	}
+
+	_getMultiTargetTargets (operationId) {
+		return [...this._semanticOperationTargets.values()]
+			.filter(target => target.operationId === operationId)
+			.sort((left, right) => left.ordinal - right.ordinal);
+	}
+
+	_getMultiTargetByInvitation ({operationId, invitationId}) {
+		return this._getMultiTargetTargets(operationId)
+			.find(target => target.invitationId === invitationId) || null;
+	}
+
+	_getMultiTargetOperationView ({operation, accountId, role}) {
+		const targets = this._getMultiTargetTargets(operation.id);
+		const isDm = ["dm", "co_dm"].includes(role);
+		const isSource = operation.originActorAccountId === accountId;
+		const isSourceOrDm = isSource || isDm;
+		const visibleTargets = (isDm || isSource
+			? targets
+			: targets.filter(target => target.targetOwnerAccountIdAtProposal === accountId))
+			.map(target => ({
+				invitationId: target.invitationId,
+				status: target.responseState,
+				presentation: {
+					targetName: target.targetDisplaySnapshot?.identity?.name || "Campaign character",
+					effectLabel: operation.effectDisplaySnapshot?.label || "Campaign effect",
+				},
+				capabilities: {
+					canApprove: target.responseState === "pending"
+						&& target.targetOwnerAccountIdAtProposal === accountId,
+					canReject: target.responseState === "pending"
+						&& (target.targetOwnerAccountIdAtProposal === accountId || isDm),
+				},
+				...((isDm || target.targetOwnerAccountIdAtProposal === accountId) && target.selectionState === "applied"
+					? {
+						result: {
+							changed: target.changed,
+							resultingCharacterRevision: target.resultingCharacterRevision,
+							legId: target.legId,
+							legKind: target.legKind,
+							appliedEventId: target.legEventId,
+							operation: copy(target.operation),
+						},
+					}
+					: {}),
+			}));
+		const summary = getMultiTargetOperationSummary({
+			operation,
+			targets,
+			canFinalize: isSource,
+			canCancel: isSource || isDm,
+		});
+		if (!isSourceOrDm) {
+			delete summary.candidateCount;
+			delete summary.counts;
+		}
+		const sourceTarget = targets.find(target =>
+			target.targetCharacterId === operation.sourceCharacterId
+			&& target.selectionState === "applied");
+		return {
+			...summary,
+			sourceCharacterId: isSource || isDm ? operation.sourceCharacterId : undefined,
+			...(isSourceOrDm && operation.status === "applied"
+				? {
+					sourceResult: {
+						sourceCharacterId: operation.sourceCharacterId,
+						sourceCost: copy(operation.sourceCost),
+						resultingSourceCharacterRevision: operation.resultingSourceCharacterRevision,
+						appliedEventId: operation.sourceCostEventId,
+						legKind: sourceTarget ? "combined" : "source",
+						...(sourceTarget
+							? {
+								legId: sourceTarget.legId,
+								operation: copy(sourceTarget.operation),
+							}
+							: {}),
+					},
+				}
+				: {}),
+			targets: visibleTargets,
+			finalization: this._semanticOperationFinalizations.get(operation.id)
+				? {
+					status: this._semanticOperationFinalizations.get(operation.id).resultStatus,
+					selectedInvitationIds: isSource || isDm
+						? [...this._semanticOperationFinalizations.get(operation.id).selectedInvitationIds]
+						: undefined,
+				}
+				: null,
+		};
+	}
+
+	_refreshMultiTargetReadiness ({operation, actorAccountId = null}) {
+		if (operation.status !== "collecting_responses") return null;
+		const targets = this._getMultiTargetTargets(operation.id);
+		if (targets.some(target => target.responseState === "pending")) return null;
+		operation.status = "awaiting_source_selection";
+		operation.readyAt = this._fnNow().toISOString();
+		operation.updatedAt = operation.readyAt;
+		const event = this._appendEvent({
+			campaignId: operation.campaignId,
+			actorAccountId,
+			type: "character.multi_operation.ready",
+			aggregateType: "semantic_operation",
+			aggregateId: operation.id,
+			visibility: "explicit_accounts",
+			visibleAccountIds: getMultiTargetSourceAudience({
+				sourceOwnerAccountId: operation.originActorAccountId,
+				dmAccountIds: this._getSemanticDmAccountIds(operation.campaignId),
+			}),
+			payload: {
+				operationId: operation.id,
+				status: operation.status,
+				approvedCount: targets.filter(target => ["approved", "approved_by_source"].includes(target.responseState)).length,
+			},
+		});
+		operation.readyEventId = event.id;
+		return event;
+	}
+
+	_expireMultiTargetOperation ({operation, isOperationExpiry = false}) {
+		if (!isMultiTargetLiveStatus(operation.status)) return [];
+		const now = this._fnNow();
+		const eventIds = [];
+		for (const target of this._getMultiTargetTargets(operation.id)) {
+			if (target.responseState !== "pending") continue;
+			target.responseState = "expired";
+			target.respondedAt = now.toISOString();
+			const event = this._appendEvent({
+				campaignId: operation.campaignId,
+				actorAccountId: null,
+				type: "character.multi_operation.target_responded",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetLegAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+					dmAccountIds: this._getSemanticDmAccountIds(operation.campaignId),
+				}),
+				payload: {
+					operationId: operation.id,
+					invitationId: target.invitationId,
+					status: "expired",
+				},
+			});
+			target.responseEventId = event.id;
+			eventIds.push(event.id);
+		}
+		if (isOperationExpiry || new Date(operation.expiresAt) <= now) {
+			operation.status = "expired";
+			operation.resolvedAt = now.toISOString();
+			operation.updatedAt = operation.resolvedAt;
+			const event = this._appendEvent({
+				campaignId: operation.campaignId,
+				actorAccountId: null,
+				type: "character.multi_operation.expired",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetSourceAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					dmAccountIds: this._getSemanticDmAccountIds(operation.campaignId),
+				}),
+				payload: {operationId: operation.id, status: "expired", reason: "unavailable"},
+			});
+			operation.terminalEventId = event.id;
+			eventIds.push(event.id);
+		} else {
+			const readyEvent = this._refreshMultiTargetReadiness({operation});
+			if (readyEvent) eventIds.push(readyEvent.id);
+		}
+		return eventIds;
+	}
+
+	_terminalizeElapsedMultiTarget ({operation}) {
+		const now = this._fnNow();
+		if (!isMultiTargetLiveStatus(operation.status)) return [];
+		if (new Date(operation.expiresAt) <= now) {
+			return this._expireMultiTargetOperation({operation, isOperationExpiry: true});
+		}
+		if (
+			operation.status === "collecting_responses"
+			&& new Date(operation.collectionClosesAt) <= now
+		) return this._expireMultiTargetOperation({operation});
+		return [];
+	}
+
+	_cancelMultiTargetOperationForLifecycle ({
+		operation,
+		actorAccountId,
+		affectedCharacterIds = new Set(),
+		affectedAccountId = null,
+		isAll = false,
+	}) {
+		if (!isMultiTargetLiveStatus(operation.status)) return;
+		if (
+			isAll
+			|| operation.originActorAccountId === affectedAccountId
+			|| affectedCharacterIds.has(operation.sourceCharacterId)
+		) {
+			const now = this._fnNow().toISOString();
+			for (const target of this._getMultiTargetTargets(operation.id)) {
+				if (!["pending", "approved", "approved_by_source"].includes(target.responseState)) continue;
+				const isPending = target.responseState === "pending";
+				target.responseState = isPending ? "revoked" : "declined";
+				target.selectionState = isPending ? target.selectionState : "declined";
+				target.respondedAt = now;
+				if (isPending) {
+					target.revokedAt = now;
+					target.revokeReason = "unavailable";
+				}
+				const targetEvent = this._appendEvent({
+					campaignId: operation.campaignId,
+					actorAccountId,
+					type: "character.multi_operation.target_responded",
+					aggregateType: "semantic_operation",
+					aggregateId: operation.id,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetLegAudience({
+						sourceOwnerAccountId: operation.originActorAccountId,
+						targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+						dmAccountIds: this._getSemanticDmAccountIds(operation.campaignId),
+					}),
+					payload: {
+						operationId: operation.id,
+						invitationId: target.invitationId,
+						status: target.responseState,
+						reason: "unavailable",
+					},
+				});
+				target.lifecycleEventId = targetEvent.id;
+			}
+			operation.status = "cancelled";
+			operation.resolvedAt = now;
+			operation.updatedAt = operation.resolvedAt;
+			const event = this._appendEvent({
+				campaignId: operation.campaignId,
+				actorAccountId,
+				type: "character.multi_operation.cancelled",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetSourceAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					dmAccountIds: this._getSemanticDmAccountIds(operation.campaignId),
+				}),
+				payload: {operationId: operation.id, status: "cancelled", reason: "unavailable"},
+			});
+			operation.terminalEventId = event.id;
+			return;
+		}
+		for (const target of this._getMultiTargetTargets(operation.id)) {
+			if (
+				!affectedCharacterIds.has(target.targetCharacterId)
+				&& target.targetOwnerAccountIdAtProposal !== affectedAccountId
+			) continue;
+			if (!["pending", "approved", "approved_by_source"].includes(target.responseState)) continue;
+			target.responseState = "revoked";
+			target.revokedAt = this._fnNow().toISOString();
+			target.respondedAt = target.revokedAt;
+			target.revokeReason = "unavailable";
+			const event = this._appendEvent({
+				campaignId: operation.campaignId,
+				actorAccountId,
+				type: "character.multi_operation.target_responded",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetLegAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+					dmAccountIds: this._getSemanticDmAccountIds(operation.campaignId),
+				}),
+				payload: {
+					operationId: operation.id,
+					invitationId: target.invitationId,
+					status: "revoked",
+					reason: "unavailable",
+				},
+			});
+			target.lifecycleEventId = event.id;
+		}
+		const targets = this._getMultiTargetTargets(operation.id);
+		if (!targets.some(target => ["pending", "approved", "approved_by_source"].includes(target.responseState))) {
+			operation.status = "cancelled";
+			operation.resolvedAt = this._fnNow().toISOString();
+			operation.updatedAt = operation.resolvedAt;
+			const event = this._appendEvent({
+				campaignId: operation.campaignId,
+				actorAccountId,
+				type: "character.multi_operation.cancelled",
+				aggregateType: "semantic_operation",
+				aggregateId: operation.id,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetSourceAudience({
+					sourceOwnerAccountId: operation.originActorAccountId,
+					dmAccountIds: this._getSemanticDmAccountIds(operation.campaignId),
+				}),
+				payload: {operationId: operation.id, status: "cancelled", reason: "unavailable"},
+			});
+			operation.terminalEventId = event.id;
+		} else this._refreshMultiTargetReadiness({operation, actorAccountId});
+	}
+
+	async pCreateMultiTargetOperation (args) {
+		assertMultiTargetProtocol(args);
+		const targetRefs = assertMultiTargetCandidateRefs(args.targetRefs);
+		const targets = targetRefs.map(targetRef => [...this._characters.values()].find(character =>
+			character.campaignId === args.campaignId
+			&& character.status === "active"
+			&& character.targetRef === targetRef,
+		)).filter(Boolean);
+		const ownerAccountIds = [...new Set(targets.map(target => target.ownerAccountId))].sort();
+		return this._pWithMemoryLocks({
+			keys: [
+				`1:command:${args.commandId}`,
+				...ownerAccountIds.map(accountId => `2:quota:${accountId}`),
+				`2:quota:${args.accountId}`,
+				`3:campaign:${args.campaignId}`,
+				...targets.map(target => `6:character:${target.id}`),
+				`6:character:${args.sourceCharacterId}`,
+			],
+			fn: () => {
+				const transaction = this._createSourceCostAcceptanceTransactionStore();
+				const response = transaction.transactionStore._pCreateMultiTargetOperationBody(args);
+				this._publishSourceCostAcceptanceTransactionStore(transaction);
+				return response;
+			},
+		});
+	}
+
+	_pCreateMultiTargetOperationBody ({
+		accountId,
+		sessionId,
+		campaignId,
+		commandId,
+		sourceCharacterId,
+		sourceEntity,
+		effectTemplateId,
+		choice,
+		targetRefs,
+		rulesVersionId,
+		idempotencyKey,
+	}) {
+		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
+		this._assertSemanticSession({accountId, sessionId});
+		if (prior) return prior;
+		const membership = this._getMembership({accountId, campaignId, roles: ["player"]});
+		const campaign = this._campaigns.get(campaignId);
+		if (!this._isMultiTargetOperationsEnabled(campaignId)) {
+			throw new HubStoreError("CAPABILITY_UNAVAILABLE", `Multi-target operations are unavailable.`, {status: 409});
+		}
+		const source = this._getCharacterOrThrow(sourceCharacterId);
+		if (
+			source.ownerAccountId !== accountId
+			|| source.campaignId !== campaignId
+			|| source.status !== "active"
+		) throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		const candidateRefs = assertMultiTargetCandidateRefs(targetRefs);
+		const targets = candidateRefs.map(targetRef => [...this._characters.values()].find(character =>
+			character.campaignId === campaignId
+			&& character.status === "active"
+			&& character.targetRef === targetRef,
+		));
+		if (targets.some(target => !target)) {
+			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		}
+		assertUniqueResolvedTargets(targets);
+		for (const target of targets) {
+			const targetMembership = this._memberships.get(`${campaignId}::${target.ownerAccountId}`);
+			if (targetMembership?.status !== "active" || targetMembership.role !== "player") {
+				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			}
+			try {
+				this._assertTargetable({character: target, accountId, role: membership.role});
+			} catch {
+				throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+			}
+		}
+		const liveOperations = [...this._semanticOperations.values()]
+			.filter(operation => operation.targetSetVersion === 1 && isMultiTargetLiveStatus(operation.status));
+		if (
+			liveOperations.filter(operation => operation.originActorAccountId === accountId).length >= 5
+			|| liveOperations.filter(operation => operation.campaignId === campaignId).length >= 50
+			|| liveOperations.filter(operation => operation.sourceCharacterId === sourceCharacterId).length >= 3
+		) throw new HubStoreError("COLLECTION_LIMIT_REACHED", `The collection limit was reached.`, {status: 409});
+		for (const ownerAccountId of new Set(targets.map(target => target.ownerAccountId))) {
+			const pending = [...this._semanticOperationTargets.values()].filter(target =>
+				target.targetOwnerAccountIdAtProposal === ownerAccountId
+				&& target.responseState === "pending"
+				&& isMultiTargetLiveStatus(this._semanticOperations.get(target.operationId)?.status),
+			).length;
+			const additions = targets.filter(target => target.ownerAccountId === ownerAccountId && ownerAccountId !== accountId).length;
+			if (pending + additions > 20) {
+				throw new HubStoreError("COLLECTION_LIMIT_REACHED", `The collection limit was reached.`, {status: 409});
+			}
+		}
+		const rulesVersion = campaign.activeRulesVersionId
+			? this._rulesVersions.get(campaign.activeRulesVersionId)
+			: null;
+		const brewBundle = campaign.activeBrewBundleVersionId
+			? this._brewVersions.get(campaign.activeBrewBundleVersionId)
+			: null;
+		const rulesPin = getPeerSourceCostsRulesPin({rulesVersion, brewBundle});
+		if (!rulesPin || rulesPin.rulesVersionId !== rulesVersionId) {
+			throw new HubStoreError("POLICY_VERSION_STALE", `Campaign rules changed.`, {status: 409});
+		}
+		if (!this._semanticOperationRegistry.isMultiTarget({sourceEntity, effectTemplateId})) {
+			throw new HubStoreError("SOURCE_OR_TARGET_UNAVAILABLE", `Source or target is unavailable.`, {status: 404});
+		}
+		const operationId = crypto.randomUUID();
+		const effectResolutionSeed = crypto.randomBytes(32).toString("hex");
+		const derived = this._semanticOperationRegistry.deriveMultiTarget({
+			sourceCharacter: source,
+			targetCharacters: targets,
+			targetRefs: candidateRefs,
+			sourceEntity,
+			effectTemplateId,
+			choice,
+			sourceProfile: computePeerProfile({character: source}),
+			targetProfiles: targets.map(target => computePeerProfile({character: target})),
+			operationId,
+			effectResolutionSeed,
+		});
+		const now = this._fnNow();
+		const operation = {
+			id: operationId,
+			campaignId,
+			originActorAccountId: accountId,
+			sourceCharacterId,
+			targetCharacterId: null,
+			targetSetVersion: 1,
+			candidateCount: targets.length,
+			status: "collecting_responses",
+			version: 1,
+			sourceEntity: copy(derived.sourceEntity),
+			effectTemplateId: derived.effectTemplateId,
+			choice: copy(derived.choice),
+			sourceDisplaySnapshot: copy(derived.sourceDisplaySnapshot),
+			effectDisplaySnapshot: copy(derived.effectDisplaySnapshot),
+			sourceCostVersion: derived.sourceCost.version,
+			sourceCost: copy(derived.sourceCost),
+			rulesVersionId: rulesPin.rulesVersionId,
+			rulesPin: copy(rulesPin),
+			templateRegistryVersion: MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
+			effectResolutionSeed,
+			sourceRevisionObserved: source.revision,
+			sourceCostInvalidated: false,
+			allowTargetNoOp: derived.allowTargetNoOp,
+			collectionClosesAt: new Date(now.getTime() + this._multiTargetCollectionTtlMs).toISOString(),
+			expiresAt: new Date(now.getTime() + this._multiTargetOperationTtlMs).toISOString(),
+			createdAt: now.toISOString(),
+			updatedAt: now.toISOString(),
+		};
+		this._semanticOperations.set(operationId, operation);
+		const dmAccountIds = this._getSemanticDmAccountIds(campaignId);
+		const eventIds = [];
+		const proposedEvent = this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "character.multi_operation.proposed",
+			aggregateType: "semantic_operation",
+			aggregateId: operationId,
+			visibility: "explicit_accounts",
+			visibleAccountIds: getMultiTargetSourceAudience({
+				sourceOwnerAccountId: accountId,
+				dmAccountIds,
+			}),
+			payload: {
+				operationId,
+				status: operation.status,
+				candidateCount: targets.length,
+				collectionClosesAt: operation.collectionClosesAt,
+				expiresAt: operation.expiresAt,
+				effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
+			},
+		});
+		operation.createdEventId = proposedEvent.id;
+		eventIds.push(proposedEvent.id);
+		for (let index = 0; index < targets.length; ++index) {
+			const target = targets[index];
+			const derivedTarget = derived.targets[index];
+			const row = {
+				operationId,
+				campaignId,
+				targetCharacterId: target.id,
+				invitationId: crypto.randomUUID(),
+				ordinal: index + 1,
+				targetRef: target.targetRef,
+				targetOwnerAccountIdAtProposal: target.ownerAccountId,
+				targetDisplaySnapshot: copy(derivedTarget.targetDisplaySnapshot),
+				operation: copy(derivedTarget.operation),
+				targetRevisionObserved: target.revision,
+				responseState: target.ownerAccountId === accountId ? "approved_by_source" : "pending",
+				responseActorAccountId: target.ownerAccountId === accountId ? accountId : null,
+				respondedAt: target.ownerAccountId === accountId ? now.toISOString() : null,
+				selectionState: "unselected",
+				selectionIndex: null,
+				changed: null,
+				resultingCharacterRevision: null,
+				legId: null,
+				legKind: null,
+				legEventId: null,
+			};
+			this._semanticOperationTargets.set(this._getMultiTargetKey(row), row);
+			const invitationEvent = this._appendEvent({
+				campaignId,
+				actorAccountId: accountId,
+				type: "character.multi_operation.target_requested",
+				aggregateType: "semantic_operation",
+				aggregateId: operationId,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetLegAudience({
+					sourceOwnerAccountId: accountId,
+					targetOwnerAccountId: target.ownerAccountId,
+					dmAccountIds,
+				}),
+				payload: {
+					operationId,
+					invitationId: row.invitationId,
+					status: row.responseState,
+					effectDisplaySnapshot: copy(operation.effectDisplaySnapshot),
+					targetDisplaySnapshot: copy(row.targetDisplaySnapshot),
+					collectionClosesAt: operation.collectionClosesAt,
+				},
+			});
+			row.invitationEventId = invitationEvent.id;
+			eventIds.push(invitationEvent.id);
+		}
+		this._semanticMultiTargetUsage ||= {
+			firstUsedAt: now.toISOString(),
+			firstOperationId: operationId,
+		};
+		this._multiTargetCampaignUsage.add(campaignId);
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: "character.multi_operation.proposed",
+			targetType: "semantic_operation",
+			targetId: operationId,
+			details: {
+				contractVersion: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
+				candidateCount: targets.length,
+				templateRegistryVersion: MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION,
+			},
+		});
+		const readyEvent = this._refreshMultiTargetReadiness({operation, actorAccountId: accountId});
+		if (readyEvent) eventIds.push(readyEvent.id);
+		const response = {
+			operation: this._getMultiTargetOperationView({
+				operation,
+				accountId,
+				role: membership.role,
+			}),
+			eventIds,
+		};
+		return this._setSemanticCommand({
+			accountId,
+			commandId,
+			operationId,
+			commandType: "create_multi_target_proposal",
+			idempotencyKey,
+			response,
+			eventIds,
+		});
+	}
+
+	async pRespondMultiTargetInvitation (args) {
+		assertMultiTargetProtocol(args);
+		return this._pWithMemoryLocks({
+			keys: [
+				`1:command:${args.commandId}`,
+				`3:campaign:${args.campaignId}`,
+				`4:parent:${args.operationId}`,
+				`5:invitation:${args.invitationId}`,
+			],
+			fn: () => {
+				const transaction = this._createSourceCostAcceptanceTransactionStore();
+				const response = transaction.transactionStore._pRespondMultiTargetInvitationBody(args);
+				this._publishSourceCostAcceptanceTransactionStore(transaction);
+				return response;
+			},
+		});
+	}
+
+	_pRespondMultiTargetInvitationBody ({
+		accountId,
+		sessionId,
+		campaignId,
+		commandId,
+		operationId,
+		invitationId,
+		decision,
+		idempotencyKey,
+	}) {
+		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
+		this._assertSemanticSession({accountId, sessionId});
+		if (prior) return prior;
+		if (!["approve", "reject"].includes(decision)) {
+			throw new HubStoreError("INVALID_REQUEST", `The response decision is invalid.`, {status: 400});
+		}
+		const membership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
+		const operation = this._semanticOperations.get(operationId);
+		const target = this._getMultiTargetByInvitation({operationId, invitationId});
+		if (
+			!operation
+			|| operation.campaignId !== campaignId
+			|| operation.targetSetVersion !== 1
+			|| !target
+		) throw new HubStoreError("ACTION_NOT_FOUND", `Invitation was not found.`, {status: 404});
+		const elapsedEventIds = this._terminalizeElapsedMultiTarget({operation});
+		const isDm = ["dm", "co_dm"].includes(membership.role);
+		const isOwner = target.targetOwnerAccountIdAtProposal === accountId;
+		if (!isOwner && !isDm) throw new HubStoreError("ACTION_NOT_FOUND", `Invitation was not found.`, {status: 404});
+		if (decision === "approve" && (!isOwner || membership.role !== "player")) {
+			throw new HubStoreError("OPERATION_FORBIDDEN", `Only the target owner may approve.`, {status: 403});
+		}
+		if (target.responseState !== "pending") {
+			const response = {
+				operation: this._getMultiTargetOperationView({operation, accountId, role: membership.role}),
+				invitation: this._getMultiTargetOperationView({operation, accountId, role: membership.role})
+					.targets.find(it => it.invitationId === invitationId),
+				eventIds: [...new Set([
+					...elapsedEventIds,
+					target.responseEventId,
+				].filter(Boolean))],
+			};
+			return this._setSemanticCommand({
+				accountId,
+				commandId,
+				operationId,
+				commandType: "respond_multi_target",
+				idempotencyKey,
+				response,
+				eventIds: response.eventIds,
+			});
+		}
+		target.responseState = decision === "approve" ? "approved" : "rejected";
+		target.responseActorAccountId = accountId;
+		target.responseCommandId = commandId;
+		target.respondedAt = this._fnNow().toISOString();
+		const responseEvent = this._appendEvent({
+			campaignId,
+			actorAccountId: accountId,
+			type: "character.multi_operation.target_responded",
+			aggregateType: "semantic_operation",
+			aggregateId: operationId,
+			visibility: "explicit_accounts",
+			visibleAccountIds: getMultiTargetLegAudience({
+				sourceOwnerAccountId: operation.originActorAccountId,
+				targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+				dmAccountIds: this._getSemanticDmAccountIds(campaignId),
+			}),
+			payload: {
+				operationId,
+				invitationId,
+				status: target.responseState,
+			},
+		});
+		target.responseEventId = responseEvent.id;
+		const readyEvent = this._refreshMultiTargetReadiness({operation, actorAccountId: accountId});
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: `character.multi_operation.${target.responseState}`,
+			targetType: "semantic_operation",
+			targetId: operationId,
+		});
+		const eventIds = [responseEvent.id, readyEvent?.id].filter(Boolean);
+		const response = {
+			operation: this._getMultiTargetOperationView({operation, accountId, role: membership.role}),
+			invitation: this._getMultiTargetOperationView({operation, accountId, role: membership.role})
+				.targets.find(it => it.invitationId === invitationId),
+			eventIds,
+		};
+		return this._setSemanticCommand({
+			accountId,
+			commandId,
+			operationId,
+			commandType: "respond_multi_target",
+			idempotencyKey,
+			response,
+			eventIds,
+		});
+	}
+
+	async pFinalizeMultiTargetOperation (args) {
+		assertMultiTargetProtocol(args);
+		assertUniqueSelection(args.selectedInvitationIds);
+		const operation = this._semanticOperations.get(args.operationId);
+		const targets = operation ? this._getMultiTargetTargets(operation.id) : [];
+		const selected = new Set(args.selectedInvitationIds);
+		const characterIds = [
+			operation?.sourceCharacterId,
+			...targets.filter(target => selected.has(target.invitationId)).map(target => target.targetCharacterId),
+		].filter(Boolean);
+		return this._pWithMemoryLocks({
+			keys: [
+				`1:command:${args.commandId}`,
+				`3:campaign:${args.campaignId}`,
+				`4:parent:${args.operationId}`,
+				...targets.map(target => `5:target:${args.operationId}:${target.targetCharacterId}`),
+				...characterIds.map(id => `6:character:${id}`),
+			],
+			fn: () => {
+				const transaction = this._createSourceCostAcceptanceTransactionStore();
+				const response = transaction.transactionStore._pFinalizeMultiTargetOperationBody(args);
+				this._publishSourceCostAcceptanceTransactionStore(transaction);
+				return response;
+			},
+		});
+	}
+
+	_pFinalizeMultiTargetOperationBody ({
+		accountId,
+		sessionId,
+		campaignId,
+		commandId,
+		operationId,
+		selectedInvitationIds,
+		idempotencyKey,
+	}) {
+		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
+		this._assertSemanticSession({accountId, sessionId});
+		if (prior) return prior;
+		const membership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["player"],
+			isRequireActiveCampaign: false,
+		});
+		const operation = this._semanticOperations.get(operationId);
+		if (
+			!operation
+			|| operation.campaignId !== campaignId
+			|| operation.targetSetVersion !== 1
+			|| operation.originActorAccountId !== accountId
+		) throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+		const elapsedEventIds = this._terminalizeElapsedMultiTarget({operation});
+		if (operation.status !== "awaiting_source_selection") {
+			if (!isMultiTargetLiveStatus(operation.status)) {
+				const response = {
+					operation: this._getMultiTargetOperationView({operation, accountId, role: membership.role}),
+					eventIds: [...new Set([
+						...elapsedEventIds,
+						operation.sourceCostEventId,
+						operation.terminalEventId,
+						operation.finalizedEventId,
+					].filter(Boolean))],
+				};
+				return this._setSemanticCommand({
+					accountId,
+					commandId,
+					operationId,
+					commandType: "finalize_multi_target",
+					idempotencyKey,
+					response,
+					eventIds: response.eventIds,
+				});
+			}
+			throw new HubStoreError("COLLECTION_NOT_READY", `The operation is still collecting responses.`, {status: 409});
+		}
+		const orderedSelection = assertUniqueSelection(selectedInvitationIds);
+		const targets = this._getMultiTargetTargets(operationId);
+		const selectedTargets = orderedSelection.map(invitationId =>
+			targets.find(target => target.invitationId === invitationId),
+		);
+		if (
+			selectedTargets.some(target => !target)
+			|| selectedTargets.some(target => !["approved", "approved_by_source"].includes(target.responseState))
+		) throw new HubStoreError("FINALIZATION_SELECTION_INVALID", `The final selection is invalid.`, {status: 409});
+		const now = this._fnNow();
+		const eventIds = [...elapsedEventIds];
+		if (!orderedSelection.length) {
+			for (const target of targets) {
+				if (!["approved", "approved_by_source"].includes(target.responseState)) continue;
+				target.responseState = "declined";
+				target.selectionState = "declined";
+				target.respondedAt = now.toISOString();
+				const declinedEvent = this._appendEvent({
+					campaignId,
+					actorAccountId: accountId,
+					type: "character.multi_operation.target_responded",
+					aggregateType: "semantic_operation",
+					aggregateId: operationId,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetLegAudience({
+						sourceOwnerAccountId: accountId,
+						targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+						dmAccountIds: this._getSemanticDmAccountIds(campaignId),
+					}),
+					payload: {
+						operationId,
+						invitationId: target.invitationId,
+						status: "declined",
+					},
+				});
+				target.lifecycleEventId = declinedEvent.id;
+				eventIds.push(declinedEvent.id);
+			}
+			operation.status = "cancelled";
+			operation.resolvedAt = now.toISOString();
+			operation.updatedAt = operation.resolvedAt;
+			const terminal = this._appendEvent({
+				campaignId,
+				actorAccountId: accountId,
+				type: "character.multi_operation.cancelled",
+				aggregateType: "semantic_operation",
+				aggregateId: operationId,
+				visibility: "explicit_accounts",
+				visibleAccountIds: getMultiTargetSourceAudience({
+					sourceOwnerAccountId: accountId,
+					dmAccountIds: this._getSemanticDmAccountIds(campaignId),
+				}),
+				payload: {operationId, status: "cancelled", reason: "empty_selection"},
+			});
+			operation.terminalEventId = terminal.id;
+			eventIds.push(terminal.id);
+			this._semanticOperationFinalizations.set(operationId, {
+				operationId,
+				commandId,
+				actorAccountId: accountId,
+				selectedInvitationIds: [],
+				resultStatus: "cancelled",
+				createdAt: now.toISOString(),
+			});
+		} else {
+			const source = this._characters.get(operation.sourceCharacterId);
+			const selectedCharacters = selectedTargets.map(target => this._characters.get(target.targetCharacterId));
+			let privateFailureCode = null;
+			if (
+				!source
+				|| source.status !== "active"
+				|| source.campaignId !== campaignId
+				|| source.ownerAccountId !== accountId
+			) privateFailureCode = "SOURCE_COST_UNAVAILABLE";
+			const isTargetAuthorityInvalid = selectedCharacters.some((character, index) => {
+				const target = selectedTargets[index];
+				const targetMembership = character
+					? this._memberships.get(`${campaignId}::${character.ownerAccountId}`)
+					: null;
+				if (
+					!character
+					|| character.status !== "active"
+					|| character.campaignId !== campaignId
+					|| character.targetRef !== target.targetRef
+					|| character.ownerAccountId !== target.targetOwnerAccountIdAtProposal
+					|| targetMembership?.status !== "active"
+					|| targetMembership.role !== "player"
+				) return true;
+				try {
+					this._assertTargetable({
+						character,
+						accountId: operation.originActorAccountId,
+						role: "player",
+					});
+					return false;
+				} catch {
+					return true;
+				}
+			});
+			if (!privateFailureCode && isTargetAuthorityInvalid) {
+				throw new HubStoreError("FINALIZATION_SELECTION_INVALID", `The final selection is invalid.`, {status: 409});
+			}
+			const campaign = this._campaigns.get(campaignId);
+			const rulesVersion = campaign?.activeRulesVersionId
+				? this._rulesVersions.get(campaign.activeRulesVersionId)
+				: null;
+			const brewBundle = campaign?.activeBrewBundleVersionId
+				? this._brewVersions.get(campaign.activeBrewBundleVersionId)
+				: null;
+			const currentPin = getPeerSourceCostsRulesPin({rulesVersion, brewBundle});
+			if (
+				!privateFailureCode
+				&& (
+					!this._isMultiTargetOperationsEnabled(campaignId)
+					|| operation.templateRegistryVersion !== MULTI_TARGET_OPERATIONS_TEMPLATE_REGISTRY_VERSION
+					|| !isCanonicalEqual(operation.rulesPin, currentPin)
+				)
+			) privateFailureCode = "POLICY_VERSION_STALE";
+			if (!privateFailureCode && operation.sourceCostInvalidated) {
+				privateFailureCode = "SOURCE_COST_UNAVAILABLE";
+			}
+			let derived;
+			if (!privateFailureCode) {
+				try {
+					derived = this._semanticOperationRegistry.deriveMultiTarget({
+						sourceCharacter: source,
+						targetCharacters: selectedCharacters,
+						targetRefs: selectedTargets.map(target => target.targetRef),
+						sourceEntity: operation.sourceEntity,
+						effectTemplateId: operation.effectTemplateId,
+						choice: operation.choice,
+						sourceProfile: computePeerProfile({character: source}),
+						targetProfiles: selectedCharacters.map(character => computePeerProfile({character})),
+						operationId,
+						effectResolutionSeed: operation.effectResolutionSeed,
+					});
+				} catch (error) {
+					privateFailureCode = getPrivateAcceptanceFailureCode(error);
+					if (!privateFailureCode) throw error;
+				}
+			}
+			if (
+				!privateFailureCode
+				&& (
+					!isCanonicalEqual(derived.sourceCost, operation.sourceCost)
+					|| !isCanonicalEqual(derived.sourceEntity, operation.sourceEntity)
+					|| derived.effectTemplateId !== operation.effectTemplateId
+					|| !isCanonicalEqual(derived.choice, operation.choice)
+					|| derived.targets.some((derivedTarget, index) =>
+						!isCanonicalEqual(derivedTarget.operation, selectedTargets[index].operation))
+				)
+			) privateFailureCode = "SOURCE_COST_UNAVAILABLE";
+			const nextDataByCharacterId = new Map();
+			const legResults = [];
+			if (!privateFailureCode) {
+				try {
+					const sourceNextData = applySourceCost({
+						data: source.data,
+						sourceCost: operation.sourceCost,
+					}).data;
+					validateCloudCharacterData(sourceNextData);
+					nextDataByCharacterId.set(
+						source.id,
+						sourceNextData,
+					);
+				} catch (error) {
+					privateFailureCode = getPrivateAcceptanceFailureCode(error);
+					if (!privateFailureCode) throw error;
+				}
+			}
+			if (!privateFailureCode) {
+				try {
+					for (let index = 0; index < selectedTargets.length; ++index) {
+						const target = selectedTargets[index];
+						const character = selectedCharacters[index];
+						const baseData = nextDataByCharacterId.get(character.id) ?? character.data;
+						const result = applySemanticOperationWithResult({
+							data: baseData,
+							operation: target.operation,
+						});
+						if (!result.changed && !operation.allowTargetNoOp) {
+							throw new HubStoreError("TARGET_EFFECT_UNAVAILABLE", `The target effect is unavailable.`, {status: 409});
+						}
+						if (result.changed) nextDataByCharacterId.set(character.id, result.data);
+						legResults.push({target, character, changed: result.changed});
+					}
+					for (const [characterId, data] of nextDataByCharacterId) {
+						validateCloudCharacterData(data);
+						if (!this._characters.has(characterId)) throw new Error(`Missing character.`);
+					}
+				} catch (error) {
+					privateFailureCode = getPrivateAcceptanceFailureCode(error, {leg: "target"});
+					if (!privateFailureCode) throw error;
+				}
+			}
+			if (privateFailureCode) {
+				operation.status = "failed";
+				operation.privateFailureCode = privateFailureCode;
+				operation.resolvedAt = now.toISOString();
+				operation.updatedAt = operation.resolvedAt;
+				const terminal = this._appendEvent({
+					campaignId,
+					actorAccountId: accountId,
+					type: "character.multi_operation.failed",
+					aggregateType: "semantic_operation",
+					aggregateId: operationId,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetSourceAudience({
+						sourceOwnerAccountId: accountId,
+						dmAccountIds: this._getSemanticDmAccountIds(campaignId),
+					}),
+					payload: {operationId, status: "failed", reason: "unavailable"},
+				});
+				operation.terminalEventId = terminal.id;
+				eventIds.push(terminal.id);
+				this._semanticOperationFinalizations.set(operationId, {
+					operationId,
+					commandId,
+					actorAccountId: accountId,
+					selectedInvitationIds: orderedSelection,
+					resultStatus: "failed",
+					createdAt: now.toISOString(),
+				});
+			} else {
+				const changedCharacterIds = [...nextDataByCharacterId.keys()].sort();
+				for (const [index, characterId] of changedCharacterIds.entries()) {
+					const character = this._characters.get(characterId);
+					this._setCharacterData({character, data: nextDataByCharacterId.get(characterId)});
+					character.revision++;
+					character.updatedAt = now.toISOString();
+					this._injectTestMultiTargetFault({
+						stage: "character-write",
+						operation,
+						details: {index, characterId},
+					});
+				}
+				const declinedTargets = [];
+				for (const target of targets) {
+					const selectedIndex = selectedTargets.indexOf(target);
+					if (selectedIndex === -1) {
+						if (["approved", "approved_by_source"].includes(target.responseState)) {
+							target.responseState = "declined";
+							target.selectionState = "declined";
+							target.respondedAt = now.toISOString();
+							declinedTargets.push(target);
+						}
+						continue;
+					}
+					target.selectionIndex = selectedIndex + 1;
+					target.selectionState = "applied";
+				}
+				const sourceIsSelected = selectedTargets.some(target => target.targetCharacterId === source.id);
+				const sourceSelectedLeg = sourceIsSelected
+					? legResults.find(result => result.target.targetCharacterId === source.id)
+					: null;
+				const combinedLegId = sourceIsSelected ? crypto.randomUUID() : null;
+				const sourceEvent = this._appendEvent({
+					campaignId,
+					actorAccountId: accountId,
+					type: sourceIsSelected
+						? "character.multi_operation.target_applied"
+						: "character.multi_operation.source_cost_consumed",
+					aggregateType: "character",
+					aggregateId: source.id,
+					aggregateRevision: source.revision,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetSourceAudience({
+						sourceOwnerAccountId: accountId,
+						dmAccountIds: this._getSemanticDmAccountIds(campaignId),
+					}),
+					payload: {
+						operationId,
+						_sourceOwnerAccountId: accountId,
+						_targetOwnerAccountId: source.ownerAccountId,
+						leg: sourceIsSelected ? "combined" : "source",
+						sourceCost: copy(operation.sourceCost),
+						resultingSourceCharacterRevision: source.revision,
+						...(sourceSelectedLeg
+							? {
+								invitationId: sourceSelectedLeg.target.invitationId,
+								legId: combinedLegId,
+								operation: copy(sourceSelectedLeg.target.operation),
+								resultingCharacterRevision: source.revision,
+								changed: sourceSelectedLeg.changed,
+							}
+							: {}),
+					},
+				});
+				operation.sourceCostEventId = sourceEvent.id;
+				operation.resultingSourceCharacterRevision = source.revision;
+				source.operationWatermark = sourceEvent.sequence;
+				eventIds.push(sourceEvent.id);
+				this._injectTestMultiTargetFault({stage: "source-event", operation});
+				const legResultByTargetId = new Map(
+					legResults.map(result => [result.target.targetCharacterId, result]),
+				);
+				const declinedTargetIds = new Set(declinedTargets.map(target => target.targetCharacterId));
+				for (const target of targets) {
+					const legResult = legResultByTargetId.get(target.targetCharacterId);
+					if (!legResult) {
+						if (!declinedTargetIds.has(target.targetCharacterId)) continue;
+						const declinedEvent = this._appendEvent({
+							campaignId,
+							actorAccountId: accountId,
+							type: "character.multi_operation.target_responded",
+							aggregateType: "semantic_operation",
+							aggregateId: operationId,
+							visibility: "explicit_accounts",
+							visibleAccountIds: getMultiTargetLegAudience({
+								sourceOwnerAccountId: accountId,
+								targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+								dmAccountIds: this._getSemanticDmAccountIds(campaignId),
+							}),
+							payload: {
+								operationId,
+								invitationId: target.invitationId,
+								status: "declined",
+							},
+						});
+						target.lifecycleEventId = declinedEvent.id;
+						eventIds.push(declinedEvent.id);
+						continue;
+					}
+					const {character, changed} = legResult;
+					const isCombined = character.id === source.id;
+					if (isCombined) {
+						target.changed = changed;
+						target.resultingCharacterRevision = source.revision;
+						target.legId = combinedLegId;
+						target.legKind = "combined";
+						target.legEventId = sourceEvent.id;
+						continue;
+					}
+					const event = this._appendEvent({
+						campaignId,
+						actorAccountId: accountId,
+						type: "character.multi_operation.target_applied",
+						aggregateType: "character",
+						aggregateId: character.id,
+						aggregateRevision: changed || isCombined ? character.revision : null,
+						visibility: "explicit_accounts",
+						visibleAccountIds: getMultiTargetLegAudience({
+							sourceOwnerAccountId: accountId,
+							targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+							dmAccountIds: this._getSemanticDmAccountIds(campaignId),
+						}),
+						payload: {
+							operationId,
+							_sourceOwnerAccountId: accountId,
+							_targetOwnerAccountId: target.targetOwnerAccountIdAtProposal,
+							invitationId: target.invitationId,
+							legId: crypto.randomUUID(),
+							leg: "target",
+							operation: copy(target.operation),
+							...(changed || isCombined ? {resultingCharacterRevision: character.revision} : {}),
+							changed,
+						},
+					});
+					target.changed = changed;
+					target.resultingCharacterRevision = changed ? character.revision : null;
+					target.legId = event.payload.legId;
+					target.legKind = event.payload.leg;
+					target.legEventId = event.id;
+					if (changed) character.operationWatermark = event.sequence;
+					eventIds.push(event.id);
+					this._injectTestMultiTargetFault({
+						stage: "target-event",
+						operation,
+						details: {ordinal: target.ordinal},
+					});
+				}
+				const finalizedEvent = this._appendEvent({
+					campaignId,
+					actorAccountId: accountId,
+					type: "character.multi_operation.finalized",
+					aggregateType: "semantic_operation",
+					aggregateId: operationId,
+					visibility: "explicit_accounts",
+					visibleAccountIds: getMultiTargetSourceAudience({
+						sourceOwnerAccountId: accountId,
+						dmAccountIds: this._getSemanticDmAccountIds(campaignId),
+					}),
+					payload: {
+						operationId,
+						status: "applied",
+						selectedCount: selectedTargets.length,
+						sourceEventId: sourceEvent.id,
+					},
+				});
+				operation.finalizedEventId = finalizedEvent.id;
+				eventIds.push(finalizedEvent.id);
+				const invalidationAudience = new Set();
+				for (const characterId of changedCharacterIds) {
+					const character = this._characters.get(characterId);
+					for (const recipient of this._getProjectionInvalidationRecipients({character})) {
+						invalidationAudience.add(recipient);
+					}
+				}
+				if (invalidationAudience.size) {
+					const invalidation = this._appendEvent({
+						campaignId,
+						actorAccountId: accountId,
+						type: "character.projection.invalidated",
+						aggregateType: "campaign",
+						aggregateId: campaignId,
+						visibility: "explicit_accounts",
+						visibleAccountIds: [...invalidationAudience].sort(),
+						payload: {},
+					});
+					eventIds.push(invalidation.id);
+					this._injectTestMultiTargetFault({stage: "projection-invalidation", operation});
+				}
+				operation.status = "applied";
+				operation.resolvedAt = now.toISOString();
+				operation.updatedAt = operation.resolvedAt;
+				this._semanticOperationFinalizations.set(operationId, {
+					operationId,
+					commandId,
+					actorAccountId: accountId,
+					selectedInvitationIds: orderedSelection,
+					resultStatus: "applied",
+					sourceLegEventId: sourceEvent.id,
+					createdAt: now.toISOString(),
+				});
+			}
+		}
+		this._appendAudit({
+			campaignId,
+			actorAccountId: accountId,
+			action: `character.multi_operation.${operation.status}`,
+			targetType: "semantic_operation",
+			targetId: operationId,
+			details: {
+				selectedCount: selectedInvitationIds.length,
+				contractVersion: MULTI_TARGET_OPERATIONS_CONTRACT_VERSION,
+			},
+		});
+		this._injectTestMultiTargetFault({stage: "audit", operation});
+		const response = {
+			operation: this._getMultiTargetOperationView({operation, accountId, role: membership.role}),
+			eventIds,
+		};
+		const responseOut = this._setSemanticCommand({
+			accountId,
+			commandId,
+			operationId,
+			commandType: "finalize_multi_target",
+			idempotencyKey,
+			response,
+			eventIds,
+		});
+		this._injectTestMultiTargetFault({stage: "receipt", operation});
+		return responseOut;
+	}
+
+	async pCancelMultiTargetOperation (args) {
+		assertMultiTargetProtocol(args);
+		return this._pWithMemoryLocks({
+			keys: [
+				`1:command:${args.commandId}`,
+				`3:campaign:${args.campaignId}`,
+				`4:parent:${args.operationId}`,
+			],
+			fn: () => {
+				const transaction = this._createSourceCostAcceptanceTransactionStore();
+				const response = transaction.transactionStore._pCancelMultiTargetOperationBody(args);
+				this._publishSourceCostAcceptanceTransactionStore(transaction);
+				return response;
+			},
+		});
+	}
+
+	_pCancelMultiTargetOperationBody ({
+		accountId,
+		sessionId,
+		campaignId,
+		commandId,
+		operationId,
+		idempotencyKey,
+	}) {
+		const prior = this._getSemanticCommand({accountId, commandId, idempotencyKey});
+		this._assertSemanticSession({accountId, sessionId});
+		if (prior) return prior;
+		const membership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
+		const operation = this._semanticOperations.get(operationId);
+		if (!operation || operation.campaignId !== campaignId || operation.targetSetVersion !== 1) {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+		}
+		const isDm = ["dm", "co_dm"].includes(membership.role);
+		if (!isDm && operation.originActorAccountId !== accountId) {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+		}
+		const eventStart = this._events.length;
+		this._terminalizeElapsedMultiTarget({operation});
+		if (isMultiTargetLiveStatus(operation.status)) {
+			this._cancelMultiTargetOperationForLifecycle({
+				operation,
+				actorAccountId: accountId,
+				isAll: true,
+			});
+			this._appendAudit({
+				campaignId,
+				actorAccountId: accountId,
+				action: "character.multi_operation.cancelled",
+				targetType: "semantic_operation",
+				targetId: operation.id,
+			});
+		}
+		const eventIds = this._events.slice(eventStart).map(event => event.id);
+		const response = {
+			operation: this._getMultiTargetOperationView({
+				operation,
+				accountId,
+				role: membership.role,
+			}),
+			eventIds,
+		};
+		return this._setSemanticCommand({
+			accountId,
+			commandId,
+			operationId,
+			commandType: "cancel_multi_target",
+			idempotencyKey,
+			response,
+			eventIds,
+		});
+	}
+
+	async pListMultiTargetInbox ({
+		accountId,
+		campaignId,
+		cursor = null,
+		limit = MULTI_TARGET_PAGE_LIMIT,
+	}) {
+		const membership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
+		await this.pExpireMultiTargetOperations({campaignId, limit: MULTI_TARGET_PAGE_LIMIT});
+		const after = parseMultiTargetCursor(cursor, 3);
+		const rows = [...this._semanticOperationTargets.values()]
+			.filter(target => target.campaignId === campaignId)
+			.filter(target => ["dm", "co_dm"].includes(membership.role)
+				|| target.targetOwnerAccountIdAtProposal === accountId)
+			.filter(target => target.responseState === "pending")
+			.map(target => ({target, operation: this._semanticOperations.get(target.operationId)}))
+			.filter(({operation}) => operation && isMultiTargetLiveStatus(operation.status))
+			.sort((left, right) => (
+				left.operation.collectionClosesAt.localeCompare(right.operation.collectionClosesAt)
+				|| left.operation.id.localeCompare(right.operation.id)
+				|| left.target.targetCharacterId.localeCompare(right.target.targetCharacterId)
+			))
+			.filter(({target, operation}) => !after || [
+				operation.collectionClosesAt,
+				operation.id,
+				target.targetCharacterId,
+			].join("\u0000") > after.join("\u0000"));
+		const page = rows.slice(0, Math.min(limit, MULTI_TARGET_PAGE_LIMIT));
+		return {
+			invitations: page.map(({target, operation}) => ({
+				operationId: operation.id,
+				invitationId: target.invitationId,
+				status: target.responseState,
+				collectionClosesAt: operation.collectionClosesAt,
+				expiresAt: operation.expiresAt,
+				presentation: {
+					targetName: target.targetDisplaySnapshot?.identity?.name || "Campaign character",
+					effectLabel: operation.effectDisplaySnapshot?.label || "Campaign effect",
+				},
+				capabilities: {canApprove: target.targetOwnerAccountIdAtProposal === accountId, canReject: true},
+			})),
+			nextCursor: rows.length > page.length && page.length
+				? getMultiTargetCursor([
+					page.at(-1).operation.collectionClosesAt,
+					page.at(-1).operation.id,
+					page.at(-1).target.targetCharacterId,
+				])
+				: null,
+		};
+	}
+
+	async pListMultiTargetOutgoing ({
+		accountId,
+		campaignId,
+		cursor = null,
+		limit = MULTI_TARGET_PAGE_LIMIT,
+	}) {
+		const membership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
+		await this.pExpireMultiTargetOperations({campaignId, limit: MULTI_TARGET_PAGE_LIMIT});
+		const after = parseMultiTargetCursor(cursor, 2);
+		const rows = [...this._semanticOperations.values()]
+			.filter(operation => operation.campaignId === campaignId && operation.targetSetVersion === 1)
+			.filter(operation => ["dm", "co_dm"].includes(membership.role) || operation.originActorAccountId === accountId)
+			.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+			.filter(operation => !after || [operation.createdAt, operation.id].join("\u0000") > after.join("\u0000"));
+		const page = rows.slice(0, Math.min(limit, MULTI_TARGET_PAGE_LIMIT));
+		return {
+			operations: page.map(operation => this._getMultiTargetOperationView({
+				operation,
+				accountId,
+				role: membership.role,
+			})),
+			nextCursor: rows.length > page.length && page.length
+				? getMultiTargetCursor([page.at(-1).createdAt, page.at(-1).id])
+				: null,
+		};
+	}
+
+	async pGetMultiTargetOperation ({accountId, campaignId, operationId}) {
+		const membership = this._getMembership({
+			accountId,
+			campaignId,
+			roles: ["dm", "co_dm", "player"],
+			isRequireActiveCampaign: false,
+		});
+		const operation = this._semanticOperations.get(operationId);
+		if (!operation || operation.campaignId !== campaignId || operation.targetSetVersion !== 1) {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+		}
+		const isParticipant = operation.originActorAccountId === accountId
+			|| this._getMultiTargetTargets(operationId)
+				.some(target => target.targetOwnerAccountIdAtProposal === accountId);
+		if (!isParticipant && !["dm", "co_dm"].includes(membership.role)) {
+			throw new HubStoreError("ACTION_NOT_FOUND", `Operation was not found.`, {status: 404});
+		}
+		this._terminalizeElapsedMultiTarget({operation});
+		return {operation: this._getMultiTargetOperationView({operation, accountId, role: membership.role})};
+	}
+
+	async pExpireMultiTargetOperations ({campaignId = null, limit = MULTI_TARGET_PAGE_LIMIT} = {}) {
+		const due = [...this._semanticOperations.values()]
+			.filter(operation => operation.targetSetVersion === 1 && isMultiTargetLiveStatus(operation.status))
+			.filter(operation => campaignId == null || operation.campaignId === campaignId)
+			.filter(operation => (
+				new Date(operation.collectionClosesAt) <= this._fnNow()
+				|| new Date(operation.expiresAt) <= this._fnNow()
+			))
+			.sort((left, right) => left.collectionClosesAt.localeCompare(right.collectionClosesAt) || left.id.localeCompare(right.id))
+			.slice(0, Math.min(limit, MULTI_TARGET_PAGE_LIMIT));
+		let processed = 0;
+		for (const operation of due) {
+			await this._pWithMemoryLock({
+				key: `4:parent:${operation.id}`,
+				fn: () => {
+					this._terminalizeElapsedMultiTarget({operation});
+					processed++;
+				},
+			});
+		}
+		return {processed};
+	}
+
+	async pCleanupMultiTargetHistory ({limit = MULTI_TARGET_PAGE_LIMIT} = {}) {
+		const cutoff = new Date(this._fnNow().getTime() - 90 * 86_400_000);
+		const due = [...this._semanticOperations.values()]
+			.filter(operation => (
+				operation.targetSetVersion === 1
+				&& ["applied", "cancelled", "expired", "failed"].includes(operation.status)
+				&& operation.resolvedAt
+				&& new Date(operation.resolvedAt) <= cutoff
+			))
+			.sort((left, right) => left.resolvedAt.localeCompare(right.resolvedAt) || left.id.localeCompare(right.id))
+			.slice(0, Math.min(limit, MULTI_TARGET_PAGE_LIMIT));
+		let deleted = 0;
+		for (const operation of due) {
+			const eventIds = new Set(this._events
+				.filter(event => event.aggregateId === operation.id || event.payload?.operationId === operation.id)
+				.map(event => event.id));
+			for (const command of this._semanticOperationCommands.values()) {
+				if (command.operationId !== operation.id) continue;
+				for (const eventId of command.eventIds) eventIds.add(eventId);
+			}
+			if (this._outbox.some(entry => eventIds.has(entry.eventId) && entry.status !== "published")) continue;
+			for (const [key, target] of this._semanticOperationTargets) {
+				if (target.operationId === operation.id) this._semanticOperationTargets.delete(key);
+			}
+			this._semanticOperationFinalizations.delete(operation.id);
+			for (const [key, command] of this._semanticOperationCommands) {
+				if (command.operationId === operation.id) this._semanticOperationCommands.delete(key);
+			}
+			this._semanticOperations.delete(operation.id);
+			deleted++;
+		}
+		return {deleted};
+	}
+
 	_getSemanticWatermarksForViewer ({operation, accountId, role, source, target}) {
 		const canViewBoth = ["dm", "co_dm"].includes(role) || source?.ownerAccountId === accountId;
 		const characters = canViewBoth
@@ -4404,6 +6041,7 @@ export class MemoryHubStore {
 				operation.campaignId === campaignId
 				&& operation.sourceCharacterId === characterId
 				&& operation.originActorAccountId === accountId
+				&& operation.targetSetVersion == null
 				&& operation.sourceCost != null,
 			)
 			.sort((left, right) => `${right.createdAt}`.localeCompare(`${left.createdAt}`) || left.id.localeCompare(right.id))
@@ -5188,6 +6826,12 @@ export class MemoryHubStore {
 		for (const [key, operation] of this._semanticOperations) {
 			if (operation.campaignId === campaignId) this._semanticOperations.delete(key);
 		}
+		for (const [key, target] of this._semanticOperationTargets) {
+			if (target.campaignId === campaignId) this._semanticOperationTargets.delete(key);
+		}
+		for (const [key] of this._semanticOperationFinalizations) {
+			if (!this._semanticOperations.has(key)) this._semanticOperationFinalizations.delete(key);
+		}
 		for (const [key, command] of this._semanticOperationCommands) {
 			if (!this._semanticOperations.has(command.operationId)) this._semanticOperationCommands.delete(key);
 		}
@@ -5252,8 +6896,37 @@ export class MemoryHubStore {
 				) this._transfers.delete(id);
 			}
 			for (const [id, operation] of this._semanticOperations) {
-				if (ownedCharacterIds.has(operation.sourceCharacterId) || ownedCharacterIds.has(operation.targetCharacterId)) {
+				const ownsMultiTarget = operation.targetSetVersion === 1
+					&& this._getMultiTargetTargets(operation.id)
+						.some(target => (
+							ownedCharacterIds.has(target.targetCharacterId)
+							|| target.targetOwnerAccountIdAtProposal === account.id
+						));
+				if (
+					ownedCharacterIds.has(operation.sourceCharacterId)
+					|| ownedCharacterIds.has(operation.targetCharacterId)
+					|| ownsMultiTarget
+				) {
+					if (operation.targetSetVersion === 1 && isMultiTargetLiveStatus(operation.status)) {
+						this._cancelMultiTargetOperationForLifecycle({
+							operation,
+							actorAccountId: account.id,
+							isAll: true,
+						});
+						this._appendAudit({
+							campaignId: operation.campaignId,
+							actorAccountId: account.id,
+							action: "character.multi_operation.cancelled",
+							targetType: "semantic_operation",
+							targetId: operation.id,
+							details: {reason: "account_purge"},
+						});
+					}
 					this._semanticOperations.delete(id);
+					for (const [key, target] of this._semanticOperationTargets) {
+						if (target.operationId === id) this._semanticOperationTargets.delete(key);
+					}
+					this._semanticOperationFinalizations.delete(id);
 				} else if (operation.originActorAccountId === account.id) {
 					operation.originActorAccountId = null;
 				}
@@ -5359,6 +7032,18 @@ export class MemoryHubStore {
 				...entitlementAudits,
 			].map(audit => [audit.id, audit]),
 		).values()].map(audit => redactEntitlementAuditForAccount({audit: copy(audit), accountId}));
+		const multiTargetOperations = [...this._semanticOperations.values()]
+			.filter(operation => operation.targetSetVersion === 1)
+			.filter(operation => (
+				operation.originActorAccountId === accountId
+				|| this._getMultiTargetTargets(operation.id)
+					.some(target => target.targetOwnerAccountIdAtProposal === accountId)
+			))
+			.map(operation => this._getMultiTargetOperationView({
+				operation,
+				accountId,
+				role: this._memberships.get(`${operation.campaignId}::${accountId}`)?.role || "player",
+			}));
 		return {
 			exportedAt: this._fnNow().toISOString(),
 			account: copy(account),
@@ -5372,6 +7057,7 @@ export class MemoryHubStore {
 			entitlements: [...this._accountEntitlements.values()]
 				.filter(entitlement => entitlement.accountId === accountId)
 				.map(entitlement => redactEntitlementForAccount({entitlement: copy(entitlement)})),
+			multiTargetOperations: copy(multiTargetOperations),
 			auditEntries: audits,
 		};
 	}
@@ -5392,6 +7078,14 @@ export class MemoryHubStore {
 		}
 		campaign.status = "archived";
 		for (const operation of this._semanticOperations.values()) {
+			if (operation.campaignId === campaignId && operation.targetSetVersion === 1) {
+				this._cancelMultiTargetOperationForLifecycle({
+					operation,
+					actorAccountId: accountId,
+					isAll: true,
+				});
+				continue;
+			}
 			if (operation.campaignId === campaignId && operation.status === "proposed") {
 				this._cancelSemanticOperationForLifecycle({operation, actorAccountId: accountId});
 			}

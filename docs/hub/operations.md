@@ -37,6 +37,11 @@ maintenance and backup executions passed on 2026-09-13, completing V1-G1.
    add-only: missing configured accounts warn, new configured operators are audited, and removed configuration
    never revokes authority.
    Configure an independent `HUB_INVITE_TOKEN_SECRET`; do not reuse cookie or CSRF secrets.
+   Migration 0011 is expand-first and does not enable multi-target operations. Keep
+   `HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS` blank until the separately reviewed canary; any later enrollment
+   must use exact campaign UUIDs and pass migration/table/active-rules readiness. Verify
+   `hub.semantic_multi_target_usage` remains empty until the first accepted proposal and retain the permanent
+   per-campaign protocol marker thereafter.
 7. Serve the static site and BFF behind the same HTTPS origin, forwarding `/api/*` and `/auth/*` to the BFF.
    Set `HUB_TRUST_PROXY` only to the exact proxy IP/CIDR list, and configure that proxy to replace incoming
    forwarded headers. Leave it empty for a directly exposed BFF.
@@ -123,7 +128,9 @@ npm run hub:restore -- backups/hub-YYYY-MM-DD.dump
 After restore:
 
 1. Start the BFF against the drill database and check `/api/health`.
-2. Verify account, campaign, membership, character, audit, event, and outbox counts.
+2. Verify account, campaign, membership, character, audit, event, outbox, normalized multi-target history, and
+   `hub.semantic_multi_target_usage` counts. A marker present in the source backup must remain present after
+   restore; an unused schema must restore with the marker absent.
 3. Sign in with an existing test account and open a representative campaign.
 4. Record the backup timestamp, restore duration, checks, and operator.
 5. Destroy the drill database.
@@ -189,7 +196,9 @@ npm run hub:grant-roles
 ```
 
 The runtime connection string used by `hub:serve` should belong to `hub_runtime`; migration and grant commands
-use the schema owner. The backup command should use the read-only backup role when the provider permits.
+use the schema owner. The runtime role receives only `SELECT, INSERT` on
+`hub.semantic_multi_target_usage`; it must not receive `UPDATE` or `DELETE`. The backup command should use the
+read-only backup role and must include the usage marker when the provider permits.
 
 ## Current launch gaps
 

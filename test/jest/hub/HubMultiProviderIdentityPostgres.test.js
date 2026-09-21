@@ -951,7 +951,7 @@ describePostgres("PostgreSQL provider-neutral identity substrate", () => {
 				cookie: sessionCookie,
 				origin: ORIGIN,
 				"x-csrf-token": session.csrfToken,
-				"x-hub-protocol-version": "5",
+				"x-hub-protocol-version": "6",
 				"idempotency-key": `${prefix}-invite`,
 			},
 			payload: {role: "player"},

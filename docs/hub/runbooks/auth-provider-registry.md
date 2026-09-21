@@ -28,7 +28,7 @@ Never:
    even an `--exclude-table-data` relation.
 4. Set `HUB_AUTH_PROVIDERS=github`, leave `HUB_AUTH_EMERGENCY_DISABLED_PROVIDERS` empty, retain the exact
    existing GitHub client/secret/callback, and keep `HUB_INVITE_ACCOUNT_ADMISSION_ENABLED=false`.
-5. Deploy the candidate. Probe `/api/ready` and `/api/meta`; the latter must advertise protocol 5,
+5. Deploy the candidate. Probe `/api/ready` and `/api/meta`; the latter must advertise protocol 6,
    `auth.provider_registry.v1`, and only available GitHub.
 6. Complete one existing-account GitHub sign-in and verify the prior browser session is revoked on a second sign-in.
 7. Run maintenance and verify consumed/expired OAuth transaction count is bounded.

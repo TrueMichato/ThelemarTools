@@ -78,7 +78,7 @@ export class HubCampaignPage {
 	private async getLeaseReleaseHeaders (): Promise<Record<string, string>> {
 		return {
 			...await this.getMutationHeaders(),
-			"x-hub-protocol-version": "5",
+			"x-hub-protocol-version": "6",
 		};
 	}
 

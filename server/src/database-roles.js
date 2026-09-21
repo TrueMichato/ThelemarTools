@@ -47,6 +47,8 @@ export async function pGrantHubDatabaseRoles ({
 		await client.query(`REVOKE CREATE ON SCHEMA hub FROM PUBLIC`);
 		await client.query(`GRANT USAGE ON SCHEMA hub TO ${runtime}`);
 		await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA hub TO ${runtime}`);
+		await client.query(`REVOKE UPDATE, DELETE ON hub.semantic_multi_target_usage FROM ${runtime}`);
+		await client.query(`GRANT SELECT, INSERT ON hub.semantic_multi_target_usage TO ${runtime}`);
 		await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA hub TO ${runtime}`);
 		await client.query(`REVOKE CREATE ON SCHEMA hub FROM ${runtime}`);
 		await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA hub GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${runtime}`);

@@ -11,6 +11,7 @@ const peerSourceCostsSql = fs.readFileSync(new URL("../../../server/migrations/0
 const inviteAdmissionSql = fs.readFileSync(new URL("../../../server/migrations/0008_invite_gated_first_access.sql", import.meta.url), "utf8");
 const accountEntitlementsSql = fs.readFileSync(new URL("../../../server/migrations/0009_account_entitlements.sql", import.meta.url), "utf8");
 const sourceCostBindingIdentitySql = fs.readFileSync(new URL("../../../server/migrations/0010_source_cost_binding_identity.sql", import.meta.url), "utf8");
+const multiTargetOperationsSql = fs.readFileSync(new URL("../../../server/migrations/0011_multi_target_semantic_operations.sql", import.meta.url), "utf8");
 const postgresStore = fs.readFileSync(new URL("../../../server/src/postgres-hub-store.js", import.meta.url), "utf8");
 const migrationPolicy = JSON.parse(fs.readFileSync(new URL("../../../deploy/hub/migration-policy.json", import.meta.url), "utf8"));
 const migrationVersions = fs.readdirSync(new URL("../../../server/migrations/", import.meta.url))
@@ -262,6 +263,67 @@ describe("campaign hub first migration contract", () => {
 		expect(sourceCostBindingIdentitySql).not.toContain("LIMIT 1");
 	});
 
+	it("adds normalized schema-before-use multi-target authority in migration 0011", () => {
+		for (const required of [
+			"ADD COLUMN target_set_version integer",
+			"ADD COLUMN candidate_count smallint",
+			"ADD COLUMN collection_closes_at timestamptz",
+			"CREATE TABLE hub.semantic_operation_targets",
+			"PRIMARY KEY (operation_id, target_character_id)",
+			"invitation_id uuid NOT NULL UNIQUE",
+			"UNIQUE (operation_id, ordinal)",
+			"UNIQUE (operation_id, target_ref)",
+			"target_owner_account_id_at_proposal uuid NOT NULL",
+			"response_command_id uuid",
+			"selection_index smallint",
+			"leg_id uuid",
+			"changed boolean",
+			"ON DELETE RESTRICT",
+			"CREATE TABLE hub.semantic_operation_finalizations",
+			"selected_invitation_ids jsonb NOT NULL",
+			"CREATE TABLE hub.semantic_multi_target_usage",
+			"singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton)",
+			"first_operation_id uuid NOT NULL",
+			"ADD COLUMN multi_target_first_used_at timestamptz",
+			"ADD COLUMN multi_target_first_operation_id uuid",
+			"operation.status IN ('collecting_responses', 'awaiting_source_selection')",
+			"CREATE FUNCTION hub.guard_multi_target_identity_immutable()",
+			"CREATE TRIGGER semantic_operation_targets_identity_immutable",
+			"multi-target invitation identity is immutable",
+			"CREATE FUNCTION hub.guard_multi_target_parent_identity_immutable()",
+			"CREATE TRIGGER semantic_operations_multi_target_identity_immutable",
+			"BEFORE UPDATE OR DELETE ON hub.semantic_operations",
+			"multi-target proposal identity is immutable",
+			"live multi-target parent is immutable",
+			"CREATE FUNCTION hub.guard_multi_target_candidate_membership()",
+			"CREATE TRIGGER semantic_operation_targets_membership_immutable",
+			"BEFORE INSERT OR DELETE ON hub.semantic_operation_targets",
+			"live multi-target candidate membership is immutable",
+			"multi-target candidate set is already complete",
+			"has invalid source-owned consent",
+			"has non-contiguous selection indexes",
+			"'create_multi_target_proposal'",
+			"'respond_multi_target'",
+			"'finalize_multi_target'",
+			"'cancel_multi_target'",
+			"semantic_operations_multi_collection_idx",
+			"semantic_operations_multi_finalization_idx",
+			"semantic_operations_multi_source_live_idx",
+			"semantic_operation_targets_inbox_idx",
+			"semantic_operation_targets_lifecycle_idx",
+			"semantic_operations_multi_terminal_cleanup_idx",
+			"validate_multi_target_semantic_operation",
+			"DEFERRABLE INITIALLY DEFERRED",
+		]) expect(multiTargetOperationsSql).toContain(required);
+		expect(multiTargetOperationsSql).toContain("FOREIGN KEY (target_character_id)");
+		expect(multiTargetOperationsSql).toContain("REFERENCES hub.characters(id)");
+		expect(multiTargetOperationsSql).not.toContain("FOREIGN KEY (campaign_id, target_character_id)");
+		expect(multiTargetOperationsSql).not.toMatch(
+			/CREATE (?:UNIQUE )?INDEX[^;]*\b(?:source_cost|choice|target_operation|target_display_snapshot)\b[^;]*;/,
+		);
+		expect(multiTargetOperationsSql).not.toMatch(/REFERENCES hub\.semantic_operations\(id\)[\s\S]*semantic_multi_target_usage/);
+	});
+
 	it("classifies every immutable migration for release rollback compatibility", () => {
 		expect(Object.keys(migrationPolicy.migrations).sort()).toEqual(migrationVersions);
 		expect(migrationPolicy.migrations["0007"]).toMatchObject({
@@ -276,5 +338,11 @@ describe("campaign hub first migration contract", () => {
 			phase: "expand",
 			previousAppCompatible: true,
 		});
+		expect(migrationPolicy.migrations["0011"]).toMatchObject({
+			phase: "expand",
+			previousAppCompatible: true,
+		});
+		expect(migrationPolicy.migrations["0011"].notes).toMatch(/schema-before-use only/i);
+		expect(migrationPolicy.migrations["0011"].notes).toMatch(/usage marker/i);
 	});
 });

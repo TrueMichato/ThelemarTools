@@ -14,6 +14,7 @@ describe("Hub encrypted backups", () => {
 			const source = fs.readFileSync(new URL(`../../../server/scripts/${file}`, import.meta.url), "utf8");
 			expect(source).toContain("--exclude-table-data=hub.oauth_transactions");
 			expect(source).toContain("--exclude-table-data=hub.invite_contexts");
+			expect(source).not.toContain("--exclude-table-data=hub.semantic_multi_target_usage");
 		}
 	});
 

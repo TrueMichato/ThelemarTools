@@ -37,7 +37,7 @@ test("publishes bounded provider metadata and accessible signed-out guidance", a
 	const meta = await page.request.get("/api/meta");
 	expect(meta.ok()).toBe(true);
 	expect(await meta.json()).toEqual(expect.objectContaining({
-		protocolVersion: "5",
+		protocolVersion: "6",
 		capabilities: expect.arrayContaining([
 			"auth.provider_registry.v1",
 			"campaign.active_context.v1",
@@ -132,7 +132,7 @@ test("operator reauthentication grants and revokes campaign creation through the
 				headers: {
 					"content-type": "application/json",
 					"x-csrf-token": session.csrfToken,
-					"x-hub-protocol-version": "5",
+					"x-hub-protocol-version": "6",
 					"idempotency-key": crypto.randomUUID(),
 				},
 				body: JSON.stringify({name: "Entitled Campaign"}),
@@ -152,7 +152,7 @@ test("operator reauthentication grants and revokes campaign creation through the
 				headers: {
 					"content-type": "application/json",
 					"x-csrf-token": session.csrfToken,
-					"x-hub-protocol-version": "5",
+					"x-hub-protocol-version": "6",
 					"idempotency-key": crypto.randomUUID(),
 				},
 				body: JSON.stringify({name: "Denied Campaign"}),

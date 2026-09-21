@@ -40,6 +40,8 @@ TRAFFIC_MUTATED="false"
 SCHEMA_MUTATED="false"
 PLANNED_MIGRATIONS="none"
 APPLIED_MIGRATIONS="none"
+SCHEMA_HAS_MIGRATION_0011="false"
+BFF_QUIESCED="false"
 SOURCE_CHECKED_OUT="false"
 DRY_RUN="false"
 ASSUME_YES="false"
@@ -121,6 +123,24 @@ assert_no_peer_source_cost_ambient_override () {
 	if [[ "${HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS+set}" == "set" ]]; then
 		fail "HUB_PEER_SOURCE_COSTS_CAMPAIGN_IDS must be configured only in .env.hub, not the invoking environment"
 	fi
+}
+
+assert_no_multi_target_ambient_override () {
+	if [[ "${HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS+set}" == "set" ]]; then
+		fail "HUB_MULTI_TARGET_OPERATIONS_CAMPAIGN_IDS must be configured only in .env.hub, not the invoking environment"
+	fi
+}
+
+previous_application_is_pre_0011 () {
+	local version
+	if [[ "$SIMULATE" == "1" ]]; then
+		version="${HUB_RELEASE_TEST_PREVIOUS_MIGRATION_VERSION:-0010}"
+	else
+		version="$(git -C "$ROOT" show "${PREVIOUS_SHA}:server/src/migration-version.js" 2>/dev/null \
+			| sed -nE 's/.*HUB_REQUIRED_MIGRATION_VERSION = \"([0-9]{4})\".*/\1/p' \
+			| head -n 1)"
+	fi
+	[[ -z "$version" || "$version" < "0011" ]]
 }
 
 assert_no_account_entitlement_ambient_override () {
@@ -644,6 +664,107 @@ rollback_application () {
 	replace_record rollback_result succeeded || return 1
 }
 
+is_bff_quiesced () {
+	local container_ids
+	container_ids="$(compose_current ps -q --all bff 2>/dev/null)" || return 1
+	local container_id state
+	while IFS= read -r container_id; do
+		[[ -n "$container_id" ]] || continue
+		state="$(docker inspect --format '{{.State.Running}} {{.State.Restarting}}' "$container_id" 2>/dev/null)" \
+			|| return 1
+		[[ "$state" == "false false" ]] || return 1
+	done <<<"$container_ids"
+	return 0
+}
+
+quiesce_bff_writes () {
+	if [[ "$SIMULATE" == "1" ]]; then
+		local mode="${HUB_RELEASE_TEST_QUIESCE_MODE:-success}"
+		[[ "${HUB_RELEASE_TEST_QUIESCE_FAIL:-false}" != "true" ]] || mode="all-fail"
+		trace "rollback-quiesce-attempt-1"
+		case "$mode" in
+			success) BFF_QUIESCED="true"; return 0 ;;
+			first-fail-second-success)
+				trace "rollback-quiesce-attempt-2"
+				BFF_QUIESCED="true"
+				return 0
+				;;
+			both-fail-fallback-success)
+				trace "rollback-quiesce-attempt-2"
+				trace "rollback-quiesce-fallback"
+				BFF_QUIESCED="true"
+				return 0
+				;;
+			all-fail)
+				trace "rollback-quiesce-attempt-2"
+				trace "rollback-quiesce-fallback"
+				BFF_QUIESCED="false"
+				return 1
+				;;
+			*) fail "unknown release-test quiesce mode ${mode}" ;;
+		esac
+	fi
+
+	local attempt
+	for attempt in 1 2; do
+		trace "rollback-quiesce-attempt-${attempt}"
+		compose_current stop bff >/dev/null 2>&1 || true
+		if is_bff_quiesced; then
+			BFF_QUIESCED="true"
+			return 0
+		fi
+	done
+
+	trace "rollback-quiesce-fallback"
+	local container_ids
+	container_ids="$(compose_current ps -q --all bff 2>/dev/null)" || return 1
+	local container_id
+	while IFS= read -r container_id; do
+		[[ -n "$container_id" ]] || continue
+		docker stop --time 10 "$container_id" >/dev/null 2>&1 || true
+	done <<<"$container_ids"
+	if is_bff_quiesced; then
+		BFF_QUIESCED="true"
+		return 0
+	fi
+	BFF_QUIESCED="false"
+	return 1
+}
+
+classify_multi_target_rollback_preflight () {
+	local file="$1"
+	local status="$2"
+	python3 - "$file" "$status" <<'PY'
+import json
+import sys
+
+path, raw_status = sys.argv[1], sys.argv[2]
+try:
+	status = int(raw_status)
+	with open(path, encoding="utf-8") as handle:
+		result = json.load(handle)
+	if result.get("target") != "pre-0011" or not isinstance(result.get("blockers"), list):
+		raise ValueError("invalid preflight shape")
+	compatible = result.get("compatible")
+	recognized = {"USAGE_MARKER_PRESENT", "MULTI_TARGET_HISTORY_PRESENT"}
+	blockers = result["blockers"]
+	if status == 0 and compatible is True and blockers == []:
+		print("compatible")
+	elif status == 2 and compatible is False and blockers and set(blockers) <= recognized:
+		blockers = set(blockers)
+		if "USAGE_MARKER_PRESENT" in blockers:
+			print("multi-target-usage-marker-present")
+		elif "MULTI_TARGET_HISTORY_PRESENT" in blockers:
+			print("multi-target-history-present")
+		else:
+			print("multi-target-preflight-incompatible")
+	else:
+		print("multi-target-rollback-preflight-failed")
+except Exception:
+	print("multi-target-rollback-preflight-failed")
+PY
+}
+
 handle_failure () {
 	local status="$1"
 	trap - ERR
@@ -654,13 +775,64 @@ handle_failure () {
 		replace_record failed_phase "$CURRENT_PHASE"
 		replace_record exit_status "$status"
 	}
+	if [[ "$TRAFFIC_MUTATED" == "true" \
+		&& "$ROLLBACK_COMPATIBLE" == "true" \
+		&& "$SCHEMA_HAS_MIGRATION_0011" == "true" ]] \
+		&& previous_application_is_pre_0011; then
+		trace "rollback-quiesce"
+		if ! quiesce_bff_writes; then
+			ROLLBACK_COMPATIBLE="false"
+			replace_record rollback_compatible false
+			replace_record rollback_incompatibility multi-target-quiesce-failed
+			trace "rollback-quiesce-failed"
+		else
+			replace_record rollback_candidate_quiesced true
+			trace "rollback-marker-check"
+			if [[ "$SIMULATE" == "1" ]]; then
+				if [[ "${HUB_RELEASE_TEST_MULTI_TARGET_USAGE_MARKER_PRESENT:-false}" == "true" ]]; then
+					ROLLBACK_COMPATIBLE="false"
+					replace_record rollback_compatible false
+					replace_record rollback_incompatibility multi-target-usage-marker-present
+					trace "rollback-marker-blocked"
+				fi
+			else
+				local rollback_preflight="${RELEASE_DIR}/multi-target-rollback-preflight.json"
+				compose_release run --rm --no-deps \
+					-e HUB_MULTI_TARGET_ROLLBACK_TARGET=pre-0011 \
+					bff node server/scripts/check-multi-target-rollback.mjs >"$rollback_preflight"
+				local rollback_preflight_status="$?"
+				local rollback_preflight_classification
+				rollback_preflight_classification="$(
+					classify_multi_target_rollback_preflight "$rollback_preflight" "$rollback_preflight_status"
+				)"
+				if [[ "$rollback_preflight_classification" != "compatible" ]]; then
+					ROLLBACK_COMPATIBLE="false"
+					replace_record rollback_compatible false
+					replace_record rollback_incompatibility "$rollback_preflight_classification"
+					replace_record multi_target_rollback_preflight_status "$rollback_preflight_status"
+					record multi_target_rollback_preflight_sha256 "$(sha256_file "$rollback_preflight")"
+					if [[ "$rollback_preflight_classification" == "multi-target-rollback-preflight-failed" ]]; then
+						log "Automatic rollback is blocked because pre-0011 compatibility could not be verified."
+					else
+						log "Automatic rollback to the pre-0011 application is blocked by multi-target schema use."
+					fi
+				fi
+			fi
+		fi
+	fi
 	if [[ "$SIMULATE" == "1" ]]; then
 		if [[ "$TRAFFIC_MUTATED" == "true" && "$ROLLBACK_COMPATIBLE" == "true" ]]; then
 			trace "rollback"
 			[[ -f "$STATE_FILE" ]] && replace_record rollback_result simulated-compatible
 		elif [[ "$TRAFFIC_MUTATED" == "true" ]]; then
-			trace "isolate"
-			[[ -f "$STATE_FILE" ]] && replace_record rollback_result forbidden-schema-incompatible
+			[[ "$BFF_QUIESCED" == "true" ]] || quiesce_bff_writes || true
+			if [[ "$BFF_QUIESCED" == "true" ]]; then
+				trace "isolate"
+				[[ -f "$STATE_FILE" ]] && replace_record rollback_result forbidden-schema-incompatible
+			else
+				trace "fence-failed"
+				[[ -f "$STATE_FILE" ]] && replace_record rollback_result quiesce-failed-candidate-may-be-live
+			fi
 		elif [[ "$SCHEMA_MUTATED" == "true" ]]; then
 			trace "schema-compatible-old-app-remains"
 			[[ -f "$STATE_FILE" ]] && replace_record failure_action previous-compatible-app-remains
@@ -674,9 +846,17 @@ handle_failure () {
 			log "Automatic application rollback failed; preserve the database and follow docs/hub/runbooks/rollback.md."
 		}
 	elif [[ "$TRAFFIC_MUTATED" == "true" ]]; then
-		compose_current stop bff >/dev/null 2>&1 || true
-		replace_record rollback_result forbidden-schema-incompatible
-		print_isolated_restore_instructions
+		if [[ "$BFF_QUIESCED" != "true" ]]; then
+			quiesce_bff_writes || true
+			[[ "$BFF_QUIESCED" != "true" ]] || replace_record rollback_candidate_quiesced true
+		fi
+		if [[ "$BFF_QUIESCED" == "true" ]]; then
+			replace_record rollback_result forbidden-schema-incompatible
+			print_isolated_restore_instructions
+		else
+			replace_record rollback_result quiesce-failed-candidate-may-be-live
+			log "CRITICAL: the candidate BFF could not be stopped and may still accept writes. Do not start any previous image; use the incident runbook to fence traffic immediately."
+		fi
 	elif [[ "$SOURCE_CHECKED_OUT" == "true" && -n "$PREVIOUS_SHA" ]]; then
 		if [[ "$SCHEMA_MUTATED" == "true" ]]; then
 			replace_record failure_action previous-compatible-app-remains
@@ -746,6 +926,7 @@ phase_preflight () {
 	ENV_FILE="$ROOT/.env.hub"
 	[[ "$(pwd -P)" == "$ROOT" ]] || fail "run this command from the deployment repository root: ${ROOT}"
 	assert_no_peer_source_cost_ambient_override
+	assert_no_multi_target_ambient_override
 	assert_no_account_entitlement_ambient_override
 	if [[ "$TEST_MODE" != "1" ]]; then
 		[[ "$ROOT" == "$EXPECTED_ROOT" ]] || fail "expected deployment root ${EXPECTED_ROOT}, got ${ROOT}"
@@ -1012,7 +1193,11 @@ phase_deploy () {
 	APPLIED_MIGRATIONS="$(python3 -c \
 		'import json,sys; print(",".join(json.load(open(sys.argv[1]))["appliedNow"]) or "none")' \
 		"$migration_apply")"
+	SCHEMA_HAS_MIGRATION_0011="$(python3 -c \
+		'import json,sys; print("true" if any(row["version"] == "0011" for row in json.load(open(sys.argv[1]))["applied"]) else "false")' \
+		"$migration_apply")"
 	replace_record migrations_applied "$APPLIED_MIGRATIONS"
+	replace_record schema_has_migration_0011 "$SCHEMA_HAS_MIGRATION_0011"
 	if [[ "$PLANNED_MIGRATIONS" == "none" && "$APPLIED_MIGRATIONS" != "none" ]]; then
 		SCHEMA_MUTATED="true"
 		replace_record schema_mutated true
@@ -1110,8 +1295,16 @@ run_phase () {
 			ROLLBACK_COMPATIBLE="${HUB_RELEASE_TEST_DEPLOY_ROLLBACK_COMPATIBLE:-$ROLLBACK_COMPATIBLE}"
 			replace_record rollback_compatible "$ROLLBACK_COMPATIBLE"
 			APPLIED_MIGRATIONS="$PLANNED_MIGRATIONS"
+			if [[ -n "${HUB_RELEASE_TEST_SCHEMA_HAS_MIGRATION_0011:-}" ]]; then
+				SCHEMA_HAS_MIGRATION_0011="$HUB_RELEASE_TEST_SCHEMA_HAS_MIGRATION_0011"
+			elif [[ ",${PLANNED_MIGRATIONS}," == *",0011,"* ]]; then
+				SCHEMA_HAS_MIGRATION_0011="true"
+			else
+				SCHEMA_HAS_MIGRATION_0011="false"
+			fi
 			replace_record migrations_planned "$PLANNED_MIGRATIONS"
 			replace_record migrations_applied unknown
+			replace_record schema_has_migration_0011 "$SCHEMA_HAS_MIGRATION_0011"
 			if [[ "$PLANNED_MIGRATIONS" != "none" ]]; then
 				SCHEMA_MUTATED="true"
 				replace_record schema_mutated true

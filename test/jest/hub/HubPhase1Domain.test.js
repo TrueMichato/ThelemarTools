@@ -71,7 +71,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 	function leaseReleaseHeaders (session) {
 		return {
 			...mutationHeaders(session),
-			"x-hub-protocol-version": "5",
+			"x-hub-protocol-version": "6",
 		};
 	}
 
@@ -550,7 +550,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		expect(activeRelease.json()).toEqual({released: true});
 	});
 
-	it.each(["3", "4"])("requires protocol 5 before validating lease-release identity for protocol %s", async protocolVersion => {
+	it.each(["3", "4", "5"])("requires protocol 6 before validating lease-release identity for protocol %s", async protocolVersion => {
 		const player = await pSignIn(IDENTITIES.player);
 		const response = await app.inject({
 			method: "POST",
@@ -563,10 +563,10 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 		});
 
 		expect(response.statusCode).toBe(426);
-		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "5"});
+		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "6"});
 	});
 
-	it("keeps protocol 5 lease-release identity validation strict", async () => {
+	it("keeps protocol 6 lease-release identity validation strict", async () => {
 		const player = await pSignIn(IDENTITIES.player);
 		const response = await app.inject({
 			method: "POST",
@@ -590,7 +590,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			payload: {name: "Old Client"},
 		});
 		expect(response.statusCode).toBe(426);
-		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "5"});
+		expect(response.json()).toEqual({error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "6"});
 	});
 
 	it("blocks projection-shaped reads from stale protocol clients", async () => {
@@ -619,7 +619,7 @@ describe("Phase 1 campaign membership and cloud characters", () => {
 			expect({url, status: stale.statusCode, body: stale.json()}).toEqual({
 				url,
 				status: 426,
-				body: {error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "5"},
+				body: {error: "PROTOCOL_UPDATE_REQUIRED", protocolVersion: "6"},
 			});
 		}
 	});
