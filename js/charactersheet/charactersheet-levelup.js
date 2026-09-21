@@ -5420,6 +5420,10 @@ class CharacterSheetLevelUp {
 		await this._processFeatSpellChoices();
 
 		// Save and re-render
+		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
+			page: this._page,
+			state: this._state,
+		});
 		await this._page.saveCharacter();
 		this._page.renderCharacter();
 
@@ -6368,6 +6372,10 @@ class CharacterSheetLevelUp {
 		// to the next level-up.
 		await this._processFeatSpellChoices();
 
+		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
+			page: this._page,
+			state: this._state,
+		});
 		await this._page.saveCharacter();
 		this._page.renderCharacter();
 

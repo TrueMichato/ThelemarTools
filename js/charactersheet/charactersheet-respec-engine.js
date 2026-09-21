@@ -11,6 +11,7 @@ class CharacterSheetRespecEngine {
 		this._originalManifest = null;
 		this._undoSnapshot = null;
 		this._isDirty = false;
+		this._preexistingPendingKeys = new Set();
 	}
 
 	get state () { return this._candidateState || this._liveState; }
@@ -43,10 +44,19 @@ class CharacterSheetRespecEngine {
 		);
 		this._candidateState._onProgressionLedgerChange = () => this._setDirty();
 		this._isDirty = false;
+		// Materialise any lazy compatibility queues before taking the baseline.
+		// Otherwise a first manifest refresh could mistake an existing legacy
+		// pending item for a mutation-created obligation.
+		this._candidateState.getPendingFeatureChoices?.();
+		this._candidateState.getPendingSpellChoices?.();
+		this._preexistingPendingKeys = new Set(
+			this._getPendingCompatibilityItems(this._candidateState).map(item => item.key),
+		);
 		this._originalManifest = CharacterSheetProgression.buildManifest({
 			page: this._page,
 			state: this._candidateState,
 		});
+		this._addPreexistingPendingWarnings(this._originalManifest);
 		this._manifest = this._originalManifest;
 		this._persistManifest();
 		return this._candidateState;
@@ -58,6 +68,7 @@ class CharacterSheetRespecEngine {
 		this._originalManifest = null;
 		this._originalSnapshot = null;
 		this._isDirty = false;
+		this._preexistingPendingKeys = new Set();
 	}
 
 	refreshManifest ({persist = true} = {}) {
@@ -66,8 +77,65 @@ class CharacterSheetRespecEngine {
 			page: this._page,
 			state: this._candidateState,
 		});
+		this._addPreexistingPendingWarnings(this._manifest);
 		if (persist) this._persistManifest();
 		return this._manifest;
+	}
+
+	_getPendingCompatibilityItems (state = this._candidateState) {
+		const normalize = value => {
+			if (Array.isArray(value)) return value.map(normalize);
+			if (!value || typeof value !== "object") return value;
+			return Object.fromEntries(Object.entries(value)
+				.filter(([key]) => key !== "id")
+				.sort(([a], [b]) => a.localeCompare(b))
+				.map(([key, item]) => [key, normalize(item)]));
+		};
+		const make = (family, value) => {
+			const normalized = normalize(value);
+			return {
+				family,
+				value: normalized,
+				key: `${family}:${JSON.stringify(normalized)}`,
+				sourceDecisionKey: value?.sourceDecisionKey || value?.parentSemanticKey || null,
+				label: value?.featureName || value?.featureId || value?.slotKey || family,
+			};
+		};
+		return [
+			...(state?._data?.pendingFeatureChoices || []).map(value => make("feature", value)),
+			...(state?._data?.pendingSpellChoices || []).map(value => make("spell", value)),
+		];
+	}
+
+	_addPreexistingPendingWarnings (manifest) {
+		const represented = new Set((manifest?.decisions || []).flatMap(decision => [
+			decision.semanticKey,
+			decision.parentSemanticKey,
+			decision.rootSemanticKey,
+		]).filter(Boolean));
+		for (const item of this._getPendingCompatibilityItems()) {
+			if (represented.has(item.sourceDecisionKey) || !this._preexistingPendingKeys.has(item.key)) continue;
+			manifest.issues.push({
+				severity: "warning",
+				code: "unknown-pending-choice",
+				message: `Pre-existing ${item.label} pending choice is not represented by a Respec decision; it will be preserved until repaired.`,
+				pendingKey: item.key,
+			});
+		}
+	}
+
+	_assertNoNewUnrepresentedPending (beforePending, manifest) {
+		const beforeKeys = new Set(beforePending.map(item => item.key));
+		const represented = new Set((manifest?.decisions || []).flatMap(decision => [
+			decision.semanticKey,
+			decision.parentSemanticKey,
+			decision.rootSemanticKey,
+		]).filter(Boolean));
+		const unexpected = this._getPendingCompatibilityItems()
+			.filter(item => !beforeKeys.has(item.key) && !represented.has(item.sourceDecisionKey));
+		if (!unexpected.length) return;
+		const labels = unexpected.map(item => item.label).join(", ");
+		throw new Error(`The staged change created an unrepresented pending choice (${labels}); the mutation was rolled back.`);
 	}
 
 	_persistManifest () {
@@ -164,8 +232,12 @@ class CharacterSheetRespecEngine {
 			const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
 			effects.push(...values.map(value => ({
 				type: decision.type === "nestedAbility" ? "abilityDelta" : "configuration",
+				sourceDecisionKey: decision.semanticKey,
 				ability: decision.type === "nestedAbility" ? String(value) : undefined,
 				amount: decision.type === "nestedAbility" ? amount : undefined,
+				before: decision.type === "nestedAbility"
+					? decision.meta?.receiptPreviousAbility?.[String(value || "").toLowerCase()]
+					: undefined,
 				value: decision.type === "nestedConfiguration" ? value : undefined,
 			})));
 		}
@@ -186,7 +258,10 @@ class CharacterSheetRespecEngine {
 			.filter(feature => feature.sourceDecisionKey === decision?.semanticKey)
 			.map(feature => ({id: feature.id, name: feature.name, source: feature.source}));
 		const materializedFeatureIds = new Set(materializedFeatures.map(feature => feature.id));
-		const materializedModifiers = (state?._data?.modifiers || [])
+		const materializedModifiers = [
+			...(state?._data?.modifiers || []),
+			...(state?._data?.namedModifiers || []),
+		]
 			.filter(modifier => materializedFeatureIds.has(modifier.featureId) || modifier.sourceDecisionKey === decision?.semanticKey)
 			.map(modifier => ({id: modifier.id, featureId: modifier.featureId, sourceDecisionKey: modifier.sourceDecisionKey}));
 		const materializedResources = (state?.getResources?.() || [])
@@ -208,6 +283,15 @@ class CharacterSheetRespecEngine {
 					.map(value => ({name: value.name, source: value.source})),
 			});
 		}
+		if (["nestedSpell", "nestedCantrip", "knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips"].includes(decision?.type) && values.length) {
+			effects.push({
+				type: "spells",
+				spellType: ["nestedCantrip", "cantrips", "preparedCantrips"].includes(decision.type) ? "cantrips" : "spells",
+				spells: values
+					.filter(value => value && typeof value === "object" && value.name)
+					.map(value => ({name: value.name, source: value.source})),
+			});
+		}
 		return {
 			version: 1,
 			sourceDecisionKey: decision.semanticKey,
@@ -220,12 +304,13 @@ class CharacterSheetRespecEngine {
 	 * boundary rather than just the ledger boundary: controller callbacks may
 	 * materialise features, resources, or spells before a descriptor is refreshed.
 	 */
-	stageGraphMutation (decisionId, selection, {status = null, apply = null} = {}) {
+	stageGraphMutation (decisionId, selection, {status = null, apply = null, reverseParent = false} = {}) {
 		const decision = this.getDecision(decisionId);
 		if (!decision) throw new Error("That progression decision is no longer available.");
 		if (!this._candidateState) throw new Error("No Respec draft is active.");
 		const stateSnapshot = this._candidateState.toJson();
 		const manifestSnapshot = CharacterSheetProgression._copy(this._manifest);
+		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
 		const {container} = this._getDecisionStore(decision);
 		const stored = container?.decisions?.find(it => it.id === decisionId || it.semanticKey === decision.semanticKey)
 			|| (container
@@ -275,18 +360,33 @@ class CharacterSheetRespecEngine {
 						level: descendant.classLevel || descendant.characterLevel,
 					});
 				}
+
 				const descendantStore = this._getDecisionStore(descendant).container;
 				if (descendantStore?.decisions) {
 					descendantStore.decisions = descendantStore.decisions
 						.filter(item => item.semanticKey !== descendant.semanticKey);
 				}
 			}
-			if (typeof apply === "function") apply({decision, stored, state: this._candidateState});
+			// Generic manifest editors do not have a legacy callback which
+			// knows how to tear down the previous selection.  Consume the
+			// parent's compact receipt before applying its replacement. Legacy
+			// editors opt out because their callback performs the historical
+			// teardown itself.
+			if (reverseParent) this._candidateState.reverseProgressionDecisionReceipt?.(stored);
+			const applyResult = typeof apply === "function"
+				? apply({decision, stored, state: this._candidateState})
+				: null;
+			const effectiveSelection = applyResult && Object.prototype.hasOwnProperty.call(applyResult, "selection")
+				? applyResult.selection
+				: selection;
+			const effectiveStatus = applyResult && Object.prototype.hasOwnProperty.call(applyResult, "status")
+				? applyResult.status
+				: status;
 			const updated = CharacterSheetProgression.normalizeDecision({
 				...stored,
-				selection: CharacterSheetProgression._copy(selection),
-				status,
-				receipt: this._makeDecisionReceipt(decision, selection, this._candidateState),
+				selection: CharacterSheetProgression._copy(effectiveSelection),
+				status: effectiveStatus,
+				receipt: this._makeDecisionReceipt(decision, effectiveSelection, this._candidateState),
 			}, container);
 			Object.assign(stored, updated);
 			if (decision.scope !== "origin") Object.assign(container, CharacterSheetProgression.projectDecisionsToChoices(container));
@@ -317,6 +417,7 @@ class CharacterSheetRespecEngine {
 				else nextStore.decisions.push(nextStored);
 				Object.assign(next, nextStored);
 			}
+			this._assertNoNewUnrepresentedPending(pendingSnapshot, this._manifest);
 			this._persistManifest();
 			return this._manifest;
 		} catch (error) {
@@ -326,8 +427,33 @@ class CharacterSheetRespecEngine {
 		}
 	}
 
+	/**
+	 * Run a legacy editor mutation inside the same candidate-state transaction
+	 * boundary as linked decision edits. This is used for historical choice
+	 * families which predate a manifest descriptor but still need atomic
+	 * rollback and discovery refresh.
+	 */
+	async stageCandidateMutation (apply) {
+		if (typeof apply !== "function") throw new Error("A candidate mutation callback is required.");
+		if (!this._candidateState) throw new Error("No Respec draft is active.");
+		const stateSnapshot = this._candidateState.toJson();
+		const manifestSnapshot = CharacterSheetProgression._copy(this._manifest);
+		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
+		try {
+			const result = await apply({state: this._candidateState});
+			this._setDirty();
+			this.refreshManifest({persist: false});
+			this._assertNoNewUnrepresentedPending(pendingSnapshot, this._manifest);
+			return result;
+		} catch (error) {
+			this._candidateState.loadFromJson(stateSnapshot);
+			this._manifest = manifestSnapshot;
+			throw error;
+		}
+	}
+
 	updateDecisionSelection (decisionId, selection, {status = null} = {}) {
-		return this.stageGraphMutation(decisionId, selection, {status});
+		return this.stageGraphMutation(decisionId, selection, {status, reverseParent: true});
 	}
 
 	getValidation () {

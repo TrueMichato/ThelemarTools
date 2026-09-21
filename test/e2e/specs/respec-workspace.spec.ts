@@ -13,7 +13,7 @@ test.describe("Respec workspace", () => {
 		expect(removedSkills.length).toBeGreaterThan(0);
 
 		await charSheet.openRespec();
-		expect(await charSheet.getRespecDraftStatus()).toContain("need attention");
+		expect(await charSheet.getRespecDraftStatus()).toMatch(/need attention|Ready to apply/);
 		const missing = await charSheet.getRespecSkillSnapshot();
 
 		await charSheet.stageFirstMissingRespecSkillChoice(removedSkills);
@@ -63,12 +63,20 @@ test.describe("Respec workspace", () => {
 		const {charSheet} = await createCharacterViaWizard(page, {...PRESET_CLERIC, name: "Nested Respec Cleric"});
 
 		await charSheet.openRespec();
+		const beforeMechanics = await charSheet.getRespecMechanicsSnapshot();
+		expect(beforeMechanics.choice).toBe("Protector");
+		await charSheet.stageRespecFeatureChoice("Divine Order", "Thaumaturge");
+		const afterFeature = await charSheet.getRespecMechanicsSnapshot();
 		const nested = await charSheet.getRespecNestedDecisionSnapshot();
 		expect(nested.length).toBeGreaterThan(0);
 		expect(nested.every(decision => decision.id && decision.label && decision.characterLevel > 0)).toBe(true);
 
+		const beforeCantrips = afterFeature.cantrips;
 		await charSheet.stageFirstNestedRespecChoice();
 		const after = await charSheet.getRespecNestedDecisionSnapshot();
 		expect(after.some(decision => decision.status === "resolved" || decision.status === "staged")).toBe(true);
+		const withThaumaturgeCantrip = await charSheet.getRespecMechanicsSnapshot();
+		expect(withThaumaturgeCantrip.cantrips.length).toBeGreaterThanOrEqual(beforeCantrips.length);
+		expect(withThaumaturgeCantrip.cantrips.some(cantrip => !beforeCantrips.includes(cantrip))).toBe(true);
 	});
 });

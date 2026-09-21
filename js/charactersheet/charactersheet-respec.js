@@ -331,6 +331,7 @@ class CharacterSheetRespec {
 				}
 				const selection = [...selected.values()];
 				this._engine.stageGraphMutation(decision.id, selection, {
+					reverseParent: true,
 					apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, options, state),
 				});
 				ix++;
@@ -1422,8 +1423,8 @@ class CharacterSheetRespec {
 			improvement: () => this._editImprovement(level, history, choice, closeParentModal),
 			"feature-choice": () => this._editFeatureChoice(level, history, choice, closeParentModal),
 			subclass: () => this._editSubclass(level, history, closeParentModal),
-			"combat-traditions": () => this._editCombatTraditions(level, history, closeParentModal),
-			"weapon-masteries": () => this._editWeaponMasteries(level, history, closeParentModal),
+			"combat-traditions": () => this._editCombatTraditions(level, history, choice, closeParentModal),
+			"weapon-masteries": () => this._editWeaponMasteries(level, history, choice, closeParentModal),
 			"combat-methods": () => this._editCombatMethods(level, history, choice, closeParentModal),
 			"optional-features": () => this._editOptionalFeatures(level, history, choice, closeParentModal),
 			"class-feat": () => choice.decision
@@ -1442,8 +1443,8 @@ class CharacterSheetRespec {
 			asi: () => this._editAsi(level, history, closeParentModal, choice),
 			feat: () => this._editFeat(level, history, closeParentModal, choice),
 			featureChoice: () => this._editFeatureChoice(level, history, choice, closeParentModal),
-			combatTraditions: () => this._editCombatTraditions(level, history, closeParentModal),
-			weaponMasteries: () => this._editWeaponMasteries(level, history, closeParentModal),
+			combatTraditions: () => this._editCombatTraditions(level, history, choice, closeParentModal),
+			weaponMasteries: () => this._editWeaponMasteries(level, history, choice, closeParentModal),
 			combatMethods: () => this._editCombatMethods(level, history, choice, closeParentModal),
 			optionalFeatures: () => this._editOptionalFeatures(level, history, choice, closeParentModal),
 			classFeatProgressionFeat: () => this._editClassFeatProgressionFeat(level, history, choice, closeParentModal),
@@ -1633,6 +1634,7 @@ class CharacterSheetRespec {
 				? values[0]
 				: values;
 			this._engine.stageGraphMutation(decision.id, selection, {
+				reverseParent: true,
 				apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, options, state),
 			});
 			doClose();
@@ -1654,6 +1656,39 @@ class CharacterSheetRespec {
 		} finally {
 			this._state = previousState;
 		}
+	}
+
+	// Concrete adapter entry points.  The progression registry binds each
+	// decision family to one of these methods rather than treating the generic
+	// dispatcher as proof that every family is executable.  Keeping the family
+	// wrappers thin preserves one mechanics implementation while making closure
+	// checks and future family-specific overrides explicit.
+	_applyDecisionMechanicsClass (decision, selection, options, targetState = this._state) {
+		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+	}
+
+	_applyDecisionMechanicsProficiencies (decision, selection, options, targetState = this._state) {
+		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+	}
+
+	_applyDecisionMechanicsSpells (decision, selection, options, targetState = this._state) {
+		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+	}
+
+	_applyDecisionMechanicsImprovement (decision, selection, options, targetState = this._state) {
+		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+	}
+
+	_applyDecisionMechanicsFeatures (decision, selection, options, targetState = this._state) {
+		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+	}
+
+	_applyDecisionMechanicsOrigin (decision, selection, options, targetState = this._state) {
+		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
+	}
+
+	_applyDecisionMechanicsConfiguration (decision, selection, options, targetState = this._state) {
+		return this._applyManifestSelectionMechanics(decision, selection, options, targetState);
 	}
 
 	_applyManifestSelectionMechanicsInner (decision, selection, options) {
@@ -1755,6 +1790,28 @@ class CharacterSheetRespec {
 				remove: value => this._state.removeResistance(valueName(value)),
 			},
 		};
+		if (decision.type === "nestedSkillBonus") {
+			const rules = decision.meta?.descriptorRules || {};
+			const sourceDecisionKey = decision.semanticKey;
+			const remove = () => this._state.removeModifiersBySourceDecision?.(sourceDecisionKey);
+			remove();
+			next.forEach(value => {
+				const skill = normalizeValue(value);
+				if (!skill) return;
+				this._state.addNamedModifier({
+					name: decision.label || "Skill Bonus",
+					type: `skill:${skill}`,
+					value: 0,
+					abilityMod: rules.bonusAbility || "wis",
+					minValue: Number(rules.minValue) || 0,
+					sourceDecisionKey,
+					sourceType: "progression",
+					note: `From ${decision.label || "Skill Bonus"}`,
+					enabled: true,
+				});
+			});
+			return;
+		}
 		const nestedSet = nestedSetHandlers[decision.type];
 		if (decision.type === "nestedSkillTool") {
 			const getKind = value => String(value?.kind || "skill").toLowerCase();
@@ -1812,20 +1869,17 @@ class CharacterSheetRespec {
 		}
 
 		if (decision.type === "nestedAbility" || decision.type === "nestedConfiguration") {
-			const receipt = decision.receipt?.effects || [];
-			if (receipt.length) {
-				for (const effect of receipt) {
-					if (effect.type === "abilityDelta") {
-						this._state.setAbilityBase(effect.ability, (this._state.getAbilityBase(effect.ability) || 0) - (Number(effect.amount) || 0));
-					}
-				}
-			}
 			if (decision.type === "nestedAbility") {
 				const amount = Number(decision.meta?.descriptorRules?.amount) || 1;
 				next.forEach(value => {
 					const ability = String(value || "").toLowerCase();
 					if (!ability) return;
 					const before = this._state.getAbilityBase(ability) || 0;
+					decision.meta ||= {};
+					decision.meta.receiptPreviousAbility ||= {};
+					if (decision.meta.receiptPreviousAbility[ability] == null) {
+						decision.meta.receiptPreviousAbility[ability] = before;
+					}
 					this._state.setAbilityBase(ability, CharacterSheetClassUtils.capAbilityIncrease(before, amount, 30));
 				});
 			}
@@ -2043,29 +2097,39 @@ class CharacterSheetRespec {
 	}
 
 	_applyClassAllocationChange (decision, selectedClass) {
-		const oldHistory = this._state.getLevelHistory().map(entry => MiscUtil.copyFast(entry));
-		const oldAsi = Object.fromEntries(Parser.ABIL_ABVS.map(ability => [ability, oldHistory.reduce(
-			(sum, entry) => sum + (Number(entry.choices?.asi?.[ability]) || 0),
-			0,
-		)]));
-		const oldFeatUids = new Set(oldHistory.map(entry => entry.choices?.feat).filter(Boolean).map(feat => `${feat.name}|${feat.source}`.toLowerCase()));
+		this._engine.stageGraphMutation(decision.id, {name: selectedClass.name, source: selectedClass.source}, {
+			apply: ({state}) => {
+				const previousState = this._state;
+				this._state = state;
+				try {
+					const oldHistory = state.getLevelHistory().map(entry => MiscUtil.copyFast(entry));
+					const oldAsi = Object.fromEntries(Parser.ABIL_ABVS.map(ability => [ability, oldHistory.reduce(
+						(sum, entry) => sum + (Number(entry.choices?.asi?.[ability]) || 0),
+						0,
+					)]));
+					const oldFeatUids = new Set(oldHistory.map(entry => entry.choices?.feat).filter(Boolean).map(feat => `${feat.name}|${feat.source}`.toLowerCase()));
+					const historyEntry = state.getLevelHistoryEntry(decision.characterLevel);
+					if (historyEntry) historyEntry.class = {name: selectedClass.name, source: selectedClass.source};
+					this._rebuildClassProgression();
 
-		this._engine.updateDecisionSelection(decision.id, {name: selectedClass.name, source: selectedClass.source});
-		this._rebuildClassProgression();
-
-		const newHistory = this._state.getLevelHistory();
-		Parser.ABIL_ABVS.forEach(ability => {
-			const nextAsi = newHistory.reduce((sum, entry) => sum + (Number(entry.choices?.asi?.[ability]) || 0), 0);
-			const baseWithoutOldProgression = this._state.getAbilityBase(ability) - oldAsi[ability];
-			this._state.setAbilityBase(ability, baseWithoutOldProgression + nextAsi);
+					const newHistory = state.getLevelHistory();
+					Parser.ABIL_ABVS.forEach(ability => {
+						const nextAsi = newHistory.reduce((sum, entry) => sum + (Number(entry.choices?.asi?.[ability]) || 0), 0);
+						const baseWithoutOldProgression = state.getAbilityBase(ability) - oldAsi[ability];
+						state.setAbilityBase(ability, baseWithoutOldProgression + nextAsi);
+					});
+					const newFeatUids = new Set(newHistory.map(entry => entry.choices?.feat).filter(Boolean).map(feat => `${feat.name}|${feat.source}`.toLowerCase()));
+					for (const uid of oldFeatUids) {
+						if (newFeatUids.has(uid)) continue;
+						const [name, source] = uid.split("|");
+						state.removeFeat(name, source);
+					}
+					state.recalculateHp({syncCurrent: false});
+				} finally {
+					this._state = previousState;
+				}
+			},
 		});
-		const newFeatUids = new Set(newHistory.map(entry => entry.choices?.feat).filter(Boolean).map(feat => `${feat.name}|${feat.source}`.toLowerCase()));
-		for (const uid of oldFeatUids) {
-			if (newFeatUids.has(uid)) continue;
-			const [name, source] = uid.split("|");
-			this._state.removeFeat(name, source);
-		}
-		this._state.recalculateHp({syncCurrent: false});
 		this._engine.markDirty();
 	}
 
@@ -2234,8 +2298,10 @@ class CharacterSheetRespec {
 				JqueryUtil.doToast({type: "warning", content: `Enter a roll from 1 to ${hitDie}.`});
 				return;
 			}
-			this._engine.updateDecisionSelection(decision.id, rolled.checked ? {method: "roll", value} : {method: "average"});
-			this._state.recalculateHp({syncCurrent: false});
+			const selection = rolled.checked ? {method: "roll", value} : {method: "average"};
+			this._engine.stageGraphMutation(decision.id, selection, {
+				apply: ({state}) => state.recalculateHp({syncCurrent: false}),
+			});
 			doClose();
 			closeParentModal?.();
 			this.render();
@@ -2296,8 +2362,18 @@ class CharacterSheetRespec {
 		cancel.addEventListener("click", () => doClose());
 		const defer = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Defer Replacement"});
 		defer.addEventListener("click", () => {
-			this._applySpellSwapMechanics(decision, null, legalSpells);
-			this._engine.updateDecisionSelection(decision.id, null, {status: "deferred"});
+			this._engine.stageGraphMutation(decision.id, null, {
+				status: "deferred",
+				apply: ({state}) => {
+					const previousState = this._state;
+					this._state = state;
+					try {
+						this._applySpellSwapMechanics(decision, null, legalSpells);
+					} finally {
+						this._state = previousState;
+					}
+				},
+			});
 			doClose();
 			closeParentModal?.();
 			this.render();
@@ -2320,8 +2396,17 @@ class CharacterSheetRespec {
 				removed: CharacterSheetRespec._toDecisionSelectionValue(removedSpell),
 				added: CharacterSheetRespec._toDecisionSelectionValue(addedSpell),
 			};
-			if (!this._applySpellSwapMechanics(decision, nextSelection, legalSpells)) return;
-			this._engine.updateDecisionSelection(decision.id, nextSelection);
+			this._engine.stageGraphMutation(decision.id, nextSelection, {
+				apply: ({state}) => {
+					const previousState = this._state;
+					this._state = state;
+					try {
+						if (!this._applySpellSwapMechanics(decision, nextSelection, legalSpells)) throw new Error("Choose a different replacement spell.");
+					} finally {
+						this._state = previousState;
+					}
+				},
+			});
 			doClose();
 			closeParentModal?.();
 			this.render();
@@ -2371,7 +2456,7 @@ class CharacterSheetRespec {
 		return true;
 	}
 
-	async _editCombatTraditions (level, history, closeParentModal) {
+	async _editCombatTraditions (level, history, choice = null, closeParentModal) {
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change Level ${level} Combat Traditions`,
 			isMinHeight0: true,
@@ -2410,7 +2495,8 @@ class CharacterSheetRespec {
 		});
 		const requiredTraditions = Math.min(maxTraditions, allTraditions.length || maxTraditions);
 
-		let selectedTraditions = [...(history.choices?.combatTraditions || [])];
+		const decision = choice?.decision || null;
+		let selectedTraditions = [...(decision?.selection || history.choices?.combatTraditions || [])];
 
 		modalInner.append(e_({outer: `<div>
 			<p class="ve-muted mb-2">Choose up to ${requiredTraditions} traditions for this level history entry.</p>
@@ -2479,12 +2565,25 @@ class CharacterSheetRespec {
 				return;
 			}
 
-			const didUpdate = this._state.updateLevelChoice(level, {combatTraditions: [...selectedTraditions]});
-			if (!didUpdate) {
-				JqueryUtil.doToast({type: "danger", content: "Failed to update level history entry."});
-				return;
+			const decision = choice?.decision;
+			if (decision) {
+				this._engine.stageGraphMutation(decision.id, [...selectedTraditions], {
+					apply: ({state}) => {
+						if (!state.updateLevelChoice(level, {combatTraditions: [...selectedTraditions]})) throw new Error("Failed to update level history entry.");
+						this._page.replayHistoryMartialChoices(state);
+					},
+				});
+			} else {
+				try {
+					await this._engine.stageCandidateMutation(({state}) => {
+						if (!state.updateLevelChoice(level, {combatTraditions: [...selectedTraditions]})) throw new Error("Failed to update level history entry.");
+						this._page.replayHistoryMartialChoices(state);
+					});
+				} catch (e) {
+					JqueryUtil.doToast({type: "danger", content: e.message});
+					return;
+				}
 			}
-			this._page.replayHistoryMartialChoices(this._state);
 
 			doClose();
 			closeParentModal();
@@ -2499,6 +2598,7 @@ class CharacterSheetRespec {
 	 * Modeled on LevelUp's _renderMethodsForLevelUp.
 	 */
 	async _editCombatMethods (level, history, choice, closeParentModal) {
+		const decision = choice?.decision || null;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change Combat Methods (Level ${level})`,
 			isMinHeight0: true,
@@ -2539,8 +2639,10 @@ class CharacterSheetRespec {
 		const filteredMethods = CharacterSheetClassUtils.deduplicateOptFeaturesByEdition?.(availableMethods, {showAll}) || availableMethods;
 
 		// Current selections for this type at this level
-		const currentSelections = (history.choices.optionalFeatures || []).filter(of => of.type === featureTypeKey);
-		const currentNames = new Set(currentSelections.map(s => s.name));
+		const currentSelections = decision
+			? (Array.isArray(decision.selection) ? decision.selection : [])
+			: (history.choices.optionalFeatures || []).filter(of => of.type === featureTypeKey);
+		const currentNames = new Set(currentSelections.map(s => typeof s === "string" ? s.split("|")[0] : s.name));
 
 		// Already-known methods from OTHER levels
 		const existingFromOtherLevels = new Set();
@@ -2651,55 +2753,59 @@ class CharacterSheetRespec {
 				.filter(opt => selectedNames.has(opt.name))
 				.map(opt => ({name: opt.name, source: opt.source, type: featureTypeKey}));
 
-			// Remove old method features from state
-			for (const old of currentSelections) {
-				const stateFeature = existingOptFeatures.find(f =>
-					f.name === old.name && f.featureType === "Optional Feature"
-					&& (f.optionalFeatureTypes || []).some(ft => featureTypes.includes(ft)),
-				);
-				if (stateFeature) this._state.removeFeature(stateFeature.id);
-			}
+			const applyChanges = ({state}) => {
+				const previousState = this._state;
+				this._state = state;
+				try {
+					const stateFeatures = state.getFeatures().filter(f => f.featureType === "Optional Feature");
+					for (const old of currentSelections) {
+						const stateFeature = stateFeatures.find(f =>
+							f.name === old.name && (f.optionalFeatureTypes || []).some(ft => featureTypes.includes(ft)),
+						);
+						if (stateFeature) state.removeFeature(stateFeature.id);
+					}
 
-			// Add new method features to state
-			for (const sel of newSelections) {
-				const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
-				if (fullOpt) {
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(fullOpt, {
-						className: history.class?.name,
-						classSource: history.class?.source,
-						level,
-						featureType: "Optional Feature",
-						optionalFeatureTypes: featureTypes,
-					}));
+					for (const sel of newSelections) {
+						const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
+						if (fullOpt) {
+							state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(fullOpt, {
+								className: history.class?.name,
+								classSource: history.class?.source,
+								level,
+								featureType: "Optional Feature",
+								optionalFeatureTypes: featureTypes,
+							}));
+						}
+					}
+
+					const otherTypeFeatures = (history.choices.optionalFeatures || []).filter(of => of.type !== featureTypeKey);
+					const updatedOptionalFeatures = [...otherTypeFeatures, ...newSelections];
+					const newReplaySnapshots = newSelections.map(sel => {
+						const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
+						return fullOpt
+							? CharacterSheetClassUtils.buildHistoryFeatureSnapshot(fullOpt, {type: featureTypeKey})
+							: sel;
+					});
+					const otherTypeReplay = (history.choices.replayData?.optionalFeatures || [])
+						.filter(snap => {
+							const snapType = snap.type || snap.optionalFeatureTypes?.join("_");
+							return snapType !== featureTypeKey || !currentNames.has(snap.name);
+						});
+
+					state.updateLevelChoice(level, {
+						optionalFeatures: updatedOptionalFeatures,
+						replayData: {
+							...(history.choices.replayData || {}),
+							optionalFeatures: [...otherTypeReplay, ...newReplaySnapshots],
+						},
+					});
+					this._page.replayHistoryMartialChoices(state);
+				} finally {
+					this._state = previousState;
 				}
-			}
-
-			// Update history — replace optionalFeatures of this type, keep others
-			const otherTypeFeatures = (history.choices.optionalFeatures || []).filter(of => of.type !== featureTypeKey);
-			const updatedOptionalFeatures = [...otherTypeFeatures, ...newSelections];
-
-			// Also update replayData snapshots
-			const newReplaySnapshots = newSelections.map(sel => {
-				const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
-				return fullOpt
-					? CharacterSheetClassUtils.buildHistoryFeatureSnapshot(fullOpt, {type: featureTypeKey})
-					: sel;
-			});
-			const otherTypeReplay = (history.choices.replayData?.optionalFeatures || [])
-				.filter(snap => {
-					const snapType = snap.type || snap.optionalFeatureTypes?.join("_");
-					return snapType !== featureTypeKey || !currentNames.has(snap.name);
-				});
-
-			this._state.updateLevelChoice(level, {
-				optionalFeatures: updatedOptionalFeatures,
-				replayData: {
-					...(history.choices.replayData || {}),
-					optionalFeatures: [...otherTypeReplay, ...newReplaySnapshots],
-				},
-			});
-
-			this._page.replayHistoryMartialChoices(this._state);
+			};
+			if (decision) this._engine.stageGraphMutation(decision.id, newSelections, {apply: applyChanges});
+			else await this._engine.stageCandidateMutation(applyChanges);
 
 			doClose();
 			closeParentModal();
@@ -2709,7 +2815,7 @@ class CharacterSheetRespec {
 		});
 	}
 
-	async _editWeaponMasteries (level, history, closeParentModal) {
+	async _editWeaponMasteries (level, history, choice = null, closeParentModal) {
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `Change Level ${level} Weapon Masteries`,
 			isMinHeight0: true,
@@ -2723,7 +2829,8 @@ class CharacterSheetRespec {
 			1,
 			history.choices?.weaponMasteries?.length || Math.min(globalMaxMasteries, this._state.getWeaponMasteries().length || 1),
 		);
-		let selectedMasteries = [...(history.choices?.weaponMasteries || [])];
+		const selectedMasteryValues = choice?.decision?.selection || history.choices?.weaponMasteries || [];
+		let selectedMasteries = selectedMasteryValues.map(value => typeof value === "string" ? value : `${value.name}|${value.source}`);
 
 		modalInner.append(e_({outer: `<div>
 			<p class="ve-muted mb-2">Choose up to ${requiredMasteries} weapon masteries for this level history entry.</p>
@@ -2804,12 +2911,14 @@ class CharacterSheetRespec {
 				return;
 			}
 
-			const didUpdate = this._state.updateLevelChoice(level, {weaponMasteries: [...selectedMasteries]});
-			if (!didUpdate) {
-				JqueryUtil.doToast({type: "danger", content: "Failed to update level history entry."});
-				return;
-			}
-			this._page.replayHistoryMartialChoices(this._state);
+			const applyChanges = ({state}) => {
+				if (!state.updateLevelChoice(level, {weaponMasteries: [...selectedMasteries]})) {
+					throw new Error("Failed to update level history entry.");
+				}
+				this._page.replayHistoryMartialChoices(state);
+			};
+			if (choice.decision) this._engine.stageGraphMutation(choice.decision.id, [...selectedMasteries], {apply: applyChanges});
+			else await this._engine.stageCandidateMutation(applyChanges);
 
 			doClose();
 			closeParentModal();
@@ -2966,56 +3075,63 @@ class CharacterSheetRespec {
 				.filter(opt => selectedNames.has(getOptionKey(opt)))
 				.map(opt => ({name: opt.name, source: opt.source, type: featureTypeKey}));
 
-			// Remove old features from state for this type at this level
-			for (const old of currentSelections) {
-				const stateFeature = existingFeatures.find(f =>
-					f.name === old.name && f.featureType === "Optional Feature"
-					&& (f.level == null || Number(f.level) === Number(level))
-					&& (f.optionalFeatureTypes || []).some(ft => featureTypes.includes(ft)),
-				);
-				if (stateFeature) this._state.removeFeature(stateFeature.id);
-			}
+			const applyChanges = ({state}) => {
+				const previousState = this._state;
+				this._state = state;
+				try {
+					// Remove old features from state for this type at this level
+					for (const old of currentSelections) {
+						const stateFeature = existingFeatures.find(f =>
+							f.name === old.name && f.featureType === "Optional Feature"
+							&& (f.level == null || Number(f.level) === Number(level))
+							&& (f.optionalFeatureTypes || []).some(ft => featureTypes.includes(ft)),
+						);
+						if (stateFeature) this._state.removeFeature(stateFeature.id);
+					}
 
-			// Add new features to state
-			for (const sel of newSelections) {
-				const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
-				if (fullOpt) {
-					this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(fullOpt, {
-						className: history.class?.name,
-						classSource: history.class?.source,
-						level,
-						featureType: "Optional Feature",
-						optionalFeatureTypes: featureTypes,
-					}));
+					// Add new features to state
+					for (const sel of newSelections) {
+						const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
+						if (fullOpt) {
+							this._state.addFeature(CharacterSheetClassUtils.buildFeatureStateObject(fullOpt, {
+								className: history.class?.name,
+								classSource: history.class?.source,
+								level,
+								featureType: "Optional Feature",
+								optionalFeatureTypes: featureTypes,
+							}));
+						}
+					}
+
+					// Also update replayData snapshots for this type
+					const newReplaySnapshots = newSelections.map(sel => {
+						const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
+						return fullOpt
+							? CharacterSheetClassUtils.buildHistoryFeatureSnapshot(fullOpt, {type: featureTypeKey})
+							: sel;
+					});
+					const otherTypeReplay = (history.choices.replayData?.optionalFeatures || [])
+						.filter(snap => {
+							const snapType = snap.type || snap.optionalFeatureTypes?.join("_");
+							return snapType !== featureTypeKey;
+						});
+
+					this._state.updateLevelChoice(level, {
+						replayData: {
+							...(history.choices.replayData || {}),
+							optionalFeatures: [...otherTypeReplay, ...newReplaySnapshots],
+						},
+					});
+					if (!decision) {
+						const otherTypeFeatures = (history.choices.optionalFeatures || []).filter(of => of.type !== featureTypeKey);
+						this._state.updateLevelChoice(level, {optionalFeatures: [...otherTypeFeatures, ...newSelections]});
+					}
+				} finally {
+					this._state = previousState;
 				}
-			}
-
-			// Also update replayData snapshots for this type
-			const newReplaySnapshots = newSelections.map(sel => {
-				const fullOpt = matchingOptions.find(opt => opt.name === sel.name && opt.source === sel.source);
-				return fullOpt
-					? CharacterSheetClassUtils.buildHistoryFeatureSnapshot(fullOpt, {type: featureTypeKey})
-					: sel;
-			});
-			const otherTypeReplay = (history.choices.replayData?.optionalFeatures || [])
-				.filter(snap => {
-					const snapType = snap.type || snap.optionalFeatureTypes?.join("_");
-					return snapType !== featureTypeKey;
-				});
-
-			this._state.updateLevelChoice(level, {
-				replayData: {
-					...(history.choices.replayData || {}),
-					optionalFeatures: [...otherTypeReplay, ...newReplaySnapshots],
-				},
-			});
-			if (decision) {
-				this._engine.updateDecisionSelection(decision.id, newSelections);
-			} else {
-				const otherTypeFeatures = (history.choices.optionalFeatures || []).filter(of => of.type !== featureTypeKey);
-				this._state.updateLevelChoice(level, {optionalFeatures: [...otherTypeFeatures, ...newSelections]});
-				this._engine?.markDirty();
-			}
+			};
+			if (decision) this._engine.stageGraphMutation(decision.id, newSelections, {apply: applyChanges});
+			else await this._engine.stageCandidateMutation(applyChanges);
 
 			doClose();
 			closeParentModal?.();
@@ -3197,8 +3313,15 @@ class CharacterSheetRespec {
 			if (decision) {
 				this._applyImprovementChange(decision, {mode: "asi", asi: asiState});
 			} else {
-				await this._applyAsiChange(level, history, asiState);
-				this._engine?.markDirty();
+				await this._engine.stageCandidateMutation(async ({state}) => {
+					const previousState = this._state;
+					this._state = state;
+					try {
+						await this._applyAsiChange(level, history, asiState);
+					} finally {
+						this._state = previousState;
+					}
+				});
 			}
 
 			doClose();
@@ -3412,8 +3535,21 @@ class CharacterSheetRespec {
 					featChoices: selectedFeat.choices,
 				});
 			} else {
-				didApply = await this._applyFeatChange(level, history, selectedFeat);
-				this._engine?.markDirty();
+				didApply = true;
+				try {
+					await this._engine.stageCandidateMutation(async ({state}) => {
+						const previousState = this._state;
+						this._state = state;
+						try {
+							if (!await this._applyFeatChange(level, history, selectedFeat)) throw new Error("The feat could not be staged.");
+						} finally {
+							this._state = previousState;
+						}
+					});
+				} catch (error) {
+					didApply = false;
+					JqueryUtil.doToast({type: "danger", content: error.message || "The feat could not be staged."});
+				}
 			}
 			if (!didApply) return;
 
@@ -3430,41 +3566,53 @@ class CharacterSheetRespec {
 	}
 
 	_applyClassFeatProgressionDecisionChange (decision, nextFeat, featChoices = {}) {
-		const snapshot = this._state.toJson();
 		try {
-			const previous = decision.selection;
-			if (previous?.name) this._state.removeFeat(previous.name, previous.source);
-			const feat = MiscUtil.copyFast(nextFeat);
-			feat.choices = MiscUtil.copyFast(featChoices);
-			feat._featChoices = MiscUtil.copyFast(featChoices);
-			const eligibility = CharacterSheetClassUtils.evaluateFeatPrerequisites(feat, this._state, {
-				totalLevel: decision.characterLevel,
-				excludeFeatUid: previous?.name ? `${previous.name}|${previous.source}` : "",
-			});
-			if (!eligibility.eligible) throw new Error(eligibility.reasons[0] || "That feat's prerequisites are not met.");
-			const added = this._state.addFeat(feat, {
-				allSpells: this._page.getSpells?.() || [],
-				skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(feat),
-				classFeatProgression: {
-					className: decision.className,
-					classSource: decision.classSource,
-					level: decision.classLevel,
-					progressionName: decision.meta?.progressionName || decision.label,
+			this._engine.stageGraphMutation(decision.id, null, {
+				// removeFeat below owns the historical feat teardown, so the
+				// engine must not consume the legacy receipt a second time.
+				reverseParent: false,
+				apply: ({state}) => {
+					const previousState = this._state;
+					this._state = state;
+					try {
+						const previous = decision.selection;
+						if (previous?.name) state.removeFeat(previous.name, previous.source);
+						const feat = MiscUtil.copyFast(nextFeat);
+						feat.choices = MiscUtil.copyFast(featChoices);
+						feat._featChoices = MiscUtil.copyFast(featChoices);
+						const eligibility = CharacterSheetClassUtils.evaluateFeatPrerequisites(feat, state, {
+							totalLevel: decision.characterLevel,
+							excludeFeatUid: previous?.name ? `${previous.name}|${previous.source}` : "",
+						});
+						if (!eligibility.eligible) throw new Error(eligibility.reasons[0] || "That feat's prerequisites are not met.");
+						const added = state.addFeat(feat, {
+							allSpells: this._page.getSpells?.() || [],
+							skipAdditionalSpellChoices: CharacterSheetClassUtils.hasCollectedInlineSpellChoices(feat),
+							classFeatProgression: {
+								className: decision.className,
+								classSource: decision.classSource,
+								level: decision.classLevel,
+								progressionName: decision.meta?.progressionName || decision.label,
+							},
+						});
+						if (!added) throw new Error(`${feat.name} is already selected.`);
+						CharacterSheetClassUtils.applyFeatBonuses(state, feat, featChoices);
+						this._recalcHpPreservingHealing();
+						return {
+							selection: {
+								progressionName: decision.meta?.progressionName || decision.label,
+								name: feat.name,
+								source: feat.source,
+								category: decision.meta?.category,
+							},
+						};
+					} finally {
+						this._state = previousState;
+					}
 				},
 			});
-			if (!added) throw new Error(`${feat.name} is already selected.`);
-			CharacterSheetClassUtils.applyFeatBonuses(this._state, feat, featChoices);
-			this._engine.updateDecisionSelection(decision.id, {
-				progressionName: decision.meta?.progressionName || decision.label,
-				name: feat.name,
-				source: feat.source,
-				category: decision.meta?.category,
-			});
-			this._recalcHpPreservingHealing();
 			return true;
 		} catch (error) {
-			this._state.loadFromJson(snapshot);
-			this._engine.refreshManifest();
 			JqueryUtil.doToast({type: "danger", content: error.message || "The class feat could not be staged."});
 			return false;
 		}
@@ -3547,7 +3695,15 @@ class CharacterSheetRespec {
 				return;
 			}
 
-			await this._applyClassFeatProgressionFeatChange(level, history, choice.index, entry, selectedFeat);
+			await this._engine.stageCandidateMutation(async ({state}) => {
+				const previousState = this._state;
+				this._state = state;
+				try {
+					await this._applyClassFeatProgressionFeatChange(level, history, choice.index, entry, selectedFeat);
+				} finally {
+					this._state = previousState;
+				}
+			});
 
 			doClose();
 			closeParentModal();
@@ -3773,6 +3929,39 @@ class CharacterSheetRespec {
 	 * @param {object} newOption - The new option to apply
 	 */
 	async _applyFeatureChoiceChange (level, history, choiceIndex, oldChoice, newOption) {
+		const decision = this._engine?.manifest?.decisions?.find(it =>
+			it.type === "featureChoice"
+			&& Number(it.characterLevel) === Number(level)
+			&& (Number(it.slot) === Number(choiceIndex) || it.sourceKey === oldChoice?.featureName),
+		);
+		if (!decision && !this._engine?.stageCandidateMutation) {
+			return this._applyFeatureChoiceChangeInner(level, history, choiceIndex, oldChoice, newOption);
+		}
+		if (!decision) {
+			return this._engine.stageCandidateMutation(async ({state}) => {
+				const previousState = this._state;
+				this._state = state;
+				try {
+					return await this._applyFeatureChoiceChangeInner(level, history, choiceIndex, oldChoice, newOption);
+				} finally {
+					this._state = previousState;
+				}
+			});
+		}
+		this._engine.stageGraphMutation(decision.id, newOption, {
+			apply: ({state}) => {
+				const previousState = this._state;
+				this._state = state;
+				try {
+					return this._applyFeatureChoiceChangeInner(level, history, choiceIndex, oldChoice, newOption);
+				} finally {
+					this._state = previousState;
+				}
+			},
+		});
+	}
+
+	async _applyFeatureChoiceChangeInner (level, history, choiceIndex, oldChoice, newOption) {
 		// Remove old feature using proper API
 		const features = this._state.getFeatures();
 		const replayChoice = history.choices.replayData?.featureChoices?.[choiceIndex];
@@ -3929,6 +4118,28 @@ class CharacterSheetRespec {
 
 	_applyImprovementChange (decision, next) {
 		if (!decision || !["asi", "feat", "asiOrFeat"].includes(decision.type)) return false;
+		try {
+			this._engine.stageGraphMutation(decision.id, null, {
+				apply: ({state}) => {
+					const previousState = this._state;
+					this._state = state;
+					try {
+						const result = this._applyImprovementChangeInner(decision, next, {throwOnError: true, skipLedgerUpdate: true});
+						return {selection: result?.selection};
+					} finally {
+						this._state = previousState;
+					}
+				},
+			});
+			return true;
+		} catch (error) {
+			JqueryUtil.doToast({type: "danger", content: error.message || "The improvement could not be staged."});
+			return false;
+		}
+	}
+
+	_applyImprovementChangeInner (decision, next, {throwOnError = false, skipLedgerUpdate = false} = {}) {
+		if (!decision || !["asi", "feat", "asiOrFeat"].includes(decision.type)) return false;
 		const snapshot = this._state.toJson();
 		try {
 			const previous = decision.selection || null;
@@ -4046,10 +4257,14 @@ class CharacterSheetRespec {
 				CharacterSheetClassUtils.applyFeatBonuses(this._state, pairedFeat.feat, pairedFeat.feat.choices);
 			}
 
-			this._engine.updateDecisionSelection(decision.id, selection);
+			// Ledger persistence is deliberately owned by the outer
+			// stageGraphMutation call. Keeping this inner helper mechanics-only
+			// prevents a caller from mutating first and snapshotting afterward.
+			if (!skipLedgerUpdate) throw new Error("Improvement mechanics must be staged through the Respec engine.");
 			this._recalcHpPreservingHealing();
-			return true;
+			return {selection};
 		} catch (error) {
+			if (throwOnError) throw error;
 			this._state.loadFromJson(snapshot);
 			this._engine.refreshManifest();
 			JqueryUtil.doToast({type: "danger", content: error.message || "The improvement could not be staged."});
@@ -4231,7 +4446,15 @@ class CharacterSheetRespec {
 
 			if (!confirmed) return;
 
-			await this._applySubclassChange(level, history, currentSubclass, selectedSubclass);
+			await this._engine.stageCandidateMutation(async ({state}) => {
+				const previousState = this._state;
+				this._state = state;
+				try {
+					await this._applySubclassChange(level, history, currentSubclass, selectedSubclass);
+				} finally {
+					this._state = previousState;
+				}
+			});
 
 			doClose();
 			closeParentModal();
@@ -4540,7 +4763,33 @@ class CharacterSheetRespec {
 				else if (p.type === "ability") userChoices.selectedAbilityChoices = p.getSelections();
 			});
 
-			this._applyRaceChange(history, selectedRace, userChoices);
+			const originDecision = this._engine?.manifest?.base?.decisions?.find(decision => decision.type === "originRace");
+			if (originDecision) {
+				this._engine.stageGraphMutation(originDecision.id, {
+					name: selectedRace.name,
+					source: selectedRace.source,
+				}, {
+					apply: ({state}) => {
+						const previousState = this._state;
+						this._state = state;
+						try {
+							this._applyRaceChange(history, selectedRace, userChoices);
+						} finally {
+							this._state = previousState;
+						}
+					},
+				});
+			} else {
+				await this._engine.stageCandidateMutation(({state}) => {
+					const previousState = this._state;
+					this._state = state;
+					try {
+						this._applyRaceChange(history, selectedRace, userChoices);
+					} finally {
+						this._state = previousState;
+					}
+				});
+			}
 
 			doClose();
 			closeParentModal();
@@ -4689,7 +4938,33 @@ class CharacterSheetRespec {
 				else if (p.type === "ability") userChoices.selectedAbilityBonuses = p.getSelections();
 			});
 
-			this._applyBackgroundChange(history, selectedBg, userChoices);
+			const originDecision = this._engine?.manifest?.base?.decisions?.find(decision => decision.type === "originBackground");
+			if (originDecision) {
+				this._engine.stageGraphMutation(originDecision.id, {
+					name: selectedBg.name,
+					source: selectedBg.source,
+				}, {
+					apply: ({state}) => {
+						const previousState = this._state;
+						this._state = state;
+						try {
+							this._applyBackgroundChange(history, selectedBg, userChoices);
+						} finally {
+							this._state = previousState;
+						}
+					},
+				});
+			} else {
+				await this._engine.stageCandidateMutation(({state}) => {
+					const previousState = this._state;
+					this._state = state;
+					try {
+						this._applyBackgroundChange(history, selectedBg, userChoices);
+					} finally {
+						this._state = previousState;
+					}
+				});
+			}
 
 			doClose();
 			closeParentModal();
@@ -4715,6 +4990,7 @@ class CharacterSheetRespec {
 	_applyRaceChange (history, newRace, userChoices = {}) {
 		const oldRace = this._state.getRace();
 		const oldSubrace = this._state.getSubrace();
+		const raceSourceId = "base:origin-race";
 		const oldUserChoices = (this._state.getBaseRaceUserChoices ? this._state.getBaseRaceUserChoices() : null) || history.choices?.raceUserChoices || {};
 
 		// --- CLEAR OLD RACE GRANTS ---
@@ -4740,23 +5016,23 @@ class CharacterSheetRespec {
 		Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
 
 		// Clear old racial languages
-		this._clearLanguagesFromData(oldRace);
-		this._clearLanguagesFromData(oldSubrace);
-		this._clearUserChosenLanguages(oldUserChoices);
+		this._clearLanguagesFromData(oldRace, raceSourceId);
+		this._clearLanguagesFromData(oldSubrace, raceSourceId);
+		this._clearUserChosenLanguages(oldUserChoices, raceSourceId);
 
 		// Clear old racial skills
-		this._clearSkillsFromData(oldRace);
-		this._clearSkillsFromData(oldSubrace);
-		this._clearUserChosenSkills(oldUserChoices);
+		this._clearSkillsFromData(oldRace, raceSourceId);
+		this._clearSkillsFromData(oldSubrace, raceSourceId);
+		this._clearUserChosenSkills(oldUserChoices, raceSourceId);
 
 		// Clear old racial resistances
-		this._clearResistancesFromData(oldRace);
-		this._clearResistancesFromData(oldSubrace);
+		this._clearResistancesFromData(oldRace, raceSourceId);
+		this._clearResistancesFromData(oldSubrace, raceSourceId);
 
 		// Clear old racial proficiencies
-		this._clearProficienciesFromData(oldRace, oldSubrace);
+		this._clearProficienciesFromData(oldRace, oldSubrace, raceSourceId);
 		if (oldUserChoices.selectedTools?.length) {
-			oldUserChoices.selectedTools.forEach(tool => this._state.removeToolProficiency((/** @type {*} */ (tool)).toTitleCase()));
+			oldUserChoices.selectedTools.forEach(tool => this._releaseOriginProficiency("tools", (/** @type {*} */ (tool)).toTitleCase(), raceSourceId));
 		}
 
 		// --- APPLY NEW RACE GRANTS ---
@@ -4774,15 +5050,15 @@ class CharacterSheetRespec {
 		});
 
 		// Fixed languages
-		this._applyFixedLanguages(newRace);
+		this._applyFixedLanguages(newRace, raceSourceId);
 
 		// Fixed skills
-		this._applyFixedSkills(newRace);
+		this._applyFixedSkills(newRace, raceSourceId);
 
 		// Resistances
 		if (newRace.resist) {
 			newRace.resist.forEach(r => {
-				if (typeof r === "string") this._state.addResistance(r);
+				if (typeof r === "string") this._claimOriginProficiency("resistances", r, raceSourceId);
 			});
 		}
 
@@ -4799,7 +5075,7 @@ class CharacterSheetRespec {
 		}
 
 		// Armor, weapon, tool proficiencies
-		this._applyProficienciesFromData(newRace);
+		this._applyProficienciesFromData(newRace, raceSourceId);
 
 		// Race features (entries)
 		if (newRace.entries) {
@@ -4819,21 +5095,21 @@ class CharacterSheetRespec {
 		// Apply user-chosen languages
 		if (userChoices.selectedLanguages) {
 			Object.values(userChoices.selectedLanguages).forEach(langs => {
-				if (Array.isArray(langs)) langs.forEach(lang => this._state.addLanguage(lang));
+				if (Array.isArray(langs)) langs.forEach(lang => this._claimOriginProficiency("languages", lang, raceSourceId));
 			});
 		}
 
 		// Apply user-chosen skills
 		if (userChoices.selectedSkills?.length) {
 			userChoices.selectedSkills.forEach(skill => {
-				this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
+				this._claimOriginProficiency("skills", skill.toLowerCase().replace(/\s+/g, ""), raceSourceId);
 			});
 		}
 
 		// Apply user-chosen tools
 		if (userChoices.selectedTools?.length) {
 			userChoices.selectedTools.forEach(tool => {
-				this._state.addToolProficiency(tool);
+				this._claimOriginProficiency("tools", tool, raceSourceId);
 			});
 		}
 
@@ -4873,6 +5149,7 @@ class CharacterSheetRespec {
 	 */
 	_applyBackgroundChange (history, newBg, userChoices = {}) {
 		const oldBg = this._state.getBackground();
+		const backgroundSourceId = "base:origin-background";
 		const oldUserChoices = (this._state.getBaseBackgroundUserChoices ? this._state.getBaseBackgroundUserChoices() : null) || history.choices?.backgroundUserChoices || {};
 
 		// --- CLEAR OLD BACKGROUND GRANTS ---
@@ -4887,21 +5164,21 @@ class CharacterSheetRespec {
 		Parser.ABIL_ABVS.forEach(abl => this._state.setAbilityBonus(abl, 0));
 
 		// Clear old background skills
-		this._clearSkillsFromData(oldBg);
+		this._clearSkillsFromData(oldBg, backgroundSourceId);
 
 		// Clear old background tools
-		this._clearToolsFromData(oldBg);
+		this._clearToolsFromData(oldBg, backgroundSourceId);
 		if (oldUserChoices.selectedTools?.length) {
 			oldUserChoices.selectedTools.forEach(c => {
-				if (c.tool) this._state.removeToolProficiency((/** @type {*} */ (c.tool)).toTitleCase());
+				if (c.tool) this._releaseOriginProficiency("tools", (/** @type {*} */ (c.tool)).toTitleCase(), backgroundSourceId);
 			});
 		}
 
 		// Clear old background languages
-		this._clearLanguagesFromData(oldBg);
+		this._clearLanguagesFromData(oldBg, backgroundSourceId);
 		if (oldUserChoices.selectedLanguages?.length) {
 			oldUserChoices.selectedLanguages.forEach(c => {
-				if (c.language) this._state.removeLanguage(c.language);
+				if (c.language) this._releaseOriginProficiency("languages", c.language, backgroundSourceId);
 			});
 		}
 
@@ -4910,13 +5187,13 @@ class CharacterSheetRespec {
 		this._state.setBackground(newBg);
 
 		// Skills
-		this._applyFixedSkills(newBg);
+		this._applyFixedSkills(newBg, backgroundSourceId);
 
 		// Tools
-		this._applyFixedTools(newBg);
+		this._applyFixedTools(newBg, backgroundSourceId);
 
 		// Languages
-		this._applyFixedLanguages(newBg);
+		this._applyFixedLanguages(newBg, backgroundSourceId);
 
 		// Features
 		if (newBg.entries) {
@@ -4949,14 +5226,14 @@ class CharacterSheetRespec {
 		// Apply user-chosen languages
 		if (userChoices.selectedLanguages?.length) {
 			userChoices.selectedLanguages.forEach(lang => {
-				this._state.addLanguage(lang);
+				this._claimOriginProficiency("languages", lang, backgroundSourceId);
 			});
 		}
 
 		// Apply user-chosen tools
 		if (userChoices.selectedTools?.length) {
 			userChoices.selectedTools.forEach(tool => {
-				this._state.addToolProficiency(tool);
+				this._claimOriginProficiency("tools", tool, backgroundSourceId);
 			});
 		}
 
@@ -5373,92 +5650,174 @@ class CharacterSheetRespec {
 
 	// region Clear/Apply Helpers
 
-	_clearLanguagesFromData (data) {
+	_claimOriginProficiency (type, value, sourceId) {
+		if (!value || !sourceId) return;
+		this._state.claimProgressionOwnership?.(type, value, sourceId);
+		if (type === "skills") {
+			const key = String(value).toLowerCase().replace(/\s+/g, "");
+			if ((this._state.getSkillProficiency?.(key) || 0) < 1) {
+				if (this._state.addSkillProficiency) this._state.addSkillProficiency(key);
+				else this._state.setSkillProficiency?.(key, 1);
+			}
+		} else if (type === "tools") {
+			if (!this._state.hasToolProficiency?.(value)) this._state.addToolProficiency(value);
+		} else if (type === "languages") {
+			if (!this._state.hasLanguage?.(value)) this._state.addLanguage(value);
+		} else if (type === "resistances") {
+			if (!this._state.hasResistance?.(value)) this._state.addResistance(value);
+		} else if (type === "weapons") {
+			if (!this._state.hasWeaponProficiency?.(value)) this._state.addWeaponProficiency(value);
+		} else if (type === "armor") {
+			if (!this._state.hasArmorProficiency?.(value)) this._state.addArmorProficiency(value);
+		} else if (type === "saves") {
+			if (!(this._state.getSaveProficiencies?.() || []).some(save => String(save).toLowerCase() === String(value).toLowerCase())) {
+				this._state.addSaveProficiency(value);
+			}
+		}
+	}
+
+	_releaseOriginProficiency (type, value, sourceId) {
+		if (!value || !sourceId) return;
+		const releaseOwnership = this._state.releaseProgressionOwnership;
+		if (typeof releaseOwnership === "function" && !releaseOwnership.call(this._state, type, value, sourceId)) return;
+		if (type === "skills") this._state.setSkillProficiency(String(value).toLowerCase().replace(/\s+/g, ""), 0);
+		else if (type === "tools") this._state.removeToolProficiency(value);
+		else if (type === "languages") this._state.removeLanguage(value);
+		else if (type === "resistances") this._state.removeResistance(value);
+		else if (type === "weapons") this._state.removeWeaponProficiency(value);
+		else if (type === "armor") this._state.removeArmorProficiency(value);
+		else if (type === "saves") this._state.removeSaveProficiency(value);
+	}
+
+	_clearLanguagesFromData (data, sourceId = null) {
 		if (!data?.languageProficiencies) return;
 		data.languageProficiencies.forEach(lp => {
 			Object.keys(lp).forEach(lang => {
 				if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-				this._state.removeLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(lang));
+				const value = CharacterSheetClassUtils.resolveLanguageProficiencyName(lang);
+				if (sourceId) this._releaseOriginProficiency("languages", value, sourceId);
+				else this._state.removeLanguage(value);
 			});
 		});
 	}
 
-	_clearUserChosenLanguages (userChoices) {
+	_clearUserChosenLanguages (userChoices, sourceId = null) {
 		if (userChoices.selectedLanguages) {
 			Object.values(userChoices.selectedLanguages).forEach(langArray => {
-				if (Array.isArray(langArray)) langArray.forEach(l => this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase()));
+				if (Array.isArray(langArray)) {
+					langArray.forEach(l => {
+						if (sourceId) this._releaseOriginProficiency("languages", (/** @type {*} */ (l)).toTitleCase(), sourceId);
+						else this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase());
+					});
+				}
 			});
 		}
 		if (userChoices.selectedSubraceLanguages?.length) {
-			userChoices.selectedSubraceLanguages.forEach(l => this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase()));
+			userChoices.selectedSubraceLanguages.forEach(l => {
+				if (sourceId) this._releaseOriginProficiency("languages", (/** @type {*} */ (l)).toTitleCase(), sourceId);
+				else this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase());
+			});
 		}
 		if (userChoices.tashasLanguageReplacements?.length) {
 			userChoices.tashasLanguageReplacements.forEach(l => {
-				if (l) this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase());
+				if (l) {
+					if (sourceId) this._releaseOriginProficiency("languages", (/** @type {*} */ (l)).toTitleCase(), sourceId);
+					else this._state.removeLanguage((/** @type {*} */ (l)).toTitleCase());
+				}
 			});
 		}
 	}
 
-	_clearSkillsFromData (data) {
+	_clearSkillsFromData (data, sourceId = null) {
 		if (!data?.skillProficiencies) return;
 		data.skillProficiencies.forEach(sp => {
 			Object.keys(sp).forEach(skill => {
 				if (skill !== "any" && skill !== "choose") {
-					this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 0);
+					const value = skill.toLowerCase().replace(/\s+/g, "");
+					if (sourceId) this._releaseOriginProficiency("skills", value, sourceId);
+					else this._state.setSkillProficiency(value, 0);
 				}
 			});
 		});
 	}
 
-	_clearUserChosenSkills (userChoices) {
+	_clearUserChosenSkills (userChoices, sourceId = null) {
 		if (userChoices.selectedSkills?.length) {
 			userChoices.selectedSkills.forEach(skill => {
-				this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 0);
+				const value = skill.toLowerCase().replace(/\s+/g, "");
+				if (sourceId) this._releaseOriginProficiency("skills", value, sourceId);
+				else this._state.setSkillProficiency(value, 0);
 			});
 		}
 		if (userChoices.tashasSkillReplacements?.length) {
 			userChoices.tashasSkillReplacements.forEach(skill => {
-				if (skill) this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 0);
+				if (skill) {
+					const value = skill.toLowerCase().replace(/\s+/g, "");
+					if (sourceId) this._releaseOriginProficiency("skills", value, sourceId);
+					else this._state.setSkillProficiency(value, 0);
+				}
 			});
 		}
 	}
 
-	_clearResistancesFromData (data) {
+	_clearResistancesFromData (data, sourceId = null) {
 		if (!data?.resist) return;
 		data.resist.forEach(r => {
-			if (typeof r === "string") this._state.removeResistance(r);
+			if (typeof r === "string") {
+				if (sourceId) this._releaseOriginProficiency("resistances", r, sourceId);
+				else this._state.removeResistance(r);
+			}
 		});
 	}
 
-	_clearProficienciesFromData (race, subrace) {
+	_clearProficienciesFromData (race, subrace, sourceId = null) {
 		for (const data of [race, subrace]) {
 			if (!data) continue;
+			if (data.savingThrowProficiencies) {
+				data.savingThrowProficiencies.forEach(save => {
+					const values = typeof save === "string" ? [save] : Object.keys(save || {});
+					values.forEach(value => {
+						if (sourceId) this._releaseOriginProficiency("saves", value, sourceId);
+						else this._state.removeSaveProficiency(value);
+					});
+				});
+			}
 			if (data.armorProficiencies) {
 				data.armorProficiencies.forEach(ap => {
-					Object.keys(ap).forEach(a => this._state.removeArmorProficiency((/** @type {*} */ (a)).toTitleCase()));
+					Object.keys(ap).forEach(a => sourceId
+						? this._releaseOriginProficiency("armor", (/** @type {*} */ (a)).toTitleCase(), sourceId)
+						: this._state.removeArmorProficiency((/** @type {*} */ (a)).toTitleCase()));
 				});
 			}
 			if (data.weaponProficiencies) {
 				data.weaponProficiencies.forEach(wp => {
-					Object.keys(wp).forEach(w => this._state.removeWeaponProficiency((/** @type {*} */ (w)).toTitleCase()));
+					Object.keys(wp).forEach(w => sourceId
+						? this._releaseOriginProficiency("weapons", (/** @type {*} */ (w)).toTitleCase(), sourceId)
+						: this._state.removeWeaponProficiency((/** @type {*} */ (w)).toTitleCase()));
 				});
 			}
 			if (data.toolProficiencies) {
 				data.toolProficiencies.forEach(tp => {
 					Object.keys(tp).forEach(t => {
-						if (t !== "any" && t !== "choose") this._state.removeToolProficiency((/** @type {*} */ (t)).toTitleCase());
+						if (t !== "any" && t !== "choose") {
+							const value = (/** @type {*} */ (t)).toTitleCase();
+							if (sourceId) this._releaseOriginProficiency("tools", value, sourceId);
+							else this._state.removeToolProficiency(value);
+						}
 					});
 				});
 			}
 		}
 	}
 
-	_clearToolsFromData (data) {
+	_clearToolsFromData (data, sourceId = null) {
 		if (!data?.toolProficiencies) return;
 		data.toolProficiencies.forEach(tp => {
 			Object.entries(tp).forEach(([key, value]) => {
 				if (key !== "choose" && key !== "any" && key !== "anyArtisansTool" && key !== "anyMusicalInstrument" && value === true) {
-					this._state.removeToolProficiency((/** @type {*} */ (key)).toTitleCase());
+					const value = (/** @type {*} */ (key)).toTitleCase();
+					if (sourceId) this._releaseOriginProficiency("tools", value, sourceId);
+					else this._state.removeToolProficiency(value);
 				}
 			});
 		});
@@ -5488,53 +5847,80 @@ class CharacterSheetRespec {
 		}
 	}
 
-	_applyFixedLanguages (data) {
+	_applyFixedLanguages (data, sourceId = null) {
 		if (!data?.languageProficiencies) return;
 		data.languageProficiencies.forEach(langProf => {
 			Object.keys(langProf).forEach(lang => {
 				if (lang === "anyStandard" || lang === "any" || lang === "choose") return;
-				this._state.addLanguage(CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang)));
+				const value = CharacterSheetClassUtils.resolveLanguageProficiencyName(/** @type {*} */ (lang));
+				if (sourceId) this._claimOriginProficiency("languages", value, sourceId);
+				else this._state.addLanguage(value);
 			});
 		});
 	}
 
-	_applyFixedSkills (data) {
+	_applyFixedSkills (data, sourceId = null) {
 		if (!data?.skillProficiencies) return;
 		data.skillProficiencies.forEach(skillProf => {
 			Object.keys(skillProf).forEach(skill => {
 				if (skill !== "any" && skill !== "choose") {
-					this._state.setSkillProficiency(skill.toLowerCase().replace(/\s+/g, ""), 1);
+					const value = skill.toLowerCase().replace(/\s+/g, "");
+					if (sourceId) this._claimOriginProficiency("skills", value, sourceId);
+					else this._state.setSkillProficiency(value, 1);
 				}
 			});
 		});
 	}
 
-	_applyFixedTools (data) {
+	_applyFixedTools (data, sourceId = null) {
 		if (!data?.toolProficiencies) return;
 		data.toolProficiencies.forEach(toolSet => {
 			Object.entries(toolSet).forEach(([key, value]) => {
 				if (key !== "choose" && key !== "any" && key !== "anyArtisansTool" && key !== "anyMusicalInstrument" && value === true) {
-					this._state.addToolProficiency((/** @type {*} */ (key)).toTitleCase());
+					const value = (/** @type {*} */ (key)).toTitleCase();
+					if (sourceId) this._claimOriginProficiency("tools", value, sourceId);
+					else this._state.addToolProficiency(value);
 				}
 			});
 		});
 	}
 
-	_applyProficienciesFromData (data) {
+	_applyProficienciesFromData (data, sourceId = null) {
+		if (data.savingThrowProficiencies) {
+			data.savingThrowProficiencies.forEach(save => {
+				const values = typeof save === "string" ? [save] : Object.keys(save || {});
+				values.forEach(value => {
+					if (sourceId) this._claimOriginProficiency("saves", value, sourceId);
+					else this._state.addSaveProficiency(value);
+				});
+			});
+		}
 		if (data.armorProficiencies) {
 			data.armorProficiencies.forEach(ap => {
-				Object.keys(ap).forEach(a => this._state.addArmorProficiency((/** @type {*} */ (a)).toTitleCase()));
+				Object.keys(ap).forEach(a => {
+					const value = (/** @type {*} */ (a)).toTitleCase();
+					if (sourceId) this._claimOriginProficiency("armor", value, sourceId);
+					else this._state.addArmorProficiency(value);
+				});
 			});
 		}
 		if (data.weaponProficiencies) {
 			data.weaponProficiencies.forEach(wp => {
-				Object.keys(wp).forEach(w => this._state.addWeaponProficiency((/** @type {*} */ (w)).toTitleCase()));
+				Object.keys(wp).forEach(w => {
+					const value = (/** @type {*} */ (w)).toTitleCase();
+					if (sourceId) this._claimOriginProficiency("weapons", value, sourceId);
+					else this._state.addWeaponProficiency(value);
+				});
 			});
 		}
 		if (data.toolProficiencies) {
 			data.toolProficiencies.forEach(tp => {
 				Object.keys(tp).forEach(t => {
-					if (t !== "any" && t !== "choose") this._state.addToolProficiency((/** @type {*} */ (t)).toTitleCase());
+					if (t !== "any" && t !== "choose") {
+						const value = (/** @type {*} */ (t)).toTitleCase();
+						if (sourceId) this._claimOriginProficiency("tools", value, sourceId);
+						else this._state.addToolProficiency(value);
+					}
 				});
 			});
 		}

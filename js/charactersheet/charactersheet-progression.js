@@ -42,6 +42,7 @@ class CharacterSheetProgression {
 		hp: {discovery: "class-level", editor: "hit-points", validation: "hit-point-method", mechanics: "hit-points", projection: ["choices.hpRoll"]},
 		nestedEntity: {discovery: "nested-descriptor", editor: "nested-choice", validation: "entity-option", mechanics: "nested-entity", projection: []},
 		nestedSkill: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "skill-proficiencies", projection: []},
+		nestedSkillBonus: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "skill-bonus", projection: []},
 		nestedSkillTool: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "union-proficiencies", projection: []},
 		nestedExpertise: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "skill-expertise", projection: []},
 		nestedTool: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "tool-proficiencies", projection: []},
@@ -51,6 +52,7 @@ class CharacterSheetProgression {
 		nestedWeapon: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "weapon-proficiencies", projection: []},
 		nestedArmor: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "armor-proficiencies", projection: []},
 		nestedResistance: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "resistances", projection: []},
+		nestedDamageType: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "resistances", projection: []},
 		nestedSpell: {discovery: "nested-descriptor", editor: "nested-choice", validation: "legal-spell-set", mechanics: "nested-spells", projection: []},
 		nestedCantrip: {discovery: "nested-descriptor", editor: "nested-choice", validation: "legal-spell-set", mechanics: "nested-spells", projection: []},
 		nestedFeat: {discovery: "nested-descriptor", editor: "nested-choice", validation: "eligible-feat", mechanics: "feat-transaction", projection: []},
@@ -60,14 +62,23 @@ class CharacterSheetProgression {
 		originBackground: {discovery: "base-node", editor: "nested-choice", validation: "entity-option", mechanics: "origin-background", projection: []},
 	});
 
-	static getAdapterClosureIssues () {
+	static getAdapterClosureIssues ({allowUnavailable = false} = {}) {
 		// The adapter table is only metadata. Validate it against the executable
 		// controller/state surfaces when those modules have loaded, rather than
 		// maintaining a second hand-written set of names which can drift from the
 		// actual editor and reverse paths.
 		const respecProto = globalThis.CharacterSheetRespec?.prototype;
 		const stateProto = globalThis.CharacterSheetState?.prototype;
-		if (!respecProto || !stateProto) return [];
+		if (!respecProto || !stateProto) {
+			return allowUnavailable
+				? []
+				: [{
+					code: "adapter-prototypes-unavailable",
+					type: "*",
+					handler: "CharacterSheetRespec/CharacterSheetState",
+					message: "The executable Respec and State prototypes are not loaded; adapter closure cannot be verified.",
+				}];
+		}
 		const editorMethods = {
 			class: "_editClassAllocation",
 			"manifest-options": "_editManifestOptions",
@@ -89,22 +100,54 @@ class CharacterSheetProgression {
 			"hit-points": "_editHpDecision",
 			"nested-choice": "_editManifestOptions",
 		};
+		const applyMethods = {
+			class: "_applyDecisionMechanicsClass",
+			proficiencies: "_applyDecisionMechanicsProficiencies",
+			spells: "_applyDecisionMechanicsSpells",
+			improvement: "_applyDecisionMechanicsImprovement",
+			features: "_applyDecisionMechanicsFeatures",
+			origin: "_applyDecisionMechanicsOrigin",
+			configuration: "_applyDecisionMechanicsConfiguration",
+		};
+		const reverseMethods = {
+			class: "reverseProgressionClassReceipt",
+			proficiencies: "reverseProgressionProficiencyReceipt",
+			spells: "reverseProgressionSpellReceipt",
+			improvement: "reverseProgressionImprovementReceipt",
+			features: "reverseProgressionFeatureReceipt",
+			origin: "reverseProgressionOriginReceipt",
+			configuration: "reverseProgressionConfigurationReceipt",
+		};
+		const familyForType = type => {
+			if (["class", "subclass", "subclassChoice"].includes(type)) return "class";
+			if (["skills", "tools", "expertise", "languages", "nestedSkill", "nestedSkillTool", "nestedExpertise", "nestedTool", "nestedLanguage", "nestedSave", "nestedWeapon", "nestedArmor", "nestedResistance", "nestedDamageType"].includes(type)) return "proficiencies";
+			if (["spellbookSpells", "knownSpells", "cantrips", "preparedSpells", "preparedCantrips", "spellSwap", "spellMastery", "signatureSpells", "nestedSpell", "nestedCantrip"].includes(type)) return "spells";
+			if (["asi", "feat", "asiOrFeat", "classFeatProgressionFeat"].includes(type)) return "improvement";
+			if (["optionalFeatures", "featureChoice", "nestedEntity", "nestedFeat", "nestedOptionalFeature"].includes(type)) return "features";
+			if (type === "nestedSkillBonus") return "configuration";
+			if (["originRace", "originBackground"].includes(type)) return "origin";
+			return "configuration";
+		};
 		const hasEditor = name => typeof respecProto[editorMethods[name]] === "function";
-		const hasForward = typeof respecProto._applyManifestSelectionMechanics === "function";
-		const hasReverse = typeof stateProto.reverseProgressionDecisionReceipt === "function";
 		const issues = [];
 		for (const [type, adapter] of Object.entries(CharacterSheetProgression.DECISION_ADAPTERS)) {
 			if (!editorMethods[adapter.editor] || !hasEditor(adapter.editor)) {
 				issues.push({code: "adapter-missing-editor", type, handler: adapter.editor});
 			}
-			if (!hasForward) {
-				issues.push({code: "adapter-missing-mechanics", type, handler: adapter.mechanics});
+			const family = familyForType(type);
+			if (!applyMethods[family] || typeof respecProto[applyMethods[family]] !== "function") {
+				issues.push({code: "adapter-missing-apply", type, handler: applyMethods[family]});
 			}
-			if (!hasForward) {
-				issues.push({code: "adapter-missing-apply", type, handler: adapter.mechanics});
+			if (!reverseMethods[family] || typeof stateProto[reverseMethods[family]] !== "function") {
+				issues.push({code: "adapter-missing-reverse", type, handler: reverseMethods[family]});
 			}
-			if (!hasReverse) {
-				issues.push({code: "adapter-missing-reverse", type, handler: adapter.mechanics});
+			if (family !== "configuration" && typeof respecProto[applyMethods[family]] === "function"
+				&& respecProto[applyMethods[family]] === respecProto._applyManifestSelectionMechanics) {
+				issues.push({code: "adapter-generic-apply", type, handler: applyMethods[family]});
+			}
+			if (family !== "configuration" && typeof stateProto[reverseMethods[family]] === "function"
+				&& stateProto[reverseMethods[family]] === stateProto.reverseProgressionDecisionReceipt) {
+				issues.push({code: "adapter-generic-reverse", type, handler: reverseMethods[family]});
 			}
 		}
 		return issues;
@@ -328,6 +371,42 @@ class CharacterSheetProgression {
 		return descriptors;
 	}
 
+	/**
+	 * A recurring class-feature reference (for example the Warlock Specialty
+	 * pool) points at the complete feature definition, including future-level
+	 * entries.  A decision at class level N may only see entries available by N.
+	 * Keep the original order and occurrence identity while narrowing the legal
+	 * catalog; this makes a later migration deterministic instead of silently
+	 * accepting a future choice.
+	 */
+	static _filterDescriptorOptionsForLevel (descriptor, classLevel) {
+		const maxLevel = Number(classLevel) || 0;
+		if (!maxLevel || !Array.isArray(descriptor?.options) || !descriptor.options.length) return descriptor;
+		const filtered = descriptor.options.filter(option => {
+			const ref = option?.ref || option?.classFeature || option?.subclassFeature;
+			if (!ref) return true;
+			const parts = String(ref).split("|");
+			const referencedLevel = Number(
+				option?.level
+				|| option?.definitionLevel
+				|| [...parts].reverse().find(part => /^\d+$/.test(String(part))) || 0,
+			);
+			return !referencedLevel || referencedLevel <= maxLevel;
+		});
+		return filtered.length === descriptor.options.length
+			? descriptor
+			: {
+				...descriptor,
+				options: filtered,
+				rules: {
+					...(descriptor.rules || {}),
+					optionSource: descriptor.rules?.optionSource
+						? {...descriptor.rules.optionSource, values: filtered}
+						: descriptor.rules?.optionSource,
+				},
+			};
+	}
+
 	static _getSelectedDescriptorValue ({descriptor, entity, state, parentDecision = null, legacyChoices = null}) {
 		const values = [];
 		const choices = [
@@ -497,7 +576,7 @@ class CharacterSheetProgression {
 			}
 			return;
 		}
-		const descriptors = CharacterSheetProgression._getEntityChoiceDescriptors(entity, {
+		let descriptors = CharacterSheetProgression._getEntityChoiceDescriptors(entity, {
 			sourcePath: entity.name || "entity",
 			className: levelInfo?.className,
 			classSource: levelInfo?.classSource,
@@ -506,6 +585,9 @@ class CharacterSheetProgression {
 			optionalFeatures: page?.getOptionalFeatures?.() || [],
 			feats: page?.getFeats?.() || [],
 		});
+		descriptors = descriptors.map(descriptor =>
+			CharacterSheetProgression._filterDescriptorOptionsForLevel(descriptor, levelInfo?.classLevel),
+		);
 		const census = CharacterSheetClassUtils.getChoiceDescriptorCensus?.(entity);
 		for (const unsupported of census?.entries?.filter(entry =>
 			entry.classification === "unclassified" && entry.required !== false,
@@ -904,11 +986,11 @@ class CharacterSheetProgression {
 			rootSemanticKey: rootSemanticKey || semanticKey,
 			depth: Math.max(0, Number(depth) || 0),
 			provenance: CharacterSheetProgression._copy(provenance),
-			receipt: CharacterSheetProgression._copy(receipt || (
-				(scope === "nested" || scope === "origin")
-					? CharacterSheetProgression._getDecisionReceipt({semanticKey, type, selection, meta})
-					: null
-			)),
+			// A discovered selection is evidence of a choice, not proof that this
+			// decision applied a reversible state effect. Receipts are created by the
+			// canonical acquisition/edit mutation path (or reconstructed from exact
+			// persisted evidence), never inferred from a selection alone.
+			receipt: CharacterSheetProgression._copy(receipt || null),
 		};
 	}
 
@@ -1069,7 +1151,14 @@ class CharacterSheetProgression {
 		const normalized = CharacterSheetProgression.normalizeHistoryEntry(entry);
 		if (!normalized.manifestComplete) {
 			const legacy = CharacterSheetProgression.projectLegacyChoices(normalized);
-			const preserved = (normalized.decisions || []).filter(decision => ["nested", "origin"].includes(decision.scope));
+			// Sparse legacy rows are common in older saves. Re-project only the
+			// compatibility families which are actually represented by `choices`,
+			// while retaining every persisted graph decision (including unknown
+			// newer payloads). The old implementation kept only nested/origin
+			// rows and silently discarded top-level decisions which had not yet
+			// been discovered by the current catalog.
+			const legacyKeys = new Set(legacy.map(decision => decision.semanticKey));
+			const preserved = (normalized.decisions || []).filter(decision => !legacyKeys.has(decision.semanticKey));
 			normalized.decisions = [...legacy, ...preserved];
 			return normalized;
 		}
@@ -1489,8 +1578,65 @@ class CharacterSheetProgression {
 	static _getExistingSelection ({storedPool, semanticKey, history, type, sourceKey, slot, fallback = null, fallbackStatus = "ambiguous"}) {
 		const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
 		if (exact) return {selection: CharacterSheetProgression._copy(exact.selection), status: exact.status};
+		const entry = Array.isArray(history) ? history[0] : history;
+		const choices = entry?.choices || {};
+		const sourceNeedle = CharacterSheetProgression._normalize(sourceKey);
+		const matchesSource = value => {
+			const haystack = [
+				value?.featureName,
+				value?.parent,
+				value?.parentFeature,
+				value?.sourceFeature,
+				value?.sourceDecisionKey,
+				value?.grantKey,
+				value?.type,
+			].map(CharacterSheetProgression._normalize).join("|");
+			return !sourceNeedle || haystack.includes(sourceNeedle);
+		};
+		// Pre-child-ledger saves have several durable evidence stores. Preserve
+		// their order: exact feat/chosen-subfeature records precede compatibility
+		// snapshots, while fulfilled markers prove only that an obligation
+		// existed and must never invent a selection.
+		const featChoices = entry?.feat?.choices || entry?.feat?._featChoices || choices.featChoices;
+		if (featChoices && ["nestedSkill", "nestedSkillTool", "nestedExpertise", "nestedTool", "nestedLanguage", "nestedAbility", "nestedSave", "nestedWeapon", "nestedArmor", "nestedResistance", "nestedDamageType", "nestedSpell", "nestedCantrip"].includes(type)) {
+			const key = type.replace(/^nested/, "").toLowerCase();
+			const candidate = featChoices[key]
+				|| featChoices[`${key}s`]
+				|| featChoices[`${key}Choices`];
+			if (candidate != null) return {selection: CharacterSheetProgression._copy(candidate), status: null};
+		}
+		const chosen = (entry?.chosenSubfeatures || choices.chosenSubfeatures || [])
+			.filter(value => matchesSource(value) && value?.name);
+		if (chosen.length) {
+			if (chosen.length > 1 && Number(slot) > 0) {
+				const ordered = [...chosen].sort((a, b) =>
+					`${a.name}|${a.source || ""}`.localeCompare(`${b.name}|${b.source || ""}`),
+				);
+				return {selection: CharacterSheetProgression._copy(ordered[Number(slot)] || ordered[0]), status: null};
+			}
+			return {selection: CharacterSheetProgression._copy(chosen.length === 1 ? chosen[0] : chosen), status: null};
+		}
+		const materialized = (entry?.features || choices.features || [])
+			.filter(value => matchesSource(value) && (value?.name || value?.sourceFeature));
+		if (materialized.length === 1 && type.startsWith("nested")) {
+			return {selection: CharacterSheetProgression._copy(materialized[0]), status: null};
+		}
+		const replay = (choices.replayData?.featureChoices || [])
+			.filter(value => matchesSource(value));
+		if (replay.length) {
+			const selected = replay[Number(slot)] || replay[0];
+			if (selected?.choice || selected?.name) return {selection: CharacterSheetProgression._copy(selected.choice || selected), status: null};
+		}
 		const legacy = CharacterSheetProgression._getLegacySelection({history, type, sourceKey, slot});
 		if (legacy != null) return {selection: CharacterSheetProgression._copy(legacy), status: null};
+		const fulfilled = [
+			...(entry?.fulfilledFeatureSkillChoices || []),
+			...(entry?.fulfilledFeatureToolChoices || []),
+			...(entry?.fulfilledSpellChoiceSlots || []),
+		].map(CharacterSheetProgression._normalize);
+		if (sourceNeedle && fulfilled.some(value => value.includes(sourceNeedle))) {
+			return {selection: null, status: "missing"};
+		}
 		if (fallback != null) return {selection: CharacterSheetProgression._copy(fallback), status: fallbackStatus};
 		return {selection: null, status: null};
 	}
@@ -1571,7 +1717,7 @@ class CharacterSheetProgression {
 				semanticKey: decision.semanticKey,
 			});
 		}
-		issues.push(...CharacterSheetProgression.getAdapterClosureIssues().map(issue => ({
+		issues.push(...CharacterSheetProgression.getAdapterClosureIssues({allowUnavailable: true}).map(issue => ({
 			...issue,
 			severity: "error",
 			message: `Progression adapter "${issue.type}" is not fully wired (${issue.handler}).`,
@@ -2299,6 +2445,18 @@ class CharacterSheetProgression {
 			)
 				&& !issues.some(issue => issue.severity === "error"),
 		};
+	}
+
+	/**
+	 * Persist the canonical linked decision graph at acquisition time. This is
+	 * shared by Builder, Level Up, Quick Build, deferred Features, and the spell
+	 * picker so supported new saves do not depend on later Respec inference.
+	 */
+	static syncCanonicalDecisions ({page, state} = {}) {
+		if (!page || !state) return null;
+		const manifest = CharacterSheetProgression.buildManifest({page, state});
+		state.setProgressionManifest?.(manifest);
+		return manifest;
 	}
 
 	static reconcileHistoryWithManifest ({history, manifest}) {

@@ -5254,6 +5254,11 @@ class CharacterSheetQuickBuild {
 		this._state.calculateSpellSlots();
 		this._state.recalculateAllCompanions();
 
+		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
+			page: this._page,
+			state: this._state,
+		});
+
 		// Save and re-render
 		await this._page.saveCharacter();
 		this._page.renderCharacter();

@@ -750,6 +750,13 @@ class CharacterSheetFeatures {
 		this._page._renderAbilitiesDetailed?.();
 		this._page._renderSavingThrows?.();
 		this._page._renderSkills?.();
+		// The Features tab is also an acquisition boundary. Persist the
+		// deterministic child ledger before any deferred picker is shown, then
+		// synchronize it again after the picker drains its compatibility queue.
+		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
+			page: this._page,
+			state: this._state,
+		});
 		this._page.saveCharacter();
 		// State has been mutated; refresh the Spells tab so fixed (non-choice)
 		// granted cantrips/innate spells appear immediately without a reload.
@@ -773,6 +780,11 @@ class CharacterSheetFeatures {
 				this.render();
 			}
 		}
+		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
+			page: this._page,
+			state: this._state,
+		});
+		this._page.saveCharacter();
 	}
 
 	_formatFeatChoices (choices) {

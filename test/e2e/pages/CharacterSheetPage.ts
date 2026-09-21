@@ -179,6 +179,10 @@ export class CharacterSheetPage {
 			const removed = [candidate || skills[0]];
 			if (skills.length > 1) history.choices.skills = skills.slice(1);
 			else delete history.choices.skills;
+			for (const skill of removed) state?.setSkillProficiency?.(
+				String(skill).toLowerCase().replace(/\s+/g, "").replace(/'s?/g, ""),
+				0,
+			);
 			history.manifestComplete = false;
 			history.complete = false;
 			await cs?._saveCurrentCharacter?.();
@@ -412,8 +416,9 @@ export class CharacterSheetPage {
 	async stageFirstNestedRespecChoice (): Promise<void> {
 		const nested = await this.getRespecNestedDecisionSnapshot();
 		if (!nested.length) throw new Error("No nested Respec decision was discovered.");
-		const decision = nested.find(item => item.optionCount > 0 && item.status !== "resolved")
-			|| nested.find(item => item.optionCount > 0)
+		const decision = nested.find(item => /cantrip/i.test(item.label) && item.effectiveOptionCount > 0)
+			|| nested.find(item => item.effectiveOptionCount > 0 && item.status !== "resolved")
+			|| nested.find(item => item.effectiveOptionCount > 0)
 			|| nested[0];
 		const level = this.page.locator(`.charsheet__level-entry[data-level="${decision.characterLevel}"]`);
 		await level.locator(".charsheet__level-entry-edit").click();
@@ -434,6 +439,62 @@ export class CharacterSheetPage {
 			}
 		}
 		await inlineEditor.locator("button", {hasText: "Stage Choice"}).click();
+	}
+
+	async stageNestedRespecChoice (label: string, optionName: string): Promise<void> {
+		const nested = await this.getRespecNestedDecisionSnapshot();
+		const decision = nested.find(item => item.label === label);
+		if (!decision) throw new Error(`No nested Respec decision named "${label}" was discovered.`);
+		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: label}).last();
+		if (!await row.isVisible()) {
+			const level = this.page.locator(`.charsheet__level-entry[data-level="${decision.characterLevel}"]`);
+			await level.locator(".charsheet__level-entry-edit").click();
+		}
+		await row.locator("button", {hasText: "Change"}).click();
+		const inlineEditor = this.page.locator(".charsheet__respec-nested-editor-host .charsheet__respec-decision-editor");
+		await expect(inlineEditor).toBeVisible();
+		await inlineEditor.locator(".charsheet__respec-option").filter({hasText: optionName}).first().locator("input").check();
+		await inlineEditor.locator("button", {hasText: "Stage Choice"}).click();
+	}
+
+	async stageRespecFeatureChoice (featureName: string, optionName: string): Promise<void> {
+		const entry = this.page.locator(".charsheet__level-entry[data-level='1']").first();
+		await entry.locator(".charsheet__level-entry-edit").click();
+		const row = this.page.locator(".charsheet__respec-choice-row").filter({hasText: featureName}).last();
+		await row.locator("button", {hasText: "Change"}).click();
+		const item = this.page.locator(".charsheet__respec-feat-item").filter({hasText: optionName}).last();
+		await expect(item).toBeVisible();
+		await item.click();
+		await this.page.locator("button").filter({hasText: "Apply Changes"}).last().click();
+		await expect(this.page.locator(".ve-ui-modal__overlay:visible")).toHaveCount(0);
+	}
+
+	async getRespecMechanicsSnapshot (): Promise<{
+		choice: string | null;
+		featureNames: string[];
+		cantrips: string[];
+		modifiers: Array<{name: string; type: string; value: unknown}>;
+	}> {
+		return this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._respec?._engine?.state || cs?._state;
+			const choice = (state?._data?.levelHistory || [])
+				.flatMap((entry: any) => entry?.choices?.featureChoices || [])
+				.find((item: any) => item.featureName === "Divine Order")?.choice || null;
+			return {
+				choice,
+				featureNames: (state?.getFeatures?.() || [])
+					.filter((feature: any) => feature.parentFeature === "Divine Order" || feature.name === "Thaumaturge" || feature.name === "Protector")
+					.map((feature: any) => feature.name),
+				cantrips: (state?.getCantrips?.() || []).map((spell: any) => spell.name),
+				modifiers: [
+					...(state?._data?.modifiers || []),
+					...(state?._data?.namedModifiers || []),
+				]
+					.filter((modifier: any) => /thaumaturge|arcana|religion/i.test(`${modifier.name || ""} ${modifier.type || ""}`))
+					.map((modifier: any) => ({name: modifier.name, type: modifier.type, value: modifier.value})),
+			};
+		});
 	}
 
 	/**

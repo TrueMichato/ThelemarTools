@@ -20,6 +20,40 @@ class CharacterSheetClassUtils {
 	 */
 	static RACE_MANIFESTATION_POOL_NAME = "Divine Manifestation";
 
+	/**
+	 * Selectable tool names used by data which says "any tool".  A sentinel such
+	 * as `{kind: "tool", value: "anyTool"}` is not a legal selection and cannot
+	 * be replayed or reversed, so the descriptor layer always expands it to this
+	 * finite catalog.  Keep this list shared with the Builder/Level Up pickers.
+	 * @type {Record<string, string[]>}
+	 */
+	static CHOICE_TOOL_CATALOGS = {
+		artisan: [
+			"Alchemist's Supplies", "Brewer's Supplies", "Calligrapher's Supplies",
+			"Carpenter's Tools", "Cartographer's Tools", "Cobbler's Tools",
+			"Cook's Utensils", "Glassblower's Tools", "Jeweler's Tools",
+			"Leatherworker's Tools", "Mason's Tools", "Painter's Supplies",
+			"Potter's Tools", "Smith's Tools", "Tinker's Tools",
+			"Weaver's Tools", "Woodcarver's Tools",
+		],
+		instrument: [
+			"Bagpipes", "Drum", "Dulcimer", "Flute", "Lute",
+			"Lyre", "Horn", "Pan Flute", "Shawm", "Viol",
+		],
+		other: [
+			"Disguise Kit", "Forgery Kit", "Gaming Set", "Herbalism Kit",
+			"Navigator's Tools", "Poisoner's Kit", "Thieves' Tools",
+		],
+	};
+
+	static getChoiceToolCatalog () {
+		return [
+			...CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS.artisan,
+			...CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS.instrument,
+			...CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS.other,
+		];
+	}
+
 	// ==========================================
 	// Psionic manifesters (5etools `psionic` prop)
 	// ==========================================
@@ -3877,14 +3911,66 @@ class CharacterSheetClassUtils {
 			}
 			return out;
 		};
+		const getTaggedValuesWithSource = (text, tag) => {
+			const out = [];
+			const re = new RegExp(`\\{@${tag}\\s+([^}|]+)(?:\\|([^}|]+))?[^}]*\\}`, "gi");
+			let match;
+			while ((match = re.exec(text || "")) != null) {
+				const name = String(match[1] || "").trim();
+				if (!name) continue;
+				const explicitSource = String(match[2] || "").trim();
+				const contextualSource = [opts.spellSource, opts.classSource, entity.spellSource, entity.classSource, entity.source]
+					.map(value => String(value || "").trim())
+					.find(value => value === "XPHB" || value === "PHB");
+				const source = explicitSource
+					|| contextualSource
+					// TGTT's spell prose follows the current (XPHB) spell
+					// catalog, but the feature itself quite correctly has
+					// source "TGTT". Never use that book source as a spell
+					// identity: it makes an unqualified cantrip resolve to the
+					// first catalog match and can silently import a PHB spell.
+					|| (entity.source === "TGTT" ? "XPHB" : null)
+					// Modern class/subclass/optional-feature records frequently
+					// carry a non-rule source (AU, XGE, TGTT, ...), while their
+					// unqualified spell prose is sourced from the current XPHB
+					// catalog. Never leave these values unqualified: resolution
+					// must be deterministic and edition-correct.
+					|| (entity.source && entity.source !== "PHB" ? "XPHB" : null)
+					|| undefined;
+				const key = `${name.toLowerCase()}|${String(source || "").toLowerCase()}`;
+				if (!out.some(it => `${it.name.toLowerCase()}|${String(it.source || "").toLowerCase()}` === key)) {
+					out.push({name, ...(source ? {source} : {})});
+				}
+			}
+			return out;
+		};
+		// A Spellcasting feature contains nested prose blocks for cantrips,
+		// prepared spells, and recommendations. Those are runtime spellbook/
+		// preparation rules, not historical acquisitions. Carry the root
+		// feature context through the recursive walk rather than relying on each
+		// child node retaining the parent name.
+		const entitySpellcastingContext = /spellcasting/i.test(
+			`${String(entity?.name || "")} ${String(opts.sourcePath || "")}`,
+		);
 		const addProseDescriptors = (node, path) => {
 			const text = getText(node.entries || node.entry || "");
 			const lower = text.toLowerCase();
 			if (!text) return;
+			const proseContext = `${path || ""} ${node.name || ""}`.toLowerCase();
+			const isSpellcastingContext = /spellcasting|cantrips?\s+known|spells?\s+known/.test(
+				`${proseContext} ${String(entity?.name || "")}`.toLowerCase(),
+			) || entitySpellcastingContext;
+			const isRuntimeSpellcastingProse = isSpellcastingContext
+				|| (
+					!/\bextra cantrip\b|\badditional cantrip\b/i.test(lower)
+						&& /\bcantrips?\s+(?:known|from|on your list)\b|\bprepared spells?\b|\brecommend(?:ed|ation)\b|\breplace(?:ment)? spells?\b/i.test(lower)
+					&& /\bspell\s+list\b|\bspellcasting\b|\bspellbook\b/i.test(lower)
+				);
 
 			if (
 				/extra cantrip/.test(lower)
 				&& /cleric spell list/.test(lower)
+				&& !isRuntimeSpellcastingProse
 			) {
 				add({
 					kind: "cantrip",
@@ -3898,6 +3984,31 @@ class CharacterSheetClassUtils {
 							kind: "filter",
 							filter: "level=0|class=Cleric",
 						},
+					},
+				});
+			}
+
+			const skillBonusChoice = text.match(
+				/bonus\s+to\s+(?:your\s+)?[^.(]+\(\s*((?:\{@skill\s+[^}]+\}(?:\s+or\s+|\s*,\s*|\s+and\s+)?)+)\s*\)\s*checks?/i,
+			);
+			const bonusSkills = skillBonusChoice
+				? getTaggedValues(skillBonusChoice[1], "skill").map(skill => skill.toLowerCase())
+				: [];
+			if (
+				bonusSkills.length >= 2
+				&& /bonus\s+equals\s+your\s+wisdom\s+modifier/i.test(lower)
+			) {
+				add({
+					kind: "skillBonus",
+					label: "Skill Bonus",
+					count: 1,
+					options: bonusSkills,
+					grantKey: `${path}.prose.skillBonus`,
+					sourcePath: `${path}.prose.skillBonus`,
+					rules: {
+						bonusAbility: "wis",
+						minValue: 1,
+						optionSource: {kind: "explicitList", values: bonusSkills},
 					},
 				});
 			}
@@ -3919,19 +4030,50 @@ class CharacterSheetClassUtils {
 				});
 			}
 
-			const spells = getTaggedValues(text, "spell");
+			const spells = getTaggedValuesWithSource(text, "spell");
 			if (
 				spells.length
+				&& !isRuntimeSpellcastingProse
+				&& !/recommended/.test(lower)
 				&& /cantrip|learn either|choose to learn/.test(lower)
 			) {
 				add({
 					kind: /cantrip/.test(lower) ? "cantrip" : "spell",
 					label: /cantrip/.test(lower) ? "Cantrip" : "Spell",
 					count: 1,
-					options: spells.map(name => ({name})),
+					options: spells,
 					grantKey: `${path}.prose.spells`,
 					sourcePath: `${path}.prose.spells`,
-					rules: {optionSource: {kind: "explicitList", values: spells.map(name => ({name}))}},
+					rules: {optionSource: {kind: "explicitList", values: spells}},
+				});
+			}
+
+			// The XPHB Arcane Archer wording grants both fixed skills, but permits
+			// replacing an already-known skill. Keep that conditional replacement
+			// catalog explicit without inventing a mandatory skill pick for every
+			// character.
+			if (
+				entity?.name === "Arcane Archer Lore"
+				&& entity?.source === "AU"
+				&& /different skill of your choice/i.test(text)
+			) {
+				const fighterSkills = [
+					"acrobatics", "animal handling", "arcana", "athletics", "history",
+					"insight", "intimidation", "investigation", "medicine", "nature",
+					"perception", "survival",
+				];
+				add({
+					kind: "skill",
+					label: "Arcane Archer Lore replacement skill",
+					count: 1,
+					required: false,
+					options: fighterSkills,
+					grantKey: `${path}.prose.replacementSkill`,
+					sourcePath: `${path}.prose.replacementSkill`,
+					rules: {
+						conditionalReplacement: true,
+						optionSource: {kind: "explicitList", values: fighterSkills},
+					},
 				});
 			}
 
@@ -3956,13 +4098,14 @@ class CharacterSheetClassUtils {
 					"stealth",
 					"survival",
 				];
+				const toolCatalog = CharacterSheetClassUtils.getChoiceToolCatalog();
 				add({
 					kind: "skillTool",
 					label: "Skill or Tool Proficiency",
 					count: 1,
 					options: [
 						...skillNames.map(value => ({kind: "skill", value})),
-						{kind: "tool", value: "anyTool"},
+						...toolCatalog.map(value => ({kind: "tool", value})),
 					],
 					grantKey: `${path}.prose.skillTool`,
 					sourcePath: `${path}.prose.skillTool`,
@@ -3972,7 +4115,7 @@ class CharacterSheetClassUtils {
 							kind: "explicitList",
 							values: [
 								...skillNames.map(value => ({kind: "skill", value})),
-								{kind: "tool", value: "anyTool"},
+								...toolCatalog.map(value => ({kind: "tool", value})),
 							],
 						},
 					},
@@ -4011,9 +4154,24 @@ class CharacterSheetClassUtils {
 			if (typeof node === "string") return;
 			if (typeof node !== "object") return;
 
-			if (node.type === "options" && Array.isArray(node.entries)) {
-				const options = node.entries.map((option) => {
+			if (node.type === "options") {
+				const optionEntries = Array.isArray(node.entries)
+					? node.entries
+					: Array.isArray(node.options)
+						? node.options
+						: Array.isArray(node.items) ? node.items : [];
+				const options = optionEntries.map((option) => {
 					if (typeof option === "string") return option;
+					// Ref wrappers occur in both legacy and XPHB data. The
+					// discriminator is sometimes the type value rather than a
+					// `ref*` property, so normalize both spellings.
+					const typedRef = option?.optionalfeature || option?.classFeature || option?.subclassFeature;
+					if (typeof typedRef === "string" && /^ref(?:Optionalfeature|ClassFeature|SubclassFeature)$/i.test(String(option?.type || ""))) {
+						const type = /^refOptionalfeature$/i.test(option.type)
+							? "optionalfeature"
+							: /^refSubclassFeature$/i.test(option.type) ? "subclassFeature" : "classFeature";
+						return {name: typedRef.split("|")[0], ref: typedRef, type};
+					}
 					if (option?.refClassFeature) return {name: option.refClassFeature.split("|")[0], ref: option.refClassFeature, type: "classFeature"};
 					if (option?.classFeature) return {name: option.classFeature.split("|")[0], ref: option.classFeature, type: "classFeature"};
 					if (option?.refSubclassFeature) return {name: option.refSubclassFeature.split("|")[0], ref: option.refSubclassFeature, type: "subclassFeature"};
@@ -4022,7 +4180,7 @@ class CharacterSheetClassUtils {
 					if (option?.optionalfeature) return {name: option.optionalfeature.split("|")[0], ref: option.optionalfeature, type: "optionalfeature"};
 					return option?.name ? option : null;
 				}).filter(Boolean);
-				if (options.length && !options.every(option => option.type === "optionalfeature" && !option.entries)) {
+				if (options.length) {
 					add({
 						kind: "entity",
 						label: node.name || entity.name || "Feature",
@@ -4232,7 +4390,20 @@ class CharacterSheetClassUtils {
 		if (node.runtime === true || node.current === true || node.mode === "runtime") {
 			return {classification: "runtime", family: "runtime", path, required: false};
 		}
-		if (node.type === "options") return {classification: "supported", family: "entity", path};
+		if (node.type === "options") {
+			const descriptors = CharacterSheetClassUtils.getChoiceDescriptors(node, {sourcePath: path});
+			const directDescriptors = descriptors.filter(descriptor => descriptor.sourcePath === path);
+			if (directDescriptors.some(descriptor => descriptor.options?.length || descriptor.rules?.optionSource)) {
+				return {classification: "supported", family: "entity", path, required: node.required !== false};
+			}
+			return {
+				classification: "unclassified",
+				family: "options",
+				path,
+				required: node.required !== false,
+				reason: "options-node-produced-no-legal-descriptor",
+			};
+		}
 		if (Object.prototype.hasOwnProperty.call(node, "choose")) {
 			const descriptors = CharacterSheetClassUtils.getChoiceDescriptors({choose: node.choose, name: node.name}, {sourcePath: path});
 			if (descriptors.length) return {classification: "supported", family: descriptors[0].kind, path, required: node.required !== false};

@@ -1625,9 +1625,38 @@
 		margin-left: calc(var(--respec-choice-depth, 0) * 0.75rem);
 	}
 
-	.charsheet__respec-choice-current {
+	/* The desktop row is a single flex line. On a 390px viewport its
+	   intrinsic-width "Change" button and status badge can otherwise squeeze
+	   the current value down to a few pixels instead of allowing it to wrap. */
+	.charsheet__respec-choice-row > * {
 		min-width: 0;
+	}
+
+	.charsheet__respec-choice-label {
+		flex: 0 0 100%;
+		min-width: 0;
+	}
+
+	.charsheet__respec-choice-current {
+		flex: 1 1 12rem;
+		min-width: 0;
+		max-width: 100%;
+		min-height: 2.25rem;
+		display: block;
+		line-height: 1.35;
 		overflow-wrap: anywhere;
+	}
+
+	.charsheet__respec-choice-status,
+	.charsheet__respec-choice-warning,
+	.charsheet__respec-choice-row > .ve-btn {
+		flex: 0 0 auto;
+	}
+
+	.charsheet__respec-nested-editor-host,
+	.charsheet__respec-nested-editor-host .charsheet__respec-decision-editor {
+		width: 100%;
+		min-width: 0;
 	}
 
 	.charsheet__level-history {

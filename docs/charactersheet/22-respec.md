@@ -88,6 +88,18 @@ missing blocks ledger replacement and is shown as an actionable Respec
 diagnostic. A degraded catalog never silently replaces a saved ledger with an
 empty one.
 
+The executable adapter closure is checked against the loaded Respec and State
+prototypes, including the concrete editor and family-specific apply/reverse
+entry points. A module which is not loaded cannot make the closure check pass
+vacuously.
+
+Pending feature/spell queues remain compatibility caches, not a second ledger.
+An item which existed when a draft opened but is not yet represented by a
+decision is preserved and shown as a warning. A mutation which creates a new
+unrepresented pending item is rejected and rolled back immediately. Once a
+queue item has a source decision key, removing that decision consumes only the
+matching queue item.
+
 ## Legacy Reconstruction
 
 Old saves are normalized on load.
@@ -190,6 +202,12 @@ is captured, descendants are reversed/removed deepest-first, the parent
 mechanics are applied, the manifest is rediscovered, and only exact child
 identities which remain legal are retained. Any failure restores both the
 candidate state and the manifest snapshot.
+
+All legacy editors use the same engine-level candidate snapshot boundary. Their
+mechanics callback runs inside the staged mutation; no controller mutates the
+candidate first and then asks the engine to record the selection. This includes
+feat/ASI replacement, class reassignment, spell repair, optional-feature
+replacement, and deferred pending-choice edits.
 
 Non-Epic-Boon `featProgression` grants, such as Fighting Styles, are also
 manifest decisions. A skipped grant can be created later, and replacements use
@@ -306,20 +324,48 @@ diseases, and Arcadia11 broth/fats/Cooking. The command is still run as a
 required gate; these pre-existing links are documented here rather than
 silenced or changed as part of the Character Sheet Respec scope.
 
-## Iteration 2 verification boundaries
+## Iteration 3 implementation and verification
 
-This iteration verifies the shared descriptor/manifest contract, candidate graph
-mutation, ownership cleanup covered by the current state APIs, and the inline
-nested editor with real Cleric cantrip data. The affected Arcane Archer and
-Light Domain Cleric comprehensive browser matrices, including their L1-to-20
-mega cases, also pass.
+The nested ledger is now the canonical representation for supported permanent
+child acquisitions. Builder, Level Up, Quick Build, deferred feature choices,
+and spell-picking persistence call the same `syncCanonicalDecisions()` path,
+which writes the shared decision schema and compatibility projections rather
+than creating flow-specific choice records. Origin decisions remain in
+`characterBase.decisions`; level decisions remain in their class-history rows.
 
-The following remain explicit follow-up work rather than silently inferred
-support: canonical child-ledger writes from every Builder/Level Up/Quick Build
-and deferred Features path, a frozen pre-child-ledger fixture corpus for every
-legacy evidence family, exhaustive apply/reverse assertions for every
-save/weapon/armor/resistance and Cruel receipt variant, and a complete
-cross-catalog migration/ambiguity matrix. The current focused browser suite
-proves nested discovery, inline editing, candidate isolation, Cancel, Apply,
-reload/Undo, and mobile toolbar geometry; it does not claim those unlisted
-acquisition-flow and migration families are complete.
+Legacy reconstruction is ordered and conservative: exact decisions, feat
+choice/effect evidence, chosen subfeatures, materialized provenance, replay
+snapshots, spell provenance, and compatibility values are considered before
+unique inference. Fulfilled markers prove only that a required obligation
+existed, so they leave a missing repair item instead of inventing a selection.
+Ambiguous or illegal evidence remains visible as `ambiguous` or `invalid`.
+Pre-existing wholly-untracked class spell progressions retain the legacy
+`legacyUntracked` deferred policy.
+
+Each staged graph edit snapshots candidate JSON and the manifest, removes
+descendants deepest-first, reverses source-keyed receipts/ownership, applies
+the replacement, rediscovers children, retains only exact legal identities,
+and persists one refreshed manifest. Receipt reversal covers set ownership,
+features, modifiers, resources, spells, scalar ability changes, and reversible
+configuration. Resource cleanup also removes stale `resourceTurnUsage` entries;
+same-source resources preserve current uses while unrelated same-name resources
+do not inherit them.
+
+The census now rejects reachable required `choose`/`options` nodes which do not
+produce a legal descriptor or an explicit reviewed runtime/non-Respec
+classification. Adapter closure is checked with the executable Respec and State
+prototypes loaded, and the production census includes a negative-control
+mutation which must fail before restoring the real descriptor path.
+
+The focused browser suite targets Divine Order → Thaumaturge by identity,
+checks the cantrip mechanic in the isolated candidate, and covers the existing
+Cancel/Apply/reload/Undo and 390×844 action contract. Arcana Domain Cleric
+comprehensive and `RUN_MEGA=1` runs pass on fresh ports. The focused and full
+Character Sheet Jest suites, JavaScript/CSS/JSON gates, and production census
+pass.
+
+`npm run test:data` remains red only for the pre-existing generated-link
+baseline in `data/crafting.json` (COMCRAF, HHHVI, TGTT Identify, and Arcadia
+references). No source-data or schema suppression was added; fixing those
+unrelated links is outside this Respec change and is recorded as an explicit
+repository baseline rather than hidden.

@@ -2546,6 +2546,11 @@ class CharacterSheetBuilder {
 			await this._page.processPendingFeatureChoices();
 		}
 
+		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
+			page: this._page,
+			state: this._state,
+		});
+
 		// Save the character
 		await this._page.saveCharacter();
 

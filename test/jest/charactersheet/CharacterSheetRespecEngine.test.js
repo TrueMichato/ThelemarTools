@@ -52,6 +52,18 @@ describe("CharacterSheetRespecEngine", () => {
 		expect(state.getLevelHistoryEntry(1).choices.skills).toEqual(["athletics"]);
 	});
 
+	it("rolls back a legacy staged mutation when its mechanics callback fails", async () => {
+		engine.begin();
+		const before = engine.state.toJson();
+		await expect(engine.stageCandidateMutation(({state: candidate}) => {
+			candidate.updateLevelChoice(1, {skills: ["perception"]});
+			candidate.addSkillProficiency("perception");
+			throw new Error("legacy editor failed");
+		})).rejects.toThrow("legacy editor failed");
+		expect(engine.state.toJson()).toEqual(before);
+		expect(engine.manifest).toEqual(expect.any(Object));
+	});
+
 	it("applies a valid candidate atomically and supports one-step undo", async () => {
 		engine.begin();
 		engine.state.updateLevelChoice(1, {skills: ["perception"]});
@@ -107,6 +119,32 @@ describe("CharacterSheetRespecEngine", () => {
 		state.updateLevelChoice(1, {skills: []});
 		expect(engine.syncCleanDraft()).toBe(false);
 		expect(engine.state).toBe(dirtyDraft);
+	});
+
+	it("warns for legacy unknown pending choices and rolls back newly created ones", async () => {
+		state._data.pendingFeatureChoices = [{
+			id: "legacy-pending",
+			featureName: "Legacy Feature",
+			kind: "skill",
+			options: ["arcana", "history"],
+			count: 1,
+		}];
+		engine.begin();
+		expect(engine.getValidation().warnings).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "unknown-pending-choice"}),
+		]));
+
+		const before = engine.state.toJson();
+		await expect(engine.stageCandidateMutation(({state: candidate}) => {
+			candidate._data.pendingFeatureChoices.push({
+				id: "new-pending",
+				featureName: "New Unsupported Feature",
+				kind: "skill",
+				options: ["arcana", "history"],
+				count: 1,
+			});
+		})).rejects.toThrow(/unrepresented pending choice/i);
+		expect(engine.state.toJson()).toEqual(before);
 	});
 
 	it("preserves ledger ownership through an incomplete-to-complete manifest transition", async () => {

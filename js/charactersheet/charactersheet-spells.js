@@ -9428,12 +9428,20 @@ class CharacterSheetSpells {
 			await this.showFilteredSpellPicker(choice, (spell) => {
 				this._state.fulfillSpellChoice(choice.id, spell);
 				this._renderSpellList();
+				globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
+					page: this._page,
+					state: this._state,
+				});
 				this._page.saveCharacter();
 			});
 		}
 
 		// Process pending scribing spellbook picks (Spell Scribing Adept)
 		await this.processScribingSpellPicks();
+		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
+			page: this._page,
+			state: this._state,
+		});
 	}
 
 	/**

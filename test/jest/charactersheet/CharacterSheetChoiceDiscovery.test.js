@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-progression.js";
+import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-respec.js";
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 const CharacterSheetProgression = globalThis.CharacterSheetProgression;
@@ -82,6 +84,8 @@ describe("Character Sheet choice discovery contract", () => {
 	});
 
 	it("keeps the adapter registry closed over editors and reversible mechanics", () => {
+		// The production closure must inspect the actual controller/state
+		// prototypes, not accept an unavailable-prototype bypass.
 		expect(CharacterSheetProgression.getAdapterClosureIssues()).toEqual([]);
 	});
 
@@ -111,11 +115,16 @@ describe("Character Sheet choice discovery contract", () => {
 		expect(extraDescriptors).toEqual(expect.arrayContaining([
 			expect.objectContaining({kind: "skillTool", count: 1}),
 		]));
+		expect(extraDescriptors.flatMap(it => it.options || []))
+			.not.toContainEqual(expect.objectContaining({value: "anyTool"}));
 		const recurringSpecialtyDescriptors = CharacterSheetProgression._getEntityChoiceDescriptors(
 			rogueSpecialties.find(it => it.level === 3),
 			{classFeatures: allClassFeatures},
 		);
-		expect(recurringSpecialtyDescriptors).toEqual(expect.arrayContaining([
+		const filteredSpecialties = recurringSpecialtyDescriptors.map(descriptor =>
+			CharacterSheetProgression._filterDescriptorOptionsForLevel(descriptor, 3),
+		);
+		expect(filteredSpecialties).toEqual(expect.arrayContaining([
 			expect.objectContaining({
 				kind: "entity",
 				options: expect.arrayContaining([
@@ -123,8 +132,22 @@ describe("Character Sheet choice discovery contract", () => {
 				]),
 			}),
 		]));
+		expect(filteredSpecialties.find(it => it.kind === "entity")?.options || [])
+			.not.toEqual(expect.arrayContaining([
+				expect.objectContaining({ref: expect.stringMatching(/\|13(?:\||$)/)}),
+			]));
 		const loreKinds = CharacterSheetClassUtils.getChoiceDescriptors(arcaneArcherLore).map(it => it.kind);
 		expect(loreKinds).toEqual(expect.arrayContaining(["skill", "cantrip"]));
+		expect(CharacterSheetClassUtils.getChoiceDescriptors(arcaneArcherLore)
+			.filter(it => it.kind === "cantrip")
+			.flatMap(it => it.options || [])
+			.every(option => option.source)).toBe(true);
+		const clericSpellcasting = allClassFeatures.find(it =>
+			it.name === "Spellcasting" && it.className === "Cleric" && it.source === "XPHB",
+		);
+		expect(clericSpellcasting).toBeTruthy();
+		expect(CharacterSheetClassUtils.getChoiceDescriptors(clericSpellcasting)
+			.filter(it => ["spell", "cantrip"].includes(it.kind))).toEqual([]);
 		expect(CharacterSheetClassUtils.getChoiceDescriptors(thaumaturge).some(it =>
 			it.kind === "cantrip" && it.rules.optionSource?.kind === "filter",
 		)).toBe(true);

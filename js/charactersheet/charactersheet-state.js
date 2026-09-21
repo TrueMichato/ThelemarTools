@@ -4338,6 +4338,24 @@ FeatureEffectRegistry.init();
 globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 
 class CharacterSheetState {
+	/**
+	 * Return whether a feature is a class/subclass progression feature whose
+	 * prose-derived mechanics belong to the class-feature cleanup/rebuild domain.
+	 *
+	 * Raw 5etools entities do not consistently carry a `featureType`; class and
+	 * subclass feature catalogs do consistently carry `className`, while optional
+	 * features, feats, races, and backgrounds do not. Keep this predicate in one
+	 * place so add-time parsing and rebuild-time parsing use identical ownership.
+	 * @param {object} feature
+	 * @returns {boolean}
+	 */
+	static _isClassFeatureEffectSource (feature) {
+		if (!feature || typeof feature !== "object") return false;
+		if (feature.featureType === "Class Feature" || feature.featureType === "Subclass Feature") return true;
+		if (feature.featureType === "classFeature" || feature.featureType === "subclassFeature") return true;
+		return !!feature.className && !feature.optionalFeatureTypes && !feature.featType;
+	}
+
 	static normalizeToolKey (tool) {
 		return FeatureModifierParser.normalizeToolKey(tool);
 	}
@@ -9562,6 +9580,13 @@ class CharacterSheetState {
 	reverseProgressionDecisionReceipt (decision) {
 		const sourceId = decision?.semanticKey || decision?.receipt?.sourceDecisionKey;
 		if (!sourceId) return;
+		this.removePendingProgressionChoicesBySourceDecision?.(sourceId);
+		const ownedKeys = new Set();
+		for (const effect of decision?.receipt?.effects || []) {
+			for (const owned of effect?.type === "ownership" ? effect.ownership || [] : []) {
+				ownedKeys.add(`${owned?.type || ""}|${this._getProgressionOwnershipKey(owned?.type, owned?.value) || ""}`);
+			}
+		}
 		for (const effect of decision?.receipt?.effects || []) {
 			if (effect?.type === "materialized") {
 				const featureIds = new Set((effect.features || []).map(feature => feature.id).filter(Boolean));
@@ -9573,17 +9598,60 @@ class CharacterSheetState {
 					!featureIds.has(resource.featureId)
 					&& resource.sourceDecisionKey !== sourceId,
 				);
+				const liveResourceIds = new Set((this._data.resources || []).map(resource => resource.id));
+				for (const resourceId of Object.keys(this._data.resourceTurnUsage || {})) {
+					if (!liveResourceIds.has(resourceId)) delete this._data.resourceTurnUsage[resourceId];
+				}
 				this._data.modifiers = (this._data.modifiers || []).filter(modifier =>
 					!featureIds.has(modifier.featureId)
 					&& modifier.sourceDecisionKey !== sourceId,
 				);
+				this._data.namedModifiers = (this._data.namedModifiers || []).filter(modifier =>
+					!featureIds.has(modifier.featureId)
+					&& modifier.sourceDecisionKey !== sourceId,
+				);
+				this._recalculateCustomModifiers();
 				continue;
 			}
-			// Ability and feat receipts are reversed by their owning feature/feat
-			// teardown paths. Reversing them here as well would double-subtract
-			// legacy feat choices whose parent is being replaced in the same
-			// transaction.
-			if (effect?.type === "abilityDelta" || effect?.type === "configuration") continue;
+			if (effect?.type === "abilityDelta") {
+				const ability = String(effect.ability || "").toLowerCase();
+				const amount = Number(effect.amount) || 0;
+				if (ability && amount) {
+					const before = Number(effect.before);
+					this.setAbilityBase(ability, Number.isFinite(before)
+						? before
+						: Math.max(1, (this.getAbilityBase(ability) || 0) - amount));
+				}
+				continue;
+			}
+			if (effect?.type === "configuration") {
+				// Configuration receipts are intentionally compact. Any future
+				// configuration handler can supply a reversible `before` value;
+				// source-keyed modifiers are always safe to remove now.
+				this.removeModifiersBySourceDecision(effect.sourceDecisionKey || sourceId);
+				if (effect.before !== undefined && effect.path) {
+					// Configuration handlers may opt into exact restoration by
+					// recording the affected state path and its previous value.
+					const parts = String(effect.path).split(".");
+					let cursor = this._data;
+					for (let ix = 0; ix < parts.length - 1 && cursor; ++ix) cursor = cursor[parts[ix]];
+					if (cursor && parts.length) cursor[parts.at(-1)] = MiscUtil.copyFast(effect.before);
+				}
+				continue;
+			}
+			if (effect?.type === "spells") {
+				for (const spell of effect.spells || []) {
+					if (!spell?.name) continue;
+					const ownershipType = effect.spellType === "cantrips" ? "cantrips" : "spells";
+					const ownershipKey = `${ownershipType}|${this._getProgressionOwnershipKey(ownershipType, spell) || ""}`;
+					// Spell receipts are often accompanied by an ownership effect.
+					// Consume the set ownership once; otherwise an overlapping
+					// source would be deleted by this compact compatibility effect.
+					if (ownedKeys.has(ownershipKey)) continue;
+					this.removeSpell(spell.name, spell.source);
+				}
+				continue;
+			}
 			if (effect?.type !== "ownership") continue;
 			for (const owned of effect.ownership || []) {
 				const type = owned?.type;
@@ -9607,6 +9675,49 @@ class CharacterSheetState {
 				else if (type === "innateSpells") this.removeInnateSpell(value?.name, value?.source);
 			}
 		}
+	}
+
+	/**
+	 * Remove only compatibility-queue entries which were minted by a durable
+	 * progression decision. Legacy queue entries intentionally lack a source
+	 * key and remain available for the migration warning/repair path.
+	 *
+	 * @param {string} sourceDecisionKey
+	 */
+	removePendingProgressionChoicesBySourceDecision (sourceDecisionKey) {
+		if (!sourceDecisionKey) return;
+		this._data.pendingFeatureChoices = (this._data.pendingFeatureChoices || [])
+			.filter(choice => choice.sourceDecisionKey !== sourceDecisionKey && choice.parentSemanticKey !== sourceDecisionKey);
+		this._data.pendingSpellChoices = (this._data.pendingSpellChoices || [])
+			.filter(choice => choice.sourceDecisionKey !== sourceDecisionKey && choice.parentSemanticKey !== sourceDecisionKey);
+	}
+
+	reverseProgressionClassReceipt (decision) {
+		return this.reverseProgressionDecisionReceipt(decision);
+	}
+
+	reverseProgressionProficiencyReceipt (decision) {
+		return this.reverseProgressionDecisionReceipt(decision);
+	}
+
+	reverseProgressionSpellReceipt (decision) {
+		return this.reverseProgressionDecisionReceipt(decision);
+	}
+
+	reverseProgressionImprovementReceipt (decision) {
+		return this.reverseProgressionDecisionReceipt(decision);
+	}
+
+	reverseProgressionFeatureReceipt (decision) {
+		return this.reverseProgressionDecisionReceipt(decision);
+	}
+
+	reverseProgressionOriginReceipt (decision) {
+		return this.reverseProgressionDecisionReceipt(decision);
+	}
+
+	reverseProgressionConfigurationReceipt (decision) {
+		return this.reverseProgressionDecisionReceipt(decision);
 	}
 
 	/**
@@ -18270,6 +18381,8 @@ class CharacterSheetState {
 			...(choice.sourceClass ? {sourceClass: choice.sourceClass} : {}),
 			...(choice.alwaysPrepared ? {alwaysPrepared: true} : {}),
 			...(choice.level != null ? {level: choice.level} : {}),
+			...(choice.sourceDecisionKey ? {sourceDecisionKey: choice.sourceDecisionKey} : {}),
+			...(choice.parentSemanticKey ? {parentSemanticKey: choice.parentSemanticKey} : {}),
 		};
 
 		this._data.pendingSpellChoices.push(pendingChoice);
@@ -18624,11 +18737,29 @@ class CharacterSheetState {
 		const fighterSkills = ["acrobatics", "animal handling", "athletics", "history", "insight", "intimidation", "persuasion", "perception", "survival"];
 		const artisanTools = ["Alchemist's Supplies", "Brewer's Supplies", "Calligrapher's Supplies", "Carpenter's Tools", "Cartographer's Tools", "Cobbler's Tools", "Cook's Utensils", "Glassblower's Tools", "Jeweler's Tools", "Leatherworker's Tools", "Mason's Tools", "Painter's Supplies", "Potter's Tools", "Smith's Tools", "Tinker's Tools", "Weaver's Tools", "Woodcarver's Tools"];
 		if (!this.hasFulfilledFeatureSkillChoice(feature.name)) {
-			this.addPendingFeatureChoice({featureName: feature.name, featureId: feature.id, kind: "skill", options: fighterSkills, count: 1});
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId: feature.id,
+				featureClass: feature.className,
+				featureClassSource: feature.classSource,
+				level: feature.level,
+				kind: "skill",
+				options: fighterSkills,
+				count: 1,
+			});
 		}
 		const toolFulfilled = (this._data.fulfilledFeatureToolChoices || []).includes(feature.name.toLowerCase());
 		if (!toolFulfilled) {
-			this.addPendingFeatureChoice({featureName: feature.name, featureId: feature.id, kind: "tool", options: artisanTools, count: 1});
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId: feature.id,
+				featureClass: feature.className,
+				featureClassSource: feature.classSource,
+				level: feature.level,
+				kind: "tool",
+				options: artisanTools,
+				count: 1,
+			});
 		}
 	}
 
@@ -18646,6 +18777,10 @@ class CharacterSheetState {
 		const exists = this._data.pendingFeatureChoices.some(c => this._featureChoiceSignature(c) === sig);
 		if (exists) return false;
 
+		const feature = this._data.features?.find(feature =>
+			(choice.featureId && feature.id === choice.featureId)
+			|| (!choice.featureId && feature.name === choice.featureName));
+		const characterLevel = choice.characterLevel ?? feature?.characterLevel ?? null;
 		this._data.pendingFeatureChoices.push({
 			id: CryptUtil.uid(),
 			featureName: choice.featureName,
@@ -18654,13 +18789,124 @@ class CharacterSheetState {
 			...(choice.featureClass ? {featureClass: choice.featureClass} : {}),
 			...(choice.featureClassSource ? {featureClassSource: choice.featureClassSource} : {}),
 			...(choice.level != null ? {level: choice.level} : {}),
+			...(characterLevel != null ? {characterLevel} : {}),
 			kind: choice.kind,
 			options: choice.options,
 			count: choice.count || 1,
 			...(choice.unique ? {unique: true} : {}),
 			...(choice.expertiseIfProficient ? {expertiseIfProficient: true} : {}),
+			...(choice.sourceDecisionKey ? {sourceDecisionKey: choice.sourceDecisionKey} : {}),
 		});
 		return true;
+	}
+
+	_getFeatureChoiceCharacterLevel (choice) {
+		if (choice?.characterLevel != null) return Number(choice.characterLevel) || 0;
+		const className = choice?.featureClass;
+		const classSource = choice?.featureClassSource;
+		const classLevel = Number(choice?.level);
+		if (className && Number.isFinite(classLevel)) {
+			const matching = (this._data.levelHistory || [])
+				.filter(entry => entry.class?.name === className
+					&& (!classSource || entry.class?.source === classSource));
+			const byClassLevel = matching.find(entry => Number(entry.classLevel) === classLevel);
+			if (byClassLevel) return Number(byClassLevel.level) || classLevel;
+			if (matching[classLevel - 1]) return Number(matching[classLevel - 1].level) || classLevel;
+		}
+		return Number(choice?.level) || 0;
+	}
+
+	/**
+	 * Persist a compact acquisition-time child decision. This is the shared writer
+	 * used by Builder, Level Up, Quick Build, and deferred feature pickers. The
+	 * compatibility choice caches remain in place, but a supported permanent pick
+	 * is no longer forced to wait for a later Respec inference pass.
+	 *
+	 * @param {{
+	 *   type: string,
+	 *   selection: *,
+	 *   level?: number,
+	 *   characterLevel?: number,
+	 *   className?: string,
+	 *   classSource?: string,
+	 *   sourceDecisionKey?: string,
+	 *   semanticKey?: string,
+	 *   parentSemanticKey?: string|null,
+	 *   rootSemanticKey?: string|null,
+	 *   provenance?: object,
+	 *   required?: boolean,
+	 *   label?: string,
+	 * }} config
+	 * @returns {object|null}
+	 */
+	recordProgressionDecision (config = {}) {
+		const progression = globalThis.CharacterSheetProgression;
+		if (!progression || !config.type || config.selection == null) return null;
+		const characterLevel = Number(config.characterLevel ?? config.level) || 0;
+		const className = config.className || "Acquisition";
+		const classSource = config.classSource || "";
+		const parentSemanticKey = config.parentSemanticKey || config.sourceDecisionKey || null;
+		const semanticKey = config.semanticKey || progression.getNestedSemanticKey({
+			parentSemanticKey,
+			acquisitionKey: config.provenance?.acquisitionKey || progression.getAcquisitionKey({
+				ownerType: config.provenance?.ownerType || "feature",
+				ownerUid: config.provenance?.ownerUid || config.provenance?.sourcePath || config.label || config.type,
+				classLevel: Number(config.level) || 0,
+				sourcePath: config.provenance?.sourcePath || config.label || config.type,
+				occurrence: Number(config.provenance?.occurrence) || 0,
+			}),
+			grantKey: config.provenance?.grantKey || config.label || config.type,
+			selectedGrantKey: typeof config.selection === "object"
+				? (config.selection.name || config.selection.value || "")
+				: String(config.selection),
+			occurrence: Number(config.provenance?.occurrence) || 0,
+			slot: Number(config.provenance?.pickSlot) || 0,
+		});
+		const target = characterLevel === 0
+			? this.getCharacterBase()
+			: (this._data.levelHistory || []).find(entry => Number(entry.level) === characterLevel)
+				|| null;
+		if (!target) return null;
+		if (!Array.isArray(target.decisions)) target.decisions = [];
+		const existing = target.decisions.find(decision => decision.semanticKey === semanticKey);
+		const decision = {
+			...(existing || {}),
+			id: existing?.id || progression.getDecisionId({semanticKey, characterLevel}),
+			semanticKey,
+			characterLevel,
+			className,
+			classSource,
+			classLevel: Number(config.level) || 0,
+			type: config.type,
+			label: config.label || config.type,
+			sourceKey: config.provenance?.grantKey || config.label || config.type,
+			slot: Number(config.provenance?.pickSlot) || 0,
+			required: config.required !== false,
+			count: Array.isArray(config.selection) ? config.selection.length : 1,
+			selection: MiscUtil.copyFast(config.selection),
+			status: "resolved",
+			options: [],
+			scope: characterLevel === 0 ? "origin" : "nested",
+			parentSemanticKey,
+			rootSemanticKey: config.rootSemanticKey || parentSemanticKey || semanticKey,
+			depth: parentSemanticKey ? 1 : 0,
+			provenance: MiscUtil.copyFast(config.provenance || {
+				ownerType: "feature",
+				ownerUid: config.label || config.type,
+				acquisitionKey: semanticKey,
+				selectedGrantKey: typeof config.selection === "object"
+					? config.selection.name || config.selection.value || null
+					: String(config.selection),
+				grantKind: config.type,
+				grantKey: config.label || config.type,
+				sourcePath: config.label || config.type,
+				occurrence: 0,
+				pickSlot: 0,
+			}),
+		};
+		if (existing) Object.assign(existing, decision);
+		else target.decisions.push(decision);
+		return decision;
 	}
 
 	_featureChoiceSignature (choice) {
@@ -18779,6 +19025,37 @@ class CharacterSheetState {
 			return false;
 		}
 
+		if (choice.kind !== "subfeature") {
+			const normalizedSelection = choice.kind === "cantrip"
+				? (typeof selection === "string" ? {name: selection, source: choice.featureSource || "XPHB"} : selection)
+				: selection;
+			const characterLevel = this._getFeatureChoiceCharacterLevel(choice);
+			this.recordProgressionDecision?.({
+				type: choice.kind === "skill" ? "nestedSkill"
+					: choice.kind === "tool" ? "nestedTool"
+						: "nestedCantrip",
+				selection: normalizedSelection,
+				level: choice.level,
+				characterLevel,
+				className: choice.featureClass || "Acquisition",
+				classSource: choice.featureClassSource || choice.featureSource || "",
+				sourceDecisionKey: choice.sourceDecisionKey || null,
+				label: choice.featureName || `Feature ${choice.kind}`,
+				provenance: {
+					ownerType: "feature",
+					ownerUid: choice.featureId || choice.featureName || choice.kind,
+					acquisitionKey: choice.sourceDecisionKey || `${choice.featureId || choice.featureName || choice.kind}|${choice.level || 0}`,
+					selectedGrantKey: typeof normalizedSelection === "object"
+						? normalizedSelection.name || normalizedSelection.value || ""
+						: String(normalizedSelection),
+					grantKind: choice.kind,
+					grantKey: choice.featureName || choice.kind,
+					sourcePath: choice.featureName || choice.kind,
+					occurrence: 0,
+					pickSlot: 0,
+				},
+			});
+		}
 		this.removePendingFeatureChoice(choiceId);
 		return true;
 	}
@@ -18826,22 +19103,39 @@ class CharacterSheetState {
 				parentFeature: choice.featureName,
 			},
 		);
-		this.addFeature(built);
-
 		this._recordChosenSubfeature({
 			parent: choice.featureName,
 			parentSource: choice.featureSource || null,
 			parentClass: choice.featureClass || null,
 			parentClassSource: choice.featureClassSource || null,
 			level: choice.level != null ? choice.level : null,
+			characterLevel: this._getFeatureChoiceCharacterLevel(choice),
 			name: built.name,
 			source: built.source,
+			sourceDecisionKey: choice.sourceDecisionKey || null,
+		});
+
+		// Record the selected entity before materialising it, then stamp every
+		// resulting feature/resource/modifier with the child decision's source.
+		// This keeps descendant teardown source-specific when a parent has
+		// multiple selected siblings with overlapping names.
+		const childDecision = (this.getLevelHistory?.() || [])
+			.flatMap(entry => entry.decisions || [])
+			.concat(this.getCharacterBase?.()?.decisions || [])
+			.find(decision =>
+				decision.type === "nestedEntity"
+				&& decision.parentSemanticKey === (choice.sourceDecisionKey || null)
+				&& decision.selection?.name === built.name
+				&& decision.selection?.source === built.source,
+			);
+		this.addFeature(built, {
+			sourceDecisionKey: childDecision?.semanticKey || choice.sourceDecisionKey || null,
 		});
 
 		// Some chosen sub-features grant a further player choice (e.g. Divine Order:
 		// Thaumaturge — "one extra cantrip from the Cleric spell list"). Seed it into the
 		// same pending-choice queue so the drain surfaces it next.
-		this._seedSubfeatureFollowOnChoices(built, allSpells);
+		this._seedSubfeatureFollowOnChoices(built, allSpells, childDecision?.semanticKey || null);
 		return true;
 	}
 
@@ -18853,7 +19147,7 @@ class CharacterSheetState {
 	 * @param {Array|null} [allSpells]
 	 * @private
 	 */
-	_seedSubfeatureFollowOnChoices (feature, allSpells) {
+	_seedSubfeatureFollowOnChoices (feature, allSpells, sourceDecisionKey = null) {
 		const text = (Array.isArray(feature?.entries) ? feature.entries.filter(e => typeof e === "string").join(" ") : "")
 			|| (typeof feature?.description === "string" ? feature.description : "");
 		if (!text) return;
@@ -18871,9 +19165,13 @@ class CharacterSheetState {
 			this.addPendingFeatureChoice({
 				featureName: feature.name,
 				featureId: feature.id || feature.name,
+				featureClass: feature.className,
+				featureClassSource: feature.classSource,
+				level: feature.level,
 				kind: "cantrip",
 				options,
 				count: 1,
+				...(sourceDecisionKey ? {sourceDecisionKey} : {}),
 			});
 		}
 	}
@@ -18902,14 +19200,39 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.chosenSubfeatures)) this._data.chosenSubfeatures = [];
 		const key = this._chosenSubfeatureKey(rec);
 		if (this._data.chosenSubfeatures.some(r => this._chosenSubfeatureKey(r) === key)) return;
-		this._data.chosenSubfeatures.push({
+		const stored = {
 			parent: rec.parent || null,
 			parentSource: rec.parentSource || null,
 			parentClass: rec.parentClass || null,
 			parentClassSource: rec.parentClassSource || null,
 			level: rec.level != null ? rec.level : null,
+			...(rec.characterLevel != null ? {characterLevel: rec.characterLevel} : {}),
 			name: rec.name,
 			source: rec.source || null,
+			...(rec.sourceDecisionKey ? {sourceDecisionKey: rec.sourceDecisionKey} : {}),
+		};
+		this._data.chosenSubfeatures.push(stored);
+		this.recordProgressionDecision?.({
+			type: "nestedEntity",
+			selection: {name: stored.name, source: stored.source},
+			level: stored.level,
+			characterLevel: rec.characterLevel ?? rec.level,
+			className: stored.parentClass || "Acquisition",
+			classSource: stored.parentClassSource || stored.parentSource || "",
+			sourceDecisionKey: stored.sourceDecisionKey || null,
+			parentSemanticKey: stored.sourceDecisionKey || null,
+			label: stored.parent || "Structured choice",
+			provenance: {
+				ownerType: "feature",
+				ownerUid: `${stored.parent || "choice"}|${stored.parentSource || ""}|${stored.level ?? ""}`,
+				acquisitionKey: `${stored.parent || "choice"}|${stored.parentSource || ""}|${stored.level ?? ""}`,
+				selectedGrantKey: `${stored.name}|${stored.source || ""}`,
+				grantKind: "nestedEntity",
+				grantKey: stored.parent || "Structured choice",
+				sourcePath: stored.parent || "Structured choice",
+				occurrence: 0,
+				pickSlot: 0,
+			},
 		});
 	}
 
@@ -19004,16 +19327,27 @@ class CharacterSheetState {
 				sourceDecisionKey: parentInfo.sourceDecisionKey,
 			},
 		);
-		this.addFeature(built, {sourceDecisionKey: parentInfo.sourceDecisionKey});
 		this._recordChosenSubfeature({
 			parent: parentInfo.parent,
 			parentSource: parentInfo.parentSource || null,
 			parentClass: parentInfo.parentClass || null,
 			parentClassSource: parentInfo.parentClassSource || null,
 			level: parentInfo.level != null ? parentInfo.level : null,
+			characterLevel: parentInfo.characterLevel ?? parentInfo.level,
 			name: built.name,
 			source: built.source,
+			sourceDecisionKey: parentInfo.sourceDecisionKey || null,
 		});
+		const childDecision = (this.getLevelHistory?.() || [])
+			.flatMap(entry => entry.decisions || [])
+			.concat(this.getCharacterBase?.()?.decisions || [])
+			.find(decision =>
+				decision.type === "nestedEntity"
+				&& decision.parentSemanticKey === (parentInfo.sourceDecisionKey || null)
+				&& decision.selection?.name === built.name
+				&& decision.selection?.source === built.source,
+			);
+		this.addFeature(built, {sourceDecisionKey: childDecision?.semanticKey || parentInfo.sourceDecisionKey});
 		return built;
 	}
 
@@ -30874,6 +31208,18 @@ class CharacterSheetState {
 				appliedEffects.push(result);
 			}
 		});
+
+		// Rebuild prose-derived effects for acquired class/subclass features.  These
+		// effects are intentionally applied when a feature is added, but a class
+		// rebuild first clears all class-feature-owned state and the calculation
+		// registry cannot know about arbitrary data prose (for example SCAG Arcane
+		// Initiate's Arcana proficiency).  Replaying only the parser is safe here:
+		// it does not add features, spells, resources, or pending choices, and the
+		// class-feature source marker makes the pass idempotent and tear-down-safe.
+		for (const feature of this._data.features || []) {
+			if (!CharacterSheetState._isClassFeatureEffectSource(feature)) continue;
+			this._processFeatureModifiers(feature, feature.id);
+		}
 
 		// Store applied effects for debugging/display
 		this._data.appliedClassFeatureEffects = appliedEffects;
@@ -47467,8 +47813,13 @@ class CharacterSheetState {
 	 *   CHOICE (e.g. Arcane Archer Lore's "Arcana or Nature"); skip auto-granting them.
 	 */
 	_processFeatureModifiers (feature, featureId, opts = {}) {
-		const featureText = CharacterSheetState._featureTextFromEntries(feature)
-			|| (typeof feature.description === "string" ? feature.description : "");
+		// Prefer rendered descriptions when available. Raw entries retain tags such
+		// as `{@skill Arcana}`, which intentionally do not match the plain-text
+		// proficiency parser; the rendered form carries the visible skill name.
+		// Keep the entries fallback for synthetic/homebrew feature objects that have
+		// not passed through the renderer.
+		const featureText = (typeof feature.description === "string" ? feature.description : "")
+			|| CharacterSheetState._featureTextFromEntries(feature);
 		if (!featureText) return;
 		const claimedSkills = opts.claimedSkills;
 
@@ -47552,7 +47903,11 @@ class CharacterSheetState {
 					if (claimedSkills?.has(profTarget)) return; // handled as a player choice
 					const currentLevel = this.getSkillProficiency(profTarget);
 					if (mod.value > currentLevel) {
-						this.setSkillProficiency(profTarget, mod.value);
+						if (CharacterSheetState._isClassFeatureEffectSource(feature)) {
+							this._addClassFeatureSkillProficiency(profTarget, mod.value);
+						} else {
+							this.setSkillProficiency(profTarget, mod.value);
+						}
 					}
 				} else if (profType === "save") {
 					if (!this._data.saveProficiencies.includes(profTarget)) {
@@ -47649,7 +48004,11 @@ class CharacterSheetState {
 					equalToWalk: true,
 				};
 				if (mod.conditional) modifierData.conditional = mod.conditional;
-				this.addNamedModifier(modifierData);
+				if (CharacterSheetState._isClassFeatureEffectSource(feature)) {
+					this._addClassFeatureModifier(modifierData);
+				} else {
+					this.addNamedModifier(modifierData);
+				}
 				return;
 			}
 
@@ -55018,6 +55377,7 @@ class CharacterSheetState {
 		// Source tracking
 		if (modifier.sourceFeatureId) newModifier.sourceFeatureId = modifier.sourceFeatureId;
 		if (modifier.sourceType) newModifier.sourceType = modifier.sourceType;
+		if (modifier.sourceDecisionKey) newModifier.sourceDecisionKey = modifier.sourceDecisionKey;
 		if (modifier.duration) {
 			newModifier.duration = modifier.duration;
 			if (this._data.inCombat) {
@@ -55095,6 +55455,17 @@ class CharacterSheetState {
 		this._data.namedModifiers.push(newModifier);
 		this._recalculateCustomModifiers();
 		return id;
+	}
+
+	removeModifiersBySourceDecision (sourceDecisionKey) {
+		if (!sourceDecisionKey) return 0;
+		const before = (this._data.namedModifiers || []).length;
+		this._data.namedModifiers = (this._data.namedModifiers || [])
+			.filter(modifier => modifier.sourceDecisionKey !== sourceDecisionKey);
+		this._data.modifiers = (this._data.modifiers || [])
+			.filter(modifier => modifier.sourceDecisionKey !== sourceDecisionKey);
+		if (this._data.namedModifiers.length !== before) this._recalculateCustomModifiers();
+		return before - this._data.namedModifiers.length;
 	}
 
 	/**
