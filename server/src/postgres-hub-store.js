@@ -10752,7 +10752,7 @@ export class PostgresHubStore {
 				client.release();
 			}
 		}
-		const [account, identities, sessions, memberships, campaigns, characters, entitlements, audit, multiTargetParents] = await Promise.all([
+		const [account, identities, sessions, memberships, campaigns, characters, entitlements, audit] = await Promise.all([
 			this._pool.query(`SELECT id, display_name, status, deletion_requested_at, purge_after, created_at, updated_at FROM hub.accounts WHERE id = $1`, [accountId]),
 			this._pool.query(`
 				SELECT
@@ -10795,43 +10795,11 @@ export class PostgresHubStore {
 						action LIKE 'account.entitlement.%'
 						AND details->>'targetAccountId' = $1::text
 					)
-				ORDER BY created_at
-			`, [accountId]),
-			this._pool.query(`
-				SELECT operation.*,
-					CASE WHEN membership.status = 'active' THEN membership.role ELSE 'player' END AS viewer_role
-				FROM hub.semantic_operations operation
-				LEFT JOIN hub.memberships membership
-					ON membership.campaign_id = operation.campaign_id
-					AND membership.account_id = $1
-				WHERE operation.target_set_version = 1
-					AND (
-						operation.origin_actor_account_id = $1
-						OR EXISTS (
-							SELECT 1
-							FROM hub.semantic_operation_targets target
-							WHERE target.operation_id = operation.id
-								AND target.target_owner_account_id_at_proposal = $1
-						)
-					)
-				ORDER BY operation.created_at, operation.id
+					ORDER BY created_at
 			`, [accountId]),
 		]);
 		if (!account.rowCount) throw new HubStoreError("ACCOUNT_NOT_FOUND", `Account was not found.`, {status: 404});
-		const multiTargetOperations = await Promise.all(multiTargetParents.rows.map(async row => {
-			const operation = this._getSemanticOperation(row);
-			const [targets, finalization] = await Promise.all([
-				this._pGetMultiTargetTargets({client: this._pool, operationId: operation.id}),
-				this._pGetMultiTargetFinalization({client: this._pool, operationId: operation.id}),
-			]);
-			return this._getMultiTargetOperationView({
-				operation,
-				targets,
-				finalization,
-				accountId,
-				role: row.viewer_role || "player",
-			});
-		}));
+		const multiTargetOperations = await this._pExportMultiTargetOperations({accountId});
 		return {
 			exportedAt: new Date().toISOString(),
 			account: getAccount(account.rows[0]),
@@ -10846,6 +10814,62 @@ export class PostgresHubStore {
 			multiTargetOperations,
 			auditEntries: audit.rows.map(entry => redactEntitlementAuditForAccount({audit: entry, accountId})),
 		};
+	}
+
+	async _pExportMultiTargetOperations ({accountId}) {
+		for (let attempt = 0; attempt < 2; ++attempt) {
+			const client = await this._pool.connect();
+			try {
+				await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+				const membershipResult = await client.query(`
+					SELECT campaign_id, account_id, role, status
+					FROM hub.memberships
+					WHERE account_id = $1
+					ORDER BY campaign_id, account_id
+					FOR SHARE
+				`, [accountId]);
+				const membershipsByCampaign = new Map(membershipResult.rows
+					.map(row => [row.campaign_id, getMembership(row)]));
+				const parentResult = await client.query(`
+					SELECT operation.*
+					FROM hub.semantic_operations operation
+					WHERE operation.target_set_version = 1
+						AND (
+							operation.origin_actor_account_id = $1
+							OR EXISTS (
+								SELECT 1
+								FROM hub.semantic_operation_targets target
+								WHERE target.operation_id = operation.id
+									AND target.target_owner_account_id_at_proposal = $1
+							)
+						)
+					ORDER BY operation.created_at, operation.id
+				`, [accountId]);
+				const records = [];
+				for (const row of parentResult.rows) {
+					const operation = this._getSemanticOperation(row);
+					const targets = await this._pGetMultiTargetTargets({client, operationId: operation.id});
+					const finalization = await this._pGetMultiTargetFinalization({client, operationId: operation.id});
+					const membership = membershipsByCampaign.get(operation.campaignId);
+					records.push(this._getMultiTargetOperationView({
+						operation,
+						targets,
+						finalization,
+						accountId,
+						role: membership?.status === "active" ? membership.role : "player",
+					}));
+				}
+				await client.query("COMMIT");
+				return records;
+			} catch (error) {
+				await client.query("ROLLBACK");
+				if (error?.code === "40001" && attempt === 0) continue;
+				throw error;
+			} finally {
+				client.release();
+			}
+		}
+		throw new Error(`Multi-target account export retry exhausted.`);
 	}
 
 	async pArchiveCampaign ({accountId, campaignId, idempotencyKey}) {

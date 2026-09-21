@@ -399,6 +399,101 @@ describePostgres("Campaign Hub multi-target authority (real PostgreSQL)", () => 
 		expect(serializedRemovedExport).not.toContain(proposed.operation.targets[0].invitationId);
 	});
 
+	test("serializes export visibility before concurrent membership removal", async () => {
+		const ctx = await pFixture({targetCount: 2, sameTargetOwner: false});
+		const proposed = await ctx.pPropose();
+		for (let index = 0; index < proposed.operation.targets.length; ++index) {
+			await ctx.pRespond({
+				operationId: proposed.operation.operationId,
+				invitationId: proposed.operation.targets[index].invitationId,
+				actor: ctx.targetOwners[index],
+			});
+		}
+		await ctx.pFinalize({
+			operationId: proposed.operation.operationId,
+			selectedInvitationIds: proposed.operation.targets.map(target => target.invitationId),
+		});
+		const membership = await store.pGetMembership({
+			accountId: ctx.targetOwners[1].account.id,
+			campaignId: ctx.campaign.id,
+		});
+		await store.pChangeMemberRole({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: membership.id,
+			role: "co_dm",
+			idempotencyKey: crypto.randomUUID(),
+		});
+
+		let resolveChildRead;
+		const childReadReached = new Promise(resolve => resolveChildRead = resolve);
+		let resumeChildRead;
+		const childReadResume = new Promise(resolve => resumeChildRead = resolve);
+		let isPaused = false;
+		const pMaybePauseChildRead = async (query, args, fnQuery) => {
+			const sql = typeof query === "string" ? query : query?.text || "";
+			if (
+				!isPaused
+				&& sql.includes("FROM hub.semantic_operation_targets")
+				&& sql.includes("WHERE operation_id = $1")
+			) {
+				isPaused = true;
+				resolveChildRead();
+				await childReadResume;
+			}
+			return fnQuery(query, ...args);
+		};
+		const barrierPool = {
+			on: (...args) => pool.on(...args),
+			query: (query, ...args) => pMaybePauseChildRead(
+				query,
+				args,
+				(...queryArgs) => pool.query(...queryArgs),
+			),
+			connect: async () => {
+				const client = await pool.connect();
+				return {
+					query: (query, ...args) => pMaybePauseChildRead(
+						query,
+						args,
+						(...queryArgs) => client.query(...queryArgs),
+					),
+					release: () => client.release(),
+				};
+			},
+		};
+		const barrierStore = new PostgresHubStore({
+			pool: barrierPool,
+			semanticOperationRegistry: getRegistry(),
+			multiTargetOperationsEnabled: true,
+		});
+		const exportPromise = barrierStore.pExportAccountData({
+			accountId: ctx.targetOwners[1].account.id,
+		});
+		await childReadReached;
+		let isRemovalSettled = false;
+		const removalPromise = store.pRemoveMember({
+			accountId: ctx.dm.account.id,
+			campaignId: ctx.campaign.id,
+			membershipId: membership.id,
+			idempotencyKey: crypto.randomUUID(),
+		}).finally(() => isRemovalSettled = true);
+		await new Promise(resolve => setTimeout(resolve, 50));
+		expect(isRemovalSettled).toBe(false);
+		resumeChildRead();
+		const activeExport = await exportPromise;
+		expect(activeExport.multiTargetOperations[0].targets).toHaveLength(2);
+		await removalPromise;
+
+		const removedExport = await store.pExportAccountData({
+			accountId: ctx.targetOwners[1].account.id,
+		});
+		expect(removedExport.multiTargetOperations[0].targets).toEqual([
+			expect.objectContaining({invitationId: proposed.operation.targets[1].invitationId}),
+		]);
+		expect(removedExport.multiTargetOperations[0]).not.toHaveProperty("candidateCount");
+	});
+
 	test("fails protocols 3/4/5 and duplicate targets without workflow evidence", async () => {
 		const ctx = await pFixture({targetCount: 1});
 		for (const protocolVersion of ["3", "4", "5"]) {
