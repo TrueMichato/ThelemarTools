@@ -318,7 +318,10 @@ their own list rules.
 If real level-specific choices are missing, Review groups unresolved spell
 decisions into one repair item. The spell-repair flow prevents assigning the
 same permanent spell to two levels and keeps partially completed work in the
-candidate when the player chooses **Finish later**. Pre-manifest characters
+candidate when the player chooses **Finish later**. A historical spell which is
+no longer legal remains visible and selected until the player removes it; the
+repair cannot finish while such a selection remains, and replacing it preserves
+every still-legal spell in the repertoire. Pre-manifest characters
 which never used class spell tracking retain empty spell rows as deferred; they
 are not forced to invent twenty levels of historical spell picks before
 applying an unrelated change.

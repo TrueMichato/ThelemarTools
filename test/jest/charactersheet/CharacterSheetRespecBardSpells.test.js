@@ -4,9 +4,11 @@ import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
+import "../../../js/charactersheet/charactersheet-modal.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
 
 const CharacterSheetProgression = globalThis.CharacterSheetProgression;
+const CharacterSheetModal = globalThis.CharacterSheetModal;
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
 const CharacterSheetState = globalThis.CharacterSheetState;
 
@@ -138,6 +140,10 @@ function getSpellNames (state) {
 	return state.getSpellsKnown().map(it => it.name).sort();
 }
 
+function getDescendants (root) {
+	return [root, ...(root?._children || []).flatMap(getDescendants)];
+}
+
 describe("Character Sheet Respec cumulative Bard spell choices", () => {
 	it("replaces Juli-style false per-level reconstruction with stable cumulative repertoire decisions", () => {
 		const state = getState();
@@ -216,6 +222,66 @@ describe("Character Sheet Respec cumulative Bard spell choices", () => {
 			options: ["arcana", "legacy lore"],
 			invalidOptionKeys: new Set(["legacy lore"]),
 		});
+	});
+
+	it("lets the repair flow replace an illegal historical cantrip instead of silently restaging it", async () => {
+		const legal = BARD_SPELLS.at(-1);
+		const replacement = spell("Bright Note", 0);
+		const invalid = spell("Borrowed Cantrip", 0, "Cleric");
+		const bard = getBard({cantripProgression: [2, 2, 2]});
+		const state = getState({bard, cantrips: [legal, invalid]});
+		const spells = [...BARD_SPELLS, replacement, invalid];
+		state.setSpellData(spells);
+		const page = getPage(state, bard);
+		page.getSpells = () => copy(spells);
+		page.getFilteredSpellData = () => copy(spells);
+		const respec = new CharacterSheetRespec({page, state});
+		respec._engine.begin();
+		respec._state = respec._engine.state;
+		respec.render = jest.fn();
+		const decision = respec._engine.manifest.decisions.find(it => it.type === "cantrips");
+		expect(decision).toMatchObject({count: 2, status: "invalid"});
+
+		const modalInner = e_({tag: "div"});
+		const originalPGetShow = CharacterSheetModal.pGetShow;
+		CharacterSheetModal.pGetShow = async () => ({
+			eleModalInner: modalInner,
+			doClose: jest.fn(),
+		});
+
+		try {
+			await respec._showSpellRepairFlow([decision.id], jest.fn());
+			const rows = getDescendants(modalInner).filter(it => it._clazz?.includes("charsheet__respec-option"));
+			const invalidRow = rows.find(row => row._children?.[1]?.textContent?.includes("Borrowed Cantrip"));
+			const replacementRow = rows.find(row => row._children?.[1]?.textContent?.includes("Bright Note"));
+
+			expect(invalidRow?._children?.[1]?.textContent).toContain("currently selected, no longer legal");
+			expect(invalidRow?._children?.[0]?.checked).toBe(true);
+			invalidRow._children[0].checked = false;
+			invalidRow._children[0]._handlers.change();
+			replacementRow._children[0].checked = true;
+			replacementRow._children[0]._handlers.change();
+
+			const finish = getDescendants(modalInner).find(it => it.textContent === "Stage & Finish");
+			finish.click();
+			expect(respec._state.getCantrips().map(it => it.name).sort()).toEqual([legal.name, replacement.name].sort());
+			expect(respec._engine.getDecision(decision.id)).toMatchObject({
+				status: "resolved",
+				selection: expect.arrayContaining([
+					expect.objectContaining({name: legal.name}),
+					expect.objectContaining({name: replacement.name}),
+				]),
+			});
+			await respec._engine.apply();
+			expect(state.getCantrips().map(it => it.name).sort()).toEqual([legal.name, replacement.name].sort());
+
+			const loaded = new CharacterSheetState();
+			loaded.setSpellData(spells);
+			expect(loaded.loadFromJson(state.toJson())).not.toBe(false);
+			expect(loaded.getCantrips().map(it => it.name).sort()).toEqual([legal.name, replacement.name].sort());
+		} finally {
+			CharacterSheetModal.pGetShow = originalPGetShow;
+		}
 	});
 
 	it("reconfigures the cumulative repertoire with Cancel, Apply/reload, and one-step Undo", async () => {

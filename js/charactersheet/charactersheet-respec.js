@@ -249,8 +249,10 @@ class CharacterSheetRespec {
 				this.render();
 				return;
 			}
-			const options = this._getDecisionOptions(decision);
+			const legalOptions = this._getDecisionOptions(decision);
 			const current = Array.isArray(decision.selection) ? decision.selection : [];
+			const {options, invalidOptionKeys} = CharacterSheetRespec._getDecisionEditorOptions(legalOptions, current);
+			const legalOptionKeys = new Set(legalOptions.map(CharacterSheetRespec._getDecisionOptionKey));
 			const selected = new Map(current.map(value => [CharacterSheetRespec._getDecisionOptionKey(value), value]));
 			const usedByOtherDecisions = new Set((this._engine.manifest?.decisions || [])
 				.filter(other =>
@@ -272,9 +274,15 @@ class CharacterSheetRespec {
 			search.type = "search";
 			search.placeholder = "Search legal spells...";
 			search.setAttribute("aria-label", "Search legal spells");
-			const count = e_({tag: "div", clazz: "charsheet__respec-selection-count", txt: `${selected.size}/${decision.count} selected`});
+			const count = e_({tag: "div", clazz: "charsheet__respec-selection-count"});
 			const list = e_({tag: "div", clazz: "charsheet__respec-option-list"});
 			content.append(search, count, list);
+			let next;
+			const updateSelectionState = () => {
+				const invalidSelectedCount = [...selected.keys()].filter(key => !legalOptionKeys.has(key)).length;
+				count.textContent = `${selected.size}/${decision.count} selected${invalidSelectedCount ? ` · ${invalidSelectedCount} no longer legal` : ""}`;
+				if (next) next.disabled = selected.size !== decision.count || invalidSelectedCount > 0;
+			};
 
 			const renderOptions = () => {
 				list.innerHTML = "";
@@ -282,7 +290,8 @@ class CharacterSheetRespec {
 				const filtered = options.filter(option => CharacterSheetRespec._getDecisionOptionLabel(option).toLowerCase().includes(query));
 				filtered.slice(0, 150).forEach(option => {
 					const key = CharacterSheetRespec._getDecisionOptionKey(option);
-					const isUnavailable = usedByOtherDecisions.has(key) && !selected.has(key);
+					const isInvalid = invalidOptionKeys.has(key);
+					const isUnavailable = !isInvalid && usedByOtherDecisions.has(key) && !selected.has(key);
 					const row = e_({tag: "label", clazz: `charsheet__respec-option${isUnavailable ? " charsheet__respec-option--disabled" : ""}`});
 					const input = e_({tag: "input"});
 					input.type = decision.count === 1 ? "radio" : "checkbox";
@@ -298,12 +307,12 @@ class CharacterSheetRespec {
 							}
 							selected.set(key, CharacterSheetRespec._toDecisionSelectionValue(option));
 						} else selected.delete(key);
-						count.textContent = `${selected.size}/${decision.count} selected`;
+						updateSelectionState();
 						if (decision.count === 1) renderOptions();
 					});
 					row.append(input, e_({
 						tag: "span",
-						txt: `${CharacterSheetRespec._getDecisionOptionLabel(option)}${isUnavailable ? " · chosen at another level" : ""}`,
+						txt: `${CharacterSheetRespec._getDecisionOptionLabel(option)}${isInvalid ? " — currently selected, no longer legal" : (isUnavailable ? " · chosen at another level" : "")}`,
 					}));
 					list.append(row);
 				});
@@ -319,7 +328,7 @@ class CharacterSheetRespec {
 				closeParentModal?.();
 				this.render();
 			});
-			const next = e_({
+			next = e_({
 				tag: "button",
 				clazz: "ve-btn ve-btn-primary",
 				txt: ix === decisionIds.length - 1 ? "Stage & Finish" : "Stage & Next",
@@ -331,7 +340,6 @@ class CharacterSheetRespec {
 				}
 				const selection = [...selected.values()];
 				this._engine.stageGraphMutation(decision.id, selection, {
-					reverseParent: true,
 					apply: ({state}) => this._applyManifestSelectionMechanics(decision, selection, options, state),
 				});
 				ix++;
@@ -341,6 +349,7 @@ class CharacterSheetRespec {
 				this.render();
 				JqueryUtil.doToast({type: "success", content: "Spell progression repairs staged."});
 			});
+			updateSelectionState();
 			actions.append(cancel, next);
 			content.append(actions);
 			modalInner.append(content);
