@@ -108,7 +108,8 @@ responses, source-finalization consent for source-owned legs, collection expiry,
 source-selected subset, and one-cost/all-selected-leg atomic finalization. Reviewed multi-target healing
 templates may privately record a full-HP selected leg as applied/no-change while consuming the single source
 cost. **No multi-target production capability is implemented by Wave A0:** the design-only PR contains no
-migration; future additive migration 0010, protocol 6, routes, store methods, events, browser UX, and templates
+migration; A2 reserves migration 0010 for source-cost binding identity, while future additive multi-target
+migration 0011, protocol 6, routes, store methods, events, browser UX, and templates
 remain absent and default-off. The draft is held pending the physical game-day GO/NO-GO.
 
 The accepted design now also fixes bounded abuse/fairness limits (3 live collections/source character,
@@ -117,7 +118,7 @@ oldest-pending cursor pagination), intentional bounded DM/co-DM workflow observa
 fail-closed behavior across mutation/read/WebSocket/resync/replay. Schema is predecessor-readable before use,
 with cross-campaign source-account/target-owner caps serialized by ascending seed-10 quota locks before campaign
 authority. The first accepted proposal sets a permanent FK-independent usage marker; later normal rollback to a
-true pre-0010 binary is forbidden even after workflow cleanup and requires an aware bridge release unless a
+true pre-0011 binary is forbidden even after workflow cleanup and requires an A3-aware bridge release unless a
 separately reviewed destructive history/event/outbox/recovery export/purge is approved.
 
 V2-T9 Campaign Overview is shipped by PR #243. The page is now a role-adaptive pinned session brief centered on

@@ -121,14 +121,16 @@ Protocol v3 never resolves those legacy bodies. The disposable PostgreSQL stack 
 runtime role, boots the production image against required version 0009, and runs semantic role/replay/
 source-cost atomicity/concurrency/expiry/lifecycle persistence checks.
 
-ADR 0020 requires a future additive `0010_multi_target_semantic_operations.sql`, but Wave A0 intentionally adds
-neither that SQL file nor a migration-policy entry. When A3 authors it, the policy phase is `expand` and
-`previousAppCompatible: true` describes only schema-before-use: a true pre-0010 binary is operationally
+A2 migration 0010 is reserved as `0010_source_cost_binding_identity.sql` to repair
+shared/PostgreSQL resource-binding identity and ABA correctness. ADR 0020 therefore requires the following
+additive `0011_multi_target_semantic_operations.sql`; Wave A0 intentionally adds neither production SQL file nor
+a migration-policy entry. A3 migration 0011 has phase `expand`, and
+`previousAppCompatible: true` describes only schema-before-use: a true pre-0011 binary is operationally
 compatible only while the planned singleton `hub.semantic_multi_target_usage` marker is absent. The first
 accepted proposal inserts that marker transactionally; it has no FK to cleanable history and normal retention
-never deletes it. Once present, normal rollback must target a bridge/r10+ binary which understands
+never deletes it. Once present, normal rollback must target an A3-aware bridge binary which understands
 `target_set_version`, normalized target history, expiry, retention, purge cleanup, and the marker. A true
-pre-0010 rollback is blocked whenever the marker exists, regardless of current parent/child counts; destructive
+pre-0011 rollback is blocked whenever the marker exists, regardless of current parent/child counts; destructive
 history/event/outbox/recovery export and purge, with marker deletion last, requires separate review and is not
 normal rollback. Runtime receives only SELECT/INSERT on the marker, backup receives SELECT, and restore/preflight
 tests must preserve it.
