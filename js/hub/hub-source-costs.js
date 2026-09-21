@@ -267,13 +267,18 @@ function hasUnsafeZeroQuantityLink ({data, entry}) {
 	const clone = structuredClone(data);
 	clone.inventory = (Array.isArray(clone.inventory) ? clone.inventory : []).filter(it => it.id !== entry.id);
 	const itemId = getStoredResourceId(entry.id);
+	const isNormalizedReference = value => typeof value === "string"
+		&& (
+			getStoredResourceId(value) === itemId
+			|| (value.startsWith("item:") && getStoredResourceId(value.slice(5)) === itemId)
+		);
 	const hasNormalizedReference = value => {
-		if (typeof value === "string") {
-			return getStoredResourceId(value) === itemId
-				|| (value.startsWith("item:") && getStoredResourceId(value.slice(5)) === itemId);
-		}
+		if (typeof value === "string") return isNormalizedReference(value);
 		if (Array.isArray(value)) return value.some(hasNormalizedReference);
-		if (isPlainObject(value)) return Object.values(value).some(hasNormalizedReference);
+		if (isPlainObject(value)) {
+			return Object.entries(value)
+				.some(([key, child]) => isNormalizedReference(key) || hasNormalizedReference(child));
+		}
 		return false;
 	};
 	return hasNormalizedReference(clone);

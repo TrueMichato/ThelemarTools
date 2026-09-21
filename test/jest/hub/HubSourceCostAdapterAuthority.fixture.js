@@ -56,6 +56,18 @@ export const ZERO_QUANTITY_BLOCKER_CASES = Object.freeze([
 		mutate: data => data.inventory[0].containerId = ` ${RESOURCE_IDS.quantityEntry.toUpperCase()} `,
 	},
 	{
+		label: "unknown raw UUID object key",
+		mutate: data => data.customLinks = {
+			[`\u00A0${RESOURCE_IDS.quantityEntry.toUpperCase()}\uFEFF`]: true,
+		},
+	},
+	{
+		label: "unknown item-prefixed UUID object key",
+		mutate: data => data.customLinks = {
+			[`item:\u00A0${RESOURCE_IDS.quantityEntry.toUpperCase()}\uFEFF`]: true,
+		},
+	},
+	{
 		label: "selectedAmmo key",
 		mutate: data => data.selectedAmmo = {[RESOURCE_IDS.quantityEntry]: "attack"},
 	},
@@ -159,6 +171,12 @@ const CASE_ITEM_CHARGE = Object.freeze({
 	itemRef: Object.freeze({uid: "case authority focus|phb"}),
 	amount: 1,
 });
+const CASE_ITEM_QUANTITY = Object.freeze({
+	kind: "inventory_quantity",
+	inventoryEntryId: RESOURCE_IDS.caseItem,
+	itemRef: Object.freeze({uid: "case authority focus|phb"}),
+	amount: 1,
+});
 const CASE_FEATURE_USE = Object.freeze({
 	kind: "feature_use",
 	resourceId: RESOURCE_IDS.caseResource,
@@ -196,6 +214,11 @@ export const COST_CASES = Object.freeze([
 		label: "case-distinct non-UUID item charge",
 		templateId: "test.wave-a2.case-item-charge",
 		sourceCost: {version: 1, components: [CASE_ITEM_CHARGE]},
+	},
+	{
+		label: "case-distinct non-UUID inventory quantity",
+		templateId: "test.wave-a2.case-item-quantity",
+		sourceCost: {version: 1, components: [CASE_ITEM_QUANTITY]},
 	},
 	{
 		label: "case-distinct non-UUID feature use",
@@ -440,6 +463,9 @@ export function getExpectedSourceDataAfterCost ({templateId, data}) {
 			break;
 		case "test.wave-a2.case-item-charge":
 			expected.inventory[2].item.chargesCurrent--;
+			break;
+		case "test.wave-a2.case-item-quantity":
+			expected.inventory.splice(2, 1);
 			break;
 		case "test.wave-a2.case-feature-use":
 			expected.resources[1].current--;

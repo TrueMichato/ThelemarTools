@@ -479,6 +479,44 @@ describePostgres("Wave A2 source-cost adapter authority (PostgreSQL)", () => {
 		)).toBe(false);
 	});
 
+	test.each([
+		{label: "raw non-UUID object key", key: RESOURCE_IDS.caseItem},
+		{label: "item-prefixed non-UUID object key", key: `item:${RESOURCE_IDS.caseItem}`},
+	])("fails case-sensitive full-stack removal atomically for $label", async ({key}) => {
+		const ctx = await pCreateSourceCostAdapterScenario({store});
+		const proposed = await ctx.pPropose({templateId: "test.wave-a2.case-item-quantity"});
+		const targetBefore = await ctx.pGetTarget();
+		const tamperedSource = await pTamperSourceAfterProposal({
+			ctx,
+			operationId: proposed.operation.operationId,
+			mutate: data => data.customLinks = {[key]: true},
+		});
+
+		const resolved = await ctx.pResolve({operationId: proposed.operation.operationId});
+		expect(resolved.operation).toMatchObject({
+			status: "failed",
+			sourceCostState: "not_consumed",
+			failureCode: "unavailable",
+		});
+		expect(await ctx.pGetSource()).toEqual(tamperedSource);
+		expect(await ctx.pGetTarget()).toEqual(targetBefore);
+	});
+
+	test("does not treat an unrelated or differently cased object key as a case-sensitive item reference", async () => {
+		const sourceData = getSourceCharacterData();
+		sourceData.customLinks = {
+			[RESOURCE_IDS.caseItemSibling]: true,
+			"unrelated-key": true,
+		};
+		const ctx = await pCreateSourceCostAdapterScenario({store, sourceData});
+		const proposed = await ctx.pPropose({templateId: "test.wave-a2.case-item-quantity"});
+		const resolved = await ctx.pResolve({operationId: proposed.operation.operationId});
+
+		expect(resolved.operation.status).toBe("applied");
+		expect((await ctx.pGetSource()).data.inventory.some(entry => entry.id === RESOURCE_IDS.caseItem)).toBe(false);
+		expect((await ctx.pGetSource()).data.inventory.some(entry => entry.id === RESOURCE_IDS.caseItemSibling)).toBe(true);
+	});
+
 	test.each(UNKNOWN_WRAPPER_FIELD_CASES)(
 		"fails full-stack removal atomically for non-default $label wrapper metadata",
 		async ({field, unsafe}) => {

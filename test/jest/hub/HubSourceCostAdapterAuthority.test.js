@@ -495,6 +495,43 @@ describe("Wave A2 source-cost adapter authority (MemoryHubStore)", () => {
 		)).toBe(false);
 	});
 
+	it.each([
+		{label: "raw non-UUID object key", key: RESOURCE_IDS.caseItem},
+		{label: "item-prefixed non-UUID object key", key: `item:${RESOURCE_IDS.caseItem}`},
+	])("fails case-sensitive full-stack removal atomically for $label", async ({key}) => {
+		const store = createStore();
+		const ctx = await pCreateSourceCostAdapterScenario({store});
+		const proposed = await ctx.pPropose({templateId: "test.wave-a2.case-item-quantity"});
+		const storedSource = store._characters.get(ctx.source.id);
+		storedSource.data.customLinks = {[key]: true};
+		const tamperedSource = structuredClone(await ctx.pGetSource());
+		const targetBefore = await ctx.pGetTarget();
+
+		const resolved = await ctx.pResolve({operationId: proposed.operation.operationId});
+		expect(resolved.operation).toMatchObject({
+			status: "failed",
+			sourceCostState: "not_consumed",
+			failureCode: "unavailable",
+		});
+		expect(await ctx.pGetSource()).toEqual(tamperedSource);
+		expect(await ctx.pGetTarget()).toEqual(targetBefore);
+	});
+
+	it("does not treat an unrelated or differently cased object key as a case-sensitive item reference", async () => {
+		const sourceData = getSourceCharacterData();
+		sourceData.customLinks = {
+			[RESOURCE_IDS.caseItemSibling]: true,
+			"unrelated-key": true,
+		};
+		const ctx = await pCreateSourceCostAdapterScenario({store: createStore(), sourceData});
+		const proposed = await ctx.pPropose({templateId: "test.wave-a2.case-item-quantity"});
+		const resolved = await ctx.pResolve({operationId: proposed.operation.operationId});
+
+		expect(resolved.operation.status).toBe("applied");
+		expect((await ctx.pGetSource()).data.inventory.some(entry => entry.id === RESOURCE_IDS.caseItem)).toBe(false);
+		expect((await ctx.pGetSource()).data.inventory.some(entry => entry.id === RESOURCE_IDS.caseItemSibling)).toBe(true);
+	});
+
 	it.each(UNKNOWN_WRAPPER_FIELD_CASES)(
 		"fails full-stack removal atomically for non-default $label wrapper metadata",
 		async ({field, unsafe}) => {

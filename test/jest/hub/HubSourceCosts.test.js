@@ -273,6 +273,14 @@ describe("Hub shared source-cost contract", () => {
 					},
 				],
 			},
+			{
+				inventory: [{...safe.inventory[0], id: paddedEntryId}],
+				customLinks: {[`\u00A0${entryId.toUpperCase()}\uFEFF`]: true},
+			},
+			{
+				inventory: [{...safe.inventory[0], id: paddedEntryId}],
+				customLinks: {[`item:\u00A0${entryId.toUpperCase()}\uFEFF`]: true},
+			},
 			{inventory: [{...safe.inventory[0], id: paddedEntryId}], selectedAmmo: {[entryId]: true}},
 			{inventory: [{...safe.inventory[0], id: paddedEntryId}], selectedAmmo: {attack: entryId}},
 			{inventory: [{...safe.inventory[0], id: paddedEntryId}], ammunitionConsumed: {[entryId]: 0}},
@@ -297,6 +305,44 @@ describe("Hub shared source-cost contract", () => {
 			expect(() => applySourceCost({data, sourceCost}))
 				.toThrow(expect.objectContaining({code: "SOURCE_COST_UNAVAILABLE"}));
 		}
+
+		expect(applySourceCost({
+			data: {
+				inventory: [{...safe.inventory[0], id: paddedEntryId}],
+				customLinks: {"unrelated-key": true},
+			},
+			sourceCost,
+		}).data.inventory).toEqual([]);
+
+		const caseSensitiveCost = {
+			version: 1,
+			components: [{
+				kind: "inventory_quantity",
+				inventoryEntryId: "CaseItem",
+				itemRef: {uid: "case authority focus|phb"},
+				amount: 1,
+			}],
+		};
+		const caseSensitiveEntry = {
+			id: "CaseItem",
+			item: {name: "Case Authority Focus", source: "PHB", containedItems: [], iounSet: []},
+			quantity: 1,
+			equipped: false,
+			attuned: false,
+		};
+		for (const customLinks of [
+			{CaseItem: true},
+			{"item:CaseItem": true},
+		]) {
+			expect(() => applySourceCost({
+				data: {inventory: [caseSensitiveEntry], customLinks},
+				sourceCost: caseSensitiveCost,
+			})).toThrow(expect.objectContaining({code: "SOURCE_COST_UNAVAILABLE"}));
+		}
+		expect(applySourceCost({
+			data: {inventory: [caseSensitiveEntry], customLinks: {caseitem: true, unrelated: true}},
+			sourceCost: caseSensitiveCost,
+		}).data.inventory).toEqual([]);
 	});
 
 	it("resolves every component before staging any mutation", () => {
