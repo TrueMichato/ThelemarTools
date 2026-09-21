@@ -1,7 +1,7 @@
 # Campaign Hub living roadmap
 
 > **Status:** Authoritative living roadmap
-> **Last reviewed:** 2026-09-20
+> **Last reviewed:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
 This is the single source of truth for Campaign Hub delivery status, sequencing, dependencies, and acceptance
@@ -39,6 +39,7 @@ rather than inferring deployment or enablement from merged code.
 | **active** | V2-T4 party inventory, carry, and item awards | Player stash/direct-transfer and DM atomic-award slices are implemented, with shared carry summaries and enforced carry/content boundaries; broader unified party/DM inventory UX remains |
 | **active** | V2-T6 campaign policy | Source/species/edition and carry/encumbrance enforcement are implemented; `tgtt.enabled`, exhaustion, jumping, linguistics, and critical-roll behavior remain Advisory |
 | **active** | V2-T7 player targeting | The one-player PHB/XPHB Cure Wounds slice is implemented; broader spells, abilities, resources, party/multi-target, and NPC/monster targeting remain |
+| **next** | Wave A0 multi-target operation model | [ADR 0020](adr/0020-consented-multi-target-operations.md) is accepted as a design/proof contract; implementation and capability remain absent/default-off, and this draft is held pending the physical game-day GO/NO-GO |
 | **active** | Remaining V2 scope | V2-T3 still requires broader Character Sheet effect implementation and enablement; the remaining T4/T7 scope and V2-T8 provider rollout retain their own acceptance gates |
 | **active** | r9 invite-gated identity | ADR 0018/migration 0008 foundation, ADR 0019/migration 0009 provider-neutral entitlements, and ADR 0014 account link/unlink implementation are complete; entitlement, identity-linking, new-account-admission, and Discord/Google enablement switches remain default-off until their separate release preflights |
 | **deferred** | Horizons A-F and other exclusions | Retained under [Deferred horizons](#deferred-horizons-a-f) and [Explicitly deferred](#explicitly-deferred) |
@@ -437,6 +438,29 @@ Still to deliver before the whole track is shipped:
 - multi-target and party resolution, NPC/monster targets, broader player abilities/spells and source-resource
   kinds, and supported DM target-set workflows;
 - partial-resolution semantics for target sets larger than one.
+
+Wave A0 now accepts the narrower [ADR 0020](adr/0020-consented-multi-target-operations.md) contract for the first
+multi-target implementation. Protocol-6 version 1 caps the immutable proposal at 1-8 ordered unique
+player-character targets because every leg has independent consent, event, lock, lifecycle, and reconciliation
+work; a future measured contract version may raise that limit. Each target owner responds through a unique
+opaque invitation id. Source-owned legs use source finalization as consent and remain deselectable. After all
+responses are terminal or collection closes, the source submits one exact ordered approved/current subset.
+Empty selection is explicit cancellation. One source cost and every selected leg then commit atomically, or none.
+Reviewed healing templates may set `allowTargetNoOp=true`: a selected full-HP target records an applied no-op
+without revealing that target state to the source, while the single source cost is still consumed.
+
+This is **planned, not implemented**. Migration 0010, protocol 6, routes, both stores, events, capability
+advertisement, Character Sheet UX, and templates remain future A1-A5 work. The sequence is:
+
+1. **A1:** DM typed effects.
+2. **A2:** generalized source-cost authority.
+3. **A3:** normalized migration 0010 and server state machine.
+4. **A4:** Character Sheet proposal/response/finalization UX and per-leg reconciliation.
+5. **A5:** Healing Word and Mass Healing Word templates.
+
+NPC/monster targets, arbitrary prose, damage combat resolution, offline writes, repeated partial commits,
+per-target costs, and post-proposal target additions remain deferred. Wave A0 may be reviewed as a draft but is
+held from merge until the coordinator records the physical game-day GO/NO-GO.
 
 Acceptance:
 

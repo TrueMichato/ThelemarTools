@@ -1,7 +1,7 @@
 # Campaign Hub event and audit catalog
 
 > **Status:** Current protocol-v5 catalog
-> **Last verified:** 2026-09-20
+> **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
 ## Domain event envelope
@@ -68,6 +68,29 @@ structured effects and the protocol-v3 API cannot apply them.
 Account entitlement grant/revoke and configured-operator reconciliation are deliberately absent from this
 campaign domain-event catalog. They append account-scoped audit entries only and never allocate a campaign
 sequence or outbox row.
+
+### Planned protocol-6 multi-target events
+
+The following [ADR 0020](adr/0020-consented-multi-target-operations.md) events are **planned, not implemented**.
+They must not be emitted or accepted until migration 0010, both stores, protocol 6, and the default-off capability
+land.
+
+| Planned event | Audience | Minimal payload and ordering |
+|---|---|---|
+| `character.multi_operation.proposed` | source owner + DM/co-DM | operation id, response/finalization deadlines, candidate count, safe source/effect summary; never the complete private target set |
+| `character.multi_operation.target_requested` | that target owner + DM/co-DM | operation id, opaque invitation id, ordinal, safe source/target/effect snapshots, collection deadline |
+| `character.multi_operation.target_responded` | that target owner + DM/co-DM | operation id, invitation id, approved/rejected/expired/revoked state; no rationale or target truth; source receives a separate coarse status event |
+| `character.multi_operation.ready` | source owner + DM/co-DM | operation id and coarse candidate statuses after every response is terminal |
+| `character.multi_operation.source_cost_consumed` | source owner + DM/co-DM | operation id, stable leg id, closed source cost, resulting source revision; first mutation event unless self-target is combined |
+| `character.multi_operation.target_applied` | that target owner + DM/co-DM | operation id, invitation id, stable target/combined leg id, normalized target operation, resulting target revision when changed, and bounded own-leg changed flag; target events follow immutable proposal order |
+| `character.multi_operation.cancelled` / `.expired` / `.failed` | authorization-shaped participants | operation id, terminal state, generic reason and safe snapshots only |
+
+Successful finalization emits a separate source-owner cost/combined event first, target events in immutable
+proposal order, then one collapsed existing metadata-only `character.projection.invalidated` for the union
+audience of changed projections. No event exposes the complete selected recipient list or shared roster payload.
+A reviewed `allowTargetNoOp=true` healing leg emits its target-owner applied event with no revision and produces
+no invalidation; the source event/result does not reveal which leg was full. Rejected finalization emits no
+workflow, character, projection, audit, or outbox event.
 
 The exact applied payload is:
 

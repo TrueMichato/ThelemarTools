@@ -1,6 +1,6 @@
 # Campaign Hub implementation status
 
-> **Last updated:** 2026-09-20
+> **Last updated:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
 ## Status
@@ -101,6 +101,15 @@ The capability remains default-off for every new campaign: an active immutable r
 operator-managed campaign UUID enrollment are both required. Production rejects wildcard or malformed rollout
 configuration, release automation checks enrolled campaign readiness before traffic changes, and already-open
 Character Sheets now clear and resynchronize targeting when authoritative campaign context changes.
+
+Wave A0 adds [ADR 0020](adr/0020-consented-multi-target-operations.md) and an executable read-only query proof.
+It accepts a future fixed 1-8 target set, opaque unique per-leg invitations, independent per-character owner
+responses, source-finalization consent for source-owned legs, collection expiry, one exact ordered
+source-selected subset, and one-cost/all-selected-leg atomic finalization. Reviewed multi-target healing
+templates may privately record a full-HP selected leg as applied/no-change while consuming the single source
+cost. **No multi-target production capability is implemented by Wave A0:** the design-only PR contains no
+migration; future additive migration 0010, protocol 6, routes, store methods, events, browser UX, and templates
+remain absent and default-off. The draft is held pending the physical game-day GO/NO-GO.
 
 V2-T9 Campaign Overview is shipped by PR #243. The page is now a role-adaptive pinned session brief centered on
 campaign identity, party readiness, attention, recent activity, and one role-specific next action. Existing effects,
@@ -303,6 +312,8 @@ rewritten into a current whole-repository baseline. The latest merged handoffs a
 ## V1 limitations
 
 - Monster/NPC structured actions are not automated.
+- Multi-target semantic operations are design-only under ADR 0020; current live behavior remains the singular
+  protocol-4 Cure Wounds flow.
 - Campaign brew intentionally rejects raw HTML and persistent blocklists.
 - Full simultaneous character/Board co-editing is not supported; one active editor holds the lease.
 - Offline players can view a cached copy only; cloud mutation requires an authenticated online session.

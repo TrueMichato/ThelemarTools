@@ -1,7 +1,7 @@
 # Campaign Hub testing guide
 
 > **Status:** Current automated and real-stack coverage plus managed-staging gates
-> **Last verified:** 2026-09-20
+> **Last verified:** 2026-09-21
 > **Owner:** Campaign Hub maintainers
 
 ## Test layers
@@ -19,6 +19,7 @@
 | Static UI/PWA contracts | `HubPageContract.test.js`, `HubRoutePolicy.test.js`, `HubPerformanceBudget.test.js` | Required states, boot order, navigation, service-worker and fixed limits |
 | Campaign Overview/authority | `HubPageContract.test.js`, `HubConditionCatalog.test.js`, `HubLifecycle*.test.js`, `HubRealtime.test.js`, `HubInventoryPostgres.test.js`, `campaign-overview.spec.ts` | Pinned session brief, role-specific launch, preserved workbench, canonical and current-condition pickers, brew refresh/retry, historical-role replay fencing, archived read-only parity/mutation closure, and transactional cursor consistency |
 | Database contract | `HubMigrationContract.test.js`, `HubSemanticOperationsPostgres.test.js`, local PostgreSQL drills | Schema clauses, runtime-role grants, source/target lock ordering, atomic cost/effect, replay, expiry, and restore |
+| Multi-target Wave A0 design contract | `HubMultiTargetOperationAdr.test.js`, `test/fixtures/hub/adr-0020-multi-target-lock-proof.sql` | ADR completeness, normalized migration-0010 decision, fixed-set/response/finalization/leg constraints, hazards, A1-A5 handoff, and read-only PostgreSQL uniqueness/subset/lock-order reasoning; no production behavior claim |
 | Invite admission | `HubInviteAdmission.test.js`, `HubMultiProviderIdentityPostgres.test.js`, `HubAuthServer.test.js` | Existing sign-in, unknown denial, opaque context binding, atomic first access, existing-account join, replay/expiry/revoke/race/status/privacy behavior, dedicated-secret token retry, lock ordering, and rollback |
 | Account entitlements/reauthentication | entitlement and multi-provider suites | Provider/account/session binding, five-minute commit-time freshness, creator enforcement, operator hiding/idempotency/concurrency, last-operator lifecycle protection, migration backfill/reconciliation, export redaction, and memory/PostgreSQL parity |
 | Account identity lifecycle | `HubMultiProviderIdentity`, `HubAuthServer`, `HubApiClient`, provider operations/config, PostgreSQL parity, `test-hub-account-identity-mutations.mjs`, real-stack provider journey | Bounded own-identity listing, no account creation during link, cross-account conflict, transaction replay, display-name stability, commit-time freshness, provider disable, different-identity unlink, last/retention protection, concurrent/idempotent unlink, session/lease/socket rotation, fresh CSRF, purge/export/deletion-grace behavior |
@@ -123,6 +124,19 @@ Character Sheet after authoritative context changes. The production-derived thre
 with no active rules/capability, observes the disabled selector state, activates rules through the supported API,
 and then exercises PHB and XPHB targeting. Its `*` gate remains confined to the isolated test entry point; exact
 production enrollment is covered by the closed parser and read-only pre-cutover readiness check.
+
+Wave A0 is documentation/proof evidence only. `HubMultiTargetOperationAdr.test.js` must fail when a required
+lifecycle, migration, lock-order, privacy/no-op, rollback, hazard, limit, singular-read rewrite, or handoff clause
+is removed. When
+`HUB_TEST_POSTGRES_URL` is available, it executes the read-only SQL proof inside `BEGIN READ ONLY` and rolls back;
+the proof validates candidate uniqueness, selected-subset membership, source/target deduplication, self-target
+collapse, and ascending UUID lock order without creating or mutating schema. It is not a substitute for A3's
+fresh/upgrade/concurrency/fault-injection PostgreSQL implementation tests.
+
+A3's required implementation matrix includes same-owner/two-target invitations, source-as-target, response versus
+finalization/collection-expiry, maintenance expiry without readers, source-cost ABA, move/archive/removal/purge,
+protocol-4/5 fail-closed reads/replay, allowed full-HP privacy canaries, opposing UUID deadlock probes, fault
+injection after every target/event/receipt, Memory/PostgreSQL parity, and drain-before-rollback.
 
 ## Test data rules
 
