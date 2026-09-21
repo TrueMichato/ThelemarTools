@@ -217,6 +217,41 @@ class CharacterSheetProgression {
 		].join(":");
 	}
 
+	static getFixedOriginFeatSemanticKey ({
+		originType,
+		originUid,
+		featName,
+		featSource,
+	}) {
+		const entityKey = CharacterSheetProgression.getOriginSemanticKey({
+			originType,
+			originUid,
+			grantKey: "entity",
+		});
+		const featUid = CharacterSheetProgression.getEntityUid({
+			name: featName,
+			source: featSource,
+		});
+		return CharacterSheetProgression.getNestedSemanticKey({
+			parentSemanticKey: entityKey,
+			acquisitionKey: `base:${originType}:${originUid}`,
+			grantKey: `fixed-feat:${featUid}`,
+			identityMode: "opportunity",
+		});
+	}
+
+	static _parseFixedOriginFeatGrant (key) {
+		if (!key || typeof key !== "string") return null;
+		const [nameRaw, sourceRaw = "PHB"] = key.split("|");
+		if (!nameRaw) return null;
+		const titleCase = value => String(value || "").trim().replace(/\b\w/g, char => char.toUpperCase());
+		const [baseName, subtype] = nameRaw.split(";").map(part => part.trim());
+		return {
+			name: subtype ? `${titleCase(baseName)} (${titleCase(subtype)})` : titleCase(baseName),
+			source: String(sourceRaw || "PHB").toUpperCase(),
+		};
+	}
+
 	static getNestedSemanticKey ({
 		parentSemanticKey = null,
 		acquisitionKey = "",
@@ -1103,6 +1138,59 @@ class CharacterSheetProgression {
 			});
 			base.decisions.push(...abilityDistributionDecisions);
 			const hasAbilityDistribution = abilityDistributionDecisions.length > 0;
+			(entity.feats || []).forEach((featEntry, featIx) => {
+				if (!featEntry || typeof featEntry !== "object" || featEntry.anyFromCategory) return;
+				Object.entries(featEntry).forEach(([rawKey, isGranted], grantIx) => {
+					if (!isGranted || rawKey === "anyFromCategory") return;
+					const parsed = CharacterSheetProgression._parseFixedOriginFeatGrant(rawKey);
+					if (!parsed) return;
+					const catalogFeat = (page?.getFeats?.() || []).find(feat =>
+						CharacterSheetProgression.getEntityUid(feat) === CharacterSheetProgression.getEntityUid(parsed),
+					);
+					const selection = {name: catalogFeat?.name || parsed.name, source: catalogFeat?.source || parsed.source};
+					const semanticKey = CharacterSheetProgression.getFixedOriginFeatSemanticKey({
+						originType,
+						originUid,
+						featName: selection.name,
+						featSource: selection.source,
+					});
+					const stored = storedBasePool.get(semanticKey)?.find(decision => decision.selection != null);
+					base.decisions.push(CharacterSheetProgression._makeDecision({
+						characterLevel: 0,
+						className: "Base",
+						classSource: "",
+						classLevel: 0,
+						type: "nestedFeat",
+						label: `${selection.name} (Fixed ${originType === "race" ? "Species" : "Background"} Feat)`,
+						sourceKey: `fixed-feat:${CharacterSheetProgression.getEntityUid(selection)}`,
+						slot: grantIx,
+						count: 1,
+						options: [catalogFeat || selection],
+						selection: stored?.selection || selection,
+						receipt: stored?.receipt || null,
+						meta: {
+							fixedOriginGrant: true,
+							originGrantIndex: featIx,
+						},
+						scope: "origin",
+						semanticKeyOverride: semanticKey,
+						rootSemanticKey: entityKey,
+						depth: 1,
+						parentSemanticKey: entityKey,
+						provenance: {
+							ownerType: originType,
+							ownerUid: originUid,
+							acquisitionKey: `base:${originType}:${originUid}`,
+							selectedGrantKey: CharacterSheetProgression.getEntityUid(selection),
+							grantKind: "feat",
+							grantKey: `fixed-feat:${CharacterSheetProgression.getEntityUid(selection)}`,
+							sourcePath: `${originType}.feats[${featIx}]`,
+							occurrence: featIx,
+							pickSlot: grantIx,
+						},
+					}));
+				});
+			});
 			descriptors.forEach((descriptor, slot) => {
 				if (
 					hasAbilityDistribution
@@ -2974,21 +3062,41 @@ class CharacterSheetProgression {
 			const features = (state.getFeatures?.() || [])
 				.filter(feature => featureIds.has(feature.id))
 				.map(feature => ({id: feature.id, name: feature.name, source: feature.source}));
+			const feats = (state._data?.feats || [])
+				.filter(feat => feat.sourceDecisionKey === decision.semanticKey)
+				.map(feat => ({id: feat.id, name: feat.name, source: feat.source}));
+			const featIds = new Set(feats.map(feat => feat.id));
 			const modifiers = [
 				...(state._data?.modifiers || []),
 				...(state._data?.namedModifiers || []),
 			]
-				.filter(modifier => featureIds.has(modifier.featureId) || modifier.sourceDecisionKey === decision.semanticKey)
+				.filter(modifier =>
+					featureIds.has(modifier.featureId)
+						|| featIds.has(modifier.featureId)
+						|| featIds.has(modifier.sourceFeatureId)
+						|| modifier.sourceDecisionKey === decision.semanticKey,
+				)
 				.map(modifier => ({
 					id: modifier.id,
 					featureId: modifier.featureId,
+					sourceFeatureId: modifier.sourceFeatureId,
 					sourceDecisionKey: modifier.sourceDecisionKey,
 				}));
 			const resources = (state.getResources?.() || [])
-				.filter(resource => resource.sourceDecisionKey === decision.semanticKey || featureIds.has(resource.featureId))
-				.map(resource => ({id: resource.id, name: resource.name, sourceDecisionKey: resource.sourceDecisionKey, featureId: resource.featureId}));
-			if (features.length || modifiers.length || resources.length) {
-				effects.push({type: "materialized", features, resources, modifiers});
+				.filter(resource =>
+					resource.sourceDecisionKey === decision.semanticKey
+						|| featureIds.has(resource.featureId)
+						|| featIds.has(resource.featId),
+				)
+				.map(resource => ({
+					id: resource.id,
+					name: resource.name,
+					sourceDecisionKey: resource.sourceDecisionKey,
+					featureId: resource.featureId,
+					featId: resource.featId,
+				}));
+			if (features.length || feats.length || modifiers.length || resources.length) {
+				effects.push({type: "materialized", features, feats, resources, modifiers});
 			}
 			if (["nestedSpell", "nestedCantrip", "knownSpells", "preparedSpells", "spellbookSpells", "cantrips", "preparedCantrips"].includes(decision.type) && values.length) {
 				effects.push({

@@ -80,6 +80,15 @@ remain explicitly incomplete instead of inferring ownership from aggregate
 ability bonuses, and the Base card links to the existing background editor to
 complete the missing history.
 
+Fixed species/background feats are also origin child decisions, even though
+the player does not choose them. Their semantic key is derived from the origin
+entity and feat UID, and the materialized feat plus its modifiers/resources
+are recorded in the decision receipt. Legacy saves adopt an existing exact
+feat in place rather than adding a duplicate; the feat is marked with its
+origin owner and remains at character level 0. This ownership does not infer a
+level for unrelated orphan feats or resolve duplicate acquisitions from later
+class/ASI feat choices.
+
 Manifest discovery must be complete before it replaces the saved ledger. If
 class data is temporarily unavailable, Respec may report the discovery error,
 but it preserves the existing decisions and `manifestComplete` state rather

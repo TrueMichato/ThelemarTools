@@ -8144,19 +8144,33 @@ class CharacterSheetState {
 
 				const parsed = this._parseBackgroundFeatKey(key);
 				if (!parsed) continue;
+				const sourceDecisionKey = CharacterSheetProgression.getFixedOriginFeatSemanticKey({
+					originType: "background",
+					originUid: CharacterSheetProgression.getEntityUid(bg),
+					featName: parsed.name,
+					featSource: parsed.source,
+				});
 
 				// Skip duplicates
-				if (this._data.feats.find(f =>
+				const existing = this._data.feats.find(f =>
 					f.name.toLowerCase() === parsed.name.toLowerCase()
 					&& (f.source || "").toUpperCase() === parsed.source.toUpperCase(),
-				)) continue;
+				);
+				if (existing) {
+					if (!existing.sourceDecisionKey || existing.sourceDecisionKey === sourceDecisionKey) {
+						existing.sourceDecisionKey = sourceDecisionKey;
+						existing.isOriginFeat = true;
+						existing.backgroundName = bg.name;
+					}
+					continue;
+				}
 
 				const success = this.addFeat({
 					name: parsed.name,
 					source: parsed.source,
 					isOriginFeat: true,
 					backgroundName: bg.name,
-				});
+				}, {sourceDecisionKey});
 
 				if (success !== false) {
 					// Mark the newly added feat as an origin feat
@@ -9537,6 +9551,73 @@ class CharacterSheetState {
 					}
 				}
 			}
+			if (decision.type === "nestedFeat" && decision.meta?.fixedOriginGrant && decision.selection?.name) {
+				const sourceDecisionKey = decision.semanticKey;
+				let feat = this._data.feats.find(candidate =>
+					candidate.name === decision.selection.name
+						&& candidate.source === decision.selection.source,
+				);
+				if (!feat) {
+					const featData = (decision.options || []).find(option =>
+						CharacterSheetProgression.getEntityUid(option) ===
+							CharacterSheetProgression.getEntityUid(decision.selection),
+					) || decision.selection;
+					this.addFeat({
+						...featData,
+						isOriginFeat: true,
+						backgroundName: decision.provenance?.ownerType === "background"
+							? this.getBackgroundName()
+							: null,
+						sourceDecisionKey,
+					}, {sourceDecisionKey});
+					feat = this._data.feats.find(candidate =>
+						candidate.name === decision.selection.name
+							&& candidate.source === decision.selection.source,
+					);
+				}
+				if (!feat || (feat.sourceDecisionKey && feat.sourceDecisionKey !== sourceDecisionKey)) continue;
+				feat.sourceDecisionKey = sourceDecisionKey;
+				feat.isOriginFeat = true;
+				feat.backgroundName = decision.provenance?.ownerType === "background"
+					? this.getBackgroundName()
+					: null;
+				const modifiers = [
+					...(this._data.modifiers || []),
+					...(this._data.namedModifiers || []),
+				].filter(modifier =>
+					modifier.featureId === feat.id
+						|| modifier.sourceFeatureId === feat.id
+						|| modifier.sourceDecisionKey === sourceDecisionKey,
+				);
+				for (const modifier of modifiers) modifier.sourceDecisionKey = sourceDecisionKey;
+				const resources = (this._data.resources || []).filter(resource =>
+					resource.featId === feat.id || resource.sourceDecisionKey === sourceDecisionKey,
+				);
+				for (const resource of resources) resource.sourceDecisionKey = sourceDecisionKey;
+				if (!decision.receipt) {
+					decision.receipt = {
+						version: 1,
+						sourceDecisionKey,
+						effects: [{
+							type: "materialized",
+							feats: [{id: feat.id, name: feat.name, source: feat.source}],
+							modifiers: modifiers.map(modifier => ({
+								id: modifier.id,
+								featureId: modifier.featureId,
+								sourceFeatureId: modifier.sourceFeatureId,
+								sourceDecisionKey,
+							})),
+							resources: resources.map(resource => ({
+								id: resource.id,
+								name: resource.name,
+								featId: resource.featId,
+								sourceDecisionKey,
+							})),
+						}],
+					};
+				}
+				continue;
+			}
 			if (decision.type === "nestedAbility" && decision.selection && !decision.receipt) {
 				const isOriginAbility = decision.scope === "origin"
 					&& ["race", "background"].includes(decision.provenance?.ownerType);
@@ -9834,6 +9915,10 @@ class CharacterSheetState {
 		for (const effect of decision?.receipt?.effects || []) {
 			if (effect?.type === "materialized") {
 				const featureIds = new Set((effect.features || []).map(feature => feature.id).filter(Boolean));
+				for (const feat of effect.feats || []) {
+					if (feat.id) this.removeFeat(feat.id);
+					else if (feat.name) this.removeFeat(feat.name, feat.source);
+				}
 				for (const feature of effect.features || []) {
 					if (feature.id) this.removeFeature(feature.id);
 					else if (feature.name) this.removeFeature(feature.name, feature.source);

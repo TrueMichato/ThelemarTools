@@ -303,24 +303,44 @@ class CharacterSheetRespecEngine {
 			.filter(feature => feature.sourceDecisionKey === decision?.semanticKey)
 			.map(feature => ({id: feature.id, name: feature.name, source: feature.source}));
 		const materializedFeatureIds = new Set(materializedFeatures.map(feature => feature.id));
+		const materializedFeats = (state?._data?.feats || [])
+			.filter(feat => feat.sourceDecisionKey === decision?.semanticKey)
+			.map(feat => ({id: feat.id, name: feat.name, source: feat.source}));
+		const materializedFeatIds = new Set(materializedFeats.map(feat => feat.id));
 		const materializedModifiers = [
 			...(state?._data?.modifiers || []),
 			...(state?._data?.namedModifiers || []),
 		]
-			.filter(modifier => materializedFeatureIds.has(modifier.featureId) || modifier.sourceDecisionKey === decision?.semanticKey)
-			.map(modifier => ({id: modifier.id, featureId: modifier.featureId, sourceDecisionKey: modifier.sourceDecisionKey}));
+			.filter(modifier =>
+				materializedFeatureIds.has(modifier.featureId)
+					|| materializedFeatIds.has(modifier.featureId)
+					|| materializedFeatIds.has(modifier.sourceFeatureId)
+					|| modifier.sourceDecisionKey === decision?.semanticKey,
+			)
+			.map(modifier => ({
+				id: modifier.id,
+				featureId: modifier.featureId,
+				sourceFeatureId: modifier.sourceFeatureId,
+				sourceDecisionKey: modifier.sourceDecisionKey,
+			}));
 		const materializedResources = (state?.getResources?.() || [])
-			.filter(resource => resource.sourceDecisionKey === decision?.semanticKey || materializedFeatureIds.has(resource.featureId))
+			.filter(resource =>
+				resource.sourceDecisionKey === decision?.semanticKey
+					|| materializedFeatureIds.has(resource.featureId)
+					|| materializedFeatIds.has(resource.featId),
+			)
 			.map(resource => ({
 				id: resource.id,
 				name: resource.name,
 				sourceDecisionKey: resource.sourceDecisionKey,
 				featureId: resource.featureId,
+				featId: resource.featId,
 			}));
-		if (materializedFeatures.length || materializedModifiers.length || materializedResources.length) {
+		if (materializedFeatures.length || materializedFeats.length || materializedModifiers.length || materializedResources.length) {
 			effects.push({
 				type: "materialized",
 				features: materializedFeatures,
+				feats: materializedFeats,
 				modifiers: materializedModifiers,
 				resources: materializedResources,
 				spells: values
