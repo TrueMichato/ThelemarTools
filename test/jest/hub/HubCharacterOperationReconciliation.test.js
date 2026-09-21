@@ -262,6 +262,58 @@ describe("Repository operation reconciliation", () => {
 		expect(adopted).toMatchObject({name: "Mira the Bold", hp: {current: 6}});
 	});
 
+	it("advances no-op coverage without adopting an unchanged live document", () => {
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData({current: 20})}});
+		const repository = makeRepository({api});
+		repository._accepted.set("character-1", {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData({current: 20})});
+		repository._getCoverageBook("character-1").live.revision = 1;
+		const fnAdoptLive = jest.fn();
+
+		const result = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation({kind: "hp.heal", args: {amount: 5}}),
+			resultingCharacterRevision: 2,
+			eventId: "event-noop",
+			sequence: 20,
+			liveData: makeCharacterData({current: 20}),
+			fnAdoptLive,
+		});
+
+		expect(result).toMatchObject({status: "applied", liveChanged: false, revisionNext: 2});
+		expect(fnAdoptLive).not.toHaveBeenCalled();
+		expect(repository._accepted.get("character-1")).toMatchObject({
+			revision: 2,
+			data: {hp: {current: 20}},
+		});
+		expect(repository._getCoverageBook("character-1").live).toMatchObject({
+			revision: 2,
+			acceptedSequence: 20,
+		});
+	});
+
+	it("adopts a dirty live document when a canonical no-op still changes the local track", () => {
+		const api = makeApi({character: {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData({current: 20})}});
+		const repository = makeRepository({api});
+		repository._accepted.set("character-1", {id: "character-1", campaignId: "campaign-1", revision: 1, data: makeCharacterData({current: 20})});
+		repository._getCoverageBook("character-1").live.revision = 1;
+		let live = makeCharacterData({current: 15, name: "Dirty"});
+		const fnAdoptLive = jest.fn(next => { live = next; });
+
+		const result = repository.applyRealtimeOperation({
+			characterId: "character-1",
+			operation: makeOperation({kind: "hp.heal", args: {amount: 5}}),
+			resultingCharacterRevision: 2,
+			eventId: "event-noop-dirty",
+			sequence: 20,
+			liveData: live,
+			fnAdoptLive,
+		});
+
+		expect(result).toMatchObject({status: "applied", liveChanged: true, revisionNext: 2});
+		expect(fnAdoptLive).toHaveBeenCalledTimes(1);
+		expect(live).toMatchObject({name: "Dirty", hp: {current: 20}});
+	});
+
 	it("applies to a stale recovered draft even when fetched canonical truth already covers the operation", async () => {
 		// `pGet` stores canonical revision 2 (already damaged) but returns the pre-damage draft as live state.
 		const sessionStorage = makeSessionStorage({

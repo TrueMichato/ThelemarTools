@@ -25,6 +25,7 @@ import {
 	addAwardedEntryToCharacter,
 	addTransferPayload,
 	applySemanticOperation,
+	applySemanticOperationWithResult,
 	getItemAwardIdempotencyKey,
 	getItemAwardTotalQuantity,
 	getSafeItemSummary,
@@ -5240,6 +5241,7 @@ export class PostgresHubStore {
 			sourceDisplaySnapshot: operation.sourceDisplaySnapshot,
 			targetDisplaySnapshot: operation.targetDisplaySnapshot,
 			effectDisplaySnapshot: operation.effectDisplaySnapshot,
+			...(operation.changed === false ? {changed: false} : {}),
 		};
 		if (operation.sourceCost) {
 			const sourceOwnerAccountId = source?.ownerAccountId ?? operation.originActorAccountId;
@@ -5428,7 +5430,7 @@ export class PostgresHubStore {
 					accountIds: [accountId],
 				});
 				membership = memberships.get(accountId);
-				if (!membership || membership.status !== "active" || !["dm", "co_dm", "player"].includes(membership.role)) {
+				if (!membership || membership.status !== "active" || !["dm", "co_dm", "player", "spectator"].includes(membership.role)) {
 					throw new HubStoreError("CAMPAIGN_NOT_FOUND", `Campaign is unavailable.`, {status: 404});
 				}
 				if (!["dm", "co_dm"].includes(membership.role)) {
@@ -5448,7 +5450,7 @@ export class PostgresHubStore {
 					operationId,
 					targetCharacterId,
 				});
-				const data = applySemanticOperation({data: target.data, operation: normalized});
+				const {data, changed} = applySemanticOperationWithResult({data: target.data, operation: normalized});
 				validateCloudCharacterData(data);
 				const updatedTarget = await client.query(`
 					UPDATE hub.characters
@@ -5487,8 +5489,9 @@ export class PostgresHubStore {
 					action: "character.operation.applied",
 					targetType: "semantic_operation",
 					targetId: operationId,
-					details: {kind: normalized.kind, version: normalized.version, resultingCharacterRevision: targetNxt.revision},
+					details: {kind: normalized.kind, version: normalized.version, changed, resultingCharacterRevision: targetNxt.revision},
 				});
+				const dmAccountIds = await this._pGetSemanticDmAccountIds({client, campaignId});
 				const appliedEvent = await this._pAppendEvent({
 					client,
 					campaignId,
@@ -5498,8 +5501,12 @@ export class PostgresHubStore {
 					aggregateId: target.id,
 					aggregateRevision: targetNxt.revision,
 					visibility: "explicit_accounts",
-					visibleAccountIds: [...new Set([accountId, target.ownerAccountId])],
-					payload: {operation: normalized, resultingCharacterRevision: targetNxt.revision},
+					visibleAccountIds: [...new Set([accountId, target.ownerAccountId, ...dmAccountIds])],
+					payload: {
+						operation: normalized,
+						resultingCharacterRevision: targetNxt.revision,
+						...(!changed ? {changed: false} : {}),
+					},
 				});
 				await client.query(`
 					UPDATE hub.semantic_operations
@@ -5508,8 +5515,14 @@ export class PostgresHubStore {
 				`, [operationId, appliedEvent.id]);
 				await client.query(`UPDATE hub.characters SET operation_watermark = $2 WHERE id = $1`, [target.id, appliedEvent.sequence]);
 				targetNxt.operationWatermark = appliedEvent.sequence;
-				const invalidationEvent = await this._pAppendProjectionInvalidation({client, character: targetNxt, actorAccountId: accountId});
-				semanticOperation = {...semanticOperation, resultingCharacterRevision: targetNxt.revision};
+				const invalidationEvent = changed
+					? await this._pAppendProjectionInvalidation({client, character: targetNxt, actorAccountId: accountId})
+					: null;
+				semanticOperation = {
+					...semanticOperation,
+					resultingCharacterRevision: targetNxt.revision,
+					...(!changed ? {changed: false} : {}),
+				};
 				const response = {
 					operation: this._getSemanticOperationView(semanticOperation),
 					eventIds: [appliedEvent.id, invalidationEvent?.id].filter(Boolean),

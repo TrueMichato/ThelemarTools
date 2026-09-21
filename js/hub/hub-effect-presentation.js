@@ -67,7 +67,7 @@ export function getPendingEffectPresentation ({
 	};
 }
 
-export function getAppliedEffectNotice ({operation, beforeData = null, afterData = null}) {
+export function getAppliedEffectNotice ({operation, changed = true, beforeData = null, afterData = null}) {
 	if (!operation?.operationId || operation.version !== 1) return null;
 	const args = operation.arguments || {};
 
@@ -133,7 +133,9 @@ export function getAppliedEffectNotice ({operation, beforeData = null, afterData
 				: Math.max(0, Number(args.amount) || 0);
 			return {
 				id: operation.operationId,
-				message: `${amount} level ${level} spell slot${amount === 1 ? "" : "s"} restored by the campaign.`,
+				message: changed === false && amount === 0
+					? `Campaign spell-slot restoration applied; level ${level} slots were already full.`
+					: `${amount} level ${level} spell slot${amount === 1 ? "" : "s"} restored by the campaign.`,
 			};
 		}
 		default:

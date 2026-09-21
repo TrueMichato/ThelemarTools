@@ -204,7 +204,7 @@ export class CharacterSheetHubEffects {
 		return false;
 	}
 
-	onApplied ({operation, beforeData = null, afterData = null}) {
+	onApplied ({operation, changed = true, beforeData = null, afterData = null}) {
 		if (
 			!operation?.operationId
 			|| operation.targetCharacterId !== this._characterId
@@ -214,7 +214,7 @@ export class CharacterSheetHubEffects {
 		this._commandIds.delete(`${operation.operationId}:accept`);
 		this._commandIds.delete(`${operation.operationId}:reject`);
 		this._removeNotice(`error:${operation.operationId}`);
-		const notice = getAppliedEffectNotice({operation, beforeData, afterData});
+		const notice = getAppliedEffectNotice({operation, changed, beforeData, afterData});
 		if (!notice) {
 			this._renderApprovals();
 			return false;

@@ -41,7 +41,7 @@
 | `spell.used` | character | all_members | `{spellName,spellSource,spellLevel,slotLevel,mode}` | Explicitly supplied by supported Character Sheet cast flows and committed with the authoritative save. Never inferred from patch bodies; carries no target, spell text, slot totals, component choice, resource identity, or character-name snapshot |
 | `character.operation.proposed` | semantic operation | explicit proposer+target owner+DMs | Cost-bearing: `{operationId,status,targetDisplaySnapshot,effectDisplaySnapshot,expiresAt}`; cost-free legacy also carries its existing target/source snapshot fields | Cost-bearing payload omits canonical source/target ids, source entity/template/choice, source cost, seed, and derived operation; the target owner refetches its approval projection |
 | `character.operation.source_cost_consumed` | source character | explicit source owner+DMs | `{operationId,leg:"source",sourceCost,resultingSourceCharacterRevision}` | Never visible to target-only peers; stable leg key is `operationId/source` |
-| `character.operation.applied` | target character | explicit workflow participants+DMs | `{leg?:"target"|"combined",operation,resultingCharacterRevision,resultingSourceCharacterRevision?}` | Distinct target leg omits source cost; self-target combined leg includes it and uses one revision |
+| `character.operation.applied` | target character | explicit workflow participants+DMs | `{leg?:"target"|"combined",operation,resultingCharacterRevision,resultingSourceCharacterRevision?,changed?:false}` | Distinct target leg omits source cost; self-target combined leg includes it and uses one revision. Immediate direct no-ops carry `changed:false`, advance ordering revision/watermark, and emit no projection invalidation |
 | `character.operation.rejected` | semantic operation | explicit proposer+target owner+DMs | `{operationId,status:"rejected",reason:"unavailable",targetDisplaySnapshot,effectDisplaySnapshot}` | No source or target mutation |
 | `character.operation.cancelled` | semantic operation | explicit proposer+target owner+DMs | Same minimized terminal shape | No source or target mutation |
 | `character.operation.expired` | semantic operation | explicit proposer+target owner+DMs | Same minimized terminal shape | No source or target mutation |
@@ -143,6 +143,11 @@ and resolution, both participants of an atomic direct transfer, archived-import 
 sharing-policy write. `xp.granted` emits none because `xp` is not a catalog field.
 The recipient Character Sheet therefore schedules an authorization-scoped canonical-character reconciliation
 when it receives the bounded `xp.granted` notice; the notice itself is not treated as character state.
+
+A valid immediate DM/co-DM semantic no-op emits only its explicit-recipient applied event/outbox row. It does not
+emit `character.projection.invalidated`, because the projected character bytes did not change. The event remains
+necessary for ordered owner reconciliation: the same operation can still transform an unsaved local track even
+when it was a no-op on canonical truth.
 
 An atomic item-award batch emits each `item.granted` and its projection invalidation in request target order,
 then one `party_inventory.invalidated` if the source stash was debited. Retries replay the receipt and emit

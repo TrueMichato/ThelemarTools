@@ -305,6 +305,118 @@ describe("semantic character operations", () => {
 		}));
 	});
 
+	it.each([
+		["hp.heal", {amount: 5}, stored => { stored.data.hp.current = stored.data.hp.max; }],
+		["condition.add", {condition: {name: "Poisoned", source: "XPHB"}}, stored => { stored.data.conditions = [{name: "Poisoned", source: "XPHB"}]; }],
+		["condition.remove", {condition: {name: "Poisoned", source: "XPHB"}}, stored => { stored.data.conditions = []; }],
+		["spell_slot.restore", {level: 1, amount: 1}, stored => { stored.data.spellcasting.spellSlots[1].current = stored.data.spellcasting.spellSlots[1].max; }],
+	])("records a replayable %s no-op without a projection invalidation", async (kind, args, prepare) => {
+		const {campaign, dm, coDm, characters} = await setup();
+		const stored = store._characters.get(characters.target.id);
+		prepare(stored);
+		const dataBefore = structuredClone(stored.data);
+		const revisionBefore = stored.revision;
+		const auditBefore = store._audit.length;
+		const eventBefore = store._events.length;
+		const outboxBefore = store._outbox.length;
+		const commandBefore = store._semanticOperationCommands.size;
+		const commandId = crypto.randomUUID();
+		const body = {
+			commandId,
+			targetCharacterId: characters.target.id,
+			operation: {kind, version: 1, arguments: args},
+		};
+
+		const first = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(dm, commandId),
+			payload: body,
+		});
+		const replay = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(dm, commandId),
+			payload: body,
+		});
+
+		expect(first.statusCode).toBe(201);
+		expect(replay.json()).toEqual(first.json());
+		expect(first.json().operation).toMatchObject({
+			status: "applied",
+			changed: false,
+			resultingCharacterRevision: revisionBefore + 1,
+		});
+		expect(store._characters.get(characters.target.id).data).toEqual(dataBefore);
+		expect(store._characters.get(characters.target.id).revision).toBe(revisionBefore + 1);
+		expect(store._audit.slice(auditBefore)).toHaveLength(1);
+		expect(store._audit.at(-1)).toMatchObject({
+			action: "character.operation.applied",
+			details: {kind, changed: false, resultingCharacterRevision: revisionBefore + 1},
+		});
+		expect(store._events.slice(eventBefore).map(event => event.type)).toEqual(["character.operation.applied"]);
+		expect(store._events.at(-1).payload).toMatchObject({changed: false});
+		expect(store._events.at(-1).visibleAccountIds).toContain(coDm.session.account.id);
+		expect(store._outbox.slice(outboxBefore)).toHaveLength(1);
+		expect(store._semanticOperationCommands.size).toBe(commandBefore + 1);
+	});
+
+	it.each([
+		["hp.damage", {amount: 2}, data => data.hp.current, 3],
+		["hp.heal", {amount: 2}, data => data.hp.current, 7],
+		["condition.add", {condition: {name: "Poisoned", source: "XPHB"}}, data => data.conditions, [{name: "Poisoned", source: "XPHB"}]],
+		["condition.remove", {condition: {name: "Prone", source: "XPHB"}}, data => data.conditions, []],
+		["spell_slot.spend", {level: 1, amount: 1}, data => data.spellcasting.spellSlots[1].current, 1],
+		["spell_slot.restore", {level: 1, amount: 1}, data => data.spellcasting.spellSlots[1].current, 2],
+	])("applies the direct %s route contract", async (kind, args, readResult, expected) => {
+		const {campaign, dm, characters} = await setup();
+		const stored = store._characters.get(characters.target.id);
+		if (kind === "condition.remove") stored.data.conditions = [{name: "Prone", source: "XPHB"}];
+		if (kind === "spell_slot.restore") stored.data.spellcasting.spellSlots[1].current = 1;
+		const commandId = crypto.randomUUID();
+		const response = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(dm, commandId),
+			payload: {
+				commandId,
+				targetCharacterId: characters.target.id,
+				operation: {kind, version: 1, arguments: args},
+			},
+		});
+
+		expect(response.statusCode).toBe(201);
+		expect(response.json().operation).toMatchObject({
+			status: "applied",
+			operation: {kind, arguments: args},
+		});
+		expect(readResult(store._characters.get(characters.target.id).data)).toEqual(expected);
+		expect(response.json().eventIds).toHaveLength(2);
+	});
+
+	it("accepts the shared 30-character condition source limit at the HTTP boundary", async () => {
+		const {campaign, dm, characters} = await setup();
+		const commandId = crypto.randomUUID();
+		const source = "123456789012345678901234567890";
+		const response = await app.inject({
+			method: "POST",
+			url: `/api/campaigns/${campaign.id}/actions`,
+			headers: semanticHeaders(dm, commandId),
+			payload: {
+				commandId,
+				targetCharacterId: characters.target.id,
+				operation: {
+					kind: "condition.add",
+					version: 1,
+					arguments: {condition: {name: "Marked", source}},
+				},
+			},
+		});
+
+		expect(response.statusCode).toBe(201);
+		expect(store._characters.get(characters.target.id).data.conditions).toContainEqual({name: "Marked", source});
+	});
+
 	it("allows co-DM direct operations but never allows a player generic JSON operation", async () => {
 		const {campaign, coDm, source, characters} = await setup();
 		const coDmCommandId = crypto.randomUUID();
@@ -326,6 +438,77 @@ describe("semantic character operations", () => {
 		});
 		expect(forbidden.statusCode).toBe(403);
 		expect(forbidden.json()).toEqual({error: "OPERATION_FORBIDDEN"});
+	});
+
+	it("denies player, spectator, removed-member, and archived-campaign direct writes without target enumeration", async () => {
+		const {campaign, dm, source, characters} = await setup();
+		const assertDeniedForTargets = async ({session, expectedStatus, expectedError}) => {
+			for (const targetCharacterId of [characters.target.id, crypto.randomUUID()]) {
+				const commandId = crypto.randomUUID();
+				const before = {
+					character: structuredClone(store._characters.get(characters.target.id)),
+					operations: store._semanticOperations.size,
+					audit: store._audit.length,
+					events: store._events.length,
+					outbox: store._outbox.length,
+					commands: store._semanticOperationCommands.size,
+				};
+				const response = await app.inject({
+					method: "POST",
+					url: `/api/campaigns/${campaign.id}/actions`,
+					headers: semanticHeaders(session, commandId),
+					payload: getDirectBody({commandId, targetCharacterId}),
+				});
+				expect(response.statusCode).toBe(expectedStatus);
+				expect(response.json()).toEqual({error: expectedError});
+				expect(store._characters.get(characters.target.id)).toEqual(before.character);
+				expect(store._semanticOperations.size).toBe(before.operations);
+				expect(store._audit).toHaveLength(before.audit);
+				expect(store._events).toHaveLength(before.events);
+				expect(store._outbox).toHaveLength(before.outbox);
+				expect(store._semanticOperationCommands.size).toBe(before.commands);
+			}
+		};
+
+		await assertDeniedForTargets({
+			session: source.session,
+			expectedStatus: 403,
+			expectedError: "OPERATION_FORBIDDEN",
+		});
+		await store.pChangeMemberRole({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			membershipId: source.membership.id,
+			role: "spectator",
+			idempotencyKey: `spectator-${crypto.randomUUID()}`,
+		});
+		await assertDeniedForTargets({
+			session: source.session,
+			expectedStatus: 403,
+			expectedError: "OPERATION_FORBIDDEN",
+		});
+		await store.pRemoveMember({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			membershipId: source.membership.id,
+			idempotencyKey: `remove-${crypto.randomUUID()}`,
+		});
+		await assertDeniedForTargets({
+			session: source.session,
+			expectedStatus: 404,
+			expectedError: "CAMPAIGN_NOT_FOUND",
+		});
+
+		await store.pArchiveCampaign({
+			accountId: dm.account.id,
+			campaignId: campaign.id,
+			idempotencyKey: `archive-${crypto.randomUUID()}`,
+		});
+		await assertDeniedForTargets({
+			session: dm,
+			expectedStatus: 404,
+			expectedError: "CAMPAIGN_NOT_FOUND",
+		});
 	});
 
 	it("requires target-owner approval, including a distinct self-target approval command", async () => {

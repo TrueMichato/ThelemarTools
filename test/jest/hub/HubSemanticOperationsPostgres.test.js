@@ -61,10 +61,13 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 	let pool;
 	let store;
 	let dm;
+	let coDm;
 	let sourceOwner;
+	let spectator;
 	let targetOwner;
 	let dmSession;
 	let sourceSession;
+	let spectatorSession;
 	let targetSession;
 	let campaign;
 	let sourceMembership;
@@ -117,14 +120,18 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 		await store.pCheckHealth();
 
 		({account: dm, session: dmSession} = await pCreateAccountWithSession("Semantic DM"));
+		({account: coDm} = await pCreateAccountWithSession("Semantic Co-DM"));
 		({account: sourceOwner, session: sourceSession} = await pCreateAccountWithSession("Semantic Source"));
+		({account: spectator, session: spectatorSession} = await pCreateAccountWithSession("Semantic Spectator"));
 		({account: targetOwner, session: targetSession} = await pCreateAccountWithSession("Semantic Target"));
 		campaign = (await store.pCreateCampaign({
 			accountId: dm.id,
 			name: `Semantic PostgreSQL ${crypto.randomUUID()}`,
 			idempotencyKey: crypto.randomUUID(),
 		})).campaign;
+		await pJoinCampaign({account: coDm, role: "co_dm"});
 		sourceMembership = await pJoinCampaign({account: sourceOwner});
+		await pJoinCampaign({account: spectator, role: "spectator"});
 		await pJoinCampaign({account: targetOwner});
 
 		sourceCharacter = (await store.pCreateCharacter({
@@ -237,6 +244,239 @@ describePostgres("Campaign Hub semantic operations (real PostgreSQL)", () => {
 			operation: {kind: "hp.heal", version: 1, arguments: {amount: 3}},
 			idempotencyKey: getIdempotency(commandId, {...request, operation: {kind: "hp.heal", version: 1, arguments: {amount: 3}}}),
 		})).rejects.toMatchObject({code: "IDEMPOTENCY_KEY_REUSED"});
+	});
+
+	test("matches the direct-operation no-op contract without projection invalidations", async () => {
+		const noOpCharacter = (await store.pCreateCharacter({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			data: {
+				...getCharacterData({name: "No-op target", hpCurrent: 20}),
+				conditions: [{name: "Poisoned", source: "XPHB"}],
+				spellcasting: {spellsKnown: [], cantripsKnown: [], spellSlots: {1: {current: 2, max: 2}}},
+			},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const originalData = structuredClone(noOpCharacter.data);
+		const cases = [
+			["hp.heal", {amount: 5}],
+			["condition.add", {condition: {name: "poisoned", source: "xphb"}}],
+			["condition.remove", {condition: {name: "Prone", source: "XPHB"}}],
+			["spell_slot.restore", {level: 1, amount: 1}],
+		];
+
+		let expectedRevision = noOpCharacter.revision;
+		for (const [kind, args] of cases) {
+			const commandId = crypto.randomUUID();
+			const request = {
+				commandId,
+				targetCharacterId: noOpCharacter.id,
+				operation: {kind, version: 1, arguments: args},
+			};
+			const input = {
+				accountId: dm.id,
+				sessionId: dmSession.id,
+				campaignId: campaign.id,
+				commandId,
+				targetCharacterId: noOpCharacter.id,
+				operation: request.operation,
+				idempotencyKey: getIdempotency(commandId, request),
+			};
+			const first = await store.pCreateStructuredAction(input);
+			const replay = await store.pCreateStructuredAction(input);
+			expectedRevision++;
+
+			expect(replay).toEqual(first);
+			expect(first.operation).toMatchObject({
+				status: "applied",
+				changed: false,
+				resultingCharacterRevision: expectedRevision,
+			});
+			expect(first.eventIds).toHaveLength(1);
+			const persisted = await pool.query(`
+				SELECT c.revision, c.operation_watermark, c.data, de.sequence, de.event_type,
+					de.visible_account_ids, de.payload,
+					(SELECT count(*)::integer
+						FROM hub.audit_entries audit
+						WHERE audit.target_type = 'semantic_operation'
+							AND audit.target_id = $4
+							AND audit.action = 'character.operation.applied') AS audit_count,
+					(SELECT count(*)::integer
+						FROM hub.outbox_entries outbox
+						WHERE outbox.event_id = de.id) AS outbox_count,
+					(SELECT count(*)::integer
+						FROM hub.semantic_operation_commands command
+						WHERE command.command_id = $5
+							AND command.operation_id = $4) AS command_count,
+					(SELECT count(*)::integer
+						FROM hub.domain_events invalidation
+						WHERE invalidation.campaign_id = $2
+							AND invalidation.sequence > de.sequence
+							AND invalidation.event_type = 'character.projection.invalidated') AS later_invalidations
+				FROM hub.characters c
+				JOIN hub.domain_events de ON de.id = $3
+				WHERE c.id = $1
+			`, [noOpCharacter.id, campaign.id, first.eventIds[0], first.operation.operationId, commandId]);
+			expect(persisted.rows[0]).toMatchObject({
+				revision: `${expectedRevision}`,
+				operation_watermark: persisted.rows[0].sequence,
+				data: originalData,
+				event_type: "character.operation.applied",
+				visible_account_ids: expect.arrayContaining([dm.id, coDm.id, targetOwner.id]),
+				payload: expect.objectContaining({changed: false}),
+				audit_count: 1,
+				outbox_count: 1,
+				command_count: 1,
+				later_invalidations: 0,
+			});
+			expect(persisted.rows[0].visible_account_ids).not.toContain(sourceOwner.id);
+		}
+	});
+
+	test("applies all six direct operation kinds with PostgreSQL parity", async () => {
+		const directCharacter = (await store.pCreateCharacter({
+			accountId: targetOwner.id,
+			campaignId: campaign.id,
+			data: {
+				...getCharacterData({name: "Direct operation target", hpCurrent: 10}),
+				conditions: [{name: "Prone", source: "XPHB"}],
+				spellcasting: {spellsKnown: [], cantripsKnown: [], spellSlots: {1: {current: 2, max: 3}}},
+			},
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		const cases = [
+			["hp.damage", {amount: 3}, data => data.hp.current, 7],
+			["hp.heal", {amount: 2}, data => data.hp.current, 9],
+			["condition.add", {condition: {name: "Poisoned", source: "XPHB"}}, data => data.conditions, [
+				{name: "Prone", source: "XPHB"},
+				{name: "Poisoned", source: "XPHB"},
+			]],
+			["condition.remove", {condition: {name: "Prone", source: "XPHB"}}, data => data.conditions, [
+				{name: "Poisoned", source: "XPHB"},
+			]],
+			["spell_slot.spend", {level: 1, amount: 1}, data => data.spellcasting.spellSlots[1].current, 1],
+			["spell_slot.restore", {level: 1, amount: 1}, data => data.spellcasting.spellSlots[1].current, 2],
+		];
+
+		let revision = directCharacter.revision;
+		for (const [kind, args, readResult, expected] of cases) {
+			const commandId = crypto.randomUUID();
+			const request = {
+				commandId,
+				targetCharacterId: directCharacter.id,
+				operation: {kind, version: 1, arguments: args},
+			};
+			const result = await store.pCreateStructuredAction({
+				accountId: dm.id,
+				sessionId: dmSession.id,
+				campaignId: campaign.id,
+				commandId,
+				targetCharacterId: directCharacter.id,
+				operation: request.operation,
+				idempotencyKey: getIdempotency(commandId, request),
+			});
+			revision++;
+			expect(result.operation).toMatchObject({
+				status: "applied",
+				operation: {kind, arguments: args},
+				resultingCharacterRevision: revision,
+			});
+			expect(result.eventIds).toHaveLength(2);
+			const persisted = (await pool.query(`SELECT data FROM hub.characters WHERE id = $1`, [directCharacter.id])).rows[0].data;
+			expect(readResult(persisted)).toEqual(expected);
+		}
+	});
+
+	test("matches non-enumerating direct-operation role and lifecycle denials", async () => {
+		const getInput = ({accountId, sessionId, campaignId = campaign.id, targetCharacterId}) => {
+			const commandId = crypto.randomUUID();
+			const request = {
+				commandId,
+				targetCharacterId,
+				operation: {kind: "hp.damage", version: 1, arguments: {amount: 1}},
+			};
+			return {
+				accountId,
+				sessionId,
+				campaignId,
+				commandId,
+				targetCharacterId,
+				operation: request.operation,
+				idempotencyKey: getIdempotency(commandId, request),
+			};
+		};
+		const assertSameDenial = async ({accountId, sessionId, campaignId = campaign.id, targetId, code, status}) => {
+			for (const targetCharacterId of [targetId, crypto.randomUUID()]) {
+				await expect(store.pCreateStructuredAction(getInput({
+					accountId,
+					sessionId,
+					campaignId,
+					targetCharacterId,
+				}))).rejects.toMatchObject({code, status});
+			}
+		};
+
+		await assertSameDenial({
+			accountId: sourceOwner.id,
+			sessionId: sourceSession.id,
+			targetId: targetCharacter.id,
+			code: "OPERATION_FORBIDDEN",
+			status: 403,
+		});
+		await assertSameDenial({
+			accountId: spectator.id,
+			sessionId: spectatorSession.id,
+			targetId: targetCharacter.id,
+			code: "OPERATION_FORBIDDEN",
+			status: 403,
+		});
+
+		const {account: removedAccount, session: removedSession} = await pCreateAccountWithSession("Semantic Removed");
+		const removedMembership = await pJoinCampaign({account: removedAccount});
+		await store.pRemoveMember({
+			accountId: dm.id,
+			campaignId: campaign.id,
+			membershipId: removedMembership.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await assertSameDenial({
+			accountId: removedAccount.id,
+			sessionId: removedSession.id,
+			targetId: targetCharacter.id,
+			code: "CAMPAIGN_NOT_FOUND",
+			status: 404,
+		});
+
+		const archivedCampaign = (await store.pCreateCampaign({
+			accountId: dm.id,
+			name: `Archived semantic ${crypto.randomUUID()}`,
+			idempotencyKey: crypto.randomUUID(),
+		})).campaign;
+		const archivedTarget = (await store.pCreateCharacter({
+			accountId: dm.id,
+			campaignId: archivedCampaign.id,
+			data: getCharacterData({name: "Archived target"}),
+			schemaVersion: 1,
+			clientImportId: crypto.randomUUID(),
+			idempotencyKey: crypto.randomUUID(),
+		})).character;
+		await store.pArchiveCampaign({
+			accountId: dm.id,
+			campaignId: archivedCampaign.id,
+			idempotencyKey: crypto.randomUUID(),
+		});
+		await assertSameDenial({
+			accountId: dm.id,
+			sessionId: dmSession.id,
+			campaignId: archivedCampaign.id,
+			targetId: archivedTarget.id,
+			code: "CAMPAIGN_NOT_FOUND",
+			status: 404,
+		});
 	});
 
 	test("serializes explicit target-owner approval and preserves source truth", async () => {

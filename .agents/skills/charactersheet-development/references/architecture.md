@@ -613,6 +613,11 @@ Protocol-4 cost-bearing peer operations extend this with per-character operation
 - coverage is `appliedOperationLegIds`; legacy protocol-3 operation ids migrate as target-leg coverage.
 - a local resource conflict after canonical acceptance blocks autosave and keeps the recovery draft visible;
   it never reapplies the operation or silently overwrites the authoritative source spend.
+- immediate DM/co-DM no-ops remain ordered applied events. The current server contract advances a revision and
+  watermark while leaving character JSON unchanged and omitting projection invalidation. Reconciliation still
+  runs `E` per track, because a canonical no-op may change a dirty local track; unchanged live tracks advance
+  coverage without `loadFromJson`, document-generation advancement, or a redundant render, then show one
+  accessible no-change notice.
 
 Party-inventory proposal retries use the proposal idempotency key as an actor-only transfer correlation. After
 the 23-hour browser replay window ends, the sheet must list visible transfers before unlocking the frozen

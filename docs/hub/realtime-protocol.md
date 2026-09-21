@@ -301,6 +301,12 @@ still arrive for history and dirty-local reconciliation, while a clean fetched b
 Because event sequences are campaign-local, moving a character to another campaign or detaching it resets the
 watermark to zero before that character is exposed in the new campaign context.
 
+If a valid direct operation leaves canonical character JSON unchanged, the applied payload additionally carries
+`"changed": false`. Migration 0005 still requires a unique applied character revision, so the operation advances
+a revision-only ordering point and the watermark, but emits no projection invalidation. The owner client still
+processes the operation in order because it may transform dirty local state; when the live bytes are unchanged it
+advances coverage without adopting or rendering and shows one no-change notice.
+
 Protocol-4 Character Sheet clients deduplicate by `operationId/source`, `operationId/target`, or
 `operationId/combined`. The source leg carries the closed source-cost descriptor only to the source owner and
 DM/co-DM; the target leg never exposes source resource ids or values.

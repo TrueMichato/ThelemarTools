@@ -631,6 +631,25 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 		await expect(condition.locator("option", {hasText: "Blinded (PHB)"})).toHaveCount(1);
 		await expect(condition.locator("option", {hasText: "Blinded (XPHB)"})).toHaveCount(1);
 		await condition.selectOption({label: "Blinded (PHB)"});
+		let failNextPendingActionRefresh = true;
+		let directActionPosts = 0;
+		await dm.page.route(new RegExp(`/api/campaigns/${campaignId}/actions(?:\\?.*)?$`), async route => {
+			if (route.request().method() === "POST") {
+				directActionPosts++;
+				await route.continue();
+				return;
+			}
+			if (route.request().method() === "GET" && failNextPendingActionRefresh) {
+				failNextPendingActionRefresh = false;
+				await route.fulfill({
+					status: 503,
+					contentType: "application/json",
+					body: JSON.stringify({error: "temporary pending-action refresh failure"}),
+				});
+				return;
+			}
+			await route.continue();
+		});
 		const actionResponsePromise = dm.page.waitForResponse(response => (
 			response.request().method() === "POST"
 			&& new URL(response.url()).pathname === `/api/campaigns/${campaignId}/actions`
@@ -644,7 +663,9 @@ test("DM inspection is read-only and condition actions use the canonical picker"
 				request: actionResponse.request().postDataJSON(),
 			}),
 		).toBe(true);
-		await expect(dm.page.locator("#campaign-action-form-status")).toHaveText("Effect applied.");
+		await expect(dm.page.locator("#campaign-action-form-status"))
+			.toHaveText("Effect applied. Pending requests could not be refreshed; use Refresh to retry the read.");
+		expect(directActionPosts).toBe(1);
 		await expect.poll(
 			async () => (await player.getCharacter(character.id)).data.conditions,
 			{timeout: 20_000},

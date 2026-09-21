@@ -403,6 +403,21 @@ describe("B/L -> R/F transition", () => {
 		expect(plan.staged.live.hp.current).toBe(6);
 	});
 
+	it("preserves no-op ordering while applying the same operation to dirty live state", () => {
+		const plan = planOne({
+			tracks: {
+				accepted: {data: makeCharacter({current: 20, max: 20}), coverage: createCoverage({revision: 4})},
+				live: {data: makeCharacter({current: 15, max: 20}), coverage: createCoverage({revision: 4})},
+			},
+			operation: makeOperation({kind: "hp.heal", args: {amount: 5}}),
+		});
+
+		expect(plan.status).toBe(RECONCILE_STATUS.APPLIED);
+		expect(plan.changedTracks).toEqual({accepted: false, live: true});
+		expect(plan.staged.accepted.hp.current).toBe(20);
+		expect(plan.staged.live.hp.current).toBe(20);
+	});
+
 	it("requires a resync when any single track cannot prove its coverage", () => {
 		const plan = planOne({
 			tracks: {

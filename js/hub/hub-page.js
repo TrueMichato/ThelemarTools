@@ -3956,7 +3956,7 @@ async function pInitCampaignForms ({
 		const formId = "campaign-action-form";
 		setFormStatus({formId});
 		try {
-			await pRunFormMutation({form: event.currentTarget,
+			const result = await pRunFormMutation({form: event.currentTarget,
 				fingerprint: getFormFingerprint(event.currentTarget),
 				fnMutate: async idempotencyKey => {
 					const type = document.getElementById("campaign-action-type").value;
@@ -3995,35 +3995,48 @@ async function pInitCampaignForms ({
 									arguments: {condition},
 								}
 								: null;
-					await api.pCreateStructuredAction({
+					return api.pCreateStructuredAction({
 						campaignId,
 						targetCharacterId,
 						operation,
 						idempotencyKey,
 					});
-					if (!fnIsCurrent()) {
-						deferMutationUi({
-							form: event.currentTarget,
-							fnApply: () => {
-								document.getElementById("campaign-action-value").value = "";
-								setFormStatus({formId, message: "Effect applied."});
-							},
-						});
-						return;
-					}
-					await renderPendingActions({
-						campaign,
-						campaignId,
-						session,
-						targetCharacters,
-						members,
-						roster: rosterRef.current,
-						fnIsCurrent,
-					});
-					if (!fnIsCurrent()) return;
-					document.getElementById("campaign-action-value").value = "";
-					setFormStatus({formId, message: "Effect applied."});
 				}});
+			if (!result) return;
+			const statusMessage = result?.operation?.changed === false
+				? "Effect recorded; the character was already in that state."
+				: "Effect applied.";
+			if (!fnIsCurrent()) {
+				deferMutationUi({
+					form: event.currentTarget,
+					fnApply: () => {
+						document.getElementById("campaign-action-value").value = "";
+						setFormStatus({formId, message: statusMessage});
+					},
+				});
+				return;
+			}
+			document.getElementById("campaign-action-value").value = "";
+			setFormStatus({formId, message: statusMessage});
+			try {
+				await renderPendingActions({
+					campaign,
+					campaignId,
+					session,
+					targetCharacters,
+					members,
+					roster: rosterRef.current,
+					fnIsCurrent,
+				});
+			} catch (refreshError) {
+				if (!fnIsCurrent()) return;
+				setFormStatus({
+					formId,
+					message: `${statusMessage} Pending requests could not be refreshed; use Refresh to retry the read.`,
+				});
+				// eslint-disable-next-line no-console
+				console.error("Effect committed but pending-action refresh failed:", refreshError);
+			}
 		} catch (error) {
 			if (!fnIsCurrent()) return;
 			const message = error instanceof HubApiError ? getErrorMessage(error) : error.message;

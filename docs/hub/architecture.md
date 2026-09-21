@@ -315,6 +315,13 @@ coverage and do not need to rediscover already-accepted edits. Delivery is there
 transaction over per-track coverage records, and an unprovable delivery schedules a serialized recovery that
 replays ordered visible history instead of forcing a reload.
 
+Immediate semantic no-ops are explicit ordered operations rather than silent success. The current
+migration-0005 uniqueness contract requires a revision-only ordering point even when canonical character JSON is
+unchanged; the audit and applied event record `changed:false`, the operation watermark advances, and no
+projection invalidation is emitted. Reconciliation still evaluates `E` independently for every accepted, live,
+latest-submitted, durable-recovery, and conflict track, because a canonical no-op can change an unsaved local
+track. A track whose bytes remain unchanged advances coverage without state adoption or rendering.
+
 This delivery layer is intentionally not reconciliation: it does not mutate `CharacterSheetState`, accepted
 bases, revisions, leases, conflicts, or recovery storage, and it does not fetch or replace the owner document.
 The Character Sheet page owns the subsequent authoritative-document reconciliation, while the later live-apply
