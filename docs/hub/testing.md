@@ -87,6 +87,19 @@ mutated-body rejection, explicit target-owner approval under competing commands,
 target healing, source/target/combined watermarks, bounded expiry, lifecycle cancellation, and minimized
 explicit-recipient terminal payloads.
 
+The real-stack runner has a 45-minute child-process timeout and total watchdog, a 50-minute workflow-step
+timeout, and a 60-minute job timeout. Normal local/CI runs take roughly 6-10 minutes; the margins allow cold image
+pulls/builds and slower shared runners without approaching GitHub's broad default ceiling. A timeout prints a
+structured stdout diagnostic plus a bounded stderr summary containing the run/project identity, active phase,
+requested spec scope, sanitized active command, and Playwright artifact paths. The watchdog terminates the active
+child process group, runs isolated Compose/image cleanup, and exits 124; the outer budgets bound a stuck child,
+runner, or cleanup even if the inner diagnostic path fails.
+
+On 2026-09-21, run `35600079625` was cancelled after a timezone misread made a roughly two-minute live Playwright
+step appear three hours old. Terminal logs showed PostgreSQL parity had completed and Playwright was active; the
+cancelled run is not evidence of a product deadlock. It did expose that the job had no explicit timeout or
+phase diagnostic, which the bounded watchdog contract above now corrects.
+
 Memory and real-PostgreSQL tests put 501 privacy-redacted character events before a visible semantic lifecycle
 event and prove replay advances by the server-scanned sequence even when a page returns fewer than its limit.
 Both stores bound each read to `limit + 1` raw campaign-sequence rows before audience and projection filtering;

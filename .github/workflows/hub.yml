@@ -225,6 +225,7 @@ jobs:
   real-stack-e2e:
     needs: unit-and-supply-chain
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -250,8 +251,11 @@ jobs:
         run: docker load --input hub-bff-image.tar
 
       - name: Run disposable multi-context Hub E2E
+        timeout-minutes: 50
         env:
           HUB_TEST_BASE_IMAGE: thelemartools-hub-bff:${{ github.sha }}
+          HUB_E2E_TIMEOUT_MS: "2700000"
+          HUB_E2E_CHILD_TIMEOUT_MS: "2700000"
         run: npm run test:hub:e2e:stack
 
       - name: Upload Playwright evidence
