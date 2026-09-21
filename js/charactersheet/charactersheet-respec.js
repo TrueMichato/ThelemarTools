@@ -394,6 +394,20 @@ class CharacterSheetRespec {
 		const raceName = this._state.getRaceName?.() || race?.name || "";
 		rows.append(mkRow("🧬", "Species", raceName, race ? () => this._editRace(1, level1History || {level: 1, choices: {}}, null) : null));
 		rows.append(mkRow("🎒", "Background", background?.name || "", background ? () => this._editBackground(1, level1History || {level: 1, choices: {}}, null) : null));
+		const backgroundAbilityDecisions = (this._engine?.manifest?.base?.decisions || []).filter(decision =>
+			decision.meta?.originAbilityDistribution
+				&& decision.provenance?.ownerType === "background",
+		);
+		if (background && backgroundAbilityDecisions.some(decision => decision.required && decision.status !== "resolved")) {
+			const repair = e_({
+				tag: "button",
+				clazz: "ve-btn ve-btn-xs ve-btn-warning mt-1",
+				txt: "Background ability choices are incomplete — complete choices",
+			});
+			repair.dataset.respecBackgroundAbilityRepair = "true";
+			repair.addEventListener("click", () => this._editBackground(1, level1History || {level: 1, choices: {}}, null));
+			rows.append(repair);
+		}
 		card.append(rows);
 
 		// Origin grants summary (speed/darkvision/skills/languages/ASI), reused from the level-1 renderer
@@ -1981,6 +1995,15 @@ class CharacterSheetRespec {
 							ownerChoices[`choose_${choiceIndex}_0`] = ability;
 							ownerChoices[`choose_${choiceIndex}_0_amount`] = amount;
 							this._state.setBaseRaceUserChoices(choices);
+						} else if (decision.provenance?.ownerType === "background") {
+							const choices = MiscUtil.copyFast(this._state.getBaseBackgroundUserChoices?.() || {});
+							const selectionKey = decision.meta?.originAbilitySelectionKey;
+							if (selectionKey) {
+								choices.selectedAbilityBonuses ||= {};
+								choices.selectedAbilityBonuses[selectionKey] = ability;
+								choices.selectedAbilityBonuses[`${selectionKey}_weight`] = amount;
+								this._state.setBaseBackgroundUserChoices(choices);
+							}
 						}
 						return;
 					}
@@ -4872,6 +4895,65 @@ class CharacterSheetRespec {
 		return true;
 	}
 
+	async _stageSameBackgroundAbilityChoices (userChoices) {
+		const selectedAbilityBonuses = userChoices?.selectedAbilityBonuses || {};
+		const weights = Object.keys(selectedAbilityBonuses)
+			.filter(key => /^bg_\d+_weight$/.test(key))
+			.sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]))
+			.map(key => Number(selectedAbilityBonuses[key]));
+		const parent = (this._engine?.manifest?.base?.decisions || []).find(decision =>
+			decision.type === "nestedConfiguration"
+				&& decision.meta?.originAbilityDistribution
+				&& decision.provenance?.ownerType === "background",
+		);
+		const mode = parent?.options?.find(option =>
+			option.weights?.length === weights.length
+				&& option.weights.every((weight, ix) => Number(weight) === weights[ix]),
+		);
+		if (!parent || !mode) return false;
+
+		await this._engine.stageGraphMutation(parent.id, mode, {
+			reverseParent: true,
+			apply: ({state}) => {
+				const choices = MiscUtil.copyFast(state.getBaseBackgroundUserChoices?.() || {});
+				choices.selectedAbilityBonuses = {};
+				mode.weights.forEach((weight, ix) => {
+					choices.selectedAbilityBonuses[`bg_${ix}`] = null;
+					choices.selectedAbilityBonuses[`bg_${ix}_weight`] = weight;
+				});
+				state.setBaseBackgroundUserChoices?.(choices);
+			},
+		});
+
+		const children = (this._engine.manifest?.base?.decisions || [])
+			.filter(decision =>
+				decision.type === "nestedAbility"
+					&& decision.parentSemanticKey === parent.semanticKey
+					&& decision.meta?.originAbilityDistribution,
+			)
+			.sort((a, b) => Number(a.slot) - Number(b.slot));
+		if (children.length !== weights.length) {
+			throw new Error("The selected background ability distribution could not be expanded.");
+		}
+		for (const child of children) {
+			const ability = selectedAbilityBonuses[child.meta.originAbilitySelectionKey];
+			if (!ability) throw new Error("Complete every background ability choice before staging it.");
+			const current = this._engine.manifest.base.decisions.find(decision =>
+				decision.semanticKey === child.semanticKey,
+			);
+			await this._engine.stageGraphMutation(current.id, ability, {
+				reverseParent: true,
+				apply: ({state}) => this._applyManifestSelectionMechanics(
+					current,
+					ability,
+					current.options,
+					state,
+				),
+			});
+		}
+		return true;
+	}
+
 	async _editRace (level, history, closeParentModal) {
 		const races = this._page.filterByAllowedSources(this._page.getRaces());
 
@@ -5189,8 +5271,14 @@ class CharacterSheetRespec {
 			});
 
 			const originDecision = this._engine?.manifest?.base?.decisions?.find(decision => decision.type === "originBackground");
-			if (originDecision) {
-				this._engine.stageGraphMutation(originDecision.id, {
+			const isSameBackgroundAbilityOnly = isSameEntity
+				&& currentPickers.length
+				&& currentPickers.every(picker => picker.type === "ability");
+			const didStageOwnedAbilityChoices = isSameBackgroundAbilityOnly
+				? await this._stageSameBackgroundAbilityChoices(userChoices)
+				: false;
+			if (!didStageOwnedAbilityChoices && originDecision) {
+				await this._engine.stageGraphMutation(originDecision.id, {
 					name: selectedBg.name,
 					source: selectedBg.source,
 				}, {
@@ -5204,7 +5292,7 @@ class CharacterSheetRespec {
 						}
 					},
 				});
-			} else {
+			} else if (!didStageOwnedAbilityChoices) {
 				await this._engine.stageCandidateMutation(({state}) => {
 					const previousState = this._state;
 					this._state = state;
@@ -5217,7 +5305,7 @@ class CharacterSheetRespec {
 			}
 
 			doClose();
-			closeParentModal();
+			closeParentModal?.();
 			this.render();
 			JqueryUtil.doToast({
 				type: "success",

@@ -868,6 +868,169 @@ class CharacterSheetProgression {
 		});
 	}
 
+	static _buildOriginAbilityDistribution ({
+		originType,
+		entity,
+		choices,
+		originUid,
+		entityKey,
+		storedBasePool,
+	}) {
+		if (originType !== "background") return [];
+		const modes = (entity?.ability || [])
+			.map((abilitySet, modeIndex) => {
+				const choose = abilitySet?.choose;
+				if (!choose) return null;
+				const weights = choose.weighted?.weights
+					|| (choose.count ? Array(Number(choose.count) || 0).fill(Number(choose.amount) || 1) : []);
+				const from = choose.weighted?.from || choose.from || [];
+				if (!weights.length || !from.length) return null;
+				return {
+					name: weights.map(weight => `+${weight}`).join("/"),
+					key: `mode-${modeIndex}`,
+					modeIndex,
+					weights: CharacterSheetProgression._copy(weights),
+					from: CharacterSheetProgression._copy(from),
+				};
+			})
+			.filter(Boolean);
+		if (modes.length < 2) return [];
+
+		const acquisitionKey = `base:${originType}:${originUid}`;
+		const grantKey = `${originType}.ability.distribution`;
+		const semanticKey = CharacterSheetProgression.getNestedSemanticKey({
+			parentSemanticKey: entityKey,
+			acquisitionKey,
+			grantKey,
+			identityMode: "opportunity",
+		});
+		const stored = storedBasePool.get(semanticKey)?.find(decision => decision.selection != null);
+		const selectedBonuses = choices?.selectedAbilityBonuses || {};
+		const selectedWeights = Object.keys(selectedBonuses)
+			.filter(key => /^bg_\d+_weight$/.test(key))
+			.sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]))
+			.map(key => Number(selectedBonuses[key]));
+		const persistedMode = modes.find(mode =>
+			mode.weights.length === selectedWeights.length
+				&& mode.weights.every((weight, ix) => weight === selectedWeights[ix]),
+		) || null;
+		const selection = stored?.selection ?? persistedMode;
+		const selectedMode = modes.find(mode =>
+			mode.key === selection?.key
+				|| (
+					Array.isArray(selection?.weights)
+					&& mode.weights.length === selection.weights.length
+					&& mode.weights.every((weight, ix) => weight === Number(selection.weights[ix]))
+				),
+		) || null;
+		const parent = CharacterSheetProgression._makeDecision({
+			characterLevel: 0,
+			className: "Base",
+			classSource: "",
+			classLevel: 0,
+			type: "nestedConfiguration",
+			label: "Background Ability Distribution",
+			sourceKey: grantKey,
+			count: 1,
+			options: modes,
+			selection,
+			isValid: CharacterSheetProgression._isSelectionValid({
+				selection,
+				count: 1,
+				options: modes,
+				type: "nestedConfiguration",
+			}),
+			receipt: stored?.receipt || null,
+			meta: {originAbilityDistribution: true},
+			scope: "origin",
+			semanticKeyOverride: semanticKey,
+			rootSemanticKey: entityKey,
+			depth: 1,
+			parentSemanticKey: entityKey,
+			provenance: {
+				ownerType: originType,
+				ownerUid: originUid,
+				acquisitionKey,
+				selectedGrantKey: originUid,
+				grantKind: "configuration",
+				grantKey,
+				sourcePath: `${originType}.ability`,
+				occurrence: 0,
+				pickSlot: 0,
+			},
+		});
+		const decisions = [parent];
+		if (!selectedMode) return decisions;
+
+		const selectedAbilities = selectedMode.weights.map((weight, ix) => selectedBonuses[`bg_${ix}`] || null);
+		const selectedCounts = selectedAbilities.reduce((counts, ability) => {
+			if (ability) counts.set(ability, (counts.get(ability) || 0) + 1);
+			return counts;
+		}, new Map());
+		selectedMode.weights.forEach((amount, ix) => {
+			const childGrantKey = `${grantKey}.${selectedMode.key}.ability-${ix}`;
+			const childSemanticKey = CharacterSheetProgression.getNestedSemanticKey({
+				parentSemanticKey: semanticKey,
+				acquisitionKey,
+				grantKey: childGrantKey,
+				occurrence: selectedMode.modeIndex,
+				slot: ix,
+				identityMode: "opportunity",
+			});
+			const storedChild = storedBasePool.get(childSemanticKey)?.find(decision => decision.selection != null);
+			const childSelection = storedChild?.selection ?? selectedAbilities[ix];
+			const isUnique = !childSelection || selectedCounts.get(childSelection) === 1;
+			decisions.push(CharacterSheetProgression._makeDecision({
+				characterLevel: 0,
+				className: "Base",
+				classSource: "",
+				classLevel: 0,
+				type: "nestedAbility",
+				label: `Background Ability +${amount}`,
+				sourceKey: childGrantKey,
+				slot: ix,
+				count: 1,
+				options: selectedMode.from,
+				selection: childSelection,
+				isValid: isUnique && CharacterSheetProgression._isSelectionValid({
+					selection: childSelection,
+					count: 1,
+					options: selectedMode.from,
+					type: "nestedAbility",
+				}),
+				receipt: storedChild?.receipt || null,
+				meta: {
+					originAbilityDistribution: true,
+					originAbilitySelectionKey: `bg_${ix}`,
+					descriptorRules: {
+						amount,
+						optionSource: {
+							kind: "explicitList",
+							values: selectedMode.from,
+						},
+					},
+				},
+				scope: "origin",
+				semanticKeyOverride: childSemanticKey,
+				rootSemanticKey: entityKey,
+				depth: 2,
+				parentSemanticKey: semanticKey,
+				provenance: {
+					ownerType: originType,
+					ownerUid: originUid,
+					acquisitionKey,
+					selectedGrantKey: selectedMode.key,
+					grantKind: "ability",
+					grantKey: childGrantKey,
+					sourcePath: `${originType}.ability[${selectedMode.modeIndex}]`,
+					occurrence: selectedMode.modeIndex,
+					pickSlot: ix,
+				},
+			}));
+		});
+		return decisions;
+	}
+
 	static _buildOriginManifest ({page, state, storedBasePool, issues}) {
 		const base = {scope: "origin", characterLevel: 0, decisions: []};
 		const addOrigin = (originType, entity, choices, originIx) => {
@@ -930,7 +1093,22 @@ class CharacterSheetProgression {
 					ownerUid: originUid,
 				});
 			}
+			const abilityDistributionDecisions = CharacterSheetProgression._buildOriginAbilityDistribution({
+				originType,
+				entity,
+				choices,
+				originUid,
+				entityKey,
+				storedBasePool,
+			});
+			base.decisions.push(...abilityDistributionDecisions);
+			const hasAbilityDistribution = abilityDistributionDecisions.length > 0;
 			descriptors.forEach((descriptor, slot) => {
+				if (
+					hasAbilityDistribution
+						&& descriptor.kind === "ability"
+						&& String(descriptor.sourcePath || "").startsWith(`${originType}.ability[`)
+				) return;
 				if (descriptor.required
 						&& !descriptor.options?.length
 						&& descriptor.rules?.optionSource?.kind !== "filter") {

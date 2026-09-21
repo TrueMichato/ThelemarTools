@@ -70,6 +70,16 @@ removing the first class level cannot orphan species/background choices.
 Legacy level-1 origin copies remain readable and are migrated to the base node
 without losing user selections.
 
+Background ability alternatives are represented as a required distribution
+parent with weighted ability children. For example, the 2024 `+2/+1` and
+`+1/+1/+1` alternatives are one mode opportunity, not two independent ability
+choices. Selecting a mode creates only its required children; changing the
+mode removes the previous children and reverses only their receipt-owned bonus
+deltas. Legacy saves without `backgroundUserChoices.selectedAbilityBonuses`
+remain explicitly incomplete instead of inferring ownership from aggregate
+ability bonuses, and the Base card links to the existing background editor to
+complete the missing history.
+
 Manifest discovery must be complete before it replaces the saved ledger. If
 class data is temporarily unavailable, Respec may report the discovery error,
 but it preserves the existing decisions and `manifestComplete` state rather
