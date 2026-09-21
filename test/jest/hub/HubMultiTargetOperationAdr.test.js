@@ -133,6 +133,19 @@ describe("Campaign Hub multi-target operation ADR contract", () => {
 		expect(apiReference).toContain("different campaigns produce one committed winner");
 	});
 
+	it("requires the explicit cross-campaign source-account slot-five PostgreSQL race", () => {
+		for (const anchor of [
+			"seed one source account with four live collections",
+			"two different campaigns for slot five",
+			"seed-10 source-account lock",
+			"exactly one applied proposal",
+			"one stable `COLLECTION_LIMIT_REACHED` loser",
+			"zero loser parent, child, audit, event, outbox, or command/receipt evidence",
+		]) expect(normalizedAdr).toContain(anchor);
+		expect(testing).toContain("one committed winner");
+		expect(testing).toContain("no loser parent, target-child, audit, domain-event, outbox, semantic-command, or receipt evidence");
+	});
+
 	it("pins bounded event audiences and cross-target privacy across current docs", () => {
 		for (const text of [normalizedAdr, eventCatalog]) {
 			expect(text).toContain("source owner plus DM/co-DM");

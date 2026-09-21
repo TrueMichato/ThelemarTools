@@ -143,6 +143,11 @@ usage-marker-absent preflight. It must also race cross-campaign proposals at the
 opposite account-discovery order, proving one seed-10 winner, one loser, and no deadlock; marker tests cover
 first-use insert, cleanup persistence, backup/restore, role grants, and rollback fencing.
 
+A separate A3 PostgreSQL source-account-cap test seeds one source account with four live collections, then races
+proposals in two different campaigns for slot five under the seed-10 source-account lock. It must produce exactly
+one committed winner, one stable `COLLECTION_LIMIT_REACHED` loser, no deadlock, and no loser parent, target-child,
+audit, domain-event, outbox, semantic-command, or receipt evidence.
+
 ## Test data rules
 
 - Never use a real OAuth token, invite token, database URL, or private character in fixtures.

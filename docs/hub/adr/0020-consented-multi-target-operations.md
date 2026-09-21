@@ -535,8 +535,12 @@ pre-0010 target is blocked whenever the usage marker exists, regardless of curre
     pagination without starvation.
 19. Cross-campaign proposals targeting the same owner at the 20-invitation cap, with opposite owner-discovery
     order, one seed-10 winner, one loser, and no deadlock.
-20. Fresh/0009 upgrade/concurrent/failure/checksum/roles/backup/restore proof for the irreversible usage marker.
-21. Default-off/disable/bridge rollback and true pre-0010 marker-absent preflight.
+20. PostgreSQL source-account-cap race: seed one source account with four live collections, concurrently propose
+    in two different campaigns for slot five under the seed-10 source-account lock, and prove exactly one applied
+    proposal, one stable `COLLECTION_LIMIT_REACHED` loser, no deadlock, and zero loser parent, child, audit, event,
+    outbox, or command/receipt evidence.
+21. Fresh/0009 upgrade/concurrent/failure/checksum/roles/backup/restore proof for the irreversible usage marker.
+22. Default-off/disable/bridge rollback and true pre-0010 marker-absent preflight.
 
 ## Consequences
 
