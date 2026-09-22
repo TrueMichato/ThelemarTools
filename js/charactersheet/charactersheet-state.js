@@ -11311,7 +11311,7 @@ class CharacterSheetState {
 		const slot = this._data.spellcasting.spellSlots[slotLevel];
 		const resource = this._getFeatureResourceByName("Unearthly Countenance");
 		if (!slot || slot.current < 1 || !resource || resource.current >= resource.max) return false;
-		slot.current--;
+		if (!this.useSpellSlot(slotLevel)) return false;
 		this.setResourceCurrent(resource.id, resource.current + 1);
 		return true;
 	}
@@ -11345,7 +11345,10 @@ class CharacterSheetState {
 		}
 
 		this.setResourceCurrent(resource.id, resource.current - 1);
-		if (restoreSlotLevel != null) this._data.spellcasting.spellSlots[restoreSlotLevel].current++;
+		if (restoreSlotLevel != null) {
+			const current = this.getSpellSlotsCurrent(restoreSlotLevel);
+			this.setSpellSlotCurrent(restoreSlotLevel, current + 1, {isExpenditure: false});
+		}
 		if (switchSides) this.switchDaemonologistSide({consumeUse: false});
 		return true;
 	}
@@ -20289,32 +20292,33 @@ class CharacterSheetState {
 		return false;
 	}
 
-	setSpellSlots (levelOrArray, max, current = max) {
+	setSpellSlots (levelOrArray, max, current = max, {isExpenditure = false} = {}) {
 		// Support array format: [{level: 1, current: 0, max: 4}, ...]
 		if (Array.isArray(levelOrArray)) {
 			for (const slot of levelOrArray) {
-				this._setSpellSlotsEntry(slot.level, slot.max, slot.current ?? slot.max);
+				this._setSpellSlotsEntry(slot.level, slot.max, slot.current ?? slot.max, {isExpenditure: false});
 			}
 		} else {
 			// Original format: (level, max, current)
-			this._setSpellSlotsEntry(levelOrArray, max, current);
+			this._setSpellSlotsEntry(levelOrArray, max, current, {isExpenditure});
 		}
 	}
 
-	_setSpellSlotsEntry (level, max, current) {
+	_setSpellSlotsEntry (level, max, current, {isExpenditure = false} = {}) {
 		const existing = this._data.spellcasting.spellSlots[level];
 		if (existing) existing.max = max;
 		else this._data.spellcasting.spellSlots[level] = {current: 0, max};
-		this._setOrdinarySpellSlotCurrent(level, current);
+		this._setOrdinarySpellSlotCurrent(level, current, {isExpenditure});
 	}
 
-	_setOrdinarySpellSlotCurrent (level, current) {
+	_setOrdinarySpellSlotCurrent (level, current, {isExpenditure = false, isAllowAboveMax = false} = {}) {
 		const slot = this._data.spellcasting.spellSlots[level];
 		if (!slot) return false;
 		const previous = Math.max(0, Number(slot.current) || 0);
-		const next = Math.max(0, Math.min(current, slot.max));
+		const next = Math.max(0, isAllowAboveMax ? current : Math.min(current, slot.max));
 		if (
-			next < previous
+			isExpenditure
+			&& next < previous
 			&& this._data.efaArtificerTinker?.drainSlotAvailable
 			&& Number(this._data.efaArtificerTinker.drainSlotLevel) === Number(level)
 		) {
@@ -20584,13 +20588,13 @@ class CharacterSheetState {
 				continue;
 			}
 			if (!existing) {
-				this._data.spellcasting.spellSlots[level] = {current: targetMax, max: targetMax};
+				this._setSpellSlotsEntry(level, targetMax, targetMax, {isExpenditure: false});
 			} else {
 				// Preserve how many slots were already spent so a re-render / equip toggle never
 				// silently refills expended slots (spent = old max − old current).
 				const spent = Math.max(0, (existing.max || 0) - (existing.current || 0));
 				existing.max = targetMax;
-				this._setOrdinarySpellSlotCurrent(level, Math.max(0, targetMax - spent));
+				this._setOrdinarySpellSlotCurrent(level, Math.max(0, targetMax - spent), {isExpenditure: false});
 			}
 		}
 
@@ -20621,14 +20625,14 @@ class CharacterSheetState {
 		}
 	}
 
-	setSpellSlotCurrent (level, current) {
-		this._setOrdinarySpellSlotCurrent(level, current);
+	setSpellSlotCurrent (level, current, {isExpenditure = false, isAllowAboveMax = false} = {}) {
+		this._setOrdinarySpellSlotCurrent(level, current, {isExpenditure, isAllowAboveMax});
 	}
 
 	useSpellSlot (level) {
 		const slot = this._data.spellcasting.spellSlots[level];
 		if (slot && slot.current > 0) {
-			this._setOrdinarySpellSlotCurrent(level, slot.current - 1);
+			this._setOrdinarySpellSlotCurrent(level, slot.current - 1, {isExpenditure: true});
 			return true;
 		}
 		return false;
@@ -20636,7 +20640,7 @@ class CharacterSheetState {
 
 	recoverSpellSlots () {
 		for (const level of Object.keys(this._data.spellcasting.spellSlots)) {
-			this._setOrdinarySpellSlotCurrent(level, this._data.spellcasting.spellSlots[level].max);
+			this._setOrdinarySpellSlotCurrent(level, this._data.spellcasting.spellSlots[level].max, {isExpenditure: false});
 		}
 	}
 
@@ -38750,7 +38754,7 @@ class CharacterSheetState {
 					0,
 					(currentByLevel[level] ?? slots.current) - (removeAvailableSlot && level === markerLevel ? 1 : 0),
 				);
-				this._setOrdinarySpellSlotCurrent(level, Math.min(desiredCurrent, slots.max));
+				this._setOrdinarySpellSlotCurrent(level, Math.min(desiredCurrent, slots.max), {isExpenditure: false});
 			}
 		} else {
 			for (const [levelRaw, removed] of Object.entries(removedByLevel)) {
@@ -38762,7 +38766,7 @@ class CharacterSheetState {
 					0,
 					(currentByLevel[level] ?? slots.current) - (removeAvailableSlot && level === markerLevel ? 1 : 0),
 				);
-				this._setOrdinarySpellSlotCurrent(level, Math.min(desiredCurrent, slots.max));
+				this._setOrdinarySpellSlotCurrent(level, Math.min(desiredCurrent, slots.max), {isExpenditure: false});
 				if (!slots.max) delete this._data.spellcasting.spellSlots[level];
 			}
 		}
@@ -55897,7 +55901,7 @@ class CharacterSheetState {
 		if (!feature || !resource || resource.current >= resource.max) return false;
 		const currentSlots = this.getSpellSlotsCurrent(slotLevel);
 		if (currentSlots < 1) return false;
-		this.setSpellSlotCurrent(slotLevel, currentSlots - 1);
+		if (!this.useSpellSlot(slotLevel)) return false;
 		this.setResourceCurrent(resource.id, resource.current + 1);
 		return true;
 	}
@@ -64592,7 +64596,7 @@ class CharacterSheetState {
 		if (!slot || slot.current <= 0) return false;
 
 		// Use the spell slot
-		this._data.spellcasting.spellSlots[slotLevel].current--;
+		if (!this.useSpellSlot(slotLevel)) return false;
 
 		// Gain stamina = 1 + slot level
 		const staminaGained = 1 + slotLevel;
@@ -91498,7 +91502,7 @@ class CharacterSheetState {
 		const slots = this._data.spellcasting.spellSlots;
 		for (const {level, amount} of slotsToRecover) {
 			if (slots[level]) {
-				slots[level].current = Math.min(slots[level].max, slots[level].current + amount);
+				this.setSpellSlotCurrent(level, Math.min(slots[level].max, slots[level].current + amount), {isExpenditure: false});
 			}
 		}
 
@@ -93468,9 +93472,7 @@ class CharacterSheetState {
 		if (slotCurrent <= 0) return false;
 
 		// Expend the slot
-		const slots = this._data.spellcasting.spellSlots;
-		if (!slots[slotLevel]) return false;
-		slots[slotLevel].current--;
+		if (!this.useSpellSlot(slotLevel)) return false;
 
 		// Gain SP equal to slot level (capped at max)
 		const res = this._getSpResource();
@@ -93504,14 +93506,18 @@ class CharacterSheetState {
 
 		// Ensure the slot level exists in data
 		if (!this._data.spellcasting.spellSlots[slotLevel]) {
-			this._data.spellcasting.spellSlots[slotLevel] = {current: 0, max: 0};
+			this._setSpellSlotsEntry(slotLevel, 0, 0, {isExpenditure: false});
 		}
 
 		// Spend SP
 		res.current -= cost;
 
 		// Create the slot (add 1 current, even above max — it's a temporary bonus slot)
-		this._data.spellcasting.spellSlots[slotLevel].current++;
+		this.setSpellSlotCurrent(
+			slotLevel,
+			this.getSpellSlotsCurrent(slotLevel) + 1,
+			{isExpenditure: false, isAllowAboveMax: true},
+		);
 
 		return true;
 	}
@@ -93608,7 +93614,7 @@ class CharacterSheetState {
 		const slots = this._data.spellcasting.spellSlots;
 		for (const {level, amount} of slotsToRecover) {
 			if (slots[level]) {
-				slots[level].current = Math.min(slots[level].max, slots[level].current + amount);
+				this.setSpellSlotCurrent(level, Math.min(slots[level].max, slots[level].current + amount), {isExpenditure: false});
 			}
 		}
 

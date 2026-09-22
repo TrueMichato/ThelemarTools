@@ -57,7 +57,7 @@ describe("R17 Bug #3a: quick auto-cast skips the 'Choose Slot Level' modal", () 
 		expect(globalThis.InputUiUtil.pGetUserEnum).not.toHaveBeenCalled();
 		expect(spells._showCastResult).toHaveBeenCalled();
 		expect(spells._showCastResult.mock.calls[0][1]).toBe(3);
-		expect(setSpellSlots).toHaveBeenCalledWith(3, 2, 1);
+		expect(setSpellSlots).toHaveBeenCalledWith(3, 2, 1, {isExpenditure: true});
 	});
 
 	it("does NOT open the slot-enum modal for a legacy spellId-only call (combat/overview/favourites)", async () => {
@@ -85,7 +85,7 @@ describe("R17 Bug #3a: quick auto-cast skips the 'Choose Slot Level' modal", () 
 		expect(call[1]).toBe(4);
 		expect(call[4].appliedMetamagic).toEqual(expect.objectContaining({key: "twinned"}));
 		expect(useSp).toHaveBeenCalledWith(2);
-		expect(setSpellSlots).toHaveBeenCalledWith(4, 2, 1);
+		expect(setSpellSlots).toHaveBeenCalledWith(4, 2, 1, {isExpenditure: true});
 	});
 });
 // endregion

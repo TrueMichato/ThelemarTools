@@ -759,7 +759,7 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 			operation: "drain",
 			itemId: replica.itemId,
 		}).ok).toBe(true);
-		state.setSpellSlotCurrent(1, state.getSpellSlotsCurrent(1) - 1);
+		expect(state.useSpellSlot(1)).toBe(true);
 		expect(state.getSpellSlotsCurrent(1)).toBe(baseMax);
 
 		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
@@ -843,6 +843,134 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
 		state.reconcileEfaArtificerTinker({reason: "test-cast-level-loss"});
 		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
+	});
+
+	test("spell-slot recovery does not consume or re-arm the Drain marker", () => {
+		const {state} = buildState();
+		state.addClass({name: "Wizard", source: "XPHB", level: 1});
+		state.calculateSpellSlots();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 3}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+
+		state.recoverSpellSlots();
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 5}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+
+		expect(state.useSpellSlot(1)).toBe(true);
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
+		state.recoverSpellSlots();
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
+	});
+
+	test("multiclass slot recalculation removes an unspent Drain slot without refunding spent slots", () => {
+		const {state} = buildState();
+		state.addClass({name: "Wizard", source: "XPHB", level: 1});
+		state.calculateSpellSlots();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 3}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+
+		state.removeClass("Artificer", "EFA");
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 2, current: 0}});
+		expect(state.toJson().efaArtificerTinker).toMatchObject({
+			drainUsed: false,
+			drainSlotLevel: null,
+			drainSlotAvailable: false,
+		});
+	});
+
+	test("Paladin slot-to-Stamina conversion spends the temporary Drain slot canonically", () => {
+		const {state} = buildState();
+		state.addClass({name: "Paladin", source: "TGTT", level: 1});
+		state._data.combatTraditions = [{name: "Control Tradition"}];
+		state._data.staminaCurrent = 0;
+		state._data.staminaMax = 10;
+		state.calculateSpellSlots();
+		state.setSpellSlotCurrent(1, 2);
+		const paladinReplica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: paladinReplica.itemId,
+		}).ok).toBe(true);
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+		expect(state.convertSpellSlotToStamina(1)).toBe(true);
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
+	});
+
+	test("Font of Magic slot conversion spends the temporary Drain slot canonically", () => {
+		const {state} = buildState();
+		state.setSpellSlotCurrent(1, 2);
+		const sorceryReplica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: sorceryReplica.itemId,
+		}).ok).toBe(true);
+		state.hasFontOfMagic = () => true;
+		state._data.resources.push({
+			id: "test-sorcery-points",
+			name: "Sorcery Points",
+			current: 0,
+			max: 10,
+			recharge: "long",
+		});
+		expect(state.convertSlotToSorceryPoints(1)).toBe(true);
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
+	});
+
+	test("Unearthly Countenance spends canonically at another level without consuming the Drain marker", () => {
+		const {state} = buildState();
+		state.addClass({
+			name: "Wizard",
+			source: "XPHB",
+			level: 10,
+			subclass: {
+				name: "Daemonologist",
+				shortName: "Daemonologist",
+				source: "GrimHollowPG24",
+				className: "Wizard",
+				classSource: "XPHB",
+			},
+		});
+		state._data.features.push({
+			id: "test-unearthly-countenance",
+			name: "Unearthly Countenance",
+			source: "GrimHollowPG24",
+			className: "Wizard",
+			classSource: "XPHB",
+			level: 10,
+		});
+		state._data.resources.push({
+			id: "test-unearthly-countenance-resource",
+			name: "Unearthly Countenance",
+			featureId: "test-unearthly-countenance",
+			current: 0,
+			max: 1,
+			recharge: "long",
+		});
+		state.calculateSpellSlots();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+		const useSpellSlot = jest.spyOn(state, "useSpellSlot");
+		expect(state.restoreUnearthlyCountenanceUse(5)).toBe(true);
+		expect(useSpellSlot).toHaveBeenCalledWith(5);
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
 	});
 
 	test("exact EFA source loss removes Tinker's creations and temporary Drain slots without claiming other owners", () => {

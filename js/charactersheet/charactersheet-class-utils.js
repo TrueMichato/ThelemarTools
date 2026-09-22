@@ -8822,12 +8822,16 @@ class CharacterSheetClassUtils {
 
 			Object.entries(slots).forEach(([level, count]) => {
 				if (!spellcasting.spellSlots[level]) {
-					spellcasting.spellSlots[level] = {current: count, max: count};
+					state.setSpellSlots(level, count, count, {isExpenditure: false});
 				} else {
 					const diff = count - spellcasting.spellSlots[level].max;
 					if (/** @type {*} */ diff > 0) {
-						spellcasting.spellSlots[level].max = count;
-						spellcasting.spellSlots[level].current += diff;
+						state.setSpellSlots(
+							level,
+							count,
+							spellcasting.spellSlots[level].current + diff,
+							{isExpenditure: false},
+						);
 					}
 				}
 			});

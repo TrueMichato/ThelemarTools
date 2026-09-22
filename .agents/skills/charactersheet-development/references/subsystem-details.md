@@ -462,10 +462,14 @@ missing, and never claims other generated owners or modifiers. The availability
 marker is consumed by canonical ordinary-slot decrements: cleanup subtracts the
 temporary current slot only while it is still available, preserving both the
 unspent `2/4 -> 3/5 -> 2/4` case and the already-spent `4/5 -> 4/4` case.
-`setSpellSlots()`, `setSpellSlotCurrent()`, `useSpellSlot()`, and recalculation
-all share the same current-slot mutation path, so Spells-tab casts, manual pips,
-and direct state transactions cannot bypass the marker. Mutations at other slot
-levels leave it intact.
+`setSpellSlots()`, `setSpellSlotCurrent()`, and `useSpellSlot()` share the same
+current-slot mutation path, but genuine spends must explicitly set
+`isExpenditure: true` (or call `useSpellSlot()`). Spells-tab/Play Mode casts,
+manual pips, feature-use conversions, slot-to-Stamina, and
+slot-to-sorcery-points use that mode. Recalculation, maximum clamping,
+rest/recovery, refunds, progression, Drain cleanup, and slot creation
+explicitly use the non-consuming mode, so they neither spend nor re-arm the
+marker. Mutations at other slot levels leave it intact.
 `applyEfaArtificerTinkerLongRestTransition()` is idempotent and is called by
 both `state.onLongRest()` and the active Finish Long Rest controller after its
 undo snapshot. A committed long rest therefore removes all exact-owner
@@ -2180,7 +2184,7 @@ ledger-less legacy saves, where `sourceFeature` is the only surviving provenance
 }
 ```
 
-**Manual pip toggling (Phase 6.2).** The Spells tab renders each slot as a `.charsheet__spell-slot-pip` element with an additional `.charsheet__spell-slot-pip--used` modifier class when consumed. Clicking a pip toggles it through `_toggleSlot`: clicking an available pip calls `state.useSpellSlot(level)` (decrement `current`); clicking the rightmost used pip calls `state.setSpellSlots(level, current + 1)` (restore one). The selector and used-class check must use the full prefixed names (`.charsheet__spell-slot-pip` and `.charsheet__spell-slot-pip--used`) — a previous shortform regression silently broke the click handler entirely.
+**Manual pip toggling (Phase 6.2).** The Spells tab renders each slot as a `.charsheet__spell-slot-pip` element with an additional `.charsheet__spell-slot-pip--used` modifier class when consumed. Clicking a pip toggles it through `_toggleSlot`: clicking an available pip calls `state.setSpellSlots(level, max, current - 1, {isExpenditure: true})`; clicking the rightmost used pip calls `state.setSpellSlots(level, max, current + 1)` in the default non-consuming mode. The selector and used-class check must use the full prefixed names (`.charsheet__spell-slot-pip` and `.charsheet__spell-slot-pip--used`) — a previous shortform regression silently broke the click handler entirely.
 
 **Prepared capacity excludes always-prepared grants.** `CharacterSheetClassUtils.countPreparedSpells()` counts only player-prepared leveled spells. Subclass/class overlays with `alwaysPrepared: true` remain available and render as locked prepared spells, but never consume the class's preparation capacity. Preserve their exact `name|source` identity when populating, saving, loading, Quick Building, or changing a subclass in Respec.
 

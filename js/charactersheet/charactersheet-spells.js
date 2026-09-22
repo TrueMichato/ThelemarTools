@@ -649,7 +649,7 @@ class CharacterSheetSpells {
 				const max = this._state.getSpellSlotsMax(level);
 				const cur = this._state.getSpellSlotsCurrent(level);
 				if (cur <= 0) return;
-				this._state.setSpellSlots(level, max, cur - 1);
+				this._state.setSpellSlots(level, max, cur - 1, {isExpenditure: true});
 			}
 		}
 
@@ -3356,7 +3356,12 @@ class CharacterSheetSpells {
 				this._state.setPactSlotsCurrent(pactSlots.current - 1);
 			} else {
 				const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
-				this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current - 1);
+				this._state.setSpellSlots(
+					selectedSlot.level,
+					this._state.getSpellSlotsMax(selectedSlot.level),
+					current - 1,
+					{isExpenditure: true},
+				);
 			}
 		}
 

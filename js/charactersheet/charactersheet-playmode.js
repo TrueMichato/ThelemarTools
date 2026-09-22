@@ -2054,7 +2054,7 @@ export class CharacterSheetPlayMode {
 						const cur = this._state.getSpellSlotsCurrent(lvl);
 						const max = this._state.getSpellSlotsMax(lvl);
 						if (i < cur) {
-							this._state.setSpellSlotCurrent(lvl, cur - 1);
+							this._state.setSpellSlotCurrent(lvl, cur - 1, {isExpenditure: true});
 						} else {
 							this._state.setSpellSlotCurrent(lvl, Math.min(max, cur + 1));
 						}
@@ -3806,7 +3806,7 @@ export class CharacterSheetPlayMode {
 		if (slot.isPact) {
 			this._state.setPactSlotsCurrent(slot.current - 1);
 		} else {
-			this._state.setSpellSlotCurrent(slot.level, slot.current - 1);
+			this._state.setSpellSlotCurrent(slot.level, slot.current - 1, {isExpenditure: true});
 		}
 
 		// Set concentration
