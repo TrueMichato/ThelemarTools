@@ -115,14 +115,98 @@ present). An EFA Artificer spell cannot borrow ritual authorization from a
 Cleric, Druid, or other multiclass leg; unattributed legacy spells retain the
 existing multiclass fallback.
 
-For any EFA subclass not implemented in its own bounded milestone, the existing
-Artificer subclass calculation switch remains TCE-only. Do not project TCE
-subclass mechanics onto an EFA subclass merely because the names match.
-
 Cartographer is source-qualified as `Artificer|EFA` + `Cartographer|EFA`.
 Ingenious Movement unlocks at Artificer level 9 with a 30-foot target and
 teleport range. It is an event-only post-commit Flash of Genius follow-up, not
 durable movement state and not an Adventurer's Atlas holder benefit.
+
+The legacy Artificer subclass calculation switch remains exact-source only:
+the subclass source must equal the class source, and EFA subclasses do not enter
+the legacy/TCE switch merely because their names match.
+
+### EFA Battle Smith passive contract
+
+The EFA Battle Smith passive branch requires the exact tuple
+`Artificer|EFA` + `Battle Smith|EFA` and the published class level. Public
+source-qualified identities are exposed as
+`CharacterSheetState.EFA_BATTLE_SMITH_SUBCLASS_UID` and
+`CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS`.
+
+Its calculation output is intentionally EFA-prefixed where a legacy field would
+activate runtime behavior outside the passive milestone:
+
+```javascript
+{
+    hasEfaBattleSmithToolsOfTheTrade,
+    efaBattleSmithToolsOfTheTradeFeatureUid,
+    hasEfaBattleReady,
+    efaBattleReadyFeatureUid,
+    efaBattleReadyAttackAbility,
+    efaBattleReadyWeaponRequirement,
+    efaBattleReadyAttackMod,
+    hasEfaSteelDefenderGrant,
+    efaSteelDefenderFeatureUid,
+    hasExtraAttack,
+    attackCount,
+    efaBattleSmithExtraAttackFeatureUid,
+    hasEfaArcaneJolt,
+    efaArcaneJoltFeatureUid,
+    efaArcaneJoltDamage,
+    efaArcaneJoltHealing,
+    efaArcaneJoltUses,
+    efaArcaneJoltRecharge,
+    efaArcaneJoltOncePerTurn,
+    efaArcaneJoltHealingRange,
+    hasEfaImprovedDefender,
+    efaImprovedDefenderFeatureUid,
+    efaImprovedDefenderArcaneJoltDice,
+    efaImprovedDefenderDeflectAttackDamageDice,
+    efaImprovedDefenderDeflectAttackDamageBonus,
+    efaImprovedDefenderDeflectAttackDamageType,
+}
+```
+
+Do not replace `hasEfaSteelDefenderGrant` with legacy `hasSteelDefender`; that
+field is consumed by companion-creation UI and would start the separate
+companion acquisition milestone. Defender HP, AC, Rend, Repair, reactions, and
+lifecycle remain owned by `CharacterSheetCompanionRules`. Likewise, EFA uses
+`hasEfaBattleReady`, not legacy `hasBattleReady`, because the latter feeds the
+TCE `attackAbility` effect. `Battle Ready|EFA` is an explicit empty
+source-aware registry entry so a stored EFA feature cannot fall back to the TCE
+effect.
+
+The fixed Smith's Tools and Martial Weapons grants use the normal
+calculation-based class-feature effect lifecycle. Weapon-proficiency comparisons
+normalize `simple weapon(s)` and `martial weapon(s)` to category tokens, so the
+published plural label reaches actual attack proficiency without a
+Battle-Smith-only check. The additional artisan-tool choice is deferred: the
+existing Builder `_renderClassToolProficiencyChoice`, Level Up
+`_renderFeatChoicesUI`, Quick Build `_renderFeatSelector`, and Respec
+`_applyFixedTools`/`_claimOriginProficiency` paths do not provide a shared
+source-feature decision receipt. The required reusable contract is a choice
+keyed by feature-owner UID and progression/timeline leg, with apply/revoke
+proficiency receipts keyed by owner UID plus decision ID.
+
+Battle Ready's Intelligence eligibility is metadata only until inventory and
+Replicate Magic Item expose a canonical, source-qualified magic-weapon
+provenance predicate. The future predicate must be consumed by
+`getWeaponAbilityMod()` and `updateAttackFromWeapon()` and return stable item and
+grant-owner identities; names, labels, rarity, `magical: true`, and custom item
+metadata are not substitutes.
+
+A proficient weapon acting as an Artificer spellcasting focus is also deferred.
+The reusable focus contract must connect `getSpellcastingFocusStatus()`,
+`_getSpellFocusNote()`, `_getMaterialComponentBlock()`, and `_castSpell()` to
+class/feature-qualified focus candidates and commit a cast receipt containing
+the selected item ID, class UID, and source-feature UID.
+
+The EFA Battle Smith spell table continues through the exact subclass-spell
+ledger rather than calculation flags. It grants XPHB Heroism/Shield at 3,
+Shining Smite/Warding Bond at 5, Aura of Vitality/Conjure Barrage at 9, Aura of
+Purity/Fire Shield at 13, and Banishing Smite/Mass Cure Wounds at 17. Call
+`getSubclassSpellGrantOwner(cls, {sourceFeature: "Battle Smith Spells"})` and
+remove with `removeSubclassSpells(owner)`; never remove by the display label
+when EFA and TCE owners can coexist.
 
 ## Adding a New Subclass
 
@@ -296,6 +380,12 @@ The EFA Armorer's Tools of the Trade descriptor is source-gated to Artificer `EF
 at level 3 and filters on `LA`/`MA`/`HA`. `S` shields are deliberately separate. Future features
 such as an Alchemist potion discount use the same channel with
 `filter: {recipeCategories: ["potion"]}`.
+
+The EFA Battle Smith's Tools of the Trade descriptor is source-gated to Artificer `EFA` +
+Battle Smith `EFA` at level 3, is owned by
+`Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA`, and filters on `M`/`R`.
+`A`/`AF` ammunition remains on the XDMG non-scroll consumable baseline and does not receive the
+weapon-crafting multiplier.
 
 ### Reading a subclass's progression table (do NOT hardcode)
 

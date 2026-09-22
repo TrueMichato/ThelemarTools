@@ -39,10 +39,27 @@ const MAGIC_ARMOR_RECIPE = {
 const REAL_ARMOR_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "+1 Dusk Armor" && recipe.source === "HHHVI");
 const REAL_POTION_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "Dra-gone Paste" && recipe.source === "HHHVI");
 const REAL_AMMUNITION_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "+1 Dragon Arrow" && recipe.source === "HHHVI");
+const REAL_MELEE_WEAPON_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "Chain of Command" && recipe.source === "HHHVI");
+const REAL_RANGED_WEAPON_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "Demon Cannon" && recipe.source === "HHHVIII");
 const REAL_DISH_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.recipeCategory === "dish");
 const REAL_MATERIAL = CRAFTING_DATA.craftingMaterial[0];
 
 const addEfaArmorer = (state, {level = 3, classSource = "EFA", subclassSource = "EFA", subclassName = "Armorer"} = {}) => {
+	state.addClass({
+		name: "Artificer",
+		source: classSource,
+		level,
+		subclass: {
+			name: subclassName,
+			shortName: subclassName,
+			source: subclassSource,
+			className: "Artificer",
+			classSource,
+		},
+	});
+};
+
+const addEfaBattleSmith = (state, {level = 3, classSource = "EFA", subclassSource = "EFA", subclassName = "Battle Smith"} = {}) => {
 	state.addClass({
 		name: "Artificer",
 		source: classSource,
@@ -104,6 +121,118 @@ describe("Character Sheet crafting-time modifiers", () => {
 
 		expect(result.effectiveWorkweeks).toBe(2);
 		expect(result.sourceBreakdown[0].name).toBe("Tools of the Trade");
+	});
+
+	describe("EFA Battle Smith weapon crafting", () => {
+		it.each([
+			["melee", REAL_MELEE_WEAPON_RECIPE, "M"],
+			["ranged", REAL_RANGED_WEAPON_RECIPE, "R"],
+		])("halves the value-less XDMG baseline for a real %s weapon recipe", (_label, recipe, itemType) => {
+			expect(recipe).toMatchObject({itemType, recipeCategory: "item"});
+			expect(recipe).not.toHaveProperty("value");
+
+			const state = new CharacterSheetState();
+			addEfaBattleSmith(state);
+			const result = state.getCraftingTimeCalculation({recipe});
+
+			expect(result.isSupported).toBe(true);
+			expect(result.baselineSource).toMatchObject({
+				type: "xdmg-rarity",
+				source: "XDMG",
+				page: 221,
+				isConsumable: false,
+			});
+			expect(result.effectiveWorkweeks).toBe(result.baselineWorkweeks * 0.5);
+			expect(result.sourceBreakdown).toEqual([{
+				id: "efa-battle-smith-tools-of-the-trade-weapon-crafting",
+				name: "Tools of the Trade",
+				source: "EFA",
+				uid: "Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA",
+				multiplier: 0.5,
+			}]);
+		});
+
+		it.each([
+			["armor", ARMOR_RECIPE, {type: "HA"}],
+			["potion", {...ARMOR_RECIPE, recipeCategory: "potion", itemType: "P"}, {type: "P"}],
+			["adventuring gear", {...ARMOR_RECIPE, itemType: "G"}, {type: "G"}],
+		])("leaves nonweapon %s crafting unchanged", (_label, recipe, item) => {
+			const state = new CharacterSheetState();
+			addEfaBattleSmith(state);
+
+			const result = calculate(state, {recipe, item});
+
+			expect(result.effectiveWorkweeks).toBe(4);
+			expect(result.sourceBreakdown).toEqual([]);
+		});
+
+		it("keeps ammunition on the XDMG consumable baseline without treating it as a weapon", () => {
+			const state = new CharacterSheetState();
+			addEfaBattleSmith(state);
+
+			const result = state.getCraftingTimeCalculation({recipe: REAL_AMMUNITION_RECIPE});
+
+			expect(result.baselineWorkweeks).toBe(1);
+			expect(result.effectiveWorkweeks).toBe(1);
+			expect(result.baselineSource).toMatchObject({
+				type: "xdmg-rarity",
+				isConsumable: true,
+			});
+			expect(result.sourceBreakdown).toEqual([]);
+		});
+
+		it.each([
+			["below level 3", {level: 2}],
+			["TCE class and subclass", {classSource: "TCE", subclassSource: "TCE"}],
+			["EFA class with TCE subclass", {classSource: "EFA", subclassSource: "TCE"}],
+			["TCE class with EFA subclass", {classSource: "TCE", subclassSource: "EFA"}],
+			["another EFA subclass", {subclassName: "Alchemist"}],
+		])("isolates the descriptor from %s", (_label, options) => {
+			const state = new CharacterSheetState();
+			addEfaBattleSmith(state, options);
+
+			expect(state.getCraftingTimeCalculation({recipe: REAL_MELEE_WEAPON_RECIPE}).multiplier).toBe(1);
+		});
+
+		it("composes quantity and other generic descriptors before applying the stable product", () => {
+			const state = new CharacterSheetState();
+			addEfaBattleSmith(state);
+			const battleSmithModifier = state.getFeatureCalculations().craftingTimeModifiers[0];
+			const generalWeaponModifier = {
+				id: "test-general-weapon-crafting",
+				owner: {kind: "feature", name: "General Weapon Crafting", source: "TST", uid: "General Weapon Crafting|TST"},
+				multiplier: 0.8,
+				filter: {itemTypes: ["M", "R"]},
+			};
+			jest.spyOn(state, "getFeatureCalculations").mockReturnValue({
+				craftingTimeModifiers: [battleSmithModifier, generalWeaponModifier],
+			});
+
+			const result = state.getCraftingTimeCalculation({
+				baseWorkweeks: 10,
+				quantity: 3,
+				recipe: REAL_MELEE_WEAPON_RECIPE,
+			});
+
+			expect(result.baselineWorkweeks).toBe(30);
+			expect(result.multiplier).toBeCloseTo(0.4);
+			expect(result.effectiveWorkweeks).toBeCloseTo(12);
+			expect(result.sourceBreakdown.map(it => it.id)).toEqual([
+				"efa-battle-smith-tools-of-the-trade-weapon-crafting",
+				"test-general-weapon-crafting",
+			]);
+		});
+
+		it("re-derives the exact descriptor after save/load", () => {
+			const original = new CharacterSheetState();
+			addEfaBattleSmith(original);
+			const restored = new CharacterSheetState();
+			restored.loadFromJson(original.toJson());
+
+			expect(restored.getCraftingTimeCalculation({recipe: REAL_RANGED_WEAPON_RECIPE}))
+				.toEqual(original.getCraftingTimeCalculation({recipe: REAL_RANGED_WEAPON_RECIPE}));
+			expect(restored.toJson()).not.toHaveProperty("craftingTimeModifiers");
+		});
 	});
 
 	describe("source-grounded crafting baselines", () => {

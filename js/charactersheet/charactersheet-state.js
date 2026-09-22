@@ -2807,7 +2807,7 @@ globalThis.FeatureModifierParser = FeatureModifierParser;
 const FeatureEffectRegistry = {
 	// Internal registry of feature name -> effects mapping
 	_registry: {},
-	_sourceAwareFeatureNames: new Set(["draconic resilience", "magic item savant", "soul of artifice"]),
+	_sourceAwareFeatureNames: new Set(["battle ready", "draconic resilience", "magic item savant", "soul of artifice"]),
 
 	/**
 	 * Initialize the default feature effects registry.
@@ -2876,6 +2876,7 @@ const FeatureEffectRegistry = {
 			{type: "modifier", modType: "save:all", value: "attunedItems"},
 		]);
 		this.register("Soul of Artifice|EFA", []);
+		this.register("Battle Ready|EFA", []);
 
 		// ======= BARBARIAN =======
 		this.register("Rage", [
@@ -4344,6 +4345,15 @@ globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 class CharacterSheetState {
 	static EFA_ARTIFICER_CLASS_UID = "Artificer|EFA";
 	static EFA_FLASH_OF_GENIUS_UID = "Flash of Genius|Artificer|EFA";
+	static EFA_BATTLE_SMITH_SUBCLASS_UID = "Battle Smith|Artificer|EFA|EFA";
+	static EFA_BATTLE_SMITH_FEATURE_UIDS = Object.freeze({
+		TOOLS_OF_THE_TRADE: "Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA",
+		BATTLE_READY: "Battle Ready|Artificer|EFA|Battle Smith|EFA|3|EFA",
+		STEEL_DEFENDER: "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA",
+		EXTRA_ATTACK: "Extra Attack|Artificer|EFA|Battle Smith|EFA|5|EFA",
+		ARCANE_JOLT: "Arcane Jolt|Artificer|EFA|Battle Smith|EFA|9|EFA",
+		IMPROVED_DEFENDER: "Improved Defender|Artificer|EFA|Battle Smith|EFA|15|EFA",
+	});
 	static ADVENTURERS_ATLAS_VERSION = 1;
 	static ADVENTURERS_ATLAS_INTEGRATION_VERSION = 1;
 	static ADVENTURERS_ATLAS_INITIATIVE_DIE = "1d4";
@@ -17667,6 +17677,20 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Canonicalise category-style weapon proficiency tokens while preserving named
+	 * weapon proficiencies and free-text descriptors.
+	 * @param {*} input
+	 * @returns {string}
+	 */
+	_normalizeWeaponProfToken (input) {
+		const s = String(input ?? "").trim().toLowerCase();
+		if (!s) return "";
+		const stripped = s.replace(/\s+weapons?$/, "");
+		if (stripped === "simple" || stripped === "martial") return stripped;
+		return s;
+	}
+
+	/**
 	 * Check if character has proficiency with an armor type
 	 * @param {string} armor - The armor type (light, medium, heavy, shields)
 	 * @returns {boolean} True if proficient
@@ -30970,7 +30994,8 @@ class CharacterSheetState {
 				}
 				case "Artificer": {
 					const intMod = this.getAbilityMod("int");
-					const isEfa = String(cls.source || "").toUpperCase() === "EFA";
+					const classSource = String(cls.source || "").toUpperCase();
+					const isEfa = classSource === "EFA";
 
 					if (isEfa) {
 						calculations.hasEfaArtificerSpellcasting = level >= 1;
@@ -31044,7 +31069,7 @@ class CharacterSheetState {
 					// =========================================================
 					const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
 					const subclassName = effectiveSubclass?.name?.toLowerCase() || effectiveSubclass?.shortName?.toLowerCase();
-					const subclassSource = effectiveSubclass?.source || effectiveSubclass?.subclassSource;
+					const subclassSource = `${effectiveSubclass?.source || effectiveSubclass?.subclassSource || ""}`.toUpperCase();
 					const applyArtilleristCalculations = ({isEfaArtillerist = false} = {}) => {
 						if (isEfaArtillerist) {
 							calculations.hasArtilleristMartialRangedWeaponProficiency = true;
@@ -31098,7 +31123,7 @@ class CharacterSheetState {
 						isEfa
 						&& level >= 3
 						&& subclassName === "armorer"
-						&& `${effectiveSubclass?.source ?? ""}`.toUpperCase() === "EFA"
+						&& subclassSource === "EFA"
 					) {
 						(calculations.craftingTimeModifiers ||= []).push({
 							id: "efa-armorer-tools-of-the-trade-armor-crafting",
@@ -31150,7 +31175,7 @@ class CharacterSheetState {
 						isEfa
 						&& level >= 3
 						&& subclassName === "cartographer"
-						&& `${subclassSource ?? ""}`.toUpperCase() === "EFA"
+						&& subclassSource === "EFA"
 					) {
 						calculations.hasAdventurersAtlas = true;
 						calculations.adventurersAtlasCapacity = Math.max(2, 1 + intMod);
@@ -31173,7 +31198,64 @@ class CharacterSheetState {
 
 					if (isEfaArtillerist) applyArtilleristCalculations({isEfaArtillerist: true});
 
-					if (!isEfa && subclassName && level >= 3) {
+					if (
+						isEfa
+						&& level >= 3
+						&& subclassName === "battle smith"
+						&& subclassSource === "EFA"
+					) {
+						const featureUids = CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS;
+						calculations.hasEfaBattleSmithToolsOfTheTrade = true;
+						calculations.efaBattleSmithToolsOfTheTradeFeatureUid = featureUids.TOOLS_OF_THE_TRADE;
+						calculations.hasEfaBattleReady = true;
+						calculations.efaBattleReadyFeatureUid = featureUids.BATTLE_READY;
+						calculations.efaBattleReadyAttackAbility = "int";
+						calculations.efaBattleReadyWeaponRequirement = "magic";
+						calculations.efaBattleReadyAttackMod = intMod;
+						calculations.hasEfaSteelDefenderGrant = true;
+						calculations.efaSteelDefenderFeatureUid = featureUids.STEEL_DEFENDER;
+
+						(calculations.craftingTimeModifiers ||= []).push({
+							id: "efa-battle-smith-tools-of-the-trade-weapon-crafting",
+							owner: {
+								kind: "subclassFeature",
+								name: "Tools of the Trade",
+								source: "EFA",
+								uid: featureUids.TOOLS_OF_THE_TRADE,
+							},
+							multiplier: 0.5,
+							filter: {itemTypes: ["M", "R"]},
+						});
+
+						if (level >= 5) {
+							calculations.hasExtraAttack = true;
+							calculations.attacksPerAction = 2;
+							calculations.efaBattleSmithExtraAttackFeatureUid = featureUids.EXTRA_ATTACK;
+						}
+
+						if (level >= 9) {
+							const arcaneJoltDice = level >= 15 ? "4d6" : "2d6";
+							calculations.hasEfaArcaneJolt = true;
+							calculations.efaArcaneJoltFeatureUid = featureUids.ARCANE_JOLT;
+							calculations.efaArcaneJoltDamage = arcaneJoltDice;
+							calculations.efaArcaneJoltHealing = arcaneJoltDice;
+							calculations.efaArcaneJoltUses = Math.max(1, intMod);
+							calculations.efaArcaneJoltRecharge = "longRest";
+							calculations.efaArcaneJoltOncePerTurn = true;
+							calculations.efaArcaneJoltHealingRange = 30;
+						}
+
+						if (level >= 15) {
+							calculations.hasEfaImprovedDefender = true;
+							calculations.efaImprovedDefenderFeatureUid = featureUids.IMPROVED_DEFENDER;
+							calculations.efaImprovedDefenderArcaneJoltDice = "4d6";
+							calculations.efaImprovedDefenderDeflectAttackDamageDice = "1d4";
+							calculations.efaImprovedDefenderDeflectAttackDamageBonus = intMod;
+							calculations.efaImprovedDefenderDeflectAttackDamageType = "force";
+						}
+					}
+
+					if (!isEfa && subclassName && subclassSource === classSource && level >= 3) {
 						switch (subclassName) {
 							case "alchemist": {
 								// Experimental Elixir count: 1 at 3, 2 at 6, 3 at 15
@@ -33823,6 +33905,25 @@ class CharacterSheetState {
 				modType: "save:all",
 				value: "attunedItems",
 				source: "Soul of Artifice",
+			});
+		}
+
+		// EFA Battle Smith - fixed proficiency grants. The alternate artisan-tool
+		// choice requires the progression decision/provenance contract.
+		if (calculations.hasEfaBattleSmithToolsOfTheTrade) {
+			effects.push({
+				type: "toolProficiency",
+				tool: "Smith's Tools",
+				source: "Tools of the Trade",
+				sourceFeatureUid: calculations.efaBattleSmithToolsOfTheTradeFeatureUid,
+			});
+		}
+		if (calculations.hasEfaBattleReady || calculations.hasBattleReady) {
+			effects.push({
+				type: "weaponProficiency",
+				weapon: "Martial Weapons",
+				source: "Battle Ready",
+				sourceFeatureUid: calculations.efaBattleReadyFeatureUid,
 			});
 		}
 
@@ -41820,10 +41921,11 @@ class CharacterSheetState {
 
 	_isWeaponProficient (weapon) {
 		// Check simple/martial proficiency
-		if (weapon.weaponCategory === "simple" && this._data.weaponProficiencies.includes("simple")) {
+		const proficiencyTokens = new Set(this._data.weaponProficiencies.map(it => this._normalizeWeaponProfToken(it)));
+		if (weapon.weaponCategory === "simple" && proficiencyTokens.has("simple")) {
 			return true;
 		}
-		if (weapon.weaponCategory === "martial" && this._data.weaponProficiencies.includes("martial")) {
+		if (weapon.weaponCategory === "martial" && proficiencyTokens.has("martial")) {
 			return true;
 		}
 		// Check specific weapon proficiency
