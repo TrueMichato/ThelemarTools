@@ -4863,6 +4863,223 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Apply or replace one structured feature option as a single state transaction.
+	 * Acquisition flows can omit `oldChoice`/`persistHistory`; Respec and future
+	 * switch-at-rest flows pass the existing choice so runtime state, compatibility
+	 * history, replay data, chosenSubfeatures, derived effects, and the canonical
+	 * decision remain synchronized.
+	 *
+	 * @param {{
+	 *   state:*,
+	 *   page?:*,
+	 *   characterLevel:number,
+	 *   classLevel:number,
+	 *   className:string,
+	 *   classSource:string,
+	 *   subclassName?:string,
+	 *   subclassShortName?:string,
+	 *   subclassSource?:string,
+	 *   parentFeature:string,
+	 *   parentSource?:string,
+	 *   choiceIndex?:number,
+	 *   oldChoice?:*,
+	 *   newOption:*,
+	 *   catalogs?:{classFeatures?:Array<*>,subclassFeatures?:Array<*>,optionalFeatures?:Array<*>},
+	 *   decision?:*,
+	 *   sourceDecisionKey?:string,
+	 *   persistHistory?:boolean,
+	 *   recalculate?:boolean,
+	 *   syncCanonical?:boolean,
+	 * }} config
+	 * @returns {{feature:*, choice:*, replay:*, selection:Array<*>}}
+	 */
+	static replaceStructuredFeatureChoice ({
+		state,
+		page = null,
+		characterLevel,
+		classLevel,
+		className,
+		classSource,
+		subclassName = null,
+		subclassShortName = null,
+		subclassSource = null,
+		parentFeature,
+		parentSource = null,
+		choiceIndex = 0,
+		oldChoice = null,
+		newOption,
+		catalogs = null,
+		decision = null,
+		sourceDecisionKey = null,
+		persistHistory = false,
+		recalculate = true,
+		syncCanonical = false,
+	} = {}) {
+		if (!state || !parentFeature || !newOption?.name) throw new Error("A state, parent feature, and replacement option are required.");
+
+		const snapshot = state.toJson();
+		const norm = value => String(value || "").trim().toLowerCase();
+		const acquisitionLevel = Number(
+			oldChoice?.acquisitionLevel
+				|| classLevel
+				|| newOption?.acquisitionLevel
+				|| newOption?.level,
+		) || 1;
+		const optionCatalogs = catalogs || {
+			classFeatures: page?.getClassFeatures?.() || [],
+			subclassFeatures: page?.getSubclassFeatures?.() || [],
+			optionalFeatures: page?.getOptionalFeatures?.() || [],
+		};
+		const parentDefinition = [
+			...(optionCatalogs.classFeatures || []),
+			...(optionCatalogs.subclassFeatures || []),
+		].find(feature =>
+			norm(feature?.name) === norm(parentFeature)
+				&& (!className || norm(feature?.className) === norm(className))
+				&& (!classSource || norm(feature?.classSource) === norm(classSource))
+				&& Number(feature?.level) === acquisitionLevel);
+		const effectiveParentSource = parentSource || parentDefinition?.source || null;
+		const semanticKey = sourceDecisionKey
+			|| decision?.semanticKey
+			|| globalThis.CharacterSheetProgression?.getSemanticKey?.({
+				className,
+				classSource,
+				classLevel: acquisitionLevel,
+				type: "featureChoice",
+				sourceKey: parentFeature,
+				slot: choiceIndex,
+			})
+			|| null;
+
+		try {
+			const matchesScope = item =>
+				norm(item?.parentFeature) === norm(parentFeature)
+				&& (!className || norm(item?.className) === norm(className))
+				&& (!classSource || norm(item?.classSource) === norm(classSource))
+				&& Number(item?.acquisitionLevel || item?.level) === acquisitionLevel;
+			const matchesOld = item =>
+				!oldChoice
+				|| (
+					norm(item?.name) === norm(oldChoice.choice || oldChoice.name)
+					&& (!oldChoice.source || norm(item?.source) === norm(oldChoice.source))
+				);
+
+			if (oldChoice) {
+				const oldFeatures = (state._data?.features || []).filter(item => matchesScope(item) && matchesOld(item));
+				oldFeatures.forEach(item => state.removeFeature(item.id || item.name, item.source));
+				if (!oldFeatures.length && oldChoice.choice) state.removeModifiersByName?.(oldChoice.choice);
+
+				state._data.chosenSubfeatures = (state._data.chosenSubfeatures || []).filter(record =>
+					!(
+						norm(record.parent) === norm(parentFeature)
+						&& (!effectiveParentSource || norm(record.parentSource) === norm(effectiveParentSource))
+						&& (!className || norm(record.parentClass) === norm(className))
+						&& (!classSource || norm(record.parentClassSource) === norm(classSource))
+						&& Number(record.level) === acquisitionLevel
+						&& norm(record.name) === norm(oldChoice.choice || oldChoice.name)
+						&& (!oldChoice.source || norm(record.source) === norm(oldChoice.source))
+					),
+				);
+			}
+
+			const materialized = CharacterSheetClassUtils.materializeFeatureOption(newOption, {
+				className,
+				classSource,
+				acquisitionLevel,
+				parentFeature,
+				catalogs: optionCatalogs,
+				subclassName,
+				subclassShortName,
+				subclassSource,
+			});
+			if (semanticKey) materialized.sourceDecisionKey = semanticKey;
+			state.addFeature(materialized, semanticKey ? {sourceDecisionKey: semanticKey} : {});
+			const appliedFeature = (state._data?.features || []).find(item =>
+				matchesScope(item)
+				&& norm(item.name) === norm(materialized.name)
+				&& norm(item.source) === norm(materialized.source));
+			if (!appliedFeature) throw new Error(`Failed to materialize feature choice "${newOption.name}".`);
+
+			state._recordChosenSubfeature?.({
+				parent: parentFeature,
+				parentSource: effectiveParentSource,
+				parentClass: className || null,
+				parentClassSource: classSource || null,
+				level: acquisitionLevel,
+				characterLevel,
+				name: appliedFeature.name,
+				source: appliedFeature.source,
+				sourceDecisionKey: semanticKey,
+			});
+
+			const resolved = CharacterSheetClassUtils.resolveFeatureOptionData(newOption, optionCatalogs);
+			const autoEffects = CharacterSheetClassUtils.parseFeatureAutoEffects(
+				newOption,
+				optionCatalogs.classFeatures || [],
+				{
+					optionalFeatures: optionCatalogs.optionalFeatures || [],
+					resolvedData: resolved,
+				},
+			);
+			autoEffects.forEach(effect => {
+				state.addNamedModifier({
+					name: newOption.name,
+					type: effect.type,
+					value: effect.value,
+					note: effect.note || `From specialty: ${newOption.name}`,
+					enabled: true,
+					sourceFeatureId: appliedFeature.id,
+					...(semanticKey ? {sourceDecisionKey: semanticKey} : {}),
+				});
+			});
+
+			const choice = {
+				featureName: parentFeature,
+				choice: newOption.name,
+				source: newOption.source || appliedFeature.source,
+				acquisitionLevel,
+				ref: newOption.ref || appliedFeature.ref,
+				type: newOption.type || appliedFeature.type,
+			};
+			const replay = CharacterSheetClassUtils.buildHistoryFeatureSnapshot(appliedFeature, {
+				type: newOption.type || "featureOption",
+				parentFeature,
+				includeEntries: true,
+			});
+
+			if (persistHistory) {
+				const history = state.getLevelHistoryEntry?.(characterLevel);
+				if (!history) throw new Error(`No level-history entry exists for character level ${characterLevel}.`);
+				const featureChoices = [...(history.choices?.featureChoices || [])];
+				const replayData = {...(history.choices?.replayData || {})};
+				const replayChoices = [...(replayData.featureChoices || featureChoices.map(() => null))];
+				featureChoices[choiceIndex] = choice;
+				replayChoices[choiceIndex] = replay;
+				replayData.featureChoices = replayChoices;
+				history.choices = {...(history.choices || {}), featureChoices, replayData};
+				history.timestamp = Date.now();
+				if (!decision) {
+					const refreshed = globalThis.CharacterSheetProgression?.refreshDecisionSelectionsFromChoices?.(history);
+					if (refreshed) Object.assign(history, refreshed);
+				}
+			}
+
+			if (recalculate) {
+				state.applyClassFeatureEffects?.();
+				state.calculateSpellSlots?.();
+			}
+			if (syncCanonical) {
+				globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({page, state});
+			}
+
+			return {feature: appliedFeature, choice, replay, selection: [choice]};
+		} catch (error) {
+			state.loadFromJson(snapshot);
+			throw error;
+		}
+	}
+
+	/**
 	 * Look up full subclass feature data to get description/entries.
 	 * @param {Array<*>} subclassFeatures - All loaded subclass features
 	 * @param {string} featureName - Name of the feature
@@ -5697,6 +5914,11 @@ class CharacterSheetClassUtils {
 		const searchEntriesForRefs = (/** @type {*} */ entries) => {
 			if (!Array.isArray(entries)) return;
 			for (/** @type {*} */ const entry of entries) {
+				// Explicit option groups describe legal player choices. Their refs are
+				// definitions, not automatic grants; the picker materializes only the
+				// selected option. Learn-all wrappers use ordinary nested entries and
+				// continue through the recursive path below.
+				if (entry?.type === "options") continue;
 				if (/** @type {*} */ entry?.type === "refSubclassFeature" && entry.subclassFeature) {
 					// Parse "FeatureName|ClassName|ClassSource|SubclassShortName|SubclassSource|Level"
 					const parts = entry.subclassFeature.split("|");

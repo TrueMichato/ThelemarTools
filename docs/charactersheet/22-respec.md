@@ -147,6 +147,20 @@ unrepresented pending item is rejected and rolled back immediately. Once a
 queue item has a source decision key, removing that decision consumes only the
 matching queue item.
 
+### Structured feature-choice replacement
+
+Permanent structured feature options use
+`CharacterSheetClassUtils.replaceStructuredFeatureChoice()` as their shared
+mutation boundary. The transaction removes the exact prior materialized
+feature and its owned effects, applies the replacement, updates
+`chosenSubfeatures`, and rewrites both `choices.featureChoices` and its replay
+snapshot. Acquisition flows may run it before the level-history row exists;
+Respec supplies the existing decision and performs the call inside
+`stageGraphMutation()`, which writes the replacement receipt and rolls the
+candidate back on failure. A future rules-driven switch flow can use the same
+transaction with history persistence and canonical synchronization instead of
+maintaining a second model-specific state path.
+
 ## Legacy Reconstruction
 
 Old saves are normalized on load.

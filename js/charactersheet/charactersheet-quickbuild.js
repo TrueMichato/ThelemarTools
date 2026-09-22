@@ -5401,6 +5401,7 @@ class CharacterSheetQuickBuild {
 	}
 
 	_applyFeatureOptionsForLevel (analysis) {
+		let choiceIndex = 0;
 		analysis.featureOptions.forEach(optGroup => {
 			const levelKey = `${analysis.className}_${analysis.classLevel}_${optGroup.featureName}`;
 			const selected = this._selections.featureOptions[levelKey] || [];
@@ -5408,20 +5409,28 @@ class CharacterSheetQuickBuild {
 			selected.forEach(opt => {
 				if (!["classFeature", "subclassFeature", "optionalfeature"].includes(opt.type)) return;
 				const subclass = this._getSubclassForClass(analysis.className, analysis.classSource, analysis.classLevel);
-				this._state.addFeature(CharacterSheetClassUtils.materializeFeatureOption(opt, {
+				CharacterSheetClassUtils.replaceStructuredFeatureChoice({
+					state: this._state,
+					page: this._page,
+					characterLevel: analysis.characterLevel,
+					classLevel: analysis.classLevel,
 					className: analysis.className,
 					classSource: analysis.classSource,
-					acquisitionLevel: analysis.classLevel,
+					subclassName: subclass?.name,
+					subclassShortName: subclass?.shortName,
+					subclassSource: subclass?.source,
 					parentFeature: optGroup.featureName,
+					parentSource: optGroup.featureSource || null,
+					choiceIndex: choiceIndex++,
+					newOption: opt,
 					catalogs: {
 						classFeatures: this._page.getClassFeatures(),
 						subclassFeatures: this._page.getSubclassFeatures() || [],
 						optionalFeatures: this._page.getOptionalFeatures(),
 					},
-					subclassName: subclass?.name,
-					subclassShortName: subclass?.shortName,
-					subclassSource: subclass?.source,
-				}));
+					persistHistory: false,
+					recalculate: false,
+				});
 			});
 		});
 	}

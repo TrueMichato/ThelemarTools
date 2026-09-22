@@ -45,24 +45,9 @@ const MARATHON_RUNNER_DEF = Object.freeze({
 });
 
 function makeMockState () {
-	/** @type {*[]} */
-	const features = [];
-	return {
-		features,
-		addFeature: jest.fn((/** @type {*} */ f) => {
-			// Mirror the real addFeature dedup contract: collapse on
-			// (name, source, className, level).
-			const dup = features.find(x =>
-				x.name === f.name
-				&& x.source === f.source
-				&& x.className === f.className
-				&& x.level === f.level,
-			);
-			if (dup) return dup;
-			features.push(f);
-			return f;
-		}),
-	};
+	const state = new CharacterSheetState();
+	state.features = state._data.features;
+	return state;
 }
 
 function makeQuickBuild ({classFeatures = [ADEPT_SPEED_DEF, MARATHON_RUNNER_DEF], state} = {}) {

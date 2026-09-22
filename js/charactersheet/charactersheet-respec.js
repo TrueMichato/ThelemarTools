@@ -4313,9 +4313,6 @@ class CharacterSheetRespec {
 	}
 
 	async _applyFeatureChoiceChangeInner (level, history, choiceIndex, oldChoice, newOption) {
-		// Remove old feature using proper API
-		const features = this._state.getFeatures();
-		const persistedFeatures = this._state._data?.features || features;
 		const replayChoice = history.choices.replayData?.featureChoices?.[choiceIndex];
 		const acquisitionLevel = Number(
 			oldChoice.acquisitionLevel
@@ -4327,81 +4324,43 @@ class CharacterSheetRespec {
 							&& entry.class?.source === history.class.source)
 					.length,
 		) || 1;
-		const oldFeature = persistedFeatures.find(f =>
-			f.name === oldChoice.choice
-				&& f.parentFeature === oldChoice.featureName
-				&& f.className === history.class.name
-				&& Number(f.acquisitionLevel || f.level) === acquisitionLevel,
+		const decision = this._engine?.manifest?.decisions?.find(it =>
+			it.type === "featureChoice"
+			&& Number(it.characterLevel) === Number(level)
+			&& (Number(it.slot) === Number(choiceIndex) || it.sourceKey === oldChoice?.featureName),
 		);
-		if (oldFeature) {
-			oldFeature.id ||= CryptUtil.uid();
-			this._state.removeFeature(oldFeature.id);
-		} else {
-			// Fallback: remove orphaned modifiers by name if feature lookup failed
-			this._state.removeModifiersByName(oldChoice.choice);
-		}
-
-		// Add new feature
-		const classFeatures = this._page.getClassFeatures();
 		const catalogs = {
-			classFeatures,
+			classFeatures: this._page.getClassFeatures(),
 			subclassFeatures: this._page.getSubclassFeatures() || [],
 			optionalFeatures: this._page.getOptionalFeatures(),
 		};
-		const materialized = CharacterSheetClassUtils.materializeFeatureOption(newOption, {
+		const currentClass = this._state.getClasses().find(cls =>
+			cls.name === history.class.name && cls.source === history.class.source);
+		const result = CharacterSheetClassUtils.replaceStructuredFeatureChoice({
+			state: this._state,
+			page: this._page,
+			characterLevel: level,
+			classLevel: acquisitionLevel,
 			className: history.class.name,
 			classSource: history.class.source,
-			acquisitionLevel,
+			subclassName: currentClass?.subclass?.name,
+			subclassShortName: currentClass?.subclass?.shortName,
+			subclassSource: currentClass?.subclass?.source,
 			parentFeature: oldChoice.featureName,
-			catalogs,
-		});
-		this._state.addFeature(materialized);
-		const fullFeature = CharacterSheetClassUtils.resolveFeatureOptionData(newOption, catalogs);
-
-		// Apply specialty auto-effects for the new feature (passive bonuses, PB skill bonuses, etc.)
-		const autoEffects = CharacterSheetClassUtils.parseFeatureAutoEffects(
+			parentSource: replayChoice?.parentSource || null,
+			choiceIndex,
+			oldChoice,
 			newOption,
-			classFeatures,
-			{resolvedData: fullFeature},
-		);
-		autoEffects.forEach(effect => {
-			this._state.addNamedModifier({
-				name: newOption.name,
-				type: effect.type,
-				value: effect.value,
-				note: effect.note || `From specialty: ${newOption.name}`,
-				enabled: true,
-			});
-		});
-
-		// Update history
-		const updatedFeatureChoices = [...history.choices.featureChoices];
-		updatedFeatureChoices[choiceIndex] = {
-			featureName: oldChoice.featureName,
-			choice: newOption.name,
-			source: newOption.source,
-			acquisitionLevel,
-			ref: newOption.ref,
-			type: newOption.type,
-		};
-		const replayData = {...(history.choices.replayData || {})};
-		const updatedReplayChoices = [...(replayData.featureChoices || history.choices.featureChoices.map(() => null))];
-		updatedReplayChoices[choiceIndex] = CharacterSheetClassUtils.buildHistoryFeatureSnapshot(materialized, {
-			type: newOption.type || "featureOption",
-			parentFeature: oldChoice.featureName,
-			includeEntries: true,
-		});
-		replayData.featureChoices = updatedReplayChoices;
-
-		this._state.updateLevelChoice(level, {
-			featureChoices: updatedFeatureChoices,
-			replayData,
+			catalogs,
+			decision,
+			sourceDecisionKey: decision?.semanticKey,
+			persistHistory: true,
+			recalculate: true,
 		});
 
 		// Recalculate derived values after the swap
-		this._state.applyClassFeatureEffects();
-		this._state.calculateSpellSlots();
 		this._recalcHpPreservingHealing();
+		return result;
 	}
 
 	/**

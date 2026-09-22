@@ -4868,18 +4868,31 @@ class CharacterSheetLevelUp {
 			const subclassFeatures = this._page.getSubclassFeatures() || [];
 			const optionCatalogs = {classFeatures, subclassFeatures, optionalFeatures: allOptFeatures};
 			const currentSubclass = this._state.getClasses().find((/** @type {*} */ c) => c.name === classEntry.name)?.subclass;
+			let choiceIndex = 0;
 			Object.entries(selectedFeatureOptions).forEach(([featureKey, options]) => {
 				options.forEach((/** @type {*} */ opt) => {
-					if (opt.type === "classFeature" && opt.ref) {
-						const addedOption = CharacterSheetClassUtils.materializeFeatureOption(opt, {
-							className: classEntry.name,
-							classSource: classEntry.source,
-							acquisitionLevel: newLevel,
-							parentFeature: featureKey.split("_")[0],
-							catalogs: optionCatalogs,
-						});
-						this._state.addFeature(addedOption);
+					if (!["classFeature", "subclassFeature", "optionalfeature"].includes(opt.type)) return;
+					const parentFeature = featureKey.split("_")[0];
+					CharacterSheetClassUtils.replaceStructuredFeatureChoice({
+						state: this._state,
+						page: this._page,
+						characterLevel: this._state.getTotalLevel(),
+						classLevel: newLevel,
+						className: classEntry.name,
+						classSource: classEntry.source,
+						subclassName: currentSubclass?.name,
+						subclassShortName: currentSubclass?.shortName,
+						subclassSource: currentSubclass?.source,
+						parentFeature,
+						parentSource: featureKey.slice(parentFeature.length + 1) || null,
+						choiceIndex: choiceIndex++,
+						newOption: opt,
+						catalogs: optionCatalogs,
+						persistHistory: false,
+						recalculate: false,
+					});
 
+					if (opt.type === "classFeature" && opt.ref) {
 						// Apply any skill sub-choices for this specialty
 						const choiceKey = `${featureKey}__${opt.name}__${opt.ref || ""}`;
 						const skillSelections = this._selectedFeatureSkillChoices[choiceKey];
@@ -4904,44 +4917,6 @@ class CharacterSheetLevelUp {
 								});
 							}
 						}
-
-						// Apply automatic effects from the specialty (passive bonuses, speed, etc.)
-						// Find the feature we just added to link modifiers via sourceFeatureId
-						const addedFeature = this._state.getFeatures().find((/** @type {*} */ f) =>
-							f.name === opt.name
-							&& f.isFeatureOption
-							&& f.className === classEntry.name
-							&& f.level === newLevel);
-						const autoEffects = this._parseFeatureAutoEffects(opt);
-						autoEffects.forEach((/** @type {*} */ effect) => {
-							this._state.addNamedModifier({
-								name: opt.name,
-								type: effect.type,
-								value: effect.value,
-								note: effect.note || `From specialty: ${opt.name}`,
-								enabled: true,
-								sourceFeatureId: addedFeature?.id,
-							});
-						});
-					} else if (opt.type === "subclassFeature" && opt.ref) {
-						this._state.addFeature(CharacterSheetClassUtils.materializeFeatureOption(opt, {
-							className: classEntry.name,
-							classSource: classEntry.source,
-							acquisitionLevel: newLevel,
-							parentFeature: featureKey.split("_")[0],
-							catalogs: optionCatalogs,
-							subclassName: currentSubclass?.name,
-							subclassShortName: currentSubclass?.shortName,
-							subclassSource: currentSubclass?.source,
-						}));
-					} else if (opt.type === "optionalfeature" && opt.ref) {
-						this._state.addFeature(CharacterSheetClassUtils.materializeFeatureOption(opt, {
-							className: classEntry.name,
-							classSource: classEntry.source,
-							acquisitionLevel: newLevel,
-							parentFeature: featureKey.split("_")[0],
-							catalogs: optionCatalogs,
-						}));
 					}
 				});
 			});

@@ -5872,6 +5872,7 @@ class CharacterSheetState {
 		this._migrateModifiers();
 		this._migrateRightOnTimeModifiers();
 		this._migrateAmbiguousBlessedStrikes();
+		this._migrateEfaArmorerArmorModelChoice();
 
 		// Drop duplicate feature-sourced named modifiers. `addFeat` runs both the
 		// data-declared and the registry pipelines, and until the guard was hoisted
@@ -6976,6 +6977,282 @@ class CharacterSheetState {
 			count: 1,
 		});
 		this._data.migrationFlags.blessedStrikesChoiceReset = true;
+	}
+
+	/**
+	 * Normalize legacy EFA Armorer model grants into one source-scoped structured
+	 * choice. Old data expanded all three model refs automatically. A unique exact
+	 * EFA model is adopted; zero or multiple exact models become one required
+	 * pending/canonical decision with no silent default.
+	 */
+	_migrateEfaArmorerArmorModelChoice () {
+		if (this._data.migrationFlags.efaArmorerArmorModelChoiceV1) return;
+		const eq = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+		const armorerClass = (this._data.classes || []).find(cls =>
+			eq(cls.name, "Artificer")
+			&& eq(cls.source, "EFA")
+			&& Number(cls.level) >= 3
+			&& eq(cls.subclass?.shortName || cls.subclass?.name, "Armorer")
+			&& eq(cls.subclass?.source, "EFA"));
+		if (!armorerClass) return;
+
+		const options = [
+			{name: "Dreadnaught", ref: "Dreadnaught|Artificer|EFA|Armorer|EFA|3|EFA"},
+			{name: "Guardian", ref: "Guardian|Artificer|EFA|Armorer|EFA|3|EFA"},
+			{name: "Infiltrator", ref: "Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA"},
+		].map(option => ({
+			...option,
+			source: "EFA",
+			className: "Artificer",
+			classSource: "EFA",
+			subclassShortName: "Armorer",
+			subclassSource: "EFA",
+			level: 3,
+			type: "subclassFeature",
+			refType: "subclassFeature",
+		}));
+		const byRef = new Map(options.map(option => [option.ref.toLowerCase(), option]));
+		const byName = new Map(options.map(option => [option.name.toLowerCase(), option]));
+		const fromRef = ref => byRef.get(String(ref || "").toLowerCase()) || null;
+		const fromExactEntity = entity => {
+			if (!entity) return null;
+			const refMatch = fromRef(entity.ref || entity.subclassFeature);
+			if (refMatch) return refMatch;
+			const nameMatch = byName.get(String(entity.choice || entity.name || "").toLowerCase());
+			if (!nameMatch || !eq(entity.source, "EFA")) return null;
+			if (entity.className != null && !eq(entity.className, "Artificer")) return null;
+			if (entity.classSource != null && !eq(entity.classSource, "EFA")) return null;
+			if (entity.subclassShortName != null && !eq(entity.subclassShortName, "Armorer")) return null;
+			if (entity.subclassSource != null && !eq(entity.subclassSource, "EFA")) return null;
+			if (entity.level != null && Number(entity.level) !== 3) return null;
+			return nameMatch;
+		};
+		const isExactModelFeature = feature =>
+			!!fromExactEntity(feature)
+			&& eq(feature.className, "Artificer")
+			&& eq(feature.classSource, "EFA")
+			&& eq(feature.subclassShortName, "Armorer")
+			&& eq(feature.subclassSource, "EFA")
+			&& Number(feature.definitionLevel || feature.level) === 3;
+		const isExactChosen = record =>
+			!!fromExactEntity(record)
+			&& eq(record.parent, "Armor Model")
+			&& eq(record.parentSource, "EFA")
+			&& eq(record.parentClass, "Artificer")
+			&& eq(record.parentClassSource, "EFA")
+			&& Number(record.level) === 3;
+
+		const classRows = (this._data.levelHistory || [])
+			.filter(entry => eq(entry.class?.name, "Artificer") && eq(entry.class?.source, "EFA"))
+			.sort((a, b) => Number(a.level) - Number(b.level));
+		let history = classRows.find(entry => Number(entry.classLevel) === 3) || classRows[2] || null;
+		if (!history) {
+			const preferredLevel = Number(
+				(this._data.features || []).find(isExactModelFeature)?.characterLevel
+					|| (this._data.chosenSubfeatures || []).find(isExactChosen)?.characterLevel
+					|| 3,
+			) || 3;
+			history = CharacterSheetProgression.normalizeHistoryEntry({
+				level: preferredLevel,
+				class: {name: "Artificer", source: "EFA"},
+				classLevel: 3,
+				choices: {},
+				complete: false,
+				timestamp: Date.now(),
+			});
+			this._data.levelHistory.push(history);
+			this._data.levelHistory.sort((a, b) => Number(a.level) - Number(b.level));
+		}
+		history.classLevel = 3;
+		history.choices ||= {};
+
+		const evidence = [];
+		(this._data.features || []).filter(isExactModelFeature).forEach(feature => evidence.push(fromExactEntity(feature)));
+		(this._data.chosenSubfeatures || []).filter(isExactChosen).forEach(record => evidence.push(fromExactEntity(record)));
+		(history.choices.featureChoices || []).forEach(choice => {
+			if (!eq(choice.featureName, "Armor Model")) return;
+			const option = fromExactEntity(choice);
+			if (option) evidence.push(option);
+		});
+		(history.choices.replayData?.featureChoices || []).forEach(snapshot => {
+			if (!eq(snapshot.parentFeature, "Armor Model")) return;
+			const option = fromExactEntity(snapshot);
+			if (option) evidence.push(option);
+		});
+		(history.decisions || [])
+			.filter(decision => decision.type === "featureChoice" && eq(decision.sourceKey || decision.label, "Armor Model"))
+			.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : [decision.selection])
+			.forEach(selection => {
+				const option = fromExactEntity(selection);
+				if (option) evidence.push(option);
+			});
+		const selectedRefs = [...new Set(evidence.filter(Boolean).map(option => option.ref.toLowerCase()))];
+		const selected = selectedRefs.length === 1 ? byRef.get(selectedRefs[0]) : null;
+
+		const existingChoices = history.choices.featureChoices || [];
+		const existingReplay = history.choices.replayData?.featureChoices || [];
+		const isArmorChoice = choice => eq(choice?.featureName, "Armor Model") && !!fromExactEntity(choice);
+		const isArmorReplay = snapshot => eq(snapshot?.parentFeature, "Armor Model") && !!fromExactEntity(snapshot);
+		const choiceInsertAt = Math.max(0, existingChoices.findIndex(isArmorChoice));
+		const replayInsertAt = Math.max(0, existingReplay.findIndex(isArmorReplay));
+		history.choices.featureChoices = existingChoices.filter(choice => !isArmorChoice(choice));
+		history.choices.replayData = {...(history.choices.replayData || {})};
+		history.choices.replayData.featureChoices = existingReplay.filter(snapshot => !isArmorReplay(snapshot));
+
+		const semanticKey = CharacterSheetProgression.getSemanticKey({
+			className: "Artificer",
+			classSource: "EFA",
+			classLevel: 3,
+			type: "featureChoice",
+			sourceKey: "Armor Model",
+			slot: 0,
+		});
+		const modelFeatures = (this._data.features || []).filter(isExactModelFeature);
+		this._data.pendingFeatureChoices = (this._data.pendingFeatureChoices || []).filter(choice =>
+			!(
+				choice.kind === "subfeature"
+				&& eq(choice.featureName, "Armor Model")
+				&& eq(choice.featureSource, "EFA")
+				&& eq(choice.featureClass, "Artificer")
+				&& eq(choice.featureClassSource, "EFA")
+			),
+		);
+		this._data.chosenSubfeatures = (this._data.chosenSubfeatures || []).filter(record => !isExactChosen(record));
+
+		let receipt = null;
+		let selection = null;
+		let status = "missing";
+		if (selected) {
+			const selectedFeatures = modelFeatures.filter(feature => fromExactEntity(feature)?.ref === selected.ref);
+			modelFeatures.filter(feature => fromExactEntity(feature)?.ref !== selected.ref)
+				.forEach(feature => this.removeFeature(feature.id || feature.name, feature.source));
+			selectedFeatures.slice(1).forEach(feature => this.removeFeature(feature.id || feature.name, feature.source));
+
+			let materialized = selectedFeatures[0] || null;
+			if (!materialized) {
+				const replay = existingReplay.find(snapshot => fromExactEntity(snapshot)?.ref === selected.ref);
+				const feature = CharacterSheetClassUtils.materializeFeatureOption(
+					replay ? {...selected, ...replay} : selected,
+					{
+						className: "Artificer",
+						classSource: "EFA",
+						acquisitionLevel: 3,
+						parentFeature: "Armor Model",
+						catalogs: {
+							classFeatures: this._classFeatureCatalog || [],
+							subclassFeatures: this._subclassFeatureCatalog || [],
+							optionalFeatures: this._optionalFeatureCatalog || [],
+						},
+						subclassName: "Armorer",
+						subclassShortName: "Armorer",
+						subclassSource: "EFA",
+					},
+				);
+				feature.sourceDecisionKey = semanticKey;
+				this.addFeature(feature, {sourceDecisionKey: semanticKey});
+				materialized = (this._data.features || []).find(feature => isExactModelFeature(feature) && eq(feature.name, selected.name)) || null;
+			}
+			if (materialized) {
+				materialized.parentFeature = "Armor Model";
+				materialized.isFeatureOption = true;
+				materialized.acquisitionLevel = 3;
+				materialized.sourceDecisionKey = semanticKey;
+			}
+			const choice = {
+				featureName: "Armor Model",
+				choice: selected.name,
+				source: "EFA",
+				acquisitionLevel: 3,
+				ref: selected.ref,
+				type: "subclassFeature",
+			};
+			const replay = CharacterSheetClassUtils.buildHistoryFeatureSnapshot(materialized || selected, {
+				type: "subclassFeature",
+				parentFeature: "Armor Model",
+				includeEntries: true,
+			});
+			history.choices.featureChoices.splice(choiceInsertAt, 0, choice);
+			history.choices.replayData.featureChoices.splice(replayInsertAt, 0, replay);
+			this._data.chosenSubfeatures.push({
+				parent: "Armor Model",
+				parentSource: "EFA",
+				parentClass: "Artificer",
+				parentClassSource: "EFA",
+				level: 3,
+				characterLevel: Number(history.level) || 3,
+				name: selected.name,
+				source: "EFA",
+				sourceDecisionKey: semanticKey,
+			});
+			selection = [choice];
+			status = "resolved";
+			if (materialized?.id) {
+				receipt = {
+					version: 1,
+					sourceDecisionKey: semanticKey,
+					effects: [{
+						type: "materialized",
+						features: [{id: materialized.id, name: materialized.name, source: materialized.source}],
+						feats: [],
+						resources: [],
+						modifiers: [],
+					}],
+				};
+			}
+		} else {
+			modelFeatures.forEach(feature => this.removeFeature(feature.id || feature.name, feature.source));
+			this.addPendingFeatureChoice({
+				featureName: "Armor Model",
+				featureId: (this._data.features || []).find(feature =>
+					eq(feature.name, "Armor Model")
+					&& eq(feature.source, "EFA")
+					&& eq(feature.className, "Artificer")
+					&& eq(feature.classSource, "EFA")
+					&& eq(feature.subclassShortName, "Armorer")
+					&& eq(feature.subclassSource, "EFA")
+					&& Number(feature.level) === 3)?.id || "Armor Model|Artificer|EFA|Armorer|EFA|3|EFA",
+				featureSource: "EFA",
+				featureClass: "Artificer",
+				featureClassSource: "EFA",
+				level: 3,
+				characterLevel: Number(history.level) || 3,
+				kind: "subfeature",
+				options,
+				count: 1,
+				sourceDecisionKey: semanticKey,
+			});
+		}
+
+		const decision = CharacterSheetProgression._makeDecision({
+			characterLevel: Number(history.level) || 3,
+			className: "Artificer",
+			classSource: "EFA",
+			classLevel: 3,
+			type: "featureChoice",
+			label: "Armor Model",
+			sourceKey: "Armor Model",
+			slot: 0,
+			required: true,
+			count: 1,
+			options: [],
+			selection,
+			status,
+			meta: {featureName: "Armor Model"},
+			receipt,
+		});
+		history.decisions = [
+			...(history.decisions || []).filter(item =>
+				!(
+					(item.type === "featureChoice" && eq(item.sourceKey || item.label, "Armor Model"))
+					|| item.parentSemanticKey === semanticKey
+					|| (item.rootSemanticKey === semanticKey && item.semanticKey !== semanticKey)
+				)),
+			decision,
+		];
+		history.complete = status === "resolved"
+			&& !history.decisions.some(item => item.required && item.status !== "resolved");
+		history.timestamp = Date.now();
+		this._data.migrationFlags.efaArmorerArmorModelChoiceV1 = true;
 	}
 
 	_migrateModifiers () {
