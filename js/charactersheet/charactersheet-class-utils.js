@@ -766,8 +766,11 @@ class CharacterSheetClassUtils {
 		collectFeatureRefs(classData.classFeatures || []);
 
 		const featuresAtLevel = featureRefs.filter(ref => {
-			if (typeof ref === "string") return Number(ref.split("|").at(-1)) === level;
-			if (typeof ref?.classFeature === "string") return Number(ref.classFeature.split("|").at(-1)) === level;
+			// Canonical class-feature refs store level at index 3 and may append a
+			// display/source field at index 4 (e.g. EFA Artificer refs). Reading the
+			// last field silently loses every improvement in that extended form.
+			if (typeof ref === "string") return Number(ref.split("|")[3]) === level;
+			if (typeof ref?.classFeature === "string") return Number(ref.classFeature.split("|")[3]) === level;
 			return Number(ref?.level) === level;
 		});
 		const getFeatureName = ref => {

@@ -29,6 +29,12 @@ beforeAll(async () => {
 });
 
 const CharacterSheetQuickBuild = globalThis.CharacterSheetQuickBuild;
+const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const ARTIFICER_DATA = JSON.parse(readFileSync(
+	resolve(dirname(fileURLToPath(import.meta.url)), "../../../data/class/class-artificer.json"),
+	"utf8",
+));
+const EFA_ARTIFICER = ARTIFICER_DATA.class.find(cls => cls.name === "Artificer" && cls.source === "EFA");
 
 /** Build a QuickBuild instance wired to a real state, bypassing the wizard UI. */
 function makeQb (state) {
@@ -64,6 +70,35 @@ describe("#12 QuickBuild ASI/feat base-score idempotency", () => {
 		const asiFeatures = state.getFeatures()
 			.filter(f => f.isAsiChoice && f.className === "Ranger" && f.level === 4);
 		expect(asiFeatures).toHaveLength(1);
+	});
+
+	test("CS-BUG-176 (FIXED): source-qualified EFA refs surface and apply the level-4 ASI", () => {
+		state = new CharacterSheetState();
+		state.addClass({name: "Artificer", source: "EFA", level: 4});
+		qb = makeQb(state);
+
+		expect(CharacterSheetClassUtils.getImprovementOpportunity(EFA_ARTIFICER, 4)).toMatchObject({
+			kind: "asiOrFeat",
+			source: "classFeature",
+		});
+
+		state.setAbilityBase("int", 15);
+		qb._applyAsiOrFeat(
+			{mode: "asi", abilityChoices: {int: 2}},
+			{name: "Artificer", source: "EFA"},
+			4,
+			EFA_ARTIFICER,
+		);
+
+		expect(state.getAbilityBase("int")).toBe(17);
+		expect(state.getFeatures()).toContainEqual(expect.objectContaining({
+			name: "Ability Score Improvement",
+			source: "EFA",
+			className: "Artificer",
+			classSource: "EFA",
+			level: 4,
+			isAsiChoice: true,
+		}));
 	});
 
 	test("feat ability bonus applies once; re-applying does not stack", () => {
