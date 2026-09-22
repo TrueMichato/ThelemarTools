@@ -23356,7 +23356,9 @@ class CharacterSheetState {
 				provenance: {
 					ownerType: "feature",
 					ownerUid: choice.featureUid || (sourceFeature && globalThis.CharacterSheetProgression
-						? CharacterSheetProgression.getEntityUid(sourceFeature)
+						? (sourceFeature._conditionalToolGrant
+							? CharacterSheetProgression.getFeatureOwnerUid(sourceFeature)
+							: CharacterSheetProgression.getEntityUid(sourceFeature))
 						: (choice.featureId || choice.featureName || choice.kind)),
 					acquisitionKey: choice.acquisitionKey
 						|| choice.featureUid
@@ -53120,6 +53122,7 @@ class CharacterSheetState {
 			}
 		}
 		const conditionalToolGrant = typeof CharacterSheetClassUtils !== "undefined"
+			&& CharacterSheetClassUtils.isExactEfaArtificerConditionalToolGrant(feature)
 			? CharacterSheetClassUtils.getConditionalToolProficiencyGrant(feature, this)
 			: null;
 

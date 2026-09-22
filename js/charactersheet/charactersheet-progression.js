@@ -180,16 +180,15 @@ class CharacterSheetProgression {
 
 	static getFeatureOwnerUid (entity) {
 		if (!entity?.name) return "";
-		const parts = [
+		return [
 			entity.name,
+			entity.source,
 			entity.className,
 			entity.classSource,
-		];
-		if (entity.subclassShortName || entity.subclassName || entity.subclassSource) {
-			parts.push(entity.subclassShortName || entity.subclassName, entity.subclassSource);
-		}
-		parts.push(entity.level, entity.source);
-		return parts.map(value => String(value ?? "").trim()).join("|");
+			entity.subclassShortName,
+			entity.subclassSource,
+			entity.level,
+		].map(CharacterSheetProgression._normalize).join("|");
 	}
 
 	static _matchesFeatureEntity (candidate, entity) {

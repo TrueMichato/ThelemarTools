@@ -426,7 +426,7 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 		expect(state.isActionTypeAvailable("action")).toBe(false);
 		expect(state.getConcentration()).toMatchObject({spellName: "Faerie Fire", spellSource: "XPHB"});
 		expect(state.getDamageConcentrationProtection()).toMatchObject({spellUid: "faerie fire|xphb"});
-		expect(state.toJson().deferredFlatDamageRiderTurnUsage).not.toHaveProperty(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID);
+		expect(state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID).used).toBe(false);
 		expect(state.getDeferredFlatDamageRiderOptions({route: "attack"})).toHaveLength(1);
 	});
 

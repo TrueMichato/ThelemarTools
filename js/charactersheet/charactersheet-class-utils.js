@@ -137,7 +137,15 @@ class CharacterSheetClassUtils {
 		return this.CHOICE_TOOL_CATALOGS.artisan.filter(it => !excluded.has(it.toLowerCase()));
 	}
 
+	static isExactEfaArtificerConditionalToolGrant (feature) {
+		return `${feature?.source || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.className || ""}`.toLowerCase() === "artificer"
+			&& `${feature?.classSource || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.subclassSource || ""}`.toUpperCase() === "EFA";
+	}
+
 	static getFixedProficiencyGrantContract (feature, {ownedTools = []} = {}) {
+		if (!this.isExactEfaArtificerConditionalToolGrant(feature)) return null;
 		const grant = this.getConditionalToolProficiencyGrant(feature, {
 			getToolProficiencies: () => ownedTools,
 		});
