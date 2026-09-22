@@ -414,8 +414,8 @@ placed on an ally rather than on the druid.
 
 ## Supported Toggle Abilities
 
-> ⚠️ **This section documents 35 of the 76 states in `ACTIVE_STATE_TYPES`.**
-> The other 41 are **implemented and working** — they are merely undocumented
+> ⚠️ **This section documents 36 of the 76 states in `ACTIVE_STATE_TYPES`.**
+> The other 40 are **implemented and working** — they are merely undocumented
 > here. Do not read a state's absence from this section as "unsupported"; check
 > `CharacterSheetState.ACTIVE_STATE_TYPES` first, which is the only authority.
 >
@@ -482,6 +482,18 @@ player confirms sufficient room, activation also stores the exact number of
 only that size effect. Doffing the armor, changing model, losing the exact
 `Artificer|EFA` / `Armorer|EFA` source, death, or duration expiry ends the
 state.
+
+#### Perfected Armor Flight (EFA Artificer Armorer — Infiltrator)
+
+`efaPerfectedArmorFlight` is the level-15 Infiltrator Armor Model's
+Bonus Action flight state. Activation spends one use from its
+Intelligence-modifier-sized Long Rest pool and the Bonus Action together, then
+sets Fly Speed to twice the character's current walking Speed until the end of
+the current turn. Because the effect reads current Speed, later walking-speed
+bonuses and multipliers continue to update the Fly Speed while the state is
+active. Resetting turn economy ends it. Losing the exact
+`Artificer|EFA` / `Armorer|EFA` source, changing away from Infiltrator,
+doffing the bound Arcane Armor, or dying also removes the state.
 
 #### Rage (Barbarian)
 ```javascript
