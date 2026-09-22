@@ -307,7 +307,7 @@ describe("RHW Reanimator R2c committed cast", () => {
 			ok: true,
 			committed: true,
 			castingClassUid: CLASS_UID,
-			castingSubclassUid: "Reanimator|RHW",
+			castingSubclassUid: "Reanimator|Artificer|EFA|RHW",
 			spellEntryId: spell.id,
 			spellUid: SPELL_UID,
 			castType: "noSlotResource",
@@ -449,7 +449,7 @@ describe("RHW Reanimator R2c persistence, rest, ownership, and Respec", () => {
 		const receipt = await level15.pUseRhwFacilitatedRevival(getUseInput(level15));
 		expect(receipt).toMatchObject({
 			castingClassUid: CLASS_UID,
-			castingSubclassUid: "Reanimator|RHW",
+			castingSubclassUid: "Reanimator|Artificer|EFA|RHW",
 			spellUid: SPELL_UID,
 		});
 
