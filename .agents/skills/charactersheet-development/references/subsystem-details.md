@@ -136,6 +136,7 @@ const committedResult = await state.pCommitFeatureUse({
     resourceCost,
     context,
     result,
+    onCoreCommitted,
 });
 ```
 
@@ -144,6 +145,13 @@ names. They run only after the resource cost and any combat-tracked action have
 committed. Action economy is validated and consumed only while the character is
 in combat; out-of-combat uses spend the resource without persisting a Reaction
 lock.
+
+`onCoreCommitted` is the generic persistence boundary. When supplied, it is
+awaited after the core action/resource mutation and committed result are built,
+but before any follow-up hook runs. A boundary failure remains an explicit
+committed in-memory result (`commitBoundaryFailed`) and skips follow-ups rather
+than rolling back the core use. Controllers should save again after hooks only
+when a successful hook returns `persistentStateChanged: true`.
 
 Cancellation, invalid context, an unavailable action, or insufficient resource
 returns `{ok: false, committed: false, reason}` and invokes no hook. A hook
@@ -168,6 +176,8 @@ The committed result fields are:
     result,
     followUps: [{hookId, ok, value?, error?}],
     followUpFailed,
+    commitBoundaryFailed?, // true only if onCoreCommitted failed
+    commitBoundaryError?,
 }
 ```
 
@@ -176,7 +186,7 @@ EFA Flash of Genius uses:
 - class UID `Artificer|EFA`
 - feature UID `Flash of Genius|Artificer|EFA`
 - `pUseFlashOfGenius({rollType, isFailed, rollTotal, targetType, targetName,
-  targetVisible, distanceFeet, cancelled, context})`
+  targetVisible, distanceFeet, cancelled, context, onCoreCommitted})`
 
 The call accepts only failed `abilityCheck` or `savingThrow` contexts. A target
 is either `self` or a named creature with explicit visibility and a finite
@@ -201,13 +211,15 @@ EFA Cartographer Ingenious Movement is registered only for exact
 `Artificer|EFA` + `Cartographer|EFA` level 9+ through
 `registerEfaCartographerIngeniousMovementHook`. The controller registers the
 one-shot hook around the canonical Flash commit and removes it immediately
-afterward. Its resolver requires the committed Flash result, explicit target
-eligibility and destination confirmations, and returns an immutable
+afterward. The controller persists Flash through `onCoreCommitted` before
+opening any Ingenious prompt. Its resolver requires the committed Flash result,
+explicit target eligibility and destination confirmations, and returns an immutable
 `requires-external-relocation` instruction. It never spends another Reaction or
 resource, invents coordinates/line of sight, mutates another sheet, persists
 movement state, or depends on Adventurer's Atlas holders. Declines return an
 explicit non-failure; validation failures set `followUpFailed` without rolling
-back Flash.
+back Flash. Escape/X at any confirmation is a decline; an explicit No is the
+corresponding validation failure.
 
 ## RHW Reanimator R2a State and Ownership
 

@@ -18696,6 +18696,10 @@ class CharacterSheetPage {
 		);
 		let committed;
 		try {
+			opts = {
+				...opts,
+				onCoreCommitted: () => this._saveCurrentCharacter(),
+			};
 			committed = await this._state.pUseFlashOfGenius(opts);
 		} finally {
 			unregisterIngeniousMovement?.();
@@ -18711,7 +18715,6 @@ class CharacterSheetPage {
 			JqueryUtil.doToast({type: "warning", content: messages[committed.reason] || "Flash of Genius could not be used."});
 			return committed;
 		}
-
 		const {bonus, adjustedTotal, target} = committed.result;
 		const targetLabel = target.type === "self" ? "your roll" : `${target.name}'s roll`;
 		const ingeniousMovementFollowUp = committed.followUps.find(({hookId}) =>
@@ -18719,9 +18722,14 @@ class CharacterSheetPage {
 		const ingeniousMovementResult = ingeniousMovementFollowUp?.value;
 		let toastContent = `Flash of Genius added +${bonus} to ${targetLabel}.`;
 		let toastType = "success";
-		if (ingeniousMovementFollowUp && !ingeniousMovementFollowUp.ok) {
+		if (committed.commitBoundaryFailed) {
+			toastType = "danger";
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}, but the committed state could not be saved. No follow-up was opened.`;
+		} else if (ingeniousMovementFollowUp && !ingeniousMovementFollowUp.ok) {
 			toastType = "warning";
-			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}, but Ingenious Movement could not be resolved. The Flash use remains committed.`;
+			const error = ingeniousMovementResult?.error || ingeniousMovementFollowUp.error || "Ingenious Movement could not be resolved.";
+			const errorSentence = /[.!?]$/.test(error) ? error : `${error}.`;
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}. Ingenious Movement: ${errorSentence} The Flash use remains committed.`;
 		} else if (ingeniousMovementResult?.declined) {
 			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}. Ingenious Movement was skipped; the Flash use remains committed.`;
 		} else if (ingeniousMovementResult?.resolved) {
@@ -18735,7 +18743,9 @@ class CharacterSheetPage {
 			content: toastContent,
 		});
 
-		this._saveCurrentCharacter();
+		const hasPersistentFollowUpMutation = committed.followUps.some(({ok, value}) =>
+			ok && value?.persistentStateChanged === true);
+		if (hasPersistentFollowUpMutation) await this._saveCurrentCharacter();
 		this._renderResources();
 		this._features?._renderResources?.();
 		this._renderActiveStates();
@@ -18779,14 +18789,16 @@ class CharacterSheetPage {
 				textYes: "Target is willing",
 				textNo: "Target is not willing",
 			});
-			if (targetWilling !== true) return resolve({targetType, targetName, targetWilling});
+			if (targetWilling == null) return resolve({declined: true});
+			if (targetWilling === false) return resolve({targetType, targetName, targetWilling});
 			targetVisible = await CharacterSheetModal.pGetUserBoolean({
 				title: "Ingenious Movement — Visible Target",
 				htmlDescription: `Confirm that you can see ${String(targetName || "").trim() || "the creature"}.`,
 				textYes: "I can see the target",
 				textNo: "Target is not visible",
 			});
-			if (targetVisible !== true) return resolve({targetType, targetName, targetWilling, targetVisible});
+			if (targetVisible == null) return resolve({declined: true});
+			if (targetVisible === false) return resolve({targetType, targetName, targetWilling, targetVisible});
 			targetDistanceFeet = await InputUiUtil.pGetUserNumber({
 				title: "Target distance from you (feet)",
 				default: 30,
@@ -18803,12 +18815,31 @@ class CharacterSheetPage {
 			max: CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET,
 		});
 		if (teleportDistanceFeet == null) return resolve({declined: true});
-		const destinationConfirmed = await CharacterSheetModal.pGetUserBoolean({
-			title: "Ingenious Movement — Destination",
-			htmlDescription: "Confirm that the destination is unoccupied and that you can see it. The sheet does not track map coordinates or line of sight.",
-			textYes: "Destination confirmed",
-			textNo: "Destination is not eligible",
+		const destinationVisible = await CharacterSheetModal.pGetUserBoolean({
+			title: "Ingenious Movement — Visible Destination",
+			htmlDescription: "Confirm that you can see the destination. The sheet does not track map coordinates or line of sight.",
+			textYes: "I can see the destination",
+			textNo: "Destination is not visible",
 		});
+		if (destinationVisible == null) return resolve({declined: true});
+		if (destinationVisible === false) {
+			return resolve({
+				targetType,
+				targetName,
+				targetWilling,
+				targetVisible,
+				targetDistanceFeet,
+				teleportDistanceFeet,
+				destinationVisible,
+			});
+		}
+		const destinationUnoccupied = await CharacterSheetModal.pGetUserBoolean({
+			title: "Ingenious Movement — Unoccupied Destination",
+			htmlDescription: "Confirm that the destination space is unoccupied. The sheet does not track battle-map occupancy.",
+			textYes: "Destination is unoccupied",
+			textNo: "Destination is occupied",
+		});
+		if (destinationUnoccupied == null) return resolve({declined: true});
 
 		return resolve({
 			targetType,
@@ -18817,8 +18848,8 @@ class CharacterSheetPage {
 			targetVisible,
 			targetDistanceFeet,
 			teleportDistanceFeet,
-			destinationVisible: destinationConfirmed,
-			destinationUnoccupied: destinationConfirmed,
+			destinationVisible,
+			destinationUnoccupied,
 		});
 	}
 

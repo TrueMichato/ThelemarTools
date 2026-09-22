@@ -343,12 +343,69 @@ describe("EFA Cartographer Ingenious Movement transaction", () => {
 });
 
 describe("EFA Cartographer Ingenious Movement UI integration", () => {
+	it("persists the committed Flash before an Ingenious hook resolves", async () => {
+		const state = makeCharacter();
+		state.startCombat();
+		const page = makePage(state);
+		const before = getFlashResource(state).current;
+		const savedSnapshots = [];
+		page._saveCurrentCharacter = jest.fn(async () => {
+			savedSnapshots.push(state.toJson());
+		});
+
+		let resolveHook;
+		let notifyHookStarted;
+		const hookStarted = new Promise(resolve => { notifyHookStarted = resolve; });
+		page._pResolveEfaCartographerIngeniousMovement = jest.fn(committedFlashResult => {
+			notifyHookStarted();
+			return new Promise(resolve => {
+				resolveHook = () => resolve(state.resolveEfaCartographerIngeniousMovement({
+					committedFlashResult,
+					declined: true,
+				}));
+			});
+		});
+
+		let isSettled = false;
+		const pendingCommit = page._pCommitEfaFlashOfGenius({
+			rollType: "abilityCheck",
+			isFailed: true,
+			targetType: "self",
+		});
+		void pendingCommit.then(() => { isSettled = true; });
+		await hookStarted;
+
+		expect(isSettled).toBe(false);
+		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+		expect(savedSnapshots).toHaveLength(1);
+		expect(savedSnapshots[0].resources.find(resource => resource.featureUid === FLASH_UID).current).toBe(before - 1);
+		expect(savedSnapshots[0].actionEconomyUsage.reaction).toBe(true);
+		expect(getFlashResource(state).current).toBe(before - 1);
+		expect(state.isActionTypeAvailable("reaction")).toBe(false);
+
+		resolveHook();
+		const result = await pendingCommit;
+		expect(result).toEqual(expect.objectContaining({
+			ok: true,
+			committed: true,
+			followUpFailed: false,
+			remainingUses: before - 1,
+		}));
+		expect(result.followUps[0]).toMatchObject({
+			hookId: MOVEMENT_HOOK_ID,
+			ok: true,
+			value: {declined: true, reason: "declined"},
+		});
+		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+	});
+
 	it("registers one post-commit follow-up on the canonical Flash path and returns the structured result", async () => {
 		const state = makeCharacter();
 		state.startCombat();
 		const page = makePage(state);
 		const before = getFlashResource(state).current;
 		const boolSpy = jest.spyOn(globalThis.CharacterSheetModal, "pGetUserBoolean")
+			.mockResolvedValueOnce(true)
 			.mockResolvedValueOnce(true)
 			.mockResolvedValueOnce(true);
 		const enumSpy = jest.spyOn(globalThis.CharacterSheetModal, "pGetUserEnum").mockResolvedValue("self");
@@ -381,6 +438,7 @@ describe("EFA Cartographer Ingenious Movement UI integration", () => {
 			expect(state.isActionTypeAvailable("reaction")).toBe(false);
 			expect(getFlashResource(state).current).toBe(before - 1);
 			expect(state._committedFeatureUseHooks.get(FLASH_UID)?.has(MOVEMENT_HOOK_ID)).not.toBe(true);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
 			expect(toastSpy).toHaveBeenCalledWith({
 				type: "success",
 				content: "Flash of Genius added +4 to your roll. Ingenious Movement: Teleport yourself 20 feet to the confirmed unoccupied space you can see.",
@@ -425,6 +483,7 @@ describe("EFA Cartographer Ingenious Movement UI integration", () => {
 			}]);
 			expect(state.isActionTypeAvailable("reaction")).toBe(false);
 			expect(getFlashResource(state).current).toBe(before - 1);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
 			expect(toastSpy).toHaveBeenCalledWith({
 				type: "success",
 				content: "Flash of Genius added +4 to your roll. Ingenious Movement was skipped; the Flash use remains committed.",
@@ -469,13 +528,209 @@ describe("EFA Cartographer Ingenious Movement UI integration", () => {
 			}]);
 			expect(state.isActionTypeAvailable("reaction")).toBe(false);
 			expect(getFlashResource(state).current).toBe(before - 1);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
 			expect(toastSpy).toHaveBeenCalledWith({
 				type: "warning",
-				content: "Flash of Genius added +4 to your roll, but Ingenious Movement could not be resolved. The Flash use remains committed.",
+				content: "Flash of Genius added +4 to your roll. Ingenious Movement: You must be able to see the destination. The Flash use remains committed.",
 			});
 		} finally {
 			boolSpy.mockRestore();
 			enumSpy.mockRestore();
+			numberSpy.mockRestore();
+			toastSpy.mockRestore();
+		}
+	});
+
+	it("keeps a thrown Ingenious hook error non-rollback after the core save", async () => {
+		const state = makeCharacter();
+		state.startCombat();
+		const page = makePage(state);
+		const before = getFlashResource(state).current;
+		page._pResolveEfaCartographerIngeniousMovement = jest.fn(async () => {
+			throw new Error("Ingenious prompt failed");
+		});
+		const toastSpy = jest.spyOn(globalThis.JqueryUtil, "doToast");
+
+		try {
+			const result = await page._pCommitEfaFlashOfGenius({
+				rollType: "savingThrow",
+				isFailed: true,
+				targetType: "self",
+			});
+			expect(result).toEqual(expect.objectContaining({
+				ok: true,
+				committed: true,
+				followUpFailed: true,
+				remainingUses: before - 1,
+			}));
+			expect(result.followUps).toEqual([{
+				hookId: MOVEMENT_HOOK_ID,
+				ok: false,
+				error: "Ingenious prompt failed",
+			}]);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+			expect(state.isActionTypeAvailable("reaction")).toBe(false);
+			expect(getFlashResource(state).current).toBe(before - 1);
+			expect(toastSpy).toHaveBeenCalledWith({
+				type: "warning",
+				content: "Flash of Genius added +4 to your roll. Ingenious Movement: Ingenious prompt failed. The Flash use remains committed.",
+			});
+		} finally {
+			toastSpy.mockRestore();
+		}
+	});
+
+	it("skips follow-ups and reports an explicit committed result when the core save boundary fails", async () => {
+		const state = makeCharacter();
+		state.startCombat();
+		const page = makePage(state);
+		const before = getFlashResource(state).current;
+		page._saveCurrentCharacter = jest.fn(async () => {
+			throw new Error("Storage unavailable");
+		});
+		const promptSpy = jest.spyOn(page, "_pResolveEfaCartographerIngeniousMovement");
+		const toastSpy = jest.spyOn(globalThis.JqueryUtil, "doToast");
+
+		try {
+			const result = await page._pCommitEfaFlashOfGenius({
+				rollType: "savingThrow",
+				isFailed: true,
+				targetType: "self",
+			});
+			expect(result).toEqual(expect.objectContaining({
+				ok: true,
+				committed: true,
+				commitBoundaryFailed: true,
+				commitBoundaryError: "Storage unavailable",
+				followUps: [],
+				remainingUses: before - 1,
+			}));
+			expect(promptSpy).not.toHaveBeenCalled();
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+			expect(state.isActionTypeAvailable("reaction")).toBe(false);
+			expect(getFlashResource(state).current).toBe(before - 1);
+			expect(toastSpy).toHaveBeenCalledWith({
+				type: "danger",
+				content: "Flash of Genius added +4 to your roll, but the committed state could not be saved. No follow-up was opened.",
+			});
+		} finally {
+			promptSpy.mockRestore();
+			toastSpy.mockRestore();
+		}
+	});
+
+	it("saves a second time only when a successful follow-up reports persistent mutation", async () => {
+		const state = makeCharacter();
+		const page = makePage(state);
+		page._pResolveEfaCartographerIngeniousMovement = jest.fn(async () => ({
+			ok: true,
+			resolved: true,
+			persistentStateChanged: true,
+			instruction: "Persistent follow-up test.",
+		}));
+
+		const result = await page._pCommitEfaFlashOfGenius({
+			rollType: "abilityCheck",
+			isFailed: true,
+			targetType: "self",
+		});
+
+		expect(result).toEqual(expect.objectContaining({ok: true, committed: true}));
+		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(2);
+	});
+
+	it.each([
+		{
+			label: "Willing Target Escape/X",
+			targetType: "creature",
+			booleanResults: [true, null],
+			expected: {declined: true, reason: "declined"},
+		},
+		{
+			label: "Willing Target explicit No",
+			targetType: "creature",
+			booleanResults: [true, false],
+			expected: {ok: false, reason: "targetNotWilling", error: "Thorn must be willing."},
+		},
+		{
+			label: "Visible Target Escape/X",
+			targetType: "creature",
+			booleanResults: [true, true, null],
+			expected: {declined: true, reason: "declined"},
+		},
+		{
+			label: "Visible Target explicit No",
+			targetType: "creature",
+			booleanResults: [true, true, false],
+			expected: {ok: false, reason: "targetNotVisible", error: "You must be able to see Thorn."},
+		},
+		{
+			label: "Visible Destination Escape/X",
+			targetType: "self",
+			booleanResults: [true, null],
+			expected: {declined: true, reason: "declined"},
+		},
+		{
+			label: "Visible Destination explicit No",
+			targetType: "self",
+			booleanResults: [true, false],
+			expected: {ok: false, reason: "destinationNotVisible", error: "You must be able to see the destination."},
+		},
+		{
+			label: "Unoccupied Destination Escape/X",
+			targetType: "self",
+			booleanResults: [true, true, null],
+			expected: {declined: true, reason: "declined"},
+		},
+		{
+			label: "Unoccupied Destination explicit No",
+			targetType: "self",
+			booleanResults: [true, true, false],
+			expected: {ok: false, reason: "destinationOccupied", error: "The destination must be unoccupied."},
+		},
+	])("distinguishes $label", async ({targetType, booleanResults, expected}) => {
+		const state = makeCharacter();
+		state.startCombat();
+		const page = makePage(state);
+		const before = getFlashResource(state).current;
+		const queue = [...booleanResults];
+		const boolSpy = jest.spyOn(globalThis.CharacterSheetModal, "pGetUserBoolean")
+			.mockImplementation(async () => queue.shift());
+		const enumSpy = jest.spyOn(globalThis.CharacterSheetModal, "pGetUserEnum").mockResolvedValue(targetType);
+		const stringSpy = jest.spyOn(globalThis.InputUiUtil, "pGetUserString").mockResolvedValue("Thorn");
+		const numberSpy = jest.spyOn(globalThis.InputUiUtil, "pGetUserNumber").mockResolvedValue(20);
+		const toastSpy = jest.spyOn(globalThis.JqueryUtil, "doToast");
+
+		try {
+			const result = await page._pCommitEfaFlashOfGenius({
+				rollType: "abilityCheck",
+				isFailed: true,
+				targetType: "self",
+			});
+			const followUp = result.followUps[0];
+			expect(followUp.value).toEqual(expect.objectContaining(expected));
+			expect(result.followUpFailed).toBe(expected.ok === false);
+			expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
+			expect(state.isActionTypeAvailable("reaction")).toBe(false);
+			expect(getFlashResource(state).current).toBe(before - 1);
+
+			if (expected.declined) {
+				expect(followUp.ok).toBe(true);
+				expect(toastSpy).toHaveBeenCalledWith({
+					type: "success",
+					content: "Flash of Genius added +4 to your roll. Ingenious Movement was skipped; the Flash use remains committed.",
+				});
+			} else {
+				expect(followUp.ok).toBe(false);
+				expect(toastSpy).toHaveBeenCalledWith({
+					type: "warning",
+					content: `Flash of Genius added +4 to your roll. Ingenious Movement: ${expected.error} The Flash use remains committed.`,
+				});
+			}
+		} finally {
+			boolSpy.mockRestore();
+			enumSpy.mockRestore();
+			stringSpy.mockRestore();
 			numberSpy.mockRestore();
 			toastSpy.mockRestore();
 		}
@@ -495,5 +750,6 @@ describe("EFA Cartographer Ingenious Movement UI integration", () => {
 
 		expect(result).toEqual(expect.objectContaining({ok: true, committed: true, followUps: []}));
 		expect(promptSpy).not.toHaveBeenCalled();
+		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
 	});
 });

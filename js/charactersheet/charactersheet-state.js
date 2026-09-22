@@ -46465,6 +46465,7 @@ class CharacterSheetState {
 		resourceCost = 1,
 		context = {},
 		result = {},
+		onCoreCommitted = null,
 	} = {}) {
 		const resource = (this._data.resources || []).find(it => it.id === resourceId);
 		const cost = Math.max(0, Math.floor(Number(resourceCost) || 0));
@@ -46498,6 +46499,16 @@ class CharacterSheetState {
 			followUps: [],
 			followUpFailed: false,
 		};
+
+		if (typeof onCoreCommitted === "function") {
+			try {
+				await onCoreCommitted(committedResult);
+			} catch (error) {
+				committedResult.commitBoundaryFailed = true;
+				committedResult.commitBoundaryError = error instanceof Error ? error.message : String(error);
+				return committedResult;
+			}
+		}
 
 		for (const [hookId, hook] of (this._committedFeatureUseHooks.get(featureUid) || new Map()).entries()) {
 			try {
@@ -46689,6 +46700,7 @@ class CharacterSheetState {
 		distanceFeet = null,
 		cancelled = false,
 		context = {},
+		onCoreCommitted = null,
 	} = {}) {
 		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
 		if (!["abilityCheck", "savingThrow"].includes(rollType)) {
@@ -46741,6 +46753,7 @@ class CharacterSheetState {
 				adjustedTotal: Number.isFinite(originalTotal) ? originalTotal + bonus : null,
 				target,
 			},
+			onCoreCommitted,
 		});
 	}
 
