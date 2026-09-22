@@ -79,13 +79,13 @@ Drives the level-up wizard for L2+ (and multiclass entries).
   provided; falls back to first-match if not.
 - `addKnownSpell(name)` / `addFirstAvailableKnownSpells(count)`.
 - `selectOptionalFeature(name)` / `selectFirstAvailableOptions()`.
-- `selectRequiredArtificerPlans()` — completes only required EFA Artificer
-  Replicate Magic Item plan acquisitions, then commits them. Optional
-  every-level replacement opportunities remain unchanged.
+- `selectRequiredEfaArtificerPlans()` — opens the shared Replicate
+  Magic Item plan picker, selects every required addition deterministically,
+  commits the draft, and deliberately leaves optional replacements unchanged.
 - **`autoFillAllSelections()` — the critical one.**  Optimised
-  state-stable polling sweep (per Phase 3): required Replicate Magic
-  Item plans, ASI stepper, counters, spell picks, optional features.
-  Use after the spec sets explicit picks.
+  state-stable polling sweep (per Phase 3): ASI stepper, counters, spell
+  picks, optional features, and required EFA Artificer plans. Use after the
+  spec sets explicit picks.
 - `resolvePendingFeatureChoices()` — drains stacked production feature-choice
   modals, including multi-tool picks. If the renderer owns the choice lock but
   no modal becomes observable, it uses the production fulfillment API as the
@@ -153,6 +153,9 @@ The sheet itself.  Most probes go through this.
 - `getResourceNames(): string[]`.
 - `getSpellSlots(level): {current, max}`.
 - `getPactSlots(): {current, max, level}`.
+- `getInnateSpellNames(): string[]` — reads the separate innate-grant bucket.
+- `getKnownSpellsByLevel()` includes ordinary, cantrip, and innate entries so
+  cantrip-count probes measure the complete player spell surface.
 - `castSpellAtSlot(level): {ok, remaining}`.
 - `useResourceByName(name, amount = 1): {ok, remaining}`.
 - `getMaxAttunement(): number` — reads the live attunement cap through the
@@ -165,7 +168,9 @@ The sheet itself.  Most probes go through this.
   exact/min/contains/null/truthy/reference-delta expectations, and restores the
   pre-probe character snapshot by default. Use it for composed causal probes
   that have no stable UI boundary; descriptors must name methods and values,
-  never branch on a class name in the dispatcher.
+  never branch on a class name in the dispatcher. Exact-source item probes
+  must use the canonical item source expected by the runtime contract rather
+  than a synthetic test source.
 
 ### Rests
 

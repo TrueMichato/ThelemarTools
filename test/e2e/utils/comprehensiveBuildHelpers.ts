@@ -2129,9 +2129,11 @@ export async function runEffectCheck (
 			// review; the runtime check is identical.
 			// Cantrips live in their own list on the sheet, so a subclass that
 			// grants one through `additionalSpells` only shows up once both
-			// lists are unioned.
+			// lists are unioned. Innate grants are stored separately again, so
+			// include them as well for species and feature spell grants.
 			const cantrips = await charSheet.getCantripNames().catch(() => [] as string[]);
-			const pool = [...known, ...cantrips];
+			const innate = await charSheet.getInnateSpellNames().catch(() => [] as string[]);
+			const pool = [...known, ...cantrips, ...innate];
 			const want = e.spell.toLowerCase();
 			if (!pool.some(n => n.toLowerCase() === want)) {
 				throw new Error(`spell "${e.spell}" not in spellbook [${mode}]. seen=${pool.slice(0, 30).join(", ")}…`);

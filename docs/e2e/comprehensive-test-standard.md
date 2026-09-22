@@ -46,8 +46,11 @@ The EFA Artificer chassis has reusable, source-safe E2E assets:
 - `buildEfaArtificerBaseChecks()` and
   `EFA_ARTIFICER_BASE_FEATURE_UIDS` in
   [`efaArtificerBase.ts`](../../test/e2e/utils/efaArtificerBase.ts) publish
-  the source-qualified L1–20 base-feature matrix, including generic state
-  transaction probes for the M1–M6 mechanics.
+  the source-qualified L1–20 base-feature matrix, including persisted
+  Ability Score Improvement choices and generic state transaction probes for
+  the M1–M6 mechanics.
+- `LevelUpPage.selectRequiredEfaArtificerPlans()` drives the shared plan modal
+  for required gains while preserving optional replacement choices.
 
 These helpers are **assets for a future accepted subclass spec**, not permission
 to publish a subclass-free comprehensive Artificer build. The consuming spec

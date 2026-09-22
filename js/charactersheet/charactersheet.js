@@ -441,6 +441,11 @@ class CharacterSheetPage {
 		// and BEFORE _setUpStateFromData consumes the merged data.
 		await this._pResolveCopyInheritance();
 
+		// Builder mutates the live state directly before any load-time class-feature
+		// reconciliation runs. Register the full catalog now so class-level
+		// `additionalSpells` grants are available on the first apply pass.
+		this._state.setClassCatalog(this._classes || []);
+
 		// Register the sheet's loaded (brew-merged + _copy-resolved) class,
 		// subclass, optional-feature and combat-method entities directly into the
 		// DataLoader hover cache. These brew entities aren't reachable through the

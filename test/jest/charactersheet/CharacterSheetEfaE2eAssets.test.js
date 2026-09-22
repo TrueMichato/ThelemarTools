@@ -36,6 +36,7 @@ let presetApi;
 let matrixApi;
 let dispatcherApi;
 let pageApi;
+let levelUpApi;
 
 beforeAll(async () => {
 	fs.rmSync(OUT_DIR, {recursive: true, force: true});
@@ -45,12 +46,14 @@ beforeAll(async () => {
 		bundle("test/e2e/utils/efaArtificerBase.ts", "efaArtificerBase.mjs"),
 		bundle("test/e2e/utils/comprehensiveBuildHelpers.ts", "comprehensiveBuildHelpers.mjs"),
 		bundle("test/e2e/pages/CharacterSheetPage.ts", "CharacterSheetPage.mjs"),
+		bundle("test/e2e/pages/LevelUpPage.ts", "LevelUpPage.mjs"),
 	]);
-	[presetApi, matrixApi, dispatcherApi, pageApi] = await Promise.all([
+	[presetApi, matrixApi, dispatcherApi, pageApi, levelUpApi] = await Promise.all([
 		importBundle("characterBuilder.mjs"),
 		importBundle("efaArtificerBase.mjs"),
 		importBundle("comprehensiveBuildHelpers.mjs"),
 		importBundle("CharacterSheetPage.mjs"),
+		importBundle("LevelUpPage.mjs"),
 	]);
 });
 
@@ -104,11 +107,15 @@ describe("EFA Artificer base feature matrix contract", () => {
 		["Spellcasting|Artificer|EFA|1|EFA", 1],
 		["Tinker's Magic|Artificer|EFA|1|EFA", 1],
 		["Replicate Magic Item|Artificer|EFA|2|EFA", 2],
+		["Ability Score Improvement|Artificer|EFA|4|EFA", 4],
 		["Magic Item Tinker|Artificer|EFA|6|EFA", 6],
 		["Flash of Genius|Artificer|EFA|7|EFA", 7],
+		["Ability Score Improvement|Artificer|EFA|8|EFA", 8],
 		["Magic Item Adept|Artificer|EFA|10|EFA", 10],
 		["Spell-Storing Item|Artificer|EFA|11|EFA", 11],
+		["Ability Score Improvement|Artificer|EFA|12|EFA", 12],
 		["Advanced Artifice|Artificer|EFA|14|EFA", 14],
+		["Ability Score Improvement|Artificer|EFA|16|EFA", 16],
 		["Magic Item Master|Artificer|EFA|18|EFA", 18],
 		["Epic Boon|Artificer|EFA|19|EFA", 19],
 		["Soul of Artifice|Artificer|EFA|20|EFA", 20],
@@ -124,6 +131,43 @@ describe("EFA Artificer base feature matrix contract", () => {
 			return parts.length === 5 && parts[2] === "EFA" && parts[4] === "EFA";
 		})).toBe(true);
 		expect(matrix.some(row => /subclass/i.test(String(row.featureUid)))).toBe(false);
+	});
+
+	it("covers every generic EFA Ability Score Improvement choice with a persisted decision probe", () => {
+		const matrix = matrixApi.buildEfaArtificerBaseChecks();
+		const rows = matrix.filter(row => String(row.featureUid).startsWith("Ability Score Improvement|"));
+		expect(rows.map(row => row.level)).toEqual([4, 8, 12, 16]);
+		for (const row of rows) {
+			expect(row.effects).toEqual(expect.arrayContaining([
+				expect.objectContaining({
+					kind: "stateTransaction",
+					steps: [expect.objectContaining({
+						method: "getLevelHistoryEntry",
+						args: [row.level],
+						expect: expect.arrayContaining([
+							{path: "choices.asi", truthy: true},
+						]),
+					})],
+				}),
+			]));
+		}
+	});
+
+	it("uses the exact XPHB Tinker's Tools identity in every tool-dependent transaction", () => {
+		const matrix = matrixApi.buildEfaArtificerBaseChecks();
+		const tools = matrix
+			.flatMap(row => row.effects || [])
+			.filter(effect => effect.kind === "stateTransaction")
+			.flatMap(effect => effect.steps)
+			.filter(step =>
+				step.method === "addItem"
+				&& step.args?.[0]?.name === "Tinker's Tools",
+			)
+			.map(step => step.args[0]);
+
+		expect(tools.length).toBeGreaterThanOrEqual(4);
+		expect(tools.every(item => item.source === "XPHB")).toBe(true);
+		expect(tools.every(item => item._isCustom === true)).toBe(true);
 	});
 
 	it("publishes the exact Replicate and attunement scaling tiers", () => {
@@ -270,6 +314,40 @@ describe("generic EffectCheck dispatcher causal controls", () => {
 		await expect(dispatcherApi.runEffectCheck(charSheet, effect))
 			.rejects.toThrow(/expected abilityMod\(int\) × 2 = 8/);
 	});
+
+	it("spellInList includes innate spell grants and fails when the grant is absent", async () => {
+		const charSheet = {
+			getKnownSpellNames: jest.fn(async () => []),
+			getCantripNames: jest.fn(async () => []),
+			getInnateSpellNames: jest.fn(async () => ["Produce Flame"]),
+		};
+		await expect(dispatcherApi.runEffectCheck(charSheet, {kind: "spellInList", spell: "Produce Flame"}))
+			.resolves.toBeUndefined();
+
+		charSheet.getInnateSpellNames.mockResolvedValue([]);
+		await expect(dispatcherApi.runEffectCheck(charSheet, {kind: "spellInList", spell: "Produce Flame"}))
+			.rejects.toThrow(/Produce Flame.*not in spellbook/i);
+	});
+
+	it("counts innate cantrip grants in the page-object spell-level projection", async () => {
+		const state = {
+			getSpells: () => [{name: "Acid Splash", level: 0}],
+			getInnateSpells: () => [{name: "Produce Flame", level: 0}],
+		};
+		const fakePage = {
+			evaluate: async fn => {
+				const previous = globalThis.charSheet;
+				globalThis.charSheet = {_state: state};
+				try { return await fn(); } finally { globalThis.charSheet = previous; }
+			},
+		};
+		const sheet = Object.create(pageApi.CharacterSheetPage.prototype);
+		sheet.page = fakePage;
+
+		await expect(sheet.getKnownSpellsByLevel()).resolves.toEqual({
+			0: ["Acid Splash", "Produce Flame"],
+		});
+	});
 });
 
 describe("source-qualified feature page-object boundary", () => {
@@ -295,5 +373,13 @@ describe("source-qualified feature page-object boundary", () => {
 
 		await expect(sheet.hasClassFeatureUid("Spellcasting|Artificer|EFA|1|EFA")).resolves.toBe(true);
 		await expect(sheet.hasClassFeatureUid("Spellcasting|Artificer|TCE|1|TCE")).resolves.toBe(false);
+	});
+});
+
+describe("EFA Artificer level-up page-object boundary", () => {
+	it("publishes and auto-runs the required-plan picker driver", () => {
+		expect(typeof levelUpApi.LevelUpPage.prototype.selectRequiredEfaArtificerPlans).toBe("function");
+		expect(levelUpApi.LevelUpPage.prototype.autoFillAllSelections.toString())
+			.toContain("selectRequiredEfaArtificerPlans");
 	});
 });

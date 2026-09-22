@@ -458,55 +458,72 @@ export class LevelUpPage {
 	}
 
 	/**
-	 * Complete required EFA Artificer Replicate Magic Item plan acquisitions.
-	 * Optional every-level replacements are deliberately left unchanged.
+	 * Resolve every required Replicate Magic Item plan opportunity currently
+	 * shown by the level-up wizard. Optional replacement opportunities are
+	 * deliberately left unchanged.
 	 */
-	async selectRequiredArtificerPlans (): Promise<void> {
-		const accordion = this.page.locator('[data-accordion-id="artificer-plans"]');
-		if (!await accordion.isVisible().catch(() => false)) return;
-		const badge = accordion.locator(".charsheet__levelup-accordion-badge");
-		if (!/required/i.test(await badge.textContent().catch(() => "") || "")) return;
+	async selectRequiredEfaArtificerPlans (): Promise<number> {
+		const accordion = this.page.locator(
+			".charsheet__levelup-wizard [data-accordion-id='artificer-plans']",
+		).first();
+		if (!await accordion.isVisible().catch(() => false)) return 0;
 
-		const openPicker = accordion.getByRole("button", {name: /choose or replace plans/i});
-		if (!await openPicker.isVisible().catch(() => false)) {
-			throw new Error("selectRequiredArtificerPlans: required plan accordion has no picker button");
-		}
-		await openPicker.click();
+		const readRequiredCount = async (scope: Locator): Promise<{selected: number; required: number}> => {
+			const text = await scope.textContent().catch(() => "");
+			const match = String(text || "").match(/(\d+)\s*\/\s*(\d+)\s+required(?:\s+plans?)?\s+selected/i);
+			return match
+				? {selected: Number(match[1]), required: Number(match[2])}
+				: {selected: 0, required: 0};
+		};
 
-		const picker = this.page.locator(".charsheet__artificer-plan-picker");
-		await picker.waitFor({state: "visible", timeout: 10_000});
-		for (let guard = 0; guard < 20; guard++) {
-			const countText = await picker.locator(".charsheet__artificer-plan-count").textContent() || "";
-			const match = /(\d+)\s*\/\s*(\d+)\s+required plans selected/i.exec(countText);
-			if (!match) throw new Error(`selectRequiredArtificerPlans: unreadable selection count "${countText.trim()}"`);
-			const selected = Number(match[1]);
-			const required = Number(match[2]);
-			if (selected >= required) break;
+		const initial = await readRequiredCount(accordion);
+		if (initial.required <= initial.selected) return 0;
 
-			const result = picker.locator(".charsheet__artificer-plan-result:not(:disabled)").first();
-			if (!await result.isVisible().catch(() => false)) {
-				throw new Error(`selectRequiredArtificerPlans: no eligible result for required plan ${selected + 1}/${required}`);
-			}
-			await result.click();
-			await this.page.waitForTimeout(100);
+		await accordion.getByRole("button", {name: "Choose or Replace Plans"}).click();
+		const picker = this.page.locator(".charsheet__artificer-plan-picker").last();
+		await expect(picker).toBeVisible();
 
-			if (selected + 1 < required) {
-				const nextOpportunity = picker.locator(".charsheet__artificer-plan-opportunity").nth(selected + 1);
-				if (!await nextOpportunity.isVisible().catch(() => false)) {
-					throw new Error(`selectRequiredArtificerPlans: missing opportunity ${selected + 2}/${required}`);
+		let selectedThisPass = 0;
+		for (let guard = 0; guard < initial.required + 5; guard++) {
+			const count = await readRequiredCount(picker.locator(".charsheet__artificer-plan-count"));
+			if (count.required > 0 && count.selected >= count.required) break;
+
+			const opportunities = picker.locator("button.charsheet__artificer-plan-opportunity");
+			const opportunityCount = await opportunities.count();
+			let unresolved: Locator | null = null;
+			for (let i = 0; i < opportunityCount; i++) {
+				const opportunity = opportunities.nth(i);
+				const text = await opportunity.textContent();
+				if (/Choose a plan/i.test(text || "")) {
+					unresolved = opportunity;
+					break;
 				}
-				await nextOpportunity.click();
-				await this.page.waitForTimeout(100);
 			}
+			if (!unresolved) {
+				throw new Error(
+					`selectRequiredEfaArtificerPlans: ${count.selected}/${count.required} required plans selected, but no unresolved required opportunity is visible.`,
+				);
+			}
+
+			await unresolved.click();
+			const candidate = picker.locator("button.charsheet__artificer-plan-result:not([disabled])").first();
+			await expect(candidate).toBeVisible();
+			await candidate.click();
+			selectedThisPass++;
+			await this.page.waitForTimeout(200);
 		}
 
-		const finalCount = await picker.locator(".charsheet__artificer-plan-count").textContent() || "";
-		const finalMatch = /(\d+)\s*\/\s*(\d+)\s+required plans selected/i.exec(finalCount);
-		if (!finalMatch || Number(finalMatch[1]) < Number(finalMatch[2])) {
-			throw new Error(`selectRequiredArtificerPlans: required choices remain (${finalCount.trim()})`);
+		const completed = await readRequiredCount(picker.locator(".charsheet__artificer-plan-count"));
+		if (completed.required <= 0 || completed.selected < completed.required) {
+			throw new Error(
+				`selectRequiredEfaArtificerPlans: selected ${completed.selected}/${completed.required} required plans.`,
+			);
 		}
-		await this.page.getByRole("button", {name: /review & commit plans/i}).click();
-		await picker.waitFor({state: "hidden", timeout: 10_000});
+
+		await this.page.getByRole("button", {name: "Review & Commit Plans"}).click();
+		await expect(picker).not.toBeVisible();
+		await expect(accordion).not.toContainText(/⚠️\s*Required/i);
+		return selectedThisPass;
 	}
 
 	/**
@@ -540,7 +557,10 @@ export class LevelUpPage {
 		// cannot satisfy its required opportunities.
 		await fillRequiredArtificerPlans(this.page);
 
-		await this.selectRequiredArtificerPlans();
+		// EFA Artificer plan opportunities live in their own modal rather than
+		// checkbox/radio counters, so they must be resolved before the generic
+		// selection passes below can finish the level-up.
+		await this.selectRequiredEfaArtificerPlans();
 
 		// A subclass whose data defines a persisted named branch (Divine
 		// Soul Affinity, and anything else `hasNamedSubclassChoice`

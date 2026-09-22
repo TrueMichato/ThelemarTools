@@ -5,11 +5,15 @@ export const EFA_ARTIFICER_BASE_FEATURE_UIDS = Object.freeze({
 	spellcasting: "Spellcasting|Artificer|EFA|1|EFA",
 	tinkersMagic: "Tinker's Magic|Artificer|EFA|1|EFA",
 	replicateMagicItem: "Replicate Magic Item|Artificer|EFA|2|EFA",
+	abilityScoreImprovement4: "Ability Score Improvement|Artificer|EFA|4|EFA",
 	magicItemTinker: "Magic Item Tinker|Artificer|EFA|6|EFA",
 	flashOfGenius: "Flash of Genius|Artificer|EFA|7|EFA",
+	abilityScoreImprovement8: "Ability Score Improvement|Artificer|EFA|8|EFA",
 	magicItemAdept: "Magic Item Adept|Artificer|EFA|10|EFA",
 	spellStoringItem: "Spell-Storing Item|Artificer|EFA|11|EFA",
+	abilityScoreImprovement12: "Ability Score Improvement|Artificer|EFA|12|EFA",
 	advancedArtifice: "Advanced Artifice|Artificer|EFA|14|EFA",
+	abilityScoreImprovement16: "Ability Score Improvement|Artificer|EFA|16|EFA",
 	magicItemMaster: "Magic Item Master|Artificer|EFA|18|EFA",
 	epicBoon: "Epic Boon|Artificer|EFA|19|EFA",
 	soulOfArtifice: "Soul of Artifice|Artificer|EFA|20|EFA",
@@ -32,10 +36,19 @@ const addTinkersToolsStep = (id: string): StateTransactionStep => ({
 	args: [{
 		id,
 		name: "Tinker's Tools",
-		source: "TST",
+		source: "XPHB",
 		type: "AT",
+		_isCustom: true,
 	}, 1, true, false],
 });
+
+function abilityScoreImprovementEffect (level: number): EffectCheck {
+	return transaction([{
+		method: "getLevelHistoryEntry",
+		args: [level],
+		expect: [{path: "choices.asi", truthy: true}],
+	}]);
+}
 
 function spellcastingEffects ({
 	slotLevel,
@@ -504,6 +517,13 @@ export function buildEfaArtificerBaseChecks (): FeatureCheck[] {
 			],
 		},
 		{
+			level: 4,
+			name: /^Ability Score Improvement$/i,
+			featureUid: EFA_ARTIFICER_BASE_FEATURE_UIDS.abilityScoreImprovement4,
+			kind: "passive",
+			effects: [abilityScoreImprovementEffect(4)],
+		},
+		{
 			level: 5,
 			untilLevel: 5,
 			name: /^Spellcasting$/i,
@@ -544,6 +564,13 @@ export function buildEfaArtificerBaseChecks (): FeatureCheck[] {
 				{kind: "featureUsesEqualAbilityMod", feature: "Flash of Genius", ability: "int", minimum: 1, recharge: "long"},
 				flashOfGeniusEffect(),
 			],
+		},
+		{
+			level: 8,
+			name: /^Ability Score Improvement$/i,
+			featureUid: EFA_ARTIFICER_BASE_FEATURE_UIDS.abilityScoreImprovement8,
+			kind: "passive",
+			effects: [abilityScoreImprovementEffect(8)],
 		},
 		{
 			level: 9,
@@ -603,6 +630,13 @@ export function buildEfaArtificerBaseChecks (): FeatureCheck[] {
 			],
 		},
 		{
+			level: 12,
+			name: /^Ability Score Improvement$/i,
+			featureUid: EFA_ARTIFICER_BASE_FEATURE_UIDS.abilityScoreImprovement12,
+			kind: "passive",
+			effects: [abilityScoreImprovementEffect(12)],
+		},
+		{
 			level: 13,
 			untilLevel: 13,
 			name: /^Spellcasting$/i,
@@ -638,6 +672,13 @@ export function buildEfaArtificerBaseChecks (): FeatureCheck[] {
 				{kind: "attunementCap", exact: 5},
 				refreshedGeniusEffect(),
 			],
+		},
+		{
+			level: 16,
+			name: /^Ability Score Improvement$/i,
+			featureUid: EFA_ARTIFICER_BASE_FEATURE_UIDS.abilityScoreImprovement16,
+			kind: "passive",
+			effects: [abilityScoreImprovementEffect(16)],
 		},
 		{
 			level: 17,

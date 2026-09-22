@@ -2499,6 +2499,16 @@ export class CharacterSheetPage {
 		});
 	}
 
+	async getInnateSpellNames (): Promise<string[]> {
+		return this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			if (typeof state?.getInnateSpells !== "function") return [] as string[];
+			try {
+				return (state.getInnateSpells() || []).map((spell: any) => spell?.name).filter(Boolean);
+			} catch (_) { return [] as string[]; }
+		});
+	}
+
 	/**
 	 * Browser-facing Gambler probes. The spec intentionally talks to this
 	 * page-object API rather than reaching into CharacterSheetState itself;
@@ -4627,19 +4637,11 @@ export class CharacterSheetPage {
 	}
 
 	/**
-	 * Group all known/prepared spells by spell level (0 = cantrip).
-	 * Returns a map {0: [cantrips], 1: [...], ...}. Useful for "subclass
-	 * granted these L3 spells" assertions.
-	 */
-	/**
 	 * Cantrip names known to the character.
 	 *
 	 * The sheet keeps cantrips in a list of their own
-	 * (`_data.spellcasting.cantripsKnown`), so `getKnownSpellNames()` — which
-	 * reads `getKnownSpells()` — never sees them. Any subclass that grants a
-	 * cantrip through `additionalSpells` (e.g. Circle of the Sea's Ray of
-	 * Frost) is therefore invisible to a spell-list probe unless the two lists
-	 * are unioned.
+	 * (`_data.spellcasting.cantripsKnown`). Keep this explicit accessor for
+	 * probes which need to distinguish cantrips from leveled spells.
 	 */
 	async getCantripNames (): Promise<string[]> {
 		return this.page.evaluate(() => {
@@ -4651,17 +4653,24 @@ export class CharacterSheetPage {
 		});
 	}
 
+	/**
+	 * Group every spell surface by spell level (0 = cantrip), including
+	 * ordinary, class-granted, and innate entries.
+	 */
 	async getKnownSpellsByLevel (): Promise<Record<number, string[]>> {
 		return this.page.evaluate(() => {
 			const cs: any = (globalThis as any).charSheet;
 			const state = cs?._state;
-			// See `getKnownSpellNames` — `getKnownSpells()` excludes cantrips, which made
-			// the `cantripCount` probe structurally incapable of ever returning non-zero.
+			// Innate grants are a third storage bucket; include them so class/race features
+			// which grant a cantrip are measured as part of the character's spell surface.
 			const read = state?.getSpells ? () => state.getSpells() : state?.getKnownSpells ? () => state.getKnownSpells() : null;
 			if (!read) return {};
 			const out: Record<number, string[]> = {};
 			try {
-				const spells = read() || [];
+				const spells = [
+					...(read() || []),
+					...(typeof state?.getInnateSpells === "function" ? state.getInnateSpells() || [] : []),
+				];
 				for (const sp of spells) {
 					const lvl = sp.level ?? 0;
 					if (!out[lvl]) out[lvl] = [];
