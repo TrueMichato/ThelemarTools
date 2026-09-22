@@ -1,7 +1,7 @@
 import {Page} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 import {BuilderWizardPage} from "../pages/BuilderWizardPage";
-import {LevelUpPage} from "../pages/LevelUpPage";
+import {FeatureCompanionSetupOptions, LevelUpPage} from "../pages/LevelUpPage";
 
 /**
  * Character build presets for use across E2E tests.
@@ -167,6 +167,24 @@ export const PRESET_FULL_XPHB_DEVOTION_PALADIN: CharacterPreset = {
 	subclassName: "Oath of Devotion",
 	subclassSource: "PHB'24",
 	signatureSpells: ["Bless", "Divine Smite", "Shield of Faith"],
+};
+
+/** Exact Eberron: Forge of Artifice Battle Smith. */
+export const PRESET_FULL_EFA_BATTLE_SMITH_ARTIFICER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA", "XPHB", "PHB"],
+	skipConditionalPrompt: true,
+	background: "Sage",
+	bgSource: "PHB",
+	name: "Kelda Ironward",
+	skillCount: 2,
+	subclassName: "Battle Smith",
+	subclassSource: "EFA",
+	abilityPriority: ["int", "con", "dex", "wis", "str", "cha"],
+	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
 };
 
 /** Bard — spellcaster with known spells */
@@ -1459,7 +1477,15 @@ export async function pHandleLevelUpClassPicker (page: Page, targetClassName?: s
 export async function levelUpTo (
 	page: Page,
 	targetLevel: number,
-	opts?: {subclassName?: string; subclassSource?: string; namedSubclassChoice?: {title: string; name: string}; signatureSpells?: string[]; targetClassName?: string; preferredFeatProgressionPattern?: RegExp},
+	opts?: {
+		subclassName?: string;
+		subclassSource?: string;
+		namedSubclassChoice?: {title: string; name: string};
+		signatureSpells?: string[];
+		targetClassName?: string;
+		preferredFeatProgressionPattern?: RegExp;
+		featureCompanionSetup?: FeatureCompanionSetupOptions;
+	},
 ): Promise<void> {
 	const charSheet = new CharacterSheetPage(page);
 	const levelUp = new LevelUpPage(page);
@@ -1488,6 +1514,7 @@ export async function levelUpTo (
 		// A feature-choice prompt left over from the previous level blocks this
 		// one's wizard from closing — clear it before opening the next.
 		await levelUp.resolvePendingFeatureChoices();
+		await levelUp.resolvePendingFeatureCompanionSetup(opts?.featureCompanionSetup);
 
 		// When `opts.targetClassName` is provided, bypass the Level Up
 		// button entirely and call the production API directly. This
@@ -1577,6 +1604,7 @@ export async function levelUpTo (
 		// Finish this level
 		await levelUp.finish();
 		await levelUp.resolvePendingFeatureChoices();
+		await levelUp.resolvePendingFeatureCompanionSetup(opts?.featureCompanionSetup);
 		await levelUp.expectModalClosed();
 		await page.waitForTimeout(100);
 

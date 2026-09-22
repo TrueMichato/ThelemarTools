@@ -2,7 +2,12 @@ import * as fs from "fs";
 import * as path from "path";
 import {fileURLToPath} from "url";
 import {test, expect, TestInfo, Page} from "@playwright/test";
-import {CharacterSheetPage} from "../pages/CharacterSheetPage";
+import {
+	CharacterSheetPage,
+	FeatureCompanionIdentity,
+	FeatureCompanionOperationProbe,
+} from "../pages/CharacterSheetPage";
+import {FeatureCompanionSetupOptions} from "../pages/LevelUpPage";
 import {gotoWithThelemar, clearHomebrewStorage} from "./homebrewLoader";
 import {
 	createCharacterViaWizard,
@@ -19,6 +24,24 @@ import {
 	FeatureCheck,
 	InventoryItemRef,
 } from "./comprehensiveBuildHelpers";
+
+/**
+ * Reserved M8B seam. Core specs can declare the intended lifecycle surfaces
+ * now without M8A pretending death/revival/replacement/vanished UI is covered.
+ * The factory intentionally does not execute these fields yet.
+ */
+export interface FeatureCompanionLifecycleExtension {
+	deathAndRevival?: {spellSlotLevel: number};
+	replacement?: {toolUid: string};
+	vanishedState?: boolean;
+}
+
+export interface FeatureCompanionSpec {
+	identity: FeatureCompanionIdentity;
+	setup: FeatureCompanionSetupOptions;
+	l5Operation?: FeatureCompanionOperationProbe;
+	lifecycle?: FeatureCompanionLifecycleExtension;
+}
 
 /**
  * Shared describe-block factory for the comprehensive per-character mega
@@ -45,6 +68,8 @@ export interface CharacterSpec {
 	signatureToggle?: string | RegExp;
 	/** Explicit opt-out when the build has no toggle online at the L5 checkpoint. */
 	signatureToggleSkip?: {skip: true; reason: string};
+	/** Source-qualified class companion setup/operation coverage. */
+	featureCompanion?: FeatureCompanionSpec;
 	/**
 	 * Confirm-button label for a PROMPT-GATED signature toggle. Without this the
 	 * probe clicks Activate, the handler opens an `InputUiUtil` dialog and returns
@@ -70,6 +95,8 @@ export interface CharacterSpec {
 	milestones?: Partial<Record<number, MilestoneExpect>>;
 	/** Optional MEGA checkpoint levels; defaults to the shared 3/5/11/17/20 sample. */
 	megaCheckpoints?: number[];
+	/** Optional timeout for focused L3/L5 tests when required level-up pickers extend the walk. */
+	midTierTimeoutMs?: number;
 	/** Optional timeout for each MEGA test when extra checkpoints materially extend the walk. */
 	megaTimeoutMs?: number;
 	/** Run the feature matrix only in its dedicated MEGA test, avoiding duplicate long probes. */
@@ -225,12 +252,17 @@ const MIDTIER_TIMEOUT_MS = 180_000;
 const L7_TIMEOUT_MS = 600_000;
 
 export function describeCharacter (spec: CharacterSpec): void {
-	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, signatureToggleSkip, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
+	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, signatureToggleSkip, featureCompanion, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
 	const subclassOpts = preset.subclassName
 		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource, namedSubclassChoice: preset.namedSubclassChoice, preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
 		: preset.preferredFeatProgressionPattern
 			? {preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
 			: undefined;
+	const progressionOpts = {
+		...subclassOpts,
+		signatureSpells: preset.signatureSpells,
+		featureCompanionSetup: featureCompanion?.setup,
+	};
 
 	test.describe(`${displayName} — comprehensive build`, () => {
 		test.beforeEach(async ({page}) => {
@@ -268,28 +300,38 @@ export function describeCharacter (spec: CharacterSpec): void {
 			await charSheet.expectLevel(1);
 			const m1 = milestones[1];
 			if (m1) await assertMilestone(charSheet, m1);
+			if (featureCompanion) await charSheet.expectFeatureCompanionAbsent(featureCompanion.identity.ownerUid);
 		});
 
 		// ── L3 subclass arrival ─────────────────────────────────────────
 		const l3Test = skipL3 ? test.skip : test;
 		l3Test(`L3: subclass arrives and registers feature`, async ({page}) => {
-			test.setTimeout(MIDTIER_TIMEOUT_MS);
+			test.setTimeout(spec.midTierTimeoutMs || MIDTIER_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
-			await levelUpTo(page, 3, {...subclassOpts, signatureSpells: preset.signatureSpells});
+			await levelUpTo(page, 3, progressionOpts);
 			await charSheet.expectLevel(3);
 			const m3 = milestones[3];
 			if (m3) await assertMilestone(charSheet, m3);
+			if (featureCompanion) {
+				await charSheet.expectFeatureCompanionOperationSurface(featureCompanion.identity);
+			}
 		});
 
 		// ── L5 mid-game milestone ──────────────────────────────────────
 		const l5Test = skipL5 ? test.skip : test;
 		l5Test(`L5: extra attack / 3rd-level slots / prof +3`, async ({page}) => {
-			test.setTimeout(MIDTIER_TIMEOUT_MS);
+			test.setTimeout(spec.midTierTimeoutMs || MIDTIER_TIMEOUT_MS);
 			const {charSheet} = await createCharacterViaWizard(page, preset);
-			await levelUpTo(page, 5, {...subclassOpts, signatureSpells: preset.signatureSpells});
+			await levelUpTo(page, 5, progressionOpts);
 			await charSheet.expectLevel(5);
 			const m5 = milestones[5];
 			if (m5) await assertMilestone(charSheet, m5);
+			if (featureCompanion) {
+				await charSheet.expectFeatureCompanionOperationSurface(featureCompanion.identity, {expectRendReplacement: true});
+				if (featureCompanion.l5Operation) {
+					await charSheet.commitFeatureCompanionOperation(featureCompanion.identity, featureCompanion.l5Operation);
+				}
+			}
 		});
 
 		// ── Mid-tier loadout & toggle delta ────────────────────────────
@@ -303,7 +345,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 			test(`L5 loadout: installs gear + signature toggle produces its mechanical effect`, async ({page}) => {
 				test.setTimeout(L7_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);
-				await levelUpTo(page, 5, {...subclassOpts, signatureSpells: preset.signatureSpells});
+				await levelUpTo(page, 5, progressionOpts);
 				await charSheet.expectLevel(5);
 
 				if (midTierLoadout?.length) {
@@ -412,7 +454,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 			let cursor = 1;
 			for (const cp of checkpoints) {
 				if (cp <= cursor) continue;
-				await levelUpTo(page, cp, {...subclassOpts, signatureSpells: preset.signatureSpells});
+				await levelUpTo(page, cp, progressionOpts);
 				cursor = cp;
 				await charSheet.expectLevel(cp);
 				const m = milestones[cp];
@@ -448,7 +490,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 				let cursor = 1;
 				for (const cp of checkpoints) {
 					if (cp <= cursor) continue;
-					await levelUpTo(page, cp, {...subclassOpts, signatureSpells: preset.signatureSpells});
+					await levelUpTo(page, cp, progressionOpts);
 					cursor = cp;
 					await charSheet.expectLevel(cp);
 					await charSheet.triggerLongRest();
@@ -469,7 +511,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 				test.setTimeout(L7_TIMEOUT_MS);
 				const {charSheet} = await createCharacterViaWizard(page, preset);
 				if (atLevel > 1) {
-					await levelUpTo(page, atLevel, {...subclassOpts, signatureSpells: preset.signatureSpells});
+					await levelUpTo(page, atLevel, progressionOpts);
 				}
 				await charSheet.expectLevel(atLevel);
 				for (const [label, configured] of Object.entries({

@@ -1,6 +1,18 @@
 import {Locator, Page, expect} from "@playwright/test";
 import {waitForToolsLoaded, uiGate} from "../utils/waitHelpers";
 
+export interface FeatureCompanionIdentity {
+	ownerUid: string;
+	name: string;
+	source: string;
+}
+
+export interface FeatureCompanionOperationProbe {
+	operation: "forceEmpoweredRend" | "repair" | "deflectAttack";
+	commandMethod?: "bonusAction" | "replaceOneAttack";
+	expectedOperationUid: string;
+}
+
 /**
  * Page Object Model for the Character Sheet page
  * Provides common navigation and interaction methods
@@ -126,6 +138,138 @@ export class CharacterSheetPage {
 		await this.page.evaluate(({settingKey, settingValue}) => {
 			(globalThis as any).charSheet?._state?.setSetting?.(settingKey, settingValue);
 		}, {settingKey: key, settingValue: value});
+	}
+
+	async expectFeatureCompanionAbsent (ownerUid: string): Promise<void> {
+		const result = await this.page.evaluate((uid) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			return {
+				setup: state?.getFeatureCompanionSetupRecord?.(uid) || null,
+				count: state?.getFeatureOwnedCompanions?.(uid)?.length || 0,
+			};
+		}, ownerUid);
+		expect(result.setup, `setup for ${ownerUid} should not exist before its exact feature grant`).toBeNull();
+		expect(result.count, `companions owned by ${ownerUid} before its grant`).toBe(0);
+	}
+
+	async expectFeatureCompanionReady (identity: FeatureCompanionIdentity): Promise<{id: string}> {
+		const result = await this.page.evaluate((expected) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const setup = state?.getFeatureCompanionSetupRecord?.(expected.ownerUid) || null;
+			const companions = state?.getFeatureOwnedCompanions?.(expected.ownerUid) || [];
+			const companion = companions[0] || null;
+			return {
+				setup,
+				count: companions.length,
+				companion: companion ? {
+					id: companion.id,
+					name: companion.name,
+					source: companion.source,
+					ownerUid: companion.featureGrant?.uid,
+					appearance: companion.setup?.appearance,
+					locomotion: companion.setup?.locomotion,
+				} : null,
+			};
+		}, identity);
+		expect(result.setup?.status, `setup status for ${identity.ownerUid}`).toBe("complete");
+		expect(result.count, `exactly one companion should be owned by ${identity.ownerUid}`).toBe(1);
+		expect(result.companion).toMatchObject({
+			name: identity.name,
+			source: identity.source,
+			ownerUid: identity.ownerUid,
+		});
+		expect(result.companion?.id, "feature companion should have a stable persisted id").toBeTruthy();
+		return {id: result.companion!.id};
+	}
+
+	async expectFeatureCompanionOperationSurface (
+		identity: FeatureCompanionIdentity,
+		{expectRendReplacement = false}: {expectRendReplacement?: boolean} = {},
+	): Promise<{id: string}> {
+		const companion = await this.expectFeatureCompanionReady(identity);
+		if (expectRendReplacement) {
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const combat = cs?._combat;
+				const attack = (cs?._state?.getAttacks?.() || []).find((it: any) =>
+					!it?.isSpell && !it?.isSpellAttack && (it?.actionType == null || it.actionType === "action"));
+				if (!attack) throw new Error("no weapon/unarmed attack is available to start the Attack-action replacement probe");
+				if (typeof cs?.startCombat !== "function" || typeof combat?._recordAttackForTurn !== "function") {
+					throw new Error("Attack-action replacement tracker is unavailable");
+				}
+				cs.startCombat();
+				combat._recordAttackForTurn(attack);
+			});
+		}
+		const availability = await this.page.evaluate(({companionId}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const get = (operation: string) => cs?.getCompanionOperationAvailability?.(companionId, operation) || null;
+			return {
+				rend: get("forceEmpoweredRend"),
+				repair: get("repair"),
+				deflect: get("deflectAttack"),
+			};
+		}, {companionId: companion.id});
+		expect(availability.rend?.available, availability.rend?.message || "Rend should be available").toBe(true);
+		expect(availability.repair?.available, availability.repair?.message || "Repair should be available").toBe(true);
+		expect(availability.deflect?.available, availability.deflect?.message || "Deflect should be available").toBe(true);
+		const rendMethods = (availability.rend?.availableCommandMethods || []).map((it: any) => it.id);
+		expect(rendMethods, "Rend should support the bonus-action command").toContain("bonusAction");
+		if (expectRendReplacement) {
+			expect(rendMethods, "L5 Extra Attack should unlock Rend as an attack replacement").toContain("replaceOneAttack");
+		}
+
+		await this.tabCompanions.click();
+		const card = this.page.locator(`.charsheet__companion-card[data-companion-id="${companion.id}"]`);
+		await expect(card).toBeVisible();
+		await expect(card.locator('[data-operation="forceEmpoweredRend"]')).toBeEnabled();
+		await expect(card.locator('[data-operation="repair"]')).toBeEnabled();
+		await expect(card.locator('[data-operation="deflectAttack"]')).toBeEnabled();
+		return companion;
+	}
+
+	/**
+	 * Commit one operation through the shared production controller route.
+	 * The prompt adapters are deterministic, but operation validation,
+	 * action-economy spending, receipts, persistence, and rerendering remain
+	 * the same code used by desktop Companion cards and Play Mode.
+	 */
+	async commitFeatureCompanionOperation (
+		identity: FeatureCompanionIdentity,
+		probe: FeatureCompanionOperationProbe,
+	): Promise<Record<string, unknown>> {
+		const {id} = await this.expectFeatureCompanionReady(identity);
+		const result = await this.page.evaluate(async ({companionId, operation, commandMethod}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const input: any = (globalThis as any).InputUiUtil;
+			if (!cs?.pUseCompanionOperation) throw new Error("charSheet.pUseCompanionOperation is unavailable");
+			cs?.resetTurnEconomy?.();
+			const previous = {
+				getUserString: input.pGetUserString,
+				getUserBoolean: input.pGetUserBoolean,
+				getUserEnum: input.pGetUserEnum,
+				rollDice: cs.rollDice,
+			};
+			input.pGetUserString = async () => "Training Dummy";
+			input.pGetUserBoolean = async () => true;
+			input.pGetUserEnum = async ({values}: {values?: string[]}) => values?.includes("hit") ? "hit" : values?.[0];
+			cs.rollDice = (count: number, faces: number) => count * Math.max(1, Math.ceil(faces / 2));
+			try {
+				return await cs.pUseCompanionOperation({companionId, operation, commandMethod});
+			} finally {
+				input.pGetUserString = previous.getUserString;
+				input.pGetUserBoolean = previous.getUserBoolean;
+				input.pGetUserEnum = previous.getUserEnum;
+				cs.rollDice = previous.rollDice;
+			}
+		}, {companionId: id, operation: probe.operation, commandMethod: probe.commandMethod || null});
+		expect(result?.ok, JSON.stringify(result)).toBe(true);
+		expect(result?.committed, JSON.stringify(result)).toBe(true);
+		expect(result?.ownerUid).toBe(identity.ownerUid);
+		expect(result?.sourceUid).toBe(`${identity.name}|${identity.source}`);
+		expect(result?.operationUid).toBe(probe.expectedOperationUid);
+		if (probe.commandMethod) expect(result?.commandMethod).toBe(probe.commandMethod);
+		return result as Record<string, unknown>;
 	}
 
 	async goto (): Promise<void> {

@@ -760,6 +760,15 @@ interface _EffectCommon {
 	skipReason?: string;
 }
 
+interface ProjectionExpectation {
+	path: string;
+	exact?: number | string | boolean | null;
+	min?: number;
+	contains?: string;
+	equalsPath?: string;
+	offset?: number;
+}
+
 /**
  * One declarative assertion about a feature's mechanical effect.
  * Three families:
@@ -886,8 +895,25 @@ export type EffectCheck = _EffectCommon & (
 	// and only verify that ≥1 spell of that level surfaces — useful
 	// when the spell list mechanism is the thing under test, not any
 	// specific spell name.
-	| {kind: "spellInList"; spell: string; spellMatchMode?: "first-party" | "tgtt-flavor" | "any"; level?: number}
+	| {kind: "spellInList"; spell: string; source?: string; spellMatchMode?: "first-party" | "tgtt-flavor" | "any"; level?: number}
 	| {kind: "cantripCount"; min: number}
+	/**
+	 * Assert one exact stored class/subclass feature identity and reject
+	 * source-qualified same-name alternatives. The UID shape is:
+	 * Name|Class|ClassSource|Subclass|SubclassSource|Level|FeatureSource.
+	 */
+	| {kind: "sourceQualifiedFeature"; uid: string; excludedUids?: string[]}
+	/**
+	 * Project a feature-owned companion through the source-qualified State
+	 * APIs and assert paths on both its persisted runtime row and canonical
+	 * resolved rules. Generic enough for any registry-backed class companion.
+	 */
+	| {
+		kind: "featureCompanionProjection";
+		ownerUid: string;
+		excludedOwnerUids?: string[];
+		checks: ProjectionExpectation[];
+	}
 
 	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
 	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey; floor?: number}
@@ -1542,6 +1568,116 @@ async function _runPassiveOrRollEffect (
 			}
 			return;
 		}
+		case "sourceQualifiedFeature": {
+			const result = await charSheet.page.evaluate(({uid, excludedUids}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const toUid = (feature: any) => [
+					feature?.name,
+					feature?.className,
+					feature?.classSource,
+					feature?.subclassShortName,
+					feature?.subclassSource,
+					feature?.level,
+					feature?.source,
+				].map(value => String(value ?? "")).join("|");
+				const uids = (state?.getFeatures?.() || []).map(toUid);
+				const lower = new Set(uids.map((it: string) => it.toLowerCase()));
+				return {
+					present: lower.has(uid.toLowerCase()),
+					excludedPresent: (excludedUids || []).filter((it: string) => lower.has(it.toLowerCase())),
+					uids,
+				};
+			}, {uid: e.uid, excludedUids: e.excludedUids || []});
+			if (!result.present) {
+				throw new Error(`source-qualified feature "${e.uid}" missing. seen=[${result.uids.join(", ")}]`);
+			}
+			if (result.excludedPresent.length) {
+				throw new Error(`source leakage: excluded feature UID(s) present [${result.excludedPresent.join(", ")}]`);
+			}
+			return;
+		}
+		case "featureCompanionProjection": {
+			const projection = await charSheet.page.evaluate(({ownerUid, excludedOwnerUids}) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				if (!state) return {__error: "no state"};
+				const companions = state.getFeatureOwnedCompanions?.(ownerUid) || [];
+				const companion = companions[0] || null;
+				const context = state.getFeatureCompanionSummonerContext?.(ownerUid) || null;
+				const rules = context ? state.resolveFeatureCompanionRules?.(ownerUid, context) || null : null;
+				const runtimeResolved = companion?.scaling?.resolved || null;
+				return {
+					count: companions.length,
+					setup: state.getFeatureCompanionSetupRecord?.(ownerUid) || null,
+					companion: companion ? {
+						id: companion.id,
+						name: companion.name,
+						source: companion.source,
+						ownerUid: companion.featureGrant?.uid || null,
+						hpMax: companion.hp?.max ?? companion.maxHp ?? null,
+						ac: companion.ac ?? null,
+						repairUsesMax: companion.uses?.repair?.max ?? null,
+						hitDiceMax: companion.hitDice?.max ?? null,
+						resolved: runtimeResolved,
+					} : null,
+					context,
+					rules,
+					matchesResolved: companion && rules ? {
+						hp: (companion.hp?.max ?? companion.maxHp ?? null) === rules.statistics?.maxHp,
+						ac: companion.ac === rules.statistics?.ac,
+						repairUses: companion.uses?.repair?.max === rules.actions?.repair?.uses?.max,
+						hitDice: companion.hitDice?.max === rules.statistics?.hitDice?.count,
+						identity: companion.name === rules.identity?.name
+							&& companion.source === rules.identity?.source
+							&& companion.featureGrant?.uid === ownerUid,
+					} : null,
+					excludedCounts: Object.fromEntries((excludedOwnerUids || []).map((uid: string) => [
+						uid,
+						state.getFeatureOwnedCompanions?.(uid)?.length || 0,
+					])),
+				};
+			}, {ownerUid: e.ownerUid, excludedOwnerUids: e.excludedOwnerUids || []});
+			if ((projection as any).__error) throw new Error(`featureCompanionProjection(${e.ownerUid}): ${(projection as any).__error}`);
+
+			const readPath = (root: any, path: string): any =>
+				path.split(".").reduce((cursor, segment) => cursor == null ? null : cursor[segment], root);
+			for (const check of e.checks) {
+				const actual = readPath(projection, check.path);
+				const label = `featureCompanionProjection(${e.ownerUid}).${check.path}`;
+				if (check.exact !== undefined && actual !== check.exact) {
+					throw new Error(`${label}=${JSON.stringify(actual)}, expected ${JSON.stringify(check.exact)}`);
+				}
+				if (check.min !== undefined && (typeof actual !== "number" || actual < check.min)) {
+					throw new Error(`${label}=${JSON.stringify(actual)}, expected >= ${check.min}`);
+				}
+				if (check.contains !== undefined) {
+					const rendered = Array.isArray(actual) ? actual.map(it => JSON.stringify(it)) : [String(actual)];
+					if (!rendered.some(it => it.toLowerCase().includes(check.contains!.toLowerCase()))) {
+						throw new Error(`${label}=${JSON.stringify(actual)}, expected to contain "${check.contains}"`);
+					}
+				}
+				if (check.equalsPath) {
+					const expected = readPath(projection, check.equalsPath);
+					const want = typeof expected === "number" ? expected + (check.offset || 0) : expected;
+					if (actual !== want) {
+						throw new Error(`${label}=${JSON.stringify(actual)}, expected ${check.equalsPath}${check.offset ? ` + ${check.offset}` : ""} = ${JSON.stringify(want)}`);
+					}
+				}
+				if (
+					check.exact === undefined
+					&& check.min === undefined
+					&& check.contains === undefined
+					&& !check.equalsPath
+					&& actual == null
+				) {
+					throw new Error(`${label} is absent`);
+				}
+			}
+			for (const uid of e.excludedOwnerUids || []) {
+				const count = (projection as any).excludedCounts?.[uid] ?? 0;
+				if (count !== 0) throw new Error(`source leakage: ${count} companion(s) owned by excluded UID "${uid}"`);
+			}
+			return;
+		}
 		case "gamblerProbe": {
 			// The MEGA matrix rechecks the L3 row at every later level. Run the
 			// expensive real-browser lifecycle once per matrix invocation; later
@@ -1893,6 +2029,15 @@ async function _runPassiveOrRollEffect (
 			const want = e.spell.toLowerCase();
 			if (!pool.some(n => n.toLowerCase() === want)) {
 				throw new Error(`spell "${e.spell}" not in spellbook [${mode}]. seen=${pool.slice(0, 30).join(", ")}…`);
+			}
+			if (e.source) {
+				const exact = await charSheet.page.evaluate(({name, source}) => {
+					const spells = (globalThis as any).charSheet?._state?.getSpells?.() || [];
+					return spells.some((spell: any) =>
+						String(spell?.name || "").toLowerCase() === name.toLowerCase()
+						&& String(spell?.source || "").toLowerCase() === source.toLowerCase());
+				}, {name: e.spell, source: e.source});
+				if (!exact) throw new Error(`spell "${e.spell}|${e.source}" not in source-qualified spellbook`);
 			}
 			return;
 		}

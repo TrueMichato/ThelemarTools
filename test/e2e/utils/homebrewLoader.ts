@@ -107,11 +107,16 @@ export async function gotoWithThelemar (
  */
 export async function clearHomebrewStorage (page: Page): Promise<void> {
 	try {
-		await page.evaluate(async () => {
+		const completed = await page.evaluate(async () => {
 			const BU2 = (window as any).BrewUtil2;
-			if (BU2?.pSetBrew) {
-				await BU2.pSetBrew([]);
-			}
+			if (!BU2?.pSetBrew) return true;
+			let isComplete = false;
+			await Promise.race([
+				BU2.pSetBrew([]).then(() => { isComplete = true; }),
+				new Promise(resolve => setTimeout(resolve, 5_000)),
+			]);
+			return isComplete;
 		});
+		if (!completed) console.warn("[clearHomebrewStorage] BrewUtil2.pSetBrew([]) exceeded 5s; browser-context teardown will discard the isolated test storage");
 	} catch { /* page may have navigated */ }
 }

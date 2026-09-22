@@ -56,6 +56,15 @@ async function fillRequiredArtificerPlans (page: Page): Promise<void> {
 	await expect(picker).not.toBeVisible({timeout: 5000});
 }
 
+export interface FeatureCompanionSetupOptions {
+	ownerUid: string;
+	nickname?: string;
+	appearance: string;
+	locomotion: "twoLegs" | "fourLegs";
+	/** Exercise the production "Finish later" persistence path before creation. */
+	deferOnce?: boolean;
+}
+
 /**
  * Page Object Model for the Level-Up wizard modal
  * Provides methods to complete level-up choices
@@ -1294,6 +1303,90 @@ export class LevelUpPage {
 			throw new Error(`Required level-up choices remain unresolved after bounded picker drain: ${JSON.stringify(remaining)}`);
 		}
 		return resolved;
+	}
+
+	/**
+	 * Resolve a source-qualified feature-companion setup prompt raised after
+	 * level-up. This deliberately drives the production modal rather than
+	 * completing setup through state, so required appearance/locomotion/tool
+	 * choices and the optional deferred-setup path stay covered.
+	 */
+	async resolvePendingFeatureCompanionSetup (options?: FeatureCompanionSetupOptions): Promise<boolean> {
+		if (!options) return false;
+
+		const getStatus = () => this.page.evaluate((ownerUid) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const record = state?.getFeatureCompanionSetupRecord?.(ownerUid) || null;
+			const companions = state?.getFeatureOwnedCompanions?.(ownerUid) || [];
+			return {
+				status: record?.status || null,
+				choices: record?.choices || {},
+				companionCount: companions.length,
+			};
+		}, options.ownerUid);
+
+		const initial = await getStatus();
+		if (initial.status === "complete" && initial.companionCount === 1) return false;
+		if (!initial.status) return false;
+
+		const modal = this.page.locator(".charsheet__feature-companion-setup-modal").last();
+		const openModal = async () => {
+			if (await modal.isVisible().catch(() => false)) return;
+			await this.page.evaluate((ownerUid) => {
+				const cs: any = (globalThis as any).charSheet;
+				if (typeof cs?.pShowFeatureCompanionSetup !== "function") {
+					throw new Error("charSheet.pShowFeatureCompanionSetup is unavailable");
+				}
+				Promise.resolve(cs.pShowFeatureCompanionSetup(ownerUid)).catch((error: unknown) => {
+					(window as unknown as {__e2eFeatureCompanionSetupError?: string}).__e2eFeatureCompanionSetupError = String(error);
+				});
+			}, options.ownerUid);
+			await modal.waitFor({state: "visible", timeout: 10000});
+		};
+		const fillRequiredChoices = async () => {
+			const tool = modal.locator('[data-role="tool"]');
+			if (await tool.count() && await tool.isVisible()) {
+				const values = await tool.locator("option").evaluateAll(options =>
+					options.map(option => (option as HTMLOptionElement).value).filter(Boolean));
+				if (!values.length) throw new Error("feature companion setup requires an alternate tool but offered no choices");
+				await tool.selectOption(values[0]);
+			}
+			await modal.locator('[data-role="nickname"]').fill(options.nickname || "");
+			await modal.locator('[data-role="appearance"]').fill(options.appearance);
+			await modal.locator(`input[name="steel-defender-locomotion"][value="${options.locomotion}"]`).check();
+		};
+
+		await openModal();
+		await fillRequiredChoices();
+
+		if (options.deferOnce && initial.status !== "complete") {
+			await modal.locator('[data-role="defer"]').click();
+			await modal.waitFor({state: "hidden", timeout: 10000});
+			const deferred = await getStatus();
+			expect(deferred.status, "Finish later should preserve a pending setup").toBe("pending");
+			expect(deferred.companionCount, "Finish later must not create a placeholder companion").toBe(0);
+			expect(deferred.choices.appearance, "deferred appearance should persist").toBe(options.appearance);
+			expect(deferred.choices.locomotion, "deferred locomotion should persist").toBe(options.locomotion);
+			await openModal();
+			await expect(modal.locator('[data-role="appearance"]')).toHaveValue(options.appearance);
+			await expect(modal.locator(`input[name="steel-defender-locomotion"][value="${options.locomotion}"]`)).toBeChecked();
+			await fillRequiredChoices();
+		}
+
+		const create = modal.locator('[data-role="create"]');
+		await expect(create).toBeEnabled();
+		await create.click();
+		await modal.waitFor({state: "hidden", timeout: 10000});
+		await this.page.waitForFunction(
+			(ownerUid) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return state?.getFeatureCompanionSetupRecord?.(ownerUid)?.status === "complete"
+					&& state?.getFeatureOwnedCompanions?.(ownerUid)?.length === 1;
+			},
+			options.ownerUid,
+			{timeout: 10000},
+		);
+		return true;
 	}
 
 	/**
