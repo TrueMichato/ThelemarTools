@@ -340,6 +340,12 @@ level 19 receive a feat-only opportunity:
 - the editor can move both directions between ASI and feat when the opportunity
   genuinely permits both.
 
+Fallback discovery from `classFeatures` accepts canonical four-part UIDs and
+source-qualified five-part UIDs. It validates the referenced class name and
+class source against the containing class before treating the feature as an
+improvement, so a wrong-source or malformed reference cannot create an Epic
+Boon opportunity.
+
 Feat prerequisites are evaluated against the candidate for level, ability
 scores, spellcasting, race, background, armor/weapon proficiency, prior feats,
 feat categories, and named features. Campaign-specific or free-text special

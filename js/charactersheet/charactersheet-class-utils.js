@@ -805,19 +805,37 @@ class CharacterSheetClassUtils {
 		};
 		collectFeatureRefs(classData.classFeatures || []);
 
-		const featuresAtLevel = featureRefs.filter(ref => {
-			// Canonical class-feature refs store level at index 3 and may append a
-			// display/source field at index 4 (e.g. EFA Artificer refs). Reading the
-			// last field silently loses every improvement in that extended form.
-			if (typeof ref === "string") return Number(ref.split("|")[3]) === level;
-			if (typeof ref?.classFeature === "string") return Number(ref.classFeature.split("|")[3]) === level;
-			return Number(ref?.level) === level;
-		});
-		const getFeatureName = ref => {
-			if (typeof ref === "string") return ref.split("|")[0];
-			if (typeof ref?.classFeature === "string") return ref.classFeature.split("|")[0];
-			return ref?.name || "";
+		const normalize = value => String(value || "").trim().toLowerCase();
+		const getFeatureMeta = ref => {
+			const rawRef = typeof ref === "string"
+				? ref
+				: typeof ref?.classFeature === "string" ? ref.classFeature : null;
+			if (rawRef != null) {
+				const parts = rawRef.split("|");
+				// Class feature refs are four-part UIDs, with an optional fifth
+				// feature-source field used by source-qualified data such as EFA.
+				if (![4, 5].includes(parts.length)) return null;
+				const [name, className, classSourceRaw, levelRaw, featureSource] = parts;
+				const classSource = classSourceRaw || classData.source;
+				const featureLevel = Number(levelRaw);
+				if (!name || !className || !Number.isInteger(featureLevel) || featureLevel < 1) return null;
+				if (parts.length === 5 && !featureSource) return null;
+				if (normalize(className) !== normalize(classData.name)) return null;
+				if (normalize(classSource) !== normalize(classData.source)) return null;
+				return {name, level: featureLevel};
+			}
+
+			if (!ref || typeof ref !== "object") return null;
+			const className = ref.className || classData.name;
+			const classSource = ref.classSource || classData.source;
+			const featureLevel = Number(ref.level);
+			if (!ref.name || !Number.isInteger(featureLevel) || featureLevel < 1) return null;
+			if (normalize(className) !== normalize(classData.name)) return null;
+			if (normalize(classSource) !== normalize(classData.source)) return null;
+			return {name: ref.name, level: featureLevel};
 		};
+		const featureMetas = featureRefs.map(getFeatureMeta).filter(Boolean);
+		const featuresAtLevel = featureMetas.filter(feature => feature.level === level);
 
 		const epicProgressions = (classData.featProgression || []).filter(progression => {
 			if (!Array.isArray(progression?.category) || !progression.category.includes("EB")) return false;
@@ -827,7 +845,7 @@ class CharacterSheetClassUtils {
 				: Number(map?.[String(level)]) > 0;
 		});
 		const hasEpicBoon = epicProgressions.length > 0
-			|| featuresAtLevel.some(ref => /(?:^|\s)epic boon(?:\s|$)/i.test(getFeatureName(ref)));
+			|| featuresAtLevel.some(feature => /(?:^|\s)epic boon(?:\s|$)/i.test(feature.name));
 		if (hasEpicBoon) {
 			return {
 				kind: "feat",
@@ -838,7 +856,7 @@ class CharacterSheetClassUtils {
 			};
 		}
 
-		const hasAsi = featuresAtLevel.some(ref => /^ability score improvement$/i.test(getFeatureName(ref)));
+		const hasAsi = featuresAtLevel.some(feature => /^ability score improvement$/i.test(feature.name));
 		const hasCompleteFeatureData = featureRefs.length > 0;
 		if (!hasAsi && (hasCompleteFeatureData || !CharacterSheetClassUtils.levelGrantsAsi(classData, level))) return null;
 
