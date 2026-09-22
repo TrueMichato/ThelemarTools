@@ -10,6 +10,10 @@ import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCompanionRules = globalThis.CharacterSheetCompanionRules;
+const PLAYMODE_CSS = readFileSync(
+	new URL("../../../css/charactersheet-playmode.css", import.meta.url),
+	"utf8",
+);
 const ARTIFICER_DATA = JSON.parse(readFileSync(
 	new URL("../../../data/class/class-artificer.json", import.meta.url),
 	"utf8",
@@ -167,6 +171,7 @@ function makeNode (tag = "div", className = "") {
 		style: {},
 		textContent: "",
 		disabled: false,
+		isConnected: true,
 		appendChild (child) { this.children.push(child); return child; },
 		setAttribute (name, value) { this.attributes[name] = String(value); },
 		getAttribute (name) { return this.attributes[name] ?? null; },
@@ -328,6 +333,126 @@ describe("Reanimator R5b shared live-operation surface", () => {
 			companionId: "companion-1",
 			operation: "damage",
 			focusKey: "companion-1::damage::",
+		});
+	});
+
+	test("uses the AA danger semantic and permits only one in-flight Play operation", async () => {
+		const state = makeState();
+		const page = makePage(state);
+		let resolveOperation;
+		page.pUseFeatureCompanionOperation = jest.fn().mockImplementation(() => new Promise(resolve => {
+			resolveOperation = resolve;
+		}));
+		const pm = new CharacterSheetPlayMode(page);
+		pm._ce = (tag, className, parent) => {
+			const node = makeNode(tag, className);
+			parent?.appendChild(node);
+			return node;
+		};
+		const card = makeNode();
+		pm._renderRhwReanimatorOperations(card, {
+			kind: "rhwReanimator",
+			companionId: "companion-1",
+			ownerUid: OWNER_UID,
+			heading: "Operate Reanimated Companion",
+			summary: "Resolve destructive operations canonically.",
+			statusText: "All operations ready.",
+			costText: "Owner costs ready.",
+			rangeText: "Confirm range.",
+			controls: [
+				{
+					operation: "lifeTransfer",
+					label: "Life Transfer",
+					available: true,
+					reason: null,
+					description: "Transfer life.",
+					tone: "danger",
+				},
+				{
+					operation: "dismiss",
+					label: "Dismiss",
+					available: true,
+					reason: null,
+					description: "Dismiss the companion.",
+					tone: "danger",
+				},
+			],
+		});
+		const region = card.children[1];
+		const controls = region.children
+			.find(child => child.className?.includes("pm-companion-operations__controls"));
+		const [lifeTransfer, dismiss] = controls.children;
+		const status = region.children
+			.find(child => child.className?.includes("pm-companion-operations__status"));
+		expect(status.getAttribute("role")).toBe("status");
+		expect(status.getAttribute("aria-live")).toBe("polite");
+		expect(status.getAttribute("aria-atomic")).toBe("true");
+
+		for (const button of [lifeTransfer, dismiss]) {
+			expect(button.className).toContain("pm-companion__ctrl-btn--damage");
+			expect(button.className).not.toContain("pm-companion__ctrl-btn--dismiss");
+		}
+		expect(PLAYMODE_CSS).toMatch(/\.pm-companion__ctrl-btn--damage\s*\{[^}]*color:\s*var\(--cs-danger-text,\s*var\(--cs-danger,/s);
+
+		const firstClick = lifeTransfer.click();
+		expect(lifeTransfer.disabled).toBe(true);
+		expect(lifeTransfer.getAttribute("aria-busy")).toBe("true");
+		expect(status.textContent).toBe("Resolving Life Transfer…");
+		await lifeTransfer.click();
+		expect(page.pUseFeatureCompanionOperation).toHaveBeenCalledTimes(1);
+
+		resolveOperation({ok: false, committed: false, reason: "cancelled"});
+		await firstClick;
+		expect(lifeTransfer.disabled).toBe(false);
+		expect(lifeTransfer.getAttribute("aria-busy")).toBeNull();
+	});
+
+	test("resolves and persists a zero-target Death Burst through the shared Page collector", async () => {
+		const state = makeState({level: 3});
+		const companion = await createCompanion(state);
+		expect(state.killFeatureOwnedCompanion(companion.id, {
+			featureUid: OWNER_UID,
+			cause: "manual-test",
+		})).toMatchObject({ok: true, committed: true});
+		const page = makePage(state);
+		const numberPrompt = jest.spyOn(globalThis.InputUiUtil, "pGetUserNumber").mockResolvedValue(0);
+		page.rollDice = jest.fn()
+			.mockReturnValueOnce(2)
+			.mockReturnValueOnce(3);
+
+		const result = await page.pUseFeatureCompanionOperation({
+			featureUid: OWNER_UID,
+			companionId: companion.id,
+			operation: "deathBurst",
+		});
+		expect(numberPrompt).toHaveBeenCalledWith(expect.objectContaining({
+			title: "Resolve Death Burst — target count",
+			default: 0,
+			min: 0,
+			isInt: true,
+		}));
+		expect(result).toMatchObject({
+			ok: true,
+			committed: true,
+			result: {
+				damage: {dieRolls: [2, 3], total: 5},
+				targets: [],
+			},
+		});
+		expect(page._announceCompanionInteraction).toHaveBeenCalledWith(
+			"Death Burst resolved for 0 targets; apply damage manually.",
+			expect.objectContaining({type: "success"}),
+		);
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+
+		const loaded = new CharacterSheetState();
+		expect(loaded.loadFromJson(copy(state.toJson()))).not.toBe(false);
+		expect(loaded.getCompanion(companion.id)).toMatchObject({
+			lifecycle: {
+				deathBurstEmitted: true,
+				deathBurstResolved: true,
+				deathReceipt: {deathBurstResolution: {targets: []}},
+			},
 		});
 	});
 

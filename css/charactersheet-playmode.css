@@ -3342,7 +3342,7 @@
 }
 
 .pm-companion__ctrl-btn--damage {
-	color: var(--cs-danger, #ef4444);
+	color: var(--cs-danger-text, var(--cs-danger, #ef4444));
 	border-color: rgba(239, 68, 68, 0.3);
 }
 

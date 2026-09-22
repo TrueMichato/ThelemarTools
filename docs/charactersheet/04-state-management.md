@@ -609,10 +609,15 @@ Exact RHW feature-owned records never receive Play Mode's legacy direct HP
 input, Heal/Damage buttons, dismissal handler, or `turnUsage` controls. A
 source/setup mismatch suppresses those handlers and renders an explicit
 diagnostic instead of name-adopting the record. Valid RHW generations use a
-read-only HP display plus the shared canonical controls; dead generations
-remain reachable only while Death Burst needs resolution. Existing EFA/TCE
-Battle Smith setup, operation, lifecycle, and legacy `active` behavior remain
-unchanged. R5b does not add E2E/export work or R6 surfaces.
+read-only HP display plus the shared canonical controls. Destructive controls
+use the established danger semantic in both Manager and Play Mode, and each
+Play button disables itself with `aria-busy` while its canonical operation is
+pending so repeated activation cannot stack prompts. Dead generations remain
+reachable only while Death Burst needs resolution. The collector accepts an
+explicit zero target count for an empty emanation, still rolls and validates the
+canonical damage dice, and persists the resolved receipt with `targets: []`.
+Existing EFA/TCE Battle Smith setup, operation, lifecycle, and legacy `active`
+behavior remain unchanged. R5b does not add E2E/export work or R6 surfaces.
 
 Other feature companions still do not gain acquisition or lifecycle behavior
 unless their registry policies explicitly support it.

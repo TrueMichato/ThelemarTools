@@ -86664,7 +86664,7 @@ class CharacterSheetState {
 		if (!input || typeof input !== "object" || Array.isArray(input)) {
 			return {ok: false, reason: "invalidDeathBurstResolution", result: null};
 		}
-		if (!Array.isArray(input.targets) || !input.targets.length) {
+		if (!Array.isArray(input.targets)) {
 			return {ok: false, reason: "targetsRequired", result: null};
 		}
 

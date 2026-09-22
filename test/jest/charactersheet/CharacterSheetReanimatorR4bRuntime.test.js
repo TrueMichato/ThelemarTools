@@ -530,6 +530,53 @@ describe("RHW Reanimator R4b Death Burst and damage entry", () => {
 		expect(deathState.getCompanion(created.companionId)).toBeNull();
 	});
 
+	it("resolves an explicit zero-target Death Burst while rejecting missing targets and invalid dice", async () => {
+		const state = makeState({level: 3});
+		const created = await createCompanion(state, []);
+		expect(state.killFeatureOwnedCompanion(created.companionId, {
+			featureUid: COMPANION_OWNER_UID,
+		})).toMatchObject({ok: true, committed: true});
+
+		for (const input of [
+			{rolls: {damageDice: [1, 2]}},
+			{targets: [], rolls: {damageDice: [1]}},
+		]) {
+			const before = JSON.stringify(state.toJson());
+			expect(state.resolveFeatureCompanionDeathBurst({
+				featureUid: COMPANION_OWNER_UID,
+				companionId: created.companionId,
+				...input,
+			})).toMatchObject({
+				ok: false,
+				committed: false,
+				reason: input.targets ? "invalidDamageRoll" : "targetsRequired",
+			});
+			expect(JSON.stringify(state.toJson())).toBe(before);
+		}
+
+		const resolved = state.resolveFeatureCompanionDeathBurst({
+			featureUid: COMPANION_OWNER_UID,
+			companionId: created.companionId,
+			targets: [],
+			rolls: {damageDice: [1, 2]},
+		});
+		expect(resolved).toMatchObject({
+			ok: true,
+			committed: true,
+			result: {
+				damage: {dieRolls: [1, 2], total: 3},
+				targets: [],
+			},
+		});
+		expect(state.getCompanion(created.companionId)).toMatchObject({
+			lifecycle: {
+				deathBurstEmitted: true,
+				deathBurstResolved: true,
+				deathReceipt: {deathBurstResolution: {targets: []}},
+			},
+		});
+	});
+
 	it("absorbs Lightning into capped healing and routes other damage through temp HP into one death event", async () => {
 		const state = makeState({level: 9});
 		const created = await createCompanion(state, ["bloated", "moist"]);
@@ -596,7 +643,7 @@ describe("RHW Reanimator R4b Death Burst and damage entry", () => {
 				featureUid: COMPANION_OWNER_UID,
 				amount: 999,
 				damageType: "fire",
-				deathBurstResolution: {targets: [], rolls: {damageDice: [1, 1]}},
+				deathBurstResolution: {rolls: {damageDice: [1, 1]}},
 			},
 		]) {
 			const before = JSON.stringify(state.toJson());

@@ -24267,11 +24267,11 @@ class CharacterSheetPage {
 		const targetCount = await InputUiUtil.pGetUserNumber({
 			title: `${title} — target count`,
 			htmlDescription: `Count every creature within the ${rule.area.radiusFeet}-foot emanation. The sheet records save totals and manual damage; it does not apply damage to external targets.`,
-			default: 1,
-			min: 1,
+			default: 0,
+			min: 0,
 			isInt: true,
 		});
-		if (!Number.isInteger(targetCount) || targetCount < 1) return null;
+		if (!Number.isInteger(targetCount) || targetCount < 0) return null;
 
 		const targets = [];
 		for (let i = 0; i < targetCount; i++) {

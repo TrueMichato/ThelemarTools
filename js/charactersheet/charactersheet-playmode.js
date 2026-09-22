@@ -3897,6 +3897,9 @@ export class CharacterSheetPlayMode {
 		const status = this._ce("div", "pm-feature__desc pm-companion-operations__status", region);
 		status.style.display = "block";
 		status.id = `${operationId}-status`;
+		status.setAttribute("role", "status");
+		status.setAttribute("aria-live", "polite");
+		status.setAttribute("aria-atomic", "true");
 		status.textContent = model.statusText;
 		const costs = this._ce("div", "pm-feature__desc", region);
 		costs.style.display = "block";
@@ -3911,7 +3914,7 @@ export class CharacterSheetPlayMode {
 		model.controls.forEach(control => {
 			const btn = this._ce(
 				"button",
-				`pm-companion__ctrl-btn${control.tone === "danger" ? " pm-companion__ctrl-btn--dismiss" : ""}`,
+				`pm-companion__ctrl-btn${control.tone === "danger" ? " pm-companion__ctrl-btn--damage" : ""}`,
 				controls,
 			);
 			btn.type = "button";
@@ -3924,12 +3927,26 @@ export class CharacterSheetPlayMode {
 				this._page.getCompanionOperationFocusKey?.(model.companionId, control.operation, control.actionKey) || "",
 			);
 			btn.setAttribute("data-feature-companion-operation", control.operation);
-			btn.addEventListener("click", () => this._page.pUseFeatureCompanionOperation?.({
-				featureUid: model.ownerUid,
-				companionId: model.companionId,
-				operation: control.operation,
-				focusKey: btn.getAttribute("data-companion-operation-key"),
-			}));
+			btn.addEventListener("click", async () => {
+				if (btn.disabled) return;
+				btn.disabled = true;
+				btn.setAttribute("aria-busy", "true");
+				status.textContent = `Resolving ${control.label}…`;
+				try {
+					const result = await this._page.pUseFeatureCompanionOperation?.({
+						featureUid: model.ownerUid,
+						companionId: model.companionId,
+						operation: control.operation,
+						focusKey: btn.getAttribute("data-companion-operation-key"),
+					});
+					if (status.isConnected) status.textContent = this._page._getFeatureCompanionOperationResultMessage?.(result) || model.statusText;
+				} finally {
+					if (btn.isConnected) {
+						btn.disabled = false;
+						btn.removeAttribute("aria-busy");
+					}
+				}
+			});
 		});
 
 		const reasons = model.controls
