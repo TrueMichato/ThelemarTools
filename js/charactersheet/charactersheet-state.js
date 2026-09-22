@@ -77866,11 +77866,6 @@ class CharacterSheetState {
 		if (!companion || !setupRecord) return;
 		companion.setup = MiscUtil.copyFast(setupRecord.choices || {});
 		companion.customName = setupRecord.choices?.nickname || null;
-		companion.active = true;
-		companion.lifecycle = {
-			...(CharacterSheetState._isCompanionSchemaObject(companion.lifecycle) ? companion.lifecycle : {}),
-			status: "alive",
-		};
 	}
 
 	_transferFeatureCompanionSetupRecord (fromFeatureUid, toFeatureUid, companionId) {
@@ -78074,7 +78069,12 @@ class CharacterSheetState {
 
 		for (const companion of this._data.companions || []) {
 			const ownerUid = CharacterSheetState._normalizeFeatureCompanionUid(companion?.featureGrant?.uid);
-			if (!ownerUid || !CharacterSheetState.getFeatureCompanionGrantDefinition(ownerUid)) continue;
+			const definition = CharacterSheetState.getFeatureCompanionGrantDefinition(ownerUid);
+			if (
+				!ownerUid
+				|| !definition
+				|| ownerUid.toLowerCase() !== definition.featureUid.toLowerCase()
+			) continue;
 			const key = ownerUid.toLowerCase();
 			if (migrated[key]) continue;
 			const choices = CharacterSheetState._isCompanionSchemaObject(companion.setup)

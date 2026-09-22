@@ -218,6 +218,57 @@ describe("EFA Battle Smith acquisition and setup", () => {
 		expect(state.getFeatureOwnedCompanions(EFA_STEEL_UID).map(it => it.id)).toEqual([companion.id]);
 	});
 
+	test("setup synchronization preserves a dead companion's lifecycle and inactive state across reconcile/load", () => {
+		const state = makeEfaState();
+		const companion = completeSetup(state);
+		companion.hp.current = 0;
+		companion.active = false;
+		companion.lifecycle = {
+			status: "dead",
+			generation: 4,
+			diedAtGameMinute: 720,
+			customLifecycleMarker: "preserve",
+		};
+		state.updateFeatureCompanionSetup(EFA_STEEL_UID, {
+			nickname: "Bolts",
+			appearance: "A compact iron hound with a cracked brass crest.",
+			locomotion: "fourLegs",
+		}, {status: "complete", eligibility: "active"});
+
+		state.reconcileFeatureCompanionGrants({reason: "load"});
+		const reconciled = state.getCompanion(companion.id);
+		expect(reconciled.id).toBe(companion.id);
+		expect(reconciled.customName).toBe("Bolts");
+		expect(reconciled.active).toBe(false);
+		expect(reconciled.hp.current).toBe(0);
+		expect(reconciled.setup).toEqual({
+			nickname: "Bolts",
+			appearance: "A compact iron hound with a cracked brass crest.",
+			locomotion: "fourLegs",
+		});
+		expect(reconciled.lifecycle).toEqual({
+			status: "dead",
+			generation: 4,
+			diedAtGameMinute: 720,
+			customLifecycleMarker: "preserve",
+		});
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+		restored.reconcileFeatureCompanionGrants({reason: "load"});
+		const reloaded = restored.getCompanion(companion.id);
+		expect(reloaded.id).toBe(companion.id);
+		expect(reloaded.customName).toBe("Bolts");
+		expect(reloaded.active).toBe(false);
+		expect(reloaded.hp.current).toBe(0);
+		expect(reloaded.lifecycle).toEqual({
+			status: "dead",
+			generation: 4,
+			diedAtGameMinute: 720,
+			customLifecycleMarker: "preserve",
+		});
+	});
+
 	test("keeps EFA, TCE, and mixed-source Reanimator owners isolated when they coexist", () => {
 		const state = makeEfaState();
 		state.addClass(makeClass("TCE"));
@@ -253,6 +304,31 @@ describe("EFA Battle Smith acquisition and setup", () => {
 		expect(result.needsPrompt).toBe(false);
 		expect(state.getFeatureCompanionSetupRecord(EFA_STEEL_UID)).toBeNull();
 		expect(state.getFeatureOwnedCompanions(EFA_STEEL_UID)).toEqual([]);
+	});
+
+	test("load does not synthesize EFA pending setup for a compatible-only TCE defender", () => {
+		const state = new CharacterSheetState();
+		state.addClass(makeClass("TCE"));
+		state.addFeature(makeSteelFeature("TCE"));
+		const companionId = state.addCompanion({
+			name: "Steel Defender",
+			source: "TCE",
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			origin: "Battle Smith",
+			featureGrant: {uid: TCE_STEEL_UID},
+			lifecycle: {status: "alive", generation: 1},
+		});
+		expect(state.getFeatureCompanionSetupRecord(TCE_STEEL_UID)).toBeNull();
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+		expect(restored.getCompanion(companionId)).toMatchObject({
+			id: companionId,
+			featureGrant: {uid: TCE_STEEL_UID},
+		});
+		expect(restored.getFeatureCompanionSetupRecord(TCE_STEEL_UID)).toBeNull();
+		expect(restored.getFeatureCompanionSetupRecord(EFA_STEEL_UID)).toBeNull();
+		expect(restored.getPendingFeatureCompanionSetups()).toEqual([]);
 	});
 });
 
