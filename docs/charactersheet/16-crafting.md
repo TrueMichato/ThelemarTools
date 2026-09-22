@@ -44,6 +44,7 @@ Features publish descriptors through `getFeatureCalculations().craftingTimeModif
     itemTypes: ["LA", "MA", "HA"],
     // recipeCategories: ["potion"],
     // resultCategories: ["armor"],
+    // rarities: ["common", "uncommon"],
   },
 }
 ```
@@ -51,9 +52,11 @@ Features publish descriptors through `getFeatureCalculations().craftingTimeModif
 Filter keys are ANDed, values within one key are ORed, and applicable descriptors are sorted by
 stable ID before their multipliers are composed. Every descriptor must carry an exact owner UID and
 source; missing ownership, unknown filter keys, duplicate IDs, and zero/non-finite multipliers fail
-explicitly instead of creating an impossible duration. The returned calculation contains baseline
-and effective workweeks, the effective multiplier, and a render-ready source breakdown. Both the
-commit confirmation and outcome consume that same object.
+explicitly instead of creating an impossible duration. Every configured filter must be a non-empty
+array of non-empty strings. Rarity matching trims and normalizes both the recipe/item rarity and
+filter values to lowercase; it does not change the stored recipe. The returned calculation contains
+baseline and effective workweeks, the effective multiplier, and a render-ready source breakdown.
+Both the commit confirmation and outcome consume that same object.
 
 Baseline precedence is:
 
@@ -98,6 +101,14 @@ present, so changing subclass, removing the feature, or using the TCE Alchemist 
 modifier. The shared XDMG baseline is derived first and the feature multiplier is applied after it:
 an uncommon value-less potion is 1 workweek after the XDMG consumable adjustment and 0.5
 workweeks for this Alchemist. Preview and committed outcome render that same calculation object.
+
+`Magic Item Adept|Artificer|EFA|10|EFA` contributes a `0.25` multiplier only when both filters
+match: the recipe category is `item` or `potion`, and its normalized rarity is `common` or
+`uncommon`. Quantity is applied to the source-grounded baseline first, then feature multipliers are
+composed without rounding. A Common potion therefore goes from `0.5` to `0.125` workweeks, while
+an Uncommon ordinary item goes from `2` to `0.5`; Rare recipes and unrelated categories are
+unchanged. This is time-only: the current workbench has no generic feature-contributed gold-cost
+contract.
 
 ## The two invariants
 

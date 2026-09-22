@@ -15360,6 +15360,101 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Resolve a registry-provided custom zero-HP cost without knowing which feature owns it.
+	 *
+	 * The state re-validates every selected row at commit; this modal is only an accessible,
+	 * keyboard-native selection surface over the current descriptor options.
+	 *
+	 * @param {object} selectionCost
+	 * @param {object} intervention
+	 * @returns {Promise<string[]|null>}
+	 * @private
+	 */
+	async _pSelectZeroHpInterventionCost (selectionCost, intervention) {
+		if (selectionCost?.type !== "inventoryRows") return null;
+
+		let settled = false;
+		let resolveResult;
+		const pResult = new Promise(resolve => { resolveResult = resolve; });
+		const finish = value => {
+			if (settled) return;
+			settled = true;
+			resolveResult(value);
+		};
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: intervention?.name || "Choose Intervention Cost",
+			isMinHeight0: true,
+			isWidth100: true,
+			cbClose: () => finish(null),
+		});
+		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+		modalInner.style.overflowY = "auto";
+
+		const selected = new Set();
+		const fieldset = e_({tag: "fieldset", clazz: "charsheet__rest-section"});
+		fieldset.append(e_({
+			tag: "legend",
+			clazz: "charsheet__rest-section-title",
+			txt: selectionCost.selectionLabel || "Choose items",
+		}));
+		if (selectionCost.selectionDescription) {
+			fieldset.append(e_({tag: "p", clazz: "ve-muted ve-small", txt: selectionCost.selectionDescription}));
+		}
+
+		const status = e_({tag: "div", clazz: "ve-muted ve-small mt-2"});
+		status.setAttribute("role", "status");
+		status.setAttribute("aria-live", "polite");
+		const btnConfirm = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-primary",
+			txt: selectionCost.confirmLabel || "Confirm Selection",
+		});
+		const update = () => {
+			const count = selected.size;
+			btnConfirm.disabled = count < selectionCost.minSelections;
+			status.textContent = count < selectionCost.minSelections
+				? `Select at least ${selectionCost.minSelections} eligible item${selectionCost.minSelections === 1 ? "" : "s"}.`
+				: Number.isFinite(selectionCost.hpPerSelection)
+					? `${count} selected — ${selectionCost.hpPerSelection * count} hit points restored.`
+					: `${count} selected.`;
+		};
+
+		for (const option of selectionCost.options || []) {
+			const checkbox = e_({tag: "input"});
+			checkbox.type = "checkbox";
+			checkbox.value = option.itemId;
+			checkbox.setAttribute("aria-label", `Select ${option.name}, ${option.rarity}`);
+			checkbox.onChange(() => {
+				if (checkbox.checked) selected.add(option.itemId);
+				else selected.delete(option.itemId);
+				update();
+			});
+			const label = e_({tag: "label", clazz: "ve-flex-v-center mb-2"});
+			label.append(
+				checkbox,
+				e_({tag: "span", txt: `${option.name} — ${option.rarity} [${option.source}]`}),
+			);
+			fieldset.append(label);
+		}
+		fieldset.append(status);
+		modalInner.append(fieldset);
+
+		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default", txt: "Cancel"});
+		btnCancel.onClick(() => {
+			finish(null);
+			doClose(false);
+		});
+		btnConfirm.onClick(() => {
+			if (btnConfirm.disabled) return;
+			finish([...selected]);
+			doClose(true);
+		});
+		modalInner.append(ee`<div class="charsheet__modal-footer">${btnCancel}${btnConfirm}</div>`);
+		update();
+		return pResult;
+	}
+
+	/**
 	 * GENERIC: when damage has just taken the character to 0 hit points and they have a
 	 * "drop to 1 instead" feature, collect the facts the feature cares about (damage type,
 	 * critical hit), roll the save, and apply the result.
@@ -15422,6 +15517,34 @@ class CharacterSheetPage {
 		if (!recheck?.available) {
 			if (recheck?.unavailableReason) JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: recheck.unavailableReason}));
 			this._state.cancelZeroHpIntervention?.(candidate.id);
+			return;
+		}
+
+		if (recheck.selectionCost) {
+			const selectedItemIds = await this._pSelectZeroHpInterventionCost(recheck.selectionCost, recheck);
+			if (!selectedItemIds) {
+				this._state.clearPendingZeroHpIntervention();
+				return;
+			}
+			const result = this._state.applyZeroHpIntervention(candidate.id, {
+				damageType,
+				isCritical,
+				selectedItemIds,
+			});
+			if (!result?.applied) {
+				if (result?.reason) JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: result.reason}));
+				return;
+			}
+
+			this._saveCurrentCharacter();
+			this._renderHp?.();
+			this._renderConditions?.();
+			this._renderResources?.();
+			this._features?.render?.();
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "success",
+				content: `💀 <strong>${result.name}</strong>: disintegrated ${result.selectedCount} item${result.selectedCount === 1 ? "" : "s"} and rose at <strong>${result.hp} hit points</strong>.`,
+			}));
 			return;
 		}
 

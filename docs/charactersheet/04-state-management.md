@@ -1585,6 +1585,33 @@ feature behavior.
 
 ---
 
+### Transient zero-HP interventions and custom selection costs
+
+`takeDamage()` only arms the generic `ZERO_HP_INTERVENTIONS` registry; it does
+not branch on a class or feature. `_pendingZeroHpIntervention` stores the
+trigger context while the character remains at 0 HP and is deliberately
+removed by `toJson()`. Import/load never recreates a dismissed or stale prompt.
+
+An intervention can publish a `selectionCost` descriptor. The shared
+`inventoryRows` contract supplies exact generated-item ownership, allowed
+rarities, lifecycle/expiry gates, minimum selections, display copy, and a
+consume policy. `getZeroHpInterventions()` projects only currently eligible
+rows for the generic damage modal, but the modal's list is advisory:
+`applyZeroHpIntervention()` re-resolves every selected row immediately before
+commit. Foreign, copied/ambiguous, stale-owner, inactive, expired, wrong-rarity,
+missing, duplicate, or empty selections are rejected.
+
+The consume-and-revive operation is atomic. It snapshots the complete live
+character state, removes selected rows through ordinary `removeItem()`,
+verifies every removal, and restores the snapshot if any teardown fails.
+Only after all costs commit does it set HP, reset death saves/massive-death
+state, and clear the pending intervention. Success therefore averts generated
+item death-expiry finalization. Decline or invalid commit clears the transient
+prompt and runs the existing death reconciliation, preserving M3B expiry when
+the character is otherwise finalized dead.
+
+---
+
 ## Event System
 
 The state emits events when data changes, allowing the UI to react:

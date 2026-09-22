@@ -185,6 +185,19 @@ The public `serialize()`/`CharacterSheetState.deserialize()` round trip delegate
 to the same `toJson()`/`loadFromJson()` path, so it cannot bypass cleanup,
 migration, or authoritative death reconciliation.
 
+Zero-HP interventions may declare a generic `selectionCost` of type
+`inventoryRows`. The descriptor owns exact generated-item provenance, allowed
+rarities, active/unexpired lifecycle gates, minimum count, copy, and consume
+policy; the damage UI only renders that contract and contains no
+Artificer-specific branch. Selection options are advisory. The state
+re-resolves them at commit and rejects empty, foreign, copied/ambiguous, stale,
+inactive, expired, wrong-rarity, or missing rows. Removal is one transaction:
+snapshot, ordinary `removeItem()` teardown, verify every row is gone, and full
+rollback on any failure. Success sets the descriptor-derived HP, resets death
+saves/massive-death state, and clears the pending trigger while alive; decline
+or invalid commit clears it while dead so the existing Replicate expiry
+finalization still runs. Pending prompts remain runtime-only.
+
 Lifecycle days advance only through
 `advanceGeneratedFeatureItemLifecycleDays(positiveWholeDays)`. It is a
 compatibility wrapper over
@@ -819,10 +832,15 @@ prompt returns the uncommitted `cancelled` result, so outer activation paths do
 not spend or double-spend the Reaction.
 
 Advanced Artifice adds `shortRestRecovery: 1`; Magical Guidance restores the
-pool fully on a Short Rest when the level-20 EFA Artificer has at least one
-attuned magic item. `efaFlashOfGeniusResourceV1` initializes an existing EFA
-level-7+ save at maximum exactly once; subsequent reconciliation preserves
-spent uses. No Replicate Magic Item plan is inferred by this migration.
+pool fully on a committed Short Rest when the level-20 EFA Artificer has at
+least one actually attuned, structurally valid magic item. Without one, the
+level-14 restore-one behavior remains in force. Both `state.onShortRest()` and
+the active Rest dialog use the same resource metadata followed by the
+level-20 upgrade, so Flash recovers exactly once; opening/cancelling does
+nothing, and the existing full-snapshot undo restores the spent value.
+`efaFlashOfGeniusResourceV1` initializes an existing EFA level-7+ save at
+maximum exactly once; subsequent reconciliation preserves spent uses. No
+Replicate Magic Item plan is inferred by this migration.
 
 EFA Cartographer Ingenious Movement is registered only for exact
 `Artificer|EFA` + `Cartographer|EFA` level 9+ through

@@ -14521,6 +14521,15 @@ class CharacterSheetState {
 	 * - `postApplicationResult` optional callback/static structured payload returned after
 	 *                    the HP/resource commit. Throwing, or returning `{ok: false}`, rolls
 	 *                    the whole application back and surfaces an error.
+	 * - `hpOnSuccess`    optional `{flat?, abilityMod?, classLevel?}` descriptor for the hit
+	 *                    point total a success leaves you on. Defaults to a flat 1 — the
+	 *                    XGE/Death Ward wording. Shadow Sorcery (RHW) instead sets you to
+	 *                    "your Charisma modifier plus your Sorcerer level", which is a
+	 *                    different NUMBER on the same pipeline; see
+	 *                    {@link _resolveZeroHpInterventionHp}.
+	 * - `selectionCost`  optional generic inventory-row transaction descriptor. The state
+	 *                    projects live options, re-resolves them on commit, and removes all
+	 *                    selected rows atomically before applying `hpOnSuccess.perSelection`.
 	 * @type {Array<object>}
 	 */
 	static ZERO_HP_INTERVENTIONS = [
@@ -14633,6 +14642,40 @@ class CharacterSheetState {
 			},
 			description: "Destroy your active Atlas map to change your hit points to twice your Artificer level, then place yourself in an unoccupied space within 5 feet of the Cartographer or another active map holder.",
 		},
+		{
+			id: "efaArtificerCheatDeath",
+			featureName: "Soul of Artifice",
+			displayName: "Cheat Death",
+			calcFlag: "hasEfaSoulOfArtifice",
+			saveAbility: null,
+			dcBase: 0,
+			dcAddsDamage: false,
+			excludedDamageTypes: [],
+			excludeCritical: false,
+			spendOn: "success",
+			usesMax: null,
+			recharge: null,
+			requiresNonOutrightDeath: true,
+			hpOnSuccess: {perSelection: 20},
+			selectionCost: {
+				type: "inventoryRows",
+				minSelections: 1,
+				owner: {
+					featureUid: "Replicate Magic Item|Artificer|EFA|2",
+					classUid: "Artificer|EFA",
+					subclassUid: null,
+					featureSource: "EFA",
+				},
+				rarities: ["uncommon", "rare"],
+				requireActiveLifecycle: true,
+				requireUnexpired: true,
+				consume: "remove",
+				selectionLabel: "Replicate Magic Item creations to disintegrate",
+				selectionDescription: "Select one or more active Uncommon or Rare items created by your Replicate Magic Item feature. Each selected item restores 20 hit points and is permanently disintegrated.",
+				confirmLabel: "Disintegrate Selected Items",
+			},
+			description: "Disintegrate one or more active Uncommon or Rare items created by Replicate Magic Item. You regain 20 hit points per item instead of remaining at 0 hit points.",
+		},
 	];
 
 	/**
@@ -14662,10 +14705,17 @@ class CharacterSheetState {
 		let hp;
 		if (typeof resolved === "number") hp = resolved;
 		else if (typeof resolved === "object") {
-			if (resolved.hp == null && resolved.flat == null && !resolved.abilityMod && !resolved.classLevel) {
+			if (resolved.hp == null && resolved.flat == null && !resolved.abilityMod && !resolved.classLevel && !resolved.perSelection) {
 				throw new Error(`${def?.displayName || def?.featureName || def?.id || "Zero-HP intervention"} produced an empty hit point outcome.`);
 			}
 			hp = Number(resolved.hp ?? resolved.flat ?? 0);
+			if (resolved.perSelection) {
+				const selectionCount = transaction.selectionCount
+					?? transaction.validation?.selectedCount
+					?? transaction.options?.selectedItemIds?.length
+					?? 0;
+				hp += (Number(resolved.perSelection) || 0) * Math.max(0, Math.floor(selectionCount));
+			}
 			if (resolved.abilityMod) hp += this.getAbilityMod(resolved.abilityMod);
 			if (resolved.classLevel) {
 				const cls = (this._data.classes || []).find(c => (c.name || "").toLowerCase() === String(resolved.classLevel).toLowerCase());
@@ -14675,6 +14725,64 @@ class CharacterSheetState {
 		if (!Number.isFinite(hp)) throw new Error(`${def?.displayName || def?.featureName || def?.id || "Zero-HP intervention"} produced an invalid hit point outcome.`);
 		const maxHp = this.getMaxHp();
 		return Math.max(1, Math.min(maxHp > 0 ? maxHp : hp, Math.floor(hp)));
+	}
+
+	_isZeroHpSelectionCandidateUnexpired (classification) {
+		const records = classification?.provenance?.lifecycle?.expiryRecords || [];
+		const currentMinute = this.getGameTimeMinutes();
+		return records.every(record => {
+			if (record?.repairRequired) return false;
+			if (Number.isSafeInteger(record?.expiryMinute) && record.expiryMinute <= currentMinute) return false;
+			if (Number.isSafeInteger(record?.minutesRemaining) && record.minutesRemaining <= 0) return false;
+			if (Number.isSafeInteger(record?.daysRemaining) && record.daysRemaining <= 0) return false;
+			return true;
+		});
+	}
+
+	_getZeroHpInterventionSelectionCandidates (def) {
+		const cost = def?.selectionCost;
+		if (!cost) return [];
+		if (cost.type !== "inventoryRows") throw new TypeError(`Unsupported zero-HP intervention selection type "${cost.type}".`);
+		if (cost.consume !== "remove") throw new TypeError(`Unsupported zero-HP intervention consume policy "${cost.consume}".`);
+		const normalizedOwner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(cost.owner);
+		if (!normalizedOwner) throw new TypeError(`Zero-HP intervention "${def.id}" requires an exact generated-item owner.`);
+		if (!Array.isArray(cost.rarities) || !cost.rarities.length || cost.rarities.some(it => typeof it !== "string" || !it.trim())) {
+			throw new TypeError(`Zero-HP intervention "${def.id}" requires one or more valid rarities.`);
+		}
+		const rarities = new Set(cost.rarities.map(it => it.trim().toLowerCase()));
+		return this.getGeneratedFeatureItemRows(normalizedOwner)
+			.filter(row => {
+				const classification = this.classifyGeneratedFeatureItem(row);
+				if (classification.status !== "valid") return false;
+				if (cost.requireActiveLifecycle && classification.provenance?.lifecycle?.state !== "active") return false;
+				if (cost.requireUnexpired && !this._isZeroHpSelectionCandidateUnexpired(classification)) return false;
+				return rarities.has(String(row.item?.rarity || "").trim().toLowerCase());
+			})
+			.map(row => ({
+				itemId: row.id,
+				generatedItemId: row.item._generatedItemId,
+				name: row.item.name,
+				source: row.item.source,
+				rarity: String(row.item.rarity || "").trim().toLowerCase(),
+			}));
+	}
+
+	_getZeroHpInterventionSelectionCostInfo (def) {
+		const cost = def?.selectionCost;
+		if (!cost) return null;
+		const minSelections = Number(cost.minSelections);
+		if (!Number.isSafeInteger(minSelections) || minSelections < 1) {
+			throw new TypeError(`Zero-HP intervention "${def.id}" requires a positive minimum selection count.`);
+		}
+		return {
+			type: cost.type,
+			minSelections,
+			hpPerSelection: Number(def.hpOnSuccess?.perSelection) || null,
+			selectionLabel: cost.selectionLabel || "Items to consume",
+			selectionDescription: cost.selectionDescription || "",
+			confirmLabel: cost.confirmLabel || "Confirm Selection",
+			options: this._getZeroHpInterventionSelectionCandidates(def),
+		};
 	}
 
 	/**
@@ -14746,9 +14854,14 @@ class CharacterSheetState {
 
 			let unavailableReason = null;
 			const label = def.displayName || def.featureName;
+			const selectionCost = this._getZeroHpInterventionSelectionCostInfo(def);
 			if (!unlimited && usesRemaining <= 0) unavailableReason = `${label} has no uses remaining (recharges on a ${def.recharge} rest).`;
+			else if (def.requiresNonOutrightDeath && this._data.massiveDamageDeath) unavailableReason = `${label} can't be used when you are dying outright.`;
 			else if (def.excludeCritical && isCritical) unavailableReason = `${label} can't be used when a critical hit reduces you to 0 hit points.`;
 			else if (dmgType && (def.excludedDamageTypes || []).includes(dmgType)) unavailableReason = `${label} can't be used against ${dmgType} damage.`;
+			else if (selectionCost && selectionCost.options.length < selectionCost.minSelections) {
+				unavailableReason = `${label} requires at least ${selectionCost.minSelections} eligible item${selectionCost.minSelections === 1 ? "" : "s"}.`;
+			}
 
 			const dc = (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
 			const context = {
@@ -14774,7 +14887,10 @@ class CharacterSheetState {
 				excludedDamageTypes: [...(def.excludedDamageTypes || [])],
 				excludeCritical: !!def.excludeCritical,
 				spendOn: def.spendOn,
-				hpOnSuccess: unavailableReason == null ? this._resolveZeroHpInterventionHp(def, context) : null,
+				hpOnSuccess: unavailableReason == null && !selectionCost
+					? this._resolveZeroHpInterventionHp(def, context)
+					: null,
+				selectionCost,
 				usesRemaining,
 				usesMax: feature?.uses?.max ?? def.usesMax,
 				recharge: def.recharge,
@@ -14873,6 +14989,7 @@ class CharacterSheetState {
 	 * @param {string|null} [opts.damageType] refine the damage type if it was unstated.
 	 * @param {boolean} [opts.isCritical] refine the critical flag if it was unstated.
 	 * @param {boolean} [opts.cancelled=false] cancel before validation/commit.
+	 * @param {string[]} [opts.selectedItemIds] exact inventory rows selected for a custom cost.
 	 * @returns {object|null} committed, cancelled, unavailable, or validation-failure result;
 	 *   null when there is no pending transaction / matching intervention.
 	 * @throws {Error} when validation throws or any commit-phase callback/application fails.
@@ -14895,6 +15012,11 @@ class CharacterSheetState {
 		if (!def) return null;
 		const info = this.getZeroHpInterventions(transactionPending).find(i => i.id === id);
 		if (!info) return null;
+		if (def.selectionCost) {
+			return this._applyZeroHpInterventionSelectionTransaction(def, info, {
+				selectedItemIds: options.selectedItemIds ?? null,
+			});
+		}
 		if (!info.available) return {applied: false, committed: false, success: false, ...info};
 
 		let d20 = roll;
@@ -15029,6 +15151,77 @@ class CharacterSheetState {
 			wrapped.cause = cause;
 			throw wrapped;
 		}
+	}
+
+	_applyZeroHpInterventionSelectionTransaction (def, info, {selectedItemIds = null} = {}) {
+		const reject = reason => {
+			this.clearPendingZeroHpIntervention();
+			return {
+				applied: false,
+				success: false,
+				id: def.id,
+				name: def.displayName || def.featureName,
+				featureName: def.featureName,
+				reason,
+				hp: this._data.hp.current,
+			};
+		};
+
+		if (!info.available) return reject(info.unavailableReason || `${info.name} is unavailable.`);
+		if (!Array.isArray(selectedItemIds)) return reject("A selection is required.");
+		const normalizedIds = selectedItemIds.map(itemId => typeof itemId === "string" ? itemId.trim() : "");
+		if (
+			normalizedIds.length < info.selectionCost.minSelections
+			|| normalizedIds.some(itemId => !itemId)
+			|| new Set(normalizedIds).size !== normalizedIds.length
+		) {
+			return reject(`Select at least ${info.selectionCost.minSelections} eligible item${info.selectionCost.minSelections === 1 ? "" : "s"}.`);
+		}
+
+		// Re-resolve immediately before commit. The modal's options are advisory; generated-item
+		// ownership, lifecycle state, expiry, and rarity may all have changed while it was open.
+		const candidates = new Map(this._getZeroHpInterventionSelectionCandidates(def).map(candidate => [candidate.itemId, candidate]));
+		if (normalizedIds.some(itemId => !candidates.has(itemId))) {
+			return reject("One or more selected items are no longer eligible.");
+		}
+
+		const snapshot = MiscUtil.copyFast(this._data);
+		let removalFailed = false;
+		try {
+			for (const itemId of normalizedIds) {
+				this.removeItem(itemId);
+				if (this._findInventoryRow(itemId)) {
+					removalFailed = true;
+					break;
+				}
+			}
+		} catch (e) {
+			removalFailed = true;
+		}
+
+		if (removalFailed) {
+			this._data = snapshot;
+			this._reapplyItemEffects();
+			return reject("Could not remove every selected item; no selected item was consumed.");
+		}
+
+		this._data.hp.current = this._resolveZeroHpInterventionHp(def, {selectionCount: normalizedIds.length});
+		this.resetDeathSaves();
+		this._data.massiveDamageDeath = false;
+		this._updateBloodiedCondition();
+		this.clearPendingZeroHpIntervention();
+
+		return {
+			applied: true,
+			success: true,
+			id: def.id,
+			name: def.displayName || def.featureName,
+			featureName: def.featureName,
+			selectedItemIds: normalizedIds,
+			selectedCount: normalizedIds.length,
+			hp: this._data.hp.current,
+			usesRemaining: Infinity,
+		};
 	}
 
 	/** @private */
@@ -34618,6 +34811,7 @@ class CharacterSheetState {
 					const intMod = this.getAbilityMod("int");
 					const classSource = String(cls.source || "").toUpperCase();
 					const isEfa = classSource === "EFA";
+					const isTce = classSource === "TCE";
 
 					if (isEfa) {
 						calculations.hasEfaArtificerSpellcasting = level >= 1;
@@ -34635,6 +34829,22 @@ class CharacterSheetState {
 						calculations.hasMagicItemMaster = level >= 18;
 						calculations.hasEfaSoulOfArtifice = level >= 20;
 						calculations.hasMagicalGuidance = level >= 20;
+						if (level >= 10) {
+							(calculations.craftingTimeModifiers ||= []).push({
+								id: "efa-artificer-magic-item-adept-crafting",
+								owner: {
+									kind: "classFeature",
+									name: "Magic Item Adept",
+									source: "EFA",
+									uid: "Magic Item Adept|Artificer|EFA|10|EFA",
+								},
+								multiplier: 0.25,
+								filter: {
+									recipeCategories: ["item", "potion"],
+									rarities: ["common", "uncommon"],
+								},
+							});
+						}
 					} else {
 						// Ritual Casting — TCE Artificers can ritual-cast prepared ritual spells.
 						calculations.hasRitualCasting = true;
@@ -34668,11 +34878,17 @@ class CharacterSheetState {
 					// Magic Item Savant (level 14+): attune to 5 items, ignore requirements
 					// Magic Item Master (level 18+): attune to 6 items
 					const attunementLimit = level >= 18 ? 6 : level >= 14 ? 5 : level >= 10 ? 4 : 3;
-					calculations.magicItemAttunementLimit = attunementLimit;
+					if (isEfa || isTce) {
+						calculations.magicItemAttunementLimit = Math.max(
+							calculations.magicItemAttunementLimit || 3,
+							attunementLimit,
+						);
+					}
 
-					if (level >= 14) {
+					if ((isEfa || isTce) && level >= 14) {
 						calculations.hasMagicItemSavant = true;
-						calculations.magicItemSavantIgnoreRequirements = !isEfa;
+						calculations.magicItemSavantIgnoreRequirements =
+							!!calculations.magicItemSavantIgnoreRequirements || isTce;
 					}
 
 					// Spell-Storing Item (level 11+): can store INT mod * 2 uses
@@ -34681,11 +34897,9 @@ class CharacterSheetState {
 					}
 
 					// Soul of Artifice (level 20): +1 to all saves per attuned item
-					if (level >= 20) {
-						if (!isEfa) {
-							calculations.hasSoulOfArtifice = true;
-							calculations.soulOfArtificeSaveBonus = attunementLimit; // max possible bonus
-						}
+					if (isTce && level >= 20) {
+						calculations.hasSoulOfArtifice = true;
+						calculations.soulOfArtificeSaveBonus = attunementLimit; // max possible bonus
 					}
 
 					// =========================================================
@@ -48588,6 +48802,44 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Whether an item payload has a supported magic-item signal.
+	 *
+	 * Kept at the state layer so feature rules do not depend on Inventory UI categorisation.
+	 * A row being marked `attuned` is not itself proof that a mundane/custom item is magical.
+	 */
+	isMagicItem (itemOrRow) {
+		const item = itemOrRow?.item || itemOrRow;
+		if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+		const rarity = String(item.rarity || "").trim().toLowerCase();
+		if (rarity && !["none", "unknown", "varies"].includes(rarity)) return true;
+		return !!(
+			item.requiresAttunement
+			|| item.reqAttune
+			|| item.wondrous
+			|| item.bonusWeapon
+			|| item.bonusWeaponDamage
+			|| item.bonusAc
+			|| item.bonusSavingThrow
+			|| item.bonusSpellAttack
+			|| item.bonusSpellDamage
+			|| item._isGeneratedFeatureItem
+		);
+	}
+
+	/**
+	 * Attuned inventory rows which are still structurally valid magic items.
+	 */
+	getAttunedMagicItems () {
+		return (this._data.inventory || []).filter(row =>
+			!!row?.attuned
+			&& !!row?.id
+			&& !!row?.item?.name
+			&& !!row?.item?.source
+			&& this.isMagicItem(row),
+		);
+	}
+
+	/**
 	 * Get all equipped weapons
 	 * @returns {Array} Array of equipped weapon items
 	 */
@@ -48622,25 +48874,24 @@ class CharacterSheetState {
 	 * Get maximum number of items a character can attune to.
 	 * Base is 3, but Artificer gets more:
 	 * - Level 10 (Magic Item Adept): 4 items
-	 * - Level 14 (Magic Item Savant): 5 items
-	 * - Level 18 (Soul of Artifice): 6 items
+	 * - Level 14 (Magic Item Savant / Advanced Artifice): 5 items
+	 * - Level 18 (Magic Item Master): 6 items
 	 * Use Magic Device (Thief 13) grants 4 slots
 	 * @returns {number} Maximum attunement slots
 	 */
 	getMaxAttunement () {
 		let max = 3; // Default max attunement
 
-		// Check for Artificer class levels
-		const artificerClass = this._data.classes?.find(c => c.name?.toLowerCase() === "artificer");
-		if (artificerClass) {
+		// Check source-owned Artificer class levels. A same-named unrelated class must not
+		// inherit either the EFA or TCE progression.
+		for (const artificerClass of (this._data.classes || []).filter(c =>
+			String(c?.name || "").toLowerCase() === "artificer"
+			&& ["EFA", "TCE"].includes(String(c?.source || "").toUpperCase()),
+		)) {
 			const level = artificerClass.level || 0;
-			if (level >= 18) {
-				max = 6; // Soul of Artifice
-			} else if (level >= 14) {
-				max = 5; // Magic Item Savant
-			} else if (level >= 10) {
-				max = 4; // Magic Item Adept
-			}
+			if (level >= 18) max = Math.max(max, 6);
+			else if (level >= 14) max = Math.max(max, 5);
+			else if (level >= 10) max = Math.max(max, 4);
 		}
 
 		// Check for Use Magic Device (Thief 13+)
@@ -53072,7 +53323,7 @@ class CharacterSheetState {
 
 	restoreEfaFlashOfGeniusOnShortRest () {
 		const cls = this._getEfaArtificerClass();
-		if ((Number(cls?.level) || 0) < 20 || this.getAttunedItems().length < 1) return 0;
+		if ((Number(cls?.level) || 0) < 20 || this.getAttunedMagicItems().length < 1) return 0;
 		const resource = this._ensureEfaFlashOfGeniusResource();
 		if (!resource) return 0;
 		const restored = Math.max(0, resource.max - resource.current);
@@ -59698,7 +59949,7 @@ class CharacterSheetState {
 	// A twin from another book may only ADD what Arcadia 8 lacks.
 	// =====================================================================
 
-	static _CRAFTING_TIME_FILTER_KEYS = Object.freeze(["itemTypes", "recipeCategories", "resultCategories"]);
+	static _CRAFTING_TIME_FILTER_KEYS = Object.freeze(["itemTypes", "recipeCategories", "resultCategories", "rarities"]);
 	static _CRAFTING_TIME_XDMG = Object.freeze({
 		name: "Magic Item Crafting Time and Cost",
 		source: "XDMG",
@@ -59882,6 +60133,7 @@ class CharacterSheetState {
 		const itemType = `${item?.type ?? recipe?.itemType ?? ""}`.split("|")[0].trim().toUpperCase();
 		const recipeCategory = `${recipe?.recipeCategory ?? ""}`.trim().toLowerCase();
 		const resultCategory = this.getCraftingResultCategory({recipe, item, category});
+		const rarity = `${recipe?.rarity ?? item?.rarity ?? ""}`.trim().toLowerCase();
 		const seenIds = new Set();
 
 		return [...(Array.isArray(modifiers) ? modifiers : [])]
@@ -59906,13 +60158,17 @@ class CharacterSheetState {
 					if (!Array.isArray(filter[prop]) || !filter[prop].length) {
 						throw new TypeError(`Crafting-time modifier "${modifier.id}" filter "${prop}" must be a non-empty array.`);
 					}
+					if (filter[prop].some(value => typeof value !== "string" || !value.trim())) {
+						throw new TypeError(`Crafting-time modifier "${modifier.id}" filter "${prop}" must contain only non-empty strings.`);
+					}
 					const normalizedActual = isUpperCase ? `${actual ?? ""}`.toUpperCase() : `${actual ?? ""}`.toLowerCase();
-					return filter[prop].some(value => (isUpperCase ? `${value}`.toUpperCase() : `${value}`.toLowerCase()) === normalizedActual);
+					return filter[prop].some(value => (isUpperCase ? value.trim().toUpperCase() : value.trim().toLowerCase()) === normalizedActual);
 				};
 
 				if (!matches("itemTypes", itemType, {isUpperCase: true})) return null;
 				if (!matches("recipeCategories", recipeCategory)) return null;
 				if (!matches("resultCategories", resultCategory)) return null;
+				if (!matches("rarities", rarity)) return null;
 				return {
 					...modifier,
 					owner: {...modifier.owner},
