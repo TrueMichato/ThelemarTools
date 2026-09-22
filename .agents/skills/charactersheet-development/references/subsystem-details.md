@@ -84,7 +84,9 @@ wall-clock time. The only normal mutation boundary is
 returns one receipt with `priorMinute`, `newMinute`, `deltaMinutes`, `reason`,
 `identity`, and `receiptId`. Lifecycle updates/removals are part of that same
 transaction. A teardown failure restores the state snapshot and returns a
-failure receipt rather than a success-shaped result.
+failure receipt rather than a success-shaped result. Public time APIs accept
+only non-array object option bags; malformed bags return
+`invalid-game-time-options` or `invalid-rest-time-options` without mutation.
 
 Every generated row is custom, quantity 1, and has a unique wrapper id and
 `_generatedItemId`, so it never stacks with ordinary or generated rows.
@@ -169,7 +171,10 @@ death-expiry mirrors migrate into one canonical expiry record without rerolling.
 Legacy `daysRemaining` is anchored once at the loaded shared clock minute as an
 absolute `expiryMinute`; subsequent loads preserve that due minute. The
 whole-day display mirror is always `ceil(minutesRemaining / 1440)`, while exact
-expiry/removal uses the absolute minute.
+expiry/removal uses the absolute minute. This migration runs only after valid
+generated classification and an exact Replicate owner match (including
+`featureSource`); the expiry-minute migration does not normalize or update
+foreign or malformed lifecycle records.
 The public `serialize()`/`CharacterSheetState.deserialize()` round trip delegates
 to the same `toJson()`/`loadFromJson()` path, so it cannot bypass cleanup,
 migration, or authoritative death reconciliation.

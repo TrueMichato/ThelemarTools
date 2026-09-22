@@ -37212,14 +37212,23 @@ class CharacterSheetState {
 		};
 	}
 
-	advanceGameTimeMinutes (minutes, {reason = "manual", identity = null} = {}) {
+	advanceGameTimeMinutes (minutes, options = {}) {
+		const priorMinute = this.getGameTimeMinutes();
+		if (!options || typeof options !== "object" || Array.isArray(options)) {
+			return this._getGameTimeFailureReceipt({
+				code: "invalid-game-time-options",
+				priorMinute,
+				reason: null,
+				identity: null,
+			});
+		}
+		const {reason = "manual", identity = null} = options;
 		const normalizedReason = typeof reason === "string" ? reason.trim() : "";
 		const normalizedIdentity = identity == null
 			? null
 			: typeof identity === "string"
 				? identity.trim()
 				: "";
-		const priorMinute = this.getGameTimeMinutes();
 		if (typeof minutes !== "number" || !Number.isSafeInteger(minutes) || minutes <= 0) {
 			return this._getGameTimeFailureReceipt({
 				code: "invalid-game-time-minutes",
@@ -37300,7 +37309,15 @@ class CharacterSheetState {
 		}
 	}
 
-	advanceRestTime (restType, {identity = null} = {}) {
+	advanceRestTime (restType, options = {}) {
+		if (!options || typeof options !== "object" || Array.isArray(options)) {
+			return this._getGameTimeFailureReceipt({
+				code: "invalid-rest-time-options",
+				reason: "rest",
+				identity: null,
+			});
+		}
+		const {identity = null} = options;
 		if (!["short", "long"].includes(restType)) {
 			return this._getGameTimeFailureReceipt({
 				code: "invalid-rest-time-type",
@@ -37990,6 +38007,11 @@ class CharacterSheetState {
 
 	_migrateGeneratedFeatureItemExpiryMinutes ({currentMinute = this.getGameTimeMinutes()} = {}) {
 		for (const row of this._data.inventory || []) {
+			const classification = this.classifyGeneratedFeatureItem(row);
+			if (
+				classification.status !== "valid"
+				|| !CharacterSheetState._isEfaReplicateMagicItemOwner(classification.owner)
+			) continue;
 			const lifecycle = row?.item?._generatedItemProvenance?.lifecycle;
 			if (
 				!lifecycle

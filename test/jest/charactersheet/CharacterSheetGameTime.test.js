@@ -171,6 +171,44 @@ describe("persisted monotonic in-game time", () => {
 		expect(state.toJson()).toEqual(before);
 	});
 
+	const malformedOptionBags = [
+		["null", null],
+		["array", []],
+		["string", "invalid"],
+		["number", 1],
+		["boolean", true],
+	];
+
+	test.each(malformedOptionBags)("rejects malformed %s game-time option bags before mutation", (_label, options) => {
+		const state = makeState();
+		const before = state.toJson();
+
+		expect(state.advanceGameTimeMinutes(1, options)).toMatchObject({
+			ok: false,
+			code: "invalid-game-time-options",
+			priorMinute: 0,
+			newMinute: 0,
+			deltaMinutes: 0,
+			receiptId: null,
+		});
+		expect(state.toJson()).toEqual(before);
+	});
+
+	test.each(malformedOptionBags)("rejects malformed %s rest-time option bags before mutation", (_label, options) => {
+		const state = makeState();
+		const before = state.toJson();
+
+		expect(state.advanceRestTime("short", options)).toMatchObject({
+			ok: false,
+			code: "invalid-rest-time-options",
+			priorMinute: 0,
+			newMinute: 0,
+			deltaMinutes: 0,
+			receiptId: null,
+		});
+		expect(state.toJson()).toEqual(before);
+	});
+
 	test("distinguishes exact +59, +60, and +61 minute boundaries", () => {
 		const state = makeState();
 		const deathMinute = state.getGameTimeMinutes();
@@ -283,6 +321,63 @@ describe("persisted monotonic in-game time", () => {
 		expect(loadedAgain.loadFromJson(loaded.toJson())).not.toBe(false);
 		expect(getExpiry(loadedAgain, created.itemId)).toEqual(getExpiry(loaded, created.itemId));
 		expect(globalThis.RollerUtil.randomise).not.toHaveBeenCalled();
+	});
+
+	test("leaves foreign and malformed legacy expiry records byte-for-byte unchanged across load and partial advances", () => {
+		const state = makeState();
+		const foreign = createGeneratedItem(state, {owner: OTHER_OWNER, name: "Experimental Elixir"});
+		const malformed = createGeneratedItem(state, {owner: OTHER_OWNER, name: "Malformed Elixir"});
+		const saved = state.toJson();
+		saved.gameTime = {version: State.GAME_TIME_VERSION, minute: 600, lastLongRestMinute: 0};
+		const legacyRecord = {
+			version: State.GENERATED_FEATURE_ITEM_EXPIRY_VERSION,
+			policyId: "expire-after-1d4-days",
+			trigger: "death",
+			assignedReceiptId: "foreign-legacy",
+			roll: {formula: "1d4", result: 1},
+			daysRemaining: 1,
+		};
+		const foreignProvenance = saved.inventory
+			.find(row => row.id === foreign.itemId)
+			.item._generatedItemProvenance;
+		foreignProvenance.lifecycle.expiryRecords = [structuredClone(legacyRecord)];
+		foreignProvenance.lifecycle.deathExpiryDaysRemaining = 1;
+		foreignProvenance.lifecycle.deathExpiryAssignedReceiptId = "foreign-legacy";
+		const malformedProvenance = saved.inventory
+			.find(row => row.id === malformed.itemId)
+			.item._generatedItemProvenance;
+		malformedProvenance.owner.featureSource = "";
+		malformedProvenance.lifecycle.expiryRecords = [structuredClone(legacyRecord)];
+		malformedProvenance.lifecycle.deathExpiryDaysRemaining = 1;
+		malformedProvenance.lifecycle.deathExpiryAssignedReceiptId = "foreign-legacy";
+		const expectedForeignLifecycle = JSON.stringify(foreignProvenance.lifecycle);
+		const expectedMalformedLifecycle = JSON.stringify(malformedProvenance.lifecycle);
+
+		const loaded = new State();
+		expect(loaded.loadFromJson(saved)).not.toBe(false);
+		const assertUnchanged = () => {
+			const inventory = loaded.getInventory();
+			expect(JSON.stringify(inventory
+				.find(row => row.id === foreign.itemId)
+				.item._generatedItemProvenance.lifecycle)).toBe(expectedForeignLifecycle);
+			expect(JSON.stringify(inventory
+				.find(row => row.id === malformed.itemId)
+				.item._generatedItemProvenance.lifecycle)).toBe(expectedMalformedLifecycle);
+		};
+		assertUnchanged();
+
+		for (const expectedMinute of [660, 720]) {
+			expect(loaded.advanceGameTimeMinutes(60, {
+				reason: "foreign-owner-isolation",
+				identity: "clock",
+			})).toMatchObject({
+				ok: true,
+				newMinute: expectedMinute,
+				updated: [],
+				removed: [],
+			});
+			assertUnchanged();
+		}
 	});
 
 	test("isolates foreign generated owners while exact-owner expiry advances", () => {

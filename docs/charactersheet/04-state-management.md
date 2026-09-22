@@ -1297,9 +1297,12 @@ state.advanceGameTimeMinutes(minutes, {
 });
 ```
 
-`minutes` must be a positive safe integer. Zero, negative, fractional,
-non-finite, or non-number inputs return an explicit failure receipt without
-changing the character. A successful receipt contains:
+`minutes` must be a positive safe integer, and the optional second argument
+must be a non-array object. Zero, negative, fractional, non-finite, or
+non-number minute inputs return `invalid-game-time-minutes`; malformed option
+bags return `invalid-game-time-options`. `advanceRestTime` applies the same
+option-bag guard and returns `invalid-rest-time-options`. These failures do not
+change the character. A successful receipt contains:
 
 ```javascript
 {
@@ -1347,9 +1350,12 @@ Replicate Magic Item death expiry stores an absolute `assignedMinute` and
 display mirror are derived from the shared clock, with days calculated as
 `ceil(minutesRemaining / 1440)`. Legacy records containing only
 `daysRemaining` are anchored once at the clock minute on load, without rerolling
-or moving that due minute on later loads. Exact checks can therefore distinguish
-`+59`, `+60`, and `+61` minutes, while repeated partial rests and manual advances
-compose without truncation.
+or moving that due minute on later loads. Migration first requires a valid
+generated-item classification and the exact Replicate owner, including
+`featureSource`; foreign and malformed lifecycle records remain byte-for-byte
+unchanged. Exact checks can therefore distinguish `+59`, `+60`, and `+61`
+minutes, while repeated partial rests and manual advances compose without
+truncation.
 
 **Residual duration limitation:** `getFeatureCalculations()` can expose
 Warder's Duty's `longRestHours = 2`, but the current rest-duration API does not
