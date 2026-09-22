@@ -425,10 +425,12 @@ row:
 
 While the exact bound row is worn and active, its AC snapshot retains the
 wrapper `itemId`, allowing the speed/armor-requirement pipeline to ignore that
-armor's Strength requirement without name matching. The same active row is a
-class-scoped focus candidate for `Artificer|EFA` spells only; spell component
-checks pass the spell owner into `getSpellcastingFocusStatus({spell})`, so the
-armor cannot satisfy a Wizard or TCE Artificer spell. Doffing or invalidation
+armor's Strength requirement without name matching. The same active wrapper ID
+is added to the exact `Artificer|EFA` requirement returned by
+`getSpellCastFocusRequirement()`. Focus selection and committed-cast receipts
+therefore use the canonical source-qualified casting path; the armor cannot
+satisfy an ambiguous, Wizard, or TCE Artificer cast, and another copy of the
+same armor entity cannot replace the bound wrapper. Doffing or invalidation
 removes both benefits immediately.
 
 Doffing keeps the binding but suspends its mechanics. Equipping another body
