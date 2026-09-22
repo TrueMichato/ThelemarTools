@@ -38734,7 +38734,7 @@ class CharacterSheetState {
 	}
 
 	_getEfaReplicateRowForTinker (itemId) {
-		const row = (this._data.inventory || []).find(entry => entry.id === itemId);
+		const row = this._findInventoryRow(itemId);
 		if (!row) return {ok: false, code: "missing-replicate-item", row: null, classification: null};
 		const classification = this.classifyGeneratedFeatureItem(row);
 		if (
