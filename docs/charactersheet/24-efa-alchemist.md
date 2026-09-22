@@ -14,6 +14,12 @@ state must be saved, and what the player-facing controls must do.
 > `Tasha's Bubbling Cauldron|XPHB`. The shared exact-focus and committed-cast
 > receipt contract now ships; wiring these grants to Alchemist-specific cast
 > execution remains a separate milestone, so they do not yet expose a cast action.
+>
+> **Alchemical Savant milestone status:** the level-5 Savant modifier now ships
+> for exact committed `Artificer|EFA` casts by
+> `Alchemist|Artificer|EFA|EFA` using held
+> `Alchemist's Supplies|XPHB`. Experimental Elixir, Restorative Reagents cast
+> execution, Alchemical Eruption, and Conjured Cauldron remain separate work.
 
 > **Chemical Resistance milestone status:** the exact
 > `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA` owner now contributes
@@ -63,8 +69,8 @@ migration, and respec cleanup must match both the parent and subclass sources.
 
 > **Milestone status:** the fixed prepared-spell tiers and exact-owner
 > EFA/TCE lifecycle cleanup, source-owned innate grants/use counters, and shared
-> exact-focus receipt infrastructure are implemented. Focus-validated Alchemist
-> execution remains pending in the dedicated cast-feature milestone.
+> exact-focus receipt infrastructure are implemented. Alchemical Savant consumes
+> that infrastructure; focus-validated innate-grant execution remains pending.
 
 Subclass spell grants are owned by
 `Alchemist|Artificer|EFA|EFA`. Prepared grants are always prepared and do not
@@ -256,6 +262,9 @@ item/repair state instead of guessing.
 
 ## 5. Level 5: Alchemical Savant
 
+> **Milestone status:** implemented and covered by the focused
+> `CharacterSheetEfaAlchemicalSavant` Jest suite.
+
 Alchemical Savant applies only when the cast receipt proves that exact
 `Alchemist's Supplies|XPHB` was selected as the focus
 ([`data/class/class-artificer.json:2983-2996`](../../data/class/class-artificer.json#L2983-L2996)).
@@ -273,6 +282,20 @@ class's casting identity, or an ineligible damage type receives no bonus.
 The structured cast result must preserve the original formula, flat Savant
 bonus, final formula/total, selected focus, exact casting class UID, and whether
 the once-per-cast application was consumed.
+
+The implementation publishes serializable roll records in the committed
+receipt's `cast.rolls` array. The Savant hook re-resolves the live focus through
+`resolveCommittedSpellCastReceiptFocus`, requires the parent-qualified
+`castingSubclassUid`, and annotates exactly one selected roll. A single eligible
+roll is deterministic. Multiple eligible rolls use the existing accessible
+enum dialog with a decline path. Declined, consumed, and armed roll state lives
+only on that cast receipt; it is not character-save state and cannot leak into
+a later cast or reload.
+
+If the post-commit Savant hook or selection UI fails, the receipt remains
+`ok: true, committed: true`, reports `followUpFailed`, and surfaces a warning.
+The spent slot or resource is not restored and the valid spell cast is not made
+retryable.
 
 ## 6. Level 9: Restorative Reagents
 

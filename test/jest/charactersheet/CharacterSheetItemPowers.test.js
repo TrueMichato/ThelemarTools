@@ -202,7 +202,7 @@ describe("Catalog magic-item powers and passive normalization", () => {
 			5,
 			false,
 			false,
-			{sourceItem: "Staff of Power"},
+			{sourceItem: "Staff of Power", castType: "item"},
 		);
 		expect(JSON.stringify(state.getSpellSlots())).toBe(slotsBefore);
 	});

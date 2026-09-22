@@ -374,6 +374,14 @@ object. A saved receipt can re-resolve its live focus after export/import with
 `resolveCommittedSpellCastReceiptFocus(receipt)`, which verifies both wrapper
 id and item UID.
 
+`cast.rolls` is the generic per-cast roll surface for committed follow-ups. Each
+plain record carries a stable `rollId`, `kind` (`"damage"` or `"healing"`),
+formula, original/working total, resolution status, and damage type where
+applicable. A follow-up may annotate one record with its source UID, bonus,
+original/final formula and totals, and consumed/armed/declined state. These
+records belong to the receipt only; never mirror a pending per-cast modifier
+into character save data.
+
 Hooks are runtime-only and keyed by exact class UID (or `"*"`). A cancelled,
 blocked, refunded, or source-ambiguous cast publishes no receipt. A committed,
 exactly attributed EFA cast with waived components publishes a receipt with
@@ -382,6 +390,15 @@ override selected a legal live wrapper. Hook errors are captured in
 `followUps`; they leave
 `ok: true, committed: true`, set `followUpFailed: true`, and never roll back the
 valid cast.
+
+EFA Alchemical Savant is the reference consumer. The spell module registers a
+stable `efa-alchemical-savant` hook for an active level-5+
+`Alchemist|Artificer|EFA|EFA`. At commit time it revalidates exact
+`Alchemist's Supplies|XPHB`, permits one healing or Acid/Fire/Poison damage
+roll, and marks the receipt before returning so a duplicate hook invocation
+cannot consume a second roll. Multiple candidates use the existing enum modal
+with an explicit decline option.
+
 ## Active States / Toggle Abilities
 
 ### ACTIVE_STATE_TYPES

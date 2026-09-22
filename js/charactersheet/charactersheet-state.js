@@ -4370,6 +4370,9 @@ class CharacterSheetState {
 	static EFA_ARTIFICER_CLASS_UID = "Artificer|EFA";
 	static EFA_FLASH_OF_GENIUS_UID = "Flash of Genius|Artificer|EFA";
 	static EFA_SPELLCASTING_FEATURE_UID = "Spellcasting|Artificer|EFA|1|EFA";
+	static EFA_ALCHEMICAL_SAVANT_FEATURE_UID = "Alchemical Savant|Artificer|EFA|Alchemist|EFA|5|EFA";
+	static EFA_ALCHEMICAL_SAVANT_FOCUS_UID = "Alchemist's Supplies|XPHB";
+	static EFA_ALCHEMICAL_SAVANT_DAMAGE_TYPES = new Set(["acid", "fire", "poison"]);
 	static EFA_SPELLCASTING_TOOLS_RULE_ID = "efa-artificer-tools-required";
 	static EFA_BATTLE_SMITH_SUBCLASS_UID = "Battle Smith|Artificer|EFA|EFA";
 	static EFA_BATTLE_SMITH_FEATURE_UIDS = Object.freeze({
@@ -32069,6 +32072,10 @@ class CharacterSheetState {
 								filter: {recipeCategories: ["potion"]},
 							});
 						}
+						if (level >= 5) {
+							calculations.hasEfaAlchemicalSavant = true;
+							calculations.efaAlchemicalSavantBonus = Math.max(1, intMod);
+						}
 					}
 
 					if (
@@ -40241,11 +40248,17 @@ class CharacterSheetState {
 			|| spell.sourceSubclassSource
 			|| spell.subclassSource
 			|| null;
+		const activeSubclass = this.getEffectiveSubclassForClass(matchedClass);
+		const activeSubclassName = activeSubclass?.name || activeSubclass?.shortName || null;
+		const activeSubclassSource = activeSubclass?.source || activeSubclass?.subclassSource || null;
+		const activeSubclassUid = activeSubclassName && activeSubclassSource
+			? `${activeSubclassName}|${matchedClass.name}|${matchedClass.source}|${activeSubclassSource}`
+			: null;
 		const hasExactSubclass = !!subclassName && !!subclassSource && [
-			matchedClass.subclass?.name,
-			matchedClass.subclass?.shortName,
+			activeSubclass?.name,
+			activeSubclass?.shortName,
 		].some(name => String(name || "").toLowerCase() === String(subclassName).toLowerCase())
-			&& String(matchedClass.subclass?.source || "").toLowerCase() === String(subclassSource).toLowerCase();
+			&& String(activeSubclassSource || "").toLowerCase() === String(subclassSource).toLowerCase();
 
 		return {
 			name: matchedClass.name,
@@ -40254,6 +40267,7 @@ class CharacterSheetState {
 			subclassName: hasExactSubclass ? String(subclassName) : null,
 			subclassSource: hasExactSubclass ? String(subclassSource) : null,
 			subclassUid: hasExactSubclass ? `${subclassName}|${subclassSource}` : null,
+			activeSubclassUid,
 		};
 	}
 
@@ -40446,6 +40460,50 @@ class CharacterSheetState {
 
 	resolveCommittedSpellCastReceiptFocus (receipt) {
 		return this.resolveSpellCastFocusReference(receipt?.focus);
+	}
+
+	_getEfaAlchemicalSavantOwner () {
+		const cls = this._getEfaAlchemistClassEntry();
+		if ((Number(cls?.level) || 0) < 5) return null;
+		return cls;
+	}
+
+	/**
+	 * Cheap pre-roll gate used only to collect every candidate damage roll for a
+	 * possible Savant cast. The committed receipt remains the application authority.
+	 */
+	canPrepareEfaAlchemicalSavantRolls ({spell, focusReference, castType = null} = {}) {
+		if (!this._getEfaAlchemicalSavantOwner()) return false;
+		if (castType === "item") return false;
+		if (this.resolveSpellCastingClassIdentity(spell)?.uid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return false;
+		if (focusReference?.itemUid !== CharacterSheetState.EFA_ALCHEMICAL_SAVANT_FOCUS_UID) return false;
+		return this.resolveSpellCastFocusReference(focusReference)?.item != null;
+	}
+
+	/**
+	 * Resolve the flat once-per-cast modifier contributed by EFA Alchemical Savant.
+	 * The receipt and its selected focus are revalidated at the committed boundary.
+	 */
+	getEfaAlchemicalSavantModifierForReceipt (receipt) {
+		if (!receipt?.ok || !receipt.committed) return null;
+		if (receipt.castingClassUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return null;
+		if (receipt.castingSubclassUid !== CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID) return null;
+		if (receipt.castType === "item" || receipt.cast?.itemInventoryId) return null;
+		if (!this._getEfaAlchemicalSavantOwner()) return null;
+
+		const focus = this.resolveCommittedSpellCastReceiptFocus(receipt);
+		if (!focus?.item) return null;
+		if (`${focus.item.name}|${focus.item.source}` !== CharacterSheetState.EFA_ALCHEMICAL_SAVANT_FOCUS_UID) return null;
+
+		return {
+			id: "efa-alchemical-savant",
+			name: "Alchemical Savant",
+			sourceFeatureUid: CharacterSheetState.EFA_ALCHEMICAL_SAVANT_FEATURE_UID,
+			bonus: Math.max(1, this.getAbilityMod("int")),
+			eligibleKinds: ["healing", "damage"],
+			eligibleDamageTypes: [...CharacterSheetState.EFA_ALCHEMICAL_SAVANT_DAMAGE_TYPES],
+			focus: this.getSpellCastFocusReference(focus),
+		};
 	}
 
 	getSpellcastingFocusStatus () {
@@ -45233,6 +45291,7 @@ class CharacterSheetState {
 			innateSpellId: cast?.innateSpellId || null,
 			ruleId: normalizedFocusRequirement?.ruleId || null,
 			sourceFeatureUid: normalizedFocusRequirement?.sourceFeatureUid || null,
+			rolls: Array.isArray(cast?.rolls) ? cast.rolls : [],
 		};
 		const focusRule = normalizedFocusRequirement
 			? {
@@ -45247,7 +45306,7 @@ class CharacterSheetState {
 			ok: true,
 			committed: true,
 			castingClassUid: castingClass.uid,
-			castingSubclassUid: castingClass.subclassUid,
+			castingSubclassUid: castingClass.activeSubclassUid || castingClass.subclassUid,
 			spellEntryId,
 			spellUid,
 			spell: {

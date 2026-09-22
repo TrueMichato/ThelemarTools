@@ -100,8 +100,15 @@ EFA calculation fields are:
     hasEfaSoulOfArtifice,
     hasMagicalGuidance,
     magicItemAttunementLimit,
+    hasEfaAlchemicalSavant,
+    efaAlchemicalSavantBonus,
 }
 ```
+
+`hasEfaAlchemicalSavant` and `efaAlchemicalSavantBonus` are emitted only for
+the exact `Alchemist|Artificer|EFA|EFA` subclass at Artificer level 5+. The
+bonus is `max(1, Intelligence modifier)`; committed cast/focus/roll validation
+is owned by the spell-receipt subsystem rather than this calculation.
 
 EFA does **not** set the TCE-only `hasToolExpertise`, `infusionSlots`,
 `infusionsKnown`, `hasRitualCasting`, `hasSoulOfArtifice`, or
@@ -241,6 +248,11 @@ calculation exposes uses `max(0, current INT modifier)`, exact
 `Spare the Dying|XPHB` ownership, EFA spell save DC, 10-foot emanation,
 Artificer-level healing, and Lightning damage `2d4`/`3d4` at EFA 11/`4d4` at
 EFA 17.
+
+EFA subclass calculations land only in bounded, source-exact milestones.
+Alchemical Savant is implemented; do not infer the remaining EFA Alchemist
+features or project TCE subclass mechanics onto an EFA subclass merely because
+the names match.
 
 ## Adding a New Subclass
 
