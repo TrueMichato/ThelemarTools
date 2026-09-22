@@ -37,6 +37,7 @@ export function extractHamundRecipes (bookDatas, {fnDeriveEffectTags, report}) {
 				craftDC: null,
 				ingredients: parseIngredientList(cp.ingredients, {defaultSource: item.source}),
 				itemUid: getUid(item.name, item.source),
+				...(item.type ? {itemType: item.type} : {}),
 				entries: item.entries || [],
 			};
 
@@ -98,6 +99,7 @@ export function extractArcadiaRecipes (arcadia11Data, {fnDeriveEffectTags, repor
 			...(componentGroups.length > 1 ? {componentGroups} : {}),
 			outcomes,
 			itemUid: getUid(item.name, item.source),
+			...(item.type ? {itemType: item.type} : {}),
 			// Only the flavour text: the ingredient lists and outcome ladder are structured above,
 			// and repeating them verbatim would render the whole recipe twice.
 			entries: otherEntries,
@@ -184,6 +186,7 @@ export function extractCompleteCrafterRecipes (completeCrafterData, {fnDeriveEff
 			craftDC: null,
 			ingredients: [],
 			itemUid: getUid(item.name, item.source),
+			...(item.type ? {itemType: item.type} : {}),
 			entries: item.entries || [],
 		};
 

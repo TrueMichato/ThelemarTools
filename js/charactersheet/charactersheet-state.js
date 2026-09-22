@@ -29437,7 +29437,27 @@ class CharacterSheetState {
 					// =========================================================
 					// ARTIFICER SUBCLASSES
 					// =========================================================
-					const subclassName = cls.subclass?.name?.toLowerCase() || cls.subclass?.shortName?.toLowerCase();
+					const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
+					const subclassName = effectiveSubclass?.name?.toLowerCase() || effectiveSubclass?.shortName?.toLowerCase();
+					if (
+						isEfa
+						&& level >= 3
+						&& subclassName === "armorer"
+						&& `${effectiveSubclass?.source ?? ""}`.toUpperCase() === "EFA"
+					) {
+						(calculations.craftingTimeModifiers ||= []).push({
+							id: "efa-armorer-tools-of-the-trade-armor-crafting",
+							owner: {
+								kind: "subclassFeature",
+								name: "Tools of the Trade",
+								source: "EFA",
+								uid: "Tools of the Trade|Artificer|EFA|Armorer|EFA|3|EFA",
+							},
+							multiplier: 0.5,
+							filter: {itemTypes: ["LA", "MA", "HA"]},
+						});
+					}
+
 					if (!isEfa && subclassName && level >= 3) {
 						switch (subclassName) {
 							case "alchemist": {
@@ -47931,6 +47951,135 @@ class CharacterSheetState {
 	// Arcadia 8 has precedence: it owns identity, weight and `variantComponent`.
 	// A twin from another book may only ADD what Arcadia 8 lacks.
 	// =====================================================================
+
+	static _CRAFTING_TIME_FILTER_KEYS = Object.freeze(["itemTypes", "recipeCategories", "resultCategories"]);
+
+	/**
+	 * Resolve the output taxonomy used by crafting-time modifier filters.
+	 *
+	 * `recipe.itemType` is generated from the source item's existing 5etools type, while `item`
+	 * lets callers provide an already-resolved catalog entity. `category` is an explicit escape
+	 * hatch for future crafting surfaces whose output is not an item entity.
+	 */
+	static getCraftingResultCategory ({recipe = null, item = null, category = null} = {}) {
+		const explicit = `${category ?? ""}`.trim().toLowerCase();
+		if (explicit) return explicit;
+
+		const itemType = `${item?.type ?? recipe?.itemType ?? ""}`.split("|")[0].trim().toUpperCase();
+		if (item?.shield || itemType === "S") return "shield";
+		if (item?.armor || ["LA", "MA", "HA"].includes(itemType)) return "armor";
+		if (item?.weapon || ["A", "M", "R"].includes(itemType)) return "weapon";
+
+		return `${recipe?.recipeCategory ?? ""}`.trim().toLowerCase() || null;
+	}
+
+	/**
+	 * Validate, filter, and deterministically order feature-contributed crafting-time modifiers.
+	 *
+	 * Descriptors are emitted by `getFeatureCalculations().craftingTimeModifiers`:
+	 * `{id, owner: {kind, name, source, uid}, multiplier, filter}`.
+	 *
+	 * Filter keys are ANDed; values within one key are ORed. Unknown keys and non-positive
+	 * multipliers throw instead of silently producing a zero/impossible duration.
+	 */
+	static getApplicableCraftingTimeModifiers (modifiers, {recipe = null, item = null, category = null} = {}) {
+		const itemType = `${item?.type ?? recipe?.itemType ?? ""}`.split("|")[0].trim().toUpperCase();
+		const recipeCategory = `${recipe?.recipeCategory ?? ""}`.trim().toLowerCase();
+		const resultCategory = this.getCraftingResultCategory({recipe, item, category});
+		const seenIds = new Set();
+
+		return [...(Array.isArray(modifiers) ? modifiers : [])]
+			.map(modifier => {
+				if (!modifier || typeof modifier !== "object") throw new TypeError("Crafting-time modifiers must be objects.");
+				if (!`${modifier.id ?? ""}`.trim()) throw new TypeError("Crafting-time modifiers need a stable id.");
+				if (seenIds.has(modifier.id)) throw new TypeError(`Duplicate crafting-time modifier id "${modifier.id}".`);
+				seenIds.add(modifier.id);
+				if (!modifier.owner?.name || !modifier.owner?.source || !modifier.owner?.uid) {
+					throw new TypeError(`Crafting-time modifier "${modifier.id}" needs an exact owner name, source, and uid.`);
+				}
+				if (!Number.isFinite(modifier.multiplier) || modifier.multiplier <= 0) {
+					throw new RangeError(`Crafting-time modifier "${modifier.id}" needs a finite multiplier greater than zero.`);
+				}
+
+				const filter = modifier.filter || {};
+				const unknownKeys = Object.keys(filter).filter(key => !this._CRAFTING_TIME_FILTER_KEYS.includes(key));
+				if (unknownKeys.length) throw new TypeError(`Crafting-time modifier "${modifier.id}" has unsupported filter key(s): ${unknownKeys.join(", ")}.`);
+
+				const matches = (prop, actual, {isUpperCase = false} = {}) => {
+					if (filter[prop] == null) return true;
+					if (!Array.isArray(filter[prop]) || !filter[prop].length) {
+						throw new TypeError(`Crafting-time modifier "${modifier.id}" filter "${prop}" must be a non-empty array.`);
+					}
+					const normalizedActual = isUpperCase ? `${actual ?? ""}`.toUpperCase() : `${actual ?? ""}`.toLowerCase();
+					return filter[prop].some(value => (isUpperCase ? `${value}`.toUpperCase() : `${value}`.toLowerCase()) === normalizedActual);
+				};
+
+				if (!matches("itemTypes", itemType, {isUpperCase: true})) return null;
+				if (!matches("recipeCategories", recipeCategory)) return null;
+				if (!matches("resultCategories", resultCategory)) return null;
+				return {
+					...modifier,
+					owner: {...modifier.owner},
+					filter: {...filter},
+				};
+			})
+			.filter(Boolean)
+			.sort((a, b) => {
+				if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+				if (a.owner.uid === b.owner.uid) return 0;
+				return a.owner.uid < b.owner.uid ? -1 : 1;
+			});
+	}
+
+	/**
+	 * Get the feature contributions which apply to one crafting result.
+	 */
+	getCraftingTimeModifiers (context = {}) {
+		return this.constructor.getApplicableCraftingTimeModifiers(
+			this.getFeatureCalculations().craftingTimeModifiers || [],
+			context,
+		);
+	}
+
+	/**
+	 * Calculate baseline and effective crafting time for a quantity of one recipe.
+	 *
+	 * @returns {{
+	 *   baselineWorkweeks: number,
+	 *   effectiveWorkweeks: number,
+	 *   multiplier: number,
+	 *   quantity: number,
+	 *   sourceBreakdown: Array<{id: string, name: string, source: string, uid: string, multiplier: number}>,
+	 *   modifiers: Array<object>,
+	 * }}
+	 */
+	getCraftingTimeCalculation ({baseWorkweeks, quantity = 1, recipe = null, item = null, category = null} = {}) {
+		if (!Number.isFinite(baseWorkweeks) || baseWorkweeks <= 0) {
+			throw new RangeError("Crafting base workweeks must be a finite number greater than zero.");
+		}
+		if (!Number.isFinite(quantity) || quantity <= 0) {
+			throw new RangeError("Crafting quantity must be a finite number greater than zero.");
+		}
+
+		const modifiers = this.getCraftingTimeModifiers({recipe, item, category});
+		const multiplier = modifiers.reduce((acc, modifier) => acc * modifier.multiplier, 1);
+		const baselineWorkweeks = baseWorkweeks * quantity;
+
+		return {
+			baselineWorkweeks,
+			effectiveWorkweeks: baselineWorkweeks * multiplier,
+			multiplier,
+			quantity,
+			sourceBreakdown: modifiers.map(modifier => ({
+				id: modifier.id,
+				name: modifier.owner.name,
+				source: modifier.owner.source,
+				uid: modifier.owner.uid,
+				multiplier: modifier.multiplier,
+			})),
+			modifiers,
+		};
+	}
 
 	/**
 	 * Parentheticals that are packaging, not identity — "Salamander Scale (large pouch)" and

@@ -121,6 +121,7 @@ reads that file.
   ],
 
   "itemUid": "basilisk burgers|arcadia11",
+  "itemType": "FD",                       // output item's existing 5etools item type
   "value": 5000,
   "entries": [ /* the book's own text, verbatim */ ],
   "effectTags": ["food", "petrified", "poison damage", "…"],

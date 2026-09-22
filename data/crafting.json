@@ -68393,6 +68393,7 @@
 				}
 			],
 			"itemUid": "+1 dragon arrow|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"You have a +1 bonus to your attack and damage rolls made with this arrow corresponding to its rarity. When you make a successful hit with this arrow, you also deal an additional {@damage 1d8} damage of the type corresponding to the damage type this arrow was crafted from. You also have advantage on attacks made with this ammunition against any targets with the dragon creature type.",
 				"When used in a successful attack, there is a {@chance 70|30 percent chance|Dragon Arrow|The arrow does not lose its magic.|The arrow loses its magic.} that this arrow loses all magical properties and becomes a normal arrow.",
@@ -68428,6 +68429,7 @@
 				}
 			],
 			"itemUid": "+1 dragon bolt|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"You have a +1 bonus to your attack and damage rolls made with this bolt corresponding to its rarity. When you make a successful hit with this bolt, you also deal an additional {@damage 1d8} damage of the type corresponding to the damage type this bolt was crafted from. You also have advantage on attacks made with this ammunition against any targets with the dragon creature type.",
 				"When used in a successful attack, there is a {@chance 70|30 percent chance|Dragon Bolt|The bolt does not lose its magic.|The bolt loses its magic.} that this bolt loses all magical properties and becomes a normal bolt.",
@@ -68463,6 +68465,7 @@
 				}
 			],
 			"itemUid": "+1 dragon wand|hhhvi",
+			"itemType": "WD|DMG",
 			"entries": [
 				"While holding this wand, you gain a (+1) bonus to spell attack rolls determined by the wand rarity. In addition, you have advantage on any spell attack roll you make that deals the same damage type as the dragon this wand was crafted from.",
 				"If that spell attack hits, you also deal (1) extra damage dice of that damage type equal to the spell attack bonus granted by this item.",
@@ -68499,6 +68502,7 @@
 				}
 			],
 			"itemUid": "+1 dusk armor|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you have a +1 bonus to AC. In addition, while wearing this armor in dim light or darkness, you may take the {@action Hide} action as a bonus action. If you take the {@action Hide} action in this way, you do not suffer the usual penalty that normally applies to Dexterity ({@skill Stealth}) checks made in plate armor."
 			],
@@ -68526,6 +68530,7 @@
 				}
 			],
 			"itemUid": "+1 mind whip|hhhvii",
+			"itemType": "M",
 			"entries": [
 				"{@note This item is in improved version of the {@item Mind Whip|HHHVI}.}",
 				"When you make a {@action grapple} check, you may choose to do so with this whip instead of using your free hand. If you do so and if you succeed on the grapple check, you may force the {@condition grappled} creature to succeed on a {@dc 15} Intelligence saving throw or be {@condition stunned} until the grapple ends. While grappling a creature, this whip may not be used to attack another target. Once this ability has been used 4 times in a day, it cannot be used again until the next dawn.",
@@ -68556,6 +68561,7 @@
 				}
 			],
 			"itemUid": "+1 shield of reflection|hhhvii",
+			"itemType": "S",
 			"entries": [
 				"While wearing this shield, you gain a +1 bonus to your AC. In addition, if you make a successful saving throw against a spell, or a spell attack misses you, you may spend your reaction to choose another creature (including the spellcaster) that you can see within 120 feet of you. The spell targets the chosen creature instead of you. If the spell forced a saving throw, the chosen creature makes its own save. If the spell was an attack, the attack roll is rerolled against the chosen creature."
 			],
@@ -68584,6 +68590,7 @@
 				}
 			],
 			"itemUid": "+2 dragon arrow|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"You have a +2 bonus to your attack and damage rolls made with this arrow corresponding to its rarity. When you make a successful hit with this arrow, you also deal an additional {@damage 2d8} damage of the type corresponding to the damage type this arrow was crafted from. You also have advantage on attacks made with this ammunition against any targets with the dragon creature type.",
 				"When used in a successful attack, there is a {@chance 70|30 percent chance|Dragon Arrow|The arrow does not lose its magic.|The arrow loses its magic.} that this arrow loses all magical properties and becomes a normal arrow.",
@@ -68619,6 +68626,7 @@
 				}
 			],
 			"itemUid": "+2 dragon bolt|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"You have a +2 bonus to your attack and damage rolls made with this bolt corresponding to its rarity. When you make a successful hit with this bolt, you also deal an additional {@damage 2d8} damage of the type corresponding to the damage type this bolt was crafted from. You also have advantage on attacks made with this ammunition against any targets with the dragon creature type.",
 				"When used in a successful attack, there is a {@chance 70|30 percent chance|Dragon Bolt|The bolt does not lose its magic.|The bolt loses its magic.} that this bolt loses all magical properties and becomes a normal bolt.",
@@ -68654,6 +68662,7 @@
 				}
 			],
 			"itemUid": "+2 dragon wand|hhhvi",
+			"itemType": "WD|DMG",
 			"entries": [
 				"While holding this wand, you gain a (+2) bonus to spell attack rolls determined by the wand rarity. In addition, you have advantage on any spell attack roll you make that deals the same damage type as the dragon this wand was crafted from.",
 				"If that spell attack hits, you also deal (2) extra damage dice of that damage type equal to the spell attack bonus granted by this item.",
@@ -68690,6 +68699,7 @@
 				}
 			],
 			"itemUid": "+2 dusk armor|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you have a +2 bonus to AC. In addition, while wearing this armor in dim light or darkness, you may take the {@action Hide} action as a bonus action. If you take the {@action Hide} action in this way, you do not suffer the usual penalty that normally applies to Dexterity ({@skill Stealth}) checks made in plate armor."
 			],
@@ -68717,6 +68727,7 @@
 				}
 			],
 			"itemUid": "+3 dragon arrow|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"You have a +3 bonus to your attack and damage rolls made with this arrow corresponding to its rarity. When you make a successful hit with this arrow, you also deal an additional {@damage 3d8} damage of the type corresponding to the damage type this arrow was crafted from. You also have advantage on attacks made with this ammunition against any targets with the dragon creature type.",
 				"When used in a successful attack, there is a {@chance 70|30 percent chance|Dragon Arrow|The arrow does not lose its magic.|The arrow loses its magic.} that this arrow loses all magical properties and becomes a normal arrow.",
@@ -68752,6 +68763,7 @@
 				}
 			],
 			"itemUid": "+3 dragon bolt|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"You have a +3 bonus to your attack and damage rolls made with this bolt corresponding to its rarity. When you make a successful hit with this bolt, you also deal an additional {@damage 3d8} damage of the type corresponding to the damage type this bolt was crafted from. You also have advantage on attacks made with this ammunition against any targets with the dragon creature type.",
 				"When used in a successful attack, there is a {@chance 70|30 percent chance|Dragon Bolt|The bolt does not lose its magic.|The bolt loses its magic.} that this bolt loses all magical properties and becomes a normal bolt.",
@@ -68787,6 +68799,7 @@
 				}
 			],
 			"itemUid": "+3 dragon wand|hhhvi",
+			"itemType": "WD|DMG",
 			"entries": [
 				"While holding this wand, you gain a (+3) bonus to spell attack rolls determined by the wand rarity. In addition, you have advantage on any spell attack roll you make that deals the same damage type as the dragon this wand was crafted from.",
 				"If that spell attack hits, you also deal (3) extra damage dice of that damage type equal to the spell attack bonus granted by this item.",
@@ -68823,6 +68836,7 @@
 				}
 			],
 			"itemUid": "+3 dusk armor|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you have a +3 bonus to AC. In addition, while wearing this armor in dim light or darkness, you may take the {@action Hide} action as a bonus action. If you take the {@action Hide} action in this way, you do not suffer the usual penalty that normally applies to Dexterity ({@skill Stealth}) checks made in plate armor."
 			],
@@ -68878,6 +68892,7 @@
 				}
 			],
 			"itemUid": "a perfect roast|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Any bonehead can throw a deer on a spit and burn it over a fire, but making meat taste good can be deceptively difficult.}"
 			],
@@ -68946,6 +68961,7 @@
 				}
 			],
 			"itemUid": "abyssal oil|hhhviii",
+			"itemType": "Oil",
 			"entries": [
 				"This green, viscous oil carries within it all of the rage and power of the Demon Lords of the Abyss. The oil can coat one melee weapon or up to 10 pieces of slashing or piercing ammunition. Applying the oil takes 1 minute. For 1 hour, the coated item is magical, and any critical hit made with that item deals an extra {@damage 6d8} damage. This damage is not doubled."
 			],
@@ -68972,6 +68988,7 @@
 				}
 			],
 			"itemUid": "acrobat's plate|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you have advantage on Dexterity saving throws and Dexterity ({@skill Acrobatics}) checks. In addition, due to its unique materials and design, this armor has no Strength requirement and does not impose disadvantage on Dexterity ({@skill Stealth}) checks."
 			],
@@ -68999,6 +69016,7 @@
 				}
 			],
 			"itemUid": "adult remorhaz plate|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"This full set of plate armor was crafted from the insectoid carapace of a remorhaz. While wearing this armor, you have resistance to both fire and cold damage.",
 				"You also gain a +1 bonus to AC while wearing this armor."
@@ -69029,6 +69047,7 @@
 				}
 			],
 			"itemUid": "alpha grick hide coat|hhhvi",
+			"itemType": "LA",
 			"entries": [
 				"While wearing this armor, you have advantage on Dexterity ({@skill Stealth}) checks made to hide in rocky terrain and on Strength ({@skill Athletics}) checks made to climb rocky terrain.",
 				"If this is the rare version of this armor, you also gain a +1 bonus to AC while wearing this item."
@@ -69922,6 +69941,7 @@
 				}
 			],
 			"itemUid": "antimagic shield|hhhvii",
+			"itemType": "S",
 			"entries": [
 				"While wearing this shield, you have advantage on saving throws against spells, and any creature making a spell attack against you has disadvantage on the attack roll. If you succeed on your saving throw against a spell, or if a spell attack misses you, an additional effect might occur, as determined by rolling a {@dice d6}:",
 				{
@@ -69979,6 +69999,7 @@
 				}
 			],
 			"itemUid": "armor of nullification|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you gain a +3 bonus to AC, you are immune to necrotic damage, and if you are struck by a critical hit, you may use your reaction to turn it into a normal hit instead, cancelling any effects that would normally be triggered by that critical hit."
 			],
@@ -70009,6 +70030,7 @@
 				}
 			],
 			"itemUid": "armor of the eternal flame|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you gain a +3 bonus to AC and you have resistance to fire damage. In addition, if you receive damage that would reduce your hit points to 0, you may use your reaction to negate that damage and release a fiery nova from yourself, forcing all creatures within 10 feet of you to make a {@dc 20} Dexterity saving throw, suffering {@damage 4d8} fire damage on a failed save, or half as much damage on a successful one. Once you use this ability, you may not use it again until your next long rest."
 			],
@@ -70039,6 +70061,7 @@
 				}
 			],
 			"itemUid": "armor of the forest sentinel|hhhvii",
+			"itemType": "HA",
 			"entries": [
 				"Despite being made entirely of bark, this set of armor possesses the same attributes as a normal set of {@item splint armor|PHB}.",
 				"In addition, while wearing this armor, you may cast the {@spell tree stride} spell once per day without requiring any spell components or spell slots."
@@ -70072,6 +70095,7 @@
 				}
 			],
 			"itemUid": "armor of the gnoll lord|hhhviii",
+			"itemType": "LA",
 			"entries": [
 				"The savagery of the gnolls is undeniable. So vicious and brutal are they, that they even dream of one day tearing into and dismembering the body of {@creature Yeenoghu|MTF}, their own patron deity. Among the most powerful of the gnolls is the myth of a suit of armor crafted from the tanned hide of the Gnoll Lord himself, the gristle and blood soaking into their own skin and giving them demonic power. Far from being disgusted by his followers' brutal veneration, {@creature Yeenoghu|MTF} actually welcomes them to try; it simply means more prey for him to devour.",
 				"In order to attune to this item, you must wear it while hunting and killing a humanoid creature without the aid of weapons or magic. After killing them, you must then consume at least 1 pound of their raw flesh. Doing so causes the armor to fuse to your own body, making it act as a second, protective skin that you cannot remove so long as you remain attuned to this item. While attuned to this item, you become more gnoll-like: you become covered in shaggy fur, your eyes become yellow and wild, and your nails and teeth become sharper. As part of this, you may use your nails and teeth as natural weapons to make unarmed strikes. If you hit, this attack deals slashing damage equal to {@damage 1d10} + your Strength modifier and you may make a {@action grapple} check against your target as a free action as you grip them in a wild frenzy. You return to your original form immediately if your attunement to this item ends.",
@@ -70170,6 +70194,7 @@
 				}
 			],
 			"itemUid": "armor of the guardian|hhhvi",
+			"itemType": "MA",
 			"entries": [
 				"While wearing this armor, you gain a +1 bonus to AC. You also gain a special connection to the wearer of the amulet that was connected to the {@creature shield guardian|MM} that provided the breastplate to craft this armor. Whenever the wearer of that amulet takes damage and is within 60 feet of you, half of that damage (rounded up) is transferred to you.",
 				"In addition, whenever a creature makes an attack against the wearer of the amulet, you may use your reaction to grant a +2 bonus to the wearer's AC if you are within 5 feet of them."
@@ -70199,6 +70224,7 @@
 				}
 			],
 			"itemUid": "armor of the infernal enforcer|hhhviii",
+			"itemType": "LA",
 			"entries": [
 				"You gain a +3 bonus to AC while wearing this armor and you gain resistance to cold, fire, and poison damage. In addition, when you take damage you may use your reaction to cause an infernal sound to bellow forth from the armor, forcing all creatures of your choice within 30 feet of you to make a {@dc 20} Wisdom saving throw or become {@condition frightened} of you for 1 minute. A creature can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success. A creature that saves against this effect is immune to this ability for 24 hours. Once you use this ability once, you cannot use it again until you finish a short or long rest."
 			],
@@ -70281,6 +70307,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "bag of colding|comcraf",
+			"itemType": "G",
 			"entries": [
 				"This white leather bag is a variant of the {@item bag of holding}. The bag itself is imbued magically to keep everything inside of it at 40 degrees Fahrenheit, allowing it to keep any perishable chilled and fresh. The bag can hold up to 250 pounds, not exceeding a volume of 64 cubic feet."
 			],
@@ -70447,6 +70474,7 @@
 				}
 			],
 			"itemUid": "basilisk burgers|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i You ever see how much those things sleep? Perfect fat-to-meat ratio for burgers.}"
 			],
@@ -70483,6 +70511,7 @@
 				}
 			],
 			"itemUid": "basilisk gaze poison|hhhvi",
+			"itemType": "G",
 			"entries": [
 				"A creature that drinks this poison must succeed on a {@dc 12} Constitution saving throw or become {@condition poisoned} for 24 hours. While {@condition poisoned} in this way, a creature magically turns to stone and is {@condition petrified}. A creature remains {@condition petrified} like this until either the 24 hours have passed, or until freed by the {@spell greater restoration} spell or similar magic."
 			],
@@ -70541,6 +70570,7 @@
 				}
 			],
 			"itemUid": "berserker brew|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become instilled with a maddening thirst for violence for the next 10 minutes. During this time, you deal an extra {@damage 2d6} damage to your target whenever you make a successful weapon attack, and you cannot be {@condition charmed} or {@condition frightened}. However, if you do not cause damage to a target on your turn, you suffer {@damage 2d6} psychic damage as your rage burns into your own mind. This damage cannot be reduced in any way. This crimson red potion continuously roils and froths as if constantly agitated by an unseen force."
 			],
@@ -70571,6 +70601,7 @@
 				}
 			],
 			"itemUid": "bewildering bagpipes|hhhvii",
+			"itemType": "INS",
 			"entries": [
 				"This set of {@item bagpipes|PHB} creates a sound similar to that of a grung's chirr when used. If a bard uses this instrument as a spellcasting focus while attempting to {@action cast a spell} that would impose the {@condition charmed|PHB|charm} condition on a target, the range of that spell is doubled."
 			],
@@ -70691,6 +70722,7 @@
 				}
 			],
 			"itemUid": "big wild charcuterie board|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Jerky, but fancy-like.}"
 			],
@@ -70746,6 +70778,7 @@
 				}
 			],
 			"itemUid": "blight oil|hhhvi",
+			"itemType": "Oil",
 			"entries": [
 				"This bottle contains enough oil to cover up to 10 square feet of surface area. Once this oil is rubbed into the surface of vegetation, it will soak half a foot into it. Vegetation soaked in this oil becomes as soft and malleable as wet clay and retains any physical manipulation done to it.",
 				"The oil dries after 10 minutes, causing the vegetation it was rubbed on to become solid again."
@@ -70942,6 +70975,7 @@
 				}
 			],
 			"itemUid": "breastplate of the boundary|hhhvii",
+			"itemType": "MA",
 			"entries": [
 				"While wearing and attuned to this breastplate, you constantly teeter on the boundary between life and death. You have resistance to necrotic damage, and if you end your turn with 0 hit points, you regain 1 hit point. In addition, you are immune to any spell or ability that would attempt to kill you instantly without dealing damage, instantly reduce you to 0 hit points without dealing damage, or attempt to remove your soul from your body without your consent (except for the curse described below).",
 				{
@@ -71074,6 +71108,7 @@
 				}
 			],
 			"itemUid": "bulette bangers and mash|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i This landshark is swimming in a sea of mash and gravy.}"
 			],
@@ -71104,6 +71139,7 @@
 				}
 			],
 			"itemUid": "camouflage chitin|hhhvi",
+			"itemType": "MA",
 			"entries": [
 				"This full chitin armor has an AC of 13 + Dexterity modifier (max 2). While wearing this armor, you may change its appearance to match the colour and texture of your surroundings. If you do so, you gain advantage on Dexterity ({@skill Stealth}) checks made to hide."
 			],
@@ -71285,6 +71321,7 @@
 				}
 			],
 			"itemUid": "cauldron bread with honey butter|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i There's no better way to break a fast.}"
 			],
@@ -71359,6 +71396,7 @@
 				}
 			],
 			"itemUid": "chain of command|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"While holding this weapon, you may use this weapon to make {@action grapple} checks instead of using a free hand. While you have a creature {@condition grappled} this way, you can't {@action attack} with this weapon.",
 				"If you have a creature {@condition grappled} by this weapon, you may spend your action to force that creature to succeed on a {@dc 15} Wisdom saving throw or be {@condition charmed} by you for 24 hours. While {@condition charmed}, the creature obeys your verbal or telepathic commands to the best of its ability. If the creature suffers any harm or receives a command that would be hazardous to itself, it can repeat the saving throw, ending the effect on a success. If the creature successfully saves against this effect, or if the effect on it ends, it becomes immune to this effect for the next 24 hours.",
@@ -71392,6 +71430,7 @@
 				}
 			],
 			"itemUid": "chain of entanglement|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"You may use this weapon instead of your free hand when you make {@action grapple} checks. While you have a creature {@condition grappled} this way, you cannot make {@action attack|PHB|attacks} with this weapon.",
 				"Additionally, while holding this item, you may spend an action to speak this item's command word and throw it into an unoccupied space within 5 feet of you. At this point, this weapon becomes magically animate and may attack and move freely for the next minute. As a bonus action on your turn, you may either mentally command the chain to move up to 20 feet in any direction or make an attack against a target within 10 feet of it. At the end of the minute or if you drop {@condition unconscious}, the chain drops to the ground and this ability cannot be used again until the next dawn.",
@@ -71451,6 +71490,7 @@
 				}
 			],
 			"itemUid": "charming knife|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"As an action, you may speak this weapon's command word to activate its ability for the next minute. While this dagger's ability is active, any damage it deals to a creature that is {@condition charmed} by you does not count as damaging it or doing anything harmful to it for the sake of potentially ending the {@condition charmed|PHB|charm effect}. Once this ability has been used once, it cannot be used again until the next dawn."
 			],
@@ -71533,6 +71573,7 @@
 				}
 			],
 			"itemUid": "chimera carpaccio|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Three tastes in one animal...what's not to like?}",
 				"portions chimera meat",
@@ -71601,6 +71642,7 @@
 				}
 			],
 			"itemUid": "chimera trident|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"This trident's three horns are made of a chimera's goat horn, lion tooth, and dragon fang. This trident has three abilities, each of which may be used upon a successful melee weapon attack with this weapon.",
 				{
@@ -71693,6 +71735,7 @@
 				}
 			],
 			"itemUid": "chuul boil|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i It's not a true beach party until someone breaks out the chuul claws.}"
 			],
@@ -71755,6 +71798,7 @@
 				}
 			],
 			"itemUid": "cinder shield|hhhvi",
+			"itemType": "S",
 			"entries": [
 				"You have a +1 bonus to AC while wearing this shield. While wearing this shield, if you are subjected to an effect that allows you to make a Dexterity saving throw to take only half damage and if that damage type is fire, you may use your reaction to instead take no damage if you succeed on the saving throw, interposing your shield between yourself and the source of the effect."
 			],
@@ -72200,6 +72244,7 @@
 				}
 			],
 			"itemUid": "cloud step oil|hhhvi",
+			"itemType": "Oil",
 			"entries": [
 				"When some of this oil is poured out, it immediately has a reaction to the air around it and magically expands into a semi-solid cloud that is capable of floating while holding weight on top of it. Up to 50 pounds of weight per square foot can be placed on one of these clouds. If more weight than this is placed on it, that section of cloud disappears instantly. Clouds are self-supporting in the air but can also be used to make structures such as bridges using careful placement of the oil. Clouds weigh virtually nothing and can be moved around if external force is applied to them.",
 				"The clouds last for 1 hour after pouring, after which they disappear. One bottle of this oil is enough to create 500 square feet of clouds."
@@ -72227,6 +72272,7 @@
 				}
 			],
 			"itemUid": "coating of corrosion|hhhviii",
+			"itemType": "Oil",
 			"entries": [
 				"This bright green oil is magically attuned to react when it is used to coat a weapon, transmuting itself into a highly corrosive acid that leaves the weapon undamaged. It can be used to coat up to 10 pieces of slashing or piercing ammunition or one slashing or piercing weapon. Applying the oil takes 1 minute. For 1 hour, any successful attack rolls made with a coated weapon deals an extra {@damage 2d6} acid damage."
 			],
@@ -72253,6 +72299,7 @@
 				}
 			],
 			"itemUid": "concoction of companionship|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"This gray potion is divided into two layers that never mix: a cloudy top half, and a clear bottom half. As an action, you may drink the cloudy half, allowing another creature to drink the clear half. For the next 7 days, whoever drank the cloudy half is considered the \"guardian\" and the drinker of the clear half is considered the \"charge\" as both of you gain a psychic connection with one another. If one creature drinks both halves or if no creature drinks the second half within 1 minute of the first, the magic of this potion fades and it becomes useless.",
 				"Guardians and charges may communicate telepathically over any distance and are always aware of each other's location, direction, and distance from each other, so long as they are on the same plane of existence as each other. If a creature within the guardian's reach damages their charge, they may spend their reaction to make a melee weapon attack against the damaging creature. This attack is made with advantage. In addition, if a charge starts their turn with 0 hit points while within 60 feet of their guardian, they instantly stabilize."
@@ -72286,6 +72333,7 @@
 				}
 			],
 			"itemUid": "concoction of contamination|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"This pale green potion constantly appears to form clots of material inside it that quickly turn grey and dissolve back into the liquid. For 1 hour after you drink this potion, your blood becomes a dangerous disease-carrying fluid. This does not harm you, but it does grant you the following abilities:",
 				{
@@ -72356,6 +72404,7 @@
 				}
 			],
 			"itemUid": "contagion plate|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you gain a +1 bonus to AC, a swim speed equal to your walking speed, you have resistance to poison damage, and advantage on saving throws against effects that would cause you to become {@condition poisoned}. In addition, if you are submerged in a body of water, you may use your bonus action to speak this armor's command word, causing it to emit an aura of contagion for the next 10 minutes that befouls the water 30 feet around you at the start of each of your turns. Befouled water is considered {@table Screen; Obscured Areas|ScreenDungeonKit|lightly obscured} and any creature other than you that consumes or swims in this water must make a {@dc 18} Constitution saving throw. On a successful save, a creature is immune to the effects of this water for 24 hours. On a failed save, a creature takes {@damage 4d6} poison damage and is {@condition poisoned} for 1 minute. At the end of this time, the {@condition poisoned} creature must repeat the saving throw. On a failure, the creature takes {@damage 4d8} poison damage and is {@condition poisoned} until it finishes a long rest.",
 				"You may end this effect early by using your bonus action to speak the command word again, ending the aura and removing any befouling effect on contaminated water."
@@ -72645,6 +72694,7 @@
 				}
 			],
 			"itemUid": "curse of desolation|hhhvii",
+			"itemType": "Curse",
 			"entries": [
 				"This scroll contains blasphemous words written in a dark ink, that when read aloud can permanently alter the makeup of a magical object. You may spend 1 hour reading this scroll aloud while holding a magical item. At the end of that hour, that item permanently becomes a cursed item with a curse that reads as follows:",
 				{
@@ -72686,6 +72736,7 @@
 				}
 			],
 			"itemUid": "curse of jealousy|hhhvi",
+			"itemType": "Curse",
 			"entries": [
 				"This scroll contains blasphemous words written in a dark ink, that when read aloud can permanently alter the makeup of a magical object. You may spend 1 hour reading this scroll aloud while holding a magical item. At the end of that hour, that item permanently becomes a cursed item with a curse that reads as follows:",
 				{
@@ -72719,6 +72770,7 @@
 				}
 			],
 			"itemUid": "curse of never-ending fear|hhhvii",
+			"itemType": "Curse",
 			"entries": [
 				"This scroll contains blasphemous words written in a dark ink, that when read aloud can permanently alter the makeup of a magical object. You may spend 1 hour reading this scroll aloud while holding a magical item. At the end of that hour, that item permanently becomes a cursed item with a curse that reads as follows:",
 				{
@@ -72758,6 +72810,7 @@
 				}
 			],
 			"itemUid": "curse of nightmares|hhhvi",
+			"itemType": "Curse",
 			"entries": [
 				"This scroll contains blasphemous words written in a dark ink, that when read aloud can permanently alter the makeup of a magical object. You may spend 1 hour reading this scroll aloud while holding a magical item. At the end of that hour, that item permanently becomes a cursed item with a curse that reads as follows:",
 				{
@@ -72790,6 +72843,7 @@
 				}
 			],
 			"itemUid": "curse of spite|hhhvi",
+			"itemType": "Curse",
 			"entries": [
 				"This scroll contains blasphemous words written in a dark ink, that when read aloud can permanently alter the makeup of a magical object. You may spend 1 hour reading this scroll aloud while holding a magical item. At the end of that hour, that item permanently becomes a cursed item with a curse that reads as follows:",
 				{
@@ -72825,6 +72879,7 @@
 				}
 			],
 			"itemUid": "curse of sun's bane|hhhvii",
+			"itemType": "Curse",
 			"entries": [
 				"This scroll contains blasphemous words written in a dark ink, that when read aloud can permanently alter the makeup of a magical object. You may spend 1 hour reading this scroll aloud while holding a magical item. At the end of that hour, that item permanently becomes a cursed item with a curse that reads as follows:",
 				{
@@ -72864,6 +72919,7 @@
 				}
 			],
 			"itemUid": "curse of vengeance|hhhvii",
+			"itemType": "Curse",
 			"entries": [
 				"This scroll contains blasphemous words written in a dark ink, that when read aloud can permanently alter the makeup of a magical object. You may spend 1 hour reading this scroll aloud while holding a magical item. At the end of that hour, that item permanently becomes a cursed item with a curse that reads as follows:",
 				{
@@ -72902,6 +72958,7 @@
 				}
 			],
 			"itemUid": "curse of weakening|hhhvii",
+			"itemType": "Curse",
 			"entries": [
 				"This scroll contains blasphemous words written in a dark ink, that when read aloud can permanently alter the makeup of a magical object. You may spend 1 hour reading this scroll aloud while holding a magical item. At the end of that hour, that item permanently becomes a cursed item with a curse that reads as follows:",
 				{
@@ -72939,6 +72996,7 @@
 				}
 			],
 			"itemUid": "dagger of apathy|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"While this item is in your hand, you may use your bonus action to speak its command word, causing it to radiate a lifeless energy for the next minute. While it is radiating this energy, any creature hit by this weapon that is not a construct or undead must succeed on a {@dc 12} Charisma saving throw or be struck by an overwhelming sense of apathy and lifelessness for 1 minute. An apathetic creature has disadvantage on attack rolls and saving throws, and on its turn may use either an action or a bonus action, but not both. At the end of its turn, a creature affected by this ability may attempt the saving throw again, ending the effect on itself on a success. A creature that succeeds this saving throw is immune to the effects of this dagger for the next 24 hours."
 			],
@@ -72969,6 +73027,7 @@
 				}
 			],
 			"itemUid": "dagger of life stealing|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"When you attack a creature with this magic weapon and roll a 20 on the attack roll, that target takes an extra 5 necrotic damage if it isn't a construct or an undead. You also gain 5 temporary hit points."
 			],
@@ -73058,6 +73117,7 @@
 				}
 			],
 			"itemUid": "death's grip|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"You gain a +1 bonus to attack and damage rolls made with this magical weapon. When you hit a target with this weapon on your turn, you may immediately use your bonus action to attempt to {@action grapple} them, using this weapon instead of a free hand. If your target is a creature with less than half of its maximum hit points, your {@action grapple} check is made with advantage, and if it is successful, your target is considered {@condition restrained} as well.",
 				"While you have a creature {@condition grappled} in this way, you may not make attacks with this weapon."
@@ -73085,6 +73145,7 @@
 				}
 			],
 			"itemUid": "debilitating whip|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"This whip has 6 wicked tails made from a roper tendril that still had its hair-like growths intact. The wielder of this whip may choose to make a {@action grapple} check using the whip instead of their free hand.",
 				"A creature {@condition grappled} by this whip is considered {@condition restrained} on top of being {@condition grappled} and has disadvantage on all Strength checks and Strength saving throws."
@@ -73195,6 +73256,7 @@
 				}
 			],
 			"itemUid": "demon bomb|hhhvi",
+			"itemType": "EXP|DMG",
 			"entries": [
 				"This bomb is a black iron sphere filled with balor ashes and explosive elements and is roughly the size of an orange. You may spend an action to light and throw this item at a point within 20 feet. At the end of your next turn, this item will explode, forcing all creatures within 20 feet of it to make a {@dc 20} Dexterity saving throw, taking {@damage 15d6} fire damage on a failure, or half as much damage on a success. The explosion ignites flammable objects in this area that aren't being worn or carried."
 			],
@@ -73222,6 +73284,7 @@
 				}
 			],
 			"itemUid": "demon cannon|hhhviii",
+			"itemType": "R",
 			"entries": [
 				"This unique crossbow has replaced its string firing mechanism with a single tube inscribed with Abyssal runes that makes this weapon seem more like a handheld cannon with a trigger. When you make a critical hit with this magical weapon against a target, you may choose for your ammunition to burst, creating a 5-foot wide, 60-foot long line of dark energy behind your target that forces all creatures caught in it to make a {@dc 16} Dexterity saving throw. On a failure, a target takes {@damage 4d10} force damage, or half that on a success."
 			],
@@ -73250,6 +73313,7 @@
 				}
 			],
 			"itemUid": "demon leather|hhhvi",
+			"itemType": "LA",
 			"entries": [
 				"You gain a +1 bonus to AC while wearing this armor. In addition, when you first attune to this armor, you may choose to be resistant to either cold, fire, or lightning damage while wearing this armor. You may change which damage type you are resistant to after you take a long rest while wearing this armor."
 			],
@@ -73466,6 +73530,7 @@
 				}
 			],
 			"itemUid": "dino bbq|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Why have a regular BBQ when you can have a dinocue?}",
 				"{@i Note: Good BBQ takes time. This recipe requires 8 hours of uninterrupted work during which the cook can't rest.}"
@@ -73525,6 +73590,7 @@
 				}
 			],
 			"itemUid": "doublet of psionic protection|hhhvii",
+			"itemType": "LA",
 			"entries": [
 				"While wearing this armor, you have resistance to psychic damage, and are immune to diviniation spells and any effect that would sense your emotions or read your thoughts. You also have advantage on saving throws against any effect that would impose the {@condition charmed|PHB|charm} condition on you."
 			],
@@ -73567,6 +73633,7 @@
 				}
 			],
 			"itemUid": "dra-gone paste|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"You may spend 1 minute applying a dose of this paste to yourself. For the next 24 hours or until the paste is washed off, you have advantage on any Dexterity ({@skill Stealth}) checks made to hide from creatures with the dragon subtype as well as disadvantage on any Charisma checks made when interacting with creatures with the dragon subtype. This item has enough paste for 5 doses."
 			],
@@ -73631,6 +73698,7 @@
 				}
 			],
 			"itemUid": "drag-on paste|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"You may spend 1 minute applying a dose of this paste to yourself. For the next 24 hours, or until the paste is washed off, you have advantage on any Charisma checks made when interacting with creatures with the dragon subtype, as well as disadvantage on Dexterity ({@skill Stealth}) checks made to hide from creatures with the dragon subtype. This item has enough paste for 5 doses."
 			],
@@ -73671,6 +73739,7 @@
 				}
 			],
 			"itemUid": "dragon arrow|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"You have a bonus to your attack and damage rolls made with this arrow corresponding to its rarity. When you make a successful hit with this arrow, you also deal an additional {@damage 1d8} (uncommon) {@damage 2d8} (rare), or {@damage 3d8} (very rare) damage of the type corresponding to the damage type this arrow was crafted from. You also have advantage on attacks made with this ammunition against any targets with the dragon creature type.",
 				"When used in a successful attack, there is a {@chance 70|30 percent chance|Dragon Arrow|The arrow does not lose its magic.|The arrow loses its magic.} that this arrow loses all magical properties and becomes a normal arrow.",
@@ -73719,6 +73788,7 @@
 				}
 			],
 			"itemUid": "dragon bolt|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"You have a bonus to your attack and damage rolls made with this bolt corresponding to its rarity. When you make a successful hit with this bolt, you also deal an additional {@damage 1d8} (uncommon) {@damage 2d8} (rare), or {@damage 3d8} (very rare) damage of the type corresponding to the damage type this bolt was crafted from. You also have advantage on attacks made with this ammunition against any targets with the dragon creature type.",
 				"When used in a successful attack, there is a {@chance 70|30 percent chance|Dragon Bolt|The bolt does not lose its magic.|The bolt loses its magic.} that this bolt loses all magical properties and becomes a normal bolt.",
@@ -73911,6 +73981,7 @@
 				}
 			],
 			"itemUid": "dragon turtle jelly|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this jelly-like potion, you recover {@dice 10d4 + 20} hit points and are cured of any disease."
 			],
@@ -73948,6 +74019,7 @@
 				}
 			],
 			"itemUid": "dragon wand|hhhvi",
+			"itemType": "WD|DMG",
 			"entries": [
 				"While holding this wand, you gain a bonus to spell attack rolls determined by the wand rarity. In addition, you have advantage on any spell attack roll you make that deals the same damage type as the dragon this wand was crafted from.",
 				"If that spell attack hits, you also deal extra damage dice of that damage type equal to the spell attack bonus granted by this item.",
@@ -74396,6 +74468,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "dragonbone weapon|comcraf",
+			"itemType": "M",
 			"entries": [
 				"You gain a +2 bonus to attack and damage rolls made with this weapon.",
 				"When you hit with an attack using this magic weapon, the target takes an extra 1d6 damage. The damage type is determined by the kind of dragon that provided the bones (see the table below).",
@@ -74515,6 +74588,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "dragonplate armor|comcraf",
+			"itemType": "HA",
 			"entries": [
 				"A dragonplate armor is made of the bones of one kind of dragon.",
 				"While wearing this armor, you gain a +1 bonus to AC, you have advantage on saving throws against the Frightful Presence and breath weapons of dragons, and you have resistance to one damage type that is determined by the kind of dragon that provided the bones (see the table below).",
@@ -74730,6 +74804,7 @@
 				}
 			],
 			"itemUid": "dusk armor|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you have a bonus to AC determined by the armor's rarity. In addition, while wearing this armor in dim light or darkness, you may take the {@action Hide} action as a bonus action. If you take the {@action Hide} action in this way, you do not suffer the usual penalty that normally applies to Dexterity ({@skill Stealth}) checks made in plate armor."
 			],
@@ -74778,6 +74853,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "ebony bow|comcraf",
+			"itemType": "R",
 			"entries": [
 				"This dark bow was created by an old vampire in a dark ritual using the blood of his ancestor.",
 				"You gain a +2 bonus to attack and damage rolls made with this weapon.",
@@ -74905,6 +74981,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "essence extraction device|comcraf",
+			"itemType": "G",
 			"entries": [
 				"This device looks like a leather bracer with a small syringe on the side. It allows its wearer to extract a creature's essence and store it in an empty glass vial connected behind the syringe.",
 				"The device has 3 charges, and it regains {@dice 1d3} expended charges daily at dawn. When you make a check for harvesting a creature, you can extract one unit of the creature's essence. Additionally, if you have a creature part, you can expend 1 charge to transform that part into one unit of the creature's essence."
@@ -74961,6 +75038,7 @@
 				}
 			],
 			"itemUid": "eye stalk wand|hhhvi",
+			"itemType": "WD|DMG",
 			"entries": [
 				"This wand has 5 charges. While holding this wand, you may spend an action and 1 charge to shoot a magical ray of energy at a target within 120 feet of you. The type of ray depends on the type of beholder eye stalk that the wand was crafted from. Consult the list below to find out what your wand does.",
 				{
@@ -75201,6 +75279,7 @@
 				}
 			],
 			"itemUid": "fire arrow|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"These arrows combust upon direct piercing organic material. When you hit a target successfully with this arrow, you deal an additional {@damage 1d6} fire damage. These arrows lose this property on hit and become regular arrows afterwards."
 			],
@@ -75233,6 +75312,7 @@
 				}
 			],
 			"itemUid": "fire bolt|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"These bolts combust upon direct piercing organic material. When you hit a target successfully with this bolt, you deal an additional {@damage 1d6} fire damage. These bolts lose this property on hit and become regular bolts afterwards."
 			],
@@ -75259,6 +75339,7 @@
 				}
 			],
 			"itemUid": "fire dagger|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"This dagger continually radiates a dull heat that intensifies when sunk into exposed flesh. When you deal damage with this weapon, you may choose for the damage type to be either piercing or fire damage."
 			],
@@ -75353,6 +75434,7 @@
 				}
 			],
 			"itemUid": "fish pie|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i I'll take fish pie over apple pie any day of the week.}"
 			],
@@ -75409,6 +75491,7 @@
 				}
 			],
 			"itemUid": "floating oil|hhhvi",
+			"itemType": "Oil",
 			"entries": [
 				"When this oil is rubbed into an item that weighs 20 pounds or less, that item becomes lighter than air for the next hour. It retains all of its other characteristics, but it automatically rises unless appropriate downward force is applied to it. If this oil is applied to an item that weighs more than 20 pounds, it takes no effect and the oil is wasted."
 			],
@@ -75462,6 +75545,7 @@
 				}
 			],
 			"itemUid": "frost dagger|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"This dagger continually radiates a wave of cold that intensifies when sunk into exposed flesh. You have a +1 to attack and damage rolls made with this weapon, and when you deal damage with it, you may choose to convert the piercing damage into {@homebrew cold|frost} damage instead."
 			],
@@ -75488,6 +75572,7 @@
 				}
 			],
 			"itemUid": "frostbite armor|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"You gain a +1 bonus to AC and resistance to cold damage while wearing this armor. In addition, the first time in a turn that a creature within 5 feet hits you with a melee weapon attack while you are wearing this armor, they suffer {@damage 2d6} cold damage."
 			],
@@ -75524,6 +75609,7 @@
 				}
 			],
 			"itemUid": "frostclaw weapons|hhhvi",
+			"itemType": "GV|DMG",
 			"entries": [
 				"If you are using the rare version of this weapon, you gain a +1 bonus to all attack and damage rolls made with this weapon. When you hit with this weapon, you may choose to deal an extra {@damage 1d6} cold damage, or {@damage 2d6} cold damage if you are using the rare version of this weapon. Once you have used this ability once, it can't be used again until the end of your next short rest."
 			],
@@ -75687,6 +75773,7 @@
 				}
 			],
 			"itemUid": "geryon's spite|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"You have a +3 bonus to attack and damage rolls made with this magic weapon and any creature you hit must succeed on a {@dc 21} Constitution saving throw or take {@damage 2d12} poison damage and become {@condition poisoned} until it finishes a short or long rest. The target's hit point maximum is reduced by an amount equal to half the poison damage it takes. If its hit point maximum drops to 0, it dies. This reduction lasts until the {@condition poisoned} condition is removed."
 			],
@@ -75709,6 +75796,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "ghost weapon|comcraf",
+			"itemType": "M",
 			"entries": [
 				"These spectral blades are carried by ghosts, wraiths, and other incorporeal undead. The weapon weighs only 1 pound, and can be wielded only by the creature attuned to it.",
 				"A ghost weapon deals necrotic damage instead of its normal damage, and when you hit with an attack using this magic weapon, you deal an additional 2d4 necrotic damage."
@@ -75778,6 +75866,7 @@
 				}
 			],
 			"itemUid": "glass oil|hhhvii",
+			"itemType": "Oil",
 			"entries": [
 				"Spreading this oil on glass causes that glass to become as malleable and flexible as soft rubber. This effect lasts for 1 hour, after which the oil dries and the glass hardens into whatever shape it is currently in. This vial has enough oil to cover 30 square feet of glass."
 			],
@@ -75797,6 +75886,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "gloves of crafting|comcraf",
+			"itemType": "G",
 			"entries": [
 				"These leather gloves have a hammer and an anvil embroidered on each palm, and allow their owner to craft items faster. While you're wearing the gloves, you count as two characters when you craft an item, reducing the crafting time to half (rounded up)."
 			],
@@ -75901,6 +75991,7 @@
 				}
 			],
 			"itemUid": "golden sun armor|hhhvii",
+			"itemType": "HA",
 			"entries": [
 				"You gain a +1 bonus to AC while wearing this armor. While wearing this armor, you may cast the {@spell light} spell on yourself at will without requiring any components. The light shed by this spell is considered to be sunlight."
 			],
@@ -76020,6 +76111,7 @@
 				}
 			],
 			"itemUid": "goossert|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i I imagine they eat these desserts in Hell.}"
 			],
@@ -76049,6 +76141,7 @@
 				}
 			],
 			"itemUid": "grell jerkin|hhhvi",
+			"itemType": "LA",
 			"entries": [
 				"While wearing this jerkin you become particularly sensitive to the vibrations and electrical currents around you. So long as you are {@condition blinded} (including if you just have your eyes closed), you have {@sense blindsight} with a range of 60 feet."
 			],
@@ -76082,6 +76175,7 @@
 				}
 			],
 			"itemUid": "grick hide coat|hhhvi",
+			"itemType": "LA",
 			"entries": [
 				"While wearing this armor, you have advantage on Dexterity ({@skill Stealth}) checks made to hide in rocky terrain and on Strength ({@skill Athletics}) checks made to climb rocky terrain."
 			],
@@ -76115,6 +76209,7 @@
 				}
 			],
 			"itemUid": "grick hide coats|hhhvi",
+			"itemType": "LA",
 			"entries": [
 				"While wearing this armor, you have advantage on Dexterity ({@skill Stealth}) checks made to hide in rocky terrain and on Strength ({@skill Athletics}) checks made to climb rocky terrain.",
 				"If this is the rare version of this armor, you also gain a +1 bonus to AC while wearing this item."
@@ -76169,6 +76264,7 @@
 				}
 			],
 			"itemUid": "gut rot|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you must succeed on a {@dc 10} Constitution saving throw or become afflicted with the disease {@disease gut rot|HHHVI}. While afflicted with {@disease gut rot|HHHVI}, any time you attempt to swallow food, you instead suffer {@damage 4} necrotic damage and regurgitate that food. At the end of a long rest, you may attempt the saving throw again, ending the disease on a success.",
 				"If a creature dies while afflicted with {@disease gut rot|HHHVI}, a {@creature violet fungus|MM} sprouts from the mouldering corpse, growing to full size in {@dice 2d6} days."
@@ -76197,6 +76293,7 @@
 				}
 			],
 			"itemUid": "hair tonic|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you massage this tonic into a patch of skin for 1 minute, that patch of skin experiences extremely rapid hair growth, even if hair growth in that area is not usually possible. Each day for the next 7 days, roll {@dice 1d6}. You grow that many inches in hair over the course of the day in that area.",
 				"This bottle has enough hair tonic to cover 10 square feet of skin."
@@ -76224,6 +76321,7 @@
 				}
 			],
 			"itemUid": "hammer of the eternal quake|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"You have a +3 bonus to attack and damage rolls made with this weapon. Strikes made with this weapon have a chance to reverberate constantly, compounding the damage you do to your target. If you roll the maximum value on a damage dice with this weapon, you may reroll that dice, adding the result to your total damage dealt. Rerolled dice may also trigger this effect, and there is no limit to how many times this effect can repeat.",
 				"In addition, while holding this hammer you may use the {@action Attack} action to slam its head into the ground, creating a shockwave that forces all targets within 30 feet of you to succeed on a {@dc 20} Dexterity saving throw or be knocked {@condition prone}. If you are able to make multiple attacks with the {@action Attack} action, this attack replaces one of them."
@@ -76277,6 +76375,7 @@
 				}
 			],
 			"itemUid": "harp of horror|hhhviii",
+			"itemType": "INS",
 			"entries": [
 				"You must be proficient with stringed instruments to use this harp. This harp has 3 charges. As an action, you can expend 1 charge to create a horrid, mind-shattering tune. Each creature within 30 feet of you that hears this performance must succeed on a {@dc 16} Wisdom saving throw or become {@condition frightened} of you until the end of your next turn. While {@condition frightened} in this way, a creature's speed is halved and it is {@condition incapacitated}. If you wish, you may choose to make all creatures in the area that aren't hostile toward you automatically succeed on the saving throw. A creature that succeeds on its saving throw is immune to the effect of this harp for 24 hours. The harp regains {@dice 1d3} expended charges daily at dawn. If you use the last charge, there is a {@chance 80|20 percent|Harp of Horror|The harp remains intact.|The harp crumbles to dust and becomes useless.} chance that the harp crumbles into dust and becomes useless."
 			],
@@ -76311,6 +76410,7 @@
 				}
 			],
 			"itemUid": "harp of winter's tempo|hhhvii",
+			"itemType": "INS",
 			"entries": [
 				"You may spend your action to play this harp. If you do so, you may roll any number of your available {@classFeature Bardic Inspiration|Bard|PHB|1} dice to target an equal number of creatures within 60 feet of you that can hear you. Until the end of the next round, those creatures have a penalty to their initiative score equal to the number you roll on your {@classFeature Bardic Inspiration|Bard|PHB|1} dice, making separate rolls for each target. If this penalty causes a creature to fall below you in the initiative order, they do not get a new turn and that turn is instead skipped."
 			],
@@ -76338,6 +76438,7 @@
 				}
 			],
 			"itemUid": "harpy harp|hhhvi",
+			"itemType": "INS",
 			"entries": [
 				"While holding this item, if you cast a spell that forces a creature to make a saving throw or be inflicted with the {@condition charmed} condition, that creature makes that saving throw at disadvantage."
 			],
@@ -76998,6 +77099,7 @@
 				}
 			],
 			"itemUid": "hide of hiding|hhhviii",
+			"itemType": "LA",
 			"entries": [
 				"While wearing this armor, you can spend your action to make yourself and everything you are carrying and wearing become {@condition invisible} until the start of your next turn. This invisibility ends immediately if you make an attack roll or are hit by an attack."
 			],
@@ -77291,6 +77393,7 @@
 				}
 			],
 			"itemUid": "hydra 5 ways|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Or 6, 7, or 8 ways, depending on how quickly you kill it.}",
 				"{@i Note: Each of the hydra's heads yields a portion of meat. Each portion requires a separate Dexterity ({@skill Harvesting|Arcadia11}) check.}"
@@ -77474,6 +77577,7 @@
 				}
 			],
 			"itemUid": "instrument of harmony|hhhvi",
+			"itemType": "INS",
 			"entries": [
 				"The notes played on an instrument strung with unicorn hair are reminiscent of the sound of wind whistling through the branches of an ancient forest. You can use an action to play this instrument in a performance that lasts until the start of your next turn. During that time, any friendly creature who can hear your performance may reroll any 1s or 2s rolled when they recover hit points in any way. Creatures that do so must use the new result, even if it is a 1 or a 2."
 			],
@@ -77499,6 +77603,7 @@
 				}
 			],
 			"itemUid": "interrogator's web|hhhvii",
+			"itemType": "R",
 			"entries": [
 				"This large net is composed of the web-like connective tissue of an elder brain. If there is a creature caught in this net, you may spend your action holding onto the net and focusing on that creature. If you do so, you gain one memory or fact from that creature's mind. The memory or fact may be one that you specifically search for, otherwise you gain a random one chosen by the DM.",
 				"A creature may use its action to make a {@dc 20} Strength check, freeing itself or another creature within its reach on a success. Dealing 20 slashing damage to the net (AC 15) also frees the creature, ending the effect and destroying the net."
@@ -77526,6 +77631,7 @@
 				}
 			],
 			"itemUid": "ironleather splint|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"This flexible armor acts like regular splint but does not impose disadvantage on Dexterity ({@skill Stealth}) checks."
 			],
@@ -77579,6 +77685,7 @@
 				}
 			],
 			"itemUid": "jerky|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i For the busy adventurer on the go.}",
 				"{@i Note: After a successful Wisdom ({@skill Cooking|Arcadia11}) check, jerky takes {@dice 1d6} days to dry before it can be eaten. It makes six strips that each have a shelf life of {@dice 1d6} weeks and take an action to eat.}"
@@ -77606,6 +77713,7 @@
 				}
 			],
 			"itemUid": "kraken bolt|hhhvi",
+			"itemType": "A",
 			"entries": [
 				"This several-foot-long bolt is designed to be loaded and fired from a {@object ballista}, usually one mounted on board a naval ship. An attack made with this bolt has a {@hit 10} to hit, range 120/480 ft., deals {@damage 6d10} piercing damage upon a successful hit, and ignores any damage threshold of their target. If the attack is being made against an object or structure, this attack deals {@damage 12d10} piercing damage instead. Unlike most ballista bolts, kraken bolts may be used again after being shot, so long as they can be retrieved successfully."
 			],
@@ -77667,6 +77775,7 @@
 				}
 			],
 			"itemUid": "kraken shield|hhhvi",
+			"itemType": "S",
 			"entries": [
 				"While wearing this shield, you gain a +3 bonus to your AC. While wearing this shield, you are immune to lightning damage, and if you are subjected to an effect that would cause you to suffer lightning damage, you may spend your reaction to choose another target you can see within 30 feet of you (including the source of the effect). You redirect the effect towards that target. That target acts as if it was the initial target of the effect and suffers any results as appropriate."
 			],
@@ -77696,6 +77805,7 @@
 				}
 			],
 			"itemUid": "kraken tunic|hhhvi",
+			"itemType": "LA",
 			"entries": [
 				"While wearing this armor, you gain a +3 bonus to your AC. In addition, you gain the following benefits:",
 				{
@@ -77738,6 +77848,7 @@
 				}
 			],
 			"itemUid": "lance of isolation|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"You gain a +1 bonus to attack and damage rolls made with this magical weapon. Whenever you successfully hit a creature with this weapon, they must make a {@dc 16} Wisdom saving throw. On a failure, that creature cannot willingly enter a space that is within 5 feet of you until the start of your next turn."
 			],
@@ -77765,6 +77876,7 @@
 				}
 			],
 			"itemUid": "leeching whip|hhhvii",
+			"itemType": "M",
 			"entries": [
 				"When you hit a Huge or smaller sized creature with this weapon, you may make a {@action grapple} check against them as a free action, using this whip to {@action grapple} instead of your free hand. While you have a creature {@condition grappled} in this way, you may not attack with this weapon. If you have a creature {@condition grappled} by this weapon, you may spend an action to force that creature to succeed on a {@dc 16} Constitution saving throw or suffer {@damage 2d10} necrotic damage. In addition, if a creature fails their saving throw, a vial's worth of their blood becomes stored in the whip, which you may harvest as an action without requiring a check. This whip can only store one vial's worth of blood at a time."
 			],
@@ -77932,6 +78044,7 @@
 				}
 			],
 			"itemUid": "lesser eye stalk wand|hhhvi",
+			"itemType": "WD|DMG",
 			"entries": [
 				"This wand has 5 charges. While holding this wand, you may spend an action and 1 charge to shoot a magical ray of energy at a target within 90 feet of you. The type of ray depends on the type of spectator eye stalk that the wand was crafted from. Consult the list below to find out what your wand does.",
 				{
@@ -77996,6 +78109,7 @@
 				}
 			],
 			"itemUid": "lesser eye stalk wand|hhhvii",
+			"itemType": "WD|DMG",
 			"entries": [
 				"This wand has 3 charges. While holding this wand, you may spend an action and 1 charge to shoot a magical ray of energy at a target within 120 feet of you. The type of ray depends on the type of gauth eye stalk that the wand was crafted from. Consult the list below to find out what your wand does.",
 				{
@@ -78132,6 +78246,7 @@
 				}
 			],
 			"itemUid": "lightning oil|hhhvi",
+			"itemType": "Oil",
 			"entries": [
 				"A line of lightning constantly crackles through this bottle of cloudy grey liquid. A dose of this oil can coat one slashing or piercing weapon or up to 5 pieces of slashing or piercing ammunition. Applying the oil takes 1 minute. For 1 hour, the coated item is magical and deals an extra {@damage 1d8} lightning damage on a successful hit.",
 				"This bottle has enough liquid in it for 3 doses."
@@ -78604,6 +78719,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "mask of the medusa|comcraf",
+			"itemType": "G",
 			"entries": [
 				"While wearing this mask, you can use an action to cast the {@spell flesh to stone} spell (save {@dc 13}). You can cast the spell twice per dawn, and you regain any expended uses daily at dawn."
 			],
@@ -78688,6 +78804,7 @@
 				}
 			],
 			"itemUid": "medusa whip|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"This weapon has 6 charges. When you successfully hit a creature with this weapon, you may choose to expend 1 or more charges from this weapon. If you do, you add {@damage 1d6} poison damage to your damage roll for every charge expended. This weapon regains 1 charge every hour."
 			],
@@ -78765,6 +78882,7 @@
 				}
 			],
 			"itemUid": "mezzoloth mail|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"While wearing and attuned to this armor, you gain the ability to speak {@language Abyssal} and {@language Infernal} if you did not know them already. You also gain resistance to poison and acid damage."
 			],
@@ -78793,6 +78911,7 @@
 				}
 			],
 			"itemUid": "mimic gel|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"This vial contains enough gel to cover an item no larger than one square foot in surface area. Completely covering an item in this gel and then leaving it for an hour causes it to meld with the gel, giving it a permanent enchantment. While a creature is holding an item melded with mimic gel, they may spend an action to change its appearance to anything else of the same approximate size and configuration. This appearance change is an illusion only and fails to hold up to physical inspection. Otherwise, a creature can use its action to inspect the item and discern its true nature by succeeding on a {@dc 13} Intelligence ({@skill Investigation}) check."
 			],
@@ -78858,6 +78977,7 @@
 				}
 			],
 			"itemUid": "mimic tongue chowder|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i No, it doesn't just taste like wood. It's grosser.}",
 				"{@i Note: Mimic tongue must be harvested from a living mimic, as the monstrosity reverts to its amorphous goo form when destroyed.}"
@@ -78895,6 +79015,7 @@
 				}
 			],
 			"itemUid": "mind whip|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"When you make a {@action grapple} check, you may choose to do so with this whip instead of using your free hand. If you do so and if you succeed on the {@action grapple} check, you may force the {@condition grappled} creature to succeed on a {@dc 15} Intelligence saving throw or be {@condition stunned} until the grapple ends. While grappling a creature, this whip may not be used to attack another target. Once this ability has been used 4 times in a day, it cannot be used again until the next dawn."
 			],
@@ -78990,6 +79111,7 @@
 				}
 			],
 			"itemUid": "minor eye stalk wand|hhhvii",
+			"itemType": "WD|DMG",
 			"entries": [
 				"While holding this wand, you may spend an action to shoot a magical ray of energy at a target creature within 60 feet of you. The type of ray depends on the type of gazer eye stalk that the wand was crafted from. Consult the list below to find out what your wand does.",
 				{
@@ -79193,6 +79315,7 @@
 				}
 			],
 			"itemUid": "moon muzzle mixture|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"Drinking this potion completely cures a creature of {@variantrule Player Characters as Lycanthropes|MM|lycanthropy} if taken before that creature experiences its first full moon as a lycanthrope. If drunk after that, or if drunk by a natural born lycanthrope, a lycanthrope is able to ignore the usual transformative effects of the full moon for the next 28 days."
 			],
@@ -79219,6 +79342,7 @@
 				}
 			],
 			"itemUid": "mummy rot juice|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"A noxious potion brewed from the corpse dust of a mummy. It carries much of the lethal mummy rot that the cursed creatures are known for. This potion has a murky brown colour and smells roughly like an opened tomb; however, the smell can be covered easily enough with an overpowering scent.",
 				"When you drink this potion, you must succeed on a {@dc 12} Constitution saving throw or be cursed with mummy rot. While cursed, you cannot regain hit points, and your hit point maximum decreases by {@dice 3d6} for every 24 hours that elapse. If the curse reduces your hit point maximum to 0, you die, and your body turns to dust. This curse lasts until removed by the {@spell remove curse} spell or other magic."
@@ -79246,6 +79370,7 @@
 				}
 			],
 			"itemUid": "mutated eye stalk wand|hhhvii",
+			"itemType": "WD|DMG",
 			"entries": [
 				"This wand has 5 charges. While holding this wand, you may spend an action and 1 charge to shoot a magical ray of energy at a target within 120 feet of you. The type of ray depends on the type of mindwitness eye stalk that the wand was crafted from. Consult the list below to find out what your wand does.",
 				{
@@ -79355,6 +79480,7 @@
 				}
 			],
 			"itemUid": "necroplate|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you gain a +2 bonus to AC, you are immune to necrotic damage, and you are immune to any ability that would attempt to possess your body or remove your soul without your consent. In addition, any time an intangible creature attempts to move through your body (such as if they were on the Border Ethereal or by using the incorporeal movement trait), the attempt fails, and they take {@damage 1d10} force damage instead."
 			],
@@ -79557,6 +79683,7 @@
 				}
 			],
 			"itemUid": "oil of the memory thief|hhhviii",
+			"itemType": "Oil",
 			"entries": [
 				"As an action, you can coat up to 5 pieces of slashing or piercing ammunition or one slashing or piercing weapon with this oil. For the next 10 minutes, any creature struck by this weapon or ammunition must succeed on a {@dc 15} Wisdom saving throw or become memory drained until it finishes a short or long rest or until it benefits from the {@spell greater restoration} or {@spell heal} spell. Constructs, oozes, plants, and undead succeed on the save automatically. While memory drained, a creature must roll a {@dice d4} and subtract the number rolled from any ability check or attack roll it makes. Each time the target is memory drained beyond the first, the die size increases by one: the {@dice d4} becomes a {@dice d6}, the {@dice d6} becomes a {@dice d8}, and so on until the die becomes a {@dice d20}, at which point the target becomes {@condition unconscious} for 1 hour or until it takes damage, whichever comes first."
 			],
@@ -79731,6 +79858,7 @@
 				}
 			],
 			"itemUid": "otyugh whip|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"You gain a +1 to attack and damage rolls made with this weapon. When you hit a Medium or smaller sized creature with this weapon, you may make a {@action grapple} check against them as a free action, using the whip to {@action grapple} instead of your free hand. This ability can only be used once per turn. While you have a creature {@condition grappled} in this way, you may not attack with this whip."
 			],
@@ -79819,6 +79947,7 @@
 				}
 			],
 			"itemUid": "owlbear omelette|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Owlbear meat is surprisingly delicate for such a ferocious and, ah, durable animal.}"
 			],
@@ -79920,6 +80049,7 @@
 				}
 			],
 			"itemUid": "pease porridge|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Stick-to-your-ribs goodness.}"
 			],
@@ -79947,6 +80077,7 @@
 				}
 			],
 			"itemUid": "permafrost plate|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you are resistant to cold damage. In addition, whenever you take fire damage, you may use your reaction to halve the damage taken and gain a +2 bonus to your AC until the end of your next turn."
 			],
@@ -79975,6 +80106,7 @@
 				}
 			],
 			"itemUid": "petrifying dagger|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"If this dagger strikes any non-living organic matter that is smaller than half a cubic foot in volume, it is instantly turned to stone for 24 hours.",
 				"If a tiny creature is hit by this dagger, they must succeed on a {@dc 11} Constitution saving throw against being magically {@condition petrified}. On a failed save, the creature begins to turn to stone and is {@condition restrained}. It must repeat the saving throw at the end of its next turn. On a success, the effect ends. On a failure, the creature is {@condition petrified} for 24 hours."
@@ -80117,6 +80249,7 @@
 				}
 			],
 			"itemUid": "plate of the black rider|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"These thick, pitch-black armor plates are infused with the lingering soul of a narzugon, granting you some of their fiendish abilities. You gain a +1 bonus to AC while wearing this armor. In addition, while adjacent to a horse that is friendly to you, you may spend 10 minutes bonding with it, transforming it into your steed. At your DM's discretion, this ability may also be used on other riding creatures such as {@creature mastiff|MM|mastiffs}, {@creature elk|MM|elks}, {@creature camel|MM|camels}, etc.",
 				"While a creature is your steed, it is completely loyal to your commands and you may use your action to summon your steed to an unoccupied spot within 5 feet of you, so long as both of you are on the same plane of existence. While mounted on your steed, all creatures allied with 30 feet of you that can see you are immune to the {@condition charmed} and {@condition frightened} conditions, and whenever you score a critical hit on a melee weapon attack you may deal an additional {@damage 2d10} fire damage.",
@@ -80152,6 +80285,7 @@
 				}
 			],
 			"itemUid": "plate of the pursuer|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you gain a +2 bonus to AC, and you may not be teleported or sent to another plane of existence against your will; any attempt to do so automatically fails."
 			],
@@ -80239,6 +80373,7 @@
 				}
 			],
 			"itemUid": "potion of adaptation|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, your form becomes particularly malleable and you quickly adapt to hazardous environments. For the next 6 hours, you gain the following benefits:",
 				{
@@ -80279,6 +80414,7 @@
 				}
 			],
 			"itemUid": "potion of adult dragonstrength|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you recover {@dice 10d4 + 10} hit points. In addition, you gain resistance to the damage type of the dragon it was crafted from for 1 hour.",
 				{
@@ -80314,6 +80450,7 @@
 				}
 			],
 			"itemUid": "potion of ancient dragonstrength|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you recover {@dice 12d4 + 24} hit points. In addition, you gain resistance to the damage type of the dragon it was crafted from for 1 hour.",
 				{
@@ -80349,6 +80486,7 @@
 				}
 			],
 			"itemUid": "potion of boundless intellect|hhhvii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, your Intelligence score increases to 21 if it was lower than that before, and you gain proficiency in the {@skill History}, {@skill Arcana}, {@skill Nature}, {@skill Religion}, and {@skill Investigation} skills if you were not proficient in them before. This effect lasts for 24 hours, after which you suffer 2 levels of {@condition exhaustion} as your brain attempts to process the mental surge it just experienced. This potion is a dull grey color with chunks of partly solidified matter floating in it."
 			],
@@ -80376,6 +80514,7 @@
 				}
 			],
 			"itemUid": "potion of bravery|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become immune to the {@condition frightened|PHB|fear} condition for 1 hour. This potion is a pale gold colour with a thick consistency."
 			],
@@ -80403,6 +80542,7 @@
 				}
 			],
 			"itemUid": "potion of celestial might|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you regain hit points equal to half of your maximum hit points, and you gain advantage on saving throws against spells and other magical effects for the next minute. This potion gleams a bright gold at all times."
 			],
@@ -80442,6 +80582,7 @@
 				}
 			],
 			"itemUid": "potion of corrupted strength|hhhvii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you grow one size larger and your Strength score increases to 21 for 1 hour if it was lower than that before. At the end of this hour you return to your regular size, and your Strength score returns to normal. This potion is a pale red color that swells and ebbs to the rhythm of an invisible heartbeat."
 			],
@@ -80470,6 +80611,7 @@
 				}
 			],
 			"itemUid": "potion of desecration|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become cursed. While cursed in this way, you gain {@sense darkvision} out to 120 ft. if you did not have it already, and whenever you receive necrotic damage, you instead heal the amount of damage you would have taken. In addition, whenever an undead creature with less than 10 Intelligence targets you with a harmful attack or spell, it must first make a {@dc 18} Wisdom saving throw. On a failed save, the creature must choose a new target or lose the attack or spell.",
 				"Every night at midnight while cursed, you must succeed on a {@dc 18} Wisdom saving throw or become dominated by the {@creature death knight|MM} from whose blood this potion was crafted, as if under the effect of the {@spell dominate person} spell, but with an indefinite duration, no {@status concentration} required, and unlimited range. The death knight is aware of this taking place unless it is on a different plane of existence.",
@@ -80502,6 +80644,7 @@
 				}
 			],
 			"itemUid": "potion of detect thoughts|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain the effect of the {@spell detect thoughts} spell. This potion is completely clear except for a small pink blog floating in the centre of it."
 			],
@@ -80527,6 +80670,7 @@
 				}
 			],
 			"itemUid": "potion of digestion|hhhvii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, for the next 24 hours you become able to digest anything you eat without any negative consequences. Rotten food does not make you ill, and swallowed poisons have no effect on you. Food with no nutritional value will still not contribute to your daily food requirements however. This potion is a dark green color with a sludge consistency and a smell of decomposing food."
 			],
@@ -80572,6 +80716,7 @@
 				}
 			],
 			"itemUid": "potion of dragonstrength|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"The rarity and strength of this potion differs depending on the age category of the dragon it was harvested from. When you drink this potion, you recover hit points corresponding to the rarity of the potion. In addition, you gain resistance to the damage type of the dragon it was crafted from for 1 hour.",
 				{
@@ -80652,6 +80797,7 @@
 				}
 			],
 			"itemUid": "potion of elemental tempering|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become comfortable even if you are in extreme weather. For the next 24 hours, you automatically succeed any saving throw against {@condition exhaustion} triggered by being in an extremely cold or an extremely hot environment. This potion is constantly bubbling as if boiling and also has a small shard of ice in it that never melts despite the ambient temperature."
 			],
@@ -80671,6 +80817,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "potion of greater mana|comcraf",
+			"itemType": "P",
 			"entries": [
 				"This blue liquid is created using the essence of magic. When you drink this potion, you regain {@dice 2d4+2} mana points, which you can use to regain spell slots you have already used. See the {@i Potion of Mana} entry in {@i Complete Crafter} for the full point-cost table; in brief, recovering 1st through 5th level slots costs 2, 3, 5, 6, and 7 points respectively. When you use the potion, you must distribute the points immediately, and any leftover points are lost. You can recover only 5th-level or lower expended spell slots."
 			],
@@ -80696,6 +80843,7 @@
 				}
 			],
 			"itemUid": "potion of infernal vitality|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you recover {@dice 8d4 + 8} hit points and you gain a fiendish constitution for the next {@dice 1d4} hours. During this time, you gain resistance to cold, fire, and poison damage as well as damage from nonmagical weapons that aren't silvered. You also have advantage on saving throws against spells and other magical effects. This potion is a deep crimson and smells strongly of sulfur."
 			],
@@ -80724,6 +80872,7 @@
 				}
 			],
 			"itemUid": "potion of liquid form|hhhvii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this clear potion, you transform into a water-like liquid form for 1 hour. In this form, you gain the following benefits:",
 				{
@@ -80764,6 +80913,7 @@
 				}
 			],
 			"itemUid": "potion of magical madness|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you go slightly mad for the next {@dice 1d4} hours. While in this state, you gain the ability to sense the presence of any creature within 30 feet of you that is {@condition invisible} or on the Ethereal Plane. You can pinpoint such a creature that is moving.",
 				"If you are a spellcaster, you also gain the ability to cast {@filter any spell on the cleric spell list (excluding cantrips)|spells|source=|level=!0|class=cleric} for which you would have spell slots available. Any time you cast a spell known in this way, you suffer psychic damage equal to the spell level of that spell multiplied by 3. This damage is unmitigable in any way. Any attempt to record the knowledge of these spells fails as they inevitably become incomprehensible ramblings to you once the madness fades."
@@ -80787,6 +80937,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "potion of mana|comcraf",
+			"itemType": "P",
 			"entries": [
 				"This blue liquid is created using the essence of magic. When you drink this potion, you regain {@dice 1d4+1} mana points, which you can use to regain spell slots you have already used. See the {@i Potion of Mana} entry in {@i Complete Crafter} for the full point-cost table; in brief, recovering 1st through 5th level slots costs 2, 3, 5, 6, and 7 points respectively. When you use the potion, you must distribute the points immediately, and any leftover points are lost. You can recover only 5th-level or lower expended spell slots."
 			],
@@ -80812,6 +80963,7 @@
 				}
 			],
 			"itemUid": "potion of ogre strength|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you Strength score changes to 17 for one hour. This potion has no effect on you if your Strength score is equal to or greater than that score. This potion is a pale yellow with a reddish tinge."
 			],
@@ -80848,6 +81000,7 @@
 				}
 			],
 			"itemUid": "potion of poison immunity|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become immune to poison damage and the {@condition poisoned} condition for the next 12 hours. This potion is green with small bubbles on the top."
 			],
@@ -80876,6 +81029,7 @@
 				}
 			],
 			"itemUid": "potion of pollution breathing|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become able to breathe in even the most polluted areas. You automatically succeed any Constitution saving throw provoked by breathing in a polluted, {@condition poisoned}, or diseased air."
 			],
@@ -80902,6 +81056,7 @@
 				}
 			],
 			"itemUid": "potion of rage|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, any Strength melee weapon attack you make gains a +2 bonus to its damage roll and is rolled at advantage, however any attack made against you is also rolled with advantage. In addition, anytime you are damaged by a creature you can see, you must succeed on a {@dc 13} Wisdom saving throw or be forced to spend your next action making a melee weapon {@action attack} against the creature that damaged you, using your movement speed to get as close to them as possible, including any potential {@action dash} action. This potion is a bright red with angry bubbles constantly rising to its surface."
 			],
@@ -80928,6 +81083,7 @@
 				}
 			],
 			"itemUid": "potion of rapport|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"This bottle of potion contains enough potion for 4 doses. For the next hour after you drink a dose of this potion, you are able to telepathically communicate with any other creature that has drunk a dose of this potion within the past hour so long as they are within 150 feet of you."
 			],
@@ -80955,6 +81111,7 @@
 				}
 			],
 			"itemUid": "potion of reflexes|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain one reaction on every turn in a combat. This effect lasts for 1 minute, after which you must succeed on a {@dc 15} Constitution saving throw or gain 1 level of {@condition exhaustion}. This potion is completely clear except for one cloudy grey portion that darts around in the liquid towards anything holding the bottle."
 			],
@@ -80981,6 +81138,7 @@
 				}
 			],
 			"itemUid": "potion of ruined flesh|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you must succeed on a {@dc 14} Constitution saving throw or break out in severe boils all over your body and have all your bodily hair fall off. This condition remains for 24 hours, after which you return to your normal state, including the regrowth of all the hair you may have lost."
 			],
@@ -81007,6 +81165,7 @@
 				}
 			],
 			"itemUid": "potion of sensing|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain the ability to sense the presence of any creature within 30 feet of you that is {@condition invisible} or on the Ethereal Plane. You can pinpoint such a creature that is moving. This incredibly fishy smelling potion is a sickly purple colour with cloudy segments that take a more distinct shape when you hold it and imagine things."
 			],
@@ -81034,6 +81193,7 @@
 				}
 			],
 			"itemUid": "potion of sickness|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become sick with mane disease for {@dice 1d12} hours. While sick in this way, your nose becomes runny and your eyes watery, causing you to have disadvantage on Wisdom ({@skill Perception}) checks that rely on sight. However, your relatively mild sickness also boosts your immune system, giving you advantage on Constitution saving throws against being {@condition poisoned} and other diseases. This potion is a pale grey colour with a string of liquid in it that resembles watery mucus."
 			],
@@ -81062,6 +81222,7 @@
 				}
 			],
 			"itemUid": "potion of sloth|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become overwhelmed with feelings of sluggishness and laziness for the next 10 minutes. While under the effects of this potion, you are unable to take {@action Dash} action, and whenever any other action on your turn, you must succeed on a {@dc 14} Wisdom saving throw or waste that action. The bottom of this brown potion contains a sediment that never moves no matter how much the bottle is shaken."
 			],
@@ -81089,6 +81250,7 @@
 				}
 			],
 			"itemUid": "potion of speak with plants|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain the effect of the {@spell speak with plants} spell. The potion is a cloudy green with what looks like pollen floating in it."
 			],
@@ -81114,6 +81276,7 @@
 				}
 			],
 			"itemUid": "potion of stamina|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain a sense of inner strength and vitality. For the next 24 hours, whenever you roll a saving throw to resist an effect that causes {@condition exhaustion}, you may make that roll at advantage. This potion is a bright blue with what looks like electricity running through it occasionally."
 			],
@@ -81134,6 +81297,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "potion of superior mana|comcraf",
+			"itemType": "P",
 			"entries": [
 				"This blue liquid is created using the essence of magic. When you drink this potion, you regain {@dice 3d4+4} mana points, which you can use to regain spell slots you have already used. See the {@i Potion of Mana} entry in {@i Complete Crafter} for the full point-cost table; in brief, recovering 1st through 5th level slots costs 2, 3, 5, 6, and 7 points respectively. When you use the potion, you must distribute the points immediately, and any leftover points are lost. You can recover only 5th-level or lower expended spell slots."
 			],
@@ -81159,6 +81323,7 @@
 				}
 			],
 			"itemUid": "potion of the duergar|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain the ability to cast the {@spell mage hand} and {@spell minor illusion} spells at will for the next hour. This thick, grey potion seems to move around by itself as if acted on by an invisible force."
 			],
@@ -81184,6 +81349,7 @@
 				}
 			],
 			"itemUid": "potion of the eternal tide|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you imbibe the power of an elder elemental, gaining all the strength of the ocean and the waves. You gain the following benefits for the next hour:",
 				{
@@ -81228,6 +81394,7 @@
 				}
 			],
 			"itemUid": "potion of the gestalt|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"As part of drinking this potion, you must first drop a small piece of a humanoid's body into it such as: a hair, a drop of blood, or a nail. When you drink this potion, your body transforms into a duplicate of whoever's body part you dropped into the potion for the next 6 hours. Your racial abilities change to match your new body, as does your Strength, Dexterity, and Constitution scores. You do not gain any class abilities, spells, or proficiencies, however. While transformed in this way, you are able to perfectly imitate the voice and mannerisms of your chosen humanoid, and you have advantage on any Charisma checks made to persuade other people of your stolen identity. This thick potion constantly shifts inside its bottle, creating images inside its liquid of whomever is holding it."
 			],
@@ -81256,6 +81423,7 @@
 				}
 			],
 			"itemUid": "potion of the ice hunter|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you become one with the frost and cold, able to move around in it with ease. For the next hour, you have resistance to cold damage, and you cannot be slowed down by snowy or icy terrain. You have advantage on Dexterity ({@skill Stealth}) checks made to hide in snowy or icy terrain, and you have a burrow speed equal to your move speed so long as you are moving through snow or ice. In addition, on your turn you may use your bonus action to imbue your next strike with frosted fury, causing the next successful weapon attack you make on your turn to deal an additional {@damage 1d10} cold damage. This potion is a cloudy white color with pinpricks of icy blue that constantly float and flutter through the liquid."
 			],
@@ -81287,6 +81455,7 @@
 				}
 			],
 			"itemUid": "potion of the sahuagin|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"This potion uses a sahuagin's blood as a base along with various seaweeds, seashells, and fish scales to produce a mutagenic effect in those who drink it. For the next 10 minutes after drinking this potion, you gain the following benefits:",
 				{
@@ -81324,6 +81493,7 @@
 				}
 			],
 			"itemUid": "potion of the sea|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain several properties of the kraken for the next hour. During this time, you have a swim speed of 60 feet, can breathe freely in water and gain immunity to lightning damage."
 			],
@@ -81352,6 +81522,7 @@
 				}
 			],
 			"itemUid": "potion of the shadowjumper|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain the ability to merge with the shadows for the next hour. During this time, you may use your action to teleport yourself and anything you are wearing and carrying up to 500 feet to an area in line of sight, so long as both your starting and ending locations are in dim light or darkness."
 			],
@@ -81378,6 +81549,7 @@
 				}
 			],
 			"itemUid": "potion of the siege|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you gain the \"enlarge\" effect of the {@spell enlarge/reduce} spell. In addition, you gain a Strength score of 25 if it was lower than that before, and all of your attacks deal double damage to objects and structures. This potion seems to throb with a dull energy every few seconds, and glass containers holding it seem to crack slightly."
 			],
@@ -81403,6 +81575,7 @@
 				}
 			],
 			"itemUid": "potion of the space worm|hhhviii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you temporarily gain an other-dimensional awareness of reality, as if the secrets of the universe have been laid bare before you. For the next hour, you have the following benefits:",
 				{
@@ -81443,6 +81616,7 @@
 				}
 			],
 			"itemUid": "potion of vigor|hhhvii",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you regain {@dice 8d4 + 8} hit points and for the next 24 hours, you have advantage on Constitution saving throws to resist the effects of diseases and poisons. This potion is a bright gold color with constant activity regardless of whether it has been shaken recently or not."
 			],
@@ -81470,6 +81644,7 @@
 				}
 			],
 			"itemUid": "potion of winter's rest|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"This potion is constantly cool to the touch and appears to have snowflakes floating in the middle of it. If you willingly drink this potion, you enter a comatose state and fall {@condition unconscious} and then immediately become encased in a block of ice that extends half a foot away from your body in either direction. While inside this ice block, you are considered behind {@book total cover|PHB|9|Cover} in all directions. You also do not age, require food, drink, or sleep, and any physical ailments including diseases and poisons halt their effect. If you were on 0 hit points you are also instantly stabilised. You instantly wake up if the ice block is destroyed, and all of these effects end. The ice block has AC 12, 30 hit points, is immune to psychic and poison damage and is vulnerable to fire damage. The ice block does not melt under nonmagical sources of heat.",
 				"If you unwillingly drink this potion, you may make a {@dc 13} Constitution saving throw to avoid being encased in the ice block, taking only {@damage 3d6} cold damage instead."
@@ -81503,6 +81678,7 @@
 				}
 			],
 			"itemUid": "potion of winterbite|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, your physiology changes entirely and your blood becomes icy cold for {@dice 1d4} hours. During this time, you are immune to cold damage, and any time a creature within 5 feet of you hits you with an attack that deals piercing or slashing damage, they suffer {@damage 2d6} cold damage. This potion is bright blue with frost constantly encasing the glass."
 			],
@@ -81532,6 +81708,7 @@
 				}
 			],
 			"itemUid": "potion of wyrmling dragonstrength|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you recover {@dice 3d4 + 3} hit points. In addition, you gain resistance to the damage type of the dragon it was crafted from for 1 hour.",
 				{
@@ -81567,6 +81744,7 @@
 				}
 			],
 			"itemUid": "potion of young dragonstrength|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"When you drink this potion, you recover {@dice 6d4 + 6} hit points. In addition, you gain resistance to the damage type of the dragon it was crafted from for 1 hour.",
 				{
@@ -81625,6 +81803,7 @@
 				}
 			],
 			"itemUid": "primus plate|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"The metal of this armor was smelted by the unwavering hand of Primus and grants its wearer all the relentless endurance of their mechanical constructs. While wearing this armor, you have a +3 bonus to AC, you are immune to any magical effect that would change your form against your will or reduce your movement speed, and you are immune to the {@condition exhaustion}, {@condition paralyzed}, and {@condition restrained} conditions."
 			],
@@ -81654,6 +81833,7 @@
 				}
 			],
 			"itemUid": "psionic oil|hhhviii",
+			"itemType": "Oil",
 			"entries": [
 				"You may spend 1 hour rubbing this weapon oil on any nonmagical weapon to irreversibly transform it into your bonded psychic weapon. A bonded psychic weapon is considered magical and has the following properties:",
 				{
@@ -81689,6 +81869,7 @@
 				}
 			],
 			"itemUid": "radiant oil|hhhvii",
+			"itemType": "Oil",
 			"entries": [
 				"You may spend 1 minute applying this oil to an item no larger than 1 cubic foot in volume. For the next hour, the oiled item shines bright light out to a range of 15 feet and then dim light for 15 feet beyond that, and any damage dealt using that item may be treated as radiant damage instead of its usual damage type.",
 				"Alternatively, you may smash this bottle of oil on a hard surface up to 20 feet away from you. If you do so, the oil violently reacts and creates a blinding flash of light, affecting any creature in a 10-foot radius of it. Any creature in that area must make a {@dc 11} Constitution saving throw. On a failure, the creature takes {@damage 2d6} radiant damage and, if the creature can see the light, is {@condition blinded} until the end of its next turn. If the saving throw is successful, the creature takes half the damage and isn't {@condition blinded}."
@@ -81812,6 +81993,7 @@
 				}
 			],
 			"itemUid": "remorhaz plate|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"This full set of plate armor was crafted from the insectoid carapace of a remorhaz. While wearing this armor, you have resistance to both fire and cold damage.",
 				"If this was crafted from an Adult Remorhaz Carapace, you also gain a +1 bonus to AC while wearing this armor."
@@ -81946,6 +82128,7 @@
 				}
 			],
 			"itemUid": "rod of seasons|hhhviii",
+			"itemType": "RD|DMG",
 			"entries": [
 				"This rod has 4 charges. While holding it, you can use your action to swing it, expending a charge and creating a magical, 30-foot radius aura centered on the rod for the next 10 minutes. This aura becomes a self-contained atmosphere with an effect determined by the season that you designate when you swing the rod which you may choose from below:",
 				{
@@ -82067,6 +82250,7 @@
 				}
 			],
 			"itemUid": "salamander fire|hhhvi",
+			"itemType": "P",
 			"entries": [
 				"This vial contains 3 doses. Chimera fire is a highly viscous oil that is incredibly flammable and yet strangely easy to control. You may spend an action to cover a melee weapon in a dose of this oil and set it alight. While on fire in this way, a weapon deals an extra {@damage 1d6} fire damage on a successful hit and also sheds bright light out to a distance of 10 feet and dim light for a further 10 feet. The weapon will continue to burn for 1 minute before extinguishing itself. Traditional methods of extinguishing the flame do not work unless they manage to take the oil itself off the melee weapon."
 			],
@@ -82095,6 +82279,7 @@
 				}
 			],
 			"itemUid": "scepter of rot and decay|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"In one of the many doomsday prophecies thrown around by the demonology cultists, the main focus is on a single splinter that embeds itself in the World Tree. This mottled-grey splinter is topped with sickly, black fungus caps that spread noxious spores through the tree's systems, infecting it and starting a chain of events that will lead to the collapse of all life in the multiverse. This splinter is the Scepter of Rot and Decay, an artifact crafted from the stem of the Demon Lord {@creature Zuggtmoy|MTF}. Many of her deranged cultists believe that this is her ultimate end goal; once she has built up her army of devoted fungus thralls, she will allow her body to be transformed into this scepter and then ultimately conquer all animal and plant life everywhere. We can only hope that this prophecy remains the simple deranged ranting of demon-afflicted madmen.",
 				"In order to attune to this item, you must bury yourself in a 1-foot thick layer of decaying vegetable matter for at least 8 hours while holding onto the scepter. Upon rising from this layer, your attunement finishes and your body takes on a more mottled appearance as small mushrooms grow across your body. When your attunement to this item ends, your body reverts to its original form.",
@@ -82255,6 +82440,7 @@
 				}
 			],
 			"itemUid": "seared shambling mound salad|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Hot salad sounds wild, but it works.}"
 			],
@@ -82339,6 +82525,7 @@
 				}
 			],
 			"itemUid": "serpent shield|hhhvi",
+			"itemType": "S",
 			"entries": [
 				"This shield is plated with scales taken from a yuan-ti abomination and pulses with the residual divine magic of the serpent gods. While wearing this shield, you may spend a bonus action to transform the shield and the arm holding it into a single serpent attached to your shoulder for the next 10 minutes.",
 				"This shield does not provide any bonus to AC while it is in serpent form. You may make melee weapon attacks with your serpent appendage by having it bite your targets. When used for melee weapon attacks, your serpent appendage is considered to have the finesse, reach, and light properties and deals {@damage 1d4} piercing damage plus {@damage 1d6} poison damage on a successful hit. You may at any point, spend a bonus action to transform your serpent appendage back into your arm and shield.",
@@ -82400,6 +82587,7 @@
 				}
 			],
 			"itemUid": "shadow dye|hhhvii",
+			"itemType": "P",
 			"entries": [
 				"You may spend your action to pour this dye on yourself. If you do so, you take on a semi-corporeal shadowy form for the next hour. During this time, you gain a vulnerability to radiant damage and resistance to non-magical bludgeoning, piercing, and slashing damage. In addition, so long as you are within dim light or darkness, you may take the {@action Hide} action as a bonus action, and you make Dexterity ({@skill Stealth}) checks at advantage."
 			],
@@ -82494,6 +82682,7 @@
 				}
 			],
 			"itemUid": "shadow sword|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"When you successfully hit a target with this sword, you may fill a 5-foot cube within 5 feet of your target with magical darkness that only you are able to see in. This darkness remains for 1 minute or until you dismiss it as a free action."
 			],
@@ -82555,6 +82744,7 @@
 				}
 			],
 			"itemUid": "shadowflame oil|hhhvi",
+			"itemType": "Oil",
 			"entries": [
 				"The oil in this vial can be used to coat up to 5 pieces of slashing or piercing ammunition or one slashing or piercing weapon. Applying the oil takes 1 minute. For the next 10 minutes, any creature successfully hit by this weapon or ammunition takes an extra {@damage 2d6} necrotic damage. If this weapon or ammunition kills a creature, a {@creature shadow|MM} under your control rises from that corpse{@homebrew |(refer to the Monster Manual for the relevant statblock)}. This shadow acts directly after you in the initiative count and disappears after 1 hour or if it or you fall {@condition unconscious}."
 			],
@@ -82607,6 +82797,7 @@
 				}
 			],
 			"itemUid": "shield of reflection|hhhvi",
+			"itemType": "S",
 			"entries": [
 				"This shield has what appears to be a spectator's eye engraved in the middle of it. While wearing this shield, if you make a successful saving throw against a spell, or a spell attack misses you, you may spend your reaction to choose another creature (including the spellcaster) that you can see within 30 feet of you. The spell targets the chosen creature instead of you. If the spell forced a saving throw, the chosen creature makes its own save. If the spell was an attack, the attack roll is rerolled against the chosen creature."
 			],
@@ -82634,6 +82825,7 @@
 				}
 			],
 			"itemUid": "sickle of chaos|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"This wicked scythe continues to carry the chaotic, but fair, energies of Limbo inherent in all slaadi. You gain +1 to attack and damage rolls made with this weapon. When you make an attack against a creature with this weapon, you may choose to do so at disadvantage. If your attack is successful, the creature you attacked also has disadvantage on the next attack roll it makes before the end of its next turn. This ability cannot be used if you were to already attack at disadvantage."
 			],
@@ -82847,6 +83039,7 @@
 				}
 			],
 			"itemUid": "sky and earth stir fry|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Old foes make great friends when cooked together.}"
 			],
@@ -82876,6 +83069,7 @@
 				}
 			],
 			"itemUid": "slaad doublet|hhhvi",
+			"itemType": "MA",
 			"entries": [
 				"You gain a bonus +1 AC while wearing this armor. While wearing and attuned to this armor, you gain the following benefits:",
 				{
@@ -82917,6 +83111,7 @@
 				}
 			],
 			"itemUid": "softening oil|hhhvi",
+			"itemType": "Oil",
 			"entries": [
 				"You may spend 10 minutes applying this oil to a creature that has been turned to stone. At the end of the 10 minutes, that creature returns to a flesh and blood state and is no longer considered {@condition petrified}."
 			],
@@ -82943,6 +83138,7 @@
 				}
 			],
 			"itemUid": "soul cleaver|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"You have a +2 bonus to attack and damage rolls made with this weapon. In addition, if you successfully hit a creature with this weapon, you may force them to make a {@dc 16} Constitution saving throw. On a failure, a creature has their connection to their lifeforce disrupted until the end of your next turn. During this time, they cannot regain hit points, they lose any damage resistances they may have had, and they have disadvantage on Constitution saving throws. Undead and constructs are immune to this ability. Once used, this ability cannot be used again until you kill a creature that is not undead or a construct."
 			],
@@ -83000,6 +83196,7 @@
 				}
 			],
 			"itemUid": "staff of demon tongue|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"This staff has 10 charges. While holding this staff, you may use your action to expend 1 or more charges to do one of the following:",
 				{
@@ -83061,6 +83258,7 @@
 				}
 			],
 			"itemUid": "staff of maleficence|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"This twisted staff has 10 charges. While holding it, you can expend 1 or more of its charges to use any of the following abilities:",
 				{
@@ -83148,6 +83346,7 @@
 				}
 			],
 			"itemUid": "staff of multiplied recovery|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"If you hold this staff while casting a spell that would allow a creature to roll dice to recover hit points, any time that creature rolls the maximum value on one of those die rolls, they may roll an additional dice and add that to the amount of healing received. The amount of final dice rolled while under this effect may not exceed double the initial amount."
 			],
@@ -83174,6 +83373,7 @@
 				}
 			],
 			"itemUid": "staff of split control|hhhvii",
+			"itemType": "M",
 			"entries": [
 				"This staff has 6 charges, one for each of the white snake heads on its top. While holding this staff, if you target a creature with a spell that would result in them being {@condition charmed}, you may spend a charge to target an additional creature within 10 feet of the original creature, subjecting them to the same spell. You may spend additional charges to repeat this effect, so long as each additional creature is within 10 feet of another targeted creature.",
 				"This staff regains all lost charges at dawn."
@@ -83202,6 +83402,7 @@
 				}
 			],
 			"itemUid": "staff of the chained spell|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"While holding this three-headed staff, you may target up to 3 creatures you can see within 60 feet of you, forcing them to make a Wisdom saving throw against your spell save DC. A creature can choose to fail this saving throw if they wish. On a failure, a target becomes linked for the next 24 hours to any other creature that also failed this saving throw. Whenever you target a linked creature with a spell while holding this staff, all other linked creatures are targeted as well, duplicating the effect of the spell on them without requiring extra actions or spell slots. All regular rules for spell targeting still apply, e.g. they must be within range, within line of sight, etc. Linked creatures make all relevant saving throws and resolve effects independently of one another.",
 				"Once this ability has been used once, it cannot be used again until the next dawn."
@@ -83237,6 +83438,7 @@
 				}
 			],
 			"itemUid": "staff of the demon prince|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"It is the belief in several demonic sects that {@creature Demogorgon|MTF} is fated to die upon the end of the Blood War and the resulting desolation of both devil and demon society. From the ashes of these realms will rise two twins, both of them immensely powerful warlords who shall raise armies against one another and start the war anew. They shall war over a magical Y-shaped staff crafted from the Prince of Demons themselves, with whoever holds it claiming dominion over the other and ushering in a new age of madness.",
 				"In order to attune to this item, you must hold it while killing someone you deem an ally, for it is the nature of the {@creature Demogorgon|MTF} to trust only themselves. When you become attuned to this item, your appearance becomes more vicious as your eyes turn bloodshot, your body quivers with restlessness, and you constantly foam at the mouth. If you end attunenement to this item, you revert to your original appearance immediately.",
@@ -83352,6 +83554,7 @@
 				}
 			],
 			"itemUid": "stinger whip|hhhvi",
+			"itemType": "M",
 			"entries": [
 				"You gain a +1 bonus to attack and damage rolls made with this weapon. This retrofitted tail has a compartment fitted into where the bone devil's poisonous gland would have been, that allows for easier and more efficient uses of poisons. Any poison applied to this weapon lasts twice as long as it normally does and takes half as long to apply. Furthermore, if a creature must roll a Constitution saving throw due to a poison applied to this weapon, that saving throw is made at disadvantage."
 			],
@@ -83429,6 +83632,7 @@
 				}
 			],
 			"itemUid": "stone swim armor|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"While wearing and attuned to this armor, you gain the following abilities:",
 				{
@@ -83556,6 +83760,7 @@
 				}
 			],
 			"itemUid": "stuffed bird|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i Nothing reminds you of home and hearth better than this classic dish.}"
 			],
@@ -83637,6 +83842,7 @@
 				}
 			],
 			"itemUid": "suit of shadows|hhhviii",
+			"itemType": "MA",
 			"entries": [
 				"While wearing this armor, you have a +1 bonus to AC and you constantly exude an aura of magical darkness that only you can see in around yourself in a 10-foot radius. Within this aura, non-magical light can be no brighter than dim light. You may turn this aura on or off by speaking the item's command word as a bonus action."
 			],
@@ -83659,6 +83865,7 @@
 			"craftDC": null,
 			"ingredients": [],
 			"itemUid": "sunhallowed spear|comcraf",
+			"itemType": "M",
 			"entries": [
 				"You gain a +3 bonus on attack and damage rolls made with this magic weapon. If you throw the spear, it flies back to your hand immediately after the attack.",
 				"When you hit with an attack using this magic weapon, you deal an additional 1d10 radiant damage. If the target is evil aligned, that creature takes an extra 1d10 radiant damage."
@@ -83834,6 +84041,7 @@
 				}
 			],
 			"itemUid": "tarrasque heart tartare|arcadia11",
+			"itemType": "FD",
 			"entries": [
 				"{@i I\u2014wha\u2014yo\u2014...you ate what?!}",
 				"{@i Note: Only creatures with the {@feat Extra Hungry|Arcadia11} feat can gain benefits from this dish.}"
@@ -83889,6 +84097,7 @@
 				}
 			],
 			"itemUid": "terminator armor|hhhviii",
+			"itemType": "HA",
 			"entries": [
 				"While wearing this armor, you gain a +2 bonus to AC, and anytime you receive fire, cold, lightning, thunder, necrotic, poison, or acid damage, you may spend your reaction to gain resistance to that damage type for the next 10 minutes. You may only have resistance to one damage type at a time through this ability; attempting to use this ability again before the 10 minutes elapses replaces the damage resistance type you already have. In addition, due to the near-organic way in which this metal armor moves, it does not impose disadvantage on Dexterity ({@skill Stealth}) checks like regular plate armor does."
 			],
@@ -83947,6 +84156,7 @@
 				}
 			],
 			"itemUid": "titan ship|hhhvi",
+			"itemType": "AIR|DMG",
 			"entries": [
 				"This ship's hull is formed from the shell of a {@creature tarrasque|MM} and shares much of its properties. The ship is 30 feet wide, 70 feet long, and 20 feet high. It possesses 3 sails and can travel at 2 1/2 mph in a good wind. The ship has 25 AC, 500 HP, can house 60 passengers, carry 200 tons of cargo and has a damage threshold of 20.",
 				"In addition, this ship is immune to fire damage as well as bludgeoning, piercing, and slashing damage from nonmagical weapons. If the {@vehicle titan ship|HHHVI} is targeted by a {@spell magic missile} spell, a line spell, or a spell that requires a ranged attack roll, roll a {@dice d6}. On a 1 to 5, the ship is unaffected. On a 6, the ship is unaffected, and the effect is reflected back at the caster as though it originated from the ship, turning the caster into the target.",
@@ -84115,6 +84325,7 @@
 				}
 			],
 			"itemUid": "tri-horn shield|hhhvi",
+			"itemType": "S",
 			"entries": [
 				"If you move at least 20 feet towards a creature while wearing this shield and then make a successful melee {@action attack} against it in the same turn, you may spend a bonus action to make a {@action shove} attack against that creature."
 			],
@@ -84139,6 +84350,7 @@
 				}
 			],
 			"itemUid": "trickster's hammer|hhhviii",
+			"itemType": "M",
 			"entries": [
 				"You have a +2 bonus to attack and damage rolls made with this weapon. When you make a successful critical hit against a creature with this weapon, you add a random extra effect to your attack. Roll a {@dice d4} and consult the table below for your result:",
 				{
@@ -84362,6 +84574,7 @@
 				}
 			],
 			"itemUid": "viper strike|hhhvi",
+			"itemType": "GV|DMG",
 			"entries": [
 				"When you roll a 20 on your attack roll with this weapon, you deal an additional {@damage 10} poison damage, or {@damage 14} poison damage if you are using the 'very rare' version of this weapon. If you are using the 'very rare' version of this weapon, you also gain a +1 to attack and damage rolls made with this weapon."
 			],
@@ -84414,6 +84627,7 @@
 				}
 			],
 			"itemUid": "wand of chromatic wrath|hhhviii",
+			"itemType": "WD|DMG",
 			"entries": [
 				"This wand has 10 charges. While holding it, whenever you {@action cast a spell} that deals damage of either fire, lightning, poison, acid, or cold damage, you may spend a number of charges to change that damage type into another one of the damage types from that list. The amount of charges you spend are equal to the level of the spell slot you used to cast that spell (cantrips do not require any charges). In addition, you gain a +3 bonus to spell attack rolls made while holding this wand.",
 				"The wand recovers all expended charges at dawn. If you use the last charge on this wand, there is a {@chance 90|10 percent|Wand of Chromatic Wrath|The wand is unaffected.|The wand crumbles into dust and becomes useless.} chance that it crumbles into dust and becomes useless."
@@ -84474,6 +84688,7 @@
 				}
 			],
 			"itemUid": "wand of disruption|hhhviii",
+			"itemType": "WD|DMG",
 			"entries": [
 				"This wand has 4 charges. As an action, you may expend 1 charge to force a creature that you can see within 60 feet of you to make a {@dc 19} Constitution saving throw. On a failure, the target creature suffers {@damage 6d10} necrotic damage, and any magical effect currently affecting them is suppressed until the end of their next turn as if they were under the effect of an {@spell antimagic field} spell.",
 				"The wand recovers {@dice 1d4} expended charges daily at dawn. If you expend the wand's last charge, roll a {@dice d20}. On a 1, the wand crumbles into dust and is destroyed."
@@ -84503,6 +84718,7 @@
 				}
 			],
 			"itemUid": "wand of doom|hhhviii",
+			"itemType": "WD|DMG",
 			"entries": [
 				"While holding this wand, you have a +2 bonus to your spell save DC and attack bonus for spell attacks, and any necrotic damage that you deal as the result of a spell deals one additional damage dice. In addition, you may use this wand to cast the {@spell circle of death} or {@spell finger of death} spells once per day each."
 			],
@@ -84529,6 +84745,7 @@
 				}
 			],
 			"itemUid": "wand of the golden ray|hhhvii",
+			"itemType": "WD|DMG",
 			"entries": [
 				"While holding this wand, you gain a +2 bonus to spell attack rolls. In addition, when you roll a 1 or 2 on a damage dice for a spell that deals radiant damage, you can reroll the die and you must use the new roll."
 			],
@@ -84556,6 +84773,7 @@
 				}
 			],
 			"itemUid": "wand of the undergrowth|hhhvi",
+			"itemType": "WD|DMG",
 			"entries": [
 				"This wand has 6 charges. While holding it, you can use an action to expend 1 or more charges to cast the {@spell blight} spell (save {@dc 15}) from it. For 1 charge, you cast the 4th-level version of the spell. You can increase the spell slot level by one for each additional charge you expend.",
 				"The wand regains {@dice 1d6} expended charges daily at dawn. If you expend the wand's last charge, roll a {@dice d20}. On a 1, the wand crumbles into compost and is destroyed.",
@@ -84587,6 +84805,7 @@
 				}
 			],
 			"itemUid": "wanderer's hide|hhhviii",
+			"itemType": "MA",
 			"entries": [
 				"You gain a +1 bonus to AC while wearing this armor. In addition, you automatically succeed any Constitution saving throw to avoid {@condition exhaustion} when travelling for long periods of time or travelling in extreme cold or heat."
 			],
@@ -84698,6 +84917,7 @@
 				}
 			],
 			"itemUid": "whip of extended reach|hhhvii",
+			"itemType": "M",
 			"entries": [
 				"You gain a +1 to attack and damage rolls made with this weapon. When you hit a Medium or smaller sized creature with this weapon, you may make a {@action grapple} check against them as a free action, using the whip to {@action grapple} instead of your free hand. This ability can only be used once per turn. While you have a creature {@condition grappled} in this way, you may not attack with this whip.",
 				"In addition, while holding this 10-foot long weapon, you may spend your action to focus on it and force it to adopt any position or shape you wish, as if it were an extension of your own body. You may spend any subsequent actions to maintain your focus on the whip and either keep it in the same position or move it into a new one. While focusing on the whip, you also are able to feel sensations of touch through the whip. If you attempt to make an {@action attack} with the whip, or do not spend an action focusing on it, it falls limp and you no longer are able to feel through the whip."
@@ -84826,6 +85046,7 @@
 				}
 			],
 			"itemUid": "yeenoghu's wrath|hhhvii",
+			"itemType": "M",
 			"entries": [
 				"You gain a +1 to attack and damage rolls made with this weapon. As a bonus action, you may cause the stinger on the end of this whip to exude a noxious poison. The next creature you successfully hit with this weapon must succeed on a {@dc 14} Constitution saving throw or become {@condition poisoned}. While {@condition poisoned} in this way, the target is also {@condition paralyzed}. The target can repeat the saving throw at the end of each of its turns, ending the effect on itself on a success. Once used this ability cannot be used again until you reduce a creature to 0 hit points with a melee weapon attack."
 			],
@@ -84855,6 +85076,7 @@
 				}
 			],
 			"itemUid": "young remorhaz plate|hhhvi",
+			"itemType": "HA",
 			"entries": [
 				"This full set of plate armor was crafted from the insectoid carapace of a remorhaz. While wearing this armor, you have resistance to both fire and cold damage."
 			],

@@ -19,6 +19,52 @@ books contain.
 | **Cook** (19 dishes) | Wisdom (Cooking) vs `craftDC` | Meets DC → Success · +5 → Delicious · natural 20 on a success → Extra Delicious. Adds the dish to inventory at that tier; the benefit lands when somebody *eats* it |
 | **Craft** (437 items) | *none* | A commit dialog: materials, tool advisory, workweeks → consume → produce |
 
+## Feature-contributed crafting time
+
+Crafting time is a state calculation, not dialog policy:
+
+```js
+state.getCraftingTimeCalculation({
+  baseWorkweeks,
+  quantity,
+  recipe,
+  item,
+  category,
+});
+```
+
+Features publish descriptors through `getFeatureCalculations().craftingTimeModifiers`:
+
+```js
+{
+  id: "stable-id",
+  owner: {kind: "subclassFeature", name, source, uid},
+  multiplier: 0.5,
+  filter: {
+    itemTypes: ["LA", "MA", "HA"],
+    // recipeCategories: ["potion"],
+    // resultCategories: ["armor"],
+  },
+}
+```
+
+Filter keys are ANDed, values within one key are ORed, and applicable descriptors are sorted by
+stable ID before their multipliers are composed. Every descriptor must carry an exact owner UID and
+source; missing ownership, unknown filter keys, duplicate IDs, and zero/non-finite multipliers fail
+explicitly instead of creating an impossible duration. The returned calculation contains baseline
+and effective workweeks, the effective multiplier, and a render-ready source breakdown. Both the
+commit confirmation and outcome consume that same object.
+
+Generated recipes preserve the output's existing 5etools `itemType`. Armor is exactly `LA`, `MA`,
+or `HA`; shields remain `S`, so they do not become armor merely because both contribute AC. A
+resolved catalog item can provide the same context, and an explicit result category supports future
+non-item crafting surfaces.
+
+`Tools of the Trade|Artificer|EFA|Armorer|EFA|3|EFA` contributes a `0.5` multiplier for armor at
+Artificer 3+. The class and subclass sources must both be `EFA`; the TCE Armorer's same-named
+feature does not qualify. Mundane and magic armor use the same item taxonomy, while weapons,
+potions, adventuring gear, and shields remain unchanged.
+
 ## The two invariants
 
 ### 1. Materials are inventory items, not a parallel ledger

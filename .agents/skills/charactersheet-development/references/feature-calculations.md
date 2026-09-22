@@ -252,6 +252,34 @@ one effect description.
 ### Items
 Magic items can provide bonuses that stack with or override feature calculations. Item bonuses are tracked separately in state and aggregated during AC/save/skill computation.
 
+### Crafting-time modifiers
+
+Features which alter crafting duration append machine-readable descriptors to
+`calculations.craftingTimeModifiers`:
+
+```js
+{
+  id: "stable-id",
+  owner: {kind: "subclassFeature", name, source, uid},
+  multiplier: 0.5,
+  filter: {itemTypes: ["LA", "MA", "HA"]},
+}
+```
+
+Consumers call
+`state.getCraftingTimeCalculation({baseWorkweeks, quantity, recipe, item, category})`; they do not
+branch on a class or feature name. Supported structured filters are `itemTypes`,
+`recipeCategories`, and `resultCategories`. The state validates exact owner/source attribution,
+rejects duplicate IDs and non-positive/non-finite multipliers, filters the descriptors against the
+recipe context, sorts by stable ID, and multiplies every applicable contribution. The result
+contains `baselineWorkweeks`, `effectiveWorkweeks`, `multiplier`, and `sourceBreakdown`, and is the
+single value both crafting preview and outcome render.
+
+The EFA Armorer's Tools of the Trade descriptor is source-gated to Artificer `EFA` + Armorer `EFA`
+at level 3 and filters on `LA`/`MA`/`HA`. `S` shields are deliberately separate. Future features
+such as an Alchemist potion discount use the same channel with
+`filter: {recipeCategories: ["potion"]}`.
+
 ### Reading a subclass's progression table (do NOT hardcode)
 
 Many subclasses carry a `subclassTableGroups` block (the per-level table rendered
