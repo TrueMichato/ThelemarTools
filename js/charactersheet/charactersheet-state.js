@@ -2809,7 +2809,7 @@ globalThis.FeatureModifierParser = FeatureModifierParser;
 const FeatureEffectRegistry = {
 	// Internal registry of feature name -> effects mapping
 	_registry: {},
-	_sourceAwareFeatureNames: new Set(["battle ready", "draconic resilience", "magic item savant", "soul of artifice"]),
+	_sourceAwareFeatureNames: new Set(["battle ready", "chemical mastery", "draconic resilience", "magic item savant", "soul of artifice"]),
 
 	/**
 	 * Initialize the default feature effects registry.
@@ -3134,6 +3134,26 @@ const FeatureEffectRegistry = {
 		// Sundering's extra rite die is applied through `crimsonRiteDamage`.
 
 		// ======= ARTIFICER SUBCLASSES =======
+		this.register("Chemical Mastery|EFA", [
+			{
+				type: "resistance",
+				damageType: "acid",
+				source: "Chemical Mastery|EFA",
+				ownerUid: "Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA",
+			},
+			{
+				type: "resistance",
+				damageType: "poison",
+				source: "Chemical Mastery|EFA",
+				ownerUid: "Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA",
+			},
+			{
+				type: "conditionImmunity",
+				condition: "poisoned",
+				source: "Chemical Mastery|EFA",
+				ownerUid: "Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA",
+			},
+		]);
 		this.register("Battle Ready", [
 			{type: "attackAbility", ability: "int", weaponType: "magic"},
 		]);
@@ -4104,10 +4124,12 @@ const FeatureEffectRegistry = {
 		return this.getEffects(featName);
 	},
 
-	getStoredFeatureEffects (featureName, source) {
+	getStoredFeatureEffects (featureOrName, source) {
+		const featureName = typeof featureOrName === "object" ? featureOrName?.name : featureOrName;
+		const featureSource = typeof featureOrName === "object" ? featureOrName?.source : source;
 		const key = this._normalizeKey(featureName);
 		return this._sourceAwareFeatureNames.has(key)
-			? this.getEffects(featureName, source)
+			? this.getEffects(featureName, featureSource)
 			: this.getEffects(featureName);
 	},
 
@@ -32047,7 +32069,6 @@ class CharacterSheetState {
 								filter: {recipeCategories: ["potion"]},
 							});
 						}
-						if (level >= 15) calculations.hasEfaAlchemistChemicalResistance = true;
 					}
 
 					if (
@@ -33373,7 +33394,9 @@ class CharacterSheetState {
 				if (!feature.name) return;
 
 				// Try to get effects from the registry by feature name
-				const registryEffects = FeatureEffectRegistry.getStoredFeatureEffects(feature.name, feature.source);
+				const registryEffects = FeatureEffectRegistry.getStoredFeatureEffects(feature)
+					.filter(effect => this._isFeatureEffectOwnerActive(feature, effect.ownerUid))
+					.map(({ownerUid, ...effect}) => effect);
 				if (registryEffects.length > 0) {
 					// Effects that opt in with `__editionAware` need the FEATURE's own source
 					// (e.g. "PHB" vs "XPHB") to resolve edition-divergent wording. Opt-in by
@@ -33428,6 +33451,23 @@ class CharacterSheetState {
 		}
 
 		return {effects, processedFeatures};
+	}
+
+	_isFeatureEffectOwnerActive (feature, ownerUid) {
+		if (!ownerUid) return true;
+		if (CharacterSheetState._getSourceAwareSubclassFeatureUid(feature).toLowerCase() !== ownerUid.toLowerCase()) return false;
+
+		const [, className, classSource, subclassShortName, subclassSource, requiredLevel] = ownerUid.split("|");
+		const normalize = value => `${value || ""}`.trim().toLowerCase();
+		return (this._data.classes || []).some(cls => {
+			if (normalize(cls.name) !== normalize(className) || normalize(cls.source) !== normalize(classSource)) return false;
+			if (Number(cls.level) < Number(requiredLevel)) return false;
+
+			const subclass = cls.subclass;
+			const subclassNames = [subclass?.shortName, subclass?.name].map(normalize);
+			return subclassNames.includes(normalize(subclassShortName))
+				&& normalize(subclass?.source) === normalize(subclassSource);
+		});
 	}
 
 	/**
@@ -34777,14 +34817,6 @@ class CharacterSheetState {
 			});
 		}
 
-		if (calculations.hasEfaAlchemistChemicalResistance && !alreadyProcessed("Chemical Mastery")) {
-			effects.push(
-				{type: "resistance", damageType: "acid", source: "Chemical Mastery"},
-				{type: "resistance", damageType: "poison", source: "Chemical Mastery"},
-				{type: "conditionImmunity", condition: "poisoned", source: "Chemical Mastery"},
-			);
-		}
-
 		// Soul of Artifice (Artificer 20): +1 to saves per attuned item
 		if (calculations.hasSoulOfArtifice && !alreadyProcessed("Soul of Artifice")) {
 			effects.push({
@@ -35610,6 +35642,7 @@ class CharacterSheetState {
 		// Remove class feature resistances
 		if (this._data._classFeatureResistances) {
 			this._data._classFeatureResistances.forEach(r => {
+				if (this._hasGrantedDefensiveTraitOwner("resistances", r)) return;
 				const idx = this._data.resistances.indexOf(r);
 				if (idx >= 0) this._data.resistances.splice(idx, 1);
 			});
@@ -35619,6 +35652,7 @@ class CharacterSheetState {
 		// Remove class feature immunities
 		if (this._data._classFeatureImmunities) {
 			this._data._classFeatureImmunities.forEach(i => {
+				if (this._hasGrantedDefensiveTraitOwner("immunities", i)) return;
 				const idx = this._data.immunities.indexOf(i);
 				if (idx >= 0) this._data.immunities.splice(idx, 1);
 			});
@@ -35631,6 +35665,7 @@ class CharacterSheetState {
 		// Remove class feature condition immunities
 		if (this._data._classFeatureConditionImmunities) {
 			this._data._classFeatureConditionImmunities.forEach(c => {
+				if (this._hasGrantedDefensiveTraitOwner("conditionImmunities", c)) return;
 				const idx = this._data.conditionImmunities.indexOf(c);
 				if (idx >= 0) this._data.conditionImmunities.splice(idx, 1);
 			});
@@ -35749,18 +35784,14 @@ class CharacterSheetState {
 	// Helper methods for tracking class feature effects
 	_addClassFeatureResistance (type) {
 		if (!this._data._classFeatureResistances) this._data._classFeatureResistances = [];
-		if (!this._data.resistances.includes(type)) {
-			this._data.resistances.push(type);
-			this._data._classFeatureResistances.push(type);
-		}
+		if (!this._data._classFeatureResistances.includes(type)) this._data._classFeatureResistances.push(type);
+		if (!this._data.resistances.includes(type)) this._data.resistances.push(type);
 	}
 
 	_addClassFeatureImmunity (type) {
 		if (!this._data._classFeatureImmunities) this._data._classFeatureImmunities = [];
-		if (!this._data.immunities.includes(type)) {
-			this._data.immunities.push(type);
-			this._data._classFeatureImmunities.push(type);
-		}
+		if (!this._data._classFeatureImmunities.includes(type)) this._data._classFeatureImmunities.push(type);
+		if (!this._data.immunities.includes(type)) this._data.immunities.push(type);
 	}
 
 	_addClassFeatureConditionImmunity (condition, conditional = null) {
@@ -35774,10 +35805,21 @@ class CharacterSheetState {
 			condition: String(condition).toLowerCase(),
 			conditional: conditional || null,
 		});
-		if (!this._data.conditionImmunities.includes(condition)) {
-			this._data.conditionImmunities.push(condition);
-			this._data._classFeatureConditionImmunities.push(condition);
-		}
+		if (!this._data._classFeatureConditionImmunities.includes(condition)) this._data._classFeatureConditionImmunities.push(condition);
+		if (!this._data.conditionImmunities.includes(condition)) this._data.conditionImmunities.push(condition);
+	}
+
+	_hasGrantedDefensiveTraitOwner (type, name) {
+		return !!this._data.grantedDefensiveTraits?.[type]?.[name]?.length;
+	}
+
+	_hasClassFeatureDefensiveTraitOwner (type, name) {
+		const tracker = {
+			resistances: this._data._classFeatureResistances,
+			immunities: this._data._classFeatureImmunities,
+			conditionImmunities: this._data._classFeatureConditionImmunities,
+		}[type];
+		return !!tracker?.includes(name);
 	}
 
 	_addClassFeatureSaveProficiency (ability) {
@@ -59813,13 +59855,19 @@ class CharacterSheetState {
 		if (!effectType) return;
 		if (effectType.startsWith("resistance:")) {
 			const damageType = effectType.replace("resistance:", "");
-			if (this._untrackGrantedDefensiveTrait("resistances", damageType, sourceFeatureId)) {
+			if (
+				this._untrackGrantedDefensiveTrait("resistances", damageType, sourceFeatureId)
+				&& !this._hasClassFeatureDefensiveTraitOwner("resistances", damageType)
+			) {
 				const idx = this._data.resistances.indexOf(damageType);
 				if (idx !== -1) this._data.resistances.splice(idx, 1);
 			}
 		} else if (effectType.startsWith("immunity:")) {
 			const damageType = effectType.replace("immunity:", "");
-			if (this._untrackGrantedDefensiveTrait("immunities", damageType, sourceFeatureId)) {
+			if (
+				this._untrackGrantedDefensiveTrait("immunities", damageType, sourceFeatureId)
+				&& !this._hasClassFeatureDefensiveTraitOwner("immunities", damageType)
+			) {
 				const idx = this._data.immunities.indexOf(damageType);
 				if (idx !== -1) this._data.immunities.splice(idx, 1);
 			}
@@ -59831,7 +59879,10 @@ class CharacterSheetState {
 			}
 		} else if (effectType.startsWith("conditionImmunity:")) {
 			const condition = effectType.replace("conditionImmunity:", "");
-			if (this._untrackGrantedDefensiveTrait("conditionImmunities", condition, sourceFeatureId)) {
+			if (
+				this._untrackGrantedDefensiveTrait("conditionImmunities", condition, sourceFeatureId)
+				&& !this._hasClassFeatureDefensiveTraitOwner("conditionImmunities", condition)
+			) {
 				const idx = this._data.conditionImmunities.indexOf(condition);
 				if (idx !== -1) this._data.conditionImmunities.splice(idx, 1);
 			}
@@ -60831,7 +60882,10 @@ class CharacterSheetState {
 		// Resistances
 		if (traits.resistances?.length) {
 			for (const type of traits.resistances) {
-				if (this._untrackGrantedDefensiveTrait("resistances", type, ability.id)) {
+				if (
+					this._untrackGrantedDefensiveTrait("resistances", type, ability.id)
+					&& !this._hasClassFeatureDefensiveTraitOwner("resistances", type)
+				) {
 					const idx = this._data.resistances.indexOf(type);
 					if (idx !== -1) this._data.resistances.splice(idx, 1);
 				}
@@ -60841,7 +60895,10 @@ class CharacterSheetState {
 		// Immunities
 		if (traits.immunities?.length) {
 			for (const type of traits.immunities) {
-				if (this._untrackGrantedDefensiveTrait("immunities", type, ability.id)) {
+				if (
+					this._untrackGrantedDefensiveTrait("immunities", type, ability.id)
+					&& !this._hasClassFeatureDefensiveTraitOwner("immunities", type)
+				) {
 					const idx = this._data.immunities.indexOf(type);
 					if (idx !== -1) this._data.immunities.splice(idx, 1);
 				}
@@ -60862,7 +60919,10 @@ class CharacterSheetState {
 		if (traits.conditionImmunities?.length) {
 			for (const cond of traits.conditionImmunities) {
 				const normalizedCond = cond.toLowerCase();
-				if (this._untrackGrantedDefensiveTrait("conditionImmunities", normalizedCond, ability.id)) {
+				if (
+					this._untrackGrantedDefensiveTrait("conditionImmunities", normalizedCond, ability.id)
+					&& !this._hasClassFeatureDefensiveTraitOwner("conditionImmunities", normalizedCond)
+				) {
 					const idx = this._data.conditionImmunities.indexOf(normalizedCond);
 					if (idx !== -1) this._data.conditionImmunities.splice(idx, 1);
 				}

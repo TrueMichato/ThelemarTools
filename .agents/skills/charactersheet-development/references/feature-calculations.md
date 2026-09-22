@@ -365,6 +365,15 @@ Two ways a swap is created, both flowing through `_processFeatureModifiers` → 
 ### FeatureEffectRegistry
 Maps feature names to effect objects. When a feature is added to the character (during build/levelup), the registry is consulted to auto-apply effects like resistances, proficiencies, and senses.
 
+Source-sensitive passives use a source-qualified registry key. If the feature
+must also prove its complete class/subclass owner, put the canonical seven-part
+subclass-feature UID in `effect.ownerUid`. `_getStoredFeatureEffects()` then
+requires both the stored feature identity and an active matching class,
+subclass, and minimum class level before applying the effect. Chemical Mastery
+uses `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA`; the same-named TCE
+feature and stale features after down-level/respec therefore cannot borrow the
+EFA defenses.
+
 ### Deferred damage maximization and damage-triggered effects
 
 Features which modify a future damage roll use `armDamageMaximization()` rather than spending

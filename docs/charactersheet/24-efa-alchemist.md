@@ -15,6 +15,14 @@ state must be saved, and what the player-facing controls must do.
 > receipt contract now ships; wiring these grants to Alchemist-specific cast
 > execution remains a separate milestone, so they do not yet expose a cast action.
 
+> **Chemical Resistance milestone status:** the exact
+> `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA` owner now contributes
+> Acid resistance, Poison resistance, and Poisoned condition immunity through
+> the canonical defense queries. The grant is source/owner/level gated,
+> round-trips idempotently, follows class/subclass/feature teardown, and
+> coexists with independent grants. Alchemical Eruption and cast execution are
+> not part of this milestone.
+
 ## 1. Identity comes before feature names
 
 The word "Alchemist" is not enough to identify the rules. The data contains
@@ -305,6 +313,11 @@ manually resolved.
 
 ### 7.2 Chemical Resistance
 
+> **Implemented:** this passive is registered through the source-aware
+> `FeatureEffectRegistry` with the exact Chemical Mastery owner UID. A stored
+> same-named feature is insufficient unless the active character still has
+> `Artificer|EFA` 15 + `Alchemist|EFA`.
+
 The canonical defense and condition queries gain:
 
 - Acid resistance;
@@ -525,7 +538,7 @@ Implementation is intentionally split into bounded reviewable milestones:
 | 2 | Tools of the Trade choices and shared Potion Crafting multiplier |
 | 3 | Experimental Elixir state, inventory, transactions, and effect lifecycle |
 | 4 | Operate-mode UI, rest choices, accessibility, and mobile behavior |
-| 5 | Savant, Restorative Reagents, Eruption, defenses, and Cauldron |
+| 5 | Chemical Resistance defenses (shipped); Savant, Restorative Reagents, Eruption, and Cauldron execution remain separate bounded work |
 | 6 | Migration, respec, export, rendering, and isolation hardening |
 | 7 | Integrated Jest/E2E verification and documentation alignment |
 
