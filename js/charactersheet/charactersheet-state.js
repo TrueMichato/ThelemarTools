@@ -4491,11 +4491,6 @@ class CharacterSheetState {
 		Object.freeze({level: 17, name: "Raise Dead", source: "XPHB"}),
 	]);
 	static TCE_BATTLE_READY_FEATURE_UID = "Battle Ready|Artificer|TCE|Battle Smith|TCE|3|TCE";
-	static EFA_REPLICATE_MAGIC_ITEM_OWNER = Object.freeze({
-		featureUid: "Replicate Magic Item|Artificer|EFA|2",
-		classUid: "Artificer|EFA",
-		subclassUid: null,
-	});
 
 	/**
 	 * Build the exact owner identity used by fixed-proficiency fallback
@@ -42412,15 +42407,15 @@ class CharacterSheetState {
 					: hasBattleReady
 						? "Choose an equipped proficient tool or weapon, or an equipped replicated Wand or Weapon, as the material focus for this spell."
 						: hasArcaneArmorFocus
-					? "Choose your worn Arcane Armor, an equipped proficient tool, or an equipped replicated Wand or Weapon as the spellcasting focus."
-					: "Choose the equipped proficient tool or replicated Wand or Weapon you are using as the material focus for this spell.",
+							? "Choose your worn Arcane Armor, an equipped proficient tool, or an equipped replicated Wand or Weapon as the spellcasting focus."
+							: "Choose the equipped proficient tool or replicated Wand or Weapon you are using as the material focus for this spell.",
 				unavailableMessage: hasBattleReady && hasArcaneArmorFocus
 					? "EFA Battle Smith spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, a proficient weapon, or an equipped replicated Wand or Weapon."
 					: hasBattleReady
 						? "EFA Battle Smith spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, a proficient weapon, or an equipped replicated Wand or Weapon."
 						: hasArcaneArmorFocus
-					? "EFA Artificer spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon."
-					: "EFA Artificer spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon.",
+							? "EFA Artificer spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon."
+							: "EFA Artificer spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon.",
 			},
 		};
 	}
