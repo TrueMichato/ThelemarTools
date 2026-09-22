@@ -4388,6 +4388,30 @@ class CharacterSheetState {
 		};
 		return freeze(copied);
 	}
+	static RHW_REANIMATOR_SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
+	static RHW_REANIMATOR_FEATURE_UIDS = Object.freeze({
+		REANIMATOR: "Reanimator|Artificer|EFA|Reanimator|RHW|3",
+		SPELLS: "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3",
+		SKILL_SET: "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3",
+		COMPANION: "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3",
+		STRANGE_MODIFICATIONS: "Strange Modifications|Artificer|EFA|Reanimator|RHW|5",
+		IMPROVED_REANIMATION: "Improved Reanimation|Artificer|EFA|Reanimator|RHW|9",
+		MACABRE_MODIFICATIONS: "Macabre Modifications|Artificer|EFA|Reanimator|RHW|9",
+		REFINED_REANIMATION: "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15",
+	});
+	static RHW_REANIMATOR_SPELLS = Object.freeze([
+		Object.freeze({level: 3, name: "False Life", source: "XPHB"}),
+		Object.freeze({level: 3, name: "Spare the Dying", source: "XPHB"}),
+		Object.freeze({level: 3, name: "Witch Bolt", source: "XPHB"}),
+		Object.freeze({level: 5, name: "Blindness/Deafness", source: "XPHB"}),
+		Object.freeze({level: 5, name: "Enhance Ability", source: "XPHB"}),
+		Object.freeze({level: 9, name: "Animate Dead", source: "XPHB"}),
+		Object.freeze({level: 9, name: "Lightning Bolt", source: "XPHB"}),
+		Object.freeze({level: 13, name: "Blight", source: "XPHB"}),
+		Object.freeze({level: 13, name: "Death Ward", source: "XPHB"}),
+		Object.freeze({level: 17, name: "Antilife Shell", source: "XPHB"}),
+		Object.freeze({level: 17, name: "Raise Dead", source: "XPHB"}),
+	]);
 
 	/**
 	 * Return whether a feature is a class/subclass progression feature whose
@@ -19667,6 +19691,9 @@ class CharacterSheetState {
 		if (!cls?.subclass) return [];
 
 		const subclassData = cls.subclass;
+		const isReanimator = [subclassData.name, subclassData.shortName]
+			.some(value => String(value || "").toLowerCase() === "reanimator");
+		if (isReanimator && !this._isRhwReanimatorClass(cls)) return [];
 		const characterLevel = cls.level || 0;
 		const result = [];
 
@@ -19875,17 +19902,31 @@ class CharacterSheetState {
 	 * @returns {{key: string, sourceFeature: string, sourceClass: string, isCantrip: boolean}}
 	 */
 	getSubclassSpellGrantOwner (cls, spell) {
+		const baseKey = this._getSubclassSpellGrantBaseKey(cls);
+		const grantOwnerUid = spell.grantOwnerUid
+			|| (
+				this._isRhwReanimatorClass(cls)
+				&& spell.sourceFeature === "Reanimator Spells"
+					? CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SPELLS
+					: null
+			);
 		return {
-			key: [
-				cls.name,
-				cls.source,
-				cls.subclass?.name,
-				cls.subclass?.source,
-			].map(part => String(part || "").toLowerCase()).join("|"),
+			key: grantOwnerUid ? `${baseKey}|owner:${String(grantOwnerUid).toLowerCase()}` : baseKey,
 			sourceFeature: spell.sourceFeature,
 			sourceClass: spell.sourceClass || cls.name,
 			isCantrip: !!spell.isCantrip,
+			...(grantOwnerUid ? {grantOwnerUid} : {}),
+			...(spell.alternateCast ? {alternateCast: MiscUtil.copyFast(spell.alternateCast)} : {}),
 		};
+	}
+
+	_getSubclassSpellGrantBaseKey (cls) {
+		return [
+			cls.name,
+			cls.source,
+			cls.subclass?.name,
+			cls.subclass?.source,
+		].map(part => String(part || "").toLowerCase()).join("|");
 	}
 
 	_captureSubclassSpellGrantOriginalMetadata (spell) {
@@ -19909,13 +19950,29 @@ class CharacterSheetState {
 		return true;
 	}
 
-	_applySubclassSpellGrantOwner (spell, owner) {
-		if (!owner.isCantrip) {
+	_reapplySubclassSpellGrantOwners (spell) {
+		const owners = Array.isArray(spell.subclassSpellGrantOwners) ? spell.subclassSpellGrantOwners : [];
+		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) delete spell[key];
+		const original = spell.subclassSpellGrantOriginalMetadata;
+		for (const key of (original?.present || [])) spell[key] = original.values?.[key];
+		if (!owners.length) return original != null;
+
+		const alwaysPreparedOwner = [...owners].reverse()
+			.find(owner => !owner.isCantrip && owner.alternateCast == null);
+		const owner = alwaysPreparedOwner || owners.at(-1);
+		if (alwaysPreparedOwner) {
 			spell.alwaysPrepared = true;
 			spell.prepared = true;
+		} else if (!owner.isCantrip && original == null) {
+			spell.alwaysPrepared = false;
+			spell.prepared = false;
 		}
-		spell.sourceFeature = owner.sourceFeature;
-		spell.sourceClass = owner.sourceClass;
+		const preservesPlayerAttribution = owner.alternateCast != null && original != null;
+		if (!preservesPlayerAttribution) {
+			spell.sourceFeature = owner.sourceFeature;
+			spell.sourceClass = owner.sourceClass;
+		}
+		return true;
 	}
 
 	_addSubclassSpellGrantOwner (spell, cls, grant, {wasExisting = true} = {}) {
@@ -19927,9 +19984,14 @@ class CharacterSheetState {
 		}
 
 		const owner = this.getSubclassSpellGrantOwner(cls, grant);
+		if (owner.grantOwnerUid) {
+			const legacyKey = this._getSubclassSpellGrantBaseKey(cls);
+			spell.subclassSpellGrantOwners = spell.subclassSpellGrantOwners
+				.filter(candidate => candidate.grantOwnerUid || candidate.key !== legacyKey);
+		}
 		const isNewOwner = !spell.subclassSpellGrantOwners.some(it => it.key === owner.key);
 		if (isNewOwner) spell.subclassSpellGrantOwners.push(owner);
-		this._applySubclassSpellGrantOwner(spell, owner);
+		this._reapplySubclassSpellGrantOwners(spell);
 		return isNewOwner;
 	}
 
@@ -19941,7 +20003,7 @@ class CharacterSheetState {
 
 		spell.subclassSpellGrantOwners = remaining;
 		if (remaining.length) {
-			this._applySubclassSpellGrantOwner(spell, remaining.at(-1));
+			this._reapplySubclassSpellGrantOwners(spell);
 			return true;
 		}
 
@@ -19949,9 +20011,10 @@ class CharacterSheetState {
 	}
 
 	_reconcileFixedSubclassSpellGrants (cls, desiredSpells) {
-		const ownerKey = this.getSubclassSpellGrantOwner(cls, {isCantrip: false}).key;
-		const desiredIds = new Set(desiredSpells.map(spell => this._spellIdentityKey(spell)));
 		const sourceFeature = cls.subclass ? `${cls.subclass.name} Spells` : null;
+		const ownerKey = this.getSubclassSpellGrantOwner(cls, {isCantrip: false, sourceFeature}).key;
+		const legacyOwnerKey = this._getSubclassSpellGrantBaseKey(cls);
+		const desiredIds = new Set(desiredSpells.map(spell => this._spellIdentityKey(spell)));
 		const authoredIds = new Set();
 		for (const spellBlock of (cls.subclass?.additionalSpells || [])) {
 			for (const category of ["prepared", "known", "innate"]) {
@@ -19968,7 +20031,10 @@ class CharacterSheetState {
 			const spellId = this._spellIdentityKey(spell);
 			const ownerResult = this._removeSubclassSpellGrantOwner(
 				spell,
-				owner => owner.key === ownerKey && !desiredIds.has(spellId),
+				owner => (
+					owner.key === ownerKey
+					|| (owner.key === legacyOwnerKey && owner.grantOwnerUid == null && ownerKey !== legacyOwnerKey)
+				) && !desiredIds.has(spellId),
 			);
 			if (ownerResult != null) return ownerResult;
 
@@ -31070,6 +31136,9 @@ class CharacterSheetState {
 					const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
 					const subclassName = effectiveSubclass?.name?.toLowerCase() || effectiveSubclass?.shortName?.toLowerCase();
 					const subclassSource = `${effectiveSubclass?.source || effectiveSubclass?.subclassSource || ""}`.toUpperCase();
+					if (this._isRhwReanimatorClass(cls)) {
+						Object.assign(calculations, this._getRhwReanimatorCalculations(cls));
+					}
 					const applyArtilleristCalculations = ({isEfaArtillerist = false} = {}) => {
 						if (isEfaArtillerist) {
 							calculations.hasArtilleristMartialRangedWeaponProficiency = true;
@@ -34086,6 +34155,7 @@ class CharacterSheetState {
 
 		// Populate subclass spells (domain spells, patron spells, origin spells, etc.)
 		this.populateSubclassSpells();
+		this._reconcileRhwReanimatorState();
 		// Populate class-level always-prepared spells (base CLASS additionalSpells —
 		// e.g. TGTT Cleric Ceremony/Thaumaturgy, Ranger Hunter's Mark). Catalog-gated
 		// + idempotent reconcile; no-ops until setClassCatalog has run.
@@ -43158,6 +43228,378 @@ class CharacterSheetState {
 		) || null;
 	}
 
+	_isRhwReanimatorClass (cls) {
+		const subclassNames = [cls?.subclass?.name, cls?.subclass?.shortName]
+			.map(value => String(value || "").toLowerCase());
+		return String(cls?.name || "").toLowerCase() === "artificer"
+			&& String(cls?.source || "").toUpperCase() === "EFA"
+			&& subclassNames.includes("reanimator")
+			&& String(cls?.subclass?.source || "").toUpperCase() === "RHW";
+	}
+
+	_getRhwReanimatorClass () {
+		return (this._data.classes || []).find(cls => this._isRhwReanimatorClass(cls)) || null;
+	}
+
+	_getRhwReanimatorCalculations (cls) {
+		const level = Number(cls?.level) || 0;
+		if (level < 3) return {};
+
+		const intMod = this.getAbilityMod("int");
+		const featureUids = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS;
+		const calculations = {
+			hasReanimatorSpells: true,
+			reanimatorSpells: {
+				featureUid: featureUids.SPELLS,
+				ownerUid: featureUids.SPELLS,
+				spellUids: CharacterSheetState.RHW_REANIMATOR_SPELLS
+					.filter(spell => level >= spell.level)
+					.map(spell => `${spell.name}|${spell.source}`),
+				alwaysPrepared: true,
+				countsAgainstPreparedCapacity: false,
+			},
+			hasJoltToLife: true,
+			joltToLife: {
+				featureUid: featureUids.SKILL_SET,
+				spellUid: "Spare the Dying|XPHB",
+				spellOwnerUid: featureUids.SPELLS,
+				uses: Math.max(0, intMod),
+				recharge: "long",
+				healing: level,
+				save: {ability: "dex", dc: this.getSpellSaveDcForAbility("int"), onSuccess: "halfDamage"},
+				emanationFeet: 10,
+				damage: level >= 17 ? "4d4" : level >= 11 ? "3d4" : "2d4",
+				damageType: "lightning",
+			},
+			hasReanimatorsToolsRequirement: true,
+			reanimatorsTools: {
+				featureUid: featureUids.SKILL_SET,
+				requiredProficiency: "Alchemist's Supplies|XPHB",
+				proficiencyGranted: false,
+				fallbackChoiceGranted: false,
+				implementationBoundary: "sharedToolPickerR2b",
+			},
+			hasReanimatedCompanionOwnership: true,
+			reanimatedCompanion: {
+				featureUid: featureUids.COMPANION,
+				companionUid: "Reanimated Companion|RHW",
+				ownershipOnly: true,
+				creationImplemented: false,
+			},
+		};
+
+		if (level >= 5) {
+			calculations.hasStrangeModifications = true;
+			calculations.reanimatorModificationCount = 1;
+			calculations.reanimatorModificationFeatureUid = featureUids.STRANGE_MODIFICATIONS;
+		}
+		if (level >= 9) {
+			calculations.hasImprovedReanimation = true;
+			calculations.improvedReanimationFeatureUid = featureUids.IMPROVED_REANIMATION;
+			calculations.hasMacabreModifications = true;
+			calculations.reanimatorModificationCount = 2;
+			calculations.reanimatorModificationFeatureUid = featureUids.MACABRE_MODIFICATIONS;
+		}
+		if (level >= 15) {
+			calculations.hasRefinedReanimation = true;
+			calculations.hasSuperiorModifications = true;
+			calculations.reanimatorModificationCount = 3;
+			calculations.reanimatorModificationFeatureUid = featureUids.REFINED_REANIMATION;
+			calculations.hasFacilitatedRevival = true;
+			calculations.facilitatedRevival = {
+				featureUid: featureUids.REFINED_REANIMATION,
+				spellUid: "Raise Dead|XPHB",
+				spellOwnerUid: featureUids.REFINED_REANIMATION,
+				uses: 1,
+				recharge: "long",
+				slotCost: 0,
+				ignoresMaterialComponents: true,
+				executionAvailable: false,
+				pendingContract: "sharedToolReceiptAndFocusValidationR2b",
+			};
+			calculations.hasLifeTransfer = true;
+			calculations.lifeTransferFeatureUid = featureUids.REFINED_REANIMATION;
+		}
+
+		return calculations;
+	}
+
+	_ensureRhwReanimatorResource ({
+		featureUid,
+		name,
+		max,
+		actionLabel,
+		pendingSharedToolContract = false,
+	}) {
+		const classUid = CharacterSheetState.EFA_ARTIFICER_CLASS_UID;
+		const subclassUid = CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID;
+		const isOwned = resource =>
+			resource?.featureUid === featureUid
+			&& resource?.classUid === classUid
+			&& resource?.subclassUid === subclassUid;
+		const candidates = (this._data.resources || []).filter(isOwned);
+		let resource = candidates[0] || null;
+		const desiredMax = Math.max(0, Math.floor(Number(max) || 0));
+		const spent = candidates.length
+			? Math.max(...candidates.map(pool => Math.max(
+				0,
+				Math.max(0, Number(pool.max) || 0) - Math.min(Math.max(0, Number(pool.current) || 0), Math.max(0, Number(pool.max) || 0)),
+			)))
+			: 0;
+
+		if (!resource) {
+			resource = {id: CryptUtil.uid()};
+			(this._data.resources ||= []).push(resource);
+		}
+		Object.assign(resource, {
+			name,
+			current: Math.max(0, desiredMax - spent),
+			max: desiredMax,
+			recharge: "long",
+			contextualOnly: true,
+			actionLabel,
+			featureUid,
+			classUid,
+			subclassUid,
+			source: "RHW",
+		});
+		if (pendingSharedToolContract) resource.pendingSharedToolContract = true;
+		else delete resource.pendingSharedToolContract;
+		this._data.resources = (this._data.resources || []).filter(candidate => candidate === resource || !isOwned(candidate));
+		return resource;
+	}
+
+	_removeRhwReanimatorResources () {
+		const featureUids = new Set([
+			CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SKILL_SET,
+			CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+		]);
+		this._data.resources = (this._data.resources || []).filter(resource =>
+			!(
+				featureUids.has(resource?.featureUid)
+				&& resource?.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+				&& resource?.subclassUid === CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID
+			),
+		);
+	}
+
+	_buildRhwReanimatorSpellGrant (cls, spell, {
+		sourceFeature = "Reanimator Spells",
+		grantOwnerUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SPELLS,
+		alwaysPrepared = true,
+		alternateCast = null,
+	} = {}) {
+		const parsed = this._parseSpellReference(`${spell.name}|${spell.source}`);
+		const grant = this._buildSubclassSpellEntry(parsed, {name: "Reanimator"}, cls);
+		grant.sourceFeature = sourceFeature;
+		grant.grantOwnerUid = grantOwnerUid;
+		grant.alwaysPrepared = alwaysPrepared;
+		grant.prepared = alwaysPrepared;
+		if (alternateCast) grant.alternateCast = MiscUtil.copyFast(alternateCast);
+		return grant;
+	}
+
+	_reconcileRhwReanimatorSpellOwnerSet (cls, {ownerUid, desiredGrants}) {
+		const desiredIds = new Set(desiredGrants.map(grant => this._spellIdentityKey(grant)));
+		const reconcile = spell => {
+			const spellId = this._spellIdentityKey(spell);
+			const ownerResult = this._removeSubclassSpellGrantOwner(
+				spell,
+				owner => owner.grantOwnerUid === ownerUid && !desiredIds.has(spellId),
+			);
+			return ownerResult == null ? true : ownerResult;
+		};
+		this._data.spellcasting.spellsKnown = (this._data.spellcasting.spellsKnown || []).filter(reconcile);
+		this._data.spellcasting.cantripsKnown = (this._data.spellcasting.cantripsKnown || []).filter(reconcile);
+
+		for (const grant of desiredGrants) {
+			const collection = grant.isCantrip
+				? this._data.spellcasting.cantripsKnown
+				: this._data.spellcasting.spellsKnown;
+			let existing = collection.find(spell => this._spellIdentityKey(spell) === this._spellIdentityKey(grant));
+			if (!existing) {
+				if (grant.isCantrip) this.addCantrip(grant);
+				else this.addSpell(grant, grant.prepared);
+				existing = collection.find(spell => this._spellIdentityKey(spell) === this._spellIdentityKey(grant));
+				if (existing) this._addSubclassSpellGrantOwner(existing, cls, grant, {wasExisting: false});
+				continue;
+			}
+			const isLegacyGrant = existing.sourceFeature === grant.sourceFeature
+				&& (grant.isCantrip || existing.alwaysPrepared === grant.alwaysPrepared);
+			this._addSubclassSpellGrantOwner(existing, cls, grant, {wasExisting: !isLegacyGrant});
+		}
+	}
+
+	_reconcileRhwReanimatorState () {
+		const cls = this._getRhwReanimatorClass();
+		if (!cls) {
+			this._reconcileRhwReanimatorSpellOwnerSet(null, {
+				ownerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SPELLS,
+				desiredGrants: [],
+			});
+			this._reconcileRhwReanimatorSpellOwnerSet(null, {
+				ownerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+				desiredGrants: [],
+			});
+			this._removeRhwReanimatorResources();
+			return;
+		}
+
+		const level = Number(cls.level) || 0;
+		const fixedGrants = CharacterSheetState.RHW_REANIMATOR_SPELLS
+			.filter(spell => level >= spell.level)
+			.map(spell => this._buildRhwReanimatorSpellGrant(cls, spell));
+		this._reconcileRhwReanimatorSpellOwnerSet(cls, {
+			ownerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SPELLS,
+			desiredGrants: fixedGrants,
+		});
+
+		const facilitatedGrants = level >= 15
+			? [this._buildRhwReanimatorSpellGrant(cls, {name: "Raise Dead", source: "XPHB"}, {
+				sourceFeature: "Facilitated Revival",
+				grantOwnerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+				alwaysPrepared: false,
+				alternateCast: {
+					slotCost: 0,
+					ignoresMaterialComponents: true,
+					pendingSharedToolContract: "sharedToolReceiptAndFocusValidationR2b",
+				},
+			})]
+			: [];
+		this._reconcileRhwReanimatorSpellOwnerSet(cls, {
+			ownerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+			desiredGrants: facilitatedGrants,
+		});
+
+		if (level >= 3) {
+			this._ensureRhwReanimatorResource({
+				featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SKILL_SET,
+				name: "Jolt to Life",
+				max: Math.max(0, this.getAbilityMod("int")),
+				actionLabel: "Cast Modifier",
+			});
+		} else {
+			const skillSetUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SKILL_SET;
+			this._data.resources = (this._data.resources || []).filter(resource =>
+				!(
+					resource?.featureUid === skillSetUid
+					&& resource?.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+					&& resource?.subclassUid === CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID
+				),
+			);
+		}
+		if (level >= 15) {
+			this._ensureRhwReanimatorResource({
+				featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+				name: "Facilitated Revival",
+				max: 1,
+				actionLabel: "Alternate Cast",
+				pendingSharedToolContract: true,
+			});
+		} else {
+			const refinedUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION;
+			this._data.resources = (this._data.resources || []).filter(resource =>
+				!(
+					resource?.featureUid === refinedUid
+					&& resource?.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+					&& resource?.subclassUid === CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID
+				),
+			);
+		}
+	}
+
+	async pUseRhwReanimatorJoltToLife ({
+		spellName,
+		spellSource,
+		spellOwnerUid,
+		cancelled = false,
+		context = {},
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		const cls = this._getRhwReanimatorClass();
+		const level = Number(cls?.level) || 0;
+		if (level < 3) return {ok: false, committed: false, reason: "featureUnavailable"};
+		if (spellName !== "Spare the Dying") return {ok: false, committed: false, reason: "invalidSpell"};
+		if (spellSource !== "XPHB") return {ok: false, committed: false, reason: "invalidSpellSource"};
+		if (spellOwnerUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SPELLS) {
+			return {ok: false, committed: false, reason: "invalidSpellOwner"};
+		}
+
+		this._reconcileRhwReanimatorState();
+		const spell = (this._data.spellcasting.cantripsKnown || []).find(candidate =>
+			candidate.name === spellName && candidate.source === spellSource);
+		const hasExactOwner = spell?.subclassSpellGrantOwners?.some(owner =>
+			owner.grantOwnerUid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SPELLS);
+		if (!spell || !hasExactOwner) return {ok: false, committed: false, reason: "spellUnavailable"};
+
+		const resource = this._ensureRhwReanimatorResource({
+			featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SKILL_SET,
+			name: "Jolt to Life",
+			max: Math.max(0, this.getAbilityMod("int")),
+			actionLabel: "Cast Modifier",
+		});
+		const damage = level >= 17 ? "4d4" : level >= 11 ? "3d4" : "2d4";
+		return this.pCommitFeatureUse({
+			featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SKILL_SET,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			resourceId: resource.id,
+			resourceCost: 1,
+			context: {
+				...MiscUtil.copyFast(context),
+				spell: {name: spellName, source: spellSource, ownerUid: spellOwnerUid},
+			},
+			result: {
+				spell: {name: spellName, source: spellSource},
+				healing: {amount: level},
+				emanationFeet: 10,
+				save: {
+					ability: "dex",
+					dc: this.getSpellSaveDcForAbility("int"),
+					onSuccess: "halfDamage",
+				},
+				damage: {dice: damage, type: "lightning"},
+			},
+		});
+	}
+
+	getRhwFacilitatedRevivalBoundary () {
+		const cls = this._getRhwReanimatorClass();
+		const level = Number(cls?.level) || 0;
+		if (level < 15) {
+			return {
+				available: false,
+				executable: false,
+				reason: "featureUnavailable",
+				featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+			};
+		}
+		this._reconcileRhwReanimatorState();
+		const resource = this._data.resources.find(candidate =>
+			candidate.featureUid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION
+			&& candidate.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+			&& candidate.subclassUid === CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID);
+		return {
+			available: true,
+			executable: false,
+			reason: "pendingSharedToolContract",
+			pendingContract: "sharedToolReceiptAndFocusValidationR2b",
+			featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+			spell: {
+				name: "Raise Dead",
+				source: "XPHB",
+				ownerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+				slotCost: 0,
+				ignoresMaterialComponents: true,
+			},
+			resource: resource ? {
+				id: resource.id,
+				current: resource.current,
+				max: resource.max,
+				recharge: resource.recharge,
+			} : null,
+		};
+	}
+
 	_getEfaFlashOfGeniusFeature () {
 		return (this._data.features || []).find(feature =>
 			(feature.name || "").toLowerCase() === "flash of genius"
@@ -43415,6 +43857,7 @@ class CharacterSheetState {
 
 	getResources () {
 		this._ensureFeatRegistryResources();
+		this._reconcileRhwReanimatorState();
 		this._ensureEfaFlashOfGeniusResource();
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();

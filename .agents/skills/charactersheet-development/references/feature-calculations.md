@@ -14,6 +14,7 @@
 - Attack Rider Notes
 - Subclass Cantrip Choice Slots
 - EFA/TCE Artificer Source Separation
+- RHW Reanimator R2a Projection
 
 ## Overview
 
@@ -207,6 +208,36 @@ Purity/Fire Shield at 13, and Banishing Smite/Mass Cure Wounds at 17. Call
 `getSubclassSpellGrantOwner(cls, {sourceFeature: "Battle Smith Spells"})` and
 remove with `removeSubclassSpells(owner)`; never remove by the display label
 when EFA and TCE owners can coexist.
+
+## RHW Reanimator R2a Projection
+
+Reanimator calculations activate only for the complete mixed-source identity
+`Artificer|EFA` + `Reanimator|Artificer|EFA|RHW`. A same-named subclass from
+another source, an RHW Reanimator attached to TCE Artificer, or a source-less
+legacy name must not activate these calculations or fixed spell grants.
+
+`_getRhwReanimatorCalculations()` publishes the R2a availability contract:
+
+- level 3: `hasReanimatorSpells`, `hasJoltToLife`,
+  `hasReanimatorsToolsRequirement`, and
+  `hasReanimatedCompanionOwnership`;
+- level 5: `hasStrangeModifications` and modification count 1;
+- level 9: `hasImprovedReanimation`, `hasMacabreModifications`, and
+  modification count 2;
+- level 15: `hasRefinedReanimation`, `hasSuperiorModifications`,
+  `hasFacilitatedRevival`, `hasLifeTransfer`, and modification count 3.
+
+Every descriptor carries the exact RHW feature UID. Reanimator's Tools is only
+a pending shared-picker requirement in R2a: it grants no proficiency or
+fallback choice. Reanimated Companion is ownership-only; creation/lifecycle,
+modification runtime, Life Transfer resolution, action economy, and UI belong
+to later milestones.
+
+Jolt to Life uses the exact EFA Artificer level, not total character level. Its
+calculation exposes uses `max(0, current INT modifier)`, exact
+`Spare the Dying|XPHB` ownership, EFA spell save DC, 10-foot emanation,
+Artificer-level healing, and Lightning damage `2d4`/`3d4` at EFA 11/`4d4` at
+EFA 17.
 
 ## Adding a New Subclass
 

@@ -13,6 +13,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Custom Abilities (data structure, effect routing, reapply on load)
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
 - Committed Feature Uses and EFA Flash of Genius
+- RHW Reanimator R2a State and Ownership
 
 ## Gemstone Empowerment
 
@@ -130,6 +131,42 @@ resource, invents coordinates/line of sight, mutates another sheet, persists
 movement state, or depends on Adventurer's Atlas holders. Declines return an
 explicit non-failure; validation failures set `followUpFailed` without rolling
 back Flash.
+
+## RHW Reanimator R2a State and Ownership
+
+R2a is source-locked to `Artificer|EFA` and
+`Reanimator|Artificer|EFA|RHW`. The fixed spell list uses exact XPHB identities
+and the existing subclass spell-owner ledger. Ledger owners may now include an
+exact `grantOwnerUid` and optional `alternateCast` metadata; their key appends
+the lowercased feature owner UID to the class/subclass base key.
+
+The `Reanimator Spells|Artificer|EFA|Reanimator|RHW|3` owner always prepares
+the cumulative 3/5/9/13/17 spell tiers without consuming prepared capacity.
+The `Refined Reanimation|Artificer|EFA|Reanimator|RHW|15` owner independently
+adds `Raise Dead|XPHB` at level 15 as an unprepared alternate cast with zero
+slot cost and ignored material components. At level 17 both owners coexist on
+one spell identity, and the fixed owner keeps it prepared. Removing either
+owner preserves the other; final removal restores player metadata. Wrong
+sources and same-label owners are never removed by RHW teardown.
+
+`pUseRhwReanimatorJoltToLife()` validates exact
+`Spare the Dying|XPHB` plus the exact Reanimator Spells owner before calling
+`pCommitFeatureUse()`. Rejections and cancellation spend nothing. A successful
+free-action commit spends one long-rest Jolt resource and returns a JSON-safe
+resolution containing EFA Artificer-level healing, Dexterity save at the EFA
+spell DC, 10-foot emanation, and the level-scaled Lightning dice. The resource
+maximum is `max(0, current INT modifier)` with no minimum of 1.
+
+Facilitated Revival has a separate one-use long-rest resource, but R2a has no
+execution method. `getRhwFacilitatedRevivalBoundary()` returns
+`executable: false`, reason `pendingSharedToolContract`, and the exact
+alternate-cast ownership. Tool receipt/focus validation and spending are R2b.
+
+`applyClassFeatureEffects()` owns reconciliation across add, level change,
+load, subclass teardown, and Respec. Respec drafts must install the spell
+catalog before `loadFromJson()` so newly unlocked grants retain canonical
+levels and metadata. Reconciliation is idempotent and source-owned resources
+are removed below threshold or when the exact subclass identity disappears.
 
 ## Active States / Toggle Abilities
 
