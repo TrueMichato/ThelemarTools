@@ -72,6 +72,7 @@ function makeWornCaster () {
 function fields (state) {
 	const hitDice = state.getHitDiceByType?.() || {};
 	return {
+		gameMinute: state.getGameTimeMinutes?.() || 0,
 		hpCurrent: state.getHp().current,
 		hpTemp: state.getHp().temp,
 		slots: [1, 2, 3, 4, 5, 6, 7, 8, 9].map(l => state.getSpellSlotsCurrent(l)),
@@ -166,6 +167,58 @@ describe("#8 — Undo rest (full-snapshot capture/restore)", () => {
 			expect(state.getSpellSlotsCurrent(1)).toBe(1);
 			expect(state.getSpellSlotsCurrent(2)).toBe(0);
 			expect(state.getConditionNames()).toContain("poisoned");
+		});
+
+		it("restores canonical time and exact lifecycle removals from the pre-rest snapshot", () => {
+			const state = makeWornCaster();
+			state.addClass({name: "Artificer", source: "EFA", level: 2});
+			const {rest} = makeRest(state);
+			const originalRandomise = globalThis.RollerUtil.randomise;
+			globalThis.RollerUtil.randomise = () => 1;
+			try {
+				const created = state.createGeneratedFeatureItem({
+					item: {name: "Replicated Satchel", source: "TST", type: "W"},
+					owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+					metadata: {sourceFeatureUid: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER.featureUid, temporary: true},
+					creation: {order: 1, receiptId: "rest-undo", event: "test", batchId: null},
+					lifecycle: {
+						version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+						state: "active",
+						deathExpiryDaysRemaining: null,
+						deathExpiryAssignedReceiptId: null,
+						expiryRecords: [],
+						callbacks: {
+							onLongRest: "retain",
+							onDeath: "expire-after-1d4-days",
+							onLifecycleDay: "decrement-expiry",
+						},
+						metadata: {},
+					},
+				});
+				state.setDeathSaveFailures(3);
+				rest._captureRestSnapshot("long");
+
+				expect(state.advanceGameTimeMinutes(1440, {
+					reason: "test-rest",
+					identity: "rest-undo",
+				}).removed).toEqual([{itemId: created.itemId, name: "Replicated Satchel"}]);
+				expect(state.getGameTimeMinutes()).toBe(1440);
+				expect(state.getInventory().some(row => row.id === created.itemId)).toBe(false);
+
+				expect(rest._onUndoRest()).toBe(true);
+				expect(state.getGameTimeMinutes()).toBe(0);
+				expect(state.getInventory().some(row => row.id === created.itemId)).toBe(true);
+				expect(state.getInventory()
+					.find(row => row.id === created.itemId)
+					.item._generatedItemProvenance.lifecycle.expiryRecords[0]).toMatchObject({
+					expiryMinute: 1440,
+					minutesRemaining: 1440,
+					daysRemaining: 1,
+				});
+			} finally {
+				if (originalRandomise === undefined) delete globalThis.RollerUtil.randomise;
+				else globalThis.RollerUtil.randomise = originalRandomise;
+			}
 		});
 	});
 

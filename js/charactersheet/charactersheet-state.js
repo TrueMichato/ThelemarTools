@@ -5454,6 +5454,11 @@ class CharacterSheetState {
 
 			// Inventory
 			inventory: [], // [{item, quantity, equipped, attuned}]
+			gameTime: {
+				version: CharacterSheetState.GAME_TIME_VERSION,
+				minute: 0,
+				lastLongRestMinute: 0,
+			},
 			efaArmorer: {
 				// Inventory wrapper identity is authoritative. Names and AC snapshots are not.
 				arcaneArmorItemId: null,
@@ -5961,6 +5966,10 @@ class CharacterSheetState {
 			&& Object.hasOwn(data, "movementEconomyUsage");
 		const legacyChainedMovementUsage = data?.chainedMovementUsage;
 		delete this._data._pendingZeroHpIntervention;
+		this._normalizeGameTimeState({
+			rawGameTime: Object.prototype.hasOwnProperty.call(data || {}, "gameTime") ? data.gameTime : null,
+			legacyLastLongRestHours: data?.lastLongRestTime,
+		});
 		this._migrateInventoryItemMetadata();
 
 		this._data.xp = Math.max(0, Math.floor(Number(this._data.xp) || 0));
@@ -6494,6 +6503,7 @@ class CharacterSheetState {
 		this._migrateInventoryItemWeaponFlag();
 		this.reconcileEfaArmorerState({cause: "load"});
 		this._migrateGeneratedFeatureItemProvenance();
+		this._migrateGeneratedFeatureItemExpiryMinutes();
 		this.reconcileEfaReplicateMagicItems({reason: "load"});
 		this._normalizeGeneratedFeatureItemLifecycleState();
 		this.reconcileGeneratedFeatureItemDeathTransition({reason: "load"});
@@ -37137,7 +37147,181 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	// #region Game Time
+	_normalizeGameTimeState ({
+		rawGameTime = this._data.gameTime,
+		legacyLastLongRestHours = this._data.lastLongRestTime,
+	} = {}) {
+		const legacyHours = Number(legacyLastLongRestHours);
+		const legacyMinutesRaw = Number.isFinite(legacyHours) && legacyHours >= 0
+			? Math.floor(legacyHours * 60)
+			: 0;
+		const legacyMinutes = Number.isSafeInteger(legacyMinutesRaw)
+			? legacyMinutesRaw
+			: 0;
+		const hasValidClock = rawGameTime
+			&& typeof rawGameTime === "object"
+			&& !Array.isArray(rawGameTime)
+			&& Number(rawGameTime.version) === CharacterSheetState.GAME_TIME_VERSION
+			&& Number.isSafeInteger(Number(rawGameTime.minute))
+			&& Number(rawGameTime.minute) >= 0;
+		const minute = hasValidClock ? Number(rawGameTime.minute) : legacyMinutes;
+		const rawLastLongRestMinute = Number(rawGameTime?.lastLongRestMinute);
+		const lastLongRestMinute = hasValidClock
+			&& Number.isSafeInteger(rawLastLongRestMinute)
+			&& rawLastLongRestMinute >= 0
+			&& rawLastLongRestMinute <= minute
+			? rawLastLongRestMinute
+			: hasValidClock && legacyMinutes <= minute
+				? minute - legacyMinutes
+				: 0;
+		this._data.gameTime = {
+			version: CharacterSheetState.GAME_TIME_VERSION,
+			minute,
+			lastLongRestMinute,
+		};
+		delete this._data.lastLongRestTime;
+		return this._data.gameTime;
+	}
+
+	getGameTimeMinutes () {
+		const minute = Number(this._data.gameTime?.minute);
+		return Number.isSafeInteger(minute) && minute >= 0 ? minute : 0;
+	}
+
+	_getGameTimeFailureReceipt ({
+		code,
+		priorMinute = this.getGameTimeMinutes(),
+		reason,
+		identity,
+		receiptId = null,
+		message = null,
+	} = {}) {
+		return {
+			ok: false,
+			code,
+			...(message ? {message} : {}),
+			priorMinute,
+			newMinute: priorMinute,
+			deltaMinutes: 0,
+			reason,
+			identity,
+			receiptId,
+			updated: [],
+			removed: [],
+		};
+	}
+
+	advanceGameTimeMinutes (minutes, {reason = "manual", identity = null} = {}) {
+		const normalizedReason = typeof reason === "string" ? reason.trim() : "";
+		const normalizedIdentity = identity == null
+			? null
+			: typeof identity === "string"
+				? identity.trim()
+				: "";
+		const priorMinute = this.getGameTimeMinutes();
+		if (typeof minutes !== "number" || !Number.isSafeInteger(minutes) || minutes <= 0) {
+			return this._getGameTimeFailureReceipt({
+				code: "invalid-game-time-minutes",
+				priorMinute,
+				reason: normalizedReason || null,
+				identity: normalizedIdentity || null,
+			});
+		}
+		if (!normalizedReason) {
+			return this._getGameTimeFailureReceipt({
+				code: "invalid-game-time-reason",
+				priorMinute,
+				reason: null,
+				identity: normalizedIdentity || null,
+			});
+		}
+		if (identity != null && !normalizedIdentity) {
+			return this._getGameTimeFailureReceipt({
+				code: "invalid-game-time-identity",
+				priorMinute,
+				reason: normalizedReason,
+				identity: null,
+			});
+		}
+		if (minutes > Number.MAX_SAFE_INTEGER - priorMinute) {
+			return this._getGameTimeFailureReceipt({
+				code: "game-time-overflow",
+				priorMinute,
+				reason: normalizedReason,
+				identity: normalizedIdentity,
+			});
+		}
+
+		const receiptId = CryptUtil.uid();
+		const newMinute = priorMinute + minutes;
+		const snapshot = MiscUtil.copyFast(this._data);
+		try {
+			this._normalizeGameTimeState();
+			this._data.gameTime.minute = newMinute;
+			const lifecycle = this._advanceGeneratedFeatureItemLifecyclesToMinute({
+				priorMinute,
+				newMinute,
+			});
+			return {
+				ok: true,
+				code: "game-time-advanced",
+				priorMinute,
+				newMinute,
+				deltaMinutes: minutes,
+				reason: normalizedReason,
+				identity: normalizedIdentity,
+				receiptId,
+				updated: lifecycle.updated,
+				removed: lifecycle.removed,
+			};
+		} catch (error) {
+			this._data = snapshot;
+			try {
+				this._reapplyItemEffects();
+			} catch (rollbackError) {
+				return this._getGameTimeFailureReceipt({
+					code: "game-time-advance-rollback-failed",
+					priorMinute,
+					reason: normalizedReason,
+					identity: normalizedIdentity,
+					receiptId,
+					message: `${error.message}; rollback effects failed: ${rollbackError.message}`,
+				});
+			}
+			return this._getGameTimeFailureReceipt({
+				code: "game-time-advance-rolled-back",
+				priorMinute,
+				reason: normalizedReason,
+				identity: normalizedIdentity,
+				receiptId,
+				message: error.message,
+			});
+		}
+	}
+
+	advanceRestTime (restType, {identity = null} = {}) {
+		if (!["short", "long"].includes(restType)) {
+			return this._getGameTimeFailureReceipt({
+				code: "invalid-rest-time-type",
+				reason: "rest",
+				identity,
+			});
+		}
+		const duration = this.getRestRequirements(restType)?.duration;
+		const receipt = this.advanceGameTimeMinutes(duration, {
+			reason: `${restType}-rest`,
+			identity,
+		});
+		if (receipt.ok && restType === "long") {
+			this._data.gameTime.lastLongRestMinute = receipt.newMinute;
+		}
+		return {...receipt, restType};
+	}
+	// #endregion
+
 	// #region Inventory
+	static GAME_TIME_VERSION = 1;
 	static GENERATED_FEATURE_ITEM_PROVENANCE_VERSION = 1;
 	static GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION = 1;
 	static GENERATED_FEATURE_ITEM_EXPIRY_VERSION = 1;
@@ -37329,7 +37513,15 @@ class CharacterSheetState {
 			if (!policyId || !trigger || !assignedReceiptId) continue;
 			const hasResult = raw.roll?.result != null && Number.isFinite(Number(raw.roll.result));
 			const hasDays = raw.daysRemaining != null && Number.isFinite(Number(raw.daysRemaining));
-			const quality = Number(hasResult) + Number(hasDays);
+			const assignedMinute = Number(raw.assignedMinute);
+			const expiryMinute = Number(raw.expiryMinute);
+			const hasAbsoluteMinutes = Number.isSafeInteger(assignedMinute)
+				&& assignedMinute >= 0
+				&& Number.isSafeInteger(expiryMinute)
+				&& expiryMinute >= assignedMinute;
+			const rawMinutesRemaining = Number(raw.minutesRemaining);
+			const hasMinutesRemaining = Number.isSafeInteger(rawMinutesRemaining) && rawMinutesRemaining >= 0;
+			const quality = Number(hasResult) + Number(hasDays) + (hasAbsoluteMinutes ? 2 : 0);
 			const key = `${trigger.toLowerCase()}::${policyId.toLowerCase()}`;
 			const normalized = !hasResult && !hasDays
 				? {
@@ -37356,6 +37548,19 @@ class CharacterSheetState {
 						assignedReceiptId,
 						roll: {formula: "1d4", result},
 						daysRemaining,
+						...(hasAbsoluteMinutes
+							? {
+								assignedMinute,
+								expiryMinute,
+								...(hasMinutesRemaining ? {minutesRemaining: rawMinutesRemaining} : {}),
+							}
+							: {}),
+						...(raw.repairRequired
+							? {
+								repairRequired: true,
+								repairReason: String(raw.repairReason || "invalid-expiry-numeric"),
+							}
+							: {}),
 					};
 				})();
 			const existing = out.get(key);
@@ -37760,7 +37965,13 @@ class CharacterSheetState {
 				if (
 					classification.status === "valid"
 					&& classification.provenance?.lifecycle?.expiryRecords?.some(record => record.repairRequired)
-				) issues.push("invalid-expiry-numeric");
+				) {
+					for (const repairReason of classification.provenance.lifecycle.expiryRecords
+						.filter(record => record.repairRequired)
+						.map(record => record.repairReason || "invalid-expiry-numeric")) {
+						if (!issues.includes(repairReason)) issues.push(repairReason);
+					}
+				}
 				return {
 					itemId: row.id,
 					name: row.item?.name || "Generated Item",
@@ -37775,6 +37986,87 @@ class CharacterSheetState {
 				};
 			})
 			.filter(Boolean);
+	}
+
+	_migrateGeneratedFeatureItemExpiryMinutes ({currentMinute = this.getGameTimeMinutes()} = {}) {
+		for (const row of this._data.inventory || []) {
+			const lifecycle = row?.item?._generatedItemProvenance?.lifecycle;
+			if (
+				!lifecycle
+				|| lifecycle.version !== CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION
+			) continue;
+			lifecycle.expiryRecords = CharacterSheetState._normalizeGeneratedFeatureItemExpiryRecords(lifecycle.expiryRecords);
+			for (const record of lifecycle.expiryRecords) {
+				if (record.repairRequired) continue;
+				const hasAbsoluteMinutes = Number.isSafeInteger(record.assignedMinute)
+					&& record.assignedMinute >= 0
+					&& Number.isSafeInteger(record.expiryMinute)
+					&& record.expiryMinute >= record.assignedMinute;
+				if (!hasAbsoluteMinutes) {
+					const remainingMinutes = record.daysRemaining * 1440;
+					if (
+						!Number.isSafeInteger(remainingMinutes)
+						|| remainingMinutes < 0
+						|| remainingMinutes > Number.MAX_SAFE_INTEGER - currentMinute
+					) {
+						record.repairRequired = true;
+						record.repairReason = "invalid-expiry-minute";
+						record.minutesRemaining = null;
+						continue;
+					}
+					record.assignedMinute = currentMinute;
+					record.expiryMinute = currentMinute + remainingMinutes;
+				}
+				record.minutesRemaining = Math.max(0, record.expiryMinute - currentMinute);
+				record.daysRemaining = Math.ceil(record.minutesRemaining / 1440);
+			}
+			const deathRecord = lifecycle.expiryRecords.find(record => record.trigger === "death");
+			if (deathRecord) {
+				lifecycle.deathExpiryDaysRemaining = deathRecord.daysRemaining;
+				lifecycle.deathExpiryAssignedReceiptId = deathRecord.assignedReceiptId;
+			}
+		}
+	}
+
+	_advanceGeneratedFeatureItemLifecyclesToMinute ({priorMinute, newMinute}) {
+		this._migrateGeneratedFeatureItemExpiryMinutes({currentMinute: priorMinute});
+		const updated = [];
+		const toRemove = [];
+		for (const row of this._data.inventory || []) {
+			const classification = this.classifyGeneratedFeatureItem(row);
+			if (
+				classification.status !== "valid"
+				|| !CharacterSheetState._isEfaReplicateMagicItemOwner(classification.owner)
+			) continue;
+			const lifecycle = row.item._generatedItemProvenance.lifecycle;
+			if (lifecycle?.callbacks?.onLifecycleDay !== "decrement-expiry") continue;
+			const records = lifecycle.expiryRecords.filter(record =>
+				!record.repairRequired
+				&& Number.isSafeInteger(record.expiryMinute)
+				&& record.expiryMinute >= 0,
+			);
+			if (!records.length) continue;
+			for (const record of records) {
+				record.minutesRemaining = Math.max(0, record.expiryMinute - newMinute);
+				record.daysRemaining = Math.ceil(record.minutesRemaining / 1440);
+			}
+			const deathRecord = records.find(record => record.trigger === "death");
+			if (deathRecord) lifecycle.deathExpiryDaysRemaining = deathRecord.daysRemaining;
+			if (records.some(record => record.minutesRemaining === 0)) {
+				toRemove.push({itemId: row.id, name: row.item?.name || "Generated Item"});
+				continue;
+			}
+			const nextRecord = records.reduce((earliest, record) =>
+				record.expiryMinute < earliest.expiryMinute ? record : earliest);
+			updated.push({
+				itemId: row.id,
+				daysRemaining: nextRecord.daysRemaining,
+				minutesRemaining: nextRecord.minutesRemaining,
+				expiryMinute: nextRecord.expiryMinute,
+			});
+		}
+		for (const row of toRemove) this.removeItem(row.itemId);
+		return {updated, removed: toRemove};
 	}
 
 	_normalizeGeneratedFeatureItemLifecycleState () {
@@ -37824,12 +38116,17 @@ class CharacterSheetState {
 		);
 		if (existing) return existing;
 		const result = this._rollGeneratedFeatureItemExpiryDays();
+		const assignedMinute = this.getGameTimeMinutes();
+		const expiryMinute = assignedMinute + result * 1440;
 		const record = {
 			version: CharacterSheetState.GENERATED_FEATURE_ITEM_EXPIRY_VERSION,
 			policyId,
 			trigger: "death",
 			assignedReceiptId: receiptId,
 			roll: {formula: "1d4", result},
+			assignedMinute,
+			expiryMinute,
+			minutesRemaining: result * 1440,
 			daysRemaining: result,
 		};
 		lifecycle.expiryRecords.push(record);
@@ -37880,59 +38177,25 @@ class CharacterSheetState {
 	}
 
 	advanceGeneratedFeatureItemLifecycleDays (days) {
-		const normalizedDays = Number(days);
-		if (!Number.isSafeInteger(normalizedDays) || normalizedDays <= 0) {
+		if (typeof days !== "number" || !Number.isSafeInteger(days) || days <= 0) {
 			return {ok: false, code: "invalid-lifecycle-days", daysAdvanced: 0, updated: [], removed: []};
 		}
-		const snapshot = MiscUtil.copyFast(this._data);
-		const updated = [];
-		const toRemove = [];
-		try {
-			for (const row of this._data.inventory || []) {
-				const classification = this.classifyGeneratedFeatureItem(row);
-				if (
-					classification.status !== "valid"
-					|| !CharacterSheetState._isEfaReplicateMagicItemOwner(classification.owner)
-				) continue;
-				const lifecycle = row.item._generatedItemProvenance.lifecycle;
-				if (lifecycle?.callbacks?.onLifecycleDay !== "decrement-expiry") continue;
-				lifecycle.expiryRecords = CharacterSheetState._normalizeGeneratedFeatureItemExpiryRecords(lifecycle.expiryRecords);
-				const records = lifecycle.expiryRecords.filter(record =>
-					Number.isSafeInteger(record.daysRemaining)
-					&& record.daysRemaining >= 0,
-				);
-				if (!records.length) continue;
-				for (const record of records) record.daysRemaining = Math.max(0, record.daysRemaining - normalizedDays);
-				const deathRecord = records.find(record => record.trigger === "death");
-				if (deathRecord) lifecycle.deathExpiryDaysRemaining = deathRecord.daysRemaining;
-				if (records.some(record => record.daysRemaining === 0)) {
-					toRemove.push({itemId: row.id, name: row.item?.name || "Generated Item"});
-				} else {
-					updated.push({
-						itemId: row.id,
-						daysRemaining: Math.min(...records.map(record => record.daysRemaining)),
-					});
-				}
-			}
-			for (const row of toRemove) this.removeItem(row.itemId);
-		} catch (error) {
-			this._data = snapshot;
-			this._reapplyItemEffects();
-			return {
-				ok: false,
-				code: "lifecycle-day-advance-rolled-back",
-				message: error.message,
-				daysAdvanced: 0,
-				updated: [],
-				removed: [],
-			};
+		const minutes = days * 1440;
+		if (!Number.isSafeInteger(minutes)) {
+			return {ok: false, code: "invalid-lifecycle-days", daysAdvanced: 0, updated: [], removed: []};
 		}
+		const result = this.advanceGameTimeMinutes(minutes, {
+			reason: "generated-feature-lifecycle-days",
+			identity: "advanceGeneratedFeatureItemLifecycleDays",
+		});
 		return {
-			ok: true,
-			code: "lifecycle-days-advanced",
-			daysAdvanced: normalizedDays,
-			updated,
-			removed: toRemove,
+			...result,
+			code: result.ok
+				? "lifecycle-days-advanced"
+				: result.code === "game-time-advance-rolled-back"
+					? "lifecycle-day-advance-rolled-back"
+					: result.code,
+			daysAdvanced: result.ok ? days : 0,
 		};
 	}
 
@@ -87041,6 +87304,11 @@ class CharacterSheetState {
 
 	// #region Rest
 	onShortRest () {
+		const timeReceipt = this.advanceRestTime("short", {
+			identity: "CharacterSheetState.onShortRest",
+		});
+		if (!timeReceipt.ok) return timeReceipt;
+
 		// Clear active states that end on rest
 		this.clearStatesOnRest("short");
 		this.clearChainedFuryTargets();
@@ -87074,9 +87342,15 @@ class CharacterSheetState {
 		this.resetUndyingProtector();
 		this.restCompanions("short");
 		this.applyFeatureCompanionRest("short");
+		return timeReceipt;
 	}
 
 	onLongRest (options = {}) {
+		const timeReceipt = this.advanceRestTime("long", {
+			identity: "CharacterSheetState.onLongRest",
+		});
+		if (!timeReceipt.ok) return timeReceipt;
+
 		// Clear active states that end on rest
 		this.clearStatesOnRest("long");
 		this.clearChainedFuryTargets();
@@ -87144,9 +87418,6 @@ class CharacterSheetState {
 		// Reset resource restoration items (Dragonhide Belt, Bloodwell Vial, etc.)
 		this.resetResourceRestorations();
 
-		// Track time for rest restrictions
-		this._data.lastLongRestTime = 0; // Reset to 0 hours since last long rest
-
 		// Restore companions on long rest
 		this.restCompanions("long");
 		this.applyFeatureCompanionRest("long");
@@ -87167,6 +87438,7 @@ class CharacterSheetState {
 		// Wicked Witch: Granny's Gifts is re-chosen on every long rest, and Coven
 		// Calling's duplicates plus the Fly, My Pretty ride do not survive a rest.
 		this._resetWickedWitchOnLongRest();
+		return timeReceipt;
 	}
 
 	/**
@@ -87258,9 +87530,28 @@ class CharacterSheetState {
 	/**
 	 * Advance time in hours (for tracking rest restrictions)
 	 * @param {number} hours - Number of hours to advance
+	 * @returns {object} Game-time advance receipt.
 	 */
 	advanceTime (hours) {
-		this._data.lastLongRestTime = (this._data.lastLongRestTime || 0) + hours;
+		if (typeof hours !== "number" || !Number.isFinite(hours) || hours <= 0) {
+			return this._getGameTimeFailureReceipt({
+				code: "invalid-game-time-hours",
+				reason: "advance-time-hours",
+				identity: "CharacterSheetState.advanceTime",
+			});
+		}
+		const minutes = hours * 60;
+		if (!Number.isSafeInteger(minutes) || minutes <= 0) {
+			return this._getGameTimeFailureReceipt({
+				code: "invalid-game-time-hours",
+				reason: "advance-time-hours",
+				identity: "CharacterSheetState.advanceTime",
+			});
+		}
+		return this.advanceGameTimeMinutes(minutes, {
+			reason: "advance-time-hours",
+			identity: "CharacterSheetState.advanceTime",
+		});
 	}
 
 	/**
@@ -87268,7 +87559,14 @@ class CharacterSheetState {
 	 * @returns {number} Hours since last long rest
 	 */
 	getTimeSinceLastLongRest () {
-		return this._data.lastLongRestTime || 0;
+		const minute = this.getGameTimeMinutes();
+		const lastLongRestMinute = Number(this._data.gameTime?.lastLongRestMinute);
+		if (
+			!Number.isSafeInteger(lastLongRestMinute)
+			|| lastLongRestMinute < 0
+			|| lastLongRestMinute > minute
+		) return 0;
+		return (minute - lastLongRestMinute) / 60;
 	}
 
 	/**
@@ -87276,7 +87574,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if long rest is allowed
 	 */
 	canLongRest () {
-		return (this._data.lastLongRestTime || 0) >= 24;
+		return this.getTimeSinceLastLongRest() >= 24;
 	}
 
 	// #region Interrupted Rest Tracking
@@ -87334,8 +87632,9 @@ class CharacterSheetState {
 			this._data.restState = null;
 			return;
 		}
-		this.onLongRest();
+		const receipt = this.onLongRest();
 		this._data.restState = null;
+		return receipt;
 	}
 	// #endregion
 

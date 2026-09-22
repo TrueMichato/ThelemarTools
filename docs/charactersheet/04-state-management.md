@@ -1274,6 +1274,89 @@ static migrate(saveData) {
 }
 ```
 
+### Persisted monotonic game time
+
+Character time is stored as non-negative whole in-game minutes:
+
+```javascript
+gameTime: {
+    version: 1,
+    minute: 0,
+    lastLongRestMinute: 0,
+}
+```
+
+This is never a wall-clock timestamp. Passive reads and rendering use
+`getGameTimeMinutes()` and do not mutate state. The single normal mutation
+boundary is:
+
+```javascript
+state.advanceGameTimeMinutes(minutes, {
+    reason: "travel",
+    identity: "journey-segment-7",
+});
+```
+
+`minutes` must be a positive safe integer. Zero, negative, fractional,
+non-finite, or non-number inputs return an explicit failure receipt without
+changing the character. A successful receipt contains:
+
+```javascript
+{
+    ok: true,
+    code: "game-time-advanced",
+    priorMinute,
+    newMinute,
+    deltaMinutes,
+    reason,
+    identity,
+    receiptId,
+    updated, // generated lifecycle rows whose derived display changed
+    removed, // generated rows removed at their exact due minute
+}
+```
+
+Clock advancement and registered generated-item teardown are one transaction.
+If ordinary `removeItem()` cleanup throws, the full character snapshot is
+restored and the API returns `game-time-advance-rolled-back`; callers must not
+save or render a success state from that failure.
+
+Compatibility APIs delegate to this same transaction:
+
+- `advanceTime(hours)` accepts only positive hour values that convert exactly
+  to whole minutes, then calls `advanceGameTimeMinutes(hours * 60, ...)`.
+- `advanceGeneratedFeatureItemLifecycleDays(days)` validates positive whole
+  days and delegates with `days * 1440`.
+- `advanceRestTime(restType, {identity})` reads
+  `getRestRequirements(restType).duration`; current effective durations are 60
+  minutes for a short rest and 480 for a long rest.
+- `onShortRest()`, `onLongRest()`, and the two confirmed rest dialogs consume
+  `advanceRestTime`. Opening/cancelling a dialog does not advance time, and rest
+  undo restores the pre-rest clock and lifecycle state from the existing full
+  snapshot.
+
+A completed long rest records `lastLongRestMinute` at the new clock minute, so
+the 24-hour restriction is derived from the canonical clock rather than a
+second elapsed-hours counter. The existing `lastLongRestTime` save field
+migrates by converting its elapsed hours to whole minutes; saves with neither
+field default idempotently to minute 0. `toJson()`/`loadFromJson()` and
+`serialize()`/`deserialize()` preserve the same versioned shape.
+
+Replicate Magic Item death expiry stores an absolute `assignedMinute` and
+`expiryMinute`. `minutesRemaining` and the compatibility `daysRemaining`
+display mirror are derived from the shared clock, with days calculated as
+`ceil(minutesRemaining / 1440)`. Legacy records containing only
+`daysRemaining` are anchored once at the clock minute on load, without rerolling
+or moving that due minute on later loads. Exact checks can therefore distinguish
+`+59`, `+60`, and `+61` minutes, while repeated partial rests and manual advances
+compose without truncation.
+
+**Residual duration limitation:** `getFeatureCalculations()` can expose
+Warder's Duty's `longRestHours = 2`, but the current rest-duration API does not
+consume that dormant calculation. This milestone intentionally preserves the
+existing effective 480-minute long rest instead of activating unrelated
+feature behavior.
+
 ---
 
 ## Event System

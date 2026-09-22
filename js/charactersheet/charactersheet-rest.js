@@ -38,6 +38,17 @@ class CharacterSheetRest {
 		document.getElementById("charsheet-btn-long-rest")?.addEventListener("click", () => this._showLongRestDialog());
 	}
 
+	_advanceCommittedRestTime (restType, identity) {
+		const receipt = this._state.advanceRestTime?.(restType, {identity});
+		if (receipt?.ok) return receipt;
+		if (this._page) this._page._lastRestSnapshot = null;
+		JqueryUtil.doToast({
+			type: "danger",
+			content: `Could not finish the ${restType} rest: ${receipt?.message || receipt?.code || "time advancement failed"}.`,
+		});
+		return receipt || {ok: false, code: "rest-time-advance-unavailable"};
+	}
+
 	async _showShortRestDialog () {
 		const currentHp = this._state.getHp().current;
 		const maxHp = this._state.getHp().max;
@@ -430,7 +441,12 @@ class CharacterSheetRest {
 		btnConfirm.onClick(() => {
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
 			// Captured BEFORE any mutation below; transient and never persisted.
-			this._captureRestSnapshot("short");
+			if (!this._captureRestSnapshot("short")) {
+				JqueryUtil.doToast({type: "danger", content: "Could not safely start the short rest."});
+				return;
+			}
+			const timeReceipt = this._advanceCommittedRestTime("short", "CharacterSheetRest.finishShortRest");
+			if (!timeReceipt.ok) return;
 
 			// Apply hit dice spending using spentDice tracker. The healing was
 			// already rolled into `totalHealing` above, so decrement the pools
@@ -997,6 +1013,12 @@ class CharacterSheetRest {
 				atlasResult = this._applyAdventurersAtlasLongRestPlan(adventurersAtlas?.getPlan());
 				if (!atlasResult.ok) {
 					throw new Error(atlasResult.errors.join(" "));
+				}
+				const timeReceipt = this._state.advanceRestTime?.("long", {
+					identity: "CharacterSheetRest.finishLongRest",
+				});
+				if (!timeReceipt?.ok) {
+					throw new Error(`Could not finish the long rest: ${timeReceipt?.message || timeReceipt?.code || "time advancement failed"}.`);
 				}
 				this._state.resetTurnEconomy?.({round: null});
 

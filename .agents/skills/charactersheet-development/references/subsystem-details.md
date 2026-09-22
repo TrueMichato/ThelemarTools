@@ -69,6 +69,23 @@ state.reconcileGeneratedFeatureItemDeathTransition({reason?});
 state.advanceGeneratedFeatureItemLifecycleDays(days);
 ```
 
+Generated lifecycles consume the shared persisted game-time contract:
+
+```javascript
+state.getGameTimeMinutes();
+state.advanceGameTimeMinutes(positiveWholeMinutes, {reason, identity?});
+state.advanceTime(hours); // compatibility wrapper; hours must resolve to whole minutes
+state.advanceRestTime("short" | "long", {identity?});
+```
+
+`gameTime: {version: 1, minute, lastLongRestMinute}` is character state, not
+wall-clock time. The only normal mutation boundary is
+`advanceGameTimeMinutes`; it validates the entire request before mutation and
+returns one receipt with `priorMinute`, `newMinute`, `deltaMinutes`, `reason`,
+`identity`, and `receiptId`. Lifecycle updates/removals are part of that same
+transaction. A teardown failure restores the state snapshot and returns a
+failure receipt rather than a success-shaped result.
+
 Every generated row is custom, quantity 1, and has a unique wrapper id and
 `_generatedItemId`, so it never stacks with ordinary or generated rows.
 `replaceItem`, save/export/import, containers, notes, favorites, equipment,
@@ -100,6 +117,9 @@ The persisted `_generatedItemProvenance` shape is:
             trigger: "death",
             assignedReceiptId,
             roll: {formula: "1d4", result: number | null},
+            assignedMinute: number,
+            expiryMinute: number,
+            minutesRemaining: number,
             daysRemaining: number | null,
             repairRequired?,
             repairReason?,
@@ -146,17 +166,27 @@ while the owner remains dead use the same generic creation callback. Pending
 zero-HP intervention prompts are transient and are not exported or restored;
 only a currently actionable live prompt defers reconciliation. Legacy valid
 death-expiry mirrors migrate into one canonical expiry record without rerolling.
+Legacy `daysRemaining` is anchored once at the loaded shared clock minute as an
+absolute `expiryMinute`; subsequent loads preserve that due minute. The
+whole-day display mirror is always `ceil(minutesRemaining / 1440)`, while exact
+expiry/removal uses the absolute minute.
 The public `serialize()`/`CharacterSheetState.deserialize()` round trip delegates
 to the same `toJson()`/`loadFromJson()` path, so it cannot bypass cleanup,
 migration, or authoritative death reconciliation.
 
 Lifecycle days advance only through
-`advanceGeneratedFeatureItemLifecycleDays(positiveWholeDays)`. The transaction
-validates before mutation, decrements registered pending records, and removes
-zero-day exact-owner Replicate rows through ordinary `removeItem` teardown.
+`advanceGeneratedFeatureItemLifecycleDays(positiveWholeDays)`. It is a
+compatibility wrapper over
+`advanceGameTimeMinutes(positiveWholeDays * 1440, ...)`, so it advances the
+same clock rather than maintaining a parallel counter. The minute transaction
+validates before mutation, updates registered pending records, and removes due
+exact-owner Replicate rows through ordinary `removeItem` teardown.
 Foreign generated-item owners are ignored even if malformed data copies the
-same callback IDs. A long rest is not a
-lifecycle day and never calls this API. The Inventory tab's **Generated
+same callback IDs. A long rest is not a lifecycle-day shortcut and never calls
+this API; committed rests instead consume the current
+`getRestRequirements()` duration (short 60, long 480 minutes) through
+`advanceRestTime`. The dormant Warder's Duty `longRestHours` calculation is not
+yet consumed by the rest-duration API. The Inventory tab's **Generated
 Items** manager shows exact ownership, plan/resolved item, creation order,
 roll/days, and repair state; **Advance Day** requires confirmation and reports
 the result through an ARIA live region.

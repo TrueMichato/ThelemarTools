@@ -400,6 +400,9 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			trigger: "death",
 			assignedReceiptId: "duplicate",
 			roll: {formula: "1d4", result: 4},
+			assignedMinute: 0,
+			expiryMinute: 2880,
+			minutesRemaining: 2880,
 			daysRemaining: 2,
 		});
 		const loadedLifecycle = loaded.getInventory().find(row => row.id === created.itemId)
@@ -440,6 +443,9 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			trigger: "death",
 			assignedReceiptId: "legacy-receipt",
 			roll: {formula: "1d4", result: 2},
+			assignedMinute: 0,
+			expiryMinute: 2880,
+			minutesRemaining: 2880,
 			daysRemaining: 2,
 		});
 		expect(randomise).not.toHaveBeenCalled();
@@ -514,6 +520,9 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			trigger: "death",
 			assignedReceiptId: "legacy-receipt",
 			roll: {formula: "1d4", result: 2},
+			assignedMinute: 0,
+			expiryMinute: 2880,
+			minutesRemaining: 2880,
 			daysRemaining: 2,
 		});
 		expect(randomise).not.toHaveBeenCalled();
@@ -558,7 +567,7 @@ describe("EFA Replicate Magic Item death expiry", () => {
 		expect(randomise).not.toHaveBeenCalled();
 	});
 
-	test("advances explicit lifecycle days atomically, never on long rest, and removes expired rows normally", () => {
+	test("advances exact rest minutes without a whole-day shortcut and removes expired rows normally", () => {
 		randomise.mockReturnValue(2);
 		const state = makeState();
 		const container = createGeneratedItem(state, {
@@ -572,7 +581,11 @@ describe("EFA Replicate Magic Item death expiry", () => {
 		state.setDeathSaveFailures(3);
 
 		state.onLongRest();
-		expect(getExpiry(state, container.itemId)?.daysRemaining).toBe(2);
+		expect(state.getGameTimeMinutes()).toBe(480);
+		expect(getExpiry(state, container.itemId)).toMatchObject({
+			daysRemaining: 2,
+			minutesRemaining: 2400,
+		});
 		expect(state.advanceGeneratedFeatureItemLifecycleDays(0)).toMatchObject({ok: false});
 		expect(state.advanceGeneratedFeatureItemLifecycleDays(1.5)).toMatchObject({ok: false});
 		expect(getExpiry(state, container.itemId)?.daysRemaining).toBe(2);

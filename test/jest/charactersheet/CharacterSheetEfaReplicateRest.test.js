@@ -154,6 +154,8 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 		mockProductionOptions(state);
 		const commitProduction = jest.spyOn(state, "commitEfaReplicateMagicItemsAtLongRest")
 			.mockReturnValue({ok: true, code: "replicate-production-skipped", resolved: []});
+		const advanceMinutes = jest.spyOn(state, "advanceGameTimeMinutes");
+		const advanceDays = jest.spyOn(state, "advanceGeneratedFeatureItemLifecycleDays");
 		const beforeInventory = structuredClone(state.toJson().inventory);
 		const {rest, page} = makeRest(state);
 		const modalInner = globalThis.e_({tag: "div"});
@@ -166,8 +168,14 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 		await confirm._handlers.click();
 
 		expect(state.getCurrentHp()).toBe(state.getMaxHp());
+		expect(state.getGameTimeMinutes()).toBe(480);
 		expect(state.toJson().inventory).toEqual(beforeInventory);
 		expect(commitProduction).toHaveBeenCalledWith({selections: []});
+		expect(advanceMinutes).toHaveBeenCalledWith(480, {
+			reason: "long-rest",
+			identity: "CharacterSheetRest.finishLongRest",
+		});
+		expect(advanceDays).not.toHaveBeenCalled();
 		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
 		expect(page.renderCharacter).toHaveBeenCalledTimes(1);
 		expect(doClose).toHaveBeenCalledWith(true);
@@ -234,5 +242,35 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 		expect(state.getCurrentHp()).toBe(5);
 		expect(page._lastRestSnapshot).toBe(previousSnapshot);
 		expect(rest._showUndoRestAffordance).toHaveBeenCalledWith("short");
+	});
+
+	test("opening and cancelling a short rest is non-mutating, while Finish Short Rest commits 60 minutes", async () => {
+		const state = new State();
+		state.addClass({name: "Fighter", source: "PHB", level: 1});
+		state.setMaxHp(12);
+		state.setCurrentHp(6);
+		const advanceMinutes = jest.spyOn(state, "advanceGameTimeMinutes");
+		const {rest, page} = makeRest(state);
+		const modalInner = globalThis.e_({tag: "div"});
+		const doClose = jest.fn();
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: modalInner, doClose});
+
+		await rest._showShortRestDialog();
+		expect(state.getGameTimeMinutes()).toBe(0);
+		doClose(false);
+		expect(state.getGameTimeMinutes()).toBe(0);
+		expect(page.saveCharacter).not.toHaveBeenCalled();
+
+		const confirm = createdElements.find(element => element.textContent === "✓ Finish Short Rest");
+		expect(confirm).toBeDefined();
+		confirm.click();
+
+		expect(state.getGameTimeMinutes()).toBe(60);
+		expect(advanceMinutes).toHaveBeenCalledWith(60, {
+			reason: "short-rest",
+			identity: "CharacterSheetRest.finishShortRest",
+		});
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(page.renderCharacter).toHaveBeenCalledTimes(1);
 	});
 });
