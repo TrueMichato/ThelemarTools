@@ -76296,7 +76296,7 @@ class CharacterSheetState {
 	static EFA_ELDRITCH_CANNON_MOBILITY = Object.freeze(["legs", "wheels"]);
 
 	static _isGeneratedClassSummonRecord (record) {
-		return !!record?.generatedClassSummon;
+		return record != null && Object.hasOwn(record, "generatedClassSummon");
 	}
 
 	static _isSameClassSummonUid (a, b) {
@@ -76435,11 +76435,31 @@ class CharacterSheetState {
 
 	_validateGeneratedClassSummonRecord (record) {
 		const metadata = record?.generatedClassSummon;
-		if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+		if (metadata == null) {
 			return {
 				ok: false,
 				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
 				details: {metadataMissing: true},
+			};
+		}
+		const metadataPrototype = typeof metadata === "object" ? Object.getPrototypeOf(metadata) : null;
+		const isPlainMetadata = typeof metadata === "object"
+			&& !Array.isArray(metadata)
+			&& (metadataPrototype === Object.prototype || metadataPrototype === null);
+		const requiredUidFields = ["templateUid", "ownerClassUid", "ownerSubclassUid", "ownerFeatureUid"];
+		const hasRequiredMetadata = isPlainMetadata
+			&& requiredUidFields.every(key =>
+				Object.hasOwn(metadata, key)
+				&& typeof metadata[key] === "string"
+				&& metadata[key].trim(),
+			)
+			&& Object.hasOwn(metadata, "generatedSlot")
+			&& Object.hasOwn(metadata, "generationVersion");
+		if (!hasRequiredMetadata) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {metadataInvalid: true},
 			};
 		}
 		if (record.type !== CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON) {
