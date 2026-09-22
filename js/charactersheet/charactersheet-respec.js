@@ -4848,8 +4848,17 @@ class CharacterSheetRespec {
 		}
 
 		// Calculate what will be removed
-		const featuresToRemove = this._getSubclassFeatures(currentSubclass, history.class);
+		const removalPlan = this._getSubclassFeatureRemovalPlan(currentSubclass, history.class);
+		const featuresToRemove = removalPlan.features;
 		const willRemoveCount = featuresToRemove.length;
+
+		if (removalPlan.ambiguous.length) {
+			content.append(e_({
+				tag: "div",
+				clazz: "ve-alert ve-alert--danger mb-2",
+				txt: this._getSubclassFeatureAmbiguityMessage(currentSubclass, removalPlan.ambiguous),
+			}));
+		}
 
 		// Show cascade warning
 		if (willRemoveCount > 0) {
@@ -4928,7 +4937,15 @@ class CharacterSheetRespec {
 		cancelBtn.addEventListener("click", () => doClose());
 
 		const applyBtn = e_({tag: "button", clazz: "ve-btn ve-btn-danger", txt: "Change Subclass"});
+		applyBtn.disabled = !!removalPlan.ambiguous.length;
 		applyBtn.addEventListener("click", async () => {
+			if (removalPlan.ambiguous.length) {
+				JqueryUtil.doToast({
+					type: "danger",
+					content: this._getSubclassFeatureAmbiguityMessage(currentSubclass, removalPlan.ambiguous),
+				});
+				return;
+			}
 			if (!selectedSubclass) {
 				JqueryUtil.doToast({type: "warning", content: "Please select a subclass."});
 				return;
@@ -4973,31 +4990,65 @@ class CharacterSheetRespec {
 	}
 
 	/**
-	 * Get all features that belong to a specific subclass
+	 * Classify stored features which belong to a specific subclass.
+	 *
+	 * Modern rows use `subclassSource`, which is authoritative. Legacy rows may
+	 * omit it; only adopt those when their class, subclass name, and entity source
+	 * all identify the outgoing subclass exactly. Anything weaker is unsafe to
+	 * remove and must block the staged change instead of becoming stale state.
 	 * @param {object} subclass - The subclass {name, shortName, source}
-	 * @returns {Array} Array of features to remove
+	 * @returns {{features:Array, ambiguous:Array}}
 	 */
-	_getSubclassFeatures (subclass, classContext = null) {
-		if (!subclass) return [];
+	_getSubclassFeatureRemovalPlan (subclass, classContext = null) {
+		if (!subclass) return {features: [], ambiguous: []};
 		const features = this._state.getFeatures();
-		return features.filter(f => {
+		const out = {features: [], ambiguous: []};
+		features.forEach(f => {
 			// When a class context is supplied, only consider features belonging to that
 			// class so a subclass swap on one class of a multiclass character never
 			// removes another class's features (subclass shortNames can collide).
 			// Scope by className only — a feature's classSource (e.g. "PHB") legitimately
 			// differs from the class entry's source (e.g. "XPHB"), so it is not a safe
 			// discriminator.
-			if (classContext?.name && f.className && f.className !== classContext.name) return false;
+			if (classContext?.name && f.className && f.className !== classContext.name) return;
 
-			const matchesName = f.subclassName === subclass.name
-				|| f.subclassShortName === subclass.shortName;
-			if (!matchesName) return false;
-			if (subclass.source) {
-				if (!f.subclassSource) return false;
-				if (f.subclassSource !== subclass.source) return false;
+			const matchesName = (!!subclass.name && f.subclassName === subclass.name)
+				|| (!!subclass.shortName && f.subclassShortName === subclass.shortName);
+			if (!matchesName) return;
+
+			if (f.subclassSource) {
+				if (subclass.source && f.subclassSource !== subclass.source) return;
+				if (f.isSubclassFeature === true || f.subclassSource === subclass.source) out.features.push(f);
+				return;
 			}
-			return f.isSubclassFeature === true || f.subclassSource === subclass.source;
+
+			const hasExactClassName = !!classContext?.name && f.className === classContext.name;
+			const hasExactFeatureSource = !!subclass.source && f.source === subclass.source;
+			if (f.isSubclassFeature === true && hasExactClassName && hasExactFeatureSource) {
+				out.features.push(f);
+				return;
+			}
+			out.ambiguous.push(f);
 		});
+		return out;
+	}
+
+	_getSubclassFeatureAmbiguityMessage (subclass, ambiguousFeatures) {
+		const labels = ambiguousFeatures
+			.slice(0, 3)
+			.map(feature => `${feature.name || "Unnamed feature"}${feature.source ? `|${feature.source}` : ""}`)
+			.join(", ");
+		const remainder = ambiguousFeatures.length > 3 ? ` and ${ambiguousFeatures.length - 3} more` : "";
+		return `Cannot safely change ${subclass?.name || "this subclass"}: ${ambiguousFeatures.length} legacy subclass feature${ambiguousFeatures.length === 1 ? "" : "s"} (${labels}${remainder}) ${ambiguousFeatures.length === 1 ? "is" : "are"} missing subclassSource and exact class/subclass/entity-source provenance. Repair ${ambiguousFeatures.length === 1 ? "it" : "them"} with subclassSource "${subclass?.source || "the correct source"}" or remove them manually, then reopen Respec.`;
+	}
+
+	/**
+	 * Get all features that can be safely removed for a specific subclass.
+	 * @param {object} subclass - The subclass {name, shortName, source}
+	 * @returns {Array} Array of features to remove
+	 */
+	_getSubclassFeatures (subclass, classContext = null) {
+		return this._getSubclassFeatureRemovalPlan(subclass, classContext).features;
 	}
 
 	/**
@@ -5023,8 +5074,14 @@ class CharacterSheetRespec {
 			|| history.decisions?.find(decision => decision.type === "subclass")?.semanticKey
 			|| null;
 
-		// Remove old subclass features using proper API (scoped to the changed class)
-		const featuresToRemove = this._getSubclassFeatures(oldSubclass, history.class);
+		// Remove old subclass features using proper API (scoped to the changed class).
+		// Refuse the mutation before touching candidate state if legacy provenance is
+		// too weak to decide whether a source-less row belongs to this subclass.
+		const removalPlan = this._getSubclassFeatureRemovalPlan(oldSubclass, history.class);
+		if (removalPlan.ambiguous.length) {
+			throw new Error(this._getSubclassFeatureAmbiguityMessage(oldSubclass, removalPlan.ambiguous));
+		}
+		const featuresToRemove = removalPlan.features;
 		featuresToRemove.forEach(f => {
 			this._state.removeFeature(f.id);
 		});

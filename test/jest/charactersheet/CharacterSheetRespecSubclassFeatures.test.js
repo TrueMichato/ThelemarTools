@@ -244,6 +244,82 @@ describe("CharacterSheetRespec subclass change — exact source isolation", () =
 		]);
 	});
 
+	test("removes an exact-provenance source-less legacy feature while preserving an explicit wrong-source owner", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+		});
+		state.addFeature({
+			name: "Reanimated Companion",
+			source: "RHW",
+			level: 3,
+			className: "Artificer",
+			classSource: "EFA",
+			subclassName: "Reanimator",
+			subclassShortName: "Reanimator",
+			isSubclassFeature: true,
+			entries: [],
+		});
+		state.addFeature({
+			name: "Reanimated Companion",
+			source: "TCE",
+			level: 3,
+			className: "Artificer",
+			classSource: "EFA",
+			subclassName: "Reanimator",
+			subclassShortName: "Reanimator",
+			subclassSource: "TCE",
+			isSubclassFeature: true,
+			entries: [],
+		});
+		const respec = makeRespec(state, []);
+
+		await respec._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Artificer", source: "EFA"}},
+			{name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+			{name: "Armorer", shortName: "Armorer", source: "EFA", subclassFeatures: []},
+		);
+
+		expect(state.getFeatures().filter(feature => feature.name === "Reanimated Companion")).toEqual([
+			expect.objectContaining({source: "TCE", subclassSource: "TCE"}),
+		]);
+	});
+
+	test("rejects an ambiguous source-less legacy feature before mutating the candidate", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+		});
+		state.addFeature({
+			name: "Reanimated Companion",
+			source: "TST",
+			level: 3,
+			className: "Artificer",
+			classSource: "EFA",
+			subclassName: "Reanimator",
+			subclassShortName: "Reanimator",
+			isSubclassFeature: true,
+			entries: [],
+		});
+		const before = state.toJson();
+		const respec = makeRespec(state, []);
+
+		await expect(respec._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Artificer", source: "EFA"}},
+			{name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+			{name: "Armorer", shortName: "Armorer", source: "EFA", subclassFeatures: []},
+		)).rejects.toThrow(/missing subclassSource.*remove them manually/i);
+		expect(state.toJson()).toEqual(before);
+	});
+
 	test("updates only level-history rows for the exact class and subclass source", async () => {
 		const state = new CharacterSheetState();
 		state.addClass({

@@ -298,6 +298,13 @@ clears chosen-subfeature records, resources, active states, and once-per-turn
 resource usage through the normal state removal APIs. Runtime uses are not
 treated as progression ownership and are not recreated by a manifest refresh.
 
+Subclass replacement treats an explicit `subclassSource` as authoritative.
+Legacy source-less subclass features are removable only when their class,
+subclass name, and entity source exactly identify the outgoing subclass.
+Weaker legacy provenance blocks the candidate change with a repair diagnostic
+instead of leaving a stale feature or guessing ownership; explicit rows owned
+by another source remain untouched.
+
 ## Historical Class Changes
 
 Every level has a Class decision. Changing it rebuilds the candidate's:
