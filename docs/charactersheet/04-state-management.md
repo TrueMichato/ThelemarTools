@@ -44,10 +44,13 @@ monotonically newer identity after save/load.
 
 The record stores mutable runtime state only. For the EFA Eldritch Cannon this
 is form, size, placement, mobility, owner distance, current HP, remaining game
-minutes, payment metadata, and instance revision. AC, maximum HP, immunities,
-and current attack/save/form calculations are projected at read time from
-`data/objects.json` and the exact `Artificer|EFA` owner level. Generated summons
-are never inventory items.
+minutes, payment metadata, optional creation-tool receipt, and instance
+revision. The receipt is a stable reference to the equipped, positive-quantity,
+proficient Smith's Tools or Woodcarver's Tools wrapper used at creation; legacy
+records may omit it, and removing the tool later does not retire the cannon.
+AC, maximum HP, immunities, and current attack/save/form calculations are
+projected at read time from `data/objects.json` and the exact `Artificer|EFA`
+owner level. Generated summons are never inventory items.
 
 `reconcileClassSummons()` is the load/import and owner-change boundary. It
 returns explicit kept/clamped/retired results and reasons while enforcing
@@ -63,15 +66,18 @@ Dedicated class-summon APIs remain the only read/mutation surface, while
 `toJson()` continues to serialize the compact record from `_data.companions[]`.
 
 EFA cannon creation is a higher-level transaction over that compact lifecycle.
-`pCreateEfaEldritchCannon()` validates the complete form/size/placement/payment
-request before spending anything, consumes the canonical Action slot only in
-combat, and spends either the source-qualified one-use Long Rest resource or an
-explicit normal/Pact spell slot. The callback-backed persistence commit is
-atomic: a failed save restores the full pre-request state, including action
-economy, resource/slot counts, summon revisions, and companion records, then
-attempts to persist the rollback. Resource-less Milestone 2 saves initialize
-the use as spent only when a surviving exact-owner cannon records
-`createdWith: "freeUse"`; explicit resources remain authoritative.
+`pCreateEfaEldritchCannons()` validates one request or, at level 15, two
+requests before spending anything. Two-cannon creation is available only when
+both slots are empty. One Magic Action creates the batch; the free Long Rest
+use pays for either one or both cannons, while spell-slot creation spends one
+explicit normal/Pact slot per cannon after aggregating every requested pool.
+`pCreateEfaEldritchCannon()` remains the compatible one-cannon delegate. The
+callback-backed persistence commit is atomic: a failed save restores the full
+pre-request state, including action economy, resource/slot counts, summon
+revisions, and both companion records, then attempts to persist the rollback.
+Resource-less Milestone 2 saves initialize the use as spent only when a
+surviving exact-owner cannon records `createdWith: "freeUse"`; explicit
+resources remain authoritative.
 
 Base operation remains on dedicated EFA APIs:
 `validateEfaEldritchCannonActivation()` /
@@ -81,6 +87,34 @@ combat. Position, HP damage/healing, `mending`, Magic Action dismissal, and
 explicit duration-ending each have source-specific methods. Protector applies
 the ordinary temporary-HP replacement rule to self only; another creature's
 rolled result is reported without mutating another character.
+
+At level 15, `validateEfaEldritchCannonActivations()` /
+`activateEfaEldritchCannons()` prevalidate both request/roll pairs and commit
+both activations with one canonical Bonus Action. A failed request spends
+nothing. Finishing a 60-minute Short Rest or 480-minute Long Rest retires every
+active EFA cannon through the duration-expiry path; the Rest UI captures its
+full snapshot before that mutation, so Undo restores records, HP, duration,
+revision cursors, cover, and resources.
+
+After surviving damage at level 9, an in-combat cannon within 60 feet may arm
+one transient `pendingEfaCannonDetonation` trigger while the Reaction is
+available. Decline clears it without spending or retiring anything.
+`pDetonateEfaEldritchCannon()` spends the canonical Reaction, retires the exact
+revision as `detonated`, and reports `3d10` force damage in a 20-foot radius
+against the owner's spell-save DC (Dexterity, half on success). Its rollback
+snapshot is intentionally post-damage: a persistence failure restores the
+Reaction and damaged cannon without undoing the damage that created the
+opportunity. Pending triggers are never trusted across load, reconciliation,
+owner removal, new damage, or action-economy reset.
+
+Cover is a reusable projection rather than an Artillerist AC special case.
+`getCoverProjections()` gathers active cover effects and generated-cannon
+sources; `getCoverProjection()` applies only the highest grade once while
+retaining all equal-grade sources for AC/save breakdowns. Half Cover therefore
+adds +2 AC and +2 Dexterity saves whether one or several sources apply. Smite of
+Protection, Cover of Darkness, and EFA Shimmering Field Projection all use this
+primitive. Only the EFA owner is mutated for cannon cover; allies within 10 feet
+are reported by the Combat UI.
 
 ### Basic Information
 

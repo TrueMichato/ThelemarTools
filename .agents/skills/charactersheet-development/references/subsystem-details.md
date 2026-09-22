@@ -2009,7 +2009,9 @@ keeps the compact record in `_data.companions[]`. Carried cannons require
 `"legs"` or `"wheels"`.
 
 Duration is game time, not wall time. `advanceClassSummonGameTime(minutes)`
-reduces the persisted 60-minute duration and retires at zero.
+reduces the persisted 60-minute duration and retires at zero. Finishing either
+a 60-minute Short Rest or a 480-minute Long Rest expires every EFA cannon
+through the same retirement path; Rest Undo restores the full pre-rest snapshot.
 
 Milestone 3 adds one-active-cannon creation and base operation without changing
 the compact record contract:
@@ -2033,10 +2035,36 @@ the compact record contract:
 - Dedicated methods own position updates, HP damage/healing, `mending` (`2d6`,
   capped), Magic Action dismissal, and explicit duration ending.
 
-The Combat tab owns a dedicated cannon card and canonical
-`CharacterSheetModal` creation/activation dialogs. The card never renders
-through generic companion APIs. Rest expiry, Explosive Cannon, Half Cover,
-dual operation, and Arcane Firearm remain deferred.
+Milestone 4 extends the same compact lifecycle:
+
+- Creation requires an equipped, positive-quantity, proficient Smith's Tools or
+  Woodcarver's Tools wrapper resolved through the reusable spell-focus inventory
+  filter. New records store an optional stable creation-tool receipt; legacy
+  records without one remain valid and later tool removal does not retire them.
+- `pCreateEfaEldritchCannons()` creates one cannon in the next free slot or two
+  at once when a level-15 owner has no active cannon. One free use pays for both;
+  slot payment requires one selected normal/Pact slot per cannon with aggregate
+  validation and full rollback. The singular API delegates compatibly.
+- `activateEfaEldritchCannons()` prevalidates both requests and rolls, then
+  resolves both with one canonical Bonus Action. Individual activation remains.
+- Surviving in-range damage at level 9 can arm one transient Explosive Cannon
+  Reaction. Accepting retires the exact revision as `detonated` and reports
+  `3d10` force, 20-foot radius, Dexterity save against spell-save DC, half on
+  success. The canonical Reaction is spent only while combat tracking is
+  active; outside combat the operation remains legal and reports the action as
+  untracked. Decline spends nothing; save failure restores both the damaged
+  cannon and the immediate detonation opportunity.
+- Level-15 Shimmering Field Projection uses the generic nonstacking cover
+  projection shared by Smite of Protection and Cover of Darkness. Half Cover
+  contributes +2 AC/+2 Dexterity saves once, exposes all equal-grade
+  source/range data, and drops immediately when the last in-range cannon leaves.
+  Ally cover is descriptive only.
+
+The Combat tab owns the two-card presentation and canonical creation,
+individual/dual activation, and Explosive Cannon dialogs. The cards never render
+through generic companion APIs. Play Mode/PDF do not duplicate these controls.
+Arcane Firearm uses the exact inventory-binding and committed-cast receipt
+pipeline documented above rather than any cannon-specific state.
 
 Catalog adds preserve both type layers: inventory grouping continues to use the coarse
 `type`, while rules logic reads `typeCode` first and strips any `|source` suffix.

@@ -19,10 +19,19 @@
  * player actually cares about round-tripping.
  */
 
+import fs from "node:fs";
+
 import "./setup.js";
 
 let CharacterSheetState;
 let CharacterSheetRest;
+const artificerData = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
+const objectData = JSON.parse(fs.readFileSync("data/objects.json", "utf8")).object;
+const EFA_ARTILLERIST = artificerData.subclass.find(it =>
+	it.name === "Artillerist"
+	&& it.source === "EFA"
+	&& it.classSource === "EFA",
+);
 
 beforeAll(async () => {
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
@@ -66,6 +75,33 @@ function makeWornCaster () {
 	state.setExhaustion(2);
 	state.addCondition("poisoned");
 	return state;
+}
+
+async function makeArtilleristWithCannons () {
+	const state = new CharacterSheetState();
+	state.setClassSummonTemplateCatalog(objectData);
+	state.addClass({
+		name: "Artificer",
+		source: "EFA",
+		level: 15,
+		hd: {number: 1, faces: 8},
+		subclass: {
+			name: EFA_ARTILLERIST.name,
+			shortName: EFA_ARTILLERIST.shortName,
+			source: EFA_ARTILLERIST.source,
+		},
+	});
+	state.addItem({id: "rest-cannon-tool", name: "Smith's Tools", source: "PHB", type: "AT", _isCustom: true}, 1, true);
+	state.addToolProficiency("Smith's Tools");
+	const created = await state.pCreateEfaEldritchCannons({
+		requests: [
+			{form: "forceBallista", size: "S", placement: "deployed", mobility: "wheels", distanceFromOwnerFt: 5, createdWith: "freeUse"},
+			{form: "protector", size: "T", placement: "carried", mobility: null, distanceFromOwnerFt: 0, createdWith: "freeUse"},
+		],
+	});
+	state.damageEfaEldritchCannon(created.instanceIds[0], 6);
+	state.advanceClassSummonGameTime(15);
+	return {state, created};
 }
 
 /** Curated snapshot of the user-visible state a rest touches, for round-trip asserts. */
@@ -219,6 +255,46 @@ describe("#8 — Undo rest (full-snapshot capture/restore)", () => {
 				if (originalRandomise === undefined) delete globalThis.RollerUtil.randomise;
 				else globalThis.RollerUtil.randomise = originalRandomise;
 			}
+		});
+	});
+
+	describe("EFA cannon rest expiry undo", () => {
+		it("wires both rest dialogs through the canonical expiry helper and reports the count", () => {
+			const source = fs.readFileSync("js/charactersheet/charactersheet-rest.js", "utf8");
+			expect(source).toContain("listEfaEldritchCannons?.() || []");
+			expect(source).toContain("expireEfaEldritchCannonsForRest?.({minutes: 60})");
+			expect(source).toContain("expireEfaEldritchCannonsForRest?.({minutes: 480})");
+			expect(source).toContain("Eldritch Cannon$" + "{efaCannonExpiry.count === 1 ? \"\" : \"s\"} expired.");
+		});
+
+		it.each([
+			["short", 60],
+			["long", 480],
+		])("restores both cannons, HP, duration, revisions, resources, and cover after undoing a %s rest", async (restType, minutes) => {
+			const {state, created} = await makeArtilleristWithCannons();
+			const {rest} = makeRest(state);
+			const before = {
+				cannons: state.listEfaEldritchCannons(),
+				revisions: state.toJson().generatedClassSummonRevisions,
+				creationResource: state.getEfaEldritchCannonCreationState().freeUse,
+				cover: state.getCoverProjection(),
+			};
+
+			rest._captureRestSnapshot(restType);
+			const expired = state.expireEfaEldritchCannonsForRest({minutes});
+			expect(expired.count).toBe(2);
+			expect(state.listEfaEldritchCannons()).toEqual([]);
+			expect(state.getCoverProjection()).toBeNull();
+
+			expect(rest._onUndoRest()).toBe(true);
+			expect(state.listEfaEldritchCannons()).toEqual(before.cannons);
+			expect(state.toJson().generatedClassSummonRevisions).toEqual(before.revisions);
+			expect(state.getEfaEldritchCannonCreationState().freeUse).toEqual(before.creationResource);
+			expect(state.getCoverProjection()).toEqual(before.cover);
+			expect(state.getEfaEldritchCannon(created.instanceIds[0])).toMatchObject({
+				hp: {current: 69, max: 75},
+				durationRemainingMinutes: 45,
+			});
 		});
 	});
 

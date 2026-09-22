@@ -73,8 +73,17 @@ class CharacterSheetRest {
 			: null;
 		const canMemorizeSpell = !!(memorizeCandidates && memorizeCandidates.prepared.length && memorizeCandidates.spellbook.length);
 		const canRetuneEfaArmorModel = !!this._state.getEfaArmorerModel?.();
+		const activeEfaCannons = this._state.listEfaEldritchCannons?.() || [];
 
-		if (currentHp >= maxHp && !availableHitDice.length && !companionHitDieTargets.length && !conditions.length && !isConcentrating && !canReduceExhaustion && !canMemorizeSpell && !canRetuneEfaArmorModel) {
+		if (currentHp >= maxHp
+			&& !availableHitDice.length
+			&& !companionHitDieTargets.length
+			&& !conditions.length
+			&& !isConcentrating
+			&& !canReduceExhaustion
+			&& !canMemorizeSpell
+			&& !canRetuneEfaArmorModel
+			&& !activeEfaCannons.length) {
 			JqueryUtil.doToast({type: "info", content: "You're already at full health with no hit dice to spend."});
 			return;
 		}
@@ -532,6 +541,7 @@ class CharacterSheetRest {
 
 			// Apply Memorize Spell swap, if elected
 			const memorizeSwap = memorizeSpell?.apply() || false;
+			const efaCannonExpiry = this._state.expireEfaEldritchCannonsForRest?.({minutes: 60});
 
 			const armorModelOutcome = armorModelSwitch?.apply() || null;
 			const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
@@ -551,6 +561,7 @@ class CharacterSheetRest {
 			if (tirelessReduced > 0) message += ` Tireless reduced exhaustion by ${tirelessReduced}.`;
 			if (memorizeSwap) message += ` Memorized ${memorizeSwap}.`;
 			message += armorModelFeedback.successSuffix;
+			if (efaCannonExpiry?.count) message += ` ${efaCannonExpiry.count} Eldritch Cannon${efaCannonExpiry.count === 1 ? "" : "s"} expired.`;
 
 			JqueryUtil.doToast({
 				type: "success",
@@ -1122,6 +1133,7 @@ class CharacterSheetRest {
 				const armorModelOutcome = armorModelSwitch?.apply() || null;
 				const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
 				const spellStoringItemResult = this._commitEfaSpellStoringItemChoice(spellStoringItemChoice);
+				const efaCannonExpiry = this._state.expireEfaEldritchCannonsForRest?.({minutes: 480});
 
 				// Save changes
 				let saveResult;
@@ -1163,6 +1175,7 @@ class CharacterSheetRest {
 				if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
 				if (atlasResult.changed) message += ` Adventurer's Atlas ${atlasResult.atlas.generation > 1 ? "recreated" : "created"}.`;
 				message += armorModelFeedback.successSuffix;
+				if (efaCannonExpiry?.count) message += ` ${efaCannonExpiry.count} Eldritch Cannon${efaCannonExpiry.count === 1 ? "" : "s"} expired.`;
 
 				JqueryUtil.doToast({
 					type: "success",

@@ -15874,6 +15874,23 @@ body.has-quickbuild-overlay .toast__container {
 	display: flex;
 	flex-direction: column;
 	gap: var(--cs-space-sm, 0.5rem);
+	min-width: 0;
+	padding: var(--cs-space-md, 0.75rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 10px);
+	background: var(--cs-bg-surface, var(--cs-bg-base));
+}
+
+.charsheet__efa-cannon-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+	gap: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__efa-cannon-dual-toolbar {
+	display: flex;
+	justify-content: flex-end;
+	margin-bottom: var(--cs-space-sm, 0.5rem);
 }
 
 .charsheet__efa-cannon-identity,
@@ -15933,12 +15950,18 @@ body.has-quickbuild-overlay .toast__container {
 
 .charsheet__efa-cannon-operation,
 .charsheet__efa-cannon-operation-summary,
-.charsheet__efa-cannon-cost-summary {
+.charsheet__efa-cannon-cost-summary,
+.charsheet__efa-cannon-cover {
 	padding: var(--cs-space-sm, 0.5rem);
 	background: var(--cs-bg-base, rgba(0, 0, 0, 0.12));
 	border: 1px solid var(--cs-border, var(--rgb-border-grey));
 	border-radius: var(--cs-radius-sm, 6px);
 	font-size: var(--cs-text-xs, 0.75rem);
+}
+
+.charsheet__efa-cannon-cover--active {
+	border-color: var(--cs-success);
+	color: var(--cs-success-text, inherit);
 }
 
 .charsheet__efa-cannon-activate {

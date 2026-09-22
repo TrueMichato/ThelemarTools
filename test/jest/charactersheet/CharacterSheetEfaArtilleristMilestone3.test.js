@@ -42,6 +42,10 @@ const makeState = ({
 		},
 	});
 	state.setSpellSlots(spellSlots);
+	if (source === "EFA") {
+		state.addItem({id: "efa-cannon-tool", name: "Smith's Tools", source: "PHB", type: "AT", _isCustom: true}, 1, true);
+		state.addToolProficiency("Smith's Tools");
+	}
 	return state;
 };
 
@@ -147,8 +151,8 @@ describe("EFA Artillerist Milestone 3 cannon creation", () => {
 		expect(state.toJson().companions[0]).toMatchObject({
 			createdWith: "spellSlot",
 			createdWithSlotLevel: 1,
+			createdWithSlotKind: "spell",
 		});
-		expect(state.toJson().companions[0]).not.toHaveProperty("createdWithSlotKind");
 
 		state.dismissEfaEldritchCannon(normal.instanceId);
 		state.setPactSlots({current: 1, max: 1, level: 2});
@@ -168,23 +172,24 @@ describe("EFA Artillerist Milestone 3 cannon creation", () => {
 				form: "protector",
 				createdWith: "spellSlot",
 				createdWithSlotLevel: 2,
+				createdWithSlotKind: "pact",
 			},
 		});
 		expect(state.getPactSlots().current).toBe(0);
 	});
 
-	test("restores only the free creation use on a Long Rest without expiring the active cannon", async () => {
+	test("expires the cannon on either rest and restores the free creation use only on a Long Rest", async () => {
 		const state = makeState();
 		const created = await state.pCreateEfaEldritchCannon(createRequest());
 		expect(state.getEfaEldritchCannonCreationState().freeUse.current).toBe(0);
 
 		state.onShortRest();
 		expect(state.getEfaEldritchCannonCreationState().freeUse.current).toBe(0);
-		expect(state.getEfaEldritchCannon(created.instanceId)).toBeTruthy();
+		expect(state.getEfaEldritchCannon(created.instanceId)).toBeNull();
 
 		state.onLongRest();
 		expect(state.getEfaEldritchCannonCreationState().freeUse.current).toBe(1);
-		expect(state.getEfaEldritchCannon(created.instanceId)).toBeTruthy();
+		expect(state.getEfaEldritchCannon(created.instanceId)).toBeNull();
 	});
 
 	test("migrates a resource-less M2 free-use cannon save as spent until Long Rest", async () => {
@@ -297,7 +302,7 @@ describe("EFA Artillerist Milestone 3 cannon creation", () => {
 		expect(loaded.getEfaEldritchCannonCreationState().freeUse.current).toBe(current);
 	});
 
-	test("rejects a second active cannon and isolates all M3 resources and creation paths from TCE", async () => {
+	test("retains the level-3 single-cannon cap, fills the free level-15 slot, and isolates creation from TCE", async () => {
 		const state = makeState();
 		await state.pCreateEfaEldritchCannon(createRequest());
 		const before = state.toJson();
@@ -313,8 +318,8 @@ describe("EFA Artillerist Milestone 3 cannon creation", () => {
 		expect(await reservedSlotOnly.pCreateEfaEldritchCannon(createRequest({
 			createdWith: "spellSlot",
 			createdWithSlotLevel: 1,
-		}))).toMatchObject({ok: false, committed: false, reason: "slotOccupied"});
-		expect(reservedSlotOnly.listEfaEldritchCannons()).toHaveLength(1);
+		}))).toMatchObject({ok: true, committed: true});
+		expect(reservedSlotOnly.listEfaEldritchCannons().map(cannon => cannon.generatedClassSummon.generatedSlot)).toEqual([0, 1]);
 		expect(reserved.ok).toBe(true);
 
 		const tce = makeState({source: "TCE"});

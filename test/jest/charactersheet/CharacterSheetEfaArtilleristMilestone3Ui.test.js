@@ -22,7 +22,7 @@ const TCE_ARTILLERIST = artificerData.subclass.find(it =>
 	&& it.classSource === "TCE",
 );
 
-const makeState = ({source = "EFA", level = 3} = {}) => {
+const makeState = ({source = "EFA", level = 3, withTool = true} = {}) => {
 	const subclass = source === "EFA" ? EFA_ARTILLERIST : TCE_ARTILLERIST;
 	const state = new CharacterSheetState();
 	state.setClassSummonTemplateCatalog(objectData);
@@ -38,6 +38,10 @@ const makeState = ({source = "EFA", level = 3} = {}) => {
 		},
 	});
 	state.setSpellSlots([{level: 1, current: 2, max: 2}]);
+	if (source === "EFA" && withTool) {
+		state.addItem({id: "efa-cannon-tool", name: "Smith's Tools", source: "PHB", type: "AT", _isCustom: true}, 1, true);
+		state.addToolProficiency("Smith's Tools");
+	}
 	return state;
 };
 
@@ -62,12 +66,19 @@ const makeRenderDocument = () => {
 		classList: {toggle: jest.fn()},
 	};
 	const listenerTarget = {addEventListener: jest.fn()};
-	const card = {
-		querySelector: jest.fn(() => listenerTarget),
-	};
+	const cards = [];
 	const container = {
 		innerHTML: "",
-		querySelector: jest.fn(selector => selector === "[data-efa-cannon-id]" ? card : null),
+		querySelector: jest.fn(() => null),
+		querySelectorAll: jest.fn(selector => {
+			if (selector !== "[data-efa-cannon-id]") return [];
+			const ids = [...container.innerHTML.matchAll(/data-efa-cannon-id="([^"]+)"/g)].map(match => match[1]);
+			return ids.map((id, index) => {
+				cards[index] ||= {dataset: {}, querySelector: jest.fn(() => listenerTarget)};
+				cards[index].dataset.efaCannonId = id;
+				return cards[index];
+			});
+		}),
 	};
 	const elements = {
 		"charsheet-combat-efa-cannon-section": section,
@@ -81,7 +92,8 @@ const makeRenderDocument = () => {
 		createButton,
 		feedback,
 		container,
-		card,
+		card: cards[0] || null,
+		cards,
 	};
 };
 
@@ -166,6 +178,55 @@ describe("EFA Artillerist Milestone 3 Combat rendering", () => {
 		expect(combat._page._saveCurrentCharacter).toHaveBeenCalledTimes(2);
 	});
 
+	test("renders both persisted slots, the one-Bonus-Action dual flow, cover state, and creation tool", async () => {
+		const dom = makeRenderDocument();
+		globalThis.document = dom.document;
+		const state = makeState({level: 15});
+		const created = await state.pCreateEfaEldritchCannons({
+			requests: [
+				{
+					form: "forceBallista",
+					size: "S",
+					placement: "deployed",
+					mobility: "wheels",
+					distanceFromOwnerFt: 5,
+					createdWith: "freeUse",
+				},
+				{
+					form: "protector",
+					size: "T",
+					placement: "carried",
+					mobility: null,
+					distanceFromOwnerFt: 0,
+					createdWith: "freeUse",
+				},
+			],
+		});
+		state.setEfaEldritchCannonPosition(created.instanceIds[0], {distanceFromOwnerFt: 20});
+		makeCombat(state).renderCombatEfaCannon();
+
+		expect(created.ok).toBe(true);
+		expect(dom.container.innerHTML.match(/class="charsheet__efa-cannon-card"/g)).toHaveLength(2);
+		expect(dom.container.innerHTML).toContain("Cannon 1 · Force Ballista");
+		expect(dom.container.innerHTML).toContain("Cannon 2 · Protector");
+		expect(dom.container.innerHTML).toContain("data-efa-cannon-activate-both");
+		expect(dom.container.innerHTML).toContain("Activate Both · One Bonus Action");
+		expect(dom.container.innerHTML).toContain("Smith&#039;s Tools");
+		expect(dom.container.innerHTML).toContain("Half Cover active for you: +2 AC and +2 Dex saves while within 10 ft");
+		expect(dom.container.innerHTML).toContain("This cannon's Shimmering Field is out of range: move within 10 ft");
+		expect(dom.container.innerHTML).toContain("Allies within 10 ft also have Half Cover; ally state is not automated.");
+		expect(dom.createButton.disabled).toBe(true);
+	});
+
+	test("disables creation and gives an actionable tool requirement when no eligible wrapper exists", () => {
+		const dom = makeRenderDocument();
+		globalThis.document = dom.document;
+		makeCombat(makeState({withTool: false})).renderCombatEfaCannon();
+		expect(dom.createButton.disabled).toBe(true);
+		expect(dom.createButton.title).toContain("Equip a positive-quantity Smith's Tools or Woodcarver's Tools");
+		expect(dom.container.innerHTML).toContain("Equip a positive-quantity Smith&#039;s Tools or Woodcarver&#039;s Tools");
+	});
+
 	test("pins canonical modal, native-control, inline-feedback, and keyboard-accessible structure", () => {
 		const html = fs.readFileSync("charactersheet.html", "utf8");
 		const combatSource = fs.readFileSync("js/charactersheet/charactersheet-combat.js", "utf8");
@@ -180,6 +241,10 @@ describe("EFA Artillerist Milestone 3 Combat rendering", () => {
 		expect(combatSource).toContain("type=\"submit\"");
 		expect(combatSource).toContain("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"");
 		expect(combatSource).toContain("pRollback: () => this._pSaveEfaCannonState()");
+		expect(combatSource).toContain("Activate Both Eldritch Cannons");
+		expect(combatSource).toContain("Explosive Cannon — Reaction");
+		expect(combatSource).toContain("20-ft radius");
+		expect(combatSource).toContain("3d10 force");
 		expect(modalSource).toContain("evt.key === \"Escape\"");
 		expect(modalSource).toContain("_handleTab");
 		expect(modalSource).toContain("eleTrigger.focus");
@@ -196,6 +261,7 @@ describe("EFA Artillerist Milestone 3 Combat rendering", () => {
 		expect(mobileCss).toContain("grid-template-columns: minmax(0, 1fr)");
 		expect(mobileCss).toContain("min-height: 44px");
 		expect(mobileCss).toContain("font-size: 1rem");
+		expect(mobileCss).toMatch(/\.charsheet__efa-cannon-actions \.cs-combat-btn,\s*\.charsheet__efa-cannon-modal-actions \.ve-btn \{\s*flex: 0 0 auto;\s*width: 100%;/);
 		expect(combatSource).toContain("type=\"button\" class=\"ve-btn ve-btn-primary charsheet__efa-cannon-activate\"");
 		expect(combatSource).not.toContain("data-efa-cannon-activate title=");
 	});

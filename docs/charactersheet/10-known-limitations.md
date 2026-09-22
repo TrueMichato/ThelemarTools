@@ -19,7 +19,7 @@ partial still have explicitly deferred runtime mechanics.
 - **Alchemist**: `experimentalElixirCount`, `alchemicalSavantBonus`, `restorativeReagentsUses`, `restorativeReagentsTempHp`
 - **Armorer (TCE legacy calculations)**: `thunderGauntletsDamage`, `defensiveFieldTempHp`, `lightningLauncherDamage`, `infiltratorSpeedBonus`
 - **Armorer (EFA, partial)**: active-bound Arcane Armor lifecycle and inventory controls; level-3 model weapons, Intelligence substitution, model riders/resources, Infiltrator `+5` Speed and Stealth advantage; level-9 Armor Replication plan/capacity extensions and Improved Arsenal's active-model `+1` attack/damage. Deferred: level-15 Perfected Armor model effects, dedicated NPC/PDF export coverage, and E2E.
-- **Artillerist**: `eldritchCannonHp`, `flamethrowerDamage`, `forceBallistaDamage`, `protectorTempHp`, `maxCannons`, `arcaneFirearmDamage`
+- **Artillerist**: EFA cannon creation tools, one/two-cannon lifecycle, dual activation, Explosive Cannon, Shimmering Field Half Cover, rest expiry/undo, Arcane Firearm carving/focus/damage, plus `eldritchCannonHp`, `flamethrowerDamage`, `forceBallistaDamage`, `protectorTempHp`, `arcaneFirearmDamage`, and `maxCannons`.
 - **Battle Smith**: `steelDefenderHp`, `arcaneJoltDamage`, `arcaneJoltUses`, `deflectAttackDamage`
 - **Cartographer (EFA), Adventurer's Atlas + Mapping Magic milestones**: versioned persistent
   Atlas state, Long Rest creation/recreation with held-tool confirmation,

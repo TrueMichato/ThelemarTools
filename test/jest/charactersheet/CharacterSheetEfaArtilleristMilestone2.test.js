@@ -325,7 +325,7 @@ describe("EFA Artillerist generated class-summon contract", () => {
 		expect(() => state.advanceClassSummonGameTime(-1)).toThrow(RangeError);
 	});
 
-	test("leaves rest expiration deferred without healing or corrupting compact state", () => {
+	test("keeps generic companion-rest healing isolated from compact cannon state", () => {
 		const state = makeState({level: 5});
 		const {instanceId} = createCannon(state);
 		state.setClassSummonCurrentHp(instanceId, 7);

@@ -45,6 +45,14 @@
 		min-height: 44px;
 	}
 
+	.charsheet__efa-cannon-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.charsheet__efa-cannon-dual-toolbar {
+		display: block;
+	}
+
 	.charsheet__efa-cannon-vitals,
 	.charsheet__efa-cannon-meta,
 	.charsheet__efa-cannon-actions,
@@ -67,10 +75,16 @@
 		flex: 1 1 8rem;
 	}
 
-	.charsheet__efa-cannon-control button,
+	.charsheet__efa-cannon-control button {
+		flex: 1 1 100%;
+		min-height: 44px;
+		justify-content: center;
+	}
+
 	.charsheet__efa-cannon-actions .cs-combat-btn,
 	.charsheet__efa-cannon-modal-actions .ve-btn {
-		flex: 1 1 100%;
+		flex: 0 0 auto;
+		width: 100%;
 		min-height: 44px;
 		justify-content: center;
 	}

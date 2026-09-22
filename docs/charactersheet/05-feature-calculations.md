@@ -1281,16 +1281,19 @@ The EFA Eldritch Cannon is the first registered definition. Its compact runtime
 record derives AC 18 and poison/psychic immunities from `Eldritch Cannon|EFA`,
 maximum HP as five times the exact `Artificer|EFA` level, and attack/save/form
 formulas from current character state. Its 60-minute duration is advanced only
-through the explicit game-time API. Slot 1 is schema-valid at Artificer 15 for
-future dual-cannon work, but the Milestone 3 transaction still permits exactly
-one active cannon.
+through explicit game-time/rest APIs. Artificer 15 permits persisted generated
+slots 0 and 1.
 
-`pCreateEfaEldritchCannon()` owns the creation cost: the source-qualified
-`Eldritch Cannon Creation` resource recharges on a Long Rest, or the caller
-selects any available normal/Pact spell slot. Creation/dismissal consume the
-canonical Action slot in combat while displaying the source's "Magic Action"
-subtype; activation consumes the canonical Bonus Action slot in combat. The
-creation transaction restores its entire snapshot when persistence fails.
+`pCreateEfaEldritchCannons()` owns the creation cost and transaction for one or
+two cannons. Creation requires a selected equipped, positive-quantity,
+proficient Smith's Tools or Woodcarver's Tools inventory wrapper. The
+source-qualified `Eldritch Cannon Creation` resource recharges on a Long Rest
+and creates one or both cannons with one use; slot-funded creation spends one
+selected normal/Pact slot per cannon only after aggregate pool validation.
+Creation/dismissal consume the canonical Action slot in combat while displaying
+the source's "Magic Action" subtype. The creation transaction restores its
+entire snapshot, including both records and revision cursors, when persistence
+fails. `pCreateEfaEldritchCannon()` remains the single-request delegate.
 
 `activateEfaEldritchCannon()` resolves the derived form contract without
 persisting any duplicate combat numbers:
@@ -1304,8 +1307,25 @@ persisting any duplicate combat numbers:
 
 All forms require the owner within 60 feet and may move a deployed cannon up to
 15 feet before or after activation. `mending` restores `2d6` up to derived max
-HP. Game-time decrement/end controls remain explicit. Rest expiry, Explosive
-Cannon, Half Cover, and dual operation remain later milestones.
+HP. `activateEfaEldritchCannons()` validates two complete activation/roll
+requests before committing both with one Bonus Action; the one-cannon API is
+unchanged. Game-time decrement/end controls remain explicit, and either a Short
+Rest or Long Rest expires all active EFA cannons through canonical retirement.
+
+Explosive Cannon is a damage-triggered, one-shot level-9 Reaction opportunity.
+Only a surviving exact-owner cannon within 60 feet can arm it. Acceptance
+spends the state-owned Reaction during tracked combat, retires that revision as
+`detonated`, and reports `3d10` force damage in a 20-foot radius with a
+Dexterity save against the owner's spell-save DC for half. Outside combat the
+Reaction is reported as untracked. Decline spends nothing. Persistence failure
+restores the post-damage cannon and its immediate detonation opportunity.
+
+At level 15, each active EFA cannon projects Shimmering Field Half Cover while
+the owner is within 10 feet. The generic nonstacking cover primitive applies
+only the highest cover grade once (+2 AC/+2 Dexterity saves for Half Cover) and
+preserves every source/range in breakdowns. Smite of Protection and Cover of
+Darkness use the same primitive. Ally cover is reported, not applied to another
+character's state.
 
 ### EFA Arcane Firearm
 

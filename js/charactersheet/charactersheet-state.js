@@ -4418,6 +4418,10 @@ class CharacterSheetState {
 	static SAFE_HAVEN_FEATURE_UID = "Superior Atlas|Artificer|EFA|Cartographer|EFA|15|EFA";
 	static SAFE_HAVEN_ZERO_HP_INTERVENTION_ID = "safeHavenEfaCartographer";
 	static SAFE_HAVEN_TELEPORT_RANGE_FEET = 5;
+	static COVER_LEVELS = Object.freeze({
+		half: Object.freeze({rank: 1, acBonus: 2, dexSaveBonus: 2, label: "Half Cover"}),
+		threeQuarters: Object.freeze({rank: 2, acBonus: 5, dexSaveBonus: 5, label: "Three-Quarters Cover"}),
+	});
 
 	static _getEmptyAdventurersAtlas () {
 		return {
@@ -5764,6 +5768,10 @@ class CharacterSheetState {
 			// retired slot is recreated with a newer `instanceRevision`, including
 			// after save/load.
 			generatedClassSummonRevisions: {},
+			// A surviving EFA cannon damage event may briefly arm one exact,
+			// source-qualified Explosive Cannon Reaction. The receipt is cleared on
+			// load and lifecycle changes so it can never become a free detonation.
+			pendingEfaCannonDetonation: null,
 
 			// Druid 2024 Wild Shape "Known Forms" roster — the persistent list of
 			// Beast forms a druid has learned (official 2024 model). Each entry is a
@@ -6057,6 +6065,7 @@ class CharacterSheetState {
 		}
 		this._normalizeCombatTurnOrder();
 		this._migrateTimeDomainActiveStates();
+		this._migrateCoverActiveStates();
 		// Percussive Strike is an automatic rider on Dance activation, not an
 		// independently toggled state. Retire legacy standalone instances.
 		this._data.activeStates = this._data.activeStates.filter(state => state?.stateTypeId !== "percussiveStrike");
@@ -6115,6 +6124,9 @@ class CharacterSheetState {
 			this._data.generatedClassSummonRevisions = {};
 		}
 		this._normalizeInventoryItemBindings();
+		// Damage-trigger opportunities are encounter-local. Never resurrect one
+		// from imported or reloaded JSON, even if an interrupted save contained it.
+		this._data.pendingEfaCannonDetonation = null;
 		if (this._data.characterBase && typeof this._data.characterBase === "object") {
 			if (!Number(this._data.characterBase.v)) this._data.characterBase.v = 1;
 			if (!Array.isArray(this._data.characterBase.decisions)) this._data.characterBase.decisions = [];
@@ -15498,6 +15510,83 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	/**
+	 * Resolve every currently-active cover source into a generic projection.
+	 * Cover of the same grade never stacks; callers use the highest-ranked grade
+	 * while retaining every contributing source for breakdowns and UI.
+	 *
+	 * @returns {Array<{id:string, name:string, cover:string, rank:number, acBonus:number, dexSaveBonus:number, rangeFt:number|null}>}
+	 */
+	getCoverProjections () {
+		const calculations = this.getFeatureCalculations?.() || {};
+		const projections = [];
+		for (const state of this._data.activeStates || []) {
+			if (!state?.active) continue;
+			const effects = state.customEffects || state.effects || CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.effects || [];
+			for (const effect of effects) {
+				if (effect?.type !== "cover") continue;
+				const definition = CharacterSheetState.COVER_LEVELS[effect.cover];
+				if (!definition) continue;
+				const resolvedRange = effect.rangeFromCalculation
+					? Number(calculations[effect.rangeFromCalculation])
+					: Number(effect.rangeFt);
+				projections.push({
+					id: `state:${state.id || state.stateTypeId}:${effect.source || effect.cover}`,
+					name: effect.source || state.name || CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.name || definition.label,
+					cover: effect.cover,
+					rank: definition.rank,
+					acBonus: definition.acBonus,
+					dexSaveBonus: definition.dexSaveBonus,
+					rangeFt: Number.isFinite(resolvedRange) && resolvedRange >= 0 ? resolvedRange : null,
+				});
+			}
+		}
+
+		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
+		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
+		if (ownerState.ok && ownerState.level >= 15) {
+			const halfCover = CharacterSheetState.COVER_LEVELS.half;
+			for (const cannon of this.listEfaEldritchCannons()) {
+				if (cannon.distanceFromOwnerFt > 10) continue;
+				projections.push({
+					id: `efa-cannon:${cannon.instanceId}`,
+					name: `Shimmering Field Projection — Cannon ${cannon.generatedClassSummon.generatedSlot + 1}`,
+					cover: "half",
+					rank: halfCover.rank,
+					acBonus: halfCover.acBonus,
+					dexSaveBonus: halfCover.dexSaveBonus,
+					rangeFt: 10,
+				});
+			}
+		}
+
+		return projections;
+	}
+
+	getCoverProjection () {
+		const projections = this.getCoverProjections();
+		if (!projections.length) return null;
+		const rank = Math.max(...projections.map(projection => projection.rank));
+		const sources = projections.filter(projection => projection.rank === rank);
+		const definition = Object.values(CharacterSheetState.COVER_LEVELS).find(entry => entry.rank === rank);
+		return {
+			cover: sources[0].cover,
+			label: definition.label,
+			rank,
+			acBonus: definition.acBonus,
+			dexSaveBonus: definition.dexSaveBonus,
+			sources,
+		};
+	}
+
+	getCoverBonus (target) {
+		const cover = this.getCoverProjection();
+		if (!cover) return 0;
+		if (target === "ac") return cover.acBonus;
+		if (target === "save:dex") return cover.dexSaveBonus;
+		return 0;
+	}
+
 	getSaveMod (ability) {
 		const substitutedAbility = this.getActiveAbilitySubstitution(`save:${ability}`);
 		const mod = this.getAbilityMod(substitutedAbility || ability);
@@ -15518,11 +15607,12 @@ class CharacterSheetState {
 		const bloodHunterBonus = ["str", "dex", "con"].includes(ability)
 			? (this.getFeatureCalculations().darkAugmentationSaveBonus || 0)
 			: 0;
+		const coverBonus = ability === "dex" ? this.getCoverBonus("save:dex") : 0;
 		// Note: exhaustion is intentionally NOT applied here. The displayed save bonus
 		// stays "pure"; the exhaustion penalty is applied once at roll time by the
 		// roll handler (_rollSavingThrow). This avoids the double-application bug
 		// where both display and roll subtracted the penalty.
-		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus + bloodHunterBonus;
+		return mod + prof + custom + itemBonus + perAbilityItemBonus + stateBonus + stanceBonus + auraBonus + bloodHunterBonus + coverBonus;
 	}
 
 	// Alias for test compatibility
@@ -16265,6 +16355,7 @@ class CharacterSheetState {
 			let ac = wildShapeState.beastData.ac || 10;
 			// Active state bonuses still layered on top (e.g., Shield spell, Warding Bond)
 			ac += this.getBonusFromStates("ac");
+			ac += this.getCoverBonus("ac");
 			return ac;
 		}
 
@@ -16346,6 +16437,7 @@ class CharacterSheetState {
 
 		// Active state bonuses (e.g., Defensive Stance)
 		ac += this.getBonusFromStates("ac");
+		ac += this.getCoverBonus("ac");
 		const isHeavyArmor = this._data.ac.armor?.type === "heavy";
 		// Read the calc key rather than hard-coding 1, so the bonus has a single
 		// source of truth and any future scaling actually reaches AC.
@@ -16671,6 +16763,16 @@ class CharacterSheetState {
 		if (stateBonus !== 0) {
 			components.push({type: "state", name: "Active Effects", value: stateBonus, icon: "🔮"});
 		}
+		const cover = this.getCoverProjection();
+		if (cover) {
+			components.push({
+				type: "cover",
+				name: `${cover.label} — ${cover.sources.map(source => source.rangeFt == null ? source.name : `${source.name} (${source.rangeFt} ft)`).join("; ")}`,
+				value: cover.acBonus,
+				icon: "🛡️",
+				sources: cover.sources,
+			});
+		}
 
 		// Other bonuses
 		this._data.ac.bonuses.forEach(bonus => {
@@ -16746,6 +16848,19 @@ class CharacterSheetState {
 
 		const stanceBonus = this._getStanceSaveBonus(ability);
 		if (stanceBonus !== 0) components.push({type: "stance", name: "Combat Stance", value: stanceBonus, icon: "⚔️", isCanonical: false});
+		if (ability === "dex") {
+			const cover = this.getCoverProjection();
+			if (cover) {
+				components.push({
+					type: "cover",
+					name: `${cover.label} — ${cover.sources.map(source => source.rangeFt == null ? source.name : `${source.name} (${source.rangeFt} ft)`).join("; ")}`,
+					value: cover.dexSaveBonus,
+					icon: "🛡️",
+					isCanonical: false,
+					sources: cover.sources,
+				});
+			}
+		}
 
 		// Exhaustion: subtract from the EFFECTIVE total only. Roll handlers consume
 		// this same state-owned value, so the breakdown matches the applied penalty.
@@ -51914,8 +52029,7 @@ class CharacterSheetState {
 		const customEffects = [{type: "advantage", target: "save:dex"}];
 		if (calc.hasCoverOfDarkness) {
 			customEffects.push(
-				{type: "bonus", target: "ac", value: 2},
-				{type: "bonus", target: "save:dex", value: 2},
+				{type: "cover", cover: "half", source: "Cover of Darkness"},
 			);
 		}
 		this.activateState("shadowKnightDimLight", {customEffects});
@@ -70132,8 +70246,7 @@ class CharacterSheetState {
 			icon: "🛡️",
 			description: "You and allies in your Aura of Protection have Half Cover until the start of your next turn.",
 			effects: [
-				{type: "bonus", target: "ac", value: 2},
-				{type: "bonus", target: "save:dex", value: 2},
+				{type: "cover", cover: "half", source: "Smite of Protection", rangeFromCalculation: "smiteOfProtectionRadius"},
 			],
 			duration: "Until the start of your next turn",
 			endConditions: ["Start of your next turn"],
@@ -76431,6 +76544,21 @@ class CharacterSheetState {
 		}
 	}
 
+	_migrateCoverActiveStates () {
+		for (const state of this._data.activeStates || []) {
+			if (state?.stateTypeId !== "shadowKnightDimLight" || !Array.isArray(state.customEffects)) continue;
+			const hasLegacyAc = state.customEffects.some(effect => effect?.type === "bonus" && effect.target === "ac" && Number(effect.value) === 2);
+			const hasLegacyDexSave = state.customEffects.some(effect => effect?.type === "bonus" && effect.target === "save:dex" && Number(effect.value) === 2);
+			if (!hasLegacyAc || !hasLegacyDexSave) continue;
+			state.customEffects = state.customEffects.filter(effect =>
+				!(effect?.type === "bonus"
+					&& Number(effect.value) === 2
+					&& ["ac", "save:dex"].includes(effect.target)),
+			);
+			state.customEffects.push({type: "cover", cover: "half", source: "Cover of Darkness"});
+		}
+	}
+
 	getCombatTurnOrder () {
 		return MiscUtil.copyFast(this._data.combatTurnOrder || []);
 	}
@@ -79406,6 +79534,7 @@ class CharacterSheetState {
 
 	resetActionEconomy () {
 		this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
+		this._clearPendingEfaCannonDetonation();
 	}
 
 	applyChainedTargetEffect ({
@@ -84300,6 +84429,7 @@ class CharacterSheetState {
 	static EFA_ELDRITCH_CANNON_PLACEMENTS = Object.freeze(["carried", "deployed"]);
 	static EFA_ELDRITCH_CANNON_MOBILITY = Object.freeze(["legs", "wheels"]);
 	static EFA_ELDRITCH_CANNON_PAYMENT_TYPES = Object.freeze(["freeUse", "spellSlot"]);
+	static EFA_ELDRITCH_CANNON_CREATION_TOOL_NAMES = Object.freeze(["Smith's Tools", "Woodcarver's Tools"]);
 
 	static _isGeneratedClassSummonRecord (record) {
 		return record != null && Object.hasOwn(record, "generatedClassSummon");
@@ -84531,10 +84661,26 @@ class CharacterSheetState {
 		const isHpValid = Number.isInteger(record.currentHp) && record.currentHp >= 0;
 		const isDurationValid = Number.isFinite(record.durationRemainingMinutes) && record.durationRemainingMinutes >= 0;
 		const isPaymentValid = record.createdWith === "freeUse"
-			? record.createdWithSlotLevel == null
+			? record.createdWithSlotLevel == null && record.createdWithSlotKind == null
 			: record.createdWith === "spellSlot"
 				&& Number.isInteger(record.createdWithSlotLevel)
-				&& record.createdWithSlotLevel > 0;
+				&& record.createdWithSlotLevel > 0
+				&& (record.createdWithSlotKind == null || ["spell", "pact"].includes(record.createdWithSlotKind));
+		const creationTool = record.creationTool;
+		const isCreationToolValid = creationTool == null || (
+			typeof creationTool === "object"
+			&& !Array.isArray(creationTool)
+			&& typeof creationTool.inventoryItemId === "string"
+			&& !!creationTool.inventoryItemId
+			&& typeof creationTool.itemUid === "string"
+			&& !!creationTool.itemUid
+			&& typeof creationTool.name === "string"
+			&& !!creationTool.name
+			&& typeof creationTool.source === "string"
+			&& !!creationTool.source
+			&& CharacterSheetState.EFA_ELDRITCH_CANNON_CREATION_TOOL_NAMES.some(name => name.toLowerCase() === creationTool.name.toLowerCase())
+			&& CharacterSheetState._isSameClassSummonUid(creationTool.itemUid, `${creationTool.name}|${creationTool.source}`)
+		);
 		const isPlacementRuntimeValid = record.placement === "carried"
 			? record.mobility == null && record.distanceFromOwnerFt === 0
 			: CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(record.mobility);
@@ -84546,6 +84692,7 @@ class CharacterSheetState {
 			|| !isHpValid
 			|| !isDurationValid
 			|| !isPaymentValid
+			|| !isCreationToolValid
 			|| !isPlacementRuntimeValid) {
 			return {
 				ok: false,
@@ -84621,6 +84768,7 @@ class CharacterSheetState {
 		}
 		const index = (this._data.companions || []).indexOf(record);
 		if (~index) this._data.companions.splice(index, 1);
+		if (this._data.pendingEfaCannonDetonation?.instanceId === record?.id) this._clearPendingEfaCannonDetonation();
 		return {
 			instanceId: record?.id || null,
 			action: "retired",
@@ -84688,6 +84836,7 @@ class CharacterSheetState {
 		}
 
 		this._lastClassSummonReconciliationResults = MiscUtil.copyFast(results);
+		this.getPendingEfaCannonDetonation();
 		return MiscUtil.copyFast(results);
 	}
 
@@ -84769,6 +84918,8 @@ class CharacterSheetState {
 			durationRemainingMinutes: record.durationRemainingMinutes,
 			createdWith: record.createdWith,
 			createdWithSlotLevel: record.createdWithSlotLevel,
+			createdWithSlotKind: record.createdWith === "spellSlot" ? (record.createdWithSlotKind || "spell") : null,
+			creationTool: record.creationTool ? MiscUtil.copyFast(record.creationTool) : null,
 			instanceRevision: record.instanceRevision,
 			ac: Number(template.ac),
 			hp: {current: record.currentHp, max: validation.maxHp},
@@ -84890,23 +85041,65 @@ class CharacterSheetState {
 		return options.sort((a, b) => a.level - b.level || a.kind.localeCompare(b.kind));
 	}
 
+	getEfaEldritchCannonCreationToolRequirement () {
+		return {
+			required: true,
+			ruleId: "efa-artillerist-cannon-creation-tools",
+			sourceFeatureUid: CharacterSheetState.EFA_ELDRITCH_CANNON_FEATURE_UID,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			filter: {
+				inventoryItemIds: [],
+				itemUids: [],
+				itemNames: [...CharacterSheetState.EFA_ELDRITCH_CANNON_CREATION_TOOL_NAMES],
+				itemTypes: [],
+				weapon: null,
+				requiresProficiency: true,
+			},
+			ui: {
+				title: "Choose Cannon Creation Tools",
+				description: "Choose equipped, proficient Smith's Tools or Woodcarver's Tools to create the cannon.",
+				unavailableMessage: "Equip a positive-quantity Smith's Tools or Woodcarver's Tools inventory item and gain proficiency with it.",
+			},
+		};
+	}
+
+	getEligibleEfaEldritchCannonCreationTools () {
+		const requirement = this.getEfaEldritchCannonCreationToolRequirement();
+		return this.getEligibleSpellCastFocusInventoryRows(requirement)
+			.map(wrapper => ({
+				wrapper,
+				reference: this.getSpellCastFocusReference(wrapper),
+			}))
+			.filter(entry => entry.reference);
+	}
+
 	getEfaEldritchCannonCreationState () {
 		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
 		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
 		const resource = ownerState.ok ? this._ensureEfaEldritchCannonCreationResource() : null;
 		const cannons = ownerState.ok ? this.listEfaEldritchCannons() : [];
 		const spellSlots = ownerState.ok ? this._getEfaEldritchCannonSpellSlotOptions() : [];
+		const tools = ownerState.ok ? this.getEligibleEfaEldritchCannonCreationTools() : [];
 		const actionAvailable = !this.isInCombat() || this.isActionTypeAvailable("action");
+		const maxCannons = ownerState.ok ? ownerState.maxSlots : 0;
+		const freeSlots = ownerState.ok
+			? Array.from({length: maxCannons}, (_, slot) => slot)
+				.filter(slot => !cannons.some(cannon => cannon.generatedClassSummon.generatedSlot === slot))
+			: [];
 		let reason = null;
 		if (!ownerState.ok) reason = ownerState.reason;
-		else if (cannons.length) reason = "slotOccupied";
+		else if (!freeSlots.length) reason = "slotOccupied";
 		else if (!actionAvailable) reason = "actionUnavailable";
+		else if (!tools.length) reason = "toolUnavailable";
 		else if ((Number(resource?.current) || 0) < 1 && !spellSlots.length) reason = "paymentUnavailable";
 		return {
 			available: ownerState.ok,
 			canCreate: reason == null,
 			reason,
 			artificerLevel: ownerState.ok ? ownerState.level : 0,
+			maxCannons,
+			freeSlots,
+			canCreateTwo: reason == null && cannons.length === 0 && freeSlots.length >= 2,
 			freeUse: {
 				available: (Number(resource?.current) || 0) > 0,
 				current: Math.max(0, Number(resource?.current) || 0),
@@ -84914,6 +85107,8 @@ class CharacterSheetState {
 				resourceId: resource?.id || null,
 			},
 			spellSlots,
+			tools,
+			toolRequirement: this.getEfaEldritchCannonCreationToolRequirement(),
 			action: {
 				type: "action",
 				subtype: "Magic action",
@@ -84924,16 +85119,13 @@ class CharacterSheetState {
 		};
 	}
 
-	_validateEfaEldritchCannonCreationRequest ({
-		form,
-		size,
-		placement,
-		mobility = null,
-		distanceFromOwnerFt = 0,
-		createdWith,
-		createdWithSlotLevel = null,
-		createdWithSlotKind = "spell",
+	_validateEfaEldritchCannonCreationRequests ({
+		requests,
+		toolInventoryItemId,
 	} = {}) {
+		if (!Array.isArray(requests) || !requests.length || requests.length > 2) {
+			return {ok: false, reason: "invalidRequestCount"};
+		}
 		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
 		const templateState = this._validateGeneratedClassSummonTemplate(definition);
 		if (!templateState.ok || !templateState.template) {
@@ -84942,85 +85134,131 @@ class CharacterSheetState {
 		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
 		if (!ownerState.ok) return {ok: false, reason: ownerState.reason, details: ownerState.details || null};
 
-		const runtimeValid = definition.forms.includes(form)
-			&& definition.sizes.includes(size)
-			&& CharacterSheetState.EFA_ELDRITCH_CANNON_PLACEMENTS.includes(placement)
-			&& Number.isFinite(distanceFromOwnerFt)
-			&& distanceFromOwnerFt >= 0
-			&& distanceFromOwnerFt <= 5
-			&& (placement === "carried"
-				? mobility == null && distanceFromOwnerFt === 0
-				: CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(mobility));
-		if (!runtimeValid) return {ok: false, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE};
-		if (this.listEfaEldritchCannons().length) return {ok: false, reason: "slotOccupied"};
-
-		const generatedClassSummon = {
-			templateUid: definition.templateUid,
-			ownerClassUid: definition.ownerClassUid,
-			ownerSubclassUid: definition.ownerSubclassUid,
-			ownerFeatureUid: definition.ownerFeatureUid,
-			generatedSlot: 0,
-			generationVersion: definition.generationVersion,
-		};
-		const ownershipKey = CharacterSheetState._getGeneratedClassSummonOwnershipKey(generatedClassSummon);
-		if ((this._data.companions || []).some(companion =>
-			CharacterSheetState._getGeneratedClassSummonOwnershipKey(companion?.generatedClassSummon) === ownershipKey,
-		)) return {ok: false, reason: "slotOccupied"};
+		const activeCannons = this.listEfaEldritchCannons();
+		const occupiedSlots = new Set(activeCannons.map(cannon => cannon.generatedClassSummon.generatedSlot));
+		const freeSlots = Array.from({length: ownerState.maxSlots}, (_, slot) => slot)
+			.filter(slot => !occupiedSlots.has(slot));
+		if (requests.length > freeSlots.length) return {ok: false, reason: "slotOccupied"};
+		if (requests.length === 2 && (ownerState.level < 15 || activeCannons.length)) {
+			return {ok: false, reason: "doubleCreationUnavailable"};
+		}
 
 		if (this.isInCombat() && !this.isActionTypeAvailable("action")) {
 			return {ok: false, reason: "actionUnavailable", actionType: "action", actionSubtype: "Magic action"};
 		}
 
-		if (!CharacterSheetState.EFA_ELDRITCH_CANNON_PAYMENT_TYPES.includes(createdWith)) {
-			return {ok: false, reason: "invalidPayment"};
+		const eligibleTools = this.getEligibleEfaEldritchCannonCreationTools();
+		const toolEntry = eligibleTools.find(entry => entry.wrapper.id === toolInventoryItemId)
+			|| (toolInventoryItemId == null && eligibleTools.length === 1 ? eligibleTools[0] : null);
+		if (!toolEntry) return {ok: false, reason: "toolUnavailable"};
+
+		const normalizedRequests = [];
+		for (let index = 0; index < requests.length; index++) {
+			const request = requests[index] || {};
+			const {
+				form,
+				size,
+				placement,
+				mobility = null,
+				distanceFromOwnerFt = 0,
+				createdWith,
+				createdWithSlotLevel = null,
+				createdWithSlotKind = "spell",
+			} = request;
+			const runtimeValid = definition.forms.includes(form)
+				&& definition.sizes.includes(size)
+				&& CharacterSheetState.EFA_ELDRITCH_CANNON_PLACEMENTS.includes(placement)
+				&& Number.isFinite(distanceFromOwnerFt)
+				&& distanceFromOwnerFt >= 0
+				&& distanceFromOwnerFt <= 5
+				&& (placement === "carried"
+					? mobility == null && distanceFromOwnerFt === 0
+					: CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(mobility));
+			if (!runtimeValid) return {ok: false, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE, requestIndex: index};
+			if (!CharacterSheetState.EFA_ELDRITCH_CANNON_PAYMENT_TYPES.includes(createdWith)) {
+				return {ok: false, reason: "invalidPayment", requestIndex: index};
+			}
+			normalizedRequests.push({
+				form,
+				size,
+				placement,
+				mobility,
+				distanceFromOwnerFt,
+				createdWith,
+				createdWithSlotLevel,
+				createdWithSlotKind,
+				generatedSlot: freeSlots[index],
+			});
 		}
+
+		const paymentTypes = new Set(normalizedRequests.map(request => request.createdWith));
+		if (paymentTypes.size !== 1) return {ok: false, reason: "invalidPayment"};
+		const createdWith = normalizedRequests[0].createdWith;
 		if (createdWith === "freeUse") {
-			if (createdWithSlotLevel != null) return {ok: false, reason: "invalidPayment"};
+			if (normalizedRequests.some(request => request.createdWithSlotLevel != null)) return {ok: false, reason: "invalidPayment"};
 			const resource = this._getEfaEldritchCannonCreationResource();
 			const current = resource ? Number(resource.current) || 0 : 1;
 			if (current < 1) return {ok: false, reason: "freeUseUnavailable"};
-			return {ok: true, definition, ownerState, resource, payment: {type: "freeUse"}};
+			return {
+				ok: true,
+				definition,
+				ownerState,
+				resource,
+				requests: normalizedRequests,
+				toolReference: toolEntry.reference,
+				payments: normalizedRequests.map(() => ({type: "freeUse"})),
+			};
 		}
 
-		const slotLevel = Number(createdWithSlotLevel);
-		if (!Number.isInteger(slotLevel) || slotLevel < 1 || !["spell", "pact"].includes(createdWithSlotKind)) {
-			return {ok: false, reason: "invalidPayment"};
+		const availableByPool = new Map(this._getEfaEldritchCannonSpellSlotOptions()
+			.map(option => [`${option.kind}:${option.level}`, option.current]));
+		const requiredByPool = new Map();
+		const payments = [];
+		for (let index = 0; index < normalizedRequests.length; index++) {
+			const request = normalizedRequests[index];
+			const slotLevel = Number(request.createdWithSlotLevel);
+			if (!Number.isInteger(slotLevel) || slotLevel < 1 || !["spell", "pact"].includes(request.createdWithSlotKind)) {
+				return {ok: false, reason: "invalidPayment", requestIndex: index};
+			}
+			const key = `${request.createdWithSlotKind}:${slotLevel}`;
+			requiredByPool.set(key, (requiredByPool.get(key) || 0) + 1);
+			payments.push({type: "spellSlot", level: slotLevel, kind: request.createdWithSlotKind});
 		}
-		const slot = this._getEfaEldritchCannonSpellSlotOptions()
-			.find(option => option.kind === createdWithSlotKind && option.level === slotLevel);
-		if (!slot) return {ok: false, reason: "spellSlotUnavailable", createdWithSlotLevel: slotLevel, createdWithSlotKind};
+		for (const [key, required] of requiredByPool.entries()) {
+			if ((availableByPool.get(key) || 0) < required) return {ok: false, reason: "spellSlotUnavailable", slotPool: key, required};
+		}
 		return {
 			ok: true,
 			definition,
 			ownerState,
-			payment: {type: "spellSlot", level: slotLevel, kind: createdWithSlotKind},
+			requests: normalizedRequests,
+			toolReference: toolEntry.reference,
+			payments,
 		};
 	}
 
-	async pCreateEfaEldritchCannon ({
-		form,
-		size,
-		placement,
-		mobility = null,
-		distanceFromOwnerFt = 0,
-		createdWith,
-		createdWithSlotLevel = null,
-		createdWithSlotKind = "spell",
+	_validateEfaEldritchCannonCreationRequest (request = {}) {
+		const validation = this._validateEfaEldritchCannonCreationRequests({
+			requests: [request],
+			toolInventoryItemId: request.toolInventoryItemId,
+		});
+		if (!validation.ok) return validation;
+		return {
+			...validation,
+			payment: validation.payments[0],
+			request: validation.requests[0],
+		};
+	}
+
+	async pCreateEfaEldritchCannons ({
+		requests,
+		toolInventoryItemId,
 		cancelled = false,
 		pCommit = null,
 		pRollback = null,
 	} = {}) {
 		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
-		const validation = this._validateEfaEldritchCannonCreationRequest({
-			form,
-			size,
-			placement,
-			mobility,
-			distanceFromOwnerFt,
-			createdWith,
-			createdWithSlotLevel,
-			createdWithSlotKind,
-		});
+		const validation = this._validateEfaEldritchCannonCreationRequests({requests, toolInventoryItemId});
 		if (!validation.ok) return {...validation, committed: false};
 
 		const snapshot = this.toJson();
@@ -85047,30 +85285,37 @@ class CharacterSheetState {
 		const actionTracked = this.isInCombat();
 		if (actionTracked && !this.consumeActionType("action")) return rollback("actionUnavailable");
 
-		if (createdWith === "freeUse") {
+		if (validation.requests[0].createdWith === "freeUse") {
 			const resource = this._ensureEfaEldritchCannonCreationResource();
 			if (!resource || resource.current < 1) return rollback("freeUseUnavailable");
 			resource.current--;
-		} else if (createdWithSlotKind === "pact") {
-			if (!this.usePactSlot()) return rollback("spellSlotUnavailable");
-		} else if (!this.useSpellSlot(createdWithSlotLevel)) return rollback("spellSlotUnavailable");
+		} else {
+			for (const payment of validation.payments) {
+				const spent = payment.kind === "pact"
+					? this.usePactSlot()
+					: this.useSpellSlot(payment.level);
+				if (!spent) return rollback("spellSlotUnavailable");
+			}
+		}
 
-		const created = this.createEfaEldritchCannon({
-			form,
-			size,
-			placement,
-			mobility,
-			distanceFromOwnerFt,
-			createdWith,
-			createdWithSlotLevel: createdWith === "spellSlot" ? createdWithSlotLevel : null,
-		});
-		if (!created.ok) return rollback(created.reason || "creationFailed", created);
+		const created = [];
+		for (const request of validation.requests) {
+			const result = this.createEfaEldritchCannon({
+				...request,
+				createdWithSlotLevel: request.createdWith === "spellSlot" ? request.createdWithSlotLevel : null,
+				createdWithSlotKind: request.createdWith === "spellSlot" ? request.createdWithSlotKind : null,
+				creationToolReference: validation.toolReference,
+			});
+			if (!result.ok) return rollback(result.reason || "creationFailed", result);
+			created.push(result);
+		}
 
 		if (pCommit) {
 			try {
 				const didCommit = await pCommit({
-					summon: created.summon,
-					payment: validation.payment,
+					summons: created.map(result => result.summon),
+					payments: validation.payments,
+					tool: validation.toolReference,
 					action: {type: "action", subtype: "Magic action", spent: actionTracked},
 				});
 				if (didCommit === false) return pRollbackCommittedMutation("saveFailed");
@@ -85081,12 +85326,62 @@ class CharacterSheetState {
 
 		const creationState = this.getEfaEldritchCannonCreationState();
 		return {
-			...created,
+			ok: true,
 			committed: true,
-			payment: validation.payment,
+			instanceIds: created.map(result => result.instanceId),
+			summons: created.map(result => result.summon),
+			reconciliations: created.map(result => result.reconciliation),
+			payments: validation.payments,
+			tool: validation.toolReference,
 			action: {type: "action", subtype: "Magic action", spent: actionTracked},
 			freeUseRemaining: creationState.freeUse.current,
 			spellSlotsRemaining: creationState.spellSlots,
+		};
+	}
+
+	async pCreateEfaEldritchCannon ({
+		form,
+		size,
+		placement,
+		mobility = null,
+		distanceFromOwnerFt = 0,
+		createdWith,
+		createdWithSlotLevel = null,
+		createdWithSlotKind = "spell",
+		toolInventoryItemId = null,
+		cancelled = false,
+		pCommit = null,
+		pRollback = null,
+	} = {}) {
+		const result = await this.pCreateEfaEldritchCannons({
+			requests: [{
+				form,
+				size,
+				placement,
+				mobility,
+				distanceFromOwnerFt,
+				createdWith,
+				createdWithSlotLevel,
+				createdWithSlotKind,
+			}],
+			toolInventoryItemId,
+			cancelled,
+			pCommit: pCommit
+				? async ({summons, payments, action}) => pCommit({
+					summon: summons[0] || null,
+					payment: payments[0] || null,
+					action,
+				})
+				: null,
+			pRollback,
+		});
+		if (!result.ok) return result;
+		return {
+			...result,
+			instanceId: result.instanceIds[0],
+			summon: result.summons[0],
+			reconciliation: result.reconciliations[0],
+			payment: result.payments[0],
 		};
 	}
 
@@ -85098,6 +85393,9 @@ class CharacterSheetState {
 		distanceFromOwnerFt = 0,
 		createdWith,
 		createdWithSlotLevel = null,
+		createdWithSlotKind = null,
+		generatedSlot = null,
+		creationToolReference = null,
 	} = {}) {
 		this.reconcileClassSummons();
 		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
@@ -85113,10 +85411,11 @@ class CharacterSheetState {
 		if (!ownerState.ok) return {ok: false, reason: ownerState.reason, details: ownerState.details || null};
 
 		const paymentValid = createdWith === "freeUse"
-			? createdWithSlotLevel == null
+			? createdWithSlotLevel == null && createdWithSlotKind == null
 			: createdWith === "spellSlot"
 				&& Number.isInteger(createdWithSlotLevel)
-				&& createdWithSlotLevel > 0;
+				&& createdWithSlotLevel > 0
+				&& ["spell", "pact"].includes(createdWithSlotKind || "spell");
 		const runtimeValid = definition.forms.includes(form)
 			&& definition.sizes.includes(size)
 			&& CharacterSheetState.EFA_ELDRITCH_CANNON_PLACEMENTS.includes(placement)
@@ -85131,12 +85430,19 @@ class CharacterSheetState {
 			return {ok: false, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE};
 		}
 
+		const occupiedSlots = new Set(this.listEfaEldritchCannons().map(cannon => cannon.generatedClassSummon.generatedSlot));
+		const resolvedSlot = generatedSlot == null
+			? Array.from({length: ownerState.maxSlots}, (_, slot) => slot).find(slot => !occupiedSlots.has(slot))
+			: Number(generatedSlot);
+		if (!Number.isInteger(resolvedSlot) || resolvedSlot < 0 || resolvedSlot >= ownerState.maxSlots || occupiedSlots.has(resolvedSlot)) {
+			return {ok: false, reason: "slotOccupied"};
+		}
 		const generatedClassSummon = {
 			templateUid: definition.templateUid,
 			ownerClassUid: definition.ownerClassUid,
 			ownerSubclassUid: definition.ownerSubclassUid,
 			ownerFeatureUid: definition.ownerFeatureUid,
-			generatedSlot: 0,
+			generatedSlot: resolvedSlot,
 			generationVersion: definition.generationVersion,
 		};
 		const ownershipKey = CharacterSheetState._getGeneratedClassSummonOwnershipKey(generatedClassSummon);
@@ -85162,7 +85468,9 @@ class CharacterSheetState {
 			durationRemainingMinutes: 60,
 			createdWith,
 			createdWithSlotLevel,
+			createdWithSlotKind: createdWith === "spellSlot" ? (createdWithSlotKind || "spell") : null,
 			instanceRevision,
+			...(creationToolReference ? {creationTool: MiscUtil.copyFast(creationToolReference)} : {}),
 		};
 		this._data.companions ||= [];
 		this._data.companions.push(record);
@@ -85197,7 +85505,8 @@ class CharacterSheetState {
 	}
 
 	listEfaEldritchCannons () {
-		return this.listClassSummons({templateUid: CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID});
+		return this.listClassSummons({templateUid: CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID})
+			.sort((a, b) => a.generatedClassSummon.generatedSlot - b.generatedClassSummon.generatedSlot);
 	}
 
 	retireClassSummon (instanceId, reason) {
@@ -85296,13 +85605,204 @@ class CharacterSheetState {
 		};
 	}
 
+	_clearPendingEfaCannonDetonation () {
+		const pending = this._data.pendingEfaCannonDetonation || null;
+		this._data.pendingEfaCannonDetonation = null;
+		return pending;
+	}
+
+	_hasEfaExplosiveCannonFeature () {
+		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
+		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
+		return ownerState.ok && ownerState.level >= 9;
+	}
+
+	getPendingEfaCannonDetonation () {
+		const pending = this._data.pendingEfaCannonDetonation;
+		if (!pending || typeof pending !== "object") {
+			this._data.pendingEfaCannonDetonation = null;
+			return null;
+		}
+		const {record, summon} = this._getEfaEldritchCannonRecord(pending.instanceId);
+		const actionTracked = this.isInCombat();
+		const isValid = !!record
+			&& !!summon
+			&& this._hasEfaExplosiveCannonFeature()
+			&& (!actionTracked || this.isActionTypeAvailable("reaction"))
+			&& summon.distanceFromOwnerFt <= summon.calculations.activationRangeFt
+			&& pending.instanceRevision === summon.instanceRevision
+			&& typeof pending.triggerId === "string"
+			&& !!pending.triggerId;
+		if (!isValid) {
+			this._clearPendingEfaCannonDetonation();
+			return null;
+		}
+		return {
+			...MiscUtil.copyFast(pending),
+			cannon: summon,
+			damageDice: "3d10",
+			damageType: "force",
+			saveAbility: "dex",
+			saveDc: summon.calculations.spellSaveDc,
+			area: {shape: "radius", sizeFt: 20},
+			reaction: {type: "reaction", tracked: actionTracked, available: true},
+		};
+	}
+
+	declineEfaCannonDetonation (triggerId) {
+		const pending = this.getPendingEfaCannonDetonation();
+		if (!pending || pending.triggerId !== triggerId) return {ok: false, committed: false, reason: "triggerUnavailable"};
+		this._clearPendingEfaCannonDetonation();
+		return {
+			ok: true,
+			committed: true,
+			declined: true,
+			triggerId,
+			instanceId: pending.instanceId,
+			action: {type: "reaction", spent: false},
+		};
+	}
+
+	async pDeclineEfaCannonDetonation ({
+		triggerId,
+		pCommit = null,
+		pRollback = null,
+	} = {}) {
+		const pending = this.getPendingEfaCannonDetonation();
+		if (!pending || pending.triggerId !== triggerId) {
+			return {ok: false, committed: false, reason: "triggerUnavailable"};
+		}
+		const snapshot = this.toJson();
+		const pendingSnapshot = MiscUtil.copyFast(this._data.pendingEfaCannonDetonation);
+		const rollback = async (reason, details = null) => {
+			this.loadFromJson(snapshot);
+			this._data.pendingEfaCannonDetonation = pendingSnapshot;
+			const result = {ok: false, committed: false, reason, ...(details ? {details} : {})};
+			if (!pRollback) return result;
+			try {
+				const rollbackSaved = (await pRollback()) !== false;
+				return {...result, rollbackSaveAttempted: true, rollbackSaved};
+			} catch (error) {
+				return {
+					...result,
+					rollbackSaveAttempted: true,
+					rollbackSaved: false,
+					rollbackSaveError: error instanceof Error ? error.message : String(error),
+				};
+			}
+		};
+
+		const declined = this.declineEfaCannonDetonation(triggerId);
+		if (!declined.ok) return declined;
+		if (pCommit) {
+			try {
+				const didCommit = await pCommit(declined);
+				if (didCommit === false) return rollback("saveFailed");
+			} catch (error) {
+				return rollback("saveFailed", {message: error instanceof Error ? error.message : String(error)});
+			}
+		}
+		return declined;
+	}
+
+	async pDetonateEfaEldritchCannon ({
+		triggerId,
+		damageRoll = null,
+		pCommit = null,
+		pRollback = null,
+	} = {}) {
+		const pending = this.getPendingEfaCannonDetonation();
+		if (!pending || pending.triggerId !== triggerId) {
+			return {ok: false, committed: false, reason: "triggerUnavailable"};
+		}
+		const damage = this._rollEfaEldritchCannonFormula("3d10", damageRoll);
+		if (!damage.ok) return {...damage, committed: false};
+
+		const snapshot = this.toJson();
+		const pendingSnapshot = MiscUtil.copyFast(this._data.pendingEfaCannonDetonation);
+		const rollback = (reason, details = null) => {
+			this.loadFromJson(snapshot);
+			this._data.pendingEfaCannonDetonation = pendingSnapshot;
+			return {ok: false, committed: false, reason, ...(details ? {details} : {})};
+		};
+		const pRollbackCommittedMutation = async (reason, details = null) => {
+			const result = rollback(reason, details);
+			if (!pRollback) return result;
+			try {
+				const rollbackSaved = (await pRollback()) !== false;
+				return {...result, rollbackSaveAttempted: true, rollbackSaved};
+			} catch (error) {
+				return {
+					...result,
+					rollbackSaveAttempted: true,
+					rollbackSaved: false,
+					rollbackSaveError: error instanceof Error ? error.message : String(error),
+				};
+			}
+		};
+
+		const actionTracked = this.isInCombat();
+		if (actionTracked && !this.consumeActionType("reaction")) return rollback("actionUnavailable");
+		const {record} = this._getEfaEldritchCannonRecord(pending.instanceId);
+		if (!record || record.instanceRevision !== pending.instanceRevision) return rollback("triggerUnavailable");
+		const retirement = this._retireClassSummonRecord(
+			record,
+			CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DETONATED,
+			{triggerId},
+		);
+
+		if (pCommit) {
+			try {
+				const didCommit = await pCommit({retirement, damage, pending});
+				if (didCommit === false) return pRollbackCommittedMutation("saveFailed");
+			} catch (error) {
+				return pRollbackCommittedMutation("saveFailed", {message: error instanceof Error ? error.message : String(error)});
+			}
+		}
+
+		return {
+			ok: true,
+			committed: true,
+			triggerId,
+			instanceId: pending.instanceId,
+			retirement,
+			action: {type: "reaction", subtype: "Explosive Cannon", tracked: actionTracked, spent: actionTracked},
+			result: {
+				kind: "savingThrow",
+				saveAbility: "dex",
+				saveDc: pending.saveDc,
+				damage: damage.total,
+				damageOnSuccess: Math.floor(damage.total / 2),
+				damageDice: damage.formula,
+				damageType: "force",
+				area: {shape: "radius", sizeFt: 20},
+			},
+		};
+	}
+
 	damageEfaEldritchCannon (instanceId, amount) {
 		const {summon} = this._getEfaEldritchCannonRecord(instanceId);
 		const damage = Math.floor(Number(amount));
 		if (!summon) return {ok: false, reason: "notFound", instanceId};
 		if (!Number.isInteger(damage) || damage < 1) return {ok: false, reason: "invalidAmount", instanceId};
+		this._clearPendingEfaCannonDetonation();
 		const result = this.setEfaEldritchCannonCurrentHp(instanceId, Math.max(0, summon.hp.current - damage));
-		return {...result, amount: damage, previousHp: summon.hp.current};
+		if (!result.ok || result.action === "retired") return {...result, amount: damage, previousHp: summon.hp.current, detonationOpportunity: null};
+		let detonationOpportunity = null;
+		if (this._hasEfaExplosiveCannonFeature()
+			&& (!this.isInCombat() || this.isActionTypeAvailable("reaction"))
+			&& summon.distanceFromOwnerFt <= summon.calculations.activationRangeFt) {
+			this._data.pendingEfaCannonDetonation = {
+				triggerId: CryptUtil.uid(),
+				instanceId,
+				instanceRevision: summon.instanceRevision,
+				damageAmount: damage,
+				previousHp: summon.hp.current,
+				currentHp: result.currentHp,
+			};
+			detonationOpportunity = this.getPendingEfaCannonDetonation();
+		}
+		return {...result, amount: damage, previousHp: summon.hp.current, detonationOpportunity};
 	}
 
 	healEfaEldritchCannon (instanceId, amount) {
@@ -85356,10 +85856,11 @@ class CharacterSheetState {
 		targetDistanceFromCannonFt = null,
 		movementTiming = "none",
 		movementDistanceFromOwnerFt = null,
+		_skipActionCheck = false,
 	} = {}) {
 		const {record, summon} = this._getEfaEldritchCannonRecord(instanceId);
 		if (!record || !summon) return {ok: false, reason: "notFound", instanceId};
-		if (this.isInCombat() && !this.isActionTypeAvailable("bonus")) {
+		if (!_skipActionCheck && this.isInCombat() && !this.isActionTypeAvailable("bonus")) {
 			return {ok: false, reason: "actionUnavailable", actionType: "bonus"};
 		}
 
@@ -85425,102 +85926,134 @@ class CharacterSheetState {
 		};
 	}
 
-	activateEfaEldritchCannon ({
-		instanceId,
-		targetType = null,
-		targetName = null,
-		targetDistanceFromCannonFt = null,
-		movementTiming = "none",
-		movementDistanceFromOwnerFt = null,
-		attackRoll = null,
-		effectRoll = null,
-	} = {}) {
-		const validation = this.validateEfaEldritchCannonActivation({
-			instanceId,
-			targetType,
-			targetName,
-			targetDistanceFromCannonFt,
-			movementTiming,
-			movementDistanceFromOwnerFt,
-		});
+	validateEfaEldritchCannonActivations (requests) {
+		if (!Array.isArray(requests) || !requests.length || requests.length > 2) {
+			return {ok: false, reason: "invalidRequestCount"};
+		}
+		if (new Set(requests.map(request => request?.instanceId)).size !== requests.length) {
+			return {ok: false, reason: "duplicateCannon"};
+		}
+		if (this.isInCombat() && !this.isActionTypeAvailable("bonus")) {
+			return {ok: false, reason: "actionUnavailable", actionType: "bonus"};
+		}
+		const validations = requests.map(request => this.validateEfaEldritchCannonActivation({
+			...request,
+			_skipActionCheck: true,
+		}));
+		const failedIndex = validations.findIndex(validation => !validation.ok);
+		if (~failedIndex) return {...validations[failedIndex], requestIndex: failedIndex};
+		return {ok: true, validations};
+	}
+
+	activateEfaEldritchCannons ({requests} = {}) {
+		const validation = this.validateEfaEldritchCannonActivations(requests);
 		if (!validation.ok) return {...validation, committed: false};
 
-		const {record, summon, movement, target} = validation;
-		const effectFormula = summon.form === "protector"
-			? `${summon.calculations.tempHpDice}+${summon.calculations.tempHpBonus}`
-			: summon.calculations.damageDice;
-		const effect = this._rollEfaEldritchCannonFormula(effectFormula, effectRoll);
-		if (!effect.ok) return {...effect, committed: false};
-		let attack = null;
-		if (summon.form === "forceBallista") {
-			const natural = attackRoll == null
-				? (typeof RollerUtil !== "undefined" && RollerUtil.randomise ? RollerUtil.randomise(20) : Math.ceil(Math.random() * 20))
-				: Number(attackRoll);
-			if (!Number.isInteger(natural) || natural < 1 || natural > 20) return {ok: false, committed: false, reason: "invalidRoll"};
-			attack = {
-				natural,
-				bonus: summon.calculations.attackBonus,
-				total: natural + summon.calculations.attackBonus,
-			};
+		const prepared = [];
+		for (let index = 0; index < requests.length; index++) {
+			const request = requests[index];
+			const current = validation.validations[index];
+			const {summon} = current;
+			const effectFormula = summon.form === "protector"
+				? `${summon.calculations.tempHpDice}+${summon.calculations.tempHpBonus}`
+				: summon.calculations.damageDice;
+			const effect = this._rollEfaEldritchCannonFormula(effectFormula, request.effectRoll);
+			if (!effect.ok) return {...effect, committed: false, requestIndex: index};
+			let attack = null;
+			if (summon.form === "forceBallista") {
+				const natural = request.attackRoll == null
+					? (typeof RollerUtil !== "undefined" && RollerUtil.randomise ? RollerUtil.randomise(20) : Math.ceil(Math.random() * 20))
+					: Number(request.attackRoll);
+				if (!Number.isInteger(natural) || natural < 1 || natural > 20) {
+					return {ok: false, committed: false, reason: "invalidRoll", requestIndex: index};
+				}
+				attack = {
+					natural,
+					bonus: summon.calculations.attackBonus,
+					total: natural + summon.calculations.attackBonus,
+				};
+			}
+			prepared.push({...current, effect, attack});
 		}
 
 		const actionTracked = this.isInCombat();
 		if (actionTracked && !this.consumeActionType("bonus")) {
 			return {ok: false, committed: false, reason: "actionUnavailable", actionType: "bonus"};
 		}
-		if (movement.timing === "before") record.distanceFromOwnerFt = movement.toDistanceFt;
 
-		let result;
-		if (summon.form === "flamethrower") {
-			result = {
-				kind: "savingThrow",
-				saveAbility: summon.calculations.saveAbility,
-				saveDc: summon.calculations.saveDc,
-				damage: effect.total,
-				damageOnSuccess: Math.floor(effect.total / 2),
-				damageDice: summon.calculations.damageDice,
-				damageType: summon.calculations.damageType,
-				area: summon.calculations.area,
-			};
-		} else if (summon.form === "forceBallista") {
-			result = {
-				kind: "spellAttack",
-				attack,
-				damage: effect.total,
-				damageDice: summon.calculations.damageDice,
-				damageType: summon.calculations.damageType,
-				rangeFt: summon.calculations.rangeFt,
-				pushFt: summon.calculations.pushFt,
-			};
-		} else {
-			const previousTempHp = this.getTempHp() || 0;
-			const applied = target.type === "self" && effect.total > previousTempHp;
-			if (applied) this.setTempHp(effect.total);
-			result = {
-				kind: "temporaryHitPoints",
-				tempHp: effect.total,
-				tempHpDice: summon.calculations.tempHpDice,
-				tempHpBonus: summon.calculations.tempHpBonus,
+		const results = [];
+		for (const current of prepared) {
+			const {record, summon, movement, target, effect, attack} = current;
+			if (movement.timing === "before") record.distanceFromOwnerFt = movement.toDistanceFt;
+
+			let result;
+			if (summon.form === "flamethrower") {
+				result = {
+					kind: "savingThrow",
+					saveAbility: summon.calculations.saveAbility,
+					saveDc: summon.calculations.saveDc,
+					damage: effect.total,
+					damageOnSuccess: Math.floor(effect.total / 2),
+					damageDice: summon.calculations.damageDice,
+					damageType: summon.calculations.damageType,
+					area: summon.calculations.area,
+				};
+			} else if (summon.form === "forceBallista") {
+				result = {
+					kind: "spellAttack",
+					attack,
+					damage: effect.total,
+					damageDice: summon.calculations.damageDice,
+					damageType: summon.calculations.damageType,
+					rangeFt: summon.calculations.rangeFt,
+					pushFt: summon.calculations.pushFt,
+				};
+			} else {
+				const previousTempHp = this.getTempHp() || 0;
+				const applied = target.type === "self" && effect.total > previousTempHp;
+				if (applied) this.setTempHp(effect.total);
+				result = {
+					kind: "temporaryHitPoints",
+					tempHp: effect.total,
+					tempHpDice: summon.calculations.tempHpDice,
+					tempHpBonus: summon.calculations.tempHpBonus,
+					target,
+					applied,
+					previousTempHp,
+					currentTempHp: target.type === "self" ? this.getTempHp() : previousTempHp,
+					rangeFt: summon.calculations.rangeFt,
+				};
+			}
+
+			if (movement.timing === "after") record.distanceFromOwnerFt = movement.toDistanceFt;
+			results.push({
+				instanceId: summon.instanceId,
+				form: summon.form,
+				movement,
 				target,
-				applied,
-				previousTempHp,
-				currentTempHp: target.type === "self" ? this.getTempHp() : previousTempHp,
-				rangeFt: summon.calculations.rangeFt,
-			};
+				effect: {formula: effect.formula, total: effect.total},
+				result,
+			});
 		}
-
-		if (movement.timing === "after") record.distanceFromOwnerFt = movement.toDistanceFt;
+		results.forEach(result => {
+			result.cannon = this.getEfaEldritchCannon(result.instanceId);
+		});
 		return {
 			ok: true,
 			committed: true,
-			instanceId,
-			form: summon.form,
-			action: {type: "bonus", subtype: "Eldritch Cannon activation", spent: actionTracked},
-			movement,
-			target,
-			effect: {formula: effect.formula, total: effect.total},
-			result,
-			cannon: this.getEfaEldritchCannon(instanceId),
+			action: {type: "bonus", subtype: requests.length > 1 ? "Dual Eldritch Cannon activation" : "Eldritch Cannon activation", spent: actionTracked},
+			results,
+		};
+	}
+
+	activateEfaEldritchCannon (request = {}) {
+		const batch = this.activateEfaEldritchCannons({requests: [request]});
+		if (!batch.ok) return batch;
+		return {
+			...batch.results[0],
+			ok: true,
+			committed: true,
+			action: batch.action,
 		};
 	}
 
@@ -88326,6 +88859,15 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Rest
+	expireEfaEldritchCannonsForRest ({minutes} = {}) {
+		const durationMinutes = Math.floor(Number(minutes));
+		if (!Number.isInteger(durationMinutes) || durationMinutes < 60) return {ok: false, reason: "restTooShort", count: 0, retirements: []};
+		const retirements = this.listEfaEldritchCannons()
+			.map(cannon => this.endEfaEldritchCannonDuration(cannon.instanceId))
+			.filter(result => result.ok);
+		return {ok: true, count: retirements.length, retirements};
+	}
+
 	onShortRest () {
 		const timeReceipt = this.advanceRestTime("short", {
 			identity: "CharacterSheetState.onShortRest",
@@ -88363,9 +88905,10 @@ class CharacterSheetState {
 		// Undying Protector's escalating ferocity cost resets on either rest, and a rest
 		// means the encounter is over, so the companion's ferocity settles too.
 		this.resetUndyingProtector();
+		const efaCannonExpiry = this.expireEfaEldritchCannonsForRest({minutes: 60});
 		this.restCompanions("short");
 		this.applyFeatureCompanionRest("short");
-		return timeReceipt;
+		return {...timeReceipt, efaCannonExpiry};
 	}
 
 	onLongRest (options = {}) {
@@ -88442,6 +88985,7 @@ class CharacterSheetState {
 		this.resetResourceRestorations();
 
 		// Restore companions on long rest
+		const efaCannonExpiry = this.expireEfaEldritchCannonsForRest({minutes: 480});
 		this.restCompanions("long");
 		this.applyFeatureCompanionRest("long");
 		this.resetUndyingProtector();
@@ -88461,7 +89005,7 @@ class CharacterSheetState {
 		// Wicked Witch: Granny's Gifts is re-chosen on every long rest, and Coven
 		// Calling's duplicates plus the Fly, My Pretty ride do not survive a rest.
 		this._resetWickedWitchOnLongRest();
-		return timeReceipt;
+		return {...timeReceipt, efaCannonExpiry};
 	}
 
 	/**
