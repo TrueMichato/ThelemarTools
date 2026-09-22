@@ -18644,7 +18644,15 @@ class CharacterSheetPage {
 	}
 
 	async _pCommitEfaFlashOfGenius (opts) {
-		const committed = await this._state.pUseFlashOfGenius(opts);
+		const unregisterIngeniousMovement = this._state.registerEfaCartographerIngeniousMovementHook?.(
+			committedResult => this._pResolveEfaCartographerIngeniousMovement(committedResult),
+		);
+		let committed;
+		try {
+			committed = await this._state.pUseFlashOfGenius(opts);
+		} finally {
+			unregisterIngeniousMovement?.();
+		}
 		if (!committed.ok) {
 			const messages = {
 				actionUnavailable: "Your Reaction is unavailable.",
@@ -18659,11 +18667,25 @@ class CharacterSheetPage {
 
 		const {bonus, adjustedTotal, target} = committed.result;
 		const targetLabel = target.type === "self" ? "your roll" : `${target.name}'s roll`;
+		const ingeniousMovementFollowUp = committed.followUps.find(({hookId}) =>
+			hookId === CharacterSheetState.INGENIOUS_MOVEMENT_HOOK_ID);
+		const ingeniousMovementResult = ingeniousMovementFollowUp?.value;
+		let toastContent = `Flash of Genius added +${bonus} to ${targetLabel}.`;
+		let toastType = "success";
+		if (ingeniousMovementFollowUp && !ingeniousMovementFollowUp.ok) {
+			toastType = "warning";
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}, but Ingenious Movement could not be resolved. The Flash use remains committed.`;
+		} else if (ingeniousMovementResult?.declined) {
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}. Ingenious Movement was skipped; the Flash use remains committed.`;
+		} else if (ingeniousMovementResult?.resolved) {
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}. Ingenious Movement: ${ingeniousMovementResult.instruction}`;
+		} else if (committed.followUpFailed) {
+			toastType = "warning";
+			toastContent = `Flash of Genius added +${bonus} to ${targetLabel}, but a follow-up effect failed.`;
+		}
 		JqueryUtil.doToast({
-			type: committed.followUpFailed ? "warning" : "success",
-			content: committed.followUpFailed
-				? `Flash of Genius added +${bonus} to ${targetLabel}, but a follow-up effect failed.`
-				: `Flash of Genius added +${bonus} to ${targetLabel}.`,
+			type: toastType,
+			content: toastContent,
 		});
 
 		this._saveCurrentCharacter();
@@ -18673,6 +18695,84 @@ class CharacterSheetPage {
 		this._combat?.render?.();
 		this._renderCharacter();
 		return {...committed, adjustedTotal};
+	}
+
+	async _pResolveEfaCartographerIngeniousMovement (committedFlashResult) {
+		const resolve = confirmation => this._state.resolveEfaCartographerIngeniousMovement({
+			committedFlashResult,
+			...confirmation,
+		});
+		const useMovement = await CharacterSheetModal.pGetUserBoolean({
+			title: "Ingenious Movement",
+			htmlDescription: "Flash of Genius is committed. As part of the same Reaction, teleport yourself or one willing creature you can see within 30 feet?",
+			textYes: "Choose teleport",
+			textNo: "Skip",
+		});
+		if (!useMovement) return resolve({declined: true});
+
+		const targetType = await CharacterSheetModal.pGetUserEnum({
+			title: "Ingenious Movement — Target",
+			values: ["self", "creature"],
+			fnDisplay: value => value === "self" ? "Self" : "Willing visible creature within 30 feet",
+			isResolveItem: true,
+		});
+		if (!targetType) return resolve({declined: true});
+
+		let targetName = null;
+		let targetWilling = true;
+		let targetVisible = true;
+		let targetDistanceFeet = 0;
+		if (targetType === "creature") {
+			targetName = await InputUiUtil.pGetUserString({title: "Creature name", default: ""});
+			if (targetName == null) return resolve({declined: true});
+			if (!String(targetName).trim()) return resolve({targetType, targetName});
+			targetWilling = await CharacterSheetModal.pGetUserBoolean({
+				title: "Ingenious Movement — Willing Target",
+				htmlDescription: `Confirm that ${String(targetName || "").trim() || "the creature"} is willing to teleport.`,
+				textYes: "Target is willing",
+				textNo: "Target is not willing",
+			});
+			if (targetWilling !== true) return resolve({targetType, targetName, targetWilling});
+			targetVisible = await CharacterSheetModal.pGetUserBoolean({
+				title: "Ingenious Movement — Visible Target",
+				htmlDescription: `Confirm that you can see ${String(targetName || "").trim() || "the creature"}.`,
+				textYes: "I can see the target",
+				textNo: "Target is not visible",
+			});
+			if (targetVisible !== true) return resolve({targetType, targetName, targetWilling, targetVisible});
+			targetDistanceFeet = await InputUiUtil.pGetUserNumber({
+				title: "Target distance from you (feet)",
+				default: 30,
+				min: 0,
+				max: CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET,
+			});
+			if (targetDistanceFeet == null) return resolve({declined: true});
+		}
+
+		const teleportDistanceFeet = await InputUiUtil.pGetUserNumber({
+			title: "Teleport distance from the target's current space (feet)",
+			default: CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET,
+			min: 1,
+			max: CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET,
+		});
+		if (teleportDistanceFeet == null) return resolve({declined: true});
+		const destinationConfirmed = await CharacterSheetModal.pGetUserBoolean({
+			title: "Ingenious Movement — Destination",
+			htmlDescription: "Confirm that the destination is unoccupied and that you can see it. The sheet does not track map coordinates or line of sight.",
+			textYes: "Destination confirmed",
+			textNo: "Destination is not eligible",
+		});
+
+		return resolve({
+			targetType,
+			targetName,
+			targetWilling,
+			targetVisible,
+			targetDistanceFeet,
+			teleportDistanceFeet,
+			destinationVisible: destinationConfirmed,
+			destinationUnoccupied: destinationConfirmed,
+		});
 	}
 
 	async _pMaybeApplyEfaFlashOfGenius ({

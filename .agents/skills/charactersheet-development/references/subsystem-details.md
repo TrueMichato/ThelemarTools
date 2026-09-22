@@ -119,6 +119,18 @@ attuned magic item. `efaFlashOfGeniusResourceV1` initializes an existing EFA
 level-7+ save at maximum exactly once; subsequent reconciliation preserves
 spent uses. No Replicate Magic Item plan is inferred by this migration.
 
+EFA Cartographer Ingenious Movement is registered only for exact
+`Artificer|EFA` + `Cartographer|EFA` level 9+ through
+`registerEfaCartographerIngeniousMovementHook`. The controller registers the
+one-shot hook around the canonical Flash commit and removes it immediately
+afterward. Its resolver requires the committed Flash result, explicit target
+eligibility and destination confirmations, and returns an immutable
+`requires-external-relocation` instruction. It never spends another Reaction or
+resource, invents coordinates/line of sight, mutates another sheet, persists
+movement state, or depends on Adventurer's Atlas holders. Declines return an
+explicit non-failure; validation failures set `followUpFailed` without rolling
+back Flash.
+
 ## Active States / Toggle Abilities
 
 ### ACTIVE_STATE_TYPES

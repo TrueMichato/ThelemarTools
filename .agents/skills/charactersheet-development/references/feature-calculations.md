@@ -88,6 +88,9 @@ EFA calculation fields are:
     hasFlashOfGenius,
     flashOfGeniusUses,
     flashOfGeniusBonus,
+    hasIngeniousMovement,
+    ingeniousMovementRange,
+    ingeniousMovementSourceFeatureUid,
     hasMagicItemAdept,
     hasSpellStoringItem,
     hasAdvancedArtifice,
@@ -112,9 +115,14 @@ present). An EFA Artificer spell cannot borrow ritual authorization from a
 Cleric, Druid, or other multiclass leg; unattributed legacy spells retain the
 existing multiclass fallback.
 
-Until an EFA subclass is implemented in its own bounded milestone, the
-existing Artificer subclass calculation switch remains TCE-only. Do not project
-TCE subclass mechanics onto an EFA subclass merely because the names match.
+For any EFA subclass not implemented in its own bounded milestone, the existing
+Artificer subclass calculation switch remains TCE-only. Do not project TCE
+subclass mechanics onto an EFA subclass merely because the names match.
+
+Cartographer is source-qualified as `Artificer|EFA` + `Cartographer|EFA`.
+Ingenious Movement unlocks at Artificer level 9 with a 30-foot target and
+teleport range. It is an event-only post-commit Flash of Genius follow-up, not
+durable movement state and not an Adventurer's Atlas holder benefit.
 
 ## Adding a New Subclass
 

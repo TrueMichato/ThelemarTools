@@ -4351,6 +4351,9 @@ class CharacterSheetState {
 	static _adventurersAtlasHolderIdSeq = 0;
 	static GUIDED_PRECISION_FEATURE_UID = "Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA";
 	static GUIDED_PRECISION_FAERIE_FIRE_UID = "faerie fire|xphb";
+	static INGENIOUS_MOVEMENT_FEATURE_UID = "Ingenious Movement|Artificer|EFA|Cartographer|EFA|9|EFA";
+	static INGENIOUS_MOVEMENT_HOOK_ID = "efaCartographerIngeniousMovement";
+	static INGENIOUS_MOVEMENT_RANGE_FEET = 30;
 	static SAFE_HAVEN_FEATURE_UID = "Superior Atlas|Artificer|EFA|Cartographer|EFA|15|EFA";
 	static SAFE_HAVEN_ZERO_HP_INTERVENTION_ID = "safeHavenEfaCartographer";
 	static SAFE_HAVEN_TELEPORT_RANGE_FEET = 5;
@@ -6459,6 +6462,154 @@ class CharacterSheetState {
 			&& cls?.subclass?.name?.toLowerCase() === "cartographer"
 			&& cls?.subclass?.source?.toUpperCase() === "EFA",
 		) || null;
+	}
+
+	hasEfaCartographerIngeniousMovementFeature () {
+		return Number(this._getEfaCartographerClass()?.level || 0) >= 9;
+	}
+
+	registerEfaCartographerIngeniousMovementHook (hook) {
+		if (!this.hasEfaCartographerIngeniousMovementFeature()) return null;
+		return this.registerCommittedFeatureUseHook(
+			CharacterSheetState.EFA_FLASH_OF_GENIUS_UID,
+			hook,
+			{hookId: CharacterSheetState.INGENIOUS_MOVEMENT_HOOK_ID},
+		);
+	}
+
+	_getEfaCartographerIngeniousMovementFailure (reason, error) {
+		return CharacterSheetState._copyAndFreeze({
+			ok: false,
+			resolved: false,
+			applied: false,
+			kind: "ingeniousMovement",
+			sourceFeatureUid: CharacterSheetState.INGENIOUS_MOVEMENT_FEATURE_UID,
+			triggerFeatureUid: CharacterSheetState.EFA_FLASH_OF_GENIUS_UID,
+			reason,
+			error,
+		});
+	}
+
+	resolveEfaCartographerIngeniousMovement ({
+		committedFlashResult,
+		declined = false,
+		targetType = "self",
+		targetName = null,
+		targetWilling = null,
+		targetVisible = null,
+		targetDistanceFeet = null,
+		teleportDistanceFeet = null,
+		destinationVisible = null,
+		destinationUnoccupied = null,
+	} = {}) {
+		if (
+			committedFlashResult?.ok !== true
+			|| committedFlashResult?.committed !== true
+			|| committedFlashResult?.featureUid !== CharacterSheetState.EFA_FLASH_OF_GENIUS_UID
+			|| committedFlashResult?.classUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+			|| committedFlashResult?.actionType !== "reaction"
+		) {
+			return this._getEfaCartographerIngeniousMovementFailure(
+				"uncommittedFlash",
+				"Ingenious Movement requires a committed EFA Flash of Genius Reaction.",
+			);
+		}
+		if (!this.hasEfaCartographerIngeniousMovementFeature()) {
+			return this._getEfaCartographerIngeniousMovementFailure(
+				"featureUnavailable",
+				"Ingenious Movement requires an Artificer|EFA 9+ with Cartographer|EFA.",
+			);
+		}
+		if (declined) {
+			return CharacterSheetState._copyAndFreeze({
+				ok: true,
+				resolved: false,
+				applied: false,
+				declined: true,
+				kind: "ingeniousMovement",
+				sourceFeatureUid: CharacterSheetState.INGENIOUS_MOVEMENT_FEATURE_UID,
+				triggerFeatureUid: CharacterSheetState.EFA_FLASH_OF_GENIUS_UID,
+				reason: "declined",
+				instruction: "Ingenious Movement was declined; the committed Flash of Genius use remains spent.",
+			});
+		}
+		if (!["self", "creature"].includes(targetType)) {
+			return this._getEfaCartographerIngeniousMovementFailure("invalidTarget", "Choose yourself or one willing creature.");
+		}
+
+		let target;
+		if (targetType === "self") {
+			target = {
+				type: "self",
+				name: this.getCharacterName() || "Self",
+				willing: true,
+				visibleToCartographer: true,
+				distanceFromCartographerFeet: 0,
+			};
+		} else {
+			const name = String(targetName || "").trim();
+			if (!name) return this._getEfaCartographerIngeniousMovementFailure("invalidTarget", "Name the willing creature.");
+			if (targetWilling !== true) {
+				return this._getEfaCartographerIngeniousMovementFailure("targetNotWilling", `${name} must be willing.`);
+			}
+			if (targetVisible !== true) {
+				return this._getEfaCartographerIngeniousMovementFailure("targetNotVisible", `You must be able to see ${name}.`);
+			}
+			const distance = Number(targetDistanceFeet);
+			if (!Number.isFinite(distance) || distance < 0 || distance > CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET) {
+				return this._getEfaCartographerIngeniousMovementFailure(
+					"targetOutOfRange",
+					`${name} must be within ${CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET} feet of you.`,
+				);
+			}
+			target = {
+				type: "creature",
+				name,
+				willing: true,
+				visibleToCartographer: true,
+				distanceFromCartographerFeet: distance,
+			};
+		}
+
+		const teleportDistance = Number(teleportDistanceFeet);
+		if (
+			!Number.isFinite(teleportDistance)
+			|| teleportDistance <= 0
+			|| teleportDistance > CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET
+		) {
+			return this._getEfaCartographerIngeniousMovementFailure(
+				"destinationOutOfRange",
+				`The destination must be 1-${CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET} feet from the teleporting creature.`,
+			);
+		}
+		if (destinationVisible !== true) {
+			return this._getEfaCartographerIngeniousMovementFailure("destinationNotVisible", "You must be able to see the destination.");
+		}
+		if (destinationUnoccupied !== true) {
+			return this._getEfaCartographerIngeniousMovementFailure("destinationOccupied", "The destination must be unoccupied.");
+		}
+
+		const instruction = `Teleport ${target.type === "self" ? "yourself" : target.name} ${teleportDistance} feet to the confirmed unoccupied space you can see.`;
+		return CharacterSheetState._copyAndFreeze({
+			ok: true,
+			resolved: true,
+			applied: false,
+			kind: "ingeniousMovement",
+			sourceFeatureUid: CharacterSheetState.INGENIOUS_MOVEMENT_FEATURE_UID,
+			triggerFeatureUid: CharacterSheetState.EFA_FLASH_OF_GENIUS_UID,
+			timing: "sameReaction",
+			target,
+			teleport: {
+				status: "requires-external-relocation",
+				applied: false,
+				distanceFeet: teleportDistance,
+				maxDistanceFeet: CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET,
+				destinationVisibleToCartographer: true,
+				destinationUnoccupied: true,
+				requiresExternalRelocation: true,
+			},
+			instruction,
+		});
 	}
 
 	hasAdventurersAtlasSafeHavenFeature () {
@@ -30979,6 +31130,11 @@ class CharacterSheetState {
 							calculations.hasGuidedPrecision = true;
 							calculations.guidedPrecisionSourceFeatureUid = CharacterSheetState.GUIDED_PRECISION_FEATURE_UID;
 						}
+						if (level >= 9) {
+							calculations.hasIngeniousMovement = true;
+							calculations.ingeniousMovementRange = CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET;
+							calculations.ingeniousMovementSourceFeatureUid = CharacterSheetState.INGENIOUS_MOVEMENT_FEATURE_UID;
+						}
 						if (level >= 15) {
 							calculations.hasSuperiorAtlasSafeHaven = true;
 							calculations.safeHavenHitPoints = 2 * level;
@@ -43037,7 +43193,9 @@ class CharacterSheetState {
 		for (const [hookId, hook] of (this._committedFeatureUseHooks.get(featureUid) || new Map()).entries()) {
 			try {
 				const value = await hook(committedResult);
-				committedResult.followUps.push({hookId, ok: true, value});
+				const isSuccessful = value?.ok !== false;
+				if (!isSuccessful) committedResult.followUpFailed = true;
+				committedResult.followUps.push({hookId, ok: isSuccessful, value});
 			} catch (error) {
 				committedResult.followUpFailed = true;
 				committedResult.followUps.push({
