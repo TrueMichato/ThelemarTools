@@ -69686,8 +69686,6 @@ class CharacterSheetState {
 			if (!boundWrapper) reasons.push("bound-row-missing");
 			else if (!this._isEfaBodyArmor(boundWrapper)) reasons.push("bound-row-not-body-armor");
 			else if (!boundWrapper.equipped) reasons.push("bound-armor-not-equipped");
-			if (!this.hasToolProficiency("Smith's Tools")) reasons.push("missing-smiths-tools-proficiency");
-			if (!this._hasEfaSmithsToolsItem()) reasons.push("missing-smiths-tools-item");
 			if (boundWrapper && (this._data.inventory || []).some(wrapper =>
 				wrapper.id !== boundItemId
 				&& wrapper.equipped

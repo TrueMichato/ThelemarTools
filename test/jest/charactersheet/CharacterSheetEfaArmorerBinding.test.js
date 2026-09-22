@@ -186,6 +186,23 @@ describe("EFA Armorer Arcane Armor binding", () => {
 		});
 	});
 
+	it("keeps Arcane Armor active after the transformation tools are no longer available", () => {
+		const {state, armor, tools} = buildState();
+		expect(state.bindEfaArcaneArmor(armor.id)).toMatchObject({ok: true});
+
+		state.removeItem(tools.id);
+		state.removeToolProficiency("Smith's Tools");
+
+		expect(state.getEfaArcaneArmorBindingStatus()).toMatchObject({
+			boundItemId: armor.id,
+			active: true,
+			suspended: false,
+			reasons: [],
+		});
+		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toHaveLength(1);
+		expect(state.getEfaArcaneArmorEligibleItems()).toEqual([]);
+	});
+
 	it("rejects a shield even when it is equipped", () => {
 		const {state} = buildState({addArmor: false});
 		const shield = addInventoryItem(state, getBaseItem("Shield"), true);

@@ -795,6 +795,9 @@ derived AC snapshot. EFA Arcane Armor stores
 death, and source-loss handling through `reconcileEfaArmorerState()`. Doffing
 preserves the wrapper binding in a suspended status; another equipped body armor,
 a missing/non-armor bound row, exact source/model loss, or death clears it.
+Smith's Tools proficiency and inventory are checked when transforming or
+switching the armor, but are not ongoing requirements after a successful
+transformation.
 
 ### Usable adventuring gear
 

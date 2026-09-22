@@ -339,6 +339,12 @@ The public state surface is:
 - `reconcileEfaArmorerState()` — the single mutation/load/death reconciliation
   path.
 
+Smith's Tools proficiency and a canonical Smith's Tools inventory item are
+transformation prerequisites, not ongoing Arcane Armor requirements. Once
+bound, the armor remains Arcane Armor without the tools until another body
+armor is equipped, the bound row becomes invalid, the exact EFA Armorer/model
+is lost, or the character dies. Doffing only suspends worn benefits.
+
 Doffing keeps the binding but suspends its mechanics. Equipping another body
 armor, removing the wrapper, replacing it with a non-armor item, losing the exact
 EFA subclass/model, or dying clears the binding. The three generated model
