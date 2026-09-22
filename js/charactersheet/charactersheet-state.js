@@ -4614,6 +4614,7 @@ class CharacterSheetState {
 	static EFA_EXPERIMENTAL_ELIXIR_METADATA_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_BATCH_PLAN_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_ACTIVE_EFFECT_VERSION = 1;
+	static EFA_EXPERIMENTAL_ELIXIR_HANDOFF_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_REST_DRAFT_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_OWNER = Object.freeze({
 		featureUid: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID,
@@ -22432,11 +22433,46 @@ class CharacterSheetState {
 			}));
 	}
 
-	_resolveEfaExperimentalElixirHealing (metadata, healingRolls = null) {
+	_validateEfaExperimentalElixirConsumable (itemId) {
+		if (!this._getEfaAlchemistClassEntry()) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-unavailable"};
+		}
+		const row = this._findInventoryRow(itemId);
+		if (!row) return {ok: false, committed: false, code: "efa-experimental-elixir-item-unavailable"};
+		const classification = this.classifyEfaExperimentalElixir(row);
+		if (classification.status !== "valid") {
+			return {
+				ok: false,
+				committed: false,
+				code: classification.status === "stale"
+					? "stale-efa-experimental-elixir"
+					: "invalid-efa-experimental-elixir-item",
+				reason: classification.reason,
+			};
+		}
+		if (row.quantity !== 1) {
+			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-item-quantity"};
+		}
+		return {ok: true, row, classification};
+	}
+
+	_resolveEfaExperimentalElixirHealing (metadata, healingRolls = null, {rollIfMissing = true} = {}) {
 		const count = metadata?.healing?.diceCount;
 		const faces = metadata?.healing?.dieFaces;
 		if (!Number.isInteger(count) || count <= 0 || !Number.isInteger(faces) || faces <= 0) {
 			return {ok: false, code: "invalid-efa-experimental-elixir-healing"};
+		}
+		const intelligenceModifier = this.getAbilityMod("int");
+		const formula = `${metadata.healing.dice} ${intelligenceModifier >= 0 ? "+" : "-"} ${Math.abs(intelligenceModifier)}`;
+		if (healingRolls == null && !rollIfMissing) {
+			return {
+				ok: true,
+				formula,
+				rolls: null,
+				diceTotal: null,
+				intelligenceModifier,
+				total: null,
+			};
 		}
 		let rolls;
 		if (healingRolls == null) {
@@ -22456,14 +22492,148 @@ class CharacterSheetState {
 			rolls = [...healingRolls];
 		}
 		const diceTotal = rolls.reduce((sum, roll) => sum + roll, 0);
-		const intelligenceModifier = this.getAbilityMod("int");
 		return {
 			ok: true,
-			formula: `${metadata.healing.dice} ${intelligenceModifier >= 0 ? "+" : "-"} ${Math.abs(intelligenceModifier)}`,
+			formula,
 			rolls,
 			diceTotal,
 			intelligenceModifier,
 			total: Math.max(0, diceTotal + intelligenceModifier),
+		};
+	}
+
+	_buildEfaExperimentalElixirOtherHandoff ({row, classification, targetName, healing}) {
+		const metadata = classification.metadata;
+		const effect = Object.values(CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_EFFECTS)
+			.find(it => it.key === metadata.effectKey);
+		if (!effect) return null;
+
+		let effectData;
+		let summary;
+		if (metadata.effectKey === "healing") {
+			effectData = {
+				type: "healing",
+				effectKey: metadata.effectKey,
+				label: effect.label,
+				dice: metadata.healing.dice,
+				diceCount: metadata.healing.diceCount,
+				dieFaces: metadata.healing.dieFaces,
+				ability: metadata.healing.ability,
+				abilityModifierTiming: metadata.healing.abilityModifierTiming,
+				formula: healing.formula,
+				rolls: healing.rolls,
+				diceTotal: healing.diceTotal,
+				intelligenceModifier: healing.intelligenceModifier,
+				total: healing.total,
+			};
+			summary = healing.total == null
+				? `${targetName}: roll ${healing.formula} hit points of Experimental Elixir healing.`
+				: `${targetName} regains ${healing.total} hit points from Experimental Elixir (${healing.formula}).`;
+		} else {
+			const mechanics = CharacterSheetState._getEfaExperimentalElixirActiveStateEffects(metadata);
+			const durationTracking = CharacterSheetState._getEfaExperimentalElixirDurationTracking(metadata.duration);
+			if (!mechanics || !durationTracking) return null;
+			effectData = {
+				type: "timedEffect",
+				effectKey: metadata.effectKey,
+				label: effect.label,
+				mechanics: MiscUtil.copyFast(mechanics),
+				duration: {
+					amount: durationTracking.amount,
+					unit: durationTracking.unit,
+					totalRounds: durationTracking.totalRounds,
+					endsOnShortRest: durationTracking.endsOnShortRest,
+					endsOnLongRest: durationTracking.endsOnLongRest,
+					preserveRoundsAcrossCombat: durationTracking.preserveRoundsAcrossCombat,
+				},
+			};
+			const durationLabel = `${durationTracking.amount} ${durationTracking.unit}${durationTracking.amount === 1 ? "" : "s"}`;
+			const restExpiry = durationTracking.endsOnShortRest
+				? "ends on a Short or Long Rest"
+				: "ends on a Long Rest";
+			switch (metadata.effectKey) {
+				case "swiftness":
+					summary = `${targetName} gains a ${metadata.value.amount}-foot bonus to walking speed for ${durationLabel}; ${restExpiry}.`;
+					break;
+				case "resilience":
+					summary = `${targetName} gains a +${metadata.value.amount} bonus to AC for ${durationLabel}; ${restExpiry}.`;
+					break;
+				case "boldness":
+					summary = `${targetName} adds ${metadata.value.dice} to every attack roll and saving throw for ${durationLabel}; ${restExpiry}.`;
+					break;
+				case "flight":
+					summary = `${targetName} gains a ${metadata.value.amount}-foot fly speed for ${durationLabel}; ${restExpiry}.`;
+					break;
+				default:
+					return null;
+			}
+		}
+
+		return {
+			version: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_HANDOFF_VERSION,
+			kind: "efaExperimentalElixirOther",
+			target: {
+				type: "external",
+				name: targetName,
+				range: {
+					maximumFeet: 5,
+					withinRangeConfirmed: true,
+				},
+			},
+			source: {
+				itemId: row.id,
+				generatedItemId: row.item?._generatedItemId || null,
+				provenance: MiscUtil.copyFast(classification.provenance),
+			},
+			effect: effectData,
+			summary,
+		};
+	}
+
+	previewEfaExperimentalElixirOtherHandoff ({
+		itemId,
+		targetName,
+		within5Feet = false,
+		healingRolls = null,
+	} = {}) {
+		const validated = this._validateEfaExperimentalElixirConsumable(itemId);
+		if (!validated.ok) return validated;
+		const normalizedTargetName = typeof targetName === "string" ? targetName.trim() : "";
+		if (!normalizedTargetName || normalizedTargetName.toLowerCase() === "self") {
+			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-external-target"};
+		}
+		if (within5Feet !== true) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-other-range-unconfirmed"};
+		}
+		const healing = validated.classification.metadata.effectKey === "healing"
+			? this._resolveEfaExperimentalElixirHealing(
+				validated.classification.metadata,
+				healingRolls,
+				{rollIfMissing: false},
+			)
+			: null;
+		if (healing && !healing.ok) return {...healing, committed: false};
+		const handoff = this._buildEfaExperimentalElixirOtherHandoff({
+			...validated,
+			targetName: normalizedTargetName,
+			healing,
+		});
+		if (!handoff) {
+			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-handoff"};
+		}
+		const actionTracked = this.isInCombat();
+		return {
+			ok: true,
+			committed: false,
+			code: "efa-experimental-elixir-other-handoff-preview",
+			itemId: validated.row.id,
+			actionType: "bonus",
+			actionTracked,
+			actionAvailable: !actionTracked || this.isActionTypeAvailable("bonus"),
+			target: "other",
+			targetName: normalizedTargetName,
+			effectKey: validated.classification.metadata.effectKey,
+			handoff,
 		};
 	}
 
@@ -22506,30 +22676,88 @@ class CharacterSheetState {
 	consumeEfaExperimentalElixir ({
 		itemId,
 		target = "self",
+		targetName = null,
+		within5Feet = false,
+		confirmed = false,
 		cancelled = false,
 		healingRolls = null,
 	} = {}) {
 		if (cancelled) return {ok: false, committed: false, code: "efa-experimental-elixir-consumption-cancelled"};
-		if (target !== "self") return {ok: false, committed: false, code: "unsupported-efa-experimental-elixir-target"};
-		if (!this._getEfaAlchemistClassEntry()) {
-			return {ok: false, committed: false, code: "efa-experimental-elixir-unavailable"};
+		if (!["self", "other"].includes(target)) {
+			return {ok: false, committed: false, code: "unsupported-efa-experimental-elixir-target"};
 		}
-		const row = this._findInventoryRow(itemId);
-		if (!row) return {ok: false, committed: false, code: "efa-experimental-elixir-item-unavailable"};
-		const classification = this.classifyEfaExperimentalElixir(row);
-		if (classification.status !== "valid") {
-			return {
-				ok: false,
-				committed: false,
-				code: classification.status === "stale"
-					? "stale-efa-experimental-elixir"
-					: "invalid-efa-experimental-elixir-item",
-				reason: classification.reason,
-			};
+		if (target === "other") {
+			const preview = this.previewEfaExperimentalElixirOtherHandoff({
+				itemId,
+				targetName,
+				within5Feet,
+				healingRolls,
+			});
+			if (!preview.ok) return preview;
+			if (confirmed !== true) {
+				return {
+					ok: false,
+					committed: false,
+					code: "efa-experimental-elixir-other-confirmation-required",
+				};
+			}
+			if (preview.actionTracked && !preview.actionAvailable) {
+				return {ok: false, committed: false, code: "efa-experimental-elixir-bonus-action-unavailable"};
+			}
+
+			const row = this._findInventoryRow(itemId);
+			const classification = this.classifyEfaExperimentalElixir(row);
+			const healing = classification.metadata.effectKey === "healing"
+				? this._resolveEfaExperimentalElixirHealing(classification.metadata, healingRolls)
+				: null;
+			if (healing && !healing.ok) return {...healing, committed: false};
+			const handoff = this._buildEfaExperimentalElixirOtherHandoff({
+				row,
+				classification,
+				targetName: preview.targetName,
+				healing,
+			});
+			if (!handoff) {
+				return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-handoff"};
+			}
+
+			const dataSnapshot = MiscUtil.copyFast(this._data);
+			try {
+				if (preview.actionTracked && !this.consumeActionType("bonus")) {
+					this._data = dataSnapshot;
+					return {ok: false, committed: false, code: "efa-experimental-elixir-bonus-action-unavailable"};
+				}
+				this.removeItem(row.id);
+				if (this._findInventoryRow(row.id)) throw new Error("efa-experimental-elixir-item-consumption-failed");
+				return {
+					ok: true,
+					committed: true,
+					code: "efa-experimental-elixir-consumed",
+					itemId: row.id,
+					actionType: "bonus",
+					actionConsumed: preview.actionTracked,
+					target: "other",
+					targetName: preview.targetName,
+					effectKey: classification.metadata.effectKey,
+					result: {
+						type: "externalHandoff",
+						handoff,
+					},
+				};
+			} catch (error) {
+				this._data = dataSnapshot;
+				return {
+					ok: false,
+					committed: false,
+					code: "efa-experimental-elixir-consumption-failed",
+					error: error?.message || "Unable to consume Experimental Elixir.",
+				};
+			}
 		}
-		if (row.quantity !== 1) {
-			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-item-quantity"};
-		}
+
+		const validated = this._validateEfaExperimentalElixirConsumable(itemId);
+		if (!validated.ok) return validated;
+		const {row, classification} = validated;
 		const isActionTracked = this.isInCombat();
 		if (isActionTracked && !this.isActionTypeAvailable("bonus")) {
 			return {ok: false, committed: false, code: "efa-experimental-elixir-bonus-action-unavailable"};
@@ -22542,6 +22770,7 @@ class CharacterSheetState {
 		const dataSnapshot = MiscUtil.copyFast(this._data);
 		try {
 			if (isActionTracked && !this.consumeActionType("bonus")) {
+				this._data = dataSnapshot;
 				return {ok: false, committed: false, code: "efa-experimental-elixir-bonus-action-unavailable"};
 			}
 

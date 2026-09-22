@@ -27,9 +27,9 @@ state must be saved, and what the player-facing controls must do.
 > rest recovery and full-state undo boundary. Slot-funded creation validates the
 > exact held XPHB supplies, chosen effect, selected slot, and combat-tracked Magic
 > action before atomically spending costs and creating one provenance-backed vial.
-> Rest/create modals and Other handoff remain separate work; Self consumption
-> and all measurable effect applications now ship through the lifecycle
-> milestone below.
+> Rest/create modals and all Operate-mode controls remain separate work; Self
+> consumption, Other-target preview/handoff transactions, and all measurable
+> effect applications now ship through the lifecycle milestone below.
 
 > **Chemical Resistance milestone status:** the exact
 > `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA` owner now contributes
@@ -41,14 +41,17 @@ state must be saved, and what the player-facing controls must do.
 > milestone above.
 >
 > **Experimental Elixir consumption milestone status:** exact-owner generated
-> vials can now be consumed on Self through one atomic state transaction.
+> vials can now be consumed on Self or administered to a named external target
+> within 5 feet through one atomic state transaction.
 > Healing uses the creation-snapshotted dice plus the current Intelligence
 > modifier; Swiftness, Resilience, Boldness, and Flight use persisted
-> source-owned active states with deterministic duration/rest expiry. A
-> committed in-combat use spends the shared Bonus Action and vial together;
-> invalid, cancelled, stale, wrong-source, or failed commits spend nothing.
-> Player-facing controls, Other-target handoff, slot-funded creation UI, and
-> Long Rest production UI remain later milestones.
+> source-owned active states for Self and exact readable/copyable handoffs for
+> Other. The Other preview is read-only; commit requires a nonblank target,
+> explicit within-5-feet confirmation, and explicit confirmation. A committed
+> in-combat use spends the shared Bonus Action and exact vial together; invalid,
+> cancelled, stale, wrong-source, or failed commits spend nothing. Player-facing
+> controls, slot-funded creation UI, and Long Rest production UI remain later
+> milestones.
 
 > **Alchemical Eruption milestone status:** exact level-15 EFA Alchemist owners
 > now receive the optional post-commit `2d8` Force follow-up when a normalized
@@ -202,20 +205,22 @@ creation and use. Its source rules cover Long Rest production, slot-funded
 creation, Bonus Action consumption, and all five effects
 ([`data/class/class-artificer.json:2889-2955`](../../data/class/class-artificer.json#L2889-L2955)).
 
-> **State, transaction, and Self-consumption milestones:** the exact-owner
+> **State, transaction, and consumption milestones:** the exact-owner
 > generated-vial contract, pure d6 batch planner, creation-time scaling
 > snapshots, atomic batch replacement, save/load reconciliation, source-loss
 > cleanup, Long Rest produce/decline/no-supplies transactions, full-state rest
 > undo, and atomic spell-slot/Magic-action creation are implemented. The model
 > transaction for exact
 > `Alchemist|Artificer|EFA|EFA` vials is implemented. It consumes the shared
-> Bonus Action only for an in-combat committed use, consumes the quantity-1
-> generated vial, and applies Healing or the creation-snapshotted timed effect
-> atomically. Outside combat it does not latch action economy. Save/load,
-> source-loss cleanup, same-effect refresh, round expiry, and Short/Long Rest
-> expiry use the shared inventory, action-economy, healing, and active-state
-> systems rather than parallel ledgers. Rest/create/consume UI and Other handoff
-> remain later milestones.
+> Bonus Action only for an in-combat committed use and consumes the exact
+> quantity-1 generated vial. Self applies Healing or the creation-snapshotted
+> timed effect atomically. Other returns a versioned external handoff containing
+> the exact target/range confirmation, provenance snapshot, formula or numeric
+> mechanics, and duration/rest-expiry policy without changing local HP or active
+> states. Outside combat it does not latch action economy. Save/load, source-loss
+> cleanup, same-effect refresh, round expiry, and Short/Long Rest expiry use the
+> shared inventory, action-economy, healing, and active-state systems rather than
+> parallel ledgers. Rest/create/consume UI remains a later milestone.
 
 ### 4.1 Long Rest batch
 
@@ -291,11 +296,28 @@ Drinking or administering a vial costs one Bonus Action. The player chooses:
 Unlike the TCE rule, the other creature need not be incapacitated. Cancellation
 consumes neither the vial nor the Bonus Action.
 
-The state-level Self transaction now ships. It fails closed for unsupported
-targets, stale six-part ownership, unsupported metadata versions, TCE/custom
-provenance, corrupted quantities, missing actions, and lost EFA source
-ownership. Its timed state stores the exact consumed-vial provenance and
-creation snapshot, so later level changes cannot rewrite an active effect.
+The state-level Self and Other transactions now ship. Self stores the exact
+consumed-vial provenance and creation snapshot on its timed state, so later
+level changes cannot rewrite an active effect. Other first exposes
+`previewEfaExperimentalElixirOtherHandoff()`, which validates the exact current
+owner, metadata versions and snapshot, quantity, named external target, and
+explicit within-5-feet confirmation without mutating or randomly rolling
+anything. A deterministic Healing preview can supply explicit rolls; otherwise
+it returns the exact formula with unresolved roll fields.
+
+`consumeEfaExperimentalElixir({target: "other", ...})` additionally requires
+`confirmed: true`, revalidates the live vial and shared Bonus Action, and then
+atomically consumes the action only in combat plus that exact vial. The returned
+`externalHandoff` contains a copyable summary and structured target, full
+generated-item provenance, Healing dice/current Intelligence result or timed
+mechanics, and numeric duration with Short/Long Rest expiry. It never heals Self,
+creates a local active state, or claims to mutate the named creature.
+
+Both paths fail closed for unsupported targets, blank external names,
+unconfirmed range or commit, stale six-part ownership, unsupported metadata
+versions, TCE/custom provenance, corrupted quantities, missing actions, and
+lost EFA source ownership. Action or item-removal failure restores the full
+pre-use state.
 
 Boldness already feeds the main Character Sheet attack and saving-throw roll
 pipeline through the generic active-state roll-dice query. The dedicated
@@ -304,8 +326,9 @@ that UI consumer is explicitly deferred rather than reporting a bonus that it
 did not roll.
 
 Still deferred: the drinking/administering modal, inventory action controls,
-Other-target handoff receipt, slot-funded creation UI, Long Rest production
-orchestration, and undo presentation.
+slot-funded creation UI, Long Rest production orchestration, and undo
+presentation. The shipped Other handoff is a state API for that later UI, not
+the UI itself.
 
 ### 4.5 Generated-item ownership
 

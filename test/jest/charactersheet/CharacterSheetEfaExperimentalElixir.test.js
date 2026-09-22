@@ -303,7 +303,7 @@ describe("EFA Experimental Elixir core lifecycle", () => {
 			expect(state.isActionTypeAvailable("bonus")).toBe(true);
 		});
 
-		test("cancellation, unsupported target, stale metadata, wrong provenance, and unavailable Bonus Action mutate nothing", () => {
+		test("cancellation, incomplete Other input, stale metadata, wrong provenance, and unavailable Bonus Action mutate nothing", () => {
 			{
 				const state = makeState();
 				const itemId = createVial(state, "flight");
@@ -322,7 +322,7 @@ describe("EFA Experimental Elixir core lifecycle", () => {
 				expect(state.consumeEfaExperimentalElixir({itemId, target: "other"})).toEqual({
 					ok: false,
 					committed: false,
-					code: "unsupported-efa-experimental-elixir-target",
+					code: "invalid-efa-experimental-elixir-external-target",
 				});
 				expect(state.toJson()).toEqual(before);
 			}
@@ -503,6 +503,571 @@ describe("EFA Experimental Elixir core lifecycle", () => {
 			state.onLongRest();
 			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([]);
 			expect(state.getAc()).toBe(10);
+		});
+	});
+
+	describe("EFA Experimental Elixir Other handoff", () => {
+		test("builds a read-only exact-owner preview without rolling or spending anything", () => {
+			const state = makeState({level: 3});
+			state.setAbilityBase("int", 18);
+			const itemId = createVial(state, "healing", {batchId: "preview-healing"});
+			const before = copy(state.toJson());
+
+			const preview = state.previewEfaExperimentalElixirOtherHandoff({
+				itemId,
+				targetName: "  Mira  ",
+				within5Feet: true,
+			});
+
+			expect(preview).toMatchObject({
+				ok: true,
+				committed: false,
+				code: "efa-experimental-elixir-other-handoff-preview",
+				itemId,
+				actionType: "bonus",
+				actionTracked: false,
+				actionAvailable: true,
+				target: "other",
+				targetName: "Mira",
+				effectKey: "healing",
+				handoff: {
+					version: 1,
+					kind: "efaExperimentalElixirOther",
+					target: {
+						type: "external",
+						name: "Mira",
+						range: {maximumFeet: 5, withinRangeConfirmed: true},
+					},
+					source: {
+						itemId,
+						provenance: {
+							version: CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION,
+							owner: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER,
+							metadata: expect.objectContaining({
+								metadataSchemaVersion: 1,
+								effectKey: "healing",
+								batchId: "preview-healing",
+								creationArtificerLevel: 3,
+								healing: expect.objectContaining({dice: "2d8"}),
+							}),
+						},
+					},
+					effect: {
+						type: "healing",
+						effectKey: "healing",
+						label: "Healing",
+						dice: "2d8",
+						formula: "2d8 + 4",
+						rolls: null,
+						diceTotal: null,
+						intelligenceModifier: 4,
+						total: null,
+					},
+					summary: "Mira: roll 2d8 + 4 hit points of Experimental Elixir healing.",
+				},
+			});
+			expect(state.toJson()).toEqual(before);
+		});
+
+		test("returns deterministic external Healing without changing local HP or active states", () => {
+			const state = makeState({level: 3});
+			state.setAbilityBase("int", 10);
+			state.setMaxHp(40);
+			state.setCurrentHp(7);
+			const itemId = createVial(state, "healing", {batchId: "other-healing"});
+			state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 15;
+			state.setAbilityBase("int", 18);
+
+			const consumed = state.consumeEfaExperimentalElixir({
+				itemId,
+				target: "other",
+				targetName: "Mira",
+				within5Feet: true,
+				confirmed: true,
+				healingRolls: [3, 7],
+			});
+
+			expect(consumed).toMatchObject({
+				ok: true,
+				committed: true,
+				code: "efa-experimental-elixir-consumed",
+				itemId,
+				actionType: "bonus",
+				actionConsumed: false,
+				target: "other",
+				targetName: "Mira",
+				effectKey: "healing",
+				result: {
+					type: "externalHandoff",
+					handoff: {
+						source: {
+							itemId,
+							provenance: {
+								owner: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER,
+								metadata: expect.objectContaining({
+									creationArtificerLevel: 3,
+									healing: expect.objectContaining({dice: "2d8"}),
+								}),
+							},
+						},
+						effect: {
+							type: "healing",
+							dice: "2d8",
+							formula: "2d8 + 4",
+							rolls: [3, 7],
+							diceTotal: 10,
+							intelligenceModifier: 4,
+							total: 14,
+						},
+						summary: "Mira regains 14 hit points from Experimental Elixir (2d8 + 4).",
+					},
+				},
+			});
+			expect(state.getCurrentHp()).toBe(7);
+			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([]);
+			expect(state.getItems().some(item => item.id === itemId)).toBe(false);
+		});
+
+		test.each([
+			{
+				effectKey: "swiftness",
+				level: 15,
+				expectedMechanics: [
+					{type: "bonus", target: "speed:walk", value: 20, source: "Experimental Elixir"},
+				],
+				expectedDuration: {
+					amount: 1,
+					unit: "hour",
+					totalRounds: 600,
+					endsOnShortRest: true,
+					endsOnLongRest: true,
+					preserveRoundsAcrossCombat: true,
+				},
+				expectedSummary: "Mira gains a 20-foot bonus to walking speed for 1 hour; ends on a Short or Long Rest.",
+			},
+			{
+				effectKey: "resilience",
+				level: 15,
+				expectedMechanics: [
+					{type: "bonus", target: "ac", value: 1, source: "Experimental Elixir"},
+				],
+				expectedDuration: {
+					amount: 8,
+					unit: "hour",
+					totalRounds: 4800,
+					endsOnShortRest: false,
+					endsOnLongRest: true,
+					preserveRoundsAcrossCombat: true,
+				},
+				expectedSummary: "Mira gains a +1 bonus to AC for 8 hours; ends on a Long Rest.",
+			},
+			{
+				effectKey: "boldness",
+				level: 9,
+				expectedMechanics: [
+					{type: "rollBonus", target: "attack", dice: "1d4", source: "Experimental Elixir"},
+					{type: "rollBonus", target: "save", dice: "1d4", source: "Experimental Elixir"},
+				],
+				expectedDuration: {
+					amount: 10,
+					unit: "minute",
+					totalRounds: 100,
+					endsOnShortRest: true,
+					endsOnLongRest: true,
+					preserveRoundsAcrossCombat: true,
+				},
+				expectedSummary: "Mira adds 1d4 to every attack roll and saving throw for 10 minutes; ends on a Short or Long Rest.",
+			},
+			{
+				effectKey: "flight",
+				level: 9,
+				expectedMechanics: [
+					{type: "flySpeed", value: 20, source: "Experimental Elixir"},
+				],
+				expectedDuration: {
+					amount: 10,
+					unit: "minute",
+					totalRounds: 100,
+					endsOnShortRest: true,
+					endsOnLongRest: true,
+					preserveRoundsAcrossCombat: true,
+				},
+				expectedSummary: "Mira gains a 20-foot fly speed for 10 minutes; ends on a Short or Long Rest.",
+			},
+		])("returns exact $effectKey mechanics and expiry without creating a local active state", ({
+			effectKey,
+			level,
+			expectedMechanics,
+			expectedDuration,
+			expectedSummary,
+		}) => {
+			const state = makeState({level});
+			state.setCurrentHp(7);
+			const itemId = createVial(state, effectKey, {batchId: `other-${effectKey}`});
+
+			const consumed = state.consumeEfaExperimentalElixir({
+				itemId,
+				target: "other",
+				targetName: "Mira",
+				within5Feet: true,
+				confirmed: true,
+			});
+
+			expect(consumed).toMatchObject({
+				ok: true,
+				committed: true,
+				effectKey,
+				result: {
+					type: "externalHandoff",
+					handoff: {
+						target: {
+							type: "external",
+							name: "Mira",
+							range: {maximumFeet: 5, withinRangeConfirmed: true},
+						},
+						source: {
+							itemId,
+							provenance: {
+								owner: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER,
+								metadata: expect.objectContaining({
+									effectKey,
+									batchId: `other-${effectKey}`,
+									creationArtificerLevel: level,
+								}),
+							},
+						},
+						effect: {
+							type: "timedEffect",
+							effectKey,
+							mechanics: expectedMechanics,
+							duration: expectedDuration,
+						},
+						summary: expectedSummary,
+					},
+				},
+			});
+			expect(state.getCurrentHp()).toBe(7);
+			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([]);
+			expect(state.getItems().some(item => item.id === itemId)).toBe(false);
+		});
+
+		test("spends the in-combat Bonus Action and only the selected same-effect vial", () => {
+			const state = makeState({level: 9});
+			const selectedItemId = createVial(state, "swiftness", {batchId: "selected"});
+			const preservedItemId = createVial(state, "swiftness", {batchId: "preserved"});
+			state.startCombat();
+
+			const consumed = state.consumeEfaExperimentalElixir({
+				itemId: selectedItemId,
+				target: "other",
+				targetName: "Mira",
+				within5Feet: true,
+				confirmed: true,
+			});
+
+			expect(consumed).toMatchObject({
+				ok: true,
+				committed: true,
+				itemId: selectedItemId,
+				actionConsumed: true,
+				result: {
+					handoff: {
+						source: {
+							itemId: selectedItemId,
+							provenance: {metadata: expect.objectContaining({batchId: "selected"})},
+						},
+					},
+				},
+			});
+			expect(state.isActionTypeAvailable("bonus")).toBe(false);
+			expect(state.getItems().some(item => item.id === selectedItemId)).toBe(false);
+			expect(state.getItems().some(item => item.id === preservedItemId)).toBe(true);
+		});
+
+		test("does not latch the Bonus Action outside combat", () => {
+			const state = makeState();
+			const itemId = createVial(state, "flight");
+
+			expect(state.consumeEfaExperimentalElixir({
+				itemId,
+				target: "other",
+				targetName: "Mira",
+				within5Feet: true,
+				confirmed: true,
+			})).toMatchObject({
+				ok: true,
+				committed: true,
+				actionConsumed: false,
+			});
+			expect(state.isActionTypeAvailable("bonus")).toBe(true);
+		});
+
+		test("cancellation, target, range, confirmation, quantity, metadata, source, and action failures mutate nothing", () => {
+			const expectNoMutation = ({state, call, expected}) => {
+				const before = copy(state.toJson());
+				expect(call()).toMatchObject(expected);
+				expect(state.toJson()).toEqual(before);
+			};
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				expectNoMutation({
+					state,
+					call: () => state.consumeEfaExperimentalElixir({
+						itemId,
+						target: "other",
+						targetName: "Mira",
+						within5Feet: true,
+						confirmed: true,
+						cancelled: true,
+					}),
+					expected: {ok: false, committed: false, code: "efa-experimental-elixir-consumption-cancelled"},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				expectNoMutation({
+					state,
+					call: () => state.previewEfaExperimentalElixirOtherHandoff({
+						itemId,
+						targetName: " ",
+						within5Feet: true,
+					}),
+					expected: {ok: false, committed: false, code: "invalid-efa-experimental-elixir-external-target"},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				expectNoMutation({
+					state,
+					call: () => state.consumeEfaExperimentalElixir({
+						itemId,
+						target: "other",
+						targetName: "Mira",
+						within5Feet: false,
+						confirmed: true,
+					}),
+					expected: {ok: false, committed: false, code: "efa-experimental-elixir-other-range-unconfirmed"},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				expectNoMutation({
+					state,
+					call: () => state.consumeEfaExperimentalElixir({
+						itemId,
+						target: "other",
+						targetName: "Mira",
+						within5Feet: true,
+					}),
+					expected: {ok: false, committed: false, code: "efa-experimental-elixir-other-confirmation-required"},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				state.getInventory().find(row => row.id === itemId).quantity = 2;
+				expectNoMutation({
+					state,
+					call: () => state.previewEfaExperimentalElixirOtherHandoff({
+						itemId,
+						targetName: "Mira",
+						within5Feet: true,
+					}),
+					expected: {ok: false, committed: false, code: "invalid-efa-experimental-elixir-item-quantity"},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				state.getInventory().find(row => row.id === itemId)
+					.item._generatedItemProvenance.metadata.metadataSchemaVersion = 999;
+				expectNoMutation({
+					state,
+					call: () => state.previewEfaExperimentalElixirOtherHandoff({
+						itemId,
+						targetName: "Mira",
+						within5Feet: true,
+					}),
+					expected: {
+						ok: false,
+						committed: false,
+						code: "stale-efa-experimental-elixir",
+						reason: "unsupported-efa-experimental-elixir-metadata-version",
+					},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				state.getInventory().find(row => row.id === itemId)
+					.item._generatedItemProvenance.metadata.value.amount = 999;
+				expectNoMutation({
+					state,
+					call: () => state.previewEfaExperimentalElixirOtherHandoff({
+						itemId,
+						targetName: "Mira",
+						within5Feet: true,
+					}),
+					expected: {
+						ok: false,
+						committed: false,
+						code: "stale-efa-experimental-elixir",
+						reason: "invalid-efa-experimental-elixir-snapshot",
+					},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				state.getInventory().find(row => row.id === itemId)
+					.item._generatedItemProvenance.version = 999;
+				expectNoMutation({
+					state,
+					call: () => state.previewEfaExperimentalElixirOtherHandoff({
+						itemId,
+						targetName: "Mira",
+						within5Feet: true,
+					}),
+					expected: {
+						ok: false,
+						committed: false,
+						code: "stale-efa-experimental-elixir",
+						reason: "unsupported-provenance-version",
+					},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").subclass = getSubclass("TCE");
+				expectNoMutation({
+					state,
+					call: () => state.consumeEfaExperimentalElixir({
+						itemId,
+						target: "other",
+						targetName: "Mira",
+						within5Feet: true,
+						confirmed: true,
+					}),
+					expected: {ok: false, committed: false, code: "efa-experimental-elixir-unavailable"},
+				});
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				state.startCombat();
+				state.consumeActionType("bonus");
+				expectNoMutation({
+					state,
+					call: () => state.consumeEfaExperimentalElixir({
+						itemId,
+						target: "other",
+						targetName: "Mira",
+						within5Feet: true,
+						confirmed: true,
+					}),
+					expected: {ok: false, committed: false, code: "efa-experimental-elixir-bonus-action-unavailable"},
+				});
+			}
+		});
+
+		test("keeps TCE, compatibility, same-name custom, and wrong-owner items isolated", () => {
+			for (const state of [
+				makeState({classSource: "EFA", subclassSource: "TCE"}),
+				makeState({classSource: "TCE", subclassSource: "TCE"}),
+			]) {
+				state.addItem({id: "ordinary-elixir", name: "Experimental Elixir", source: "EFA", type: "P", _isCustom: true});
+				const before = copy(state.toJson());
+				expect(state.previewEfaExperimentalElixirOtherHandoff({
+					itemId: "ordinary-elixir",
+					targetName: "Mira",
+					within5Feet: true,
+				})).toEqual({
+					ok: false,
+					committed: false,
+					code: "efa-experimental-elixir-unavailable",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+
+			const state = makeState();
+			state.addItem({id: "custom-elixir", name: "Experimental Elixir", source: "EFA", type: "P", _isCustom: true});
+			const wrongOwner = state.createGeneratedFeatureItem({
+				item: {name: "Experimental Elixir (Flight)", source: "TCE", type: "P"},
+				owner: {
+					featureUid: "Experimental Elixir|Artificer|EFA|Alchemist|TCE|3|TCE",
+					featureSource: "TCE",
+					classUid: "Artificer|EFA",
+					subclassUid: "Alchemist|Artificer|EFA|TCE",
+				},
+				metadata: {metadataSchemaVersion: 1},
+			});
+			for (const itemId of ["custom-elixir", wrongOwner.itemId]) {
+				const before = copy(state.toJson());
+				expect(state.previewEfaExperimentalElixirOtherHandoff({
+					itemId,
+					targetName: "Mira",
+					within5Feet: true,
+				})).toMatchObject({
+					ok: false,
+					committed: false,
+					code: "invalid-efa-experimental-elixir-item",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+		});
+
+		test("rolls back a failed action boundary or item removal completely", () => {
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				state.startCombat();
+				const before = copy(state.toJson());
+				jest.spyOn(state, "consumeActionType").mockImplementation(actionType => {
+					state._data.actionEconomyUsage[actionType] = true;
+					return false;
+				});
+
+				expect(state.consumeEfaExperimentalElixir({
+					itemId,
+					target: "other",
+					targetName: "Mira",
+					within5Feet: true,
+					confirmed: true,
+				})).toEqual({
+					ok: false,
+					committed: false,
+					code: "efa-experimental-elixir-bonus-action-unavailable",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				state.startCombat();
+				const before = copy(state.toJson());
+				jest.spyOn(state, "removeItem").mockReturnValue(false);
+
+				expect(state.consumeEfaExperimentalElixir({
+					itemId,
+					target: "other",
+					targetName: "Mira",
+					within5Feet: true,
+					confirmed: true,
+				})).toMatchObject({
+					ok: false,
+					committed: false,
+					code: "efa-experimental-elixir-consumption-failed",
+					error: "efa-experimental-elixir-item-consumption-failed",
+				});
+				expect(state.toJson()).toEqual(before);
+				expect(state.isActionTypeAvailable("bonus")).toBe(true);
+				expect(state.getItems().some(item => item.id === itemId)).toBe(true);
+			}
 		});
 	});
 

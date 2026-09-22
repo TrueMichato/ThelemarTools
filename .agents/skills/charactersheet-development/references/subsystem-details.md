@@ -1724,6 +1724,24 @@ source-lost effects; valid inactive effects can remain as ordinary historical
 state rows. Rest cleanup reads the serialized duration policy, while normal
 round advancement remains the sole round-expiry mechanism.
 
+External EFA Experimental Elixir administration does not create one of these
+states. `previewEfaExperimentalElixirOtherHandoff()` is the read-only validation
+and projection boundary for a later Operate-mode UI: it requires the exact live
+EFA owner, supported generated-item and metadata versions, quantity one, a
+nonblank named external target, and explicit within-5-feet confirmation. It
+returns the exact formula or mechanics, current Intelligence modifier,
+creation-snapshotted values, provenance, duration rounds, and rest-expiry policy
+without spending or randomly rolling unless deterministic Healing rolls were
+provided.
+
+`consumeEfaExperimentalElixir({target: "other", confirmed: true, ...})`
+revalidates that preview against live state, consumes the shared Bonus Action
+only in combat and the exact vial in one full-state transaction, then returns
+`result: {type: "externalHandoff", handoff}`. It never changes local HP or active
+states and never claims to mutate the named creature. Failed action consumption
+or item removal restores the pre-use snapshot; out-of-combat use leaves action
+economy available.
+
 ### Mutual Exclusivity
 
 Hard-coded: Rage ↔ Bladesong. Enforced in `activateState()` — activating one auto-deactivates the other.
