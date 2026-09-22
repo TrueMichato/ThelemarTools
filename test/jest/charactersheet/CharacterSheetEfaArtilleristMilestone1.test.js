@@ -67,6 +67,46 @@ const makeArtilleristState = ({source = "EFA", level = 17} = {}) => {
 	return state;
 };
 
+const makeSharedArtilleristOwnerClass = (source) => ({
+	name: "Artificer",
+	source,
+	level: 3,
+	subclass: {
+		name: "Artillerist",
+		shortName: "Artillerist",
+		source,
+		additionalSpells: [{
+			prepared: {3: ["shield|xphb"]},
+		}],
+	},
+});
+
+const makeSharedArtilleristOwnerState = () => {
+	const state = new CharacterSheetState();
+	state.setSpellData(SPELL_DB);
+	state.addSpell({
+		name: "Shield",
+		source: "XPHB",
+		level: 1,
+		school: "V",
+		sourceFeature: "Prepared Spells",
+		sourceClass: "Artificer",
+		prepared: true,
+		alwaysPrepared: false,
+	}, true);
+	state._data.classes = [
+		makeSharedArtilleristOwnerClass("EFA"),
+		makeSharedArtilleristOwnerClass("TCE"),
+	];
+	state.populateSubclassSpells();
+	return state;
+};
+
+const getArtilleristGrantOwner = (state, classSource) => {
+	const cls = state.getClasses().find(it => it.name === "Artificer" && it.source === classSource);
+	return state.getSubclassSpellGrantOwner(cls, {sourceFeature: "Artillerist Spells"});
+};
+
 const makeToolsFeature = (overrides = {}) => CharacterSheetClassUtils.buildFeatureStateObject({
 	...EFA_TOOLS,
 	...overrides,
@@ -279,5 +319,48 @@ describe("EFA Artillerist always-prepared spells", () => {
 		expect(spells).toHaveLength(10);
 		expect(new Set(spells.map(spell => spell.source))).toEqual(new Set(["XPHB"]));
 		expect(CharacterSheetClassUtils.countPreparedSpells(spells).current).toBe(0);
+	});
+
+	test.each([
+		["EFA", "TCE"],
+		["TCE", "EFA"],
+	])("removing the %s same-label owner preserves the %s Artillerist grant", (removedSource, keptSource) => {
+		const state = makeSharedArtilleristOwnerState();
+		const removedOwner = getArtilleristGrantOwner(state, removedSource);
+		const keptOwner = getArtilleristGrantOwner(state, keptSource);
+
+		state.removeSubclassSpells(removedOwner);
+
+		const shield = state.getSpellsKnown().find(spell => spell.name === "Shield" && spell.source === "XPHB");
+		expect(shield.subclassSpellGrantOwners).toEqual([keptOwner]);
+		expect(shield).toMatchObject({
+			sourceFeature: "Artillerist Spells",
+			sourceClass: "Artificer",
+			alwaysPrepared: true,
+			prepared: true,
+		});
+
+		state.removeSubclassSpells("Artillerist Spells");
+		expect(shield.subclassSpellGrantOwners).toEqual([keptOwner]);
+	});
+
+	test("last exact Artillerist owner removal restores player metadata after save/load", () => {
+		const state = makeSharedArtilleristOwnerState();
+		state.removeSubclassSpells(getArtilleristGrantOwner(state, "EFA"));
+		state.getClasses().find(cls => cls.source === "EFA").subclass.additionalSpells = [];
+
+		const restored = new CharacterSheetState();
+		restored.setSpellData(SPELL_DB);
+		restored.loadFromJson(state.toJson());
+		restored.removeSubclassSpells(getArtilleristGrantOwner(restored, "TCE"));
+
+		const shield = restored.getSpellsKnown().find(spell => spell.name === "Shield" && spell.source === "XPHB");
+		expect(shield).toMatchObject({
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Artificer",
+			prepared: true,
+			alwaysPrepared: false,
+		});
+		expect(shield.subclassSpellGrantOwners).toBeUndefined();
 	});
 });
