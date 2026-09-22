@@ -211,11 +211,41 @@ class CharacterSheetEfaExperimentalElixirUi {
 		}
 	}
 
+	static _createModalPersistenceLock ({wrp, eleModal, btnCancel}) {
+		let isPending = false;
+		const getHeaderClose = () => eleModal?.querySelector?.(".cs-modal__btn-close") || null;
+		return {
+			canClose: () => !isPending,
+			setPending: nextIsPending => {
+				isPending = !!nextIsPending;
+				if (btnCancel) btnCancel.disabled = isPending;
+				const btnHeaderClose = getHeaderClose();
+				if (btnHeaderClose) btnHeaderClose.disabled = isPending;
+				if (isPending) wrp?.setAttribute?.("aria-busy", "true");
+				else wrp?.removeAttribute?.("aria-busy");
+			},
+		};
+	}
+
+	static async _pRunPersistenceLocked ({lock, operation}) {
+		lock.setPending(true);
+		try {
+			const result = await operation();
+			if (!result?.ok || !result?.committed) lock.setPending(false);
+			return result;
+		} catch (error) {
+			lock.setPending(false);
+			throw error;
+		}
+	}
+
 	static async pShowCreateModal ({state, page}) {
-		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
+		let persistenceLock = null;
+		const {eleModal, eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Create Experimental Elixir",
 			isMinHeight0: true,
 			getFocusRestoreTarget: () => document.querySelector?.(".charsheet__efa-elixir-create"),
+			fnCanClose: () => persistenceLock?.canClose() ?? true,
 		});
 		const wrp = e_({outer: this.renderCreateModalHtml(state)});
 		eleModalInner.append(wrp);
@@ -224,6 +254,7 @@ class CharacterSheetEfaExperimentalElixirUi {
 		const btnCancel = wrp.querySelector("[data-efa-elixir-cancel]");
 		const selectSlot = wrp.querySelector("[data-efa-elixir-slot]");
 		let isCommitted = false;
+		persistenceLock = this._createModalPersistenceLock({wrp, eleModal, btnCancel});
 
 		btnCancel?.addEventListener("click", () => doClose(false));
 		btnConfirm?.addEventListener("click", async () => {
@@ -235,7 +266,10 @@ class CharacterSheetEfaExperimentalElixirUi {
 			const slotLevel = Number(selectSlot?.value);
 			btnConfirm.disabled = true;
 			if (live) live.textContent = "Creating vial...";
-			const result = await this.commitCreate({state, page, effectKey, slotLevel});
+			const result = await this._pRunPersistenceLocked({
+				lock: persistenceLock,
+				operation: () => this.commitCreate({state, page, effectKey, slotLevel}),
+			});
 			if (!result?.ok || !result?.committed) {
 				btnConfirm.disabled = false;
 				if (live) {
@@ -245,6 +279,7 @@ class CharacterSheetEfaExperimentalElixirUi {
 				return;
 			}
 			isCommitted = true;
+			persistenceLock.setPending(false);
 			wrp.querySelectorAll("input, select").forEach(ele => { ele.disabled = true; });
 			btnCancel.hidden = true;
 			btnConfirm.disabled = false;
@@ -396,12 +431,23 @@ class CharacterSheetEfaExperimentalElixirUi {
 		live.append(summary, label, output, btnCopy, copyStatus);
 	}
 
+	static getConsumeFocusRestoreTarget (itemId) {
+		const consumeActions = [...(document.querySelectorAll?.("[data-efa-elixir-consume]") || [])];
+		return consumeActions.find(ele => ele.dataset?.efaElixirConsume === itemId)
+			|| consumeActions[0]
+			|| document.querySelector?.("#charsheet-ipt-inventory-search")
+			|| document.querySelector?.("#charsheet-btn-add-item")
+			|| document.querySelector?.("#charsheet-btn-starred-filter")
+			|| null;
+	}
+
 	static async pShowConsumeModal ({state, page, itemId}) {
-		const {eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
+		let persistenceLock = null;
+		const {eleModal, eleModalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: "Drink or Administer Experimental Elixir",
 			isMinHeight0: true,
-			getFocusRestoreTarget: () => [...(document.querySelectorAll?.("[data-efa-elixir-consume]") || [])]
-				.find(ele => ele.dataset?.efaElixirConsume === itemId),
+			getFocusRestoreTarget: () => this.getConsumeFocusRestoreTarget(itemId),
+			fnCanClose: () => persistenceLock?.canClose() ?? true,
 		});
 		const wrp = e_({outer: this.renderConsumeModalHtml(state, itemId)});
 		eleModalInner.append(wrp);
@@ -413,6 +459,7 @@ class CharacterSheetEfaExperimentalElixirUi {
 		const inputWithinFive = wrp.querySelector("[data-efa-elixir-within-five]");
 		let previewFingerprint = null;
 		let isCommitted = false;
+		persistenceLock = this._createModalPersistenceLock({wrp, eleModal, btnCancel});
 
 		const getValues = () => {
 			const target = wrp.querySelector("input[name=\"efa-elixir-target\"]:checked")?.value || "self";
@@ -475,7 +522,10 @@ class CharacterSheetEfaExperimentalElixirUi {
 
 			btnConfirm.disabled = true;
 			if (live) live.textContent = values.target === "other" ? "Creating handoff..." : "Drinking elixir...";
-			const result = await this.commitConsume({state, page, itemId, ...values});
+			const result = await this._pRunPersistenceLocked({
+				lock: persistenceLock,
+				operation: () => this.commitConsume({state, page, itemId, ...values}),
+			});
 			if (!result?.ok || !result?.committed) {
 				btnConfirm.disabled = false;
 				previewFingerprint = null;
@@ -486,6 +536,7 @@ class CharacterSheetEfaExperimentalElixirUi {
 				return;
 			}
 			isCommitted = true;
+			persistenceLock.setPending(false);
 			wrp.querySelectorAll("input").forEach(ele => { ele.disabled = true; });
 			btnCancel.hidden = true;
 			btnConfirm.disabled = false;

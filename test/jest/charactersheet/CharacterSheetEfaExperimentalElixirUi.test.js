@@ -232,15 +232,67 @@ describe("EFA Experimental Elixir modal contracts", () => {
 		expect(pGetShow).toHaveBeenNthCalledWith(1, expect.objectContaining({
 			title: "Create Experimental Elixir",
 			getFocusRestoreTarget: expect.any(Function),
+			fnCanClose: expect.any(Function),
 		}));
 		expect(pGetShow).toHaveBeenNthCalledWith(2, expect.objectContaining({
 			title: "Drink or Administer Experimental Elixir",
 			getFocusRestoreTarget: expect.any(Function),
+			fnCanClose: expect.any(Function),
 		}));
 		expect(focusFirst).toHaveBeenNthCalledWith(1, modalInner, {preferSelector: "input[name=\"efa-elixir-effect\"]"});
 		expect(focusFirst).toHaveBeenNthCalledWith(2, modalInner, {preferSelector: "input[name=\"efa-elixir-target\"]"});
 		pGetShow.mockRestore();
 		focusFirst.mockRestore();
+	});
+
+	test("persistence lock blocks shared close paths while pending and unlocks on failure", async () => {
+		const btnCancel = {disabled: false};
+		const btnHeaderClose = {disabled: false};
+		const wrp = {
+			setAttribute: jest.fn(),
+			removeAttribute: jest.fn(),
+		};
+		const lock = CharacterSheetEfaExperimentalElixirUi._createModalPersistenceLock({
+			wrp,
+			eleModal: {querySelector: jest.fn(() => btnHeaderClose)},
+			btnCancel,
+		});
+		let resolveCommit;
+		const pendingCommit = new Promise(resolve => { resolveCommit = resolve; });
+
+		const resultPromise = CharacterSheetEfaExperimentalElixirUi._pRunPersistenceLocked({
+			lock,
+			operation: () => pendingCommit,
+		});
+
+		expect(lock.canClose()).toBe(false);
+		expect(btnCancel.disabled).toBe(true);
+		expect(btnHeaderClose.disabled).toBe(true);
+		expect(wrp.setAttribute).toHaveBeenCalledWith("aria-busy", "true");
+
+		resolveCommit({ok: false, committed: false, code: "save-failed"});
+		await expect(resultPromise).resolves.toMatchObject({ok: false, committed: false});
+		expect(lock.canClose()).toBe(true);
+		expect(btnCancel.disabled).toBe(false);
+		expect(btnHeaderClose.disabled).toBe(false);
+		expect(wrp.removeAttribute).toHaveBeenCalledWith("aria-busy");
+	});
+
+	test("persistence lock stays closed after mechanics success until the success UI unlocks it", async () => {
+		const lock = CharacterSheetEfaExperimentalElixirUi._createModalPersistenceLock({
+			wrp: {setAttribute: jest.fn(), removeAttribute: jest.fn()},
+			eleModal: null,
+			btnCancel: {disabled: false},
+		});
+
+		await expect(CharacterSheetEfaExperimentalElixirUi._pRunPersistenceLocked({
+			lock,
+			operation: async () => ({ok: true, committed: true}),
+		})).resolves.toMatchObject({ok: true, committed: true});
+		expect(lock.canClose()).toBe(false);
+
+		lock.setPending(false);
+		expect(lock.canClose()).toBe(true);
 	});
 });
 
@@ -330,6 +382,33 @@ describe("EFA Experimental Elixir inventory and consume boundary", () => {
 		expect(html).toContain("Repair required");
 		expect(html).toContain("legacy subclass feature uid");
 		expect(html).toContain("shared generated-item edit/delete/restore controls");
+		expect(html).not.toContain("charsheet__efa-elixir-consume");
+		expect(html).not.toContain("charsheet__item-use\"");
+	});
+
+	test.each([
+		[
+			"unsupported metadata schema",
+			metadata => { metadata.metadataSchemaVersion = 999; },
+			"efa experimental elixir metadata version",
+		],
+		[
+			"invalid effect snapshot",
+			metadata => { metadata.value = {...metadata.value, amount: Number(metadata.value?.amount || 0) + 1}; },
+			"efa experimental elixir snapshot",
+		],
+	])("generic-valid %s is still rendered through the shared repair path", (_label, mutate, reasonText) => {
+		const state = makeState();
+		const vial = createVial(state, {effectKey: "swiftness"});
+		const metadata = (vial.item || vial)._generatedItemProvenance.metadata;
+		mutate(metadata);
+
+		expect(state.classifyGeneratedFeatureItem(vial).status).toBe("valid");
+		expect(state.classifyEfaExperimentalElixir(vial)).toMatchObject({status: "stale", repairRequired: true});
+		const html = makeInventory(state)._renderItemRow(vial).outerHTML;
+
+		expect(html).toContain("Repair required");
+		expect(html).toContain(reasonText);
 		expect(html).not.toContain("charsheet__efa-elixir-consume");
 		expect(html).not.toContain("charsheet__item-use\"");
 	});
@@ -459,6 +538,20 @@ describe("EFA Experimental Elixir inventory and consume boundary", () => {
 		expect(textarea.select).toHaveBeenCalled();
 		globalThis.document = documentBefore;
 	});
+
+	test("successful consume focus restoration falls back after the vial action is removed", () => {
+		const searchInput = {id: "charsheet-ipt-inventory-search"};
+		const documentBefore = globalThis.document;
+		globalThis.document = {
+			...documentBefore,
+			querySelectorAll: jest.fn(() => []),
+			querySelector: jest.fn(selector => selector === "#charsheet-ipt-inventory-search" ? searchInput : null),
+		};
+
+		expect(CharacterSheetEfaExperimentalElixirUi.getConsumeFocusRestoreTarget("removed-vial")).toBe(searchInput);
+
+		globalThis.document = documentBefore;
+	});
 });
 
 describe("EFA Experimental Elixir Long Rest UI transaction", () => {
@@ -488,6 +581,31 @@ describe("EFA Experimental Elixir Long Rest UI transaction", () => {
 		expect(section.element.outerHTML).toContain("Decline production");
 		expect(section.element.outerHTML).toContain("Every rolled 6 requires an explicit effect choice");
 		expect(section.element.outerHTML).toContain("aria-live=\"polite\"");
+	});
+
+	test("Produce to Decline to Produce preserves the one staged roll batch", () => {
+		const state = makeState({level: 5});
+		addSupplies(state);
+		const randomiseBefore = globalThis.RollerUtil.randomise;
+		const randomise = globalThis.RollerUtil.randomise = jest.fn()
+			.mockReturnValueOnce(1)
+			.mockReturnValueOnce(3)
+			.mockReturnValueOnce(5);
+		try {
+			const {rest} = makeRest(state);
+			const section = rest._createEfaExperimentalElixirLongRestSection();
+
+			section.setDecision("produce");
+			const firstRolls = section.getRolls();
+			section.setDecision("decline");
+			section.setDecision("produce");
+
+			expect(section.getRolls()).toEqual(firstRolls);
+			expect(randomise).toHaveBeenCalledTimes(3);
+		} finally {
+			if (randomiseBefore) globalThis.RollerUtil.randomise = randomiseBefore;
+			else delete globalThis.RollerUtil.randomise;
+		}
 	});
 
 	test("canonical recovery runs exactly once and honors the generic exhaustion checkbox option", () => {

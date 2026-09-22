@@ -806,14 +806,11 @@ class CharacterSheetRest {
 			live.classList.remove("charsheet__efa-elixir-live--error");
 		};
 		const renderRolls = () => {
-			if (!rollsWrp) return;
-			rollsWrp.innerHTML = "";
 			row6Selects = [];
-			if (decision !== "produce") {
-				rolls = null;
-				return;
-			}
+			if (rollsWrp) rollsWrp.innerHTML = "";
+			if (decision !== "produce") return;
 			if (!rolls) rolls = Array.from({length: batchSize}, rollD6);
+			if (!rollsWrp) return;
 			rolls.forEach((roll, ix) => {
 				const row = e_({outer: `<div class="charsheet__efa-elixir-rest-roll">
 					<span class="charsheet__efa-elixir-roll-value" aria-label="Vial ${ix + 1} rolled ${roll}">Vial ${ix + 1}: <strong>${roll}</strong></span>
@@ -853,6 +850,15 @@ class CharacterSheetRest {
 				rollsWrp.append(row);
 			});
 		};
+		const setDecision = nextDecision => {
+			decision = nextDecision === "produce" ? "produce" : "decline";
+			section.querySelectorAll(`input[name="${radioName}"]`).forEach(radio => {
+				radio.checked = radio.value === decision;
+			});
+			clearLive();
+			renderRolls();
+			onChange?.();
+		};
 		const getPreparedDraft = () => {
 			if (!hasSupplies || decision === "decline") {
 				return this._state.prepareEfaExperimentalElixirLongRestDraft({decision: "decline"});
@@ -872,16 +878,12 @@ class CharacterSheetRest {
 		};
 
 		section.querySelectorAll(`input[name="${radioName}"]`).forEach(radio => {
-			radio.addEventListener("change", () => {
-				decision = radio.value;
-				clearLive();
-				renderRolls();
-				onChange?.();
-			});
+			radio.addEventListener("change", () => setDecision(radio.value));
 		});
 
 		return {
 			element: section,
+			setDecision,
 			getPreparedDraft,
 			isValid: () => getPreparedDraft().ok,
 			focusFirstInvalid: () => {

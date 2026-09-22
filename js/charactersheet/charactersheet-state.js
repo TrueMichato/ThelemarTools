@@ -92806,11 +92806,8 @@ class CharacterSheetState {
 		// Recover stamina (Thelemar: recovers on any rest)
 		this.restoreStamina();
 
-		// Recharge magic items at dawn
-		const rechargedItems = this._rechargeItems("dawn");
-
-		// Recharge magic items that recharge on long rest
-		rechargedItems.push(...this._rechargeItems("restLong"));
+		// Recharge every period covered by the canonical long-rest predicate.
+		const rechargedItems = this._rechargeItemsOnRest("long");
 
 		// Reset resource restoration items (Dragonhide Belt, Bloodwell Vial, etc.)
 		this.resetResourceRestorations();
@@ -92877,6 +92874,18 @@ class CharacterSheetState {
 				const result = this.rechargeItemCharges(entry.id);
 				if (result?.committed) results.push(result);
 			}
+		}
+		return results;
+	}
+
+	_rechargeItemsOnRest (restType) {
+		const items = this._data.inventory || [];
+		const results = [];
+		for (const entry of items) {
+			const itemData = entry.item || entry;
+			if (!CharacterSheetState.itemRechargesOnRest(itemData, restType) || !entry.id) continue;
+			const result = this.rechargeItemCharges(entry.id);
+			if (result?.committed) results.push(result);
 		}
 		return results;
 	}

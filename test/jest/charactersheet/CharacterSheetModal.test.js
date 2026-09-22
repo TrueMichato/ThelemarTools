@@ -94,11 +94,13 @@ describe("CharacterSheetModal", () => {
 		});
 
 		it("passes the caller's options through untouched", async () => {
-			await CharacterSheetModal.pGetShow({title: "Craft", isWidth100: true, isHeight100: true});
+			const fnCanClose = () => false;
+			await CharacterSheetModal.pGetShow({title: "Craft", isWidth100: true, isHeight100: true, fnCanClose});
 
 			expect(calls[0].title).toBe("Craft");
 			expect(calls[0].isWidth100).toBe(true);
 			expect(calls[0].isHeight100).toBe(true);
+			expect(calls[0].fnCanClose).toBe(fnCanClose);
 		});
 
 		it("honours the escape hatch and strips its own flag", async () => {

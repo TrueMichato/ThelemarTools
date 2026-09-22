@@ -7870,7 +7870,8 @@ class CharacterSheetInventory {
 			: null;
 		const generatedPlan = generatedProvenance?.catalog?.plan?.selection || null;
 		const generatedOrder = generatedProvenance?.creation?.order || null;
-		const generatedRepairRequired = generatedClassification.repairRequired
+		const generatedRepairRequired = efaExperimentalElixir?.status === "stale"
+			|| generatedClassification.repairRequired
 			|| (
 				generatedClassification.status === "valid"
 				&& generatedProvenance?.lifecycle?.state === "unresolved"
