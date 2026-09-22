@@ -100,4 +100,38 @@ describe("EFA Replicate Magic Item inventory status", () => {
 		expect(getHtml()).toContain("Repair required");
 		expect(state.getInventory().find(row => row.id === created.itemId)).toBeDefined();
 	});
+
+	test("keeps legacy managed generated markers out of provenance repair management and rendering", () => {
+		const state = new State();
+		state.addItem({
+			id: "spectral-chains",
+			name: "Spectral Chains",
+			source: "TGTT",
+			type: "M",
+			weapon: true,
+			_isCustom: true,
+			_isGeneratedFeatureItem: true,
+			_generatedItemId: "tgtt-chained-fury-spectral-chains",
+			_generatedItemProvenance: {
+				sourceType: "subclassFeature",
+				sourceFeature: "Manifest Chains",
+				source: "TGTT",
+				className: "Barbarian",
+				classSource: "TGTT",
+				subclassShortName: "Chained Fury",
+				subclassSource: "TGTT",
+			},
+		}, 1, true);
+		const item = state.getItems().find(row => row.id === "spectral-chains");
+		const classification = state.classifyGeneratedFeatureItem(item);
+		const html = makeInventory(state)._renderItemRow(item).outerHTML;
+
+		expect(classification).toEqual({
+			status: "ordinary",
+			repairRequired: false,
+			reason: "malformed-generated-metadata",
+		});
+		expect(state.getGeneratedFeatureItemManagementRows()).toEqual([]);
+		expect(html).not.toContain("Repair required");
+	});
 });

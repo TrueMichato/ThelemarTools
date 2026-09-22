@@ -172,6 +172,34 @@ describe("Generated feature item provenance", () => {
 		expect(state.getItemRaw(created.itemId)._generatedItemProvenance.owner).toEqual(legacyOwner);
 	});
 
+	it("preserves legacy four-part class feature UIDs as stale repair-required rows", () => {
+		const canonicalOwner = {
+			featureUid: "Replicate Magic Item|Artificer|EFA|2",
+			classUid: "Artificer|EFA",
+			subclassUid: null,
+			featureSource: "EFA",
+		};
+		const legacyOwner = {
+			featureUid: "Replicate Magic Item|Artificer|EFA|2",
+			classUid: "Artificer|EFA",
+			subclassUid: null,
+		};
+		const created = state.createGeneratedFeatureItem({item: getItem(), owner: canonicalOwner});
+		const wrapper = state.getInventory().find(row => row.id === created.itemId);
+		wrapper.item._generatedItemProvenance.owner = legacyOwner;
+
+		expect(state.createGeneratedFeatureItem({item: getItem(), owner: legacyOwner}))
+			.toEqual({ok: false, code: "invalid-generated-item-owner"});
+		expect(state.classifyGeneratedFeatureItem(wrapper)).toMatchObject({
+			status: "stale",
+			repairRequired: true,
+			reason: "legacy-class-feature-uid",
+			generatedItemId: created.generatedItemId,
+		});
+		expect(state.getGeneratedFeatureItemRows(canonicalOwner)).toEqual([]);
+		expect(state.removeGeneratedFeatureItemsByOwner(canonicalOwner)).toEqual([]);
+	});
+
 	it("surfaces unsupported versions as stale and never lists or removes them", () => {
 		const owner = getOwner();
 		const created = state.createGeneratedFeatureItem({item: getItem(), owner});

@@ -52,7 +52,7 @@ surface:
 ```javascript
 state.createGeneratedFeatureItem({
     item,
-    owner,       // exact featureUid/classUid/subclassUid
+    owner,       // exact featureUid/classUid/subclassUid/featureSource
     metadata,
     catalog,     // exact plan selection + resolved catalog item
     creation,    // stable order/receipt/event/batch
@@ -79,7 +79,7 @@ The persisted `_generatedItemProvenance` shape is:
 ```javascript
 {
     version: 1,
-    owner: {featureUid, classUid, subclassUid},
+    owner: {featureUid, classUid, subclassUid, featureSource},
     metadata: {sourceFeatureUid?, temporary?, ...},
     catalog: {
         plan: {slotId, acquisitionLevel?, lineage?, selection},
@@ -101,13 +101,15 @@ The persisted `_generatedItemProvenance` shape is:
 Load migration only upgrades rows that already carry valid exact generated
 ownership. It assigns missing creation/lifecycle defaults idempotently and
 never claims name-only legacy items. Unsupported provenance/lifecycle
-versions, duplicate generated ids, malformed owners, and missing/ambiguous
+versions, duplicate generated ids, malformed owners, legacy owners without an
+exact `featureSource` (including six-part subclass feature UIDs), and missing/ambiguous
 catalog identities stay in inventory and surface through
 `getGeneratedFeatureItemManagementRows()` plus the inventory's **Repair
 required** badge.
 
 EFA Replicate Magic Item uses exact owner
-`Replicate Magic Item|Artificer|EFA|2` / `Artificer|EFA`. Its production APIs
+`Replicate Magic Item|Artificer|EFA|2` / `Artificer|EFA`, with required,
+independent `featureSource: "EFA"` included in the owner key. Its production APIs
 are:
 
 ```javascript
@@ -132,9 +134,12 @@ blank/cancelled or unresolved production request does not mutate inventory;
 the surrounding long rest still commits. When the cap would be exceeded, the
 oldest exact-owner rows are evicted by persisted creation order. Immediate
 self-attunement is optional: requirement/cap failure is reported but does not
-cancel a valid creation.
+cancel a valid creation. Slot-exempt items use the shared attunement policy and
+never consume the ordinary cap.
 
 Capacity extensions use the same structured descriptor path as the base cap.
+Overlapping constrained descriptors are assigned with maximum matching, so
+capacity is independent of descriptor registration order.
 Descriptors declare exact allowed owners, allowed item kinds, optional
 category/generated predicates, lifecycle callback metadata, and extension
 metadata. This is the reusable seam for later Experimental Elixir, Armorer,

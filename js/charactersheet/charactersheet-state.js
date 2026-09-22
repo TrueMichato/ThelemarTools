@@ -37081,9 +37081,16 @@ class CharacterSheetState {
 		featureUid: "Replicate Magic Item|Artificer|EFA|2",
 		classUid: "Artificer|EFA",
 		subclassUid: null,
+		featureSource: "EFA",
 	});
 
-	static _normalizeGeneratedFeatureItemOwner (owner, {isLegacySubclassFeatureUid = false} = {}) {
+	static _normalizeGeneratedFeatureItemOwner (
+		owner,
+		{
+			isLegacyClassFeatureUid = false,
+			isLegacySubclassFeatureUid = false,
+		} = {},
+	) {
 		if (!owner || typeof owner !== "object" || Array.isArray(owner)) return null;
 
 		const getParts = (uid, count) => {
@@ -37096,7 +37103,10 @@ class CharacterSheetState {
 
 		const classParts = getParts(owner.classUid, 2);
 		const subclassParts = owner.subclassUid == null ? null : getParts(owner.subclassUid, 4);
-		const featureParts = getParts(owner.featureUid, subclassParts ? (isLegacySubclassFeatureUid ? 6 : 7) : 4);
+		const isLegacyFeatureUid = subclassParts ? isLegacySubclassFeatureUid : isLegacyClassFeatureUid;
+		const featureParts = getParts(owner.featureUid, subclassParts
+			? (isLegacyFeatureUid ? 6 : 7)
+			: 4);
 		if (!classParts || !featureParts || (owner.subclassUid != null && !subclassParts)) return null;
 		const featureLevel = Number(featureParts[subclassParts ? 5 : 3]);
 		if (!Number.isSafeInteger(featureLevel) || featureLevel < 1) return null;
@@ -37108,22 +37118,23 @@ class CharacterSheetState {
 			|| !equals(subclassParts[1], classParts[0])
 			|| !equals(subclassParts[2], classParts[1])
 		)) return null;
+		const normalizedFeatureSource = isLegacyFeatureUid
+			? null
+			: typeof owner.featureSource === "string"
+				? owner.featureSource.trim()
+				: "";
+		if (!isLegacyFeatureUid && !normalizedFeatureSource) return null;
 		if (
 			subclassParts
-			&& !isLegacySubclassFeatureUid
-			&& owner.featureSource != null
-			&& (
-				typeof owner.featureSource !== "string"
-				|| !owner.featureSource.trim()
-				|| !equals(featureParts[6], owner.featureSource.trim())
-			)
+			&& !isLegacyFeatureUid
+			&& !equals(featureParts[6], normalizedFeatureSource)
 		) return null;
 
 		return {
 			featureUid: featureParts.join("|"),
 			classUid: classParts.join("|"),
 			subclassUid: subclassParts ? subclassParts.join("|") : null,
-			...(subclassParts && !isLegacySubclassFeatureUid ? {featureSource: featureParts[6]} : {}),
+			...(!isLegacyFeatureUid ? {featureSource: normalizedFeatureSource} : {}),
 		};
 	}
 
@@ -37134,6 +37145,7 @@ class CharacterSheetState {
 			normalized.featureUid,
 			normalized.classUid,
 			normalized.subclassUid || "",
+			normalized.featureSource,
 		]
 			.map(part => part.toLowerCase())
 			.join("::");
@@ -37342,16 +37354,21 @@ class CharacterSheetState {
 		const isMetadataValid = provenance.metadata == null
 			|| (typeof provenance.metadata === "object" && !Array.isArray(provenance.metadata));
 		const owner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(provenance.owner);
-		if (!owner && isMetadataValid && provenance.owner?.subclassUid != null) {
+		if (!owner && isMetadataValid) {
+			const isSubclassOwner = provenance.owner?.subclassUid != null;
 			const legacyOwner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(
 				provenance.owner,
-				{isLegacySubclassFeatureUid: true},
+				isSubclassOwner
+					? {isLegacySubclassFeatureUid: true}
+					: {isLegacyClassFeatureUid: true},
 			);
 			if (legacyOwner) {
 				return {
 					status: "stale",
 					repairRequired: true,
-					reason: "legacy-subclass-feature-uid",
+					reason: isSubclassOwner
+						? "legacy-subclass-feature-uid"
+						: "legacy-class-feature-uid",
 					generatedItemId,
 					provenance: MiscUtil.copyFast(provenance),
 				};
@@ -37571,21 +37588,21 @@ class CharacterSheetState {
 
 	getGeneratedFeatureItemManagementRows () {
 		return (this._data.inventory || [])
-			.filter(row => {
-				const item = row?.item;
-				return item?._isGeneratedFeatureItem != null
-					|| item?._generatedItemId != null
-					|| item?._generatedItemProvenance != null;
-			})
 			.map(row => {
 				const classification = this.classifyGeneratedFeatureItem(row);
+				if (classification.status === "ordinary" && !classification.repairRequired) return null;
 				const issues = [];
-				if (classification.status !== "valid") issues.push(classification.reason);
+				if (classification.repairRequired) issues.push(classification.reason);
 				const catalog = classification.provenance?.catalog;
 				if (classification.status === "valid" && catalog?.resolvedItem) {
 					const matches = this._getExactCatalogItems(catalog.resolvedItem);
 					if (matches.length !== 1) issues.push(matches.length ? "ambiguous-catalog-item" : "missing-catalog-item");
 				}
+				if (
+					classification.status === "valid"
+					&& classification.provenance?.lifecycle?.state === "unresolved"
+					&& !issues.length
+				) issues.push("unresolved-lifecycle");
 				return {
 					itemId: row.id,
 					name: row.item?.name || "Generated Item",
@@ -37593,7 +37610,8 @@ class CharacterSheetState {
 					issues,
 					repairRequired: !!issues.length,
 				};
-			});
+			})
+			.filter(Boolean);
 	}
 
 	_getExactCatalogItems ({name, source} = {}) {
@@ -37691,20 +37709,26 @@ class CharacterSheetState {
 		const extensionSlots = applicable
 			.filter(descriptor => !descriptor.isBase)
 			.flatMap(descriptor => Array.from({length: descriptor.capacity}, () => descriptor));
-		const matchedRows = new Set();
-		const matchSlot = slotIndex => {
+		const rowMatches = Array(consideredRows.length).fill(-1);
+		const matchSlot = (slotIndex, visitedRows) => {
 			const descriptor = extensionSlots[slotIndex];
 			for (let rowIndex = 0; rowIndex < consideredRows.length; rowIndex++) {
-				if (matchedRows.has(rowIndex)) continue;
+				if (visitedRows.has(rowIndex)) continue;
 				if (!this._generatedFeatureItemMatchesLifecycleDescriptor(consideredRows[rowIndex], descriptor)) continue;
-				matchedRows.add(rowIndex);
-				return true;
+				visitedRows.add(rowIndex);
+				if (
+					rowMatches[rowIndex] === -1
+					|| matchSlot(rowMatches[rowIndex], visitedRows)
+				) {
+					rowMatches[rowIndex] = slotIndex;
+					return true;
+				}
 			}
 			return false;
 		};
 		let extensionCapacityUsed = 0;
 		for (let i = 0; i < extensionSlots.length; i++) {
-			if (matchSlot(i)) extensionCapacityUsed++;
+			if (matchSlot(i, new Set())) extensionCapacityUsed++;
 		}
 		const capacity = baseCapacity + extensionCapacityUsed;
 		return {
@@ -37907,7 +37931,7 @@ class CharacterSheetState {
 		const attunement = [];
 		try {
 			evicted.forEach(row => this.removeItem(row.id));
-			let plannedAttuned = (this._data.inventory || []).filter(row => row.attuned).length;
+			let plannedAttuned = this.getAttunedCount();
 			for (const [index, entry] of preflight.resolved.entries()) {
 				const item = entry.resolvedItem.item;
 				let attunementResult = {requested: entry.attune, status: "declined", reasons: []};
@@ -37917,13 +37941,14 @@ class CharacterSheetState {
 						attunementResult = {requested: true, status: "not-required", reasons: []};
 					} else {
 						const requirements = this.meetsAttunementRequirements(item);
+						const consumesAttunementSlot = !this.isAttunementExempt(item);
 						if (!requirements.canAttune) {
 							attunementResult = {requested: true, status: "requirements-failed", reasons: requirements.reasons};
-						} else if (plannedAttuned >= this.getMaxAttunement()) {
+						} else if (consumesAttunementSlot && plannedAttuned >= this.getMaxAttunement()) {
 							attunementResult = {requested: true, status: "cap-reached", reasons: ["No attunement slots are available."]};
 						} else {
 							attunementResult = {requested: true, status: "attuned", reasons: []};
-							plannedAttuned++;
+							if (consumesAttunementSlot) plannedAttuned++;
 						}
 					}
 				}

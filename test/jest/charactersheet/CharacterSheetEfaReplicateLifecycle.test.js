@@ -252,7 +252,7 @@ describe("EFA Replicate Magic Item lifecycle", () => {
 			.map(row => row.item._generatedItemProvenance.creation.order)).toEqual([3, 4]);
 	});
 
-	test("uses the generic descriptor path for an Armor-constrained extra capacity without registering Armorer mechanics", () => {
+	test("maximizes overlapping extension capacity independently of descriptor order", () => {
 		const {state} = buildState();
 		const owner = State.EFA_REPLICATE_MAGIC_ITEM_OWNER;
 		const make = item => state.createGeneratedFeatureItem({
@@ -267,36 +267,42 @@ describe("EFA Replicate Magic Item lifecycle", () => {
 				metadata: {},
 			},
 		});
-		make({name: "First Wand", source: "TST", type: "WD"});
+		make({name: "First Armor", source: "TST", type: "HA"});
 		make({name: "Second Wand", source: "TST", type: "WD"});
-		const armor = make({name: "Third Armor", source: "TST", type: "HA"});
-		const descriptors = state.getEfaReplicateMagicItemLifecycleDescriptors({
-			extensions: [{
-				id: "armorer-level-9-armor-capacity-proof",
-				owner,
-				capacity: 1,
-				allowedOwners: [owner],
-				allowedItemKinds: ["armor"],
-				categoryPredicate: {itemKinds: ["armor"]},
-				generatedPredicate: {featureUid: owner.featureUid},
-				lifecycleCallbacks: {onOwnerRemoved: "remove"},
-				metadata: {proofOnly: true, consumerRegistered: false},
-			}],
-		});
+		make({name: "Third Wand", source: "TST", type: "WD"});
+		make({name: "Fourth Wand", source: "TST", type: "WD"});
+		const broad = {
+			id: "broad-armor-or-wand-capacity-proof",
+			owner,
+			capacity: 1,
+			allowedOwners: [owner],
+			allowedItemKinds: ["armor", "wand"],
+			categoryPredicate: {itemKinds: ["armor", "wand"]},
+			generatedPredicate: {featureUid: owner.featureUid},
+			lifecycleCallbacks: {onOwnerRemoved: "remove"},
+			metadata: {proofOnly: true, consumerRegistered: false},
+		};
+		const armorOnly = {
+			id: "armorer-level-9-armor-capacity-proof",
+			owner,
+			capacity: 1,
+			allowedOwners: [owner],
+			allowedItemKinds: ["armor"],
+			categoryPredicate: {itemKinds: ["armor"]},
+			generatedPredicate: {featureUid: owner.featureUid},
+			lifecycleCallbacks: {onOwnerRemoved: "remove"},
+			metadata: {proofOnly: true, consumerRegistered: false},
+		};
 
-		expect(state.getGeneratedFeatureItemCapacitySnapshot({owner, descriptors})).toMatchObject({
-			fits: true,
-			baseCapacity: 2,
-			extensionCapacityUsed: 1,
-			capacity: 3,
-		});
-		state.replaceItem(armor.itemId, {name: "Third Wand", source: "TST", type: "WD"});
-		expect(state.getGeneratedFeatureItemCapacitySnapshot({owner, descriptors})).toMatchObject({
-			fits: false,
-			baseCapacity: 2,
-			extensionCapacityUsed: 0,
-			capacity: 2,
-		});
+		for (const extensions of [[broad, armorOnly], [armorOnly, broad]]) {
+			const descriptors = state.getEfaReplicateMagicItemLifecycleDescriptors({extensions});
+			expect(state.getGeneratedFeatureItemCapacitySnapshot({owner, descriptors})).toMatchObject({
+				fits: true,
+				baseCapacity: 2,
+				extensionCapacityUsed: 2,
+				capacity: 4,
+			});
+		}
 	});
 
 	test("attunes when legal, reports refusal without cancelling creation, and preserves ordinary item mechanics", () => {
@@ -329,6 +335,51 @@ describe("EFA Replicate Magic Item lifecycle", () => {
 				chargesCurrent: 3,
 			},
 		});
+	});
+
+	test("uses slot-consuming attunement count and never charges exempt created items against the cap", () => {
+		const {state} = buildState();
+		const exemptionText = "This attunement doesn't count against the number of magic items to which you can normally be attuned.";
+		state.addItem({name: "First Normal Attunement", source: "TST", type: "W", requiresAttunement: true}, 1, false, true);
+		state.addItem({name: "Second Normal Attunement", source: "TST", type: "W", requiresAttunement: true}, 1, false, true);
+		state.addItem({
+			name: "Existing Exempt Attunement",
+			source: "TST",
+			type: "W",
+			requiresAttunement: true,
+			entries: [exemptionText],
+		}, 1, false, true);
+		state.setItemCatalog([
+			...ENHANCED_ITEMS.filter(item => item.name !== "Silver Cog"),
+			{
+				name: "Silver Cog",
+				source: "TST",
+				type: "W",
+				wondrous: true,
+				requiresAttunement: true,
+				entries: [exemptionText],
+			},
+		]);
+
+		expect(state.getAttunedItems()).toHaveLength(3);
+		expect(state.getAttunedCount()).toBe(2);
+		const result = state.commitEfaReplicateMagicItemsAtLongRest({
+			selections: [
+				{slotId: getSlot(state, "Bag of Holding|XDMG").slotId, attune: true},
+				{slotId: getSlot(state, "Silver Cog|TST").slotId, attune: true},
+			],
+		});
+
+		expect(result).toMatchObject({
+			ok: true,
+			attunement: [
+				{status: "attuned"},
+				{status: "attuned"},
+			],
+		});
+		expect(state.getAttunedItems()).toHaveLength(5);
+		expect(state.getAttunedCount()).toBe(3);
+		expect(state.getInventory().find(row => row.id === result.created[1].itemId)?.attuned).toBe(true);
 	});
 
 	test("uses normal container removal semantics so oldest-item eviction spills contents instead of deleting them", () => {
@@ -374,7 +425,19 @@ describe("EFA Replicate Magic Item lifecycle", () => {
 			item: {name: "Other Generated Item", source: "TST", type: "W"},
 			owner: otherOwner,
 		});
+		const wrongFeatureSourceOwner = {
+			featureUid: "Replicate Magic Item|Artificer|EFA|2",
+			classUid: "Artificer|EFA",
+			subclassUid: null,
+			featureSource: "HB",
+		};
+		const wrongFeatureSource = state.createGeneratedFeatureItem({
+			item: {name: "Wrong-source Replica", source: "TST", type: "W"},
+			owner: wrongFeatureSourceOwner,
+		});
 
+		expect(state.getGeneratedFeatureItemRows(State.EFA_REPLICATE_MAGIC_ITEM_OWNER)
+			.map(row => row.id)).toEqual(created.created.map(row => row.itemId));
 		expect(state.commitGeneratedFeatureItemPlanLineage({
 			owner: State.EFA_REPLICATE_MAGIC_ITEM_OWNER,
 			removedPlan: bag.selection,
@@ -383,10 +446,12 @@ describe("EFA Replicate Magic Item lifecycle", () => {
 		expect(state.getInventory().find(row => row.id === created.created[0].itemId)).toBeUndefined();
 		expect(state.getInventory().find(row => row.id === created.created[1].itemId)).toBeDefined();
 		expect(state.getInventory().find(row => row.id === other.itemId)).toBeDefined();
+		expect(state.getInventory().find(row => row.id === wrongFeatureSource.itemId)).toBeDefined();
 
 		state.removeClass("Artificer", "EFA");
 		expect(state.getGeneratedFeatureItemRows(State.EFA_REPLICATE_MAGIC_ITEM_OWNER)).toEqual([]);
 		expect(state.getInventory().find(row => row.id === other.itemId)).toBeDefined();
+		expect(state.getInventory().find(row => row.id === wrongFeatureSource.itemId)).toBeDefined();
 	});
 
 	test("round-trips provenance, order, attunement, specific variants, containers, and repair state without silently dropping rows", () => {
@@ -460,7 +525,18 @@ describe("EFA Replicate Magic Item lifecycle", () => {
 			owner: wrongOwner,
 			equipped: true,
 		});
+		const wrongFeatureSource = state.createGeneratedFeatureItem({
+			item: {name: "Wrong-source Replica Wand", source: "TST", type: "WD"},
+			owner: {
+				featureUid: "Replicate Magic Item|Artificer|EFA|2",
+				classUid: "Artificer|EFA",
+				subclassUid: null,
+				featureSource: "HB",
+			},
+			equipped: true,
+		});
 		expect(wrong.ok).toBe(true);
+		expect(wrongFeatureSource.ok).toBe(true);
 
 		const requirement = state.getSpellCastFocusRequirement({
 			name: "Cure Wounds",

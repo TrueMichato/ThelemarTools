@@ -7221,18 +7221,16 @@ class CharacterSheetInventory {
 		const canOpenPack = !!this._getEffectivePackContents(item)?.length;
 		const packProvenanceName = item._fromPack ? item._fromPack.split("|")[0] : "";
 		const generatedClassification = this._state.classifyGeneratedFeatureItem?.(item) || {status: "ordinary", reason: "unsupported"};
-		const hasGeneratedMarker = item._isGeneratedFeatureItem != null
-			|| item._generatedItemId != null
-			|| item._generatedItemProvenance != null;
 		const generatedProvenance = generatedClassification.status === "valid"
 			? generatedClassification.provenance
 			: null;
 		const generatedPlan = generatedProvenance?.catalog?.plan?.selection || null;
 		const generatedOrder = generatedProvenance?.creation?.order || null;
-		const generatedRepairRequired = hasGeneratedMarker && (
-			generatedClassification.status !== "valid"
-			|| generatedProvenance?.lifecycle?.state === "unresolved"
-		);
+		const generatedRepairRequired = generatedClassification.repairRequired
+			|| (
+				generatedClassification.status === "valid"
+				&& generatedProvenance?.lifecycle?.state === "unresolved"
+			);
 		const generatedFeatureLabel = generatedProvenance?.metadata?.sourceFeatureUid
 			? String(generatedProvenance.metadata.sourceFeatureUid).split("|")[0]
 			: "Generated feature item";

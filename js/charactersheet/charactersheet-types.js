@@ -474,7 +474,7 @@ void globalThis;
  *
  * @typedef {object} GeneratedFeatureItemProvenance
  * @property {1} version
- * @property {{featureUid: string, classUid: string, subclassUid: string|null}} owner
+ * @property {{featureUid: string, classUid: string, subclassUid: string|null, featureSource: SourceCode}} owner
  * @property {Object<string, *>} metadata
  * @property {{
  *   plan: {slotId: string|null, acquisitionLevel?: number, lineage?: Array<*>, selection: ArtificerPlanSelection},
