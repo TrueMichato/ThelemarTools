@@ -7,12 +7,14 @@ import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-inventory.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 
 const State = globalThis.CharacterSheetState;
 const Progression = globalThis.CharacterSheetProgression;
 const Plans = globalThis.CharacterSheetArtificerPlans;
 const Inventory = globalThis.CharacterSheetInventory;
 const Combat = globalThis.CharacterSheetCombat;
+const Spells = globalThis.CharacterSheetSpells;
 
 if (typeof globalThis.document === "undefined") {
 	globalThis.document = {
@@ -785,6 +787,64 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		expect(state.getBonusSpellSlotsForLevel(1)).toBe(0);
 	});
 
+	test("a real Spells-tab cast spends the temporary Drain slot before level loss cleanup", async () => {
+		const {state} = buildState();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 3}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+		state.setSpellSlots(2, state.getSpellSlotsMax(2), state.getSpellSlotsCurrent(2) - 1);
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+
+		const spellData = {
+			name: "Cure Wounds",
+			source: "XPHB",
+			level: 1,
+			duration: [{type: "instant"}],
+			components: {v: true, s: true},
+		};
+		state.addSpell(spellData, true);
+		const spell = state.getSpells().find(it => it.name === spellData.name && it.source === spellData.source);
+		const spells = Object.create(Spells.prototype);
+		spells._state = state;
+		spells._allSpells = [spellData];
+		spells._page = {
+			saveCharacter: jest.fn(),
+			_renderQuickSpells: jest.fn(),
+		};
+		spells._resolveMetamagicChoice = jest.fn(async () => ({cancelled: false, metamagic: null}));
+		spells._pHandleCastingConstraints = jest.fn(async () => true);
+		spells._resolveVariantComponentChoice = jest.fn(async () => ({cancelled: false}));
+		spells._pResolveSpellCastFocus = jest.fn(async () => ({
+			cancelled: false,
+			focusInventoryRow: null,
+			focusReference: null,
+			requirement: null,
+		}));
+		spells._pResolveGamblerCastReceipt = jest.fn(async () => ({cancelled: false, resolution: null, deferCast: false}));
+		spells._spendMetamagicCost = jest.fn(() => true);
+		spells._getNormalizedCastMeta = jest.fn(() => ({}));
+		spells._showCastResult = jest.fn(async () => ({cancelled: false}));
+		spells._pConsumeMaterialComponent = jest.fn(async () => {});
+		spells.renderSlots = jest.fn();
+		state.pPublishCommittedSpellCast = jest.fn(async () => null);
+
+		await spells._castSpell(spell.id, {
+			withMetamagic: false,
+			decision: {slotLevel: 1, castAsRitual: false, skipComponentPrompt: true},
+		});
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 2}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
+		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
+		state.reconcileEfaArtificerTinker({reason: "test-cast-level-loss"});
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
+	});
+
 	test("exact EFA source loss removes Tinker's creations and temporary Drain slots without claiming other owners", () => {
 		const {state} = buildState();
 		const tinker = state.previewEfaArtificerTinkerTransaction({
@@ -848,6 +908,55 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		expect(unrelatedHtml).not.toContain("charsheet__item-efa-charge");
 		expect(unrelatedHtml).not.toContain("charsheet__item-efa-drain");
 		expect(unrelatedHtml).not.toContain("charsheet__item-efa-transmute");
+	});
+
+	test("Pact-only Charge stays enabled and clickable from Inventory and Combat Actions", () => {
+		const {state} = buildState();
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		state.setItemCharges(replica.itemId, 0);
+		state.addClass({name: "Warlock", source: "XPHB", level: 1});
+		for (let level = 1; level <= 9; level++) state.setSpellSlotCurrent(level, 0);
+		state.setPactSlots({level: 1, current: 1, max: 1});
+		expect(state.getEfaArtificerTinkerOptions().magicItemTinker.chargeSlots).toEqual([{
+			pool: "pact",
+			level: 1,
+			current: 1,
+			max: 1,
+		}]);
+
+		const originalAddEventListener = document.addEventListener;
+		let inventoryClickHandler;
+		document.addEventListener = jest.fn((eventName, handler) => {
+			if (eventName === "click") inventoryClickHandler = handler;
+		});
+		const {inventory} = makeInventory(state);
+		document.addEventListener = originalAddEventListener;
+		const openInventoryTinker = jest.spyOn(inventory, "pShowEfaArtificerTinker").mockResolvedValue(null);
+		const inventoryHtml = inventory._renderItemRow(state.getItems().find(item => item.id === replica.itemId)).outerHTML;
+		const inventoryChargeButton = inventoryHtml.match(/<button[^>]*charsheet__item-efa-charge[^>]*>/)?.[0] || "";
+		expect(inventoryChargeButton).not.toContain("disabled");
+		inventoryClickHandler({
+			target: {
+				closest: selector => {
+					if (selector === ".charsheet__item-efa-charge") return {};
+					if (selector === ".charsheet__item") return {dataset: {itemId: replica.itemId}};
+					return null;
+				},
+			},
+		});
+		expect(openInventoryTinker).toHaveBeenCalledWith({operation: "charge", itemId: replica.itemId});
+
+		const openCombatTinker = jest.fn();
+		const combat = Object.create(Combat.prototype);
+		combat._state = state;
+		combat._page = {_inventory: {pShowEfaArtificerTinker: openCombatTinker}};
+		const container = globalThis.e_({tag: "div"});
+		combat._renderEfaArtificerTinkerActions(container);
+		const chargeRow = container.children.find(row => row.outerHTML.includes("Charge Magic Item"));
+		const chargeButton = chargeRow.children.at(-1);
+		expect(chargeButton.disabled).toBe(false);
+		chargeButton.click();
+		expect(openCombatTinker).toHaveBeenCalledWith({operation: "charge"});
 	});
 
 	test("closing the shared Tinker modal is pre-cost and non-mutating", async () => {

@@ -897,7 +897,11 @@ without touching unrelated items or modifiers. It recalculates a stale slot
 maximum even when the exact Drain modifier is missing. The availability marker
 tracks whether the temporary current slot remains: source/rest cleanup subtracts
 it only while unspent, while an expended temporary slot preserves ordinary
-class-slot current. The idempotent
+class-slot current. All ordinary slot-current writes, including
+`setSpellSlots()`, manual pips, and normal Spells-tab casts, route through the
+same downward-mutation check; other slot levels do not consume the marker.
+Inventory and Combat Charge affordances use the canonical `chargeSlots` option
+list, so a Pact-only slot remains usable. The idempotent
 `applyEfaArtificerTinkerLongRestTransition()` runs from both `onLongRest()` and
 the active Finish Long Rest controller after its undo snapshot. A committed
 long rest therefore removes all exact-owner Tinker's creations, refills its

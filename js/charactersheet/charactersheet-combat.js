@@ -8701,8 +8701,7 @@ class CharacterSheetCombat {
 
 		const actionAvailable = !this._state.isInCombat() || this._state.isActionTypeAvailable("action");
 		const bonusAvailable = !this._state.isInCombat() || this._state.isActionTypeAvailable("bonus");
-		const hasChargeSlot = Array.from({length: 9}, (_, ix) => ix + 1)
-			.some(level => this._state.getSpellSlotsCurrent(level) > 0);
+		const hasChargeSlot = !!options.magicItemTinker.chargeSlots.length;
 		const chargedTargets = options.magicItemTinker.replicateItems.filter(item =>
 			Number(item.chargesMax) > 0 && Number(item.chargesCurrent) < Number(item.chargesMax),
 		);

@@ -462,6 +462,10 @@ missing, and never claims other generated owners or modifiers. The availability
 marker is consumed by canonical ordinary-slot decrements: cleanup subtracts the
 temporary current slot only while it is still available, preserving both the
 unspent `2/4 -> 3/5 -> 2/4` case and the already-spent `4/5 -> 4/4` case.
+`setSpellSlots()`, `setSpellSlotCurrent()`, `useSpellSlot()`, and recalculation
+all share the same current-slot mutation path, so Spells-tab casts, manual pips,
+and direct state transactions cannot bypass the marker. Mutations at other slot
+levels leave it intact.
 `applyEfaArtificerTinkerLongRestTransition()` is idempotent and is called by
 both `state.onLongRest()` and the active Finish Long Rest controller after its
 undo snapshot. A committed long rest therefore removes all exact-owner
@@ -473,8 +477,10 @@ operations rather than a second inventory manager. Inventory exposes one
 level-gated Tinker's Magic toolbar action and compact Charge/Drain/Transmute
 buttons only on exact live Replicate rows; Combat Actions mirrors the same four
 operations. Both surfaces delegate to one protected modal and the same state
-transactions. Charge labels ordinary and Pact Magic pools separately. Native
-labelled selects, explicit disabled reasons, confirmation copy,
+transactions. Charge labels ordinary and Pact Magic pools separately, and
+Inventory/Combat enablement derives from the canonical `chargeSlots` options
+rather than scanning only ordinary slots. Native labelled selects, explicit
+disabled reasons, confirmation copy,
 `role="status"`/`aria-live="polite"` feedback, focus restoration, Escape, and
 an auto-fit single-column layout preserve keyboard and mobile use.
 Anti-goals are subclass mechanics, Spell-Storing Item, levels 10/14/18/20,

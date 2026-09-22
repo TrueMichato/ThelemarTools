@@ -20293,15 +20293,35 @@ class CharacterSheetState {
 		// Support array format: [{level: 1, current: 0, max: 4}, ...]
 		if (Array.isArray(levelOrArray)) {
 			for (const slot of levelOrArray) {
-				this._data.spellcasting.spellSlots[slot.level] = {
-					current: slot.current ?? slot.max,
-					max: slot.max,
-				};
+				this._setSpellSlotsEntry(slot.level, slot.max, slot.current ?? slot.max);
 			}
 		} else {
 			// Original format: (level, max, current)
-			this._data.spellcasting.spellSlots[levelOrArray] = {current, max};
+			this._setSpellSlotsEntry(levelOrArray, max, current);
 		}
+	}
+
+	_setSpellSlotsEntry (level, max, current) {
+		const existing = this._data.spellcasting.spellSlots[level];
+		if (existing) existing.max = max;
+		else this._data.spellcasting.spellSlots[level] = {current: 0, max};
+		this._setOrdinarySpellSlotCurrent(level, current);
+	}
+
+	_setOrdinarySpellSlotCurrent (level, current) {
+		const slot = this._data.spellcasting.spellSlots[level];
+		if (!slot) return false;
+		const previous = Math.max(0, Number(slot.current) || 0);
+		const next = Math.max(0, Math.min(current, slot.max));
+		if (
+			next < previous
+			&& this._data.efaArtificerTinker?.drainSlotAvailable
+			&& Number(this._data.efaArtificerTinker.drainSlotLevel) === Number(level)
+		) {
+			this._data.efaArtificerTinker.drainSlotAvailable = false;
+		}
+		slot.current = next;
+		return true;
 	}
 
 	/**
@@ -20570,7 +20590,7 @@ class CharacterSheetState {
 				// silently refills expended slots (spent = old max − old current).
 				const spent = Math.max(0, (existing.max || 0) - (existing.current || 0));
 				existing.max = targetMax;
-				existing.current = Math.max(0, targetMax - spent);
+				this._setOrdinarySpellSlotCurrent(level, Math.max(0, targetMax - spent));
 			}
 		}
 
@@ -20602,30 +20622,13 @@ class CharacterSheetState {
 	}
 
 	setSpellSlotCurrent (level, current) {
-		if (this._data.spellcasting.spellSlots[level]) {
-			const slot = this._data.spellcasting.spellSlots[level];
-			const next = Math.max(0, Math.min(current, slot.max));
-			if (
-				next < slot.current
-				&& this._data.efaArtificerTinker?.drainSlotAvailable
-				&& Number(this._data.efaArtificerTinker.drainSlotLevel) === Number(level)
-			) {
-				this._data.efaArtificerTinker.drainSlotAvailable = false;
-			}
-			slot.current = next;
-		}
+		this._setOrdinarySpellSlotCurrent(level, current);
 	}
 
 	useSpellSlot (level) {
 		const slot = this._data.spellcasting.spellSlots[level];
 		if (slot && slot.current > 0) {
-			slot.current--;
-			if (
-				this._data.efaArtificerTinker?.drainSlotAvailable
-				&& Number(this._data.efaArtificerTinker.drainSlotLevel) === Number(level)
-			) {
-				this._data.efaArtificerTinker.drainSlotAvailable = false;
-			}
+			this._setOrdinarySpellSlotCurrent(level, slot.current - 1);
 			return true;
 		}
 		return false;
@@ -20633,7 +20636,7 @@ class CharacterSheetState {
 
 	recoverSpellSlots () {
 		for (const level of Object.keys(this._data.spellcasting.spellSlots)) {
-			this._data.spellcasting.spellSlots[level].current = this._data.spellcasting.spellSlots[level].max;
+			this._setOrdinarySpellSlotCurrent(level, this._data.spellcasting.spellSlots[level].max);
 		}
 	}
 
@@ -38747,7 +38750,7 @@ class CharacterSheetState {
 					0,
 					(currentByLevel[level] ?? slots.current) - (removeAvailableSlot && level === markerLevel ? 1 : 0),
 				);
-				slots.current = Math.min(desiredCurrent, slots.max);
+				this._setOrdinarySpellSlotCurrent(level, Math.min(desiredCurrent, slots.max));
 			}
 		} else {
 			for (const [levelRaw, removed] of Object.entries(removedByLevel)) {
@@ -38759,7 +38762,7 @@ class CharacterSheetState {
 					0,
 					(currentByLevel[level] ?? slots.current) - (removeAvailableSlot && level === markerLevel ? 1 : 0),
 				);
-				slots.current = Math.min(desiredCurrent, slots.max);
+				this._setOrdinarySpellSlotCurrent(level, Math.min(desiredCurrent, slots.max));
 				if (!slots.max) delete this._data.spellcasting.spellSlots[level];
 			}
 		}

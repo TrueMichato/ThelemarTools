@@ -7874,8 +7874,7 @@ class CharacterSheetInventory {
 			.find(candidate => candidate.itemId === item.id) || null;
 		const efaBonusActionAvailable = !this._state.isInCombat?.() || this._state.isActionTypeAvailable?.("bonus");
 		const efaActionAvailable = !this._state.isInCombat?.() || this._state.isActionTypeAvailable?.("action");
-		const efaChargeSlotsAvailable = Array.from({length: 9}, (_, ix) => ix + 1)
-			.some(level => this._state.getSpellSlotsCurrent?.(level) > 0);
+		const efaChargeSlotsAvailable = !!efaTinkerOptions?.magicItemTinker?.chargeSlots?.length;
 		const efaCanCharge = !!efaReplicateItem
 			&& Number(efaReplicateItem.chargesMax) > 0
 			&& Number(efaReplicateItem.chargesCurrent) < Number(efaReplicateItem.chargesMax)
