@@ -182,6 +182,72 @@ conditional grants (e.g. "while submerged you gain blindsight 10 ft.")
 stay in the race's `entries` block and are surfaced through the
 active-state / toggle system, not through the numeric senses fields.
 
+### Feature-Owned Companions
+
+Feature companions remain ordinary records in `_data.companions[]`; there is no
+Battle-Smith-only store. Exact ownership is carried by a full subclass-feature
+UID:
+
+```javascript
+{
+    id: "stable-companion-id",
+    featureGrant: {
+        type: "subclassFeature",
+        uid: "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA",
+        className: "Artificer",
+        classSource: "EFA",
+        subclassShortName: "Battle Smith",
+        subclassSource: "EFA",
+        level: 3,
+    },
+    setup: {...},        // persisted player choices
+    lifecycle: {...},    // status, generation, and lifecycle timestamps
+    uses: {...},         // companion-owned resources and current values
+    turnUsage: {...},    // current action/reaction/feature flags
+    hitDice: {...},      // die plus current/max counts
+    scaling: {
+        kind: "featureCompanion",
+        featureUid: "...|3|EFA",
+        registryFeatureUid: "...|3",
+        identity: {...},
+        summonerContext: {...},
+        resolved: {...}, // detached JSON-safe rules output
+    },
+}
+```
+
+`CharacterSheetCompanionRules` is the sole formula authority.
+`resolveFeatureCompanionRules(featureUid, summonerContext)` requires an exact
+registered UID and an already-resolved context. Missing modules, descriptors,
+or required context fields throw instead of falling back to a same-named TCE
+feature.
+
+`reconcileFeatureOwnedCompanion()` refreshes only derived identity, statistics,
+actions/reactions, resource maxima, Hit Dice maximum, and the resolved scaling
+overlay. It preserves the record ID, nickname/setup, arbitrary extension keys,
+generation, lifecycle status/timestamps, turn usage, spent resources, spent Hit
+Dice, conditions, and temporary HP. Current HP is kept exactly and is only
+clamped when a new maximum is lower; a level or Intelligence increase never
+heals the companion.
+
+Whole-owner helpers (`getFeatureOwnedCompanions`,
+`deactivateFeatureOwnedCompanions`, `removeFeatureOwnedCompanions`, and
+`rebindFeatureOwnedCompanion`) compare the normalized full source-qualified UID.
+They must not use `type`, display name, or subclass name, so EFA, TCE, and future
+Reanimator companions can coexist safely.
+
+Legacy Steel Defender migration is intentionally narrower than the generic
+runtime contract. It binds only one exact `steel_defender` statblock whose
+name/source match one exact-source Artificer/Battle Smith owner. Missing source,
+cross-source ownership, duplicate candidates, or an already-bound owner remain
+untouched. Outcomes are exposed by `getFeatureCompanionMigrationStatus()` under
+`migrationFlags.featureCompanionLegacyV1`; migration never creates a companion,
+heals it, or initializes resource/Hit Die current values above zero.
+
+This State milestone does not acquire companions, prompt for setup, render
+companion controls, spend Repair/Hit Dice, implement command economy, transition
+death/revival/replacement state, apply rest policies, or run Arcane Jolt.
+
 ### Spellcasting
 
 ```javascript

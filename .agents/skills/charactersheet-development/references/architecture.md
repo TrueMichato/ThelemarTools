@@ -542,6 +542,42 @@ host, representative feature adoption, and the no-stale-result invariant.
 - `loadFromJson(json)`: Deep merge with defaults + migration steps + effect re-application
 - Migration handles: legacy features, combat traditions, custom ability effects, unarmed strike
 
+#### Feature-companion reconciliation
+
+`charactersheet-state.js` imports `charactersheet-companion-rules.js` before
+declaring State, so production and tests use the same browser-global rules
+module. State must not duplicate a companion formula or silently substitute a
+same-named source.
+
+Public State contracts:
+
+- `resolveFeatureCompanionRules(featureUid, summonerContext)` resolves one exact
+  registry descriptor and throws for a missing module, descriptor, or invalid
+  already-derived context.
+- `reconcileFeatureOwnedCompanion(companionId, options)` refreshes derived
+  statistics/actions/scaling in place. It keeps the stable ID, setup/custom
+  metadata, lifecycle/generation, exact current HP (clamped only downward),
+  spent uses/Hit Dice, and turn usage.
+- `getFeatureOwnedCompanions`, `deactivateFeatureOwnedCompanions`,
+  `removeFeatureOwnedCompanions`, and `rebindFeatureOwnedCompanion` compare the
+  normalized full source-qualified feature UID. Never replace this with a
+  `type`, display-name, or subclass-name lookup.
+- `migrateLegacyFeatureCompanions()` has a narrow Steel Defender recognition
+  adapter but dispatches through the same registry/reconciler. It requires exact
+  defender source/type/statblock identity plus exact class/subclass source,
+  refuses duplicate or cross-source candidates, creates nothing, and initializes
+  no free HP/resources. `getFeatureCompanionMigrationStatus()` surfaces every
+  non-guessing outcome.
+
+The resolved JSON-safe rules result lives under
+`companion.scaling.resolved`; companion save/check readers consult it before
+legacy proficiency projections. Unknown future feature descriptors remain
+persisted and untouched until their registry entry exists.
+
+Acquisition/setup UI, Respec wiring, companion rendering, action economy,
+Repair/Hit Dice transactions, lifecycle transitions, rest effects, Arcane Jolt,
+and E2E coverage are later milestones.
+
 ## Key Integration Points
 
 | Module A | Module B | Relationship |
@@ -620,6 +656,8 @@ Effect types: `resistance`, `immunity`, `conditionImmunity`, `saveProficiency`, 
 ## Global Dependencies
 
 The character sheet modules depend on these 5etools globals (mocked in tests):
+- `CharacterSheetCompanionRules` — exact-source feature-companion descriptors
+  and pure summoner-context resolvers; loaded by `charactersheet-state.js`
 - `Parser` — ability abbreviations, spell levels, source constants
 - `MiscUtil` — deep copy, property access
 - `CryptUtil` — UID generation

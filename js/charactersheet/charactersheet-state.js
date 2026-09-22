@@ -4,6 +4,7 @@
  */
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import "./charactersheet-companion-rules.js";
 import {CharacterSheetGamblerRules, GAMBLER_GAMBLING_TABLE} from "./charactersheet-gambler.js";
 import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
 import {CharacterSheetProgression} from "./charactersheet-progression.js";
@@ -7127,6 +7128,21 @@ class CharacterSheetState {
 				if (Object.hasOwn(normalized, key)) c[key] = normalized[key];
 				else if (Object.hasOwn(c, key)) delete c[key];
 			}
+		}
+
+		this.migrateLegacyFeatureCompanions();
+
+		for (const companion of this._data.companions) {
+			const featureUid = companion?.featureGrant?.uid;
+			if (!featureUid) continue;
+			const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+			if (!rules?.getDescriptor(featureUid)) continue;
+			const contextResult = this._tryGetFeatureCompanionSummonerContext(featureUid);
+			if (!contextResult.ok) continue;
+			this.reconcileFeatureOwnedCompanion(companion.id, {
+				featureUid,
+				summonerContext: contextResult.context,
+			});
 		}
 	}
 
@@ -74177,8 +74193,543 @@ class CharacterSheetState {
 		"hitDice",
 	]);
 
+	static FEATURE_COMPANION_MIGRATION_KEY = "featureCompanionLegacyV1";
+
 	static _isCompanionSchemaObject (value) {
 		return value != null && typeof value === "object" && !Array.isArray(value);
+	}
+
+	static _getFeatureCompanionRulesModule ({required = true} = {}) {
+		const rules = globalThis.CharacterSheetCompanionRules;
+		if (rules?.getDescriptor && rules?.resolve && rules?.getRegistry) return rules;
+		if (!required) return null;
+		throw new ReferenceError("CharacterSheetCompanionRules must be loaded before resolving feature companions.");
+	}
+
+	static _normalizeFeatureCompanionUid (featureUid) {
+		if (typeof featureUid !== "string") return null;
+		const parts = featureUid.split("|").map(part => part.trim());
+		if (parts.length !== 6 && parts.length !== 7) return null;
+
+		const [name, className, classSource, subclassShortName, subclassSource, levelRaw, featureSourceRaw] = parts;
+		if (!name || !className || !classSource || !subclassShortName || !subclassSource || !levelRaw) return null;
+		const level = Number(levelRaw);
+		if (!Number.isInteger(level) || level < 0) return null;
+
+		return [
+			name,
+			className,
+			classSource,
+			subclassShortName,
+			subclassSource,
+			Math.floor(level),
+			featureSourceRaw || subclassSource,
+		].join("|");
+	}
+
+	static _getFeatureCompanionOwnerKey (featureUid) {
+		return CharacterSheetState._normalizeFeatureCompanionUid(featureUid)?.toLowerCase() || null;
+	}
+
+	static _getFeatureCompanionOwnerMetadata (featureUid, descriptor) {
+		const normalizedUid = CharacterSheetState._normalizeFeatureCompanionUid(featureUid);
+		if (!normalizedUid) throw new TypeError("Feature companion ownership requires a complete source-qualified subclass feature UID.");
+
+		const [className, classSource, ...classRemainder] = String(descriptor?.identity?.classUid || "").split("|");
+		const [subclassShortName, subclassClassName, subclassClassSource, subclassSource, ...subclassRemainder] =
+			String(descriptor?.identity?.subclassUid || "").split("|");
+		if (
+			!className
+			|| !classSource
+			|| classRemainder.length
+			|| !subclassShortName
+			|| !subclassSource
+			|| subclassRemainder.length
+			|| subclassClassName !== className
+			|| subclassClassSource !== classSource
+		) {
+			throw new TypeError(`Feature companion descriptor "${normalizedUid}" has invalid source-qualified owner identity.`);
+		}
+
+		return {
+			type: "subclassFeature",
+			uid: normalizedUid,
+			className,
+			classSource,
+			subclassShortName,
+			subclassSource,
+			level: Number(normalizedUid.split("|")[5]),
+		};
+	}
+
+	static _getFeatureCompanionRuleEntryNameKey (name) {
+		return String(name || "")
+			.replace(/\s*\([^)]*\)\s*$/g, "")
+			.trim()
+			.toLowerCase();
+	}
+
+	static _formatFeatureCompanionDice (dice, flat) {
+		const flatValue = Number(flat) || 0;
+		return `${dice || "0"}${flatValue ? ` ${flatValue >= 0 ? "+" : "-"} ${Math.abs(flatValue)}` : ""}`;
+	}
+
+	static _getFeatureCompanionRuleEntry ({kind, key, rule}) {
+		const marker = {kind, key, rule: MiscUtil.copyFast(rule)};
+		let entries;
+
+		if (kind === "action" && rule.attackBonus != null && rule.damage) {
+			const damage = CharacterSheetState._formatFeatureCompanionDice(rule.damage.dice, rule.damage.flat);
+			entries = [
+				`{@atk mw} {@hit ${rule.attackBonus}} to hit, reach ${rule.reachFeet || 5} ft., one target. {@h}{@damage ${damage}} ${rule.damage.type || ""} damage.`.replace(/\s+/g, " ").trim(),
+			];
+		} else if (kind === "action" && rule.healing) {
+			const healing = CharacterSheetState._formatFeatureCompanionDice(rule.healing.dice, rule.healing.flat);
+			entries = [
+				`The companion restores {@dice ${healing}} hit points to an eligible target within ${rule.rangeFeet || 5} feet.`,
+			];
+		} else if (kind === "reaction" && rule.effect?.attackRollMode) {
+			entries = [
+				`The triggering attack roll is made with ${rule.effect.attackRollMode}.`,
+			];
+		} else {
+			entries = [];
+		}
+
+		return {
+			name: rule.name || key,
+			entries,
+			featureCompanionRule: marker,
+		};
+	}
+
+	static _mergeFeatureCompanionRuleEntries (existing, rules, kind, {attacksOnly = false} = {}) {
+		const generated = Object.entries(rules || {})
+			.filter(([, rule]) => !attacksOnly || rule?.attackBonus != null)
+			.map(([key, rule]) => CharacterSheetState._getFeatureCompanionRuleEntry({kind, key, rule}));
+		const byMarker = new Map(generated.map(entry => [entry.featureCompanionRule.key, entry]));
+		const byName = new Map(generated.map(entry => [
+			CharacterSheetState._getFeatureCompanionRuleEntryNameKey(entry.name),
+			entry,
+		]));
+		const used = new Set();
+		const out = [];
+
+		for (const entry of existing || []) {
+			const markerKey = entry?.featureCompanionRule?.key;
+			const generatedEntry = (markerKey && byMarker.get(markerKey))
+				|| byName.get(CharacterSheetState._getFeatureCompanionRuleEntryNameKey(entry?.name));
+			if (!generatedEntry || used.has(generatedEntry.featureCompanionRule.key)) {
+				out.push(entry);
+				continue;
+			}
+			used.add(generatedEntry.featureCompanionRule.key);
+			out.push({...entry, ...generatedEntry});
+		}
+
+		for (const entry of generated) {
+			if (!used.has(entry.featureCompanionRule.key)) out.push(entry);
+		}
+		return out;
+	}
+
+	static _getFeatureCompanionProficiencyProjection (resolved) {
+		const statistics = resolved.statistics || {};
+		const abilities = statistics.abilityModifiers || {};
+		const proficiencyBonus = Number(resolved.summonerContext?.proficiencyBonus) || 0;
+		const saveProficiencies = [];
+		for (const [ability, modifier] of Object.entries(statistics.savingThrows || {})) {
+			if (Number(modifier) === (Number(abilities[ability]) || 0) + proficiencyBonus) saveProficiencies.push(ability);
+		}
+
+		const skillAbilities = {
+			athletics: "str",
+			acrobatics: "dex",
+			sleightofhand: "dex",
+			stealth: "dex",
+			arcana: "int",
+			history: "int",
+			investigation: "int",
+			nature: "int",
+			religion: "int",
+			animalhandling: "wis",
+			insight: "wis",
+			medicine: "wis",
+			perception: "wis",
+			survival: "wis",
+			deception: "cha",
+			intimidation: "cha",
+			performance: "cha",
+			persuasion: "cha",
+		};
+		const skillProficiencies = {};
+		if (proficiencyBonus > 0) {
+			for (const [skill, modifier] of Object.entries(statistics.skills || {})) {
+				const ability = skillAbilities[skill.toLowerCase().replace(/\s+/g, "")];
+				if (!ability) continue;
+				const level = (Number(modifier) - (Number(abilities[ability]) || 0)) / proficiencyBonus;
+				if (Number.isInteger(level) && level > 0) skillProficiencies[skill] = level;
+			}
+		}
+
+		return {saveProficiencies, skillProficiencies};
+	}
+
+	/**
+	 * Resolve a registry-backed feature companion from an exact feature UID and an
+	 * already-derived summoner context. Missing modules, descriptors, and invalid
+	 * context are errors; State never guesses a source or falls back to TCE.
+	 */
+	resolveFeatureCompanionRules (featureUid, summonerContext) {
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
+		const descriptor = rules.getDescriptor(featureUid);
+		if (!descriptor) throw new RangeError(`No feature companion descriptor is registered for "${featureUid}".`);
+		const resolved = rules.resolve(featureUid, summonerContext);
+		if (!resolved) throw new Error(`Feature companion resolver returned no result for "${featureUid}".`);
+		return resolved;
+	}
+
+	_tryGetFeatureCompanionSummonerContext (featureUid) {
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+		const descriptor = rules?.getDescriptor(featureUid);
+		if (!descriptor) return {ok: false, reason: "missingDescriptor"};
+
+		let owner;
+		try {
+			owner = CharacterSheetState._getFeatureCompanionOwnerMetadata(featureUid, descriptor);
+		} catch (error) {
+			return {ok: false, reason: "invalidDescriptor", error};
+		}
+
+		const ownerClasses = (this._data.classes || []).filter(cls => {
+			if (String(cls?.name || "").toLowerCase() !== owner.className.toLowerCase()) return false;
+			if (String(cls?.source || "").toUpperCase() !== owner.classSource.toUpperCase()) return false;
+			const subclass = this.getEffectiveSubclassForClass(cls);
+			return String(subclass?.shortName || subclass?.name || "").toLowerCase() === owner.subclassShortName.toLowerCase()
+				&& String(subclass?.source || "").toUpperCase() === owner.subclassSource.toUpperCase();
+		});
+		if (ownerClasses.length !== 1) {
+			return {ok: false, reason: ownerClasses.length ? "ambiguousOwner" : "ownerNotFound"};
+		}
+
+		const cls = ownerClasses[0];
+		if ((Number(cls.level) || 0) < (Number(descriptor.minimumArtificerLevel) || 0)) {
+			return {ok: false, reason: "ownerBelowMinimumLevel"};
+		}
+
+		const context = {};
+		for (const key of descriptor.requiredSummonerContext || []) {
+			switch (key) {
+				case "artificerLevel": context[key] = Number(cls.level) || 0; break;
+				case "intelligenceModifier": context[key] = this.getAbilityMod("int"); break;
+				case "proficiencyBonus": context[key] = this.getProficiencyBonus(); break;
+				case "spellAttackBonus": context[key] = this.getSpellAttackBonusForAbility("int"); break;
+				default: return {ok: false, reason: "unsupportedContextKey", key};
+			}
+		}
+
+		return {ok: true, context, owner, descriptor};
+	}
+
+	getFeatureCompanionSummonerContext (featureUid) {
+		const result = this._tryGetFeatureCompanionSummonerContext(featureUid);
+		if (!result.ok) {
+			throw new RangeError(`Could not resolve summoner context for "${featureUid}": ${result.reason}.`);
+		}
+		return MiscUtil.copyFast(result.context);
+	}
+
+	/**
+	 * Refresh an existing feature-owned companion without replacing its identity or
+	 * live state. Current HP is preserved exactly and only clamped downward when the
+	 * new maximum is lower; resource and Hit Die currents are never replenished.
+	 */
+	reconcileFeatureOwnedCompanion (companionId, {featureUid = null, summonerContext = null} = {}) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) throw new RangeError(`Companion "${companionId}" does not exist.`);
+
+		const storedFeatureUid = companion.featureGrant?.uid;
+		const requestedFeatureUid = featureUid || storedFeatureUid;
+		if (!storedFeatureUid || !requestedFeatureUid) {
+			throw new TypeError(`Companion "${companionId}" is not owned by a source-qualified feature grant.`);
+		}
+		if (
+			CharacterSheetState._getFeatureCompanionOwnerKey(storedFeatureUid) !==
+			CharacterSheetState._getFeatureCompanionOwnerKey(requestedFeatureUid)
+		) {
+			throw new RangeError(`Companion "${companionId}" is not owned by "${requestedFeatureUid}".`);
+		}
+
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
+		const descriptor = rules.getDescriptor(requestedFeatureUid);
+		if (!descriptor) throw new RangeError(`No feature companion descriptor is registered for "${requestedFeatureUid}".`);
+		const context = summonerContext || this.getFeatureCompanionSummonerContext(requestedFeatureUid);
+		const resolved = this.resolveFeatureCompanionRules(requestedFeatureUid, context);
+		const owner = CharacterSheetState._getFeatureCompanionOwnerMetadata(requestedFeatureUid, descriptor);
+
+		companion.featureGrant = {
+			...(companion.featureGrant || {}),
+			...owner,
+		};
+
+		const statistics = resolved.statistics || {};
+		const previousHp = companion.hp || {};
+		const newMax = Math.max(1, Number(statistics.maxHp) || 1);
+		const previousCurrent = Math.max(0, Number(previousHp.current) || 0);
+		companion.hp = {
+			...previousHp,
+			max: newMax,
+			current: Math.min(previousCurrent, newMax),
+			temp: Math.max(0, Number(previousHp.temp) || 0),
+		};
+
+		companion.name = resolved.identity.name;
+		companion.source = resolved.identity.source;
+		companion.creatureName = resolved.identity.name;
+		companion.creatureSource = resolved.identity.source;
+		companion.abilities = {...(companion.abilities || {}), ...(statistics.abilityScores || {})};
+		companion.ac = Number(statistics.ac) || 10;
+		companion.speed = {...(companion.speed || {}), ...(statistics.speed || {})};
+		companion.senses = Object.entries(statistics.senses || {})
+			.map(([sense, distance]) => `${sense} ${distance} ft.`);
+		companion.passive = Number(statistics.passivePerception) || 10;
+		companion.profBonus = Number(resolved.summonerContext?.proficiencyBonus) || 0;
+		companion.immunities = [...(statistics.damageImmunities || [])];
+		companion.conditionImmunities = [...(statistics.conditionImmunities || [])];
+		companion.size = Array.isArray(statistics.size) ? statistics.size[0] : statistics.size;
+		companion.creatureType = statistics.creatureType;
+
+		const proficiencyProjection = CharacterSheetState._getFeatureCompanionProficiencyProjection(resolved);
+		companion.saveProficiencies = proficiencyProjection.saveProficiencies;
+		companion.skillProficiencies = proficiencyProjection.skillProficiencies;
+		companion.actions = CharacterSheetState._mergeFeatureCompanionRuleEntries(companion.actions, resolved.actions, "action");
+		companion.attacks = CharacterSheetState._mergeFeatureCompanionRuleEntries(
+			companion.attacks,
+			resolved.actions,
+			"action",
+			{attacksOnly: true},
+		);
+		companion.reactions = CharacterSheetState._mergeFeatureCompanionRuleEntries(companion.reactions, resolved.reactions, "reaction");
+
+		const uses = MiscUtil.copyFast(companion.uses || {});
+		for (const [key, action] of Object.entries(resolved.actions || {})) {
+			if (!action?.uses) continue;
+			const existing = CharacterSheetState._isCompanionSchemaObject(uses[key]) ? uses[key] : {};
+			const max = Math.max(0, Number(action.uses.max) || 0);
+			uses[key] = {
+				...existing,
+				current: Math.min(Math.max(0, Number(existing.current) || 0), max),
+				max,
+				recharge: action.uses.recharge,
+			};
+		}
+		companion.uses = uses;
+
+		const resolvedHitDice = statistics.hitDice || {};
+		const existingHitDice = CharacterSheetState._isCompanionSchemaObject(companion.hitDice) ? companion.hitDice : {};
+		const hitDiceMax = Math.max(0, Number(resolvedHitDice.count) || 0);
+		companion.hitDice = {
+			...existingHitDice,
+			die: resolvedHitDice.die ?? existingHitDice.die ?? null,
+			current: Math.min(Math.max(0, Number(existingHitDice.current) || 0), hitDiceMax),
+			max: hitDiceMax,
+		};
+
+		const normalizedFeatureFields = CharacterSheetState._getNormalizedCompanionFeatureFields(companion);
+		companion.lifecycle = normalizedFeatureFields.lifecycle;
+		companion.scaling = {
+			...(CharacterSheetState._isCompanionSchemaObject(companion.scaling) ? companion.scaling : {}),
+			kind: "featureCompanion",
+			featureUid: owner.uid,
+			registryFeatureUid: resolved.identity.featureUid,
+			schemaVersion: resolved.schemaVersion,
+			identity: MiscUtil.copyFast(resolved.identity),
+			summonerContext: MiscUtil.copyFast(resolved.summonerContext),
+			resolved: MiscUtil.copyFast(resolved),
+		};
+
+		return companion;
+	}
+
+	getFeatureOwnedCompanions (featureUid) {
+		const ownerKey = CharacterSheetState._getFeatureCompanionOwnerKey(featureUid);
+		if (!ownerKey) throw new TypeError("A complete source-qualified feature UID is required.");
+		return (this._data.companions || []).filter(companion =>
+			CharacterSheetState._getFeatureCompanionOwnerKey(companion?.featureGrant?.uid) === ownerKey,
+		);
+	}
+
+	removeFeatureOwnedCompanions (featureUid) {
+		const ownedIds = new Set(this.getFeatureOwnedCompanions(featureUid).map(companion => companion.id));
+		if (!ownedIds.size) return 0;
+		const before = this._data.companions.length;
+		this._data.companions = this._data.companions.filter(companion => !ownedIds.has(companion.id));
+		return before - this._data.companions.length;
+	}
+
+	deactivateFeatureOwnedCompanions (featureUid, {status = "inactive"} = {}) {
+		const companions = this.getFeatureOwnedCompanions(featureUid);
+		for (const companion of companions) {
+			companion.active = false;
+			companion.lifecycle = {
+				...(CharacterSheetState._isCompanionSchemaObject(companion.lifecycle) ? companion.lifecycle : {}),
+				status,
+			};
+			companion.lifecycle = CharacterSheetState._getNormalizedCompanionFeatureFields(companion).lifecycle;
+		}
+		return companions.length;
+	}
+
+	rebindFeatureOwnedCompanion (companionId, {fromFeatureUid, toFeatureUid, summonerContext = null} = {}) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return {ok: false, reason: "companionNotFound"};
+		if (
+			CharacterSheetState._getFeatureCompanionOwnerKey(companion.featureGrant?.uid) !==
+			CharacterSheetState._getFeatureCompanionOwnerKey(fromFeatureUid)
+		) return {ok: false, reason: "ownerMismatch"};
+
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
+		const descriptor = rules.getDescriptor(toFeatureUid);
+		if (!descriptor) throw new RangeError(`No feature companion descriptor is registered for "${toFeatureUid}".`);
+		const context = summonerContext || this.getFeatureCompanionSummonerContext(toFeatureUid);
+		this.resolveFeatureCompanionRules(toFeatureUid, context);
+		companion.featureGrant = {
+			...(companion.featureGrant || {}),
+			...CharacterSheetState._getFeatureCompanionOwnerMetadata(toFeatureUid, descriptor),
+		};
+		this.reconcileFeatureOwnedCompanion(companionId, {
+			featureUid: toFeatureUid,
+			summonerContext: context,
+		});
+		return {ok: true, companion};
+	}
+
+	_isLegacySteelDefenderCandidate (companion) {
+		if (!companion || companion.featureGrant?.uid) return false;
+		if (companion.type !== CharacterSheetState.COMPANION_TYPES.STEEL_DEFENDER) return false;
+		const names = [companion.name, companion.creatureName].filter(Boolean);
+		if (!names.length || names.some(name => String(name).trim().toLowerCase() !== "steel defender")) return false;
+		if (companion.creatureType && String(companion.creatureType).toLowerCase() !== "construct") return false;
+		if (companion.origin && String(companion.origin).trim().toLowerCase() !== "battle smith") return false;
+		return true;
+	}
+
+	_getLegacySteelDefenderSource (companion) {
+		const sources = new Set(
+			[companion?.source, companion?.creatureSource]
+				.filter(Boolean)
+				.map(source => String(source).trim().toUpperCase()),
+		);
+		if (sources.size !== 1) return null;
+		return [...sources][0];
+	}
+
+	migrateLegacyFeatureCompanions () {
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
+		const previous = this._data.migrationFlags?.[CharacterSheetState.FEATURE_COMPANION_MIGRATION_KEY];
+		const existingIds = new Set((this._data.companions || []).map(companion => companion?.id).filter(Boolean));
+		const resultsById = Object.fromEntries(
+			Object.entries(previous?.resultsById || {}).filter(([companionId]) => existingIds.has(companionId)),
+		);
+		const descriptors = Object.values(rules.getRegistry())
+			.filter(descriptor => descriptor?.identity?.name === "Steel Defender");
+		const descriptorsBySource = new Map(descriptors.map(descriptor => [
+			String(descriptor.identity.source).toUpperCase(),
+			descriptor,
+		]));
+		const candidatesByFeature = new Map();
+
+		for (const companion of this._data.companions || []) {
+			if (!this._isLegacySteelDefenderCandidate(companion)) continue;
+			const source = this._getLegacySteelDefenderSource(companion);
+			if (!source) {
+				resultsById[companion.id] = {companionId: companion.id, status: "ambiguousSource"};
+				continue;
+			}
+			const descriptor = descriptorsBySource.get(source);
+			if (!descriptor) {
+				resultsById[companion.id] = {companionId: companion.id, status: "unsupportedSource", source};
+				continue;
+			}
+			const featureUid = CharacterSheetState._normalizeFeatureCompanionUid(descriptor.identity.featureUid);
+			const ownerKey = CharacterSheetState._getFeatureCompanionOwnerKey(featureUid);
+			const entries = candidatesByFeature.get(ownerKey) || [];
+			entries.push({companion, descriptor, featureUid, source});
+			candidatesByFeature.set(ownerKey, entries);
+		}
+
+		for (const [ownerKey, candidates] of candidatesByFeature.entries()) {
+			if (candidates.length !== 1) {
+				for (const {companion, featureUid, source} of candidates) {
+					resultsById[companion.id] = {
+						companionId: companion.id,
+						status: "ambiguousMultipleCandidates",
+						featureUid,
+						source,
+					};
+				}
+				continue;
+			}
+
+			const {companion, descriptor, featureUid, source} = candidates[0];
+			const alreadyBound = (this._data.companions || []).some(other =>
+				other.id !== companion.id
+				&& CharacterSheetState._getFeatureCompanionOwnerKey(other.featureGrant?.uid) === ownerKey,
+			);
+			if (alreadyBound) {
+				resultsById[companion.id] = {
+					companionId: companion.id,
+					status: "ownerAlreadyBound",
+					featureUid,
+					source,
+				};
+				continue;
+			}
+
+			const contextResult = this._tryGetFeatureCompanionSummonerContext(featureUid);
+			if (!contextResult.ok) {
+				resultsById[companion.id] = {
+					companionId: companion.id,
+					status: contextResult.reason,
+					featureUid,
+					source,
+				};
+				continue;
+			}
+
+			companion.featureGrant = CharacterSheetState._getFeatureCompanionOwnerMetadata(featureUid, descriptor);
+			this.reconcileFeatureOwnedCompanion(companion.id, {
+				featureUid,
+				summonerContext: contextResult.context,
+			});
+			resultsById[companion.id] = {
+				companionId: companion.id,
+				status: "migrated",
+				featureUid: companion.featureGrant.uid,
+				source,
+			};
+		}
+
+		const results = Object.values(resultsById);
+		const migration = {
+			version: 1,
+			status: results.some(result => result.status === "migrated")
+				? "migrated"
+				: results.length ? "unchanged" : "noCandidates",
+			migrated: results.filter(result => result.status === "migrated").map(result => result.companionId),
+			unchanged: results.filter(result => result.status !== "migrated").map(result => result.companionId),
+			resultsById,
+		};
+		this._data.migrationFlags ||= {};
+		this._data.migrationFlags[CharacterSheetState.FEATURE_COMPANION_MIGRATION_KEY] = migration;
+		return MiscUtil.copyFast(migration);
+	}
+
+	getFeatureCompanionMigrationStatus () {
+		return MiscUtil.copyFast(
+			this._data.migrationFlags?.[CharacterSheetState.FEATURE_COMPANION_MIGRATION_KEY]
+			|| {version: 1, status: "notRun", migrated: [], unchanged: [], resultsById: {}},
+		);
 	}
 
 	/**
@@ -74467,6 +75018,7 @@ class CharacterSheetState {
 
 			// Hit points
 			hp: {
+				...(companionData.hp || {}),
 				max: companionData.hp?.max || 1,
 				current: companionData.hp?.current ?? companionData.hp?.max ?? 1,
 				temp: companionData.hp?.temp || 0,
@@ -75712,9 +76264,19 @@ class CharacterSheetState {
 	getCompanionSaveMod (companionId, ability) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return 0;
+		const resolved = companion.scaling?.resolved?.statistics?.savingThrows?.[ability];
+		if (Number.isFinite(Number(resolved))) return Number(resolved);
 		const abilMod = Math.floor((companion.abilities[ability] - 10) / 2);
 		const proficient = companion.saveProficiencies.includes(ability);
 		return abilMod + (proficient ? companion.profBonus : 0);
+	}
+
+	getCompanionAbilityCheckMod (companionId, ability) {
+		const companion = this.getCompanion(companionId);
+		if (!companion) return 0;
+		const resolved = companion.scaling?.resolved?.statistics?.abilityChecks?.[ability];
+		if (Number.isFinite(Number(resolved))) return Number(resolved);
+		return Math.floor(((Number(companion.abilities?.[ability]) || 10) - 10) / 2);
 	}
 
 	/**
@@ -75749,6 +76311,11 @@ class CharacterSheetState {
 		};
 
 		const ability = skillAbilities[skill.toLowerCase().replace(/\s+/g, "")] || "int";
+		const resolvedStatistics = companion.scaling?.resolved?.statistics;
+		const resolvedSkill = resolvedStatistics?.skills?.[skill.toLowerCase().replace(/\s+/g, "")];
+		if (Number.isFinite(Number(resolvedSkill))) return Number(resolvedSkill);
+		const resolvedCheck = resolvedStatistics?.abilityChecks?.[ability];
+		if (Number.isFinite(Number(resolvedCheck))) return Number(resolvedCheck);
 		const abilMod = Math.floor((companion.abilities[ability] - 10) / 2);
 		const profLevel = companion.skillProficiencies[skill] || 0;
 		return abilMod + (profLevel * companion.profBonus);
@@ -75768,6 +76335,18 @@ class CharacterSheetState {
 
 		const calculations = this.getFeatureCalculations();
 		const profBonus = this.getProficiencyBonus();
+
+		if (companion.featureGrant?.uid) {
+			const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+			if (!rules?.getDescriptor(companion.featureGrant.uid)) return;
+			const contextResult = this._tryGetFeatureCompanionSummonerContext(companion.featureGrant.uid);
+			if (!contextResult.ok) return;
+			this.reconcileFeatureOwnedCompanion(companion.id, {
+				featureUid: companion.featureGrant.uid,
+				summonerContext: contextResult.context,
+			});
+			return;
+		}
 
 		// A companion carrying a declarative `scaling` descriptor is resolved
 		// generically, regardless of its `type`. This is the path any new
