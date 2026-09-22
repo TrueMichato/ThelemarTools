@@ -14611,7 +14611,7 @@ class CharacterSheetState {
 	 */
 	_armZeroHpIntervention ({damage, rawDamage, damageType, isCritical, hpBefore}) {
 		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical});
-		if (!candidates.some(candidate => candidate.available)) return;
+		if (!candidates.length) return;
 		this._data._pendingZeroHpIntervention = {
 			damage,
 			rawDamage,
