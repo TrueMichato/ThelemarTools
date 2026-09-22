@@ -4227,7 +4227,6 @@ class CharacterSheetCombat {
 
 	_resetTurnActionUsage () {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
-		this._state?.resetActionEconomy?.();
 		this._turnAttackUsage = {hasAttackAction: false, attackActionCount: 0, attackActionFeatureIds: new Set()};
 		this._handOfHarmUsedThisTurn = false;
 		this._relentlessUsedThisTurn = false;

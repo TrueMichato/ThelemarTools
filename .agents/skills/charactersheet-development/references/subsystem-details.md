@@ -97,7 +97,9 @@ the opaque `turnId`, clears receipts, and restores action slots. Combat start,
 round advance, combat end, rests, and Play Mode's explicit **Reset turn**
 delegate to it. It works identically outside combat: a committed use remains
 blocked until an explicit reset, while Reaction/Action locks are not assumed to
-persist or enforce the receipt.
+persist or enforce the receipt. Combat's `_resetTurnActionUsage()` resets only
+module-local caches after these state lifecycle calls; lazy local initialization
+must never restore state action slots or advance/clear the receipt ledger.
 
 Current consumers are:
 
