@@ -64,6 +64,16 @@ function makeState ({source = "EFA", subclass = null} = {}) {
 	return state;
 }
 
+function makeBattleReadyState () {
+	return makeState({
+		subclass: {
+			name: "Battle Smith",
+			shortName: "Battle Smith",
+			source: "EFA",
+		},
+	});
+}
+
 function addTool (state, {
 	id,
 	name,
@@ -432,7 +442,119 @@ describe("EFA held tool-focus resolution", () => {
 	});
 });
 
+describe("EFA Battle Ready proficient-weapon focus", () => {
+	it("extends the exact EFA requirement to tools or a proficient weapon with Battle Ready attribution", () => {
+		const state = makeBattleReadyState();
+		const tool = addTool(state, {id: "smith", name: "Smith's Tools", type: "AT"});
+		const weapon = addWeapon(state, {id: "battle-ready-weapon", proficient: false});
+		state.addWeaponProficiency("Martial Weapons");
+		const requirement = state.getSpellCastFocusRequirement({
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+		});
+
+		expect(requirement).toEqual(expect.objectContaining({
+			ruleId: CharacterSheetState.EFA_BATTLE_READY_FOCUS_RULE_ID,
+			sourceFeatureUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY,
+			classUid: "Artificer|EFA",
+			filter: expect.objectContaining({
+				weapon: {category: "any", requiresProficiency: true},
+			}),
+		}));
+		expect(state.getEligibleSpellCastFocusInventoryRows(requirement)).toEqual(
+			expect.arrayContaining([tool, weapon]),
+		);
+		expect(state.getSpellcastingFocusStatus()).toEqual({
+			ok: true,
+			source: "Battle Ready proficient weapon",
+			itemName: "Longsword",
+		});
+	});
+
+	it("uses the canonical live/equipped/quantity/proficiency gates", () => {
+		const state = makeBattleReadyState();
+		addWeapon(state, {id: "legal"});
+		addWeapon(state, {id: "unproficient", name: "War Pick", weaponCategory: "exotic", proficient: false});
+		addWeapon(state, {id: "unequipped", name: "Battleaxe", equipped: false});
+		addWeapon(state, {id: "empty", name: "Maul", quantity: 0});
+		addWeapon(state, {id: "nonweapon", name: "Hammer", type: "G", weapon: false, weaponCategory: null});
+
+		const requirement = state.getSpellCastFocusRequirement({
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+		});
+		expect(state.getEligibleSpellCastFocusInventoryRows(requirement).map(row => row.id)).toEqual(["legal"]);
+	});
+
+	it("removes the weapon option immediately with the exact feature and never grants it to TCE or ambiguous rows", () => {
+		const state = makeBattleReadyState();
+		addWeapon(state, {id: "weapon"});
+		state.getClasses()[0].subclass = {name: "Alchemist", shortName: "Alchemist", source: "EFA"};
+		state.applyClassFeatureEffects();
+
+		const efaRequirement = state.getSpellCastFocusRequirement({
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+		});
+		expect(efaRequirement.ruleId).toBe(CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID);
+		expect(efaRequirement.filter.weapon).toBeNull();
+		expect(state.getEligibleSpellCastFocusInventoryRows(efaRequirement)).toEqual([]);
+
+		const tceState = makeState({
+			source: "TCE",
+			subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "TCE"},
+		});
+		expect(tceState.getSpellCastFocusRequirement({
+			sourceClass: "Artificer",
+			sourceClassSource: "TCE",
+		})).toBeNull();
+		expect(makeBattleReadyState().getSpellCastFocusRequirement({sourceClass: "Artificer"})).toBeNull();
+	});
+
+	it("explains an absent Battle Ready focus through the canonical material block", () => {
+		const state = makeBattleReadyState();
+		const spells = makeSpellsManager(state, [WAIVED_MATERIAL_SPELL]);
+		const spell = {
+			...WAIVED_MATERIAL_SPELL,
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+		};
+
+		expect(spells._getMaterialComponentBlock(spell, WAIVED_MATERIAL_SPELL))
+			.toContain("proficient weapon");
+	});
+});
+
 describe("EFA committed cast receipts", () => {
+	it("commits a Battle Ready weapon-focus cast with exact top-level and cast attribution", async () => {
+		const state = makeBattleReadyState();
+		const weapon = addWeapon(state, {id: "battle-ready-focus"});
+		const spell = addExactSpell(state, MENDING);
+		const spells = makeSpellsManager(state, [MENDING]);
+
+		const receipt = await spells._castSpell(spell.id, {
+			withMetamagic: false,
+			decision: {focusInventoryItemId: weapon.id},
+		});
+
+		expect(receipt).toEqual(expect.objectContaining({
+			committed: true,
+			ruleId: CharacterSheetState.EFA_BATTLE_READY_FOCUS_RULE_ID,
+			sourceFeatureUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY,
+			focusInventoryItemId: weapon.id,
+			focusItemUid: "Longsword|XPHB",
+			focusRule: {
+				ruleId: CharacterSheetState.EFA_BATTLE_READY_FOCUS_RULE_ID,
+				sourceFeatureUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY,
+			},
+			cast: expect.objectContaining({
+				ruleId: CharacterSheetState.EFA_BATTLE_READY_FOCUS_RULE_ID,
+				sourceFeatureUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY,
+			}),
+		}));
+		expect(spells._getSpellFocusNote(spell, MENDING, {focusReference: receipt.focus})).toBe("Longsword");
+	});
+
 	it("commits a no-material cantrip through the selected tool and returns an exact receipt", async () => {
 		const state = makeState();
 		addTool(state, {id: "thieves", name: "Thieves' Tools", type: "T"});

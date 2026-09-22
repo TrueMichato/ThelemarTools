@@ -14011,6 +14011,13 @@ class CharacterSheetPage {
 
 		displayAttacks.forEach(attack => {
 			const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+			const abilityResolution = attackBreakdown?.abilityResolution
+				|| this._state.getWeaponAbilityResolution?.(attack)
+				|| {
+					modifier: this._state.getWeaponAbilityMod(attack),
+					ability: attack.abilityMod || "str",
+					source: null,
+				};
 			const weaponId = attack.riteWeaponId || attack.id;
 			const totalAttackBonus = attackBreakdown?.total ?? 0;
 			const totalDamageBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack))
@@ -14044,11 +14051,14 @@ class CharacterSheetPage {
 			const attackNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(attack.sourceItem || attack);
 
 			const monkBadge = attack.isMonkWeapon ? ` <span class="badge badge-warning" title="Monk Weapon">Monk</span>` : "";
+			const abilityBadge = abilityResolution.source
+				? ` <span class="badge badge-info charsheet__attack-ability-source" title="${CharacterSheetClassUtils.escapeHtml(abilityResolution.attribution || `${String(abilityResolution.ability).toUpperCase()} via ${abilityResolution.source}`)}">${CharacterSheetClassUtils.escapeHtml(abilityResolution.attribution || `${String(abilityResolution.ability).toUpperCase()} via ${abilityResolution.source}`)}</span>`
+				: "";
 
 			const row = e_({outer: `
 				<div class="charsheet__attack-row">
 					<div class="charsheet__attack-info">
-						<span class="charsheet__attack-name">${attackNameHtml}${monkBadge}</span>
+						<span class="charsheet__attack-name">${attackNameHtml}${monkBadge}${abilityBadge}</span>
 						<span class="charsheet__attack-range ve-small ve-muted">${rangeStr} ${propsStr}</span>
 					</div>
 					<div class="charsheet__attack-stats">

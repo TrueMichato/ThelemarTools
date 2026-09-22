@@ -405,20 +405,10 @@ describe("EFA Battle Smith authoritative passive contract", () => {
 		expect(attack.attackBonus).toBe(state.getProficiencyBonus());
 	});
 
-	test("Battle Ready exposes eligibility metadata without applying the blocked Intelligence substitution", () => {
+	test("Battle Ready applies Intelligence through the shared magic-weapon resolver", () => {
 		const state = makeState({level: 3});
 		state.setAbilityBase("str", 10);
 		state.setAbilityBase("int", 18);
-		state.addFeature({
-			name: "Battle Ready",
-			source: "EFA",
-			className: "Artificer",
-			classSource: "EFA",
-			subclassName: "Battle Smith",
-			subclassSource: "EFA",
-			level: 3,
-			featureType: "Subclass Feature",
-		});
 		state.applyClassFeatureEffects();
 
 		const calculations = state.getFeatureCalculations();
@@ -428,9 +418,15 @@ describe("EFA Battle Smith authoritative passive contract", () => {
 			efaBattleReadyWeaponRequirement: "magic",
 			efaBattleReadyAttackMod: 4,
 		});
-		expect(state._data._classFeatureAttackAbilities).toEqual([]);
+		expect(state._data._classFeatureAttackAbilities).toContainEqual({
+			ability: "int",
+			weaponType: "magic",
+			source: "Battle Ready",
+			sourceFeatureUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY,
+			classUid: "Artificer|EFA",
+		});
 		const attack = state.updateAttackFromWeapon({
-			name: "Replicated Longsword",
+			name: "Magic Longsword",
 			source: "EFA",
 			type: "M",
 			weaponCategory: "martial",
@@ -441,7 +437,11 @@ describe("EFA Battle Smith authoritative passive contract", () => {
 			rarity: "rare",
 		});
 		expect(attack.abilityMod).toBe("str");
-		expect(attack.attackBonus).toBe(state.getProficiencyBonus());
+		expect(attack.resolvedAbility).toBe("int");
+		expect(attack.abilitySource).toBe("Battle Ready");
+		expect(attack.abilitySourceFeatureUid).toBe(CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY);
+		expect(attack.attackBonus).toBe(4 + state.getProficiencyBonus());
+		expect(attack.damage).toBe("1d8+4");
 	});
 
 	test("fixed grants use canonical teardown and preserve pre-existing proficiency", () => {
@@ -536,10 +536,32 @@ describe("EFA Battle Smith spell ledger and progression surfaces", () => {
 
 	test("save/load preserves exact grants and lower-level reconciliation removes locked spells", () => {
 		const original = makeState({level: 17, playerPrepared: ["Cure Wounds"]});
+		original.setAbilityBase("str", 10);
+		original.setAbilityBase("int", 18);
+		original.addItem({
+			name: "Saved Magic Weapon",
+			source: "TST",
+			type: "M",
+			weaponCategory: "martial",
+			dmg1: "1d8",
+			rarity: "uncommon",
+			_isCustom: true,
+		});
 		const loaded = new CharacterSheetState();
 		loaded.setSpellData(SPELL_DATA);
 		loaded.loadFromJson(original.toJson());
 		expectExactEfaGrants(loaded, 17);
+		const savedWeapon = loaded.getItems().find(item => item.name === "Saved Magic Weapon");
+		expect(loaded.getWeaponAbilityResolution({
+			name: savedWeapon.name,
+			abilityMod: "str",
+			sourceItem: savedWeapon,
+		})).toMatchObject({
+			modifier: 4,
+			ability: "int",
+			source: "Battle Ready",
+			sourceFeatureUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY,
+		});
 
 		loaded.getClasses()[0].level = 4;
 		loaded.applyClassFeatureEffects();
@@ -624,6 +646,8 @@ describe("EFA Battle Smith spell ledger and progression surfaces", () => {
 
 	test("Respec removes only the exact EFA owner and leaves TCE Battle Smith intact", async () => {
 		const state = makeCoexistingState();
+		state.setAbilityBase("str", 10);
+		state.setAbilityBase("int", 18);
 		await makeRespec(state)._applySubclassChange(
 			3,
 			{level: 3, class: {name: "Artificer", source: "EFA"}},
@@ -635,5 +659,19 @@ describe("EFA Battle Smith spell ledger and progression surfaces", () => {
 		expect(sorted(battleSmithGrants(state, "PHB").map(spellUid))).toEqual(["Heroism|PHB", "Shield|PHB"]);
 		expect(state.getClasses().find(cls => cls.source === "EFA").subclass.name).toBe("Alchemist");
 		expect(state.getClasses().find(cls => cls.source === "TCE").subclass.name).toBe("Battle Smith");
+		expect(state.getWeaponAbilityResolution({
+			name: "Respec Magic Weapon",
+			abilityMod: "str",
+			sourceItem: {
+				name: "Respec Magic Weapon",
+				source: "TST",
+				type: "M",
+				weaponCategory: "martial",
+				rarity: "rare",
+			},
+		})).toMatchObject({
+			ability: "int",
+			sourceFeatureUid: CharacterSheetState.TCE_BATTLE_READY_FEATURE_UID,
+		});
 	});
 });

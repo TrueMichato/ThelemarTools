@@ -1865,6 +1865,13 @@ export class CharacterSheetPlayMode {
 
 		attacks.forEach(attack => {
 			const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+			const abilityResolution = attackBreakdown?.abilityResolution
+				|| this._state.getWeaponAbilityResolution?.(attack)
+				|| {
+					modifier: this._state.getWeaponAbilityMod(attack),
+					ability: attack.abilityMod || "str",
+					source: null,
+				};
 			const weaponId = attack.riteWeaponId || attack.id;
 			const totalBonus = attackBreakdown?.total ?? 0;
 			const totalDmgBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack))
@@ -1879,6 +1886,11 @@ export class CharacterSheetPlayMode {
 			icon.textContent = attack.isMelee ? "weapon-melee" : "weapon-ranged";
 			const name = this._ce("span", "pm-attack__name", row);
 			name.textContent = attack.name;
+			if (abilityResolution.source) {
+				const abilitySource = this._ce("span", "pm-attack__ability-source", row);
+				abilitySource.textContent = abilityResolution.attribution || `${String(abilityResolution.ability).toUpperCase()} via ${abilityResolution.source}`;
+				abilitySource.title = abilitySource.textContent;
+			}
 			const bonus = this._ce("span", "pm-attack__bonus", row);
 			bonus.textContent = this._fmtMod(totalBonus);
 			const dmg = this._ce("span", "pm-attack__damage", row);

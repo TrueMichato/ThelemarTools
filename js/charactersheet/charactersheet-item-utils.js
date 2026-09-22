@@ -34,6 +34,83 @@ export class CharacterSheetItemUtils {
 		return Number.isNaN(parsed) ? 0 : parsed;
 	}
 
+	static _hasGeneratedFeatureItemMarkers (item) {
+		return item?._isGeneratedFeatureItem != null
+			|| item?._generatedItemId != null
+			|| item?._generatedItemProvenance != null;
+	}
+
+	/**
+	 * Classify explicit magic facts. Generated feature items fail closed so editable
+	 * names, rarity, and bonuses cannot override stale, malformed, or unrelated provenance.
+	 *
+	 * @param {object} item
+	 * @param {object} [opts]
+	 * @param {object|null} [opts.generatedItemClassification]
+	 * @param {boolean} [opts.isGeneratedMagicItem]
+	 * @param {boolean} [opts.countsAsMagical]
+	 * @returns {boolean}
+	 */
+	static isMagicItem (item, {
+		generatedItemClassification = null,
+		isGeneratedMagicItem = false,
+		countsAsMagical = false,
+	} = {}) {
+		if (!item || typeof item !== "object") return false;
+
+		if (this._hasGeneratedFeatureItemMarkers(item)) {
+			return generatedItemClassification?.status === "valid" && isGeneratedMagicItem === true;
+		}
+
+		const typeBase = String(item.typeCode || item.type || "").split("|")[0].toUpperCase();
+		const rarity = String(item.rarity || "").trim().toLowerCase();
+		const hasMagicRarity = !!rarity && !["none", "unknown", "varies"].includes(rarity);
+		const hasMagicBonus = [
+			"bonusAc",
+			"bonusWeapon",
+			"bonusWeaponAttack",
+			"bonusWeaponDamage",
+			"bonusWeaponCritDamage",
+			"bonusSpellAttack",
+			"bonusSpellSaveDc",
+			"bonusSpellDamage",
+			"bonusSavingThrow",
+			"bonusSavingThrowStr",
+			"bonusSavingThrowDex",
+			"bonusSavingThrowCon",
+			"bonusSavingThrowInt",
+			"bonusSavingThrowWis",
+			"bonusSavingThrowCha",
+			"bonusAbilityCheck",
+			"bonusAbilityCheckStr",
+			"bonusAbilityCheckDex",
+			"bonusAbilityCheckCon",
+			"bonusAbilityCheckInt",
+			"bonusAbilityCheckWis",
+			"bonusAbilityCheckCha",
+			"bonusProficiencyBonus",
+			"bonusSavingThrowConcentration",
+		].some(prop => this.parseBonus(item[prop]) !== 0);
+
+		return item.magical === true
+			|| item.magic === true
+			|| item._isMagicItem === true
+			|| item._isMagicWeapon === true
+			|| item.countsAsMagical === true
+			|| countsAsMagical === true
+			|| hasMagicRarity
+			|| hasMagicBonus
+			|| item.wondrous === true
+			|| item.reqAttune === true
+			|| item.requiresAttunement === true
+			|| ["WD", "ST", "RG", "RD"].includes(typeBase)
+			|| !!item._variantName;
+	}
+
+	static isMagicWeapon (item, opts = {}) {
+		return this.isWeapon(item) && this.isMagicItem(item, opts);
+	}
+
 	static getNormalizedCatalogItem ({item, state}) {
 		const sourceItem = item?._compositionRaw || item;
 		const itemTypeBase = sourceItem.type?.split("|")[0];
@@ -74,6 +151,12 @@ export class CharacterSheetItemUtils {
 			bonusWeapon: this.parseBonus(sourceItem.bonusWeapon),
 			bonusWeaponAttack: this.parseBonus(sourceItem.bonusWeaponAttack),
 			bonusWeaponDamage: this.parseBonus(sourceItem.bonusWeaponDamage),
+			magical: sourceItem.magical === true,
+			magic: sourceItem.magic === true,
+			countsAsMagical: sourceItem.countsAsMagical === true,
+			_isMagicItem: sourceItem._isMagicItem === true,
+			_isMagicWeapon: sourceItem._isMagicWeapon === true,
+			wondrous: sourceItem.wondrous === true,
 			armor: !!isArmor,
 			armorType,
 			ac: sourceItem.ac || null,
@@ -143,6 +226,7 @@ export class CharacterSheetItemUtils {
 			socketedGemstones: sourceItem.socketedGemstones ? MiscUtil.copyFast(sourceItem.socketedGemstones) : [],
 			_variantName: sourceItem._variantName || null,
 			_baseSource: sourceItem._baseSource || null,
+			_variantSource: sourceItem._variantSource || null,
 			iounHost: sourceItem.iounHost ? MiscUtil.copyFast(sourceItem.iounHost) : null,
 			iounSettings: sourceItem.iounSettings ?? null,
 			iounSet: sourceItem.iounSet ? MiscUtil.copyFast(sourceItem.iounSet) : [],

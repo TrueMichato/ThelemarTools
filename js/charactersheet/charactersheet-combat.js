@@ -1438,6 +1438,8 @@ class CharacterSheetCombat {
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
 
 		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+		const abilityResolution = attackBreakdown?.abilityResolution
+			|| this._state.getWeaponAbilityResolution?.(attack);
 		const attackContributions = attackBreakdown?.passiveFeatureContributions || [];
 		const externalItemContributions = attackBreakdown?.externalItemContributions || [];
 		const conditionalAttackBonus = appliedConditionals.reduce((sum, conditional) => sum + (conditional.bonus || 0), 0);
@@ -1509,8 +1511,8 @@ class CharacterSheetCombat {
 		const externalItemLabel = externalItemContributions.length
 			? ` <span class="ve-muted">(${externalItemContributions.map(c => `${c.name} ${c.value >= 0 ? "+" : ""}${c.value}`).join(", ")})</span>`
 			: "";
-		const substitutionLabel = attackBreakdown?.abilitySubstitution
-			? ` <span class="ve-muted">(${attackBreakdown.abilitySubstitution.name} ability)</span>`
+		const substitutionLabel = abilityResolution?.source
+			? ` <span class="ve-muted">(${CharacterSheetClassUtils.escapeHtml(abilityResolution.attribution || `${String(abilityResolution.ability).toUpperCase()} via ${abilityResolution.source}`)})</span>`
 			: "";
 		// Itemize the active ammunition's to-hit bonus explicitly (the user asked for
 		// attack bonuses to be broken out) — e.g. "(Healing Arrow +1)".
@@ -3673,7 +3675,12 @@ class CharacterSheetCombat {
 			&& this._state.getEffectiveItemBonuses?.(attack.sourceItem.id)?.explodingDamageDice)
 			? this._explodeDamageDice(damageRoll)
 			: [];
-		const abilityMod = this._state.getWeaponAbilityMod(attack);
+		const abilityResolution = this._state.getWeaponAbilityResolution?.(attack) || {
+			modifier: this._state.getWeaponAbilityMod(attack),
+			ability: attack.abilityMod || "str",
+			source: null,
+		};
+		const abilityMod = abilityResolution.modifier;
 
 		// Doubleshot (#20, S4-owned): a pending one-shot rider that grants +1 weapon
 		// damage die on the NEXT ranged WEAPON attack. S4 owns the pending flag, the
@@ -3998,7 +4005,10 @@ class CharacterSheetCombat {
 		let juggernautOutcome = "";
 
 		// Build subtitle with breakdown
-		let subtitle = `${damageExpression}${isCrit ? " (crit)" : ""} + ${abilityMod} (${attack.abilityMod || "STR"})`;
+		const abilityLabel = abilityResolution.source
+			? `${abilityResolution.ability.toUpperCase()} via ${abilityResolution.source}`
+			: String(abilityResolution.ability || attack.abilityMod || "str").toUpperCase();
+		let subtitle = `${damageExpression}${isCrit ? " (crit)" : ""} + ${abilityMod} (${abilityLabel})`;
 		if (explodedDice.length) subtitle += ` <strong style="color:#f39c12">+ ${explodedDice.reduce((a, b) => a + b, 0)} (exploding: ${explodedDice.join(", ")})</strong>`;
 		if (attack.damageBonus) subtitle += ` + ${attack.damageBonus} (weapon)`;
 		if (featureDamageBonus) subtitle += ` + ${featureDamageBonus} (features)`;
@@ -5361,15 +5371,22 @@ class CharacterSheetCombat {
 	_renderAttackItem (attack, reachCtx = {}) {
 		const {isMelee: attackIsMelee} = this._getAttackRollKind(attack);
 		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+		const abilityResolution = attackBreakdown?.abilityResolution
+			|| this._state.getWeaponAbilityResolution?.(attack)
+			|| {
+				modifier: this._state.getWeaponAbilityMod(attack),
+				ability: attack.abilityMod || "str",
+				source: null,
+			};
 		const totalAttackBonus = attackBreakdown?.total ?? 0;
 		const totalDamageBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack))
 			+ (this._state.getWeaponDisplayDamageBonus?.(attack) ?? (Number(attack.damageBonus) || 0));
 		// Itemized tooltip for the to-hit badge so each contributing source is visible.
 		const atkBreakdownParts = [
-			`${attackBreakdown?.baseAbility >= 0 ? "+" : ""}${attackBreakdown?.baseAbility || 0} ability`,
+			`${abilityResolution.modifier >= 0 ? "+" : ""}${abilityResolution.modifier} ${String(abilityResolution.ability || "str").toUpperCase()}${abilityResolution.source ? ` via ${abilityResolution.source}` : ""}`,
 			`+${attackBreakdown?.proficiency || 0} prof`,
 		];
-		if (attackBreakdown?.abilitySubstitution) {
+		if (attackBreakdown?.abilitySubstitution && !abilityResolution.source) {
 			atkBreakdownParts.push(`${attackBreakdown.abilitySubstitution.value >= 0 ? "+" : ""}${attackBreakdown.abilitySubstitution.value} ${attackBreakdown.abilitySubstitution.name}`);
 		}
 		if (attack.attackBonus) atkBreakdownParts.push(`${attack.attackBonus >= 0 ? "+" : ""}${attack.attackBonus} weapon`);
@@ -5455,6 +5472,10 @@ class CharacterSheetCombat {
 			: {};
 		if (attack.countsAsMagical || itemEff.countsAsMagical) {
 			badgeHtml += " <span class=\"badge badge-success\" title=\"Counts as magical for overcoming resistance and immunity to nonmagical attacks and damage\">✧ Magical</span>";
+		}
+		if (abilityResolution.source) {
+			const attribution = CharacterSheetClassUtils.escapeHtml(abilityResolution.attribution || `${String(abilityResolution.ability).toUpperCase()} via ${abilityResolution.source}`);
+			badgeHtml += ` <span class="badge badge-info charsheet__attack-ability-source" title="${attribution}">${attribution}</span>`;
 		}
 		if (itemEff.countsAsSilvered) {
 			badgeHtml += " <span class=\"badge badge-secondary\" title=\"Counts as silvered, where a creature's rules specifically call for silver\">◈ Silvered</span>";

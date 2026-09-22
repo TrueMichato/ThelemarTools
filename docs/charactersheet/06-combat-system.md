@@ -156,6 +156,27 @@ const breakdown = state.getAttackBonusBreakdown(attack);
 const total = breakdown.total;
 ```
 
+`CharacterSheetState.getWeaponAbilityResolution(attack)` is the shared ability
+authority for attack cards, attack rolls, damage cards, and damage rolls. It
+first resolves the normal weapon ability (`STR`, `DEX`, finesse, or another
+explicit mode), then considers eligible alternate abilities. An alternate wins
+only when its modifier is strictly higher; the result includes the selected
+ability plus `source`, `sourceFeatureUid`, and a display attribution such as
+`INT via Battle Ready`. `getWeaponAbilityMod(attack)` is the numeric wrapper.
+
+EFA and TCE Battle Smith both publish a generic `attackAbility` effect for
+magic weapons, but their exact source-qualified feature UIDs remain separate.
+Battle Ready uses the shared `CharacterSheetItemUtils.isMagicWeapon` classifier,
+so meaningful rarity/flags/bonuses, composed magic facts, and exact valid
+Replicate Magic Item provenance qualify. A magical damage type alone does not.
+Generated feature items fail closed when provenance is stale, malformed, or
+owned by another feature. Removing the feature or magic fact therefore changes
+the next display and roll immediately; no resolved ability is persisted.
+
+```text
+total = resolvedAbilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackBonus
+```
+
 `buildAutoAttackFromWeapon()` owns the canonical inventory-to-attack conversion.
 Its `attackBonus` is **intrinsic/local only**: the source weapon's effective
 magic bonus, upgrades, projected material effects, and custom flat bonus.

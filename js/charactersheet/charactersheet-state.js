@@ -3156,9 +3156,7 @@ const FeatureEffectRegistry = {
 				ownerUid: "Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA",
 			},
 		]);
-		this.register("Battle Ready", [
-			{type: "attackAbility", ability: "int", weaponType: "magic"},
-		]);
+		this.register("Battle Ready|TCE", []);
 
 		// ======= BARBARIAN SUBCLASSES =======
 		this.register("Mindless Rage", [
@@ -4377,6 +4375,7 @@ class CharacterSheetState {
 	static EFA_ALCHEMICAL_SAVANT_FOCUS_UID = "Alchemist's Supplies|XPHB";
 	static EFA_ALCHEMICAL_SAVANT_DAMAGE_TYPES = new Set(["acid", "fire", "poison"]);
 	static EFA_SPELLCASTING_TOOLS_RULE_ID = "efa-artificer-tools-required";
+	static EFA_BATTLE_READY_FOCUS_RULE_ID = "efa-battle-ready-tools-or-proficient-weapon";
 	static EFA_BATTLE_SMITH_SUBCLASS_UID = "Battle Smith|Artificer|EFA|EFA";
 	static EFA_BATTLE_SMITH_FEATURE_UIDS = Object.freeze({
 		TOOLS_OF_THE_TRADE: "Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA",
@@ -4487,6 +4486,12 @@ class CharacterSheetState {
 		Object.freeze({level: 17, name: "Antilife Shell", source: "XPHB"}),
 		Object.freeze({level: 17, name: "Raise Dead", source: "XPHB"}),
 	]);
+	static TCE_BATTLE_READY_FEATURE_UID = "Battle Ready|Artificer|TCE|Battle Smith|TCE|3|TCE";
+	static EFA_REPLICATE_MAGIC_ITEM_OWNER = Object.freeze({
+		featureUid: "Replicate Magic Item|Artificer|EFA|2",
+		classUid: "Artificer|EFA",
+		subclassUid: null,
+	});
 
 	/**
 	 * Build the exact owner identity used by fixed-proficiency fallback
@@ -13064,6 +13069,19 @@ class CharacterSheetState {
 		return this.getAbilityMod(abilityKey);
 	}
 
+	_resolveBaseWeaponAbility (abilityKey) {
+		const candidates = abilityKey === "finesse"
+			? ["str", "dex"]
+			: abilityKey === "finesseWis"
+				? ["str", "dex", "wis"]
+				: abilityKey === "spellcasting"
+					? ["int", "wis", "cha"]
+					: [abilityKey];
+		return candidates.reduce((best, ability) =>
+			this.getAbilityMod(ability) > this.getAbilityMod(best) ? ability : best,
+		candidates[0]);
+	}
+
 	/**
 	 * Only weapon attacks can use the 2024 Bladework ability choice.
 	 * @param {object} attack
@@ -13073,7 +13091,7 @@ class CharacterSheetState {
 		if (!attack || typeof attack !== "object") return false;
 		if (attack.isSpell || attack.isSpellAttack) return false;
 		if (attack.isUnarmedStrike || attack.isNaturalWeapon) return false;
-		if (attack.abilityMod === "spellcasting") return false;
+		if ((attack.abilityMode || attack.abilityMod) === "spellcasting") return false;
 		return true;
 	}
 
@@ -13136,26 +13154,85 @@ class CharacterSheetState {
 		if (!this.isStateTypeActive?.("bladesong")) return 0;
 		if (!this._isBladesong2024()) return 0;
 		if (!this._isBladesongWeaponAttack(attack)) return 0;
-		if (!["str", "dex", "finesse"].includes(attack.abilityMod || "str")) return 0;
+		const abilityKey = attack.abilityMode || attack.abilityMod || "str";
+		if (!["str", "dex", "finesse"].includes(abilityKey)) return 0;
 		if (!this._isWeaponProficient(attack.sourceItem || attack)) return 0;
-		const base = this._resolveBaseWeaponAbilityMod(attack.abilityMod || "str");
+		const base = this._resolveBaseWeaponAbilityMod(abilityKey);
 		return Math.max(0, this.getAbilityMod("int") - base);
 	}
 
 	/**
-	 * Effective ability modifier for a weapon attack/damage roll, accounting for
-	 * active-state overrides (currently Bladesong: MAX(weapon mod, INT)). Composes
-	 * with finesse — the weapon's own mod is resolved first (which may itself be
-	 * MAX(STR, DEX)), then the override is applied.
-	 * @param {object} attack - Attack object (uses attack.abilityMod, attack.isSpell)
-	 * @returns {number}
+	 * Resolve one shared weapon-ability result for display, attack rolls, and damage.
+	 * Alternate abilities replace the normal result only when better.
+	 *
+	 * @param {object} attack Attack descriptor.
+	 * @returns {{modifier:number, ability:string, baseModifier:number, baseAbility:string, source:string|null, sourceFeatureUid:string|null, attribution:string|null}}
 	 */
+	getWeaponAbilityResolution (attack = {}, {includeActiveStates = true, includePassiveFeatures = true} = {}) {
+		const abilityKey = attack.abilityMode || attack.abilityMod || "str";
+		const baseAbility = this._resolveBaseWeaponAbility(abilityKey);
+		const baseModifier = this._resolveBaseWeaponAbilityMod(abilityKey);
+		let resolution = {
+			modifier: baseModifier,
+			ability: baseAbility,
+			baseModifier,
+			baseAbility,
+			source: null,
+			sourceFeatureUid: null,
+			attribution: null,
+		};
+		const applyAlternative = ({ability, source, sourceFeatureUid = null}) => {
+			const modifier = this.getAbilityMod(ability);
+			if (modifier <= resolution.modifier) return;
+			resolution = {
+				...resolution,
+				modifier,
+				ability,
+				source,
+				sourceFeatureUid,
+				attribution: `${ability.toUpperCase()} via ${source}`,
+			};
+		};
+
+		if (includePassiveFeatures) {
+			for (const effect of this._data._classFeatureAttackAbilities || []) {
+				if (!this._isClassFeatureAttackAbilityActive(effect, attack)) continue;
+				applyAlternative(effect);
+			}
+		}
+		if (includeActiveStates && this.getBladesongWeaponBonus(attack) > 0) {
+			applyAlternative({ability: "int", source: "Bladesong"});
+		}
+		if (includePassiveFeatures && this.getLiesWeaponBonus(attack) > 0) {
+			applyAlternative({ability: "cha", source: "Lies"});
+		}
+
+		return resolution;
+	}
+
 	getWeaponAbilityMod (attack) {
-		const base = this._resolveBaseWeaponAbilityMod(attack?.abilityMod || "str");
-		// Bladesong (INT) and Lies (CHA) are alternate-ability overrides; you may use only
-		// one at a time, so compose via MAX of their positive deltas (never additive).
-		const override = Math.max(this.getBladesongWeaponBonus(attack), this.getLiesWeaponBonus(attack));
-		return base + override;
+		return this.getWeaponAbilityResolution(attack).modifier;
+	}
+
+	_isClassFeatureAttackAbilityActive (effect, attack) {
+		if (!effect?.ability || effect.weaponType !== "magic") return false;
+		const calculations = this.getFeatureCalculations();
+		if (effect.sourceFeatureUid === CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY) {
+			if (!calculations.hasEfaBattleReady
+				|| calculations.efaBattleReadyFeatureUid !== effect.sourceFeatureUid) return false;
+		} else if (effect.sourceFeatureUid === CharacterSheetState.TCE_BATTLE_READY_FEATURE_UID) {
+			if (!calculations.hasBattleReady) return false;
+		} else {
+			return false;
+		}
+
+		if (attack?.isSpell || attack?.isSpellAttack || (attack?.abilityMode || attack?.abilityMod) === "spellcasting") return false;
+		const weapon = attack?.sourceItem || attack;
+		if (!this._isWeaponItem(weapon)) return false;
+		const effectiveBonuses = weapon.id != null ? this.getEffectiveItemBonuses?.(weapon.id) : null;
+		return this.isMagicWeapon(weapon, {
+			countsAsMagical: attack?.countsAsMagical === true || effectiveBonuses?.countsAsMagical === true,
+		});
 	}
 
 	/**
@@ -13169,22 +13246,21 @@ class CharacterSheetState {
 	 * @returns {{base: number, substitution: {name: string, value: number}|null, total: number, candidates: Array<{name: string, value: number}>}}
 	 */
 	getAttackAbilityBreakdown (attack, {includeActiveStates = true, includePassiveFeatures = true} = {}) {
-		const base = this._resolveBaseWeaponAbilityMod(attack?.abilityMod || "str");
-		const candidates = [];
-		if (includePassiveFeatures) {
-			const lies = Number(this.getLiesWeaponBonus?.(attack)) || 0;
-			if (lies > 0) candidates.push({name: "Lies", value: lies});
-		}
-		if (includeActiveStates) {
-			const bladesong = Number(this.getBladesongWeaponBonus?.(attack)) || 0;
-			if (bladesong > 0) candidates.push({name: "Bladesong", value: bladesong});
-		}
-		const substitution = candidates.reduce((best, it) => !best || it.value > best.value ? it : best, null);
+		const resolution = this.getWeaponAbilityResolution(attack, {includeActiveStates, includePassiveFeatures});
+		const substitution = resolution.source
+			? {
+				name: resolution.source,
+				value: resolution.modifier - resolution.baseModifier,
+				ability: resolution.ability,
+				sourceFeatureUid: resolution.sourceFeatureUid,
+			}
+			: null;
 		return {
-			base,
+			base: resolution.baseModifier,
 			substitution,
-			total: base + (substitution?.value || 0),
-			candidates,
+			total: resolution.modifier,
+			candidates: substitution ? [substitution] : [],
+			resolution,
 		};
 	}
 
@@ -13251,6 +13327,7 @@ class CharacterSheetState {
 			classification,
 			baseAbility: ability.base,
 			abilitySubstitution: ability.substitution,
+			abilityResolution: ability.resolution,
 			effectiveAbility: ability.total,
 			proficiency,
 			intrinsicLocal,
@@ -33172,6 +33249,7 @@ class CharacterSheetState {
 								break;
 							}
 							case "battle smith": {
+								if (classSource !== "TCE") break;
 								// Battle Ready: can use INT for magic weapon attacks
 								calculations.hasBattleReady = true;
 								calculations.magicWeaponAttackMod = intMod;
@@ -35799,13 +35877,25 @@ class CharacterSheetState {
 			});
 		}
 
-		// Battle Smith - Battle Ready: INT for attacks with magic weapons
-		if (calculations.hasBattleReady && !alreadyProcessed("Battle Ready")) {
+		// Battle Smith - Battle Ready: INT for attacks and damage with magic weapons.
+		if (calculations.hasEfaBattleReady) {
 			effects.push({
 				type: "attackAbility",
 				ability: "int",
 				weaponType: "magic",
 				source: "Battle Ready",
+				sourceFeatureUid: calculations.efaBattleReadyFeatureUid,
+				classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			});
+		}
+		if (calculations.hasBattleReady) {
+			effects.push({
+				type: "attackAbility",
+				ability: "int",
+				weaponType: "magic",
+				source: "Battle Ready",
+				sourceFeatureUid: CharacterSheetState.TCE_BATTLE_READY_FEATURE_UID,
+				classUid: "Artificer|TCE",
 			});
 		}
 
@@ -36537,6 +36627,8 @@ class CharacterSheetState {
 					ability: effect.ability,
 					weaponType: effect.weaponType,
 					source: effect.source,
+					sourceFeatureUid: effect.sourceFeatureUid || null,
+					classUid: effect.classUid || null,
 				});
 				return `${effect.source}: use ${effect.ability.toUpperCase()} for ${effect.weaponType} weapon attacks`;
 			}
@@ -37005,6 +37097,27 @@ class CharacterSheetState {
 			ownerKey: CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner),
 			provenance: MiscUtil.copyFast(provenance),
 		};
+	}
+
+	_isGeneratedReplicateMagicItem (classification) {
+		const ownerKey = CharacterSheetState._getGeneratedFeatureItemOwnerKey(
+			CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+		);
+		return classification?.status === "valid" && classification.ownerKey === ownerKey;
+	}
+
+	isMagicItem (item, {countsAsMagical = false} = {}) {
+		const classification = this.classifyGeneratedFeatureItem(item);
+		return CharacterSheetItemUtils.isMagicItem(item?.item || item, {
+			generatedItemClassification: classification,
+			isGeneratedMagicItem: this._isGeneratedReplicateMagicItem(classification),
+			countsAsMagical,
+		});
+	}
+
+	isMagicWeapon (item, opts = {}) {
+		const itemData = item?.item || item;
+		return CharacterSheetItemUtils.isWeapon(itemData) && this.isMagicItem(itemData, opts);
 	}
 
 	/**
@@ -41329,10 +41442,18 @@ class CharacterSheetState {
 		const arcaneArmorInventoryItemIds = arcaneArmorStatus.active && arcaneArmorStatus.boundItemId
 			? [arcaneArmorStatus.boundItemId]
 			: [];
+		const calculations = this.getFeatureCalculations();
+		const hasBattleReady = calculations.hasEfaBattleReady
+			&& calculations.efaBattleReadyFeatureUid === CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY;
+		const hasArcaneArmorFocus = arcaneArmorInventoryItemIds.length > 0;
 		return {
 			required: true,
-			ruleId: CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID,
-			sourceFeatureUid: CharacterSheetState.EFA_SPELLCASTING_FEATURE_UID,
+			ruleId: hasBattleReady
+				? CharacterSheetState.EFA_BATTLE_READY_FOCUS_RULE_ID
+				: CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID,
+			sourceFeatureUid: hasBattleReady
+				? CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY
+				: CharacterSheetState.EFA_SPELLCASTING_FEATURE_UID,
 			classUid: castingClass.uid,
 			castingClass,
 			addsMaterialComponent: true,
@@ -41341,17 +41462,30 @@ class CharacterSheetState {
 				itemUids: [],
 				itemNames: ["Thieves' Tools", "Tinker's Tools"],
 				itemTypes: ["AT"],
-				weapon: null,
+				weapon: hasBattleReady
+					? {
+						category: "any",
+						requiresProficiency: true,
+					}
+					: null,
 				requiresProficiency: true,
 			},
 			ui: {
-				title: arcaneArmorInventoryItemIds.length
+				title: hasBattleReady || hasArcaneArmorFocus
 					? "Choose Artificer Spellcasting Focus"
 					: "Choose Artificer Spellcasting Tools",
-				description: arcaneArmorInventoryItemIds.length
+				description: hasBattleReady && hasArcaneArmorFocus
+					? "Choose your worn Arcane Armor or an equipped, proficient tool or weapon as the spellcasting focus."
+					: hasBattleReady
+						? "Choose the equipped, proficient tool or weapon you are using as the material focus for this spell."
+						: hasArcaneArmorFocus
 					? "Choose your worn Arcane Armor or an equipped, proficient tool as the spellcasting focus."
 					: "Choose the equipped, proficient tool you are using as the material focus for this spell.",
-				unavailableMessage: arcaneArmorInventoryItemIds.length
+				unavailableMessage: hasBattleReady && hasArcaneArmorFocus
+					? "EFA Battle Smith spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or a proficient weapon."
+					: hasBattleReady
+						? "EFA Battle Smith spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or a proficient weapon."
+						: hasArcaneArmorFocus
 					? "EFA Artificer spells require worn Arcane Armor or an equipped, proficient spellcasting tool."
 					: "EFA Artificer spells require equipped Thieves' Tools, Tinker's Tools, or proficient Artisan's Tools.",
 			},
@@ -41503,6 +41637,21 @@ class CharacterSheetState {
 		if (has((i, it) => (it.name || i.name || "").toLowerCase().includes("component pouch"))) return {ok: true, source: "component pouch", itemName: matched.name};
 
 		// 3. Feature/feat substitutions.
+		const battleReadyFocusRequirement = this.getSpellCastFocusRequirement({
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+		});
+		if (battleReadyFocusRequirement?.ruleId === CharacterSheetState.EFA_BATTLE_READY_FOCUS_RULE_ID) {
+			const focusRows = this.getEligibleSpellCastFocusInventoryRows(battleReadyFocusRequirement);
+			const focusRow = focusRows.find(row => this._isWeaponItem(row.item)) || focusRows[0];
+			if (focusRow) {
+				return {
+					ok: true,
+					source: this._isWeaponItem(focusRow.item) ? "Battle Ready proficient weapon" : "Artificer spellcasting tools",
+					itemName: focusRow.item.name,
+				};
+			}
+		}
 		if (this.hasFeat?.("Spellsword Technique") && has((i, it) => this._isMeleeWeaponItem(it))) return {ok: true, source: "Spellsword Technique", itemName: matched.name};
 		if (this.hasFeat?.("War Caster") && has((i, it) => baseType(it) === "S" || !!it.shield)) return {ok: true, source: "War Caster", itemName: matched.name};
 		if (this.hasFeature?.("Star Map")) return {ok: true, source: "Star Map", itemName: null};
@@ -44322,21 +44471,25 @@ class CharacterSheetState {
 		const isRanged = rawType === "R" || props.some(p => p === "A" || p.startsWith("A|")) || (item.isMelee === false) || isAlwaysThrown;
 		const isMonkWeapon = this.isMonkWeapon?.(item) || item.isMonkWeapon;
 
-		let abilityUsed;
-		if (isRanged && !isAlwaysThrown) {
-			abilityUsed = "dex";
-		} else if (isFinesse || isMonkWeapon) {
-			abilityUsed = this.getAbilityMod("dex") >= this.getAbilityMod("str") ? "dex" : "str";
-		} else {
-			abilityUsed = "str";
-		}
-		const abilityMod = this.getAbilityMod(abilityUsed);
+		const abilityUsed = isRanged && !isAlwaysThrown
+			? "dex"
+			: (isFinesse || isMonkWeapon ? "finesse" : "str");
+		const effectiveBonuses = item.id != null ? this.getEffectiveItemBonuses?.(item.id) : null;
+		const attackDescriptor = {
+			name: item.name,
+			isMelee: !isRanged,
+			isWeapon: true,
+			abilityMod: abilityUsed,
+			sourceItem: item,
+			countsAsMagical: item.countsAsMagical === true || effectiveBonuses?.countsAsMagical === true,
+		};
+		const abilityResolution = this.getWeaponAbilityResolution(attackDescriptor);
 
 		const profBonus = this._isWeaponProficient(item) ? this.getProficiencyBonus() : 0;
-		const attackBonus = abilityMod + profBonus + (this._data.customModifiers.attackBonus || 0);
+		const attackBonus = abilityResolution.modifier + profBonus + (this._data.customModifiers.attackBonus || 0);
 
 		const damageDie = this.getWeaponDamageDie(item);
-		const damageBonus = abilityMod + (this._data.customModifiers.damageBonus || 0);
+		const damageBonus = abilityResolution.modifier + (this._data.customModifiers.damageBonus || 0);
 		const damage = `${damageDie}${damageBonus >= 0 ? "+" : ""}${damageBonus}`;
 
 		const dmgTypeFull = item.dmgType
@@ -44344,8 +44497,12 @@ class CharacterSheetState {
 			: null;
 
 		return {
-			name: item.name,
-			abilityMod: abilityUsed,
+			...attackDescriptor,
+			abilityMod: abilityResolution.baseAbility,
+			abilityMode: abilityUsed,
+			resolvedAbility: abilityResolution.ability,
+			abilitySource: abilityResolution.source,
+			abilitySourceFeatureUid: abilityResolution.sourceFeatureUid,
 			attackBonus,
 			damage,
 			damageType: dmgTypeFull || item.damageType || "bludgeoning",
@@ -51871,7 +52028,7 @@ class CharacterSheetState {
 	_isLiesWeaponAttack (attack) {
 		if (!attack || typeof attack !== "object") return false;
 		if (attack.isSpell || attack.isSpellAttack) return false;
-		if (attack.abilityMod === "spellcasting") return false;
+		if ((attack.abilityMode || attack.abilityMod) === "spellcasting") return false;
 		const choice = this.getLiesWeaponType().toLowerCase();
 		if (!choice) return false;
 		const name = (attack.name || "").toLowerCase();
@@ -51890,7 +52047,7 @@ class CharacterSheetState {
 	getLiesWeaponBonus (attack) {
 		if (!(this.getFeatureCalculations?.() || {}).hasLiesMastery) return 0;
 		if (!this._isLiesWeaponAttack(attack)) return 0;
-		const base = this._resolveBaseWeaponAbilityMod(attack.abilityMod || "str");
+		const base = this._resolveBaseWeaponAbilityMod(attack.abilityMode || attack.abilityMod || "str");
 		return Math.max(0, this.getAbilityMod("cha") - base);
 	}
 

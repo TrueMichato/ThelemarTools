@@ -1471,13 +1471,7 @@ class CharacterSheetInventory {
 		footer.querySelector("button").addEventListener("click", () => doClose(false));
 	}
 	_isMagicItem (item) {
-		if (item.rarity && !["none", "unknown"].includes(item.rarity.toLowerCase())) return true;
-		if (item.wondrous) return true;
-		if (item.reqAttune) return true;
-		if (item.bonusWeapon || item.bonusAc || item.bonusSpellAttack) return true;
-		if (["WD", "ST", "RG", "RD"].includes(item.type)) return true;
-		if (item.bonusWeaponDamage || item.bonusSavingThrow || item.bonusSpellDamage) return true;
-		return false;
+		return this._state?.isMagicItem?.(item) ?? CharacterSheetItemUtils.isMagicItem(item);
 	}
 
 	_isVariantComponent (item) {

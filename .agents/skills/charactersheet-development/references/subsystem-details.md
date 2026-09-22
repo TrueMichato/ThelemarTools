@@ -386,12 +386,20 @@ class name **and** source resolve to a current class entry. Name-only legacy
 rows remain ambiguous by design and do not activate source-specific casting
 rules.
 
-`getSpellCastFocusRequirement(spell, castMeta)` currently contributes one
+`getSpellCastFocusRequirement(spell, castMeta)` contributes the EFA Artificer
 source-specific rule: every exact `Artificer|EFA` spell gains a material
 component and requires an equipped, proficient Thieves' Tools, Tinker's Tools,
 or Artisan's Tools inventory wrapper. An active EFA Armorer Arcane Armor binding
 is another eligible wrapper and flows through the same focus selection and cast
-receipt APIs. This applies even when the spell's source data has no `M` component.
+receipt APIs. While exact EFA Battle Ready is active,
+the same requirement OR-composes
+`weapon:{category:"any", requiresProficiency:true}` and is attributed to
+`efa-battle-ready-tools-or-proficient-weapon` /
+`Battle Ready|Artificer|EFA|Battle Smith|EFA|3|EFA`. The canonical live wrapper,
+equipped, positive-quantity, weapon, and `_isWeaponProficient` checks remain in
+`getEligibleSpellCastFocusInventoryRows`; do not duplicate them in a subclass
+branch. TCE Battle Smith and ambiguous name-only Artificer rows never qualify.
+This applies even when the spell's source data has no `M` component.
 `ignoresMaterialComponents`,
 `ignoreMaterialComponents`, `waiveMaterialComponents`, or
 `materialComponentsRequired: false` are explicit cast-vehicle waivers for
@@ -898,6 +906,21 @@ that increases melee reach must not rewrite a spell's authored range.
 
 ### Standing Weapon Damage Display
 
+`CharacterSheetState.getWeaponAbilityResolution(attack)` is the single
+attack/damage ability resolver. It returns the normal ability result plus the
+winning alternate ability's `source`, exact `sourceFeatureUid`, and
+`attribution`. `getWeaponAbilityMod()` is only its numeric compatibility
+wrapper. Combat, Overview, and Play Mode must consume the resolution instead of
+re-implementing finesse or feature swaps; both attack and damage therefore use
+the same ability and show the same attribution.
+
+Battle Ready is represented as a generic class-feature `attackAbility` effect.
+Its magic-weapon gate delegates to `CharacterSheetItemUtils.isMagicWeapon`
+through state, including exact generated-item classification. EFA validates
+`Battle Ready|Artificer|EFA|Battle Smith|EFA|3|EFA`; TCE validates its own UID.
+Do not set legacy `hasBattleReady` for EFA, and do not persist the resolved
+ability on inventory rows.
+
 `CharacterSheetState.getWeaponDisplayDamageBonus(attack)` is the shared source for
 the non-ability flat bonus shown in Combat, Overview, and Play Mode, and for the
 standing-flat portion of `_rollDamage`. It includes the attack's authoritative
@@ -1345,6 +1368,12 @@ the normal cleanup path. `replaceItem()` preserves valid provenance and instance
 identity, and also carries unsupported-version metadata forward without trying
 to interpret it. Existing fixed generated systems may retain their dedicated
 legacy identities until explicitly migrated; never adopt them by name.
+
+`CharacterSheetItemUtils.isMagicItem()` / `isMagicWeapon()` also treat generated
+markers as a fail-closed provenance envelope. Only a `valid` exact
+`Replicate Magic Item|Artificer|EFA|2` owner is intrinsically magic; stale,
+malformed, wrong-owner, and unrelated generated rows remain nonmagical even if
+their editable rarity or display name claims otherwise.
 
 Reconciliation must be idempotent: preserve the wrapper ID and player-owned
 fields, update only untouched generated/scaling fields, collapse duplicate
