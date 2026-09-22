@@ -822,11 +822,30 @@ direct mechanical overrides survive model switches and save/load. Managed
 passive effects have stable `_generatedEffectId` values so generated updates can
 coexist with player-authored effects.
 
-Remaining Armorer work is limited to level-15 Perfected Armor model effects,
-dedicated NPC/PDF export coverage, and E2E coverage. Level-9 Armor Replication
-uses the shared source-qualified plan-extension and constrained
-generated-item-capacity contracts; it does not add an Armorer-specific persisted
-ledger.
+At exact level 15, Perfected Armor advances only the active generated row's
+managed damage baseline (`2d6` Force Demolisher, `1d10` Thunder Pulse, `2d6`
+Lightning Launcher). The same `_generatedItemBase` comparison moves or removes
+the upgrade without replacing wrapper IDs, editable names, or player damage
+overrides.
+
+Guardian and Infiltrator each use a deterministic exact-owned Perfected Armor
+resource ID. Both maxima are the Intelligence modifier (minimum 1), while
+`metadata.efaPerfectedArmor.spentUses` preserves total expenditure across
+Intelligence changes and model switches; Long Rest alone resets the spend.
+Guardian validates the external save/pull context before the shared committed
+Reaction transaction and returns adjacent melee follow-up descriptors after
+commit. Infiltrator flight uses the shared active-state movement channel and
+resolves twice the final live walking Speed without reapplying global movement
+modifiers, then expires on `resetTurnEconomy()`. Lightning Launcher glimmer uses
+opaque target IDs and the shared turn-receipt boundary to refresh a selected
+existing target and expire on the canonical owner-turn reset. Its owner-only
+disadvantage semantics remain distinct from Thunder Pulse's
+disadvantage-against-others semantics.
+
+Remaining Armorer work is limited to dedicated NPC/PDF export coverage and E2E
+coverage. Level-9 Armor Replication uses the shared source-qualified
+plan-extension and constrained generated-item-capacity contracts; it does not
+add an Armorer-specific persisted ledger.
 
 ### Active States & Conditions
 

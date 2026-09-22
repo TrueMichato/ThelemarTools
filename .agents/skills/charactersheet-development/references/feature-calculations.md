@@ -459,6 +459,16 @@ Alchemist's same-named feature uses the same channel with
 `filter: {recipeCategories: ["potion"]}` and also requires the exact active EFA feature, so feature
 removal/respec disables the contribution immediately. Same-named TCE subclasses never qualify.
 
+The exact EFA Armorer progression publishes `hasEfaPerfectedArmor` at level 15
+without reusing the legacy TCE `hasPerfectedArmor` flag. While the bound Arcane
+Armor is active, model-specific calculation flags are
+`hasEfaPerfectedDreadnaught`, `hasEfaPerfectedGuardian`, and
+`hasEfaPerfectedInfiltrator`; glimmer and flight additionally expose
+`hasEfaLightningLauncherGlimmer` and `hasEfaPerfectedArmorFlight`. Generated
+damage dice, resources, active states, target effects, and transactions remain
+runtime projections beside the EFA Armorer binding logic rather than passive
+calculation values. TCE and mixed-source Armorers never qualify.
+
 The EFA Battle Smith's Tools of the Trade descriptor is source-gated to Artificer `EFA` +
 Battle Smith `EFA` at level 3, is owned by
 `Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA`, and filters on `M`/`R`.

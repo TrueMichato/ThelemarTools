@@ -15,10 +15,12 @@ import {CharacterSheetProgression} from "./charactersheet-progression.js";
 const TARGET_EFFECT_HANDLER_METHODS = Object.freeze({
 	"chained-fury": "applyChainedTargetEffect",
 	"efa-armorer-thunder-pulse": "applyEfaThunderPulseTargetEffect",
+	"efa-armorer-lightning-launcher-glimmer": "applyEfaLightningLauncherGlimmerTargetEffect",
 });
 const TARGET_EFFECT_METADATA_METHODS = Object.freeze({
 	"chained-fury": "getChainedTargetEffectMetadata",
 	"efa-armorer-thunder-pulse": "getEfaThunderPulseTargetEffectMetadata",
+	"efa-armorer-lightning-launcher-glimmer": "getEfaLightningLauncherGlimmerTargetEffectMetadata",
 });
 const FIXED_PROFICIENCY_FALLBACK_DEFINITIONS = new Map();
 const FEATURE_COMPANION_GRANT_DEFINITIONS = new Map();
@@ -18795,15 +18797,32 @@ class CharacterSheetState {
 
 		// Apply spell-granted speeds (e.g., Fly spell: flySpeed 60)
 		const activeEffects = this.getActiveStateEffects();
+		const activeSpeedFloors = {
+			fly: 0,
+			swim: 0,
+			climb: 0,
+			burrow: 0,
+		};
 		for (const e of activeEffects) {
-			// `equalToWalk` resolves against the already-computed raw walking
-			// speed, mirroring `getSpeedByType`, so an active state can grant
-			// "fly/swim equal to your Speed" without re-entering this method.
+			const speedType = e.type === "flySpeed"
+				? "fly"
+				: e.type === "swimSpeed"
+					? "swim"
+					: e.type === "climbSpeed"
+						? "climb"
+						: e.type === "burrowSpeed" ? "burrow" : null;
+			if (!speedType) continue;
+			if (e.walkMultiplier) {
+				activeSpeedFloors[speedType] = Math.max(activeSpeedFloors[speedType], this.getWalkSpeed() * Math.max(0, Number(e.walkMultiplier) || 0));
+				continue;
+			}
+			// `equalToWalk` resolves against the raw walking speed here, mirroring
+			// the existing equal-to grants in this formatted speed pipeline.
 			const granted = e.equalToWalk ? rawWalk : (e.value || 0);
-			if (e.type === "flySpeed") effectiveFly = Math.max(effectiveFly, granted);
-			else if (e.type === "swimSpeed") effectiveSwim = Math.max(effectiveSwim, granted);
-			else if (e.type === "climbSpeed") effectiveClimb = Math.max(effectiveClimb, granted);
-			else if (e.type === "burrowSpeed") effectiveBurrow = Math.max(effectiveBurrow, granted);
+			if (speedType === "fly") effectiveFly = Math.max(effectiveFly, granted);
+			else if (speedType === "swim") effectiveSwim = Math.max(effectiveSwim, granted);
+			else if (speedType === "climb") effectiveClimb = Math.max(effectiveClimb, granted);
+			else if (speedType === "burrow") effectiveBurrow = Math.max(effectiveBurrow, granted);
 		}
 		effectiveSwim = Math.max(effectiveSwim, applyEqual("swim"));
 		effectiveClimb = Math.max(effectiveClimb, applyEqual("climb"));
@@ -18812,10 +18831,10 @@ class CharacterSheetState {
 		// Compute each movement type with per-type multipliers
 		const getTypeMultiplier = (speedType) => (itemSpeedMultiply[speedType] || 1) * (itemSpeedMultiply["*"] || 1);
 
-		const fly = (effectiveFly > 0 || hasEqualToWalkMod("fly") || this._getGrantedSpeedFromFeatures("fly") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + adeptSpeedBonus + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const swim = (effectiveSwim > 0 || hasEqualToWalkMod("swim") || this._getGrantedSpeedFromFeatures("swim") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + adeptSpeedBonus + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const climb = (effectiveClimb > 0 || hasEqualToWalkMod("climb") || this._getGrantedSpeedFromFeatures("climb") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + adeptSpeedBonus + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
-		const burrow = (effectiveBurrow > 0 || hasEqualToWalkMod("burrow") || this._getGrantedSpeedFromFeatures("burrow") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + adeptSpeedBonus + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0;
+		const fly = Math.max(activeSpeedFloors.fly, (effectiveFly > 0 || hasEqualToWalkMod("fly") || this._getGrantedSpeedFromFeatures("fly") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("fly", effectiveFly, (speedMods.fly || 0) + this.getSpeedBonusFromStates("fly") + adeptSpeedBonus + (itemSpeedBonus.fly || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("fly") * speedMultiplier) - exhaustionSpeedPenalty) : 0);
+		const swim = Math.max(activeSpeedFloors.swim, (effectiveSwim > 0 || hasEqualToWalkMod("swim") || this._getGrantedSpeedFromFeatures("swim") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("swim", effectiveSwim, (speedMods.swim || 0) + this.getSpeedBonusFromStates("swim") + adeptSpeedBonus + (itemSpeedBonus.swim || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("swim") * speedMultiplier) - exhaustionSpeedPenalty) : 0);
+		const climb = Math.max(activeSpeedFloors.climb, (effectiveClimb > 0 || hasEqualToWalkMod("climb") || this._getGrantedSpeedFromFeatures("climb") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("climb", effectiveClimb, (speedMods.climb || 0) + this.getSpeedBonusFromStates("climb") + adeptSpeedBonus + (itemSpeedBonus.climb || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("climb") * speedMultiplier) - exhaustionSpeedPenalty) : 0);
+		const burrow = Math.max(activeSpeedFloors.burrow, (effectiveBurrow > 0 || hasEqualToWalkMod("burrow") || this._getGrantedSpeedFromFeatures("burrow") > 0) ? Math.max(0, Math.floor(getSpeedWithEqualToWalk("burrow", effectiveBurrow, (speedMods.burrow || 0) + this.getSpeedBonusFromStates("burrow") + adeptSpeedBonus + (itemSpeedBonus.burrow || 0) + (itemSpeedBonus["*"] || 0)) * getTypeMultiplier("burrow") * speedMultiplier) - exhaustionSpeedPenalty) : 0);
 
 		if (fly > 0) parts.push(`fly ${fly} ft.`);
 		if (swim > 0) parts.push(`swim ${swim} ft.`);
@@ -18902,11 +18921,19 @@ class CharacterSheetState {
 		// Apply spell-granted speeds (e.g., Fly spell: flySpeed 60)
 		const spellSpeedType = `${type}Speed`; // e.g., "flySpeed", "swimSpeed"
 		const activeEffects = this.getActiveStateEffects();
+		let activeSpeedFloor = 0;
 		for (const e of activeEffects) {
 			// `equalToWalk` is resolved HERE, at the read site, rather than baked
 			// into the effect: computing the walking speed while producing active
 			// state effects would re-enter the speed pipeline.
-			if (e.type === spellSpeedType) base = Math.max(base, e.equalToWalk ? this.getWalkSpeed() : (e.value || 0));
+			if (e.type === spellSpeedType) {
+				if (e.walkMultiplier) {
+					activeSpeedFloor = Math.max(activeSpeedFloor, this.getWalkSpeed() * Math.max(0, Number(e.walkMultiplier) || 0));
+					continue;
+				}
+				const granted = e.equalToWalk ? this.getWalkSpeed() : (e.value || 0);
+				base = Math.max(base, granted);
+			}
 		}
 
 		// For non-walk speeds, only apply bonuses if character has that movement type
@@ -18921,7 +18948,7 @@ class CharacterSheetState {
 		// added — silently returning 0 for every such feature. Only a
 		// TYPE-SPECIFIC grant counts here, which is what keeps the generic
 		// "+10 speed" case above still correct.
-		if (type !== "walk" && base === 0 && this._getGrantedSpeedFromStates(type) <= 0 && this._getGrantedSpeedFromFeatures(type) <= 0) {
+		if (type !== "walk" && base === 0 && activeSpeedFloor <= 0 && this._getGrantedSpeedFromStates(type) <= 0 && this._getGrantedSpeedFromFeatures(type) <= 0) {
 			return 0;
 		}
 
@@ -18930,7 +18957,8 @@ class CharacterSheetState {
 
 		// Armor strength penalty applies to all movement types
 		const speedMultiplier = ignoresSpeedReductions ? Math.max(1, this.getSpeedMultiplierFromConditions()) : this.getSpeedMultiplierFromConditions();
-		return Math.max(0, Math.floor((base + bonus + armorPenalty) * typeMultiplier * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
+		const calculated = Math.max(0, Math.floor((base + bonus + armorPenalty) * typeMultiplier * speedMultiplier) - (ignoresSpeedReductions ? 0 : this._getExhaustionSpeedPenalty()));
+		return Math.max(calculated, activeSpeedFloor);
 	}
 	// #endregion
 
@@ -33311,12 +33339,18 @@ class CharacterSheetState {
 						calculations.efaArmorerBindingReasons = [...status.reasons];
 						calculations.efaArmorerModelWeaponActive = status.active && !!status.model;
 						calculations.efaArmorerModelWeaponId = status.active ? status.model?.id || null : null;
+						calculations.hasEfaPerfectedArmor = level >= 15;
 
 						if (status.active) {
 							switch (status.model?.name) {
 								case "Dreadnaught":
 									calculations.hasEfaForceDemolisher = true;
 									calculations.hasEfaGiantStature = true;
+									if (level >= 15) {
+										calculations.hasEfaPerfectedDreadnaught = true;
+										calculations.efaGiantStatureReachBonus = 10;
+										calculations.efaGiantStatureSizeChoices = ["large", "huge"];
+									}
 									(calculations.attackOnHitOptions ||= []).push({
 										id: "efa-armorer-force-demolisher-movement",
 										name: "Force Demolisher Push/Pull",
@@ -33331,6 +33365,7 @@ class CharacterSheetState {
 									calculations.hasEfaThunderPulse = true;
 									calculations.hasEfaDefensiveField = true;
 									calculations.efaDefensiveFieldTempHp = level;
+									if (level >= 15) calculations.hasEfaPerfectedGuardian = true;
 									(calculations.attackOnHitOptions ||= []).push({
 										id: "efa-armorer-thunder-pulse-disadvantage",
 										name: "Thunder Pulse",
@@ -33350,6 +33385,11 @@ class CharacterSheetState {
 									calculations.hasEfaPoweredSteps = true;
 									calculations.hasEfaDampeningField = true;
 									calculations.efaArmorerSpeedBonus = 5;
+									if (level >= 15) {
+										calculations.hasEfaPerfectedInfiltrator = true;
+										calculations.hasEfaLightningLauncherGlimmer = true;
+										calculations.hasEfaPerfectedArmorFlight = true;
+									}
 									(calculations.weaponDamageRiders ||= []).push({
 										id: "efa-armorer-lightning-launcher-extra-damage",
 										name: "Lightning Launcher",
@@ -50616,6 +50656,7 @@ class CharacterSheetState {
 		this._reconcileRhwReanimatorState();
 		this._ensureEfaFlashOfGeniusResource();
 		this._ensureEfaGiantStatureResource();
+		this._ensureEfaPerfectedArmorResources();
 		this._ensureEfaEldritchCannonCreationResource();
 		this._ensureEfaArcaneJoltResource();
 		this._ensureBattleMasterSuperiorityDice();
@@ -55002,6 +55043,19 @@ class CharacterSheetState {
 			) {
 				resource.spentUses = Math.max(0, resource.max - resource.current);
 			}
+			if (
+				this._isEfaPerfectedArmorResource(resource)
+				&& (resource.current !== previousCurrent || resource.current === resource.max)
+			) {
+				resource.metadata = {
+					...(resource.metadata || {}),
+					efaPerfectedArmor: {
+						...(resource.metadata?.efaPerfectedArmor || {}),
+						version: 1,
+						spentUses: Math.max(0, resource.max - resource.current),
+					},
+				};
+			}
 			// Sync back to the linked feature if one exists
 			if (resource.featureId) {
 				const feature = this._data.features.find(f => f.id === resource.featureId);
@@ -55088,6 +55142,16 @@ class CharacterSheetState {
 					r.metadata = {
 						...(r.metadata || {}),
 						efaGiantStature: {
+							version: 1,
+							spentUses: 0,
+						},
+					};
+				}
+				if (rechargeType === "long" && this._isEfaPerfectedArmorResource(r)) {
+					r.metadata = {
+						...(r.metadata || {}),
+						efaPerfectedArmor: {
+							...(r.metadata?.efaPerfectedArmor || {}),
 							version: 1,
 							spentUses: 0,
 						},
@@ -69886,6 +69950,19 @@ class CharacterSheetState {
 			tracksActionEconomy: true,
 			preferCuratedEffects: true,
 		},
+		efaPerfectedArmorFlight: {
+			id: "efaPerfectedArmorFlight",
+			name: "Perfected Armor Flight",
+			icon: "🪽",
+			description: "Your Fly Speed equals twice your current Speed until the end of the current turn.",
+			effects: [{type: "flySpeed", walkMultiplier: 2}],
+			duration: "Until the end of the current turn",
+			endConditions: ["Current turn ends", "You die", "Arcane Armor is doffed", "Armor Model changes"],
+			activationAction: "bonus",
+			tracksActionEconomy: true,
+			expiresOnTurnEconomyReset: true,
+			preferCuratedEffects: true,
+		},
 		/**
 		 * Manifest Chains (Barbarian: Path of the Chained Fury, TGTT L3).
 		 *
@@ -75703,6 +75780,7 @@ class CharacterSheetState {
 			if (options.temporalView !== undefined) existing.temporalView = MiscUtil.copyFast(options.temporalView);
 			if (options.effectOwnerId !== undefined) existing.effectOwnerId = options.effectOwnerId || null;
 			if (options.effectHolderUid !== undefined) existing.effectHolderUid = options.effectHolderUid || null;
+			if (options.metadata !== undefined) existing.metadata = MiscUtil.copyFast(options.metadata);
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -75755,6 +75833,7 @@ class CharacterSheetState {
 			temporalView: options.temporalView ? MiscUtil.copyFast(options.temporalView) : null,
 			effectOwnerId: options.effectOwnerId || null,
 			effectHolderUid: options.effectHolderUid || null,
+			metadata: options.metadata ? MiscUtil.copyFast(options.metadata) : null,
 			// Self-imposed drawback conditions this state applies while active. Curated
 			// states declare them on their ACTIVE_STATE_TYPES entry; CUSTOM (generically
 			// detected) toggles carry them here instead, parsed from the feature text.
@@ -76387,7 +76466,6 @@ class CharacterSheetState {
 	startCombat () {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
-		this._expireTargetEffectsAtOwnerTurnStart(1);
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: 1});
 		this._data.sanguineMasteryLastRerollRound = null;
@@ -76427,6 +76505,7 @@ class CharacterSheetState {
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: null});
 		this.clearTargetEffects("efa-armorer-thunder-pulse");
+		this.clearTargetEffects("efa-armorer-lightning-launcher-glimmer");
 
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
@@ -76450,7 +76529,6 @@ class CharacterSheetState {
 		if (!this._data.inCombat) return [];
 
 		this._data.combatRound++;
-		this._expireTargetEffectsAtOwnerTurnStart(this._data.combatRound);
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: this._data.combatRound});
 		this._data.sanguineMasteryLastRerollRound = null;
@@ -77178,6 +77256,7 @@ class CharacterSheetState {
 		defensiveField: "Defensive Field|Artificer|EFA|Armorer|EFA|3|EFA",
 		thunderPulse: "Thunder Pulse|Artificer|EFA|Armorer|EFA|3|EFA",
 		improvedArmorer: "Improved Armorer|Artificer|EFA|Armorer|EFA|9|EFA",
+		perfectedArmor: "Perfected Armor|Artificer|EFA|Armorer|EFA|15|EFA",
 	});
 
 	static EFA_ARMORER_FEATURE_OWNERS = Object.freeze({
@@ -77195,9 +77274,33 @@ class CharacterSheetState {
 			source: "EFA",
 			uid: "Thunder Pulse|Artificer|EFA|Armorer|EFA|3|EFA",
 		}),
+		perfectedArmor: Object.freeze({
+			id: "efa-armorer:perfected-armor",
+			kind: "subclassFeature",
+			name: "Perfected Armor",
+			source: "EFA",
+			uid: "Perfected Armor|Artificer|EFA|Armorer|EFA|15|EFA",
+		}),
 	});
 
 	static EFA_GIANT_STATURE_RESOURCE_NAME = "Giant Stature";
+	static EFA_PERFECTED_ARMOR_DAMAGE_DICE = Object.freeze({
+		"efa-armorer:dreadnaught:force-demolisher": "2d6",
+		"efa-armorer:guardian:thunder-pulse": "1d10",
+		"efa-armorer:infiltrator:lightning-launcher": "2d6",
+	});
+	static EFA_PERFECTED_ARMOR_RESOURCES = Object.freeze({
+		guardian: Object.freeze({
+			id: "efa-armorer:perfected-armor:guardian:uses",
+			name: "Perfected Armor — Guardian",
+			resourceType: "efaPerfectedArmorGuardian",
+		}),
+		flight: Object.freeze({
+			id: "efa-armorer:perfected-armor:infiltrator-flight:uses",
+			name: "Perfected Armor — Flight",
+			resourceType: "efaPerfectedArmorFlight",
+		}),
+	});
 
 	static EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT = Object.freeze({
 		key: "subclassFeature:Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA:action:lightning-launcher-extra-damage",
@@ -77205,6 +77308,74 @@ class CharacterSheetState {
 		sourceUid: "subclassFeature:Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA",
 		actionUid: "lightning-launcher-extra-damage",
 	});
+
+	_isEfaPerfectedArmorResource (resource, kind = null) {
+		const def = kind ? CharacterSheetState.EFA_PERFECTED_ARMOR_RESOURCES[kind] : null;
+		return resource?.featureUid === CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.perfectedArmor
+			&& resource?.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+			&& (!def || resource.id === def.id || resource.resourceType === def.resourceType || resource.metadata?.efaPerfectedArmor?.kind === kind);
+	}
+
+	_ensureEfaPerfectedArmorResource (kind) {
+		const def = CharacterSheetState.EFA_PERFECTED_ARMOR_RESOURCES[kind];
+		if (!def) return null;
+		const armorer = this._getEfaArmorerClass();
+		if (!armorer || Number(armorer.level) < 15) {
+			this._data.resources = (this._data.resources || []).filter(resource => !this._isEfaPerfectedArmorResource(resource));
+			return null;
+		}
+
+		const tracked = (this._data.resources || []).filter(resource => this._isEfaPerfectedArmorResource(resource, kind));
+		const desiredMax = Math.max(1, this.getAbilityMod("int"));
+		const spent = tracked.length
+			? Math.max(...tracked.map(resource => {
+				const priorMax = Math.max(0, Number(resource.max) || 0);
+				const observedSpent = Math.max(0, priorMax - Math.min(Number(resource.current) || 0, priorMax));
+				const persistedSpent = Number(resource.metadata?.efaPerfectedArmor?.spentUses);
+				return Number.isFinite(persistedSpent)
+					? Math.max(observedSpent, Math.max(0, Math.floor(persistedSpent)))
+					: observedSpent;
+			}))
+			: 0;
+		let resource = tracked.find(candidate => candidate.id === def.id) || tracked[0] || null;
+		if (!resource) {
+			resource = {
+				id: def.id,
+				name: def.name,
+				current: desiredMax,
+				max: desiredMax,
+				recharge: "long",
+			};
+			(this._data.resources ||= []).push(resource);
+		}
+		resource.id = def.id;
+		resource.name = def.name;
+		resource.max = desiredMax;
+		resource.current = Math.max(0, desiredMax - spent);
+		resource.recharge = "long";
+		resource.resourceType = def.resourceType;
+		resource.featureUid = CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.perfectedArmor;
+		resource.classUid = CharacterSheetState.EFA_ARTIFICER_CLASS_UID;
+		resource.source = "EFA";
+		resource.metadata = {
+			...(resource.metadata || {}),
+			efaPerfectedArmor: {
+				version: 1,
+				kind,
+				spentUses: spent,
+			},
+		};
+		this._data.resources = (this._data.resources || []).filter(candidate =>
+			candidate === resource || !this._isEfaPerfectedArmorResource(candidate, kind));
+		return resource;
+	}
+
+	_ensureEfaPerfectedArmorResources () {
+		return {
+			guardian: this._ensureEfaPerfectedArmorResource("guardian"),
+			flight: this._ensureEfaPerfectedArmorResource("flight"),
+		};
+	}
 
 	_ensureEfaGiantStatureResource () {
 		const featureUid = CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature;
@@ -77262,9 +77433,11 @@ class CharacterSheetState {
 	getEfaGiantStatureStatus () {
 		this.reconcileEfaArmorerState({cause: "giant-stature-status"});
 		const status = this._getEfaArcaneArmorStatusSnapshot();
+		const armorer = this._getEfaArmorerClass();
+		const perfected = Number(armorer?.level) >= 15;
 		const resource = this._ensureEfaGiantStatureResource();
 		let reason = null;
-		if (!this._getEfaArmorerClass()) reason = "Requires a level 3 EFA Artificer Armorer.";
+		if (!armorer) reason = "Requires a level 3 EFA Artificer Armorer.";
 		else if (status.model?.name !== "Dreadnaught") reason = "Requires the Dreadnaught Armor Model.";
 		else if (!status.active) reason = "Wear the bound Dreadnaught Arcane Armor first.";
 		else if (this.isStateTypeActive("giantStature")) reason = "Giant Stature is already active.";
@@ -77276,20 +77449,75 @@ class CharacterSheetState {
 			resource: resource ? MiscUtil.copyFast(resource) : null,
 			active: this.isStateTypeActive("giantStature"),
 			status,
+			perfected,
+			reachBonus: perfected ? 10 : 5,
+			sizeChoices: perfected ? ["large", "huge"] : ["large"],
 		};
 	}
 
-	async activateEfaGiantStature ({hasRoom = true} = {}) {
+	_getEfaGiantStatureProjection ({perfected, hasRoom = true, targetSize = "large"} = {}) {
+		const sizeBefore = String(this._data.size || "medium").toLowerCase();
+		const normalizedTargetSize = perfected ? String(targetSize || "large").toLowerCase() : "large";
+		if (hasRoom && !["large", ...(perfected ? ["huge"] : [])].includes(normalizedTargetSize)) {
+			return {ok: false, reason: "Choose Large or Huge before activating Giant Stature."};
+		}
+		const currentRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(sizeBefore);
+		const targetRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(normalizedTargetSize);
+		const sizeSteps = hasRoom && currentRank >= 0 && targetRank > currentRank ? targetRank - currentRank : 0;
+		const reachBonus = perfected ? 10 : 5;
+		return {
+			ok: true,
+			sizeBefore,
+			targetSize: hasRoom ? normalizedTargetSize : null,
+			sizeSteps,
+			reachBonus,
+			effects: [
+				{type: "reach", value: reachBonus},
+				...(sizeSteps ? [{type: "sizeIncrease", value: sizeSteps}] : []),
+				...(perfected
+					? [
+						{type: "advantage", target: "check:str"},
+						{type: "advantage", target: "save:str"},
+					]
+					: []),
+			],
+		};
+	}
+
+	_reconcileEfaGiantStatureProjection (armorer = this._getEfaArmorerClass()) {
+		const state = (this._data.activeStates || []).find(candidate => candidate.stateTypeId === "giantStature" && candidate.active);
+		if (!state) return;
+		const prior = state.metadata?.efaGiantStature || {};
+		const perfected = Number(armorer?.level) >= 15;
+		const projection = this._getEfaGiantStatureProjection({
+			perfected,
+			hasRoom: prior.hasRoom !== false,
+			targetSize: perfected ? prior.targetSize || "large" : "large",
+		});
+		if (!projection.ok) return;
+		state.customEffects = projection.effects;
+		state.description = perfected
+			? "Your reach increases by 10 feet; you have Advantage on Strength checks and saving throws; when space permits, your chosen size is Large or Huge."
+			: CharacterSheetState.ACTIVE_STATE_TYPES.giantStature.description;
+		state.metadata = {
+			...(state.metadata || {}),
+			efaGiantStature: {
+				version: 1,
+				hasRoom: prior.hasRoom !== false,
+				targetSize: projection.targetSize,
+			},
+		};
+	}
+
+	async activateEfaGiantStature ({hasRoom = true, targetSize = "large"} = {}) {
 		const eligibility = this.getEfaGiantStatureStatus();
 		if (!eligibility.ok) return {ok: false, committed: false, reason: eligibility.reason};
-		const currentSize = String(this.getSize() || "medium").toLowerCase();
-		const currentRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(currentSize);
-		const largeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf("large");
-		const sizeSteps = hasRoom && currentRank >= 0 && currentRank < largeRank ? largeRank - currentRank : 0;
-		const effects = [
-			{type: "reach", value: 5},
-			...(sizeSteps ? [{type: "sizeIncrease", value: sizeSteps}] : []),
-		];
+		const projection = this._getEfaGiantStatureProjection({
+			perfected: eligibility.perfected,
+			hasRoom,
+			targetSize,
+		});
+		if (!projection.ok) return {ok: false, committed: false, reason: projection.reason};
 		const committed = await this.pCommitFeatureUse({
 			featureUid: CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature,
 			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
@@ -77300,11 +77528,14 @@ class CharacterSheetState {
 				model: "Dreadnaught",
 				arcaneArmorItemId: eligibility.status.boundItemId,
 				hasRoom: !!hasRoom,
+				targetSize: projection.targetSize,
 			},
 			result: {
-				reachBonus: 5,
-				sizeBefore: currentSize,
-				sizeSteps,
+				reachBonus: projection.reachBonus,
+				sizeBefore: projection.sizeBefore,
+				targetSize: projection.targetSize,
+				sizeSteps: projection.sizeSteps,
+				strengthAdvantage: eligibility.perfected,
 			},
 		});
 		if (!committed.ok) return committed;
@@ -77312,10 +77543,19 @@ class CharacterSheetState {
 
 		const stateId = this.activateState("giantStature", {
 			name: "Giant Stature",
-			description: CharacterSheetState.ACTIVE_STATE_TYPES.giantStature.description,
+			description: eligibility.perfected
+				? "Your reach increases by 10 feet; you have Advantage on Strength checks and saving throws; when space permits, your chosen size is Large or Huge."
+				: CharacterSheetState.ACTIVE_STATE_TYPES.giantStature.description,
 			duration: "1 minute",
-			customEffects: effects,
+			customEffects: projection.effects,
 			sourceFeatureId: CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature,
+			metadata: {
+				efaGiantStature: {
+					version: 1,
+					hasRoom: !!hasRoom,
+					targetSize: projection.targetSize,
+				},
+			},
 		});
 		if (!stateId) {
 			return {
@@ -77330,9 +77570,239 @@ class CharacterSheetState {
 			...committed,
 			stateId,
 			actionConsumed: committed.actionType !== "free" && this.isInCombat(),
-			message: sizeSteps
-				? "Giant Stature activated: reach +5 feet; size becomes Large."
-				: "Giant Stature activated: reach +5 feet; size unchanged because there is not enough room or you are already Large.",
+			message: `${[
+				`Giant Stature activated: reach +${projection.reachBonus} feet`,
+				eligibility.perfected ? "Advantage on Strength checks and saving throws" : null,
+				projection.sizeSteps
+					? `size becomes ${projection.targetSize.toTitleCase()}`
+					: "size unchanged because there is not enough room or you are already at least the chosen size",
+			].filter(Boolean).join("; ")}.`,
+		};
+	}
+
+	getEfaPerfectedGuardianStatus () {
+		this.reconcileEfaArmorerState({cause: "perfected-guardian-status"});
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		const armorer = this._getEfaArmorerClass();
+		const resource = this._ensureEfaPerfectedArmorResource("guardian");
+		const saveDc = this.getSpellSaveDcForAbility("int");
+		let reason = null;
+		if (!armorer || Number(armorer.level) < 15) reason = "Requires Perfected Armor from a level 15 EFA Artificer Armorer.";
+		else if (status.model?.name !== "Guardian") reason = "Requires the Guardian Armor Model.";
+		else if (!status.active) reason = "Wear the bound Guardian Arcane Armor first.";
+		else if (!this.isInCombat()) reason = "The Guardian reaction is available only during combat.";
+		else if (!resource || resource.current < 1) reason = "No Perfected Armor Guardian uses remain until a Long Rest.";
+		else if (!this.isActionTypeAvailable("reaction")) reason = "Reaction already used this turn.";
+		return {
+			ok: !reason,
+			reason,
+			resource: resource ? MiscUtil.copyFast(resource) : null,
+			saveDc,
+			range: 30,
+			maxTargetSize: "huge",
+			maxPullDistance: 25,
+			status,
+		};
+	}
+
+	_getEfaPerfectedGuardianMeleeAttacks () {
+		const descriptors = [];
+		const add = attack => {
+			if (!attack?.id || attack.isSpell || attack.isSpellAttack || attack.isUnarmedStrike) return;
+			if (attack.isMelee === false || attack.isRanged === true) return;
+			if (descriptors.some(existing => existing.id === attack.id)) return;
+			descriptors.push({
+				id: attack.id,
+				name: attack.name || "Melee Weapon",
+				damage: attack.damage || null,
+				damageType: attack.damageType || null,
+				range: attack.range || (attack.reach ? `${attack.reach} ft.` : "5 ft."),
+				sourceItemId: attack.sourceItem?.id || null,
+			});
+		};
+		for (const attack of this.getAttacks()) add(attack);
+		for (const item of this.getItems()) {
+			if (!item.weapon || !item.equipped || !this.isItemAttackAvailable(item)) continue;
+			const properties = item.attackOverrides?.properties ?? item.property ?? item.properties ?? [];
+			const typeBase = String(item.type || "").split("|")[0].toUpperCase();
+			const isRanged = item.attackOverrides?.isMelee === false
+				|| item.isMelee === false
+				|| ["R", "RW"].includes(typeBase)
+				|| properties.some(prop => String(prop).split("|")[0].toUpperCase() === "A");
+			if (isRanged) continue;
+			const damage = this.getEffectiveWeaponDamage(item.id) || {};
+			add({
+				id: this.getItemAttackId(item),
+				name: item.attackOverrides?.name ?? item.name,
+				isMelee: true,
+				damage: item.attackOverrides?.damage ?? damage.dice ?? item.dmg1,
+				damageType: item.attackOverrides?.damageType ?? damage.damageType ?? item.dmgType,
+				range: item.attackOverrides?.range ?? item.range ?? "5 ft.",
+				sourceItem: item,
+			});
+		}
+		return descriptors.sort((a, b) => a.name.localeCompare(b.name));
+	}
+
+	async activateEfaPerfectedGuardian ({
+		targetName,
+		targetSize,
+		distance,
+		isVisible = false,
+		endedTurn = false,
+		saveOutcome,
+		pullDistance = 0,
+		cancelled = false,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "Guardian reaction cancelled; no Reaction or use was spent."};
+		const eligibility = this.getEfaPerfectedGuardianStatus();
+		if (!eligibility.ok) return {ok: false, committed: false, reason: eligibility.reason};
+		const normalizedName = String(targetName || "").trim();
+		if (!normalizedName) return {ok: false, committed: false, reason: "Choose the creature that ended its turn."};
+		if (!isVisible) return {ok: false, committed: false, reason: "The creature must be visible; no Reaction or use was spent."};
+		if (!endedTurn) return {ok: false, committed: false, reason: "The creature must have just ended its turn; no Reaction or use was spent."};
+		const normalizedSize = String(targetSize || "").toLowerCase();
+		const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(normalizedSize);
+		const hugeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf("huge");
+		if (sizeRank < 0 || sizeRank > hugeRank) {
+			return {ok: false, committed: false, reason: "Guardian can affect only a Huge or smaller creature; no Reaction or use was spent."};
+		}
+		const normalizedDistance = Number(distance);
+		if (!Number.isFinite(normalizedDistance) || normalizedDistance < 0 || normalizedDistance > eligibility.range) {
+			return {ok: false, committed: false, reason: "The creature must be within 30 feet; no Reaction or use was spent."};
+		}
+		if (saveOutcome !== "failed") {
+			return {
+				ok: false,
+				committed: false,
+				reason: saveOutcome === "succeeded"
+					? `The creature succeeded on the DC ${eligibility.saveDc} Strength save; no Reaction or use was spent.`
+					: "Confirm the failed Strength save before spending the Reaction.",
+			};
+		}
+		const normalizedPull = Number(pullDistance);
+		if (!Number.isFinite(normalizedPull) || normalizedPull < 0 || normalizedPull > eligibility.maxPullDistance || normalizedPull > normalizedDistance) {
+			return {ok: false, committed: false, reason: "Choose a pull distance from 0 to 25 feet that does not pass the wearer."};
+		}
+		const finalDistance = normalizedDistance - normalizedPull;
+		const meleeAttacks = finalDistance <= 5 ? this._getEfaPerfectedGuardianMeleeAttacks() : [];
+		const committed = await this.pCommitFeatureUse({
+			featureUid: CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.perfectedArmor,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			actionType: "reaction",
+			resourceId: eligibility.resource.id,
+			resourceCost: 1,
+			context: {
+				model: "Guardian",
+				arcaneArmorItemId: eligibility.status.boundItemId,
+				trigger: "visible-creature-ended-turn",
+				targetName: normalizedName,
+				targetSize: normalizedSize,
+				distance: normalizedDistance,
+				saveDc: eligibility.saveDc,
+				saveAbility: "str",
+				saveOutcome,
+			},
+			result: {
+				pull: {
+					direction: "toward-wearer",
+					distance: normalizedPull,
+					finalDistance,
+				},
+				isAdjacent: finalDistance <= 5,
+				meleeAttackOptions: meleeAttacks,
+			},
+		});
+		if (!committed.ok) return committed;
+		this._ensureEfaPerfectedArmorResource("guardian");
+		return {
+			...committed,
+			actionConsumed: this.isInCombat(),
+			saveDc: eligibility.saveDc,
+			targetName: normalizedName,
+			pullDistance: normalizedPull,
+			finalDistance,
+			meleeAttackOptions: meleeAttacks,
+			message: `${[
+				`Perfected Armor spent your Reaction and 1 Guardian use`,
+				`${normalizedName} failed the DC ${eligibility.saveDc} Strength save`,
+				`pull ${normalizedPull} feet directly toward you (${finalDistance} feet away)`,
+				finalDistance <= 5
+					? meleeAttacks.length
+						? "an optional melee weapon attack is available as part of this Reaction"
+						: "the target is adjacent, but no eligible melee weapon attack is currently available"
+					: null,
+			].filter(Boolean).join("; ")}.`,
+		};
+	}
+
+	getEfaPerfectedArmorFlightStatus () {
+		this.reconcileEfaArmorerState({cause: "perfected-flight-status"});
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		const armorer = this._getEfaArmorerClass();
+		const resource = this._ensureEfaPerfectedArmorResource("flight");
+		const speed = this.getWalkSpeed();
+		let reason = null;
+		if (!armorer || Number(armorer.level) < 15) reason = "Requires Perfected Armor from a level 15 EFA Artificer Armorer.";
+		else if (status.model?.name !== "Infiltrator") reason = "Requires the Infiltrator Armor Model.";
+		else if (!status.active) reason = "Wear the bound Infiltrator Arcane Armor first.";
+		else if (this.isStateTypeActive("efaPerfectedArmorFlight")) reason = "Perfected Armor Flight is already active this turn.";
+		else if (!resource || resource.current < 1) reason = "No Perfected Armor Flight uses remain until a Long Rest.";
+		else if (this.isInCombat() && !this.isActionTypeAvailable("bonus")) reason = "Bonus Action already used this turn.";
+		return {
+			ok: !reason,
+			reason,
+			resource: resource ? MiscUtil.copyFast(resource) : null,
+			speed,
+			flySpeed: speed * 2,
+			active: this.isStateTypeActive("efaPerfectedArmorFlight"),
+			status,
+		};
+	}
+
+	async activateEfaPerfectedArmorFlight ({cancelled = false} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "Perfected Armor Flight cancelled; no Bonus Action or use was spent."};
+		const eligibility = this.getEfaPerfectedArmorFlightStatus();
+		if (!eligibility.ok) return {ok: false, committed: false, reason: eligibility.reason};
+		const committed = await this.pCommitFeatureUse({
+			featureUid: CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.perfectedArmor,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			actionType: "bonus",
+			resourceId: eligibility.resource.id,
+			resourceCost: 1,
+			context: {
+				model: "Infiltrator",
+				arcaneArmorItemId: eligibility.status.boundItemId,
+				speedAtCommit: eligibility.speed,
+			},
+			result: {
+				flySpeedAtCommit: eligibility.flySpeed,
+				walkMultiplier: 2,
+				expires: "end-current-turn",
+			},
+		});
+		if (!committed.ok) return committed;
+		this._ensureEfaPerfectedArmorResource("flight");
+		const stateId = this.activateState("efaPerfectedArmorFlight", {
+			sourceFeatureId: CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.perfectedArmor,
+			customEffects: [{type: "flySpeed", walkMultiplier: 2, source: "Perfected Armor"}],
+			duration: "Until the end of the current turn",
+		});
+		if (!stateId) {
+			return {
+				...committed,
+				followUpFailed: true,
+				reason: "stateActivationFailed",
+				actionConsumed: committed.actionType !== "free" && this.isInCombat(),
+				message: "Perfected Armor Flight was committed, but its active-state follow-up failed.",
+			};
+		}
+		return {
+			...committed,
+			stateId,
+			actionConsumed: committed.actionType !== "free" && this.isInCombat(),
+			flySpeed: eligibility.flySpeed,
+			message: `Perfected Armor spent your Bonus Action and 1 Flight use: Fly Speed ${eligibility.flySpeed} feet (2 × current ${eligibility.speed}-foot Speed) until the end of this turn.`,
 		};
 	}
 
@@ -77413,11 +77883,18 @@ class CharacterSheetState {
 	}
 
 	_getEfaArmorerModelWeaponTemplate (def) {
+		const armorer = this._getEfaArmorerClass();
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		const perfectedDamage = Number(armorer?.level) >= 15
+			&& status.active
+			&& status.model?.id === def.id
+			? CharacterSheetState.EFA_PERFECTED_ARMOR_DAMAGE_DICE[def.id]
+			: null;
 		const managedBase = {
 			type: def.type,
 			weaponCategory: "simple",
 			isMelee: def.isMelee,
-			dmg1: def.dmg1,
+			dmg1: perfectedDamage || def.dmg1,
 			dmgType: def.dmgType,
 			property: def.property,
 			range: def.range,
@@ -77790,25 +78267,74 @@ class CharacterSheetState {
 				name: "Giant Stature",
 				invokeLabel: "Activate",
 				efaArcaneArmorModelAction: "giant-stature",
-				description: "Bonus Action: for 1 minute, increase your reach by 5 feet and become Large if space permits.",
+				description: eligibility.perfected
+					? "Bonus Action: for 1 minute, increase your reach by 10 feet, gain Advantage on Strength checks and saving throws, and become Large or Huge if space permits."
+					: "Bonus Action: for 1 minute, increase your reach by 5 feet and become Large if space permits.",
+				perfected: eligibility.perfected,
+				reachBonus: eligibility.reachBonus,
 				resourceCurrent: eligibility.resource?.current ?? null,
 				resourceMax: eligibility.resource?.max ?? null,
+				usesCurrent: eligibility.resource?.current ?? null,
+				usesMax: eligibility.resource?.max ?? null,
 				isActive: eligibility.active,
 				isAvailable: eligibility.ok,
 				unavailableReason: eligibility.reason,
 			}];
 		}
 		if (status.model?.name === "Guardian") {
-			const eligibility = this.getEfaDefensiveFieldStatus();
-			return [{
+			const defensiveField = this.getEfaDefensiveFieldStatus();
+			const powers = [{
 				...base,
 				id: "efa-armorer:guardian:defensive-field",
 				name: "Defensive Field",
 				invokeLabel: "Use",
 				efaArcaneArmorModelAction: "defensive-field",
-				description: `Bonus Action while Bloodied: gain ${eligibility.tempHp} temporary hit points.`,
-				isAvailable: eligibility.ok,
-				unavailableReason: eligibility.reason,
+				description: `Bonus Action while Bloodied: gain ${defensiveField.tempHp} temporary hit points.`,
+				isAvailable: defensiveField.ok,
+				unavailableReason: defensiveField.reason,
+			}];
+			if (Number(this._getEfaArmorerClass()?.level) < 15) return powers;
+			const guardian = this.getEfaPerfectedGuardianStatus();
+			powers.push({
+				...base,
+				id: "efa-armorer:guardian:perfected-armor",
+				name: "Perfected Armor — Guardian",
+				invokeLabel: "React",
+				actionType: "reaction",
+				efaArcaneArmorModelAction: "perfected-guardian",
+				description: `Reaction: when a visible Huge-or-smaller creature ends its turn within 30 feet, require a DC ${guardian.saveDc} Strength save. On a confirmed failure, pull it 0–25 feet toward you; if it ends within 5 feet, you may make one melee weapon attack as part of the same Reaction.`,
+				resourceCurrent: guardian.resource?.current ?? null,
+				resourceMax: guardian.resource?.max ?? null,
+				usesCurrent: guardian.resource?.current ?? null,
+				usesMax: guardian.resource?.max ?? null,
+				saveDc: guardian.saveDc,
+				range: guardian.range,
+				maxTargetSize: guardian.maxTargetSize,
+				maxPullDistance: guardian.maxPullDistance,
+				isAvailable: guardian.ok,
+				unavailableReason: guardian.reason,
+			});
+			return powers;
+		}
+		if (status.model?.name === "Infiltrator") {
+			if (Number(this._getEfaArmorerClass()?.level) < 15) return [];
+			const flight = this.getEfaPerfectedArmorFlightStatus();
+			return [{
+				...base,
+				id: "efa-armorer:infiltrator:perfected-armor-flight",
+				name: "Perfected Armor — Flight",
+				invokeLabel: "Fly",
+				efaArcaneArmorModelAction: "perfected-flight",
+				description: `Bonus Action: gain a ${flight.flySpeed}-foot Fly Speed (twice your current ${flight.speed}-foot Speed) until the end of the current turn.`,
+				resourceCurrent: flight.resource?.current ?? null,
+				resourceMax: flight.resource?.max ?? null,
+				usesCurrent: flight.resource?.current ?? null,
+				usesMax: flight.resource?.max ?? null,
+				flySpeed: flight.flySpeed,
+				speed: flight.speed,
+				isActive: flight.active,
+				isAvailable: flight.ok,
+				unavailableReason: flight.reason,
 			}];
 		}
 		return [];
@@ -77816,12 +78342,23 @@ class CharacterSheetState {
 
 	_invokeEfaArcaneArmorModelItemPower (power, options = {}) {
 		if (power.efaArcaneArmorModelAction === "giant-stature") {
-			return this.activateEfaGiantStature({hasRoom: options?.hasRoom !== false})
+			return this.activateEfaGiantStature({
+				hasRoom: options?.hasRoom !== false,
+				targetSize: options?.targetSize || "large",
+			})
 				.then(result => result.ok ? {...result, power} : result);
 		}
 		if (power.efaArcaneArmorModelAction === "defensive-field") {
 			const result = this.activateEfaDefensiveField();
 			return result.ok ? {...result, power} : result;
+		}
+		if (power.efaArcaneArmorModelAction === "perfected-guardian") {
+			return this.activateEfaPerfectedGuardian(options)
+				.then(result => result.ok ? {...result, power} : result);
+		}
+		if (power.efaArcaneArmorModelAction === "perfected-flight") {
+			return this.activateEfaPerfectedArmorFlight(options)
+				.then(result => result.ok ? {...result, power} : result);
 		}
 		return {ok: false, committed: false, reason: "Unsupported Arcane Armor model action."};
 	}
@@ -78065,14 +78602,27 @@ class CharacterSheetState {
 
 			this._reconcileEfaArmorerGeneratedActivation();
 			this._ensureEfaGiantStatureResource();
+			this._ensureEfaPerfectedArmorResources();
 			const liveStatus = this._getEfaArcaneArmorStatusSnapshot();
 			if (
 				this.isStateTypeActive("giantStature")
 				&& (!liveStatus.active || liveStatus.model?.name !== "Dreadnaught" || this.isDead())
 			) this.deactivateState("giantStature", {reason: `EFA Armorer reconciliation: ${cause}`});
+			else this._reconcileEfaGiantStatureProjection(armorer);
 			if (!liveStatus.active || liveStatus.model?.name !== "Guardian" || this.isDead()) {
 				this.clearOwnedTempHp(CharacterSheetState.EFA_ARMORER_FEATURE_OWNERS.defensiveField);
 				this.clearTargetEffects("efa-armorer-thunder-pulse");
+			}
+			if (
+				Number(armorer?.level) < 15
+				|| !liveStatus.active
+				|| liveStatus.model?.name !== "Infiltrator"
+				|| this.isDead()
+			) {
+				this.clearTargetEffects("efa-armorer-lightning-launcher-glimmer");
+				if (this.isStateTypeActive("efaPerfectedArmorFlight")) {
+					this.deactivateState("efaPerfectedArmorFlight", {reason: `EFA Armorer reconciliation: ${cause}`});
+				}
 			}
 			if ((!armorer || model?.name !== "Infiltrator") && typeof this.pruneTurnReceipts === "function") {
 				const receipt = CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT;
@@ -78813,14 +79363,16 @@ class CharacterSheetState {
 			? this._normalizeTempHpOwner(raw.owner)
 			: null;
 		const expiryRound = raw.expiry?.combatRound == null ? null : Number(raw.expiry.combatRound);
+		const expiryTurnId = raw.expiry?.turnId == null ? null : Number(raw.expiry.turnId);
 		const expiry = raw.expiry?.type === "ownerTurnStart"
 			? {
 				type: "ownerTurnStart",
 				combatRound: Number.isFinite(expiryRound) && expiryRound >= 0 ? expiryRound : null,
+				turnId: Number.isFinite(expiryTurnId) && expiryTurnId >= 0 ? expiryTurnId : null,
 			}
 			: null;
-		const attackDisadvantage = raw.attackDisadvantage?.against === "other-than-owner"
-			? {against: "other-than-owner"}
+		const attackDisadvantage = ["owner", "other-than-owner"].includes(raw.attackDisadvantage?.against)
+			? {against: raw.attackDisadvantage.against}
 			: null;
 		// `restrained: false` is an explicit compatibility alias. Older saves
 		// occasionally carried a stale nested restraint layer, so never let that
@@ -78846,6 +79398,7 @@ class CharacterSheetState {
 			restrained: restraintActive,
 			shoved: shoveActive,
 			shoveDistance: Math.max(0, Number(raw.shoveDistance) || 0),
+			dimLightFeet: Math.max(0, Number(raw.dimLightFeet) || 0),
 			recurringDamage: raw.recurringDamage && typeof raw.recurringDamage === "object"
 				? {amount: Math.max(0, Number(raw.recurringDamage.amount) || 0), type: raw.recurringDamage.type || "force", when: raw.recurringDamage.when || "start of each of its turns"}
 				: null,
@@ -78926,6 +79479,59 @@ class CharacterSheetState {
 		};
 	}
 
+	getEfaLightningLauncherGlimmerTargetEffectMetadata () {
+		return {
+			source: "efa-armorer-lightning-launcher-glimmer",
+			effect: "glimmer",
+			range: null,
+			requiresSize: false,
+			requiresDistance: false,
+			prompt: "Record the creature damaged by the active Lightning Launcher. Select an existing target to refresh its glimmer until the start of your next turn.",
+		};
+	}
+
+	applyEfaLightningLauncherGlimmerTargetEffect (opts = {}) {
+		const status = this.getEfaArcaneArmorBindingStatus();
+		const armorer = this._getEfaArmorerClass();
+		const attackId = String(opts?.targetEffect?.attackId || opts?.attackId || "").trim();
+		const expectedAttackId = "efa-armorer:infiltrator:lightning-launcher";
+		if (
+			Number(armorer?.level) < 15
+			|| !status.active
+			|| status.model?.name !== "Infiltrator"
+			|| attackId !== expectedAttackId
+		) {
+			return {ok: false, reason: "inactive-lightning-launcher-glimmer"};
+		}
+		if (String(opts?.effect || "").toLowerCase() !== "glimmer") {
+			return {ok: false, reason: "effect-unavailable"};
+		}
+		const targetName = String(opts.targetName || "").trim();
+		if (!targetName) return {ok: false, reason: "target-required"};
+		const targetId = opts.targetId || `efa-armorer-lightning-launcher-glimmer:${CryptUtil.uid()}`;
+		const owner = CharacterSheetState.EFA_ARMORER_FEATURE_OWNERS.perfectedArmor;
+		const currentRound = this.isInCombat() ? this.getCombatRound() : null;
+		const currentTurnId = this._getTurnReceiptStore().turnId;
+		const target = this.upsertTargetEffect({
+			id: targetId,
+			source: "efa-armorer-lightning-launcher-glimmer",
+			effectType: "glimmer",
+			targetName,
+			owner,
+			sourceFeatureUid: owner.uid,
+			attackId: expectedAttackId,
+			model: "Infiltrator",
+			dimLightFeet: 5,
+			attackDisadvantage: {against: "owner"},
+			expiry: {
+				type: "ownerTurnStart",
+				combatRound: currentRound == null ? null : currentRound + 1,
+				turnId: currentTurnId + 1,
+			},
+		});
+		return target ? {ok: true, applied: true, target} : {ok: false, applied: false, reason: "invalid-target"};
+	}
+
 	applyEfaThunderPulseTargetEffect (opts = {}) {
 		const status = this.getEfaArcaneArmorBindingStatus();
 		const attackId = String(opts?.targetEffect?.attackId || opts?.attackId || "").trim();
@@ -78962,14 +79568,24 @@ class CharacterSheetState {
 
 	getTargetAttackDisadvantage (targetId, {defenderOwnerUid = null} = {}) {
 		const target = this._data.targetEffects.find(it => it.id === targetId);
-		if (!target?.attackDisadvantage || target.attackDisadvantage.against !== "other-than-owner") return false;
-		return !defenderOwnerUid || defenderOwnerUid !== target.owner?.uid;
+		if (!target?.attackDisadvantage) return false;
+		if (target.attackDisadvantage.against === "owner") {
+			return !!defenderOwnerUid && defenderOwnerUid === target.owner?.uid;
+		}
+		if (target.attackDisadvantage.against === "other-than-owner") {
+			return !defenderOwnerUid || defenderOwnerUid !== target.owner?.uid;
+		}
+		return false;
 	}
 
-	_expireTargetEffectsAtOwnerTurnStart (combatRound) {
+	_expireTargetEffectsAtOwnerTurnStart ({combatRound = null, turnId = null} = {}) {
 		const round = Number(combatRound);
+		const normalizedTurnId = Number(turnId);
 		this._data.targetEffects = (this._data.targetEffects || []).filter(target => {
 			if (target.expiry?.type !== "ownerTurnStart") return true;
+			if (target.expiry.turnId != null) {
+				return !Number.isFinite(normalizedTurnId) || target.expiry.turnId > normalizedTurnId;
+			}
 			if (target.expiry.combatRound == null) return false;
 			return !Number.isFinite(round) || target.expiry.combatRound > round;
 		});
@@ -79454,6 +80070,15 @@ class CharacterSheetState {
 
 	resetTurnEconomy ({round = this._data.inCombat ? Math.max(0, Number(this._data.combatRound) || 0) : null} = {}) {
 		const receiptBoundary = this.advanceTurnReceiptBoundary();
+		this._expireTargetEffectsAtOwnerTurnStart({
+			combatRound: round,
+			turnId: receiptBoundary.turnId,
+		});
+		for (const state of this._data.activeStates || []) {
+			if (!state.active) continue;
+			if (!CharacterSheetState.ACTIVE_STATE_TYPES[state.stateTypeId]?.expiresOnTurnEconomyReset) continue;
+			this.deactivateState(state.stateTypeId, {reason: "Turn ended"});
+		}
 		this.resetActionEconomy();
 		this.resetMovementEconomy({round});
 		return {

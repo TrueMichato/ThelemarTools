@@ -1296,68 +1296,68 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 });
 
 // ==========================================================================
-// PART 8: ARMORER DREADNAUGHT MODEL (EFA)
+// PART 8: ARMORER SOURCE-QUALIFIED PROGRESSION
 // ==========================================================================
-describe("Armorer Dreadnaught (EFA 2024)", () => {
+describe("Armorer source-qualified progression", () => {
 	let state;
 
 	beforeEach(() => {
 		state = new CharacterSheetState();
 	});
 
-	describe("Dreadnaught Model (Level 3)", () => {
-		it("should be available at level 3", () => {
-			state.addClass({
-				name: "Artificer",
+	it("keeps exact EFA Perfected Armor inert through level 14", () => {
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 14,
+			subclass: {
+				name: "Armorer",
+				shortName: "Armorer",
 				source: "EFA",
-				level: 3,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(3);
+				className: "Artificer",
+				classSource: "EFA",
+			},
 		});
-
-		it("should provide Force Demolisher (1d10 force damage with reach)", () => {
-			state.addClass({
-				name: "Artificer",
-				source: "EFA",
-				level: 3,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(3);
-		});
-
-		it("should provide Giant Stature (INT mod uses)", () => {
-			state.addClass({
-				name: "Artificer",
-				source: "EFA",
-				level: 3,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			state.setAbilityBase("int", 18);
-			expect(state.getAbilityMod("int")).toBe(4);
-		});
+		const calculations = state.getFeatureCalculations();
+		expect(calculations.hasEfaArmorer).toBe(true);
+		expect(calculations.hasEfaPerfectedArmor).toBe(false);
+		expect(calculations.hasPerfectedArmor).not.toBe(true);
 	});
 
-	describe("Perfected Dreadnaught (Level 15)", () => {
-		it("should increase Force Demolisher to 2d6", () => {
-			state.addClass({
-				name: "Artificer",
+	it("publishes the EFA-only Perfected Armor gate at level 15 without leaking the TCE contract", () => {
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 15,
+			subclass: {
+				name: "Armorer",
+				shortName: "Armorer",
 				source: "EFA",
-				level: 15,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(15);
+				className: "Artificer",
+				classSource: "EFA",
+			},
 		});
+		const calculations = state.getFeatureCalculations();
+		expect(calculations.hasEfaPerfectedArmor).toBe(true);
+		expect(calculations.hasPerfectedArmor).not.toBe(true);
+	});
 
-		it("should allow size increase to Huge", () => {
-			state.addClass({
-				name: "Artificer",
-				source: "EFA",
-				level: 15,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(15);
+	it("preserves the legacy TCE Perfected Armor contract without publishing EFA mechanics", () => {
+		state.addClass({
+			name: "Artificer",
+			source: "TCE",
+			level: 15,
+			subclass: {
+				name: "Armorer",
+				shortName: "Armorer",
+				source: "TCE",
+				className: "Artificer",
+				classSource: "TCE",
+			},
 		});
+		const calculations = state.getFeatureCalculations();
+		expect(calculations.hasPerfectedArmor).toBe(true);
+		expect(calculations.hasEfaPerfectedArmor).not.toBe(true);
 	});
 });
 

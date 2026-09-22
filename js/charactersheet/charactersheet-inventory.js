@@ -5841,6 +5841,118 @@ class CharacterSheetInventory {
 		};
 	}
 
+	async _pGetEfaPerfectedGuardianContext (power) {
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: "Perfected Armor — Guardian Reaction",
+			isMinHeight0: true,
+		});
+		let resolved = null;
+		const form = ee`<div class="ve-flex-col w-100">
+			<p class="ve-small ve-muted mb-2">Resolve only a visible Huge-or-smaller creature that just ended its turn within ${power.range} feet. The sheet records the confirmed save and movement; it does not roll for the creature.</p>
+			<label class="ve-form-label mb-2">Creature
+				<input class="form-control" data-guardian-target aria-label="Guardian target name" placeholder="Ogre, dragon, ...">
+			</label>
+			<label class="ve-form-label mb-2">Size
+				<select class="form-control" data-guardian-size aria-label="Guardian target size">
+					${["tiny", "small", "medium", "large", "huge"].map(size => `<option value="${size}">${size.toTitleCase()}</option>`).join("")}
+				</select>
+			</label>
+			<label class="ve-form-label mb-2">Distance when its turn ended (ft.)
+				<input class="form-control" data-guardian-distance aria-label="Guardian target distance in feet" type="number" min="0" max="${power.range}" value="${power.range}">
+			</label>
+			<label class="ve-form-label mb-2">
+				<input data-guardian-visible type="checkbox" checked> You can see the creature
+			</label>
+			<label class="ve-form-label mb-2">
+				<input data-guardian-ended-turn type="checkbox" checked> The creature just ended its turn
+			</label>
+			<label class="ve-form-label mb-2">DC ${power.saveDc} Strength save
+				<select class="form-control" data-guardian-save aria-label="Guardian Strength save result">
+					<option value="failed">Failed save</option>
+					<option value="succeeded">Successful save — spend nothing</option>
+				</select>
+			</label>
+			<label class="ve-form-label mb-2">Pull directly toward you (ft.)
+				<input class="form-control" data-guardian-pull aria-label="Guardian pull distance in feet" type="number" min="0" max="${power.maxPullDistance}" value="${power.maxPullDistance}">
+			</label>
+			<div class="ve-small mb-3" data-guardian-summary role="status" aria-live="polite"></div>
+			<div class="ve-flex-v-center ve-flex-h-right">
+				<button class="ve-btn ve-btn-default mr-2" data-act="cancel">Cancel</button>
+				<button class="ve-btn ve-btn-primary" data-act="resolve">Resolve Guardian</button>
+			</div>
+		</div>`;
+		modalInner.append(form);
+		const distanceInput = form.querySelector("[data-guardian-distance]");
+		const pullInput = form.querySelector("[data-guardian-pull]");
+		const saveInput = form.querySelector("[data-guardian-save]");
+		const summary = form.querySelector("[data-guardian-summary]");
+		const updateSummary = () => {
+			const distance = Math.max(0, Number(distanceInput.value) || 0);
+			const pullMax = Math.min(power.maxPullDistance, distance);
+			pullInput.max = `${pullMax}`;
+			if (Number(pullInput.value) > pullMax) pullInput.value = `${pullMax}`;
+			const pull = Math.max(0, Number(pullInput.value) || 0);
+			const finalDistance = Math.max(0, distance - pull);
+			summary.textContent = saveInput.value === "succeeded"
+				? `Successful DC ${power.saveDc} Strength save: no Reaction or use will be spent.`
+				: `Failed DC ${power.saveDc} Strength save: pull ${pull} ft. to ${finalDistance} ft. away${finalDistance <= 5 ? "; optional melee weapon attack available" : ""}.`;
+		};
+		for (const input of [distanceInput, pullInput, saveInput]) {
+			input.addEventListener("input", updateSummary);
+			input.addEventListener("change", updateSummary);
+		}
+		form.querySelector("[data-act=cancel]").addEventListener("click", () => doClose(false));
+		form.querySelector("[data-act=resolve]").addEventListener("click", () => {
+			resolved = {
+				targetName: form.querySelector("[data-guardian-target]").value.trim(),
+				targetSize: form.querySelector("[data-guardian-size]").value,
+				distance: Number(distanceInput.value),
+				isVisible: form.querySelector("[data-guardian-visible]").checked,
+				endedTurn: form.querySelector("[data-guardian-ended-turn]").checked,
+				saveOutcome: saveInput.value,
+				pullDistance: Number(pullInput.value),
+			};
+			doClose(true);
+		});
+		updateSummary();
+		form.querySelector("[data-guardian-target]").focus();
+		await pGetResolved();
+		return resolved;
+	}
+
+	async _pResolveEfaPerfectedGuardianFollowUp (result) {
+		const attacks = result?.meleeAttackOptions || [];
+		if (!attacks.length) return result;
+		try {
+			const values = [...attacks.map((_, ix) => `${ix}`), "skip"];
+			const picked = await InputUiUtil.pGetUserEnum({
+				title: "Perfected Armor — Optional Melee Attack",
+				htmlDescription: `The target is ${result.finalDistance} feet away. Choose one eligible melee weapon attack to make as part of the already-spent Reaction, or decline it.`,
+				values,
+				fnDisplay: value => value === "skip"
+					? "Do not make the optional attack"
+					: `${attacks[Number(value)].name}${attacks[Number(value)].damage ? ` — ${attacks[Number(value)].damage} ${attacks[Number(value)].damageType || ""}` : ""}`,
+				isResolveItem: true,
+			});
+			if (picked == null || picked === "skip") {
+				result.guardianFollowUp = {ok: true, declined: true};
+				return result;
+			}
+			const attack = attacks[Number(picked)];
+			result.guardianFollowUp = {ok: true, declined: false, attack};
+			result.message += ` Optional follow-up selected: make ${attack.name} now; it costs no additional Reaction.`;
+			return result;
+		} catch (error) {
+			result.followUpFailed = true;
+			result.guardianFollowUp = {
+				ok: false,
+				error: error instanceof Error ? error.message : String(error),
+			};
+			result.message += " The Guardian use remains committed, but the optional melee-attack selection could not be shown.";
+			return result;
+		}
+	}
+
 	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null, returnResult = false, holder = null} = {}) {
 		const power = this._state.getItemPower?.(itemId, powerId);
 		let pendingSpellCast = null;
@@ -5899,12 +6011,33 @@ class CharacterSheetInventory {
 		if (power?.efaArcaneArmorModelAction === "giant-stature") {
 			const roomChoice = await InputUiUtil.pGetUserEnum({
 				title: "Giant Stature — Available Space",
-				htmlDescription: "Does the space allow you to become Large? Insufficient room prevents only the size change; the reach increase still applies.",
-				values: ["Become Large", "Reach only — insufficient room"],
+				htmlDescription: power.perfected
+					? "Choose Large or Huge. Insufficient room prevents only the size change; reach +10 and Advantage on Strength checks and saving throws still apply."
+					: "Does the space allow you to become Large? Insufficient room prevents only the size change; the reach increase still applies.",
+				values: power.perfected
+					? ["Become Large", "Become Huge", "Reach only — insufficient room"]
+					: ["Become Large", "Reach only — insufficient room"],
 				isResolveItem: true,
 			});
 			if (roomChoice == null) return false;
-			efaArmorer = {hasRoom: roomChoice === "Become Large"};
+			efaArmorer = {
+				hasRoom: roomChoice !== "Reach only — insufficient room",
+				targetSize: roomChoice === "Become Huge" ? "huge" : "large",
+			};
+		}
+		if (power?.efaArcaneArmorModelAction === "perfected-guardian") {
+			efaArmorer = await this._pGetEfaPerfectedGuardianContext(power);
+			if (!efaArmorer) return false;
+		}
+		if (power?.efaArcaneArmorModelAction === "perfected-flight") {
+			const confirmed = await CharacterSheetModal.pGetUserBoolean({
+				title: "Perfected Armor — Flight",
+				htmlDescription: `Spend your Bonus Action and 1 use to gain a ${power.flySpeed}-foot Fly Speed (2 × current ${power.speed}-foot Speed) until the end of this turn?`,
+				textYes: `Fly ${power.flySpeed} ft.`,
+				textNo: "Cancel",
+			});
+			if (confirmed !== true) return false;
+			efaArmorer = {cancelled: false};
 		}
 		let result = await this._state.invokeItemPower?.(itemId, powerId, {
 			chargesCost,
@@ -5919,6 +6052,9 @@ class CharacterSheetInventory {
 		if (!result?.ok) {
 			JqueryUtil.doToast({type: "warning", content: result?.reason || "That item power cannot be used."});
 			return false;
+		}
+		if (power?.efaArcaneArmorModelAction === "perfected-guardian") {
+			result = await this._pResolveEfaPerfectedGuardianFollowUp(result);
 		}
 		const chargeText = result.chargesMax
 			? ` (${result.chargesCurrent}/${result.chargesMax} charges remaining)`

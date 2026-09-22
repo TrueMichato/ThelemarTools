@@ -2444,6 +2444,7 @@ class CharacterSheetCombat {
 					: "The creature resisted; no chain was recorded.";
 				JqueryUtil.doToast({type: "success", content: `${outcome} ${opt.description || ""}`.trim()});
 				this._page.renderCharacter?.();
+				this._page._saveCurrentCharacter?.();
 			});
 			csFocusModalOnOpen(modalInner, {preferSelector: "[data-target-name]"});
 		});
@@ -4198,6 +4199,29 @@ class CharacterSheetCombat {
 				this.renderAttacks?.();
 			}
 		}
+		await this._pOfferEfaLightningLauncherGlimmerAfterDamage(attack, {rollFollowup: damageRollFollowup});
+	}
+
+	async _pOfferEfaLightningLauncherGlimmerAfterDamage (attack, {rollFollowup = null} = {}) {
+		const expectedAttackId = "efa-armorer:infiltrator:lightning-launcher";
+		const stableAttackId = attack?.sourceItem?._efaArmorerWeaponId || attack?.id;
+		if (stableAttackId !== expectedAttackId) return;
+		if (!this._state.getFeatureCalculations?.().hasEfaLightningLauncherGlimmer) return;
+		await this._pOfferTargetEffect(
+			{attack, rollFollowup},
+			{
+				id: "efa-armorer-lightning-launcher-glimmer",
+				name: "Lightning Launcher Glimmer",
+				targetAware: true,
+				allowTrackOnly: false,
+				targetEffect: {
+					source: "efa-armorer-lightning-launcher-glimmer",
+					effect: "glimmer",
+					attackId: expectedAttackId,
+				},
+				description: "The damaged creature sheds dim light for 5 feet and has disadvantage on attack rolls against you until the start of your next turn.",
+			},
+		);
 	}
 
 	async _pChooseJuggernautTargetContext (attack) {

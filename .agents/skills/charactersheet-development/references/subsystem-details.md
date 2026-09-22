@@ -2190,7 +2190,14 @@ death, source loss, or ambiguous model evidence unregisters them immediately.
 This is why armor-imposed Stealth disadvantage cancels Dampening Field instead
 of being removed.
 
-Level-3 model actions remain exact-source and exact-attack mechanics:
+At exact EFA Armorer level 15, only the active worn/bound model row advances its
+generated baseline: Force Demolisher becomes `2d6`, Thunder Pulse becomes
+`1d10`, and Lightning Launcher becomes `2d6`. Model switches, doffing, binding
+loss, death, and level downgrade reconcile the untouched field back to its
+previous generated baseline while preserving wrapper IDs, editable names, and
+any player damage override.
+
+Model actions remain exact-source and exact-attack mechanics:
 
 - Force Demolisher post-hit movement resolves only from
   `efa-armorer:dreadnaught:force-demolisher`, verifies the target is at least one
@@ -2199,6 +2206,11 @@ Level-3 model actions remain exact-source and exact-attack mechanics:
 - Giant Stature is a Bonus Action item power with a Long Rest resource equal to
   the Intelligence modifier (minimum 1). Its active state always grants +5-foot
   reach and grants only the size steps needed to reach Large when room allows.
+  Perfected Armor upgrades that same transaction/state to +10-foot reach, a
+  Large/Huge player choice, and Advantage on Strength checks and Strength saving
+  throws. The chosen size is serialized with the state; level downgrade
+  reprojects the live state to the level-3 Large/+5 contract rather than
+  cancelling or refunding it.
   The action/resource/state transaction revalidates model and wrapper binding;
   lifecycle reconciliation removes an invalid state without refunding a valid
   committed use. The resource's `metadata.efaGiantStature.spentUses` preserves
@@ -2214,6 +2226,26 @@ Level-3 model actions remain exact-source and exact-attack mechanics:
   `queryTurnReceipt` / `commitTurnReceipt` / `rollbackTurnReceipt` /
   `pruneTurnReceipts` contract. Never route it through Combat's legacy
   round-keyed `_lastRiderRoundUsed` map.
+- Perfected Guardian is a Reaction item power with a dedicated exact-owned Long
+  Rest resource equal to Intelligence modifier (minimum 1). Visibility,
+  Huge-or-smaller size, 30-foot range, the confirmed failed Artificer spell-save
+  DC Strength save, and a 0–25-foot direct pull are validated before
+  `pCommitFeatureUse()`. Adjacency returns eligible melee weapon descriptors as
+  an optional post-commit follow-up; selecting or failing that follow-up never
+  consumes another Reaction or refunds the valid core use.
+- Perfected Lightning Launcher glimmer is applied only after the exact stable
+  Launcher damage path completes. Its distinct target-effect source stores
+  5-foot dim light plus disadvantage on attacks against the Armorer owner,
+  uses an opaque target ID (select that existing target to refresh it), expires
+  through the shared turn-receipt boundary at owner-turn start, and tears down
+  with model/source/binding, death, or combat loss.
+- Perfected Infiltrator flight is a dedicated Bonus Action item power with its
+  own Intelligence-modifier Long Rest resource. The active state grants a live
+  `walkMultiplier: 2` Fly Speed so later Speed changes are reflected at the read
+  site; that final walking Speed is doubled without applying global movement
+  modifiers a second time. `resetTurnEconomy()` expires it at the
+  end-current-turn boundary. Model/source/binding/death reconciliation remains
+  authoritative.
 
 Combat selectors must match `attackIds` against stable attack/generated-item
 metadata before considering legacy `attackSourceFeature` labels. Editable names
