@@ -10466,6 +10466,8 @@ class CharacterSheetState {
 
 		const existing = this._data.classes.find(c => c.name === classData.name && c.source === classData.source);
 		if (existing) {
+			const nextSubclass = classData.subclass !== undefined ? classData.subclass : existing.subclass;
+			this._removeReplacedSubclassSpellGrants(existing, nextSubclass);
 			existing.level = classData.level;
 			// Only update subclass if one is provided, preserve existing subclass otherwise
 			if (classData.subclass !== undefined) {
@@ -10528,6 +10530,8 @@ class CharacterSheetState {
 	}
 
 	removeClass (className, source) {
+		const removedClass = this._data.classes.find(c => c.name === className && c.source === source);
+		this._removeReplacedSubclassSpellGrants(removedClass, null);
 		this._data.classes = this._data.classes.filter(c => !(c.name === className && c.source === source));
 		this._recalculateMaxHp();
 		this._recalculateHitDice();
@@ -10857,6 +10861,7 @@ class CharacterSheetState {
 			if (CharacterSheetClassUtils.hasNamedSubclassChoice(classEntry.subclass)) {
 				this._reconcileSubclassChoiceSpellGrants(classEntry, []);
 			}
+			this._removeReplacedSubclassSpellGrants(classEntry, null);
 			classEntry.subclass = null;
 			if (classEntry.divineSoulSpellOverride) delete classEntry.divineSoulSpellOverride;
 			// Clear any per-subclass selection (e.g. Divine Soul affinity) so re-leveling re-prompts cleanly.
@@ -11033,6 +11038,7 @@ class CharacterSheetState {
 	setSubclass (className, subclass) {
 		const classEntry = this._data.classes.find(c => c.name === className);
 		if (classEntry) {
+			this._removeReplacedSubclassSpellGrants(classEntry, subclass);
 			const wasDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(classEntry.subclass);
 			const willBeDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclass);
 			const willHaveNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclass);
@@ -21109,6 +21115,23 @@ class CharacterSheetState {
 			cls.subclass?.name,
 			cls.subclass?.source,
 		].map(part => String(part || "").toLowerCase()).join("|");
+	}
+
+	_getSubclassSpellGrantOwnerForClass (cls) {
+		if (!cls?.subclass?.name) return null;
+		return this.getSubclassSpellGrantOwner(cls, {
+			sourceFeature: `${cls.subclass.name} Spells`,
+			sourceClass: cls.name,
+		});
+	}
+
+	_removeReplacedSubclassSpellGrants (cls, nextSubclass) {
+		const previousOwner = this._getSubclassSpellGrantOwnerForClass(cls);
+		if (!previousOwner) return;
+
+		const nextOwner = this._getSubclassSpellGrantOwnerForClass({...cls, subclass: nextSubclass});
+		if (nextOwner?.key === previousOwner.key) return;
+		this.removeSubclassSpells(previousOwner);
 	}
 
 	_captureSubclassSpellGrantOriginalMetadata (spell) {
