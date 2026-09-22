@@ -83,7 +83,9 @@ const EFA_ARTILLERIST_FEATURES: FeatureCheck[] = [
 		effects: [
 			{kind: "featureCalculation", property: "hasArcaneFirearm", exact: true},
 			{kind: "featureCalculation", property: "arcaneFirearmDamage", exact: "1d8"},
+			{kind: "efaArtilleristProbe", probe: "arcaneFirearm"},
 		],
+		untilLevel: 8,
 	},
 	{
 		level: 5,
@@ -133,7 +135,9 @@ const EFA_ARTILLERIST_FEATURES: FeatureCheck[] = [
 			{kind: "featureCalculation", property: "cannonDetonationDamage", exact: "3d10"},
 			{kind: "featureCalculation", property: "cannonDetonationActionType", exact: "reaction"},
 			{kind: "featureCalculation", property: "cannonDetonationTrigger", exact: "cannonTakesDamage"},
+			{kind: "efaArtilleristProbe", probe: "explosiveCannon"},
 		],
+		untilLevel: 14,
 	},
 	{
 		level: 9,
@@ -191,7 +195,9 @@ const EFA_ARTILLERIST_FEATURES: FeatureCheck[] = [
 			{kind: "featureCalculation", property: "maxCannons", exact: 2},
 			{kind: "featureCalculation", property: "cannonCoverRange", exact: 10},
 			{kind: "featureCalculation", property: "cannonCoverType", exact: "half"},
+			{kind: "efaArtilleristProbe", probe: "fortifiedPosition"},
 		],
+		untilLevel: 19,
 	},
 	{
 		level: 17,

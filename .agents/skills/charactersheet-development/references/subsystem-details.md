@@ -2499,11 +2499,20 @@ Milestone 4 extends the same compact lifecycle:
   source/range data, and drops immediately when the last in-range cannon leaves.
   Ally cover is descriptive only.
 
-The Combat tab owns the two-card presentation and canonical creation,
-individual/dual activation, and Explosive Cannon dialogs. The cards never render
-through generic companion APIs. Play Mode/PDF do not duplicate these controls.
-Arcane Firearm uses the exact inventory-binding and committed-cast receipt
-pipeline documented above rather than any cannon-specific state.
+The Combat tab owns the canonical creation, individual/dual activation, and
+Explosive Cannon dialogs. Play Mode adds a compact command surface for the same
+operations, but delegates every mutation and persistence boundary to Combat's
+canonical handlers; it does not introduce a second cannon state or expose
+compact records through generic companion APIs. The Play Mode card also reports
+the exact Arcane Firearm binding and nonstacking Shimmering Field status. PDF
+remains read-only. Arcane Firearm uses the exact inventory-binding and
+committed-cast receipt pipeline documented above rather than any
+cannon-specific state.
+
+Short Rest is an awaited persistence transaction. It snapshots the full state
+and the existing Rest Undo entry before applying rest effects and cannon expiry.
+On save failure it reloads the snapshot, restores the previous undo entry,
+attempts to persist that rollback, and leaves the rest dialog open for recovery.
 
 Catalog adds preserve both type layers: inventory grouping continues to use the coarse
 `type`, while rules logic reads `typeCode` first and strips any `|source` suffix.

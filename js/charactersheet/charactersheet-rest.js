@@ -448,138 +448,176 @@ class CharacterSheetRest {
 		refreshHealingTotal();
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "✓ Finish Short Rest"});
-		btnConfirm.onClick(() => {
+		btnConfirm.onClick(async () => {
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
 			// Captured BEFORE any mutation below; transient and never persisted.
-			if (!this._captureRestSnapshot("short")) {
-				JqueryUtil.doToast({type: "danger", content: "Could not safely start the short rest."});
+			const previousRestSnapshot = this._page?._lastRestSnapshot || null;
+			const restSnapshot = this._captureRestSnapshot("short");
+			if (!restSnapshot?.json) {
+				this._page._lastRestSnapshot = previousRestSnapshot;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "The Short Rest could not start because the current character state could not be protected for rollback. No changes were made.",
+				});
 				return;
 			}
-			const timeReceipt = this._advanceCommittedRestTime("short", "CharacterSheetRest.finishShortRest");
-			if (!timeReceipt.ok) return;
-
-			// Apply hit dice spending using spentDice tracker. The healing was
-			// already rolled into `totalHealing` above, so decrement the pools
-			// WITHOUT healing again (useHitDie() would heal a second time).
-			Object.entries(spentDice).forEach(([dieType, count]) => {
-				for (let i = 0; i < count; i++) {
-					this._state.adjustHitDieCurrent(dieType, -1);
-				}
-			});
-
-			if (totalHealing > 0) {
-				this._state.heal(totalHealing);
-			}
-
-			let companionHealing = 0;
-			for (const pending of pendingCompanionHitDice) {
-				const result = this._state.spendCompanionHitDie({
-					companionId: pending.companionId,
-					target: {companionId: pending.companionId, confirmed: true},
-					rolls: {hitDie: pending.roll},
+			btnConfirm.disabled = true;
+			try {
+				const timeReceipt = this._state.advanceRestTime?.("short", {
+					identity: "CharacterSheetRest.finishShortRest",
 				});
-				if (result.ok) companionHealing += result.hp.actual;
-				else {
-					JqueryUtil.doToast({
-						type: "warning",
-						content: result.message || "A queued companion Hit Die could not be committed.",
-					});
+				if (!timeReceipt?.ok) {
+					throw new Error(`Could not finish the short rest: ${timeReceipt?.message || timeReceipt?.code || "time advancement failed"}.`);
 				}
-			}
 
-			// Material rest bonuses land AFTER the dice healing and are reported separately,
-			// so the log distinguishes "you rolled well" from "the pearl paid out".
-			const bonusHealing = this._applyRestBonusHealing({
-				bonuses: restBonuses,
-				suppressedNames: suppressedBonuses,
-				hasSpentHitDice: Object.keys(spentDice).length > 0,
-			});
+				// Apply hit dice spending using spentDice tracker. The healing was
+				// already rolled into `totalHealing` above, so decrement the pools
+				// WITHOUT healing again (useHitDie() would heal a second time).
+				Object.entries(spentDice).forEach(([dieType, count]) => {
+					for (let i = 0; i < count; i++) {
+						this._state.adjustHitDieCurrent(dieType, -1);
+					}
+				});
 
-			this._restoreResources("short");
-			this._state.restoreSignatureSpells?.();
+				if (totalHealing > 0) {
+					this._state.heal(totalHealing);
+				}
 
-			// Restore Warlock pact slots on short rest
-			const pactSlots = this._state.getPactSlots();
-			if (pactSlots && pactSlots.max > 0) {
-				this._state.setPactSlotsCurrent(pactSlots.max);
-			}
-
-			// Remove selected conditions
-			conditionsToRemove.forEach(condition => {
-				this._state.removeCondition?.(condition);
-			});
-
-			// Break concentration if requested
-			if (shouldBreakConcentration) {
-				this._state.breakConcentration?.();
-			}
-
-			// Apply Arcane/Natural Recovery slot selections
-			let slotsRecovered = 0;
-			if (hasSlotRecovery && slotRecoverySelections) {
-				const slotsToRecover = Object.entries(slotRecoverySelections)
-					.filter(([_, amount]) => amount > 0)
-					.map(([level, amount]) => ({level: parseInt(level), amount}));
-
-				if (slotsToRecover.length > 0) {
-					const method = calc.hasArcaneRecovery
-						? "useArcaneRecovery"
-						: "useNaturalRecovery";
-					if (this._state[method](slotsToRecover)) {
-						slotsRecovered = slotsToRecover.reduce((s, r) => s + r.amount, 0);
+				let companionHealing = 0;
+				for (const pending of pendingCompanionHitDice) {
+					const result = this._state.spendCompanionHitDie({
+						companionId: pending.companionId,
+						target: {companionId: pending.companionId, confirmed: true},
+						rolls: {hitDie: pending.roll},
+					});
+					if (result.ok) companionHealing += result.hp.actual;
+					else {
+						JqueryUtil.doToast({
+							type: "warning",
+							content: result.message || "A queued companion Hit Die could not be committed.",
+						});
 					}
 				}
-			}
 
-			// Sorcerous Restoration is auto-applied via onShortRest → applySorcerousRestoration
-			const spRecovered = this._state.applySorcerousRestoration();
+				// Material rest bonuses land AFTER the dice healing and are reported separately,
+				// so the log distinguishes "you rolled well" from "the pearl paid out".
+				const bonusHealing = this._applyRestBonusHealing({
+					bonuses: restBonuses,
+					suppressedNames: suppressedBonuses,
+					hasSpentHitDice: Object.keys(spentDice).length > 0,
+				});
 
-			// Apply Hunter's Prey option swap, if changed
-			huntersPreySwap?.apply();
+				this._restoreResources("short");
+				this._state.restoreSignatureSpells?.();
 
-			// Apply Tireless exhaustion reduction, if elected
-			const tirelessReduced = tirelessExhaustion?.apply() || 0;
+				// Restore Warlock pact slots on short rest
+				const pactSlots = this._state.getPactSlots();
+				if (pactSlots && pactSlots.max > 0) {
+					this._state.setPactSlotsCurrent(pactSlots.max);
+				}
 
-			// Apply Memorize Spell swap, if elected
-			const memorizeSwap = memorizeSpell?.apply() || false;
-			const efaCannonExpiry = this._state.expireEfaEldritchCannonsForRest?.({minutes: 60});
+				// Remove selected conditions
+				conditionsToRemove.forEach(condition => {
+					this._state.removeCondition?.(condition);
+				});
 
-			const armorModelOutcome = armorModelSwitch?.apply() || null;
-			const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
+				// Break concentration if requested
+				if (shouldBreakConcentration) {
+					this._state.breakConcentration?.();
+				}
 
-			this._page.saveCharacter();
-			this._page.renderCharacter();
-			doClose(true);
+				// Apply Arcane/Natural Recovery slot selections
+				let slotsRecovered = 0;
+				if (hasSlotRecovery && slotRecoverySelections) {
+					const slotsToRecover = Object.entries(slotRecoverySelections)
+						.filter(([_, amount]) => amount > 0)
+						.map(([level, amount]) => ({level: parseInt(level), amount}));
 
-			let message = `😴 Short rest complete!`;
-			if (totalHealing > 0) message += ` Recovered ${totalHealing} HP.`;
-			if (companionHealing > 0) message += ` Companions recovered ${companionHealing} HP.`;
-			if (bonusHealing > 0) message += ` Materials added ${bonusHealing} HP.`;
-			if (slotsRecovered > 0) message += ` Recovered ${slotsRecovered} spell slot(s) via ${slotRecoveryFeatureName}.`;
-			if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
-			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
-			if (shouldBreakConcentration) message += ` Broke concentration.`;
-			if (tirelessReduced > 0) message += ` Tireless reduced exhaustion by ${tirelessReduced}.`;
-			if (memorizeSwap) message += ` Memorized ${memorizeSwap}.`;
-			message += armorModelFeedback.successSuffix;
-			if (efaCannonExpiry?.count) message += ` ${efaCannonExpiry.count} Eldritch Cannon${efaCannonExpiry.count === 1 ? "" : "s"} expired.`;
+					if (slotsToRecover.length > 0) {
+						const method = calc.hasArcaneRecovery
+							? "useArcaneRecovery"
+							: "useNaturalRecovery";
+						if (this._state[method](slotsToRecover)) {
+							slotsRecovered = slotsToRecover.reduce((s, r) => s + r.amount, 0);
+						}
+					}
+				}
 
-			JqueryUtil.doToast({
-				type: "success",
-				content: message,
-			});
-			if (armorModelFeedback.warning) {
+				// Sorcerous Restoration is auto-applied via onShortRest → applySorcerousRestoration
+				const spRecovered = this._state.applySorcerousRestoration();
+
+				// Apply Hunter's Prey option swap, if changed
+				huntersPreySwap?.apply();
+
+				// Apply Tireless exhaustion reduction, if elected
+				const tirelessReduced = tirelessExhaustion?.apply() || 0;
+
+				// Apply Memorize Spell swap, if elected
+				const memorizeSwap = memorizeSpell?.apply() || false;
+				const efaCannonExpiry = this._state.expireEfaEldritchCannonsForRest?.({minutes: 60});
+
+				const armorModelOutcome = armorModelSwitch?.apply() || null;
+				const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
+
+				const saveResult = this._page._saveCurrentCharacter
+					? await this._page._saveCurrentCharacter({isReturnStatus: true})
+					: await this._page.saveCharacter?.();
+				if (saveResult === false) throw new Error("The Short Rest could not be saved.");
+				this._page.renderCharacter();
+				doClose(true);
+
+				let message = `😴 Short rest complete!`;
+				if (totalHealing > 0) message += ` Recovered ${totalHealing} HP.`;
+				if (companionHealing > 0) message += ` Companions recovered ${companionHealing} HP.`;
+				if (bonusHealing > 0) message += ` Materials added ${bonusHealing} HP.`;
+				if (slotsRecovered > 0) message += ` Recovered ${slotsRecovered} spell slot(s) via ${slotRecoveryFeatureName}.`;
+				if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
+				if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
+				if (shouldBreakConcentration) message += ` Broke concentration.`;
+				if (tirelessReduced > 0) message += ` Tireless reduced exhaustion by ${tirelessReduced}.`;
+				if (memorizeSwap) message += ` Memorized ${memorizeSwap}.`;
+				message += armorModelFeedback.successSuffix;
+				if (efaCannonExpiry?.count) message += ` ${efaCannonExpiry.count} Eldritch Cannon${efaCannonExpiry.count === 1 ? "" : "s"} expired.`;
+
 				JqueryUtil.doToast({
-					type: "warning",
-					content: armorModelFeedback.warning,
+					type: "success",
+					content: message,
+				});
+				if (armorModelFeedback.warning) {
+					JqueryUtil.doToast({
+						type: "warning",
+						content: armorModelFeedback.warning,
+					});
+				}
+
+				// Offer a persistent undo for this rest (BUG 8).
+				this._showUndoRestAffordance("short");
+
+				this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("short");
+				this._page.getMaterialsModule?.()?.offerShortRestRepairs();
+			} catch (error) {
+				if (restSnapshot?.json) this._state.loadFromJson(restSnapshot.json);
+				if (this._page) this._page._lastRestSnapshot = previousRestSnapshot;
+				if (previousRestSnapshot) this._showUndoRestAffordance(previousRestSnapshot.restType);
+				else this._removeUndoRestAffordance();
+				let isRollbackPersisted = true;
+				try {
+					const rollbackSaveResult = this._page._saveCurrentCharacter
+						? await this._page._saveCurrentCharacter({isReturnStatus: true})
+						: await this._page.saveCharacter?.();
+					isRollbackPersisted = rollbackSaveResult !== false;
+				} catch {
+					isRollbackPersisted = false;
+				}
+				this._page.renderCharacter?.();
+				btnConfirm.disabled = false;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: isRollbackPersisted
+						? `${error?.message || "The Short Rest could not be completed."} No changes were kept.`
+						: `${error?.message || "The Short Rest could not be completed."} The sheet was restored, but that rollback could not be saved; save the character manually before leaving.`,
 				});
 			}
-
-			// Offer a persistent undo for this rest (BUG 8).
-			this._showUndoRestAffordance("short");
-
-			this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("short");
-			this._page.getMaterialsModule?.()?.offerShortRestRepairs();
 		});
 
 		ee`<div class="charsheet__modal-footer">

@@ -1311,6 +1311,16 @@ HP. `activateEfaEldritchCannons()` validates two complete activation/roll
 requests before committing both with one Bonus Action; the one-cannon API is
 unchanged. Game-time decrement/end controls remain explicit, and either a Short
 Rest or Long Rest expires all active EFA cannons through canonical retirement.
+The dedicated Play Mode card projects this same state and delegates creation,
+activation, HP, movement, duration, dismissal, and detonation through Combat's
+canonical transactional handlers. It never exposes compact cannon records
+through generic companion controls. Play Mode also reports Arcane Firearm
+binding and Shimmering Field cover without persisting duplicate effect state.
+
+Short Rest now uses the same awaited save boundary as Long Rest. If persistence
+fails after cannon expiry, the complete pre-rest snapshot is reloaded and the
+previous Rest Undo snapshot remains available; the failed rest cannot strand a
+retired cannon or replace the player's last valid undo point.
 
 Explosive Cannon is a damage-triggered, one-shot level-9 Reaction opportunity.
 Only a surviving exact-owner cannon within 60 feet can arm it. Acceptance

@@ -9,6 +9,7 @@
 
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
 import {CharacterSheetCombat} from "./charactersheet-combat.js";
+import {CharacterSheetModal} from "./charactersheet-modal.js";
 
 function csRestoreModalFocus (trigger) {
 	if (trigger?.isConnected && typeof trigger.focus === "function") {
@@ -1246,6 +1247,7 @@ export class CharacterSheetPlayMode {
 
 		this._renderFavoritesBar();
 		this._renderActionEconomy();
+		this._renderEfaEldritchCannons();
 		this._renderActiveStates();
 		this._renderChainedTargets();
 		this._renderCombatMethods();
@@ -1256,6 +1258,264 @@ export class CharacterSheetPlayMode {
 		this._renderFeaturesQuick();
 		this._renderCrafting();
 		this._renderResources();
+	}
+
+	_renderEfaEldritchCannons () {
+		const creation = this._state.getEfaEldritchCannonCreationState?.();
+		if (!creation?.available) return;
+
+		const combat = this._page?._combat;
+		const card = this._makeCard(this._elActionsHub, "prof", "Eldritch Cannons");
+		card.classList?.add?.("pm-efa-cannons");
+		const header = card.querySelector?.(".pm-card__header") || card.children?.[0];
+		if (header) {
+			const badge = this._ce("span", "pm-card__badge pm-efa-cannons__badge", header);
+			badge.textContent = `${creation.activeCannons.length}/${creation.maxCannons} active`;
+		}
+
+		const feedback = this._ce("div", "pm-efa-cannons__feedback", card);
+		feedback.setAttribute("role", "status");
+		feedback.setAttribute("aria-live", "polite");
+		feedback.setAttribute("aria-atomic", "true");
+		const setFeedback = (message, {isError = false} = {}) => {
+			feedback.textContent = message || "";
+			feedback.classList.toggle("pm-efa-cannons__feedback--error", !!isError);
+		};
+		const reportFailure = result => {
+			const message = result?.reason === "saveFailed"
+				? "The character could not be saved, so the cannon change was rolled back."
+				: result?.reason === "actionUnavailable"
+					? "The required Action or Bonus Action is already spent."
+					: result?.reason === "triggerUnavailable"
+						? "That cannon opportunity is no longer available."
+						: "The cannon could not be updated. Check the value and try again.";
+			setFeedback(message, {isError: true});
+		};
+		const finish = (message, icon = "prof") => {
+			combat?._refreshEfaCannonSurfaces?.();
+			if (!combat?._refreshEfaCannonSurfaces) {
+				this._renderActionsHub();
+				this._renderStatusBar();
+			}
+			this._logActivity(icon, message);
+			JqueryUtil?.doToast?.({type: "info", content: message});
+		};
+		const pCommit = async mutate => {
+			if (!combat?._pCommitEfaCannonMutation) return {ok: false, reason: "combatUnavailable"};
+			return combat._pCommitEfaCannonMutation(mutate);
+		};
+		const pGetNumber = async ({title, min = 0, max = null, defaultValue = 1, int = true} = {}) => {
+			const value = await CharacterSheetModal.pGetUserNumber({
+				title,
+				inputMode: int ? "numeric" : "decimal",
+				min,
+				...(max == null ? {} : {max}),
+				int,
+				default: defaultValue,
+			});
+			return value == null || typeof value === "symbol" ? null : Number(value);
+		};
+
+		const toolbar = this._ce("div", "pm-efa-cannons__toolbar", card);
+		const createButton = this._ce("button", "pm-efa-cannons__button pm-efa-cannons__button--primary", toolbar);
+		this._setIconLabel(createButton, "add", creation.activeCannons.length ? " Create Another" : " Create Cannon");
+		createButton.disabled = !creation.canCreate;
+		createButton.title = creation.canCreate
+			? creation.canCreateTwo ? "Create one or two cannons with one Magic Action" : "Create a cannon in the next available slot"
+			: CharacterSheetCombat._getEfaCannonCreationReason(creation);
+		createButton.addEventListener("click", () => void combat?._pShowEfaEldritchCannonCreationModal?.());
+
+		if (creation.activeCannons.length === 2) {
+			const activateBoth = this._ce("button", "pm-efa-cannons__button pm-efa-cannons__button--primary", toolbar);
+			this._setIconLabel(activateBoth, "cantrip", " Activate Both");
+			activateBoth.title = "Activate both cannons with one Bonus Action";
+			activateBoth.addEventListener("click", () => void combat?._pShowEfaEldritchCannonsActivationModal?.(
+				creation.activeCannons.map(cannon => cannon.instanceId),
+			));
+		}
+
+		const firearm = this._state.getEfaArcaneFirearmStatus?.();
+		if (firearm?.available) {
+			const firearmStatus = this._ce(
+				"div",
+				`pm-efa-cannons__firearm pm-efa-cannons__firearm--${firearm.active ? "active" : "attention"}`,
+				card,
+			);
+			this._setIconLabel(
+				firearmStatus,
+				"fire",
+				firearm.active
+					? ` Arcane Firearm: ${firearm.item?.name || "carved item"}`
+					: ` Arcane Firearm: ${firearm.code === "unequipped" ? "equip the carved item" : "choose an eligible item after a Long Rest"}`,
+			);
+		}
+
+		if (!creation.activeCannons.length) {
+			const empty = this._ce("div", "pm-efa-cannons__empty", card);
+			const title = this._ce("strong", null, empty);
+			title.textContent = "No active cannon";
+			const payment = this._ce("span", null, empty);
+			payment.textContent = creation.freeUse.available
+				? "Free creation use ready."
+				: creation.spellSlots.length
+					? "Free use spent; an available spell slot can create one."
+					: "Free use spent and no spell slot is available.";
+			const tool = this._ce("span", null, empty);
+			tool.textContent = creation.tools.length
+				? `Creation tool ready: ${creation.tools.map(({reference}) => reference.name).join(" or ")}.`
+				: creation.toolRequirement.ui.unavailableMessage;
+			return;
+		}
+
+		const cover = this._state.getCoverProjection?.();
+		const grid = this._ce("div", "pm-efa-cannons__grid", card);
+		for (const cannon of creation.activeCannons) {
+			const slotNumber = cannon.generatedClassSummon.generatedSlot + 1;
+			const formLabel = CharacterSheetCombat._getEfaCannonFormLabel(cannon.form);
+			const cannonCard = this._ce("article", "pm-efa-cannon", grid);
+			cannonCard.setAttribute("aria-label", `Cannon ${slotNumber}, ${formLabel}`);
+
+			const identity = this._ce("div", "pm-efa-cannon__identity", cannonCard);
+			const heading = this._ce("h4", "pm-efa-cannon__name", identity);
+			heading.textContent = `Cannon ${slotNumber} · ${formLabel}`;
+			const placement = this._ce("span", "pm-efa-cannon__placement", identity);
+			placement.textContent = `${CharacterSheetCombat._getEfaCannonPlacementLabel(cannon)} · ${cannon.distanceFromOwnerFt} ft`;
+
+			const vitals = this._ce("div", "pm-efa-cannon__vitals", cannonCard);
+			for (const [label, value] of [
+				["HP", `${cannon.hp.current}/${cannon.hp.max}`],
+				["AC", cannon.ac],
+				["Duration", CharacterSheetCombat._formatEfaCannonDuration(cannon.durationRemainingMinutes)],
+			]) {
+				const vital = this._ce("div", "pm-efa-cannon__vital", vitals);
+				const valueEl = this._ce("strong", null, vital);
+				valueEl.textContent = value;
+				const labelEl = this._ce("span", null, vital);
+				labelEl.textContent = label;
+			}
+
+			const operation = this._ce("div", "pm-efa-cannon__operation", cannonCard);
+			operation.textContent = cannon.form === "flamethrower"
+				? `DC ${cannon.calculations.saveDc} Dex · ${cannon.calculations.damageDice} fire · 15-ft cone · half on success`
+				: cannon.form === "forceBallista"
+					? `+${cannon.calculations.attackBonus} spell attack · ${cannon.calculations.damageDice} force · 120 ft · push 5 ft`
+					: `${cannon.calculations.tempHpDice} + ${cannon.calculations.tempHpBonus} temporary HP · 10-ft range`;
+
+			if (creation.artificerLevel >= 15) {
+				const coverSource = cover?.sources?.find(source => source.id === `efa-cannon:${cannon.instanceId}`);
+				const coverStatus = this._ce(
+					"div",
+					`pm-efa-cannon__cover${coverSource ? " pm-efa-cannon__cover--active" : ""}`,
+					cannonCard,
+				);
+				coverStatus.textContent = coverSource
+					? "Shimmering Field active: Half Cover (+2 AC and Dex saves)"
+					: "Shimmering Field out of range: move within 10 ft";
+			}
+
+			const primary = this._ce("div", "pm-efa-cannon__primary", cannonCard);
+			const activate = this._ce("button", "pm-efa-cannons__button pm-efa-cannons__button--primary", primary);
+			this._setIconLabel(activate, "cantrip", ` Activate Cannon ${slotNumber}`);
+			activate.addEventListener("click", () => void combat?._pShowEfaEldritchCannonActivationModal?.(cannon.instanceId));
+
+			const actions = this._ce("div", "pm-efa-cannon__actions", cannonCard);
+			const addAction = (label, icon, handler, {danger = false} = {}) => {
+				const button = this._ce(
+					"button",
+					`pm-efa-cannons__button${danger ? " pm-efa-cannons__button--danger" : ""}`,
+					actions,
+				);
+				this._setIconLabel(button, icon, ` ${label}`);
+				button.addEventListener("click", handler);
+				return button;
+			};
+
+			addAction("Damage", "damage", async () => {
+				const amount = await pGetNumber({title: `Damage Cannon ${slotNumber}`, min: 1});
+				if (amount == null) return;
+				const result = await pCommit(() => this._state.damageEfaEldritchCannon(cannon.instanceId, amount));
+				if (!result.ok) return reportFailure(result);
+				finish(result.action === "retired"
+					? `Cannon ${slotNumber} was destroyed at 0 HP.`
+					: `Cannon ${slotNumber} took ${result.amount} damage; ${result.currentHp} HP remains.`, "damage");
+				if (result.detonationOpportunity) void combat?._pShowEfaCannonDetonationModal?.(result.detonationOpportunity);
+			});
+			addAction("Heal", "heal", async () => {
+				const amount = await pGetNumber({title: `Heal Cannon ${slotNumber}`, min: 1});
+				if (amount == null) return;
+				const result = await pCommit(() => this._state.healEfaEldritchCannon(cannon.instanceId, amount));
+				if (!result.ok) return reportFailure(result);
+				finish(`Cannon ${slotNumber} healed ${result.healed}; ${result.currentHp}/${result.maxHp} HP.`, "heal");
+			});
+			addAction("Mending", "spell", async () => {
+				const roll = combat?._rollEfaCannonFormula?.("2d6");
+				if (!roll) return reportFailure({reason: "combatUnavailable"});
+				const result = await pCommit(() => this._state.mendEfaEldritchCannon(cannon.instanceId, {roll: roll.total}));
+				if (!result.ok) return reportFailure(result);
+				void this._page.pAnimateDamageDice?.(roll.groups);
+				this._page.showDiceResult?.({
+					title: `Mending — Cannon ${slotNumber}`,
+					roll: roll.total,
+					modifier: 0,
+					total: result.healed,
+					subtitle: `2d6: ${roll.breakdown}. Restored ${result.healed} HP, capped at ${result.maxHp}.`,
+				});
+				finish(`Mending restored ${result.healed} HP to Cannon ${slotNumber}.`, "heal");
+			});
+			addAction("Move", "speed", async () => {
+				const distance = await pGetNumber({
+					title: `Set Cannon ${slotNumber} Distance`,
+					min: 0,
+					defaultValue: cannon.distanceFromOwnerFt,
+				});
+				if (distance == null) return;
+				const result = await pCommit(() => this._state.setEfaEldritchCannonPosition(cannon.instanceId, {distanceFromOwnerFt: distance}));
+				if (!result.ok) return reportFailure(result);
+				finish(`Cannon ${slotNumber} is now ${result.distanceFromOwnerFt} ft from you.`);
+			});
+			addAction("Time", "turn", async () => {
+				const minutes = await pGetNumber({
+					title: `Advance Cannon ${slotNumber} Game Time`,
+					min: 0.5,
+					defaultValue: 1,
+					int: false,
+				});
+				if (minutes == null) return;
+				const result = await pCommit(() => {
+					const [advance] = this._state.advanceClassSummonGameTime(minutes)
+						.filter(it => it.instanceId === cannon.instanceId);
+					return advance ? {ok: true, ...advance} : {ok: false, reason: "notFound"};
+				});
+				if (!result.ok) return reportFailure(result);
+				finish(result.action === "retired"
+					? `Cannon ${slotNumber}'s duration expired.`
+					: `Cannon ${slotNumber} has ${CharacterSheetCombat._formatEfaCannonDuration(result.details.durationRemainingMinutes)} remaining.`);
+			});
+			addAction("End", "close", async () => {
+				const confirmed = await CharacterSheetModal.pGetUserBoolean({
+					title: `End Cannon ${slotNumber} Duration?`,
+					htmlDescription: "The cannon expires immediately without spending an Action.",
+					textYes: "End Duration",
+					textNo: "Keep Cannon",
+				});
+				if (!confirmed) return;
+				const result = await pCommit(() => this._state.endEfaEldritchCannonDuration(cannon.instanceId));
+				if (!result.ok) return reportFailure(result);
+				finish(`Cannon ${slotNumber}'s duration ended.`);
+			});
+			addAction("Dismiss", "close", async () => {
+				const confirmed = await CharacterSheetModal.pGetUserBoolean({
+					title: `Dismiss Cannon ${slotNumber}?`,
+					htmlDescription: `${this._state.isInCombat() ? "This spends your Action. " : ""}The cannon will be removed.`,
+					textYes: "Dismiss Cannon",
+					textNo: "Keep Cannon",
+				});
+				if (!confirmed) return;
+				const result = await pCommit(() => this._state.dismissEfaEldritchCannonWithMagicAction(cannon.instanceId));
+				if (!result.ok) return reportFailure(result);
+				finish(`Cannon ${slotNumber} was dismissed.`);
+			}, {danger: true});
+		}
 	}
 
 	_renderChainedTargets () {

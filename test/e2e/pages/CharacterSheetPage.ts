@@ -2363,7 +2363,9 @@ export class CharacterSheetPage {
 	async probeEfaArtilleristFlow (
 		probe: "baseCannon" | "arcaneFirearm" | "explosiveCannon" | "fortifiedPosition",
 	): Promise<{ok: boolean; error?: string}> {
-		if (probe !== "baseCannon") return {ok: false, error: `${probe} probe is not implemented`};
+		if (probe === "arcaneFirearm") return this._probeEfaArcaneFirearm();
+		if (probe === "explosiveCannon") return this._probeEfaExplosiveCannon();
+		if (probe === "fortifiedPosition") return this._probeEfaFortifiedPosition();
 		try {
 			await this.page.evaluate(() => {
 				const cs: any = (globalThis as any).charSheet;
@@ -2371,6 +2373,19 @@ export class CharacterSheetPage {
 				for (const cannon of state?.listEfaEldritchCannons?.() || []) {
 					state.dismissEfaEldritchCannon?.(cannon.instanceId);
 				}
+				const toolId = "e2e-efa-cannon-tool";
+				if (!state?.getInventory?.().some((row: any) => row.id === toolId)) {
+					state?.addItem?.({
+						id: toolId,
+						name: "Woodcarver's Tools",
+						source: "XPHB",
+						type: "AT",
+						quantity: 1,
+						equipped: true,
+						_isCustom: true,
+					}, 1, true);
+				}
+				state?.setItemEquipped?.(toolId, true);
 				state?.onLongRest?.();
 				state?.endCombat?.();
 				state?.startCombat?.();
@@ -2383,7 +2398,7 @@ export class CharacterSheetPage {
 			await create.click();
 			const creation = this.page.locator(".charsheet__efa-cannon-create-form");
 			await creation.waitFor({state: "visible", timeout: 5000});
-			await creation.locator('input[name="efa-cannon-form"][value="forceBallista"]').check();
+			await creation.locator('input[name="efa-cannon-0-form"][value="forceBallista"]').check();
 			await creation.locator("[data-efa-cannon-submit]").click();
 
 			const card = this.page.locator("[data-efa-cannon-id]").first();
@@ -2432,11 +2447,29 @@ export class CharacterSheetPage {
 				const cannon = (globalThis as any).charSheet?._state?.listEfaEldritchCannons?.()?.[0];
 				return cannon?.hp?.current === expected;
 			}, hpBefore - 1);
+			const detonationModal = this.page.locator(".ve-ui-modal__inner:visible")
+				.filter({has: this.page.locator("[data-efa-cannon-decline]")})
+				.last();
+			if (await detonationModal.isVisible({timeout: 500}).catch(() => false)) {
+				await detonationModal.locator("[data-efa-cannon-decline]").click();
+				await detonationModal.waitFor({state: "hidden", timeout: 5000});
+			}
 			await card.locator("[data-efa-cannon-mending]").click();
 			await this.page.waitForFunction((minimum) => {
 				const cannon = (globalThis as any).charSheet?._state?.listEfaEldritchCannons?.()?.[0];
 				return Number(cannon?.hp?.current) > minimum;
 			}, hpBefore - 1);
+
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.setViewMode?.("play");
+				cs?.getPlayMode?.()?.activate?.();
+			});
+			const playCard = this.page.locator(".pm-efa-cannons");
+			await playCard.waitFor({state: "visible", timeout: 5000});
+			if (!String(await playCard.textContent()).match(/Cannon 1.*Force Ballista/is)) {
+				return {ok: false, error: "Play Mode did not render the active Force Ballista"};
+			}
 			return {ok: true};
 		} catch (error) {
 			return {ok: false, error: error instanceof Error ? error.message : String(error)};
@@ -2448,10 +2481,314 @@ export class CharacterSheetPage {
 				for (const cannon of state?.listEfaEldritchCannons?.() || []) {
 					state.dismissEfaEldritchCannon?.(cannon.instanceId);
 				}
+				state?.removeItem?.("e2e-efa-cannon-tool");
+				state?.onLongRest?.();
 				state?.endCombat?.();
+				state?.setViewMode?.("full");
+				cs?.getPlayMode?.()?.deactivate?.();
 				cs?._renderCharacter?.();
 			}).catch(() => {});
 		}
+	}
+
+	async _probeEfaArcaneFirearm (): Promise<{ok: boolean; error?: string}> {
+		const itemId = "e2e-efa-arcane-firearm";
+		try {
+			await this.page.evaluate((inventoryItemId) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				state?.removeItem?.(inventoryItemId);
+				state?.addItem?.({
+					id: inventoryItemId,
+					name: "E2E Arcane Wand",
+					source: "XPHB",
+					type: "WD",
+					quantity: 1,
+					equipped: true,
+					_isCustom: true,
+				}, 1, true);
+				state?.setItemEquipped?.(inventoryItemId, true);
+				cs?._renderCharacter?.();
+			}, itemId);
+
+			await this.page.evaluate(async () => {
+				await (globalThis as any).charSheet?._rest?._showLongRestDialog?.();
+			});
+			const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+			await modal.waitFor({state: "visible", timeout: 5000});
+			const select = modal.locator("#charsheet-rest-arcane-firearm-choice");
+			await select.waitFor({state: "visible", timeout: 5000});
+			await select.selectOption(itemId);
+			await modal.getByRole("button", {name: "🌙 Finish Long Rest"}).click();
+			await modal.waitFor({state: "hidden", timeout: 10_000});
+
+			await this.switchToTab(this.tabCombat);
+			const firearmCard = this.page.locator("#charsheet-combat-arcane-firearm");
+			await firearmCard.waitFor({state: "visible", timeout: 5000});
+			const rendered = String(await firearmCard.textContent());
+			if (!rendered.match(/E2E Arcane Wand/i) || !rendered.match(/Active/i)) {
+				return {ok: false, error: `Arcane Firearm status did not render active: ${rendered}`};
+			}
+
+			const result = await this.page.evaluate(async (inventoryItemId) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const focusRow = state?.getInventory?.().find((row: any) => row.id === inventoryItemId);
+				const spell = {
+					name: "Fire Bolt",
+					source: "XPHB",
+					level: 0,
+					sourceClass: "Artificer",
+					sourceClassSource: "EFA",
+					entries: ["Make a ranged spell attack. On a hit, the target takes {@damage 1d10} fire damage."],
+					damageInflict: ["fire"],
+				};
+				const publish = () => state?.pPublishCommittedSpellCast?.({
+					spell,
+					spellData: spell,
+					focusInventoryRow: focusRow,
+					focusRequirement: state?.getSpellCastFocusRequirement?.(spell),
+					cast: {
+						type: "cantrip",
+						slotLevel: 0,
+						focusInventoryItemId: inventoryItemId,
+					},
+				});
+				const firstReceipt = await publish();
+				const first = state?.commitEfaArcaneFirearmDamage?.({
+					receipt: firstReceipt,
+					damageResult: {total: 10, dice: "1d10"},
+					firearmRoll: 5,
+				});
+				const duplicate = state?.commitEfaArcaneFirearmDamage?.({
+					receipt: firstReceipt,
+					damageResult: {total: 10, dice: "1d10"},
+					firearmRoll: 8,
+				});
+				const secondReceipt = await publish();
+				const second = state?.commitEfaArcaneFirearmDamage?.({
+					receipt: secondReceipt,
+					damageResult: {total: 4, dice: "1d10"},
+					firearmRoll: 6,
+				});
+				return {
+					status: state?.getEfaArcaneFirearmStatus?.(),
+					first,
+					duplicate,
+					second,
+					firstReceiptUsed: state?.queryEfaArcaneFirearmTurnReceipt?.({castReceiptId: firstReceipt?.receiptId})?.used,
+					secondReceiptUsed: state?.queryEfaArcaneFirearmTurnReceipt?.({castReceiptId: secondReceipt?.receiptId})?.used,
+				};
+			}, itemId);
+			if (!result.status?.active || result.status?.item?.id !== itemId) {
+				return {ok: false, error: `Long Rest did not bind the exact item: ${JSON.stringify(result.status)}`};
+			}
+			if (!result.first?.ok || result.first.total !== 15 || result.first.firearmRoll !== 5) {
+				return {ok: false, error: `first Arcane Firearm cast was wrong: ${JSON.stringify(result.first)}`};
+			}
+			if (result.duplicate?.code !== "alreadyAppliedToCast") {
+				return {ok: false, error: `duplicate committed cast was not idempotent: ${JSON.stringify(result.duplicate)}`};
+			}
+			if (!result.second?.ok || result.second.total !== 10 || !result.firstReceiptUsed || !result.secondReceiptUsed) {
+				return {ok: false, error: `distinct same-turn cast did not receive its own d8: ${JSON.stringify(result)}`};
+			}
+			return {ok: true};
+		} catch (error) {
+			return {ok: false, error: error instanceof Error ? error.message : String(error)};
+		} finally {
+			await this.dismissTransientModals().catch(() => {});
+			await this.page.evaluate((inventoryItemId) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				state?.removeItem?.(inventoryItemId);
+				state?.resetTurnEconomy?.();
+				cs?._renderCharacter?.();
+			}, itemId).catch(() => {});
+		}
+	}
+
+	async _probeEfaExplosiveCannon (): Promise<{ok: boolean; error?: string}> {
+		try {
+			await this._resetEfaCannonProbeState();
+			const [cannonId] = await this._createEfaCannonsViaUi({forms: ["forceBallista"]});
+			const card = this.page.locator(`[data-efa-cannon-id="${cannonId}"]`);
+			await card.locator("[data-efa-cannon-hp-amount]").fill("1");
+			await card.locator("[data-efa-cannon-damage]").click();
+
+			const modal = this.page.locator(".ve-ui-modal__inner:visible").last();
+			await modal.waitFor({state: "visible", timeout: 5000});
+			const modalText = String(await modal.textContent());
+			if (!modalText.match(/3d10/i) || !modalText.match(/DC\s+\d+/i)) {
+				return {ok: false, error: `detonation modal omitted damage or save DC: ${modalText}`};
+			}
+			const armed = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return {
+					pending: state?.getPendingEfaCannonDetonation?.(),
+					economy: state?.getActionEconomyState?.(),
+				};
+			});
+			if (!armed.pending || armed.economy?.reaction !== true) {
+				return {ok: false, error: `damage did not arm a tracked Reaction: ${JSON.stringify(armed)}`};
+			}
+
+			await modal.locator("[data-efa-cannon-detonate]").click();
+			await modal.waitFor({state: "hidden", timeout: 10_000});
+			const detonated = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return {
+					cannons: state?.listEfaEldritchCannons?.() || [],
+					pending: state?.getPendingEfaCannonDetonation?.(),
+					economy: state?.getActionEconomyState?.(),
+				};
+			});
+			if (detonated.cannons.length || detonated.pending || detonated.economy?.reaction !== false) {
+				return {ok: false, error: `detonation did not retire the cannon and spend Reaction: ${JSON.stringify(detonated)}`};
+			}
+			return {ok: true};
+		} catch (error) {
+			return {ok: false, error: error instanceof Error ? error.message : String(error)};
+		} finally {
+			await this.dismissTransientModals().catch(() => {});
+			await this._cleanupEfaCannonProbeState();
+		}
+	}
+
+	async _probeEfaFortifiedPosition (): Promise<{ok: boolean; error?: string}> {
+		try {
+			await this._resetEfaCannonProbeState();
+			const baseline = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return {
+					ac: state?.getArmorClass?.(),
+					dexSave: state?.getSaveModifier?.("dex"),
+				};
+			});
+			const cannonIds = await this._createEfaCannonsViaUi({forms: ["forceBallista", "protector"]});
+			if (cannonIds.length !== 2) return {ok: false, error: `Double Firepower created ${cannonIds.length} cannons`};
+
+			const covered = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return {
+					cover: state?.getCoverProjection?.(),
+					ac: state?.getArmorClass?.(),
+					dexSave: state?.getSaveModifier?.("dex"),
+				};
+			});
+			if (covered.cover?.cover !== "half" || covered.cover?.sources?.length !== 2) {
+				return {ok: false, error: `Fortified Position did not project both cover sources: ${JSON.stringify(covered.cover)}`};
+			}
+			if (covered.ac !== baseline.ac + 2 || covered.dexSave !== baseline.dexSave + 2) {
+				return {ok: false, error: `Half Cover did not add exactly +2 AC/Dex saves: ${JSON.stringify({baseline, covered})}`};
+			}
+			if (await this.page.locator(".charsheet__efa-cannon-cover--active").count() !== 2) {
+				return {ok: false, error: "both in-range cannons did not render active Shimmering Field status"};
+			}
+
+			await this.page.locator("[data-efa-cannon-activate-both]").click();
+			const activation = this.page.locator(".charsheet__efa-cannon-activate-form");
+			await activation.waitFor({state: "visible", timeout: 5000});
+			await activation.locator("[data-efa-cannon-submit]").click();
+			await activation.waitFor({state: "hidden", timeout: 10_000});
+			const economy = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.getActionEconomyState?.());
+			if (economy?.bonus !== false) {
+				return {ok: false, error: `dual activation did not spend one Bonus Action: ${JSON.stringify(economy)}`};
+			}
+
+			for (let index = 0; index < 2; index++) {
+				const card = this.page.locator(`[data-efa-cannon-id="${cannonIds[index]}"]`);
+				await card.locator("[data-efa-cannon-distance]").fill("20");
+				await card.locator("[data-efa-cannon-update-distance]").click();
+				await this.page.waitForFunction((expectedSources) => {
+					const cover = (globalThis as any).charSheet?._state?.getCoverProjection?.();
+					return (cover?.sources?.length || 0) === expectedSources;
+				}, 1 - index);
+				const projection = await this.page.evaluate(() => {
+					const state: any = (globalThis as any).charSheet?._state;
+					return {
+						cover: state?.getCoverProjection?.(),
+						ac: state?.getArmorClass?.(),
+						dexSave: state?.getSaveModifier?.("dex"),
+					};
+				});
+				const expectedBonus = index === 0 ? 2 : 0;
+				if (projection.ac !== baseline.ac + expectedBonus || projection.dexSave !== baseline.dexSave + expectedBonus) {
+					return {ok: false, error: `cover did not reconcile after moving cannon ${index + 1}: ${JSON.stringify(projection)}`};
+				}
+			}
+			return {ok: true};
+		} catch (error) {
+			return {ok: false, error: error instanceof Error ? error.message : String(error)};
+		} finally {
+			await this.dismissTransientModals().catch(() => {});
+			await this._cleanupEfaCannonProbeState();
+		}
+	}
+
+	async _resetEfaCannonProbeState (): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			for (const cannon of state?.listEfaEldritchCannons?.() || []) {
+				state.dismissEfaEldritchCannon?.(cannon.instanceId);
+			}
+			const toolId = "e2e-efa-cannon-tool";
+			if (!state?.getInventory?.().some((row: any) => row.id === toolId)) {
+				state?.addItem?.({
+					id: toolId,
+					name: "Woodcarver's Tools",
+					source: "XPHB",
+					type: "AT",
+					quantity: 1,
+					equipped: true,
+					_isCustom: true,
+				}, 1, true);
+			}
+			state?.setItemEquipped?.(toolId, true);
+			state?.onLongRest?.();
+			state?.endCombat?.();
+			state?.startCombat?.();
+			state?.setViewMode?.("full");
+			cs?.getPlayMode?.()?.deactivate?.();
+			cs?._renderCharacter?.();
+		});
+		await this.switchToTab(this.tabCombat);
+	}
+
+	async _cleanupEfaCannonProbeState (): Promise<void> {
+		await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			for (const cannon of state?.listEfaEldritchCannons?.() || []) {
+				state.dismissEfaEldritchCannon?.(cannon.instanceId);
+			}
+			state?.removeItem?.("e2e-efa-cannon-tool");
+			state?.onLongRest?.();
+			state?.endCombat?.();
+			state?.setViewMode?.("full");
+			cs?.getPlayMode?.()?.deactivate?.();
+			cs?._renderCharacter?.();
+		}).catch(() => {});
+	}
+
+	async _createEfaCannonsViaUi ({forms}: {forms: Array<"flamethrower" | "forceBallista" | "protector">}): Promise<string[]> {
+		const create = this.page.locator("#charsheet-combat-efa-cannon-create");
+		await create.waitFor({state: "visible", timeout: 5000});
+		await create.click();
+		const form = this.page.locator(".charsheet__efa-cannon-create-form");
+		await form.waitFor({state: "visible", timeout: 5000});
+		if (forms.length === 2) await form.locator('[name="efa-cannon-count"]').selectOption("2");
+		for (let index = 0; index < forms.length; index++) {
+			await form.locator(`input[name="efa-cannon-${index}-form"][value="${forms[index]}"]`).check();
+		}
+		await form.locator("[data-efa-cannon-submit]").click();
+		await form.waitFor({state: "hidden", timeout: 10_000});
+		const ids = await this.page.evaluate(() => (
+			(globalThis as any).charSheet?._state?.listEfaEldritchCannons?.() || []
+		).map((cannon: any) => cannon.instanceId));
+		for (const id of ids) {
+			await this.page.locator(`[data-efa-cannon-id="${id}"]`).waitFor({state: "visible", timeout: 5000});
+		}
+		return ids;
 	}
 
 	// ========== SHEET-USAGE HELPERS (Phase 2) ==========

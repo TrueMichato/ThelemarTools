@@ -7616,6 +7616,7 @@ class CharacterSheetCombat {
 		this._page?._renderResources?.();
 		this._page?._features?._renderResources?.();
 		this._page?._spells?.render?.();
+		if (this._state.getViewMode?.() === "play") this._page?.getPlayMode?.()?.render?.();
 	}
 
 	async _pCommitEfaCannonMutation (mutate) {

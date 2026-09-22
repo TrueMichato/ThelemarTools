@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
@@ -6,6 +7,13 @@ import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
 
 const State = globalThis.CharacterSheetState;
+const artificerData = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
+const objectData = JSON.parse(fs.readFileSync("data/objects.json", "utf8")).object;
+const EFA_ARTILLERIST = artificerData.subclass.find(it =>
+	it.name === "Artillerist"
+	&& it.source === "EFA"
+	&& it.classSource === "EFA",
+);
 let Rest;
 let createdElements;
 
@@ -132,6 +140,35 @@ function mockProductionOptions (state) {
 			},
 		],
 	});
+}
+
+async function makeArtilleristWithCannon () {
+	const state = new State();
+	state.setClassSummonTemplateCatalog(objectData);
+	state.addClass({
+		name: "Artificer",
+		source: "EFA",
+		level: 15,
+		hd: {number: 1, faces: 8},
+		subclass: {
+			name: EFA_ARTILLERIST.name,
+			shortName: EFA_ARTILLERIST.shortName,
+			source: EFA_ARTILLERIST.source,
+		},
+	});
+	state.addItem({id: "short-rest-tool", name: "Smith's Tools", source: "PHB", type: "AT", _isCustom: true}, 1, true);
+	state.addToolProficiency("Smith's Tools");
+	const created = await state.pCreateEfaEldritchCannon({
+		form: "forceBallista",
+		size: "S",
+		placement: "deployed",
+		mobility: "wheels",
+		distanceFromOwnerFt: 5,
+		createdWith: "freeUse",
+	});
+	state.damageEfaEldritchCannon(created.instanceId, 6);
+	state.advanceClassSummonGameTime(15);
+	return {state, created};
 }
 
 describe("EFA Replicate Magic Item long-rest interaction", () => {
@@ -481,7 +518,7 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 
 		const confirm = createdElements.find(element => element.textContent === "✓ Finish Short Rest");
 		expect(confirm).toBeDefined();
-		confirm.click();
+		await confirm.click();
 
 		expect(state.getGameTimeMinutes()).toBe(60);
 		expect(advanceMinutes).toHaveBeenCalledWith(60, {
@@ -490,5 +527,33 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 		});
 		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
 		expect(page.renderCharacter).toHaveBeenCalledTimes(1);
+	});
+
+	test("failed Short Rest persistence restores the cannon and previous undo snapshot", async () => {
+		const {state, created} = await makeArtilleristWithCannon();
+		const beforeCannon = state.getEfaEldritchCannon(created.instanceId);
+		const {rest, page} = makeRest(state);
+		const previousSnapshot = {
+			restType: "long",
+			json: structuredClone(state.toJson()),
+		};
+		page._lastRestSnapshot = previousSnapshot;
+		page._saveCurrentCharacter = jest.fn()
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true);
+		const modalInner = globalThis.e_({tag: "div"});
+		const doClose = jest.fn();
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: modalInner, doClose});
+
+		await rest._showShortRestDialog();
+		const confirm = createdElements.find(element => element.textContent === "✓ Finish Short Rest");
+		expect(confirm).toBeDefined();
+		await confirm._handlers.click();
+
+		expect(state.getEfaEldritchCannon(created.instanceId)).toEqual(beforeCannon);
+		expect(page._lastRestSnapshot).toBe(previousSnapshot);
+		expect(rest._showUndoRestAffordance).toHaveBeenCalledWith("long");
+		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(2);
+		expect(doClose).not.toHaveBeenCalled();
 	});
 });
