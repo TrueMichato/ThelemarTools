@@ -7,6 +7,7 @@
 
 const COMPANION_FEATURE_UIDS = Object.freeze({
 	EFA_STEEL_DEFENDER: "Steel Defender|Artificer|EFA|Battle Smith|EFA|3",
+	RHW_REANIMATED_COMPANION: "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3",
 	TCE_STEEL_DEFENDER: "Steel Defender|Artificer|TCE|Battle Smith|TCE|3",
 });
 
@@ -15,6 +16,14 @@ const STEEL_DEFENDER_ABILITY_SCORES = Object.freeze({
 	str: 14,
 	dex: 12,
 	con: 14,
+	int: 4,
+	wis: 10,
+	cha: 6,
+});
+const REANIMATED_COMPANION_ABILITY_SCORES = Object.freeze({
+	str: 11,
+	dex: 10,
+	con: 16,
 	int: 4,
 	wis: 10,
 	cha: 6,
@@ -168,6 +177,176 @@ const COMPANION_RULES = deepFreeze({
 				dice: "1d4",
 				flatFormula: "intelligenceModifier",
 				type: "force",
+			},
+		},
+	},
+	[COMPANION_FEATURE_UIDS.RHW_REANIMATED_COMPANION]: {
+		schemaVersion: 1,
+		identity: {
+			name: "Reanimated Companion",
+			source: "RHW",
+			companionUid: "Reanimated Companion|RHW",
+			classUid: "Artificer|EFA",
+			subclassUid: "Reanimator|Artificer|EFA|RHW",
+			featureUid: COMPANION_FEATURE_UIDS.RHW_REANIMATED_COMPANION,
+		},
+		minimumArtificerLevel: 3,
+		requiredSummonerContext: [
+			"artificerLevel",
+			"intelligenceModifier",
+			"proficiencyBonus",
+			"spellAttackBonus",
+			"spellSaveDc",
+		],
+		statistics: {
+			size: ["M"],
+			creatureType: "undead",
+			abilityScores: REANIMATED_COMPANION_ABILITY_SCORES,
+			speed: {walk: 30},
+			senses: {blindsight: 60},
+			damageResistances: ["necrotic", "poison"],
+			damageImmunities: ["lightning"],
+			conditionImmunities: ["charmed", "exhaustion", "poisoned"],
+			languages: {understands: "summonerKnownLanguages", canSpeak: false},
+			hitPoints: {formula: "5 + 5 * artificerLevel"},
+			hitDice: {die: "d8", countFormula: "artificerLevel"},
+			armorClass: {formula: "10 + intelligenceModifier"},
+			proficiencyBonus: {formula: "proficiencyBonus"},
+			spellAttackBonus: {formula: "spellAttackBonus"},
+			spellSaveDc: {formula: "spellSaveDc"},
+			passivePerception: {formula: "10", authoredValue: 10},
+		},
+		actions: {
+			dreadfulSwipe: {
+				name: "Dreadful Swipe",
+				actionType: "action",
+				attackType: "melee",
+				attackBonusFormula: "spellAttackBonus",
+				reachFeet: 5,
+				damage: {
+					dice: "1d4",
+					flatFormula: "intelligenceModifier",
+					type: "necrotic",
+				},
+				riders: [{
+					id: "preventOpportunityAttacks",
+					effect: "targetCannotTakeOpportunityAttacks",
+					duration: "untilStartOfTargetNextTurn",
+				}],
+			},
+		},
+		traits: {
+			deathBurst: {
+				name: "Death Burst",
+				trigger: "onDeath",
+				area: {shape: "emanation", radiusFeet: 10},
+				save: {
+					ability: "dex",
+					dcFormula: "spellSaveDc",
+					onSuccess: "halfDamage",
+				},
+				damage: {
+					dice: "2d4",
+					flatFormula: "0",
+					type: "necrotic",
+				},
+			},
+			lightningAbsorption: {
+				name: "Lightning Absorption",
+				trigger: "subjectedToLightningDamage",
+				damageImmunity: "lightning",
+				healing: {formula: "lightningDamageDealt"},
+			},
+		},
+		damageRules: {
+			necrotic: {
+				ignoresResistance: false,
+				unlockArtificerLevel: 9,
+			},
+		},
+		modifications: {
+			selection: {
+				unique: true,
+				requiredCountByArtificerLevel: [
+					{minimum: 0, maximum: 4, count: 0},
+					{minimum: 5, maximum: 8, count: 1},
+					{minimum: 9, maximum: 14, count: 2},
+					{minimum: 15, maximum: null, count: 3},
+				],
+			},
+			options: {
+				arcaneConduit: {
+					id: "arcaneConduit",
+					name: "Arcane Conduit",
+					unlockArtificerLevel: 5,
+					castingOrigin: {
+						mayCastFromCompanionSpace: true,
+						usesSummonerSenses: true,
+					},
+					damageRider: {
+						limit: "oncePerTurn",
+						requiresCompanionWithinFeet: 120,
+						spellClassUid: "Artificer|EFA",
+						spellSchools: ["evocation", "necromancy"],
+						trigger: "spellDealsDamage",
+						damageRollBonusFormula: "intelligenceModifier",
+					},
+				},
+				ferocity: {
+					id: "ferocity",
+					name: "Ferocity",
+					unlockArtificerLevel: 5,
+					dreadfulSwipeDamageDice: "1d6",
+				},
+				bloated: {
+					id: "bloated",
+					name: "Bloated",
+					unlockArtificerLevel: 9,
+					size: ["L"],
+					dreadfulSwipePush: {
+						distanceFeet: 10,
+						maximumTargetSize: "L",
+					},
+					deathBurstDamageBonusFormula: "intelligenceModifier",
+				},
+				gaunt: {
+					id: "gaunt",
+					name: "Gaunt",
+					unlockArtificerLevel: 9,
+					speed: {walk: 45, climb: "walk"},
+					climbing: {
+						difficultSurfaces: true,
+						ceilings: true,
+						requiresAbilityCheck: false,
+					},
+					fearAura: {
+						trigger: "chosenCreatureStartsTurn",
+						area: {shape: "emanation", radiusFeet: 10},
+						save: {ability: "wis", dcFormula: "spellSaveDc"},
+						onFailure: {
+							condition: "frightened",
+							duration: "untilStartOfCreatureNextTurn",
+						},
+					},
+				},
+				moist: {
+					id: "moist",
+					name: "Moist",
+					unlockArtificerLevel: 9,
+					speed: {swim: "walk"},
+					squeeze: {
+						minimumSpaceInches: 1,
+						extraMovement: false,
+					},
+					acidRetaliation: {
+						trigger: "hitByAttackRoll",
+						attackerMaximumRangeFeet: 10,
+						damage: {
+							flatFormula: "intelligenceModifier",
+							type: "acid",
+						},
+					},
+				},
 			},
 		},
 	},
@@ -332,9 +511,10 @@ function normalizeFeatureUid (featureUid) {
 
 	const [name, className, classSource, subclassShortName, subclassSource, levelRaw, featureSourceRaw] = parts;
 	if (!name || !className || !classSource || !subclassShortName || !subclassSource || !levelRaw) return null;
+	if (parts.length === 7 && !featureSourceRaw) return null;
 
 	const level = Number(levelRaw);
-	if (!Number.isFinite(level)) return null;
+	if (!Number.isInteger(level) || level < 0) return null;
 
 	const featureSource = featureSourceRaw || subclassSource;
 	const canonicalParts = [name, className, classSource, subclassShortName, subclassSource, level];
@@ -348,9 +528,9 @@ function getDescriptorInternal (featureUid) {
 	return {canonicalUid, descriptor: COMPANION_RULES[canonicalUid]};
 }
 
-function normalizeContext (context) {
+function normalizeContext (descriptor, context) {
 	const out = {};
-	for (const key of ["artificerLevel", "intelligenceModifier", "proficiencyBonus", "spellAttackBonus"]) {
+	for (const key of descriptor.requiredSummonerContext) {
 		const rawValue = context?.[key];
 		if (rawValue == null || (typeof rawValue === "string" && !rawValue.trim())) {
 			throw new TypeError(`Companion rules require a non-blank ${key}.`);
@@ -362,6 +542,54 @@ function normalizeContext (context) {
 	out.artificerLevel = Math.max(0, Math.floor(out.artificerLevel));
 	out.proficiencyBonus = Math.max(0, Math.floor(out.proficiencyBonus));
 	return out;
+}
+
+function getRequiredModificationCount (descriptor, artificerLevel) {
+	const range = descriptor.modifications.selection.requiredCountByArtificerLevel
+		.find(it => artificerLevel >= it.minimum && (it.maximum == null || artificerLevel <= it.maximum));
+	if (!range) throw new RangeError(`No modification count is defined for Artificer level ${artificerLevel}.`);
+	return range.count;
+}
+
+function normalizeModificationSetup (descriptor, context, setup) {
+	if (setup != null && (typeof setup !== "object" || Array.isArray(setup))) {
+		throw new TypeError("Companion resolver setup must be an object.");
+	}
+
+	const rawModifications = setup && Object.prototype.hasOwnProperty.call(setup, "modifications")
+		? setup.modifications
+		: [];
+	if (!Array.isArray(rawModifications)) throw new TypeError("Companion modifications must be an array.");
+
+	const optionEntries = Object.entries(descriptor.modifications.options);
+	const optionOrder = new Map(optionEntries.map(([id], index) => [id, index]));
+	const selected = rawModifications.map(id => {
+		if (typeof id !== "string" || !id.trim()) throw new TypeError("Companion modification IDs must be non-blank strings.");
+		return id.trim();
+	});
+	const uniqueSelected = new Set(selected);
+	if (uniqueSelected.size !== selected.length) throw new RangeError("Companion modifications must be unique.");
+
+	for (const id of selected) {
+		const option = descriptor.modifications.options[id];
+		if (!option) throw new RangeError(`Unknown companion modification "${id}".`);
+		if (context.artificerLevel < option.unlockArtificerLevel) {
+			throw new RangeError(`Companion modification "${id}" is locked at Artificer level ${context.artificerLevel}.`);
+		}
+	}
+
+	const requiredCount = getRequiredModificationCount(descriptor, context.artificerLevel);
+	if (selected.length !== requiredCount) {
+		throw new RangeError(`Companion requires exactly ${requiredCount} modification selection${requiredCount === 1 ? "" : "s"} at Artificer level ${context.artificerLevel}; received ${selected.length}.`);
+	}
+
+	return {
+		requiredCount,
+		selected: [...selected].sort((a, b) => optionOrder.get(a) - optionOrder.get(b)),
+		available: optionEntries
+			.filter(([, option]) => context.artificerLevel >= option.unlockArtificerLevel)
+			.map(([id]) => id),
+	};
 }
 
 function getAbilityModifier (score) {
@@ -513,6 +741,123 @@ function resolveTceSteelDefender (descriptor, context) {
 	return out;
 }
 
+function getResolvedReanimatorModificationEffects (descriptor, context, selected) {
+	return Object.fromEntries(selected.map(id => {
+		const effect = cloneJson(descriptor.modifications.options[id]);
+		switch (id) {
+			case "arcaneConduit":
+				effect.damageRider.damageRollBonus = context.intelligenceModifier;
+				break;
+			case "gaunt":
+				effect.fearAura.save.dc = context.spellSaveDc;
+				break;
+			case "moist":
+				effect.acidRetaliation.damage.flat = context.intelligenceModifier;
+				break;
+		}
+		return [id, effect];
+	}));
+}
+
+function resolveRhwReanimatedCompanion (descriptor, context, setup) {
+	const modificationSetup = normalizeModificationSetup(descriptor, context, setup);
+	const selected = new Set(modificationSetup.selected);
+	const abilityScores = cloneJson(descriptor.statistics.abilityScores);
+	const improvedReanimationAvailable = context.artificerLevel >= descriptor.damageRules.necrotic.unlockArtificerLevel;
+	const hasBloated = selected.has("bloated");
+	const hasGaunt = selected.has("gaunt");
+	const hasMoist = selected.has("moist");
+
+	const speed = {
+		walk: hasGaunt
+			? descriptor.modifications.options.gaunt.speed.walk
+			: descriptor.statistics.speed.walk,
+	};
+	if (hasGaunt) speed.climb = speed.walk;
+	if (hasMoist) speed.swim = speed.walk;
+
+	const dreadfulSwipeDamage = {
+		dice: selected.has("ferocity")
+			? descriptor.modifications.options.ferocity.dreadfulSwipeDamageDice
+			: descriptor.actions.dreadfulSwipe.damage.dice,
+		flat: context.intelligenceModifier,
+		type: descriptor.actions.dreadfulSwipe.damage.type,
+		ignoresResistance: improvedReanimationAvailable,
+	};
+	const dreadfulSwipeRiders = cloneJson(descriptor.actions.dreadfulSwipe.riders);
+	if (hasBloated) {
+		dreadfulSwipeRiders.push({
+			id: "bloatedPush",
+			effect: "push",
+			distanceFeet: descriptor.modifications.options.bloated.dreadfulSwipePush.distanceFeet,
+			maximumTargetSize: descriptor.modifications.options.bloated.dreadfulSwipePush.maximumTargetSize,
+		});
+	}
+
+	const deathBurstDamage = {
+		dice: improvedReanimationAvailable ? "4d4" : descriptor.traits.deathBurst.damage.dice,
+		flat: hasBloated ? context.intelligenceModifier : 0,
+		type: descriptor.traits.deathBurst.damage.type,
+		ignoresResistance: improvedReanimationAvailable,
+	};
+
+	return {
+		schemaVersion: descriptor.schemaVersion,
+		identity: cloneJson(descriptor.identity),
+		summonerContext: {...context},
+		statistics: {
+			size: hasBloated ? [...descriptor.modifications.options.bloated.size] : [...descriptor.statistics.size],
+			creatureType: descriptor.statistics.creatureType,
+			abilityScores,
+			abilityModifiers: getBaseAbilityModifiers(abilityScores),
+			speed,
+			senses: cloneJson(descriptor.statistics.senses),
+			damageResistances: [...descriptor.statistics.damageResistances],
+			damageImmunities: [...descriptor.statistics.damageImmunities],
+			conditionImmunities: [...descriptor.statistics.conditionImmunities],
+			languages: cloneJson(descriptor.statistics.languages),
+			hitDice: {count: context.artificerLevel, die: descriptor.statistics.hitDice.die},
+			maxHp: 5 + (5 * context.artificerLevel),
+			ac: 10 + context.intelligenceModifier,
+			proficiencyBonus: context.proficiencyBonus,
+			spellAttackBonus: context.spellAttackBonus,
+			spellSaveDc: context.spellSaveDc,
+			passivePerception: descriptor.statistics.passivePerception.authoredValue,
+		},
+		actions: {
+			dreadfulSwipe: {
+				...cloneJson(descriptor.actions.dreadfulSwipe),
+				attackBonus: context.spellAttackBonus,
+				damage: dreadfulSwipeDamage,
+				riders: dreadfulSwipeRiders,
+			},
+		},
+		traits: {
+			deathBurst: {
+				...cloneJson(descriptor.traits.deathBurst),
+				save: {
+					...cloneJson(descriptor.traits.deathBurst.save),
+					dc: context.spellSaveDc,
+				},
+				damage: deathBurstDamage,
+			},
+			lightningAbsorption: cloneJson(descriptor.traits.lightningAbsorption),
+		},
+		damageRules: {
+			necrotic: {
+				ignoresResistance: improvedReanimationAvailable,
+				unlockArtificerLevel: descriptor.damageRules.necrotic.unlockArtificerLevel,
+			},
+		},
+		modifications: {
+			requiredCount: modificationSetup.requiredCount,
+			selected: modificationSetup.selected,
+			available: modificationSetup.available,
+			effects: getResolvedReanimatorModificationEffects(descriptor, context, modificationSetup.selected),
+		},
+	};
+}
+
 class CharacterSheetCompanionRules {
 	static FEATURE_UIDS = COMPANION_FEATURE_UIDS;
 	static REGISTRY = COMPANION_RULES;
@@ -526,14 +871,16 @@ class CharacterSheetCompanionRules {
 		return match ? cloneJson(match.descriptor) : null;
 	}
 
-	static resolve (featureUid, summonerContext) {
+	static resolve (featureUid, summonerContext, setup) {
 		const match = getDescriptorInternal(featureUid);
 		if (!match) return null;
 
-		const context = normalizeContext(summonerContext);
+		const context = normalizeContext(match.descriptor, summonerContext);
 		switch (match.canonicalUid) {
 			case COMPANION_FEATURE_UIDS.EFA_STEEL_DEFENDER:
 				return resolveEfaSteelDefender(match.descriptor, context);
+			case COMPANION_FEATURE_UIDS.RHW_REANIMATED_COMPANION:
+				return resolveRhwReanimatedCompanion(match.descriptor, context, setup);
 			case COMPANION_FEATURE_UIDS.TCE_STEEL_DEFENDER:
 				return resolveTceSteelDefender(match.descriptor, context);
 			default:

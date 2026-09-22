@@ -3,6 +3,7 @@ import "../../../js/charactersheet/charactersheet-companion-rules.js";
 const CharacterSheetCompanionRules = globalThis.CharacterSheetCompanionRules;
 const EFA_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3";
 const EFA_DATA_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA";
+const RHW_UID = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3";
 const TCE_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3";
 const TCE_EXPLICIT_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
 
@@ -273,7 +274,7 @@ describe("CharacterSheetCompanionRules", () => {
 				.toEqual(CharacterSheetCompanionRules.getDescriptor(EFA_UID));
 			expect(CharacterSheetCompanionRules.getDescriptor(TCE_EXPLICIT_UID))
 				.toEqual(CharacterSheetCompanionRules.getDescriptor(TCE_UID));
-			expect(Object.keys(CharacterSheetCompanionRules.REGISTRY)).toEqual([EFA_UID, TCE_UID]);
+			expect(Object.keys(CharacterSheetCompanionRules.REGISTRY)).toEqual([EFA_UID, RHW_UID, TCE_UID]);
 		});
 
 		it("returns null for unknown or incomplete feature UIDs", () => {
