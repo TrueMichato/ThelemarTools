@@ -4467,6 +4467,11 @@ class CharacterSheetState {
 		"Torch|XPHB",
 		"Vial|XPHB",
 	]);
+	static EFA_ALCHEMICAL_ERUPTION_UID = "Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA";
+	static EFA_ALCHEMIST_OWNER_UID = "Alchemist|Artificer|EFA|EFA";
+	static EFA_ALCHEMICAL_ERUPTION_ACTION_UID = "alchemical-eruption";
+	static EFA_ALCHEMICAL_ERUPTION_TURN_RECEIPT_KEY = "efa-alchemist:chemical-mastery:alchemical-eruption";
+	static EFA_ALCHEMICAL_ERUPTION_DAMAGE_TYPES = new Set(["acid", "fire", "poison"]);
 
 	static _getEmptyAdventurersAtlas () {
 		return {
@@ -4621,6 +4626,7 @@ class CharacterSheetState {
 		4: Object.freeze({key: "boldness", label: "Boldness"}),
 		5: Object.freeze({key: "flight", label: "Flight"}),
 	});
+	static EFA_ALCHEMIST_CASTING_SUBCLASS_UID = "Alchemist|Artificer|EFA|EFA";
 	static EFA_ALCHEMIST_INNATE_SPELL_GRANTS = Object.freeze([
 		Object.freeze({
 			grantId: "subclass-innate:alchemist|artificer|efa|efa:lesser-restoration|xphb",
@@ -51987,6 +51993,197 @@ class CharacterSheetState {
 		};
 	}
 
+	_normalizeCommittedSpellDamageEvidence (raw) {
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+		const allowedResolutions = new Set(["confirmed", "target-confirmation-required", "manual", "unavailable"]);
+		const damage = (Array.isArray(raw.damage) ? raw.damage : [])
+			.slice(0, 12)
+			.map(entry => ({
+				damageType: String(entry?.damageType || entry?.type || "").trim().toLowerCase(),
+				amount: Number(entry?.amount ?? entry?.total),
+			}))
+			.filter(entry => entry.damageType && Number.isFinite(entry.amount) && entry.amount > 0);
+		const allowedOutcomes = new Set(["damaged", "unconfirmed", "miss", "noDamage"]);
+		const targets = (Array.isArray(raw.targets) ? raw.targets : [])
+			.slice(0, 50)
+			.map(entry => ({
+				targetId: entry?.targetId == null ? null : String(entry.targetId).trim(),
+				targetName: String(entry?.targetName || entry?.name || "").trim(),
+				outcome: allowedOutcomes.has(entry?.outcome) ? entry.outcome : "unconfirmed",
+			}))
+			.filter(entry => entry.targetName);
+		return {
+			version: 1,
+			resolution: allowedResolutions.has(raw.resolution) ? raw.resolution : "unavailable",
+			damage,
+			targets,
+		};
+	}
+
+	getCommittedSpellDamageTargetCandidates () {
+		const candidates = [
+			...(this.getCombatTurnOrder?.() || []).map(entry => ({
+				targetId: entry.id,
+				targetName: entry.name,
+			})),
+			...(this.getTargetEffects?.() || []).map(entry => ({
+				targetId: entry.id,
+				targetName: entry.targetName,
+			})),
+		];
+		const seenNames = new Set();
+		return candidates
+			.filter(entry => {
+				const key = String(entry.targetName || "").trim().toLowerCase();
+				if (!key || seenNames.has(key)) return false;
+				seenNames.add(key);
+				return true;
+			})
+			.slice(0, 50);
+	}
+
+	_getAlchemicalEruptionOwnerStatus () {
+		const efaClass = (this._data.classes || []).find(cls =>
+			`${cls?.name || ""}|${cls?.source || ""}` === CharacterSheetState.EFA_ARTIFICER_CLASS_UID);
+		if (!efaClass) return {ok: false, reason: "wrongClass"};
+		const subclass = this.getEffectiveSubclassForClass(efaClass);
+		if (subclass?.name !== "Alchemist" || subclass?.source !== "EFA") {
+			return {ok: false, reason: "wrongSubclass"};
+		}
+		if ((Number(efaClass.level) || 0) < 15) return {ok: false, reason: "belowLevel"};
+		const hasFeature = (this._data.features || []).some(feature =>
+			CharacterSheetState._getSourceAwareSubclassFeatureUid(feature).toLowerCase() ===
+			CharacterSheetState.EFA_ALCHEMICAL_ERUPTION_UID.toLowerCase());
+		return hasFeature ? {ok: true} : {ok: false, reason: "featureUnavailable"};
+	}
+
+	_getAlchemicalEruptionTurnReceiptDescriptor () {
+		return {
+			key: CharacterSheetState.EFA_ALCHEMICAL_ERUPTION_TURN_RECEIPT_KEY,
+			ownerUid: CharacterSheetState.EFA_ALCHEMICAL_ERUPTION_UID,
+			sourceUid: CharacterSheetState.EFA_ALCHEMIST_OWNER_UID,
+			actionUid: CharacterSheetState.EFA_ALCHEMICAL_ERUPTION_ACTION_UID,
+		};
+	}
+
+	getAlchemicalEruptionEligibility (receipt) {
+		const owner = this._getAlchemicalEruptionOwnerStatus();
+		if (!owner.ok) return {eligible: false, reason: owner.reason};
+		if (!receipt?.committed) return {eligible: false, reason: "uncommitted"};
+		if (receipt.castingClassUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) {
+			return {eligible: false, reason: "wrongCastingClass"};
+		}
+		if (
+			receipt.castingSubclassUid
+			&& receipt.castingSubclassUid !== CharacterSheetState.EFA_ALCHEMIST_CASTING_SUBCLASS_UID
+		) {
+			return {eligible: false, reason: "wrongCastingSubclass"};
+		}
+		if (
+			this.isInCombat()
+			&& this.queryTurnReceipt(CharacterSheetState.EFA_ALCHEMICAL_ERUPTION_TURN_RECEIPT_KEY).used
+		) {
+			return {eligible: false, reason: "alreadyUsedThisTurn"};
+		}
+
+		const damageEvidence = this._normalizeCommittedSpellDamageEvidence(receipt.damageEvidence);
+		if (!damageEvidence?.damage.length) return {eligible: false, reason: "noDamageEvidence"};
+		const eligibleDamage = damageEvidence.damage.filter(entry =>
+			CharacterSheetState.EFA_ALCHEMICAL_ERUPTION_DAMAGE_TYPES.has(entry.damageType));
+		if (!eligibleDamage.length) return {eligible: false, reason: "wrongDamageType"};
+
+		const eligibleTargets = damageEvidence.targets.filter(target =>
+			target.outcome === "damaged" || target.outcome === "unconfirmed");
+		if (
+			damageEvidence.targets.length
+			&& !eligibleTargets.length
+		) {
+			return {eligible: false, reason: "noTargetDamaged"};
+		}
+
+		return {
+			eligible: true,
+			damageEvidence,
+			eligibleDamage,
+			eligibleTargets,
+			requiresTargetConfirmation: eligibleTargets.some(target => target.outcome === "unconfirmed"),
+			isTrackedCombat: this.isInCombat(),
+		};
+	}
+
+	async pUseAlchemicalEruption ({
+		receipt,
+		target = null,
+		confirmTargetDamaged = false,
+		manualConfirmed = false,
+		fnRollDamage,
+	} = {}) {
+		const eligibility = this.getAlchemicalEruptionEligibility(receipt);
+		if (!eligibility.eligible) {
+			return {ok: false, committed: false, status: "rejected", reason: eligibility.reason};
+		}
+
+		const cleanTarget = {
+			targetId: target?.targetId == null ? null : String(target.targetId).trim(),
+			targetName: String(target?.targetName || target?.name || "").trim(),
+		};
+		if (!cleanTarget.targetName) {
+			return {ok: false, committed: false, status: "rejected", reason: "invalidTarget"};
+		}
+
+		const matchesTarget = (candidate) => cleanTarget.targetId && candidate.targetId
+			? cleanTarget.targetId === candidate.targetId
+			: cleanTarget.targetName.toLowerCase() === candidate.targetName.toLowerCase();
+		const matchedTarget = eligibility.eligibleTargets.find(matchesTarget) || null;
+		let turnReceiptResult = null;
+		if (eligibility.isTrackedCombat) {
+			if (!matchedTarget) {
+				return {ok: false, committed: false, status: "rejected", reason: "targetEvidenceUnavailable"};
+			}
+			if (matchedTarget.outcome !== "damaged" && !confirmTargetDamaged) {
+				return {ok: false, committed: false, status: "rejected", reason: "targetNotConfirmedDamaged"};
+			}
+			turnReceiptResult = this.commitTurnReceipt(this._getAlchemicalEruptionTurnReceiptDescriptor());
+			if (!turnReceiptResult.ok) {
+				return {
+					ok: false,
+					committed: false,
+					status: "rejected",
+					reason: turnReceiptResult.reason === "alreadyUsed" ? "alreadyUsedThisTurn" : "turnReceiptCommitFailed",
+					turnReceipt: turnReceiptResult.receipt,
+				};
+			}
+		} else if (!manualConfirmed) {
+			return {ok: false, committed: false, status: "rejected", reason: "manualConfirmationRequired"};
+		}
+
+		const damage = await fnRollDamage?.();
+		if (
+			damage?.dice !== "2d8"
+			|| String(damage?.damageType || "").toLowerCase() !== "force"
+			|| !Number.isInteger(damage?.total)
+			|| damage.total < 2
+			|| damage.total > 16
+		) {
+			throw new Error("Alchemical Eruption follow-up did not produce exactly 2d8 Force damage.");
+		}
+
+		return {
+			ok: true,
+			committed: true,
+			status: "used",
+			featureUid: CharacterSheetState.EFA_ALCHEMICAL_ERUPTION_UID,
+			target: cleanTarget,
+			damage: {
+				dice: "2d8",
+				damageType: "force",
+				total: damage.total,
+			},
+			turnReceipt: turnReceiptResult?.receipt || null,
+			manuallyResolved: !eligibility.isTrackedCombat,
+		};
+	}
+
 	/**
 	 * Publish a stable receipt after a spell cast has fully committed.
 	 *
@@ -52001,6 +52198,7 @@ class CharacterSheetState {
 		spellData = null,
 		focusInventoryRow = null,
 		focusRequirement = null,
+		damageEvidence = null,
 		cast = {},
 		pCommit = null,
 	} = {}) {
@@ -52088,6 +52286,7 @@ class CharacterSheetState {
 			focusInventoryItemId: focus?.inventoryItemId || null,
 			focusItemUid: focus?.itemUid || null,
 			focus,
+			damageEvidence: this._normalizeCommittedSpellDamageEvidence(damageEvidence),
 			...(commitResult ? {
 				featureCommit: {
 					featureUid: commitResult.featureUid || null,

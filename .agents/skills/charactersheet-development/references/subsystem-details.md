@@ -1501,6 +1501,7 @@ const receipt = await state.pPublishCommittedSpellCast({
     spellData,
     focusInventoryRow,
     focusRequirement,
+    damageEvidence,
     cast: {type, slotLevel, resourceId, itemInventoryId, itemUid},
 });
 ```
@@ -1532,10 +1533,12 @@ the exact rule owner at all stable consumer surfaces:
 ```
 
 The full receipt also contains `receiptId`, `ok`, `committed`,
-`castingClassUid`, `castingSubclassUid`, `spellEntryId`, `spellUid`, `spell`,
-`castType`, `slotLevel`, `focusInventoryItemId`, `focusItemUid`, `focus`,
-`materialComponentsWaived`, optional `featureCommit`, `followUps`, and
-`followUpFailed`. It never stores a DOM node or live data object. A saved
+`castingClassUid`, parent-qualified `castingSubclassUid`, `spellEntryId`,
+`spellUid`, `spell`, `castType`, `slotLevel`, `focusInventoryItemId`,
+`focusItemUid`, `focus`, `materialComponentsWaived`, optional `featureCommit`,
+`damageEvidence`, `followUps`, and `followUpFailed`. The `cast` record also
+carries the serializable per-cast roll records used by exact committed
+follow-ups. The receipt never stores a DOM node or live data object. A saved
 receipt can re-resolve its live focus after export/import with
 `resolveCommittedSpellCastReceiptFocus(receipt)`, which verifies both wrapper
 id and item UID.
@@ -1547,6 +1550,28 @@ applicable. A follow-up may annotate one record with its source UID, bonus,
 original/final formula and totals, and consumed/armed/declined state. These
 records belong to the receipt only; never mirror a pending per-cast modifier
 into character save data.
+
+`damageEvidence` is an optional, cast-bounded normalized payload:
+
+```javascript
+{
+    version: 1,
+    resolution: "confirmed" | "target-confirmation-required" | "manual" | "unavailable",
+    damage: [{damageType, amount}], // final positive damage components only
+    targets: [{
+        targetId,                   // stable tracker id when available
+        targetName,
+        outcome: "damaged" | "unconfirmed" | "miss" | "noDamage",
+    }],
+}
+```
+
+The spell resolver publishes final post-transformation damage types and
+current combat/target-tracker identities. A rolled damage formula is not proof
+that a creature was hit: consumers must require `damaged`, explicitly confirm
+an `unconfirmed` tracked target, or report that target evidence is unavailable.
+Unknown fields, non-positive amounts, and malformed target rows are discarded
+at the state boundary.
 
 Hooks are runtime-only and keyed by exact class UID (or `"*"`). A cancelled,
 blocked, refunded, or source-ambiguous cast publishes no receipt. A committed,
@@ -1592,6 +1617,24 @@ innate/resource pool exactly once, then publishes the committed receipt. A
 focus/target cancellation spends nothing; a post-commit hook failure stays spent
 and cannot be retried. The cast refreshes the Spells, Overview Resources,
 Features resources, and Combat resources surfaces immediately.
+
+Committed-spell follow-ups that are limited per turn must use the stable-key
+turn receipt APIs above. Commit only after the player accepts and target
+evidence is validated, but before rolling or rendering the follow-up. Once the
+follow-up begins, do not roll back that receipt when its roll, feedback, or hook
+fails: the original cast remains committed, `followUpFailed` reports the
+failure, and the same-turn use stays spent. Features whose out-of-combat turn
+boundary cannot be proved may require explicit manual resolution instead of
+writing a receipt.
+
+EFA Alchemical Eruption is the reference damage-evidence consumer. It requires
+exact `Artificer|EFA` casting ownership, the active
+`Alchemist|Artificer|EFA|EFA` subclass, and positive Acid, Fire, or Poison
+damage evidence for the selected target. In tracked combat it commits
+`efa-alchemist:chemical-mastery:alchemical-eruption` before rolling the `2d8`
+Force follow-up. Removing and re-adding the feature does not refresh the same
+turn receipt. Outside tracked combat, the user must name the damaged target and
+accept manual responsibility for the once-per-turn limit.
 
 ## Active States / Toggle Abilities
 

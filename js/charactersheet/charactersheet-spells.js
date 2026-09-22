@@ -131,6 +131,7 @@ class CharacterSheetSpells {
 		this._spellViewMode = this._getSpellViewMode();
 		this._registerCommittedSpellCastHooks();
 
+		this._registerAlchemicalEruptionHook();
 		this._init();
 	}
 
@@ -2630,6 +2631,7 @@ class CharacterSheetSpells {
 			focusRequirement: focusSelection.requirement
 				? MiscUtil.copyFast(focusSelection.requirement)
 				: null,
+			damageEvidence: castResult?.damageEvidence || null,
 			cast: {
 				type: "item",
 				slotLevel,
@@ -2653,6 +2655,7 @@ class CharacterSheetSpells {
 			spellData: pendingSpellCast.spellData,
 			focusInventoryRow,
 			focusRequirement: pendingSpellCast.focusRequirement,
+			damageEvidence: pendingSpellCast.damageEvidence,
 			cast: pendingSpellCast.cast,
 		});
 		await this._pApplyCommittedEfaArcaneFirearmDamage({
@@ -3029,6 +3032,7 @@ class CharacterSheetSpells {
 				spellData,
 				focusInventoryRow: focusSelection.focusInventoryRow,
 				focusRequirement: focusSelection.requirement,
+				damageEvidence: castResult?.damageEvidence,
 				cast: {
 					type: "cantrip",
 					slotLevel: 0,
@@ -3138,6 +3142,7 @@ class CharacterSheetSpells {
 					spellData,
 					focusInventoryRow: focusSelection.focusInventoryRow,
 					focusRequirement: focusSelection.requirement,
+					damageEvidence: castResult?.damageEvidence,
 					cast: {
 						type: "ritual",
 						slotLevel: spell.level,
@@ -3507,6 +3512,7 @@ class CharacterSheetSpells {
 				spellData,
 				focusInventoryRow: focusSelection.focusInventoryRow,
 				focusRequirement: focusSelection.requirement,
+				damageEvidence: castResult?.damageEvidence,
 				cast: {
 					type: selectedSlot.isNoSlotResource
 						? "noSlotResource"
@@ -3564,7 +3570,11 @@ class CharacterSheetSpells {
 
 		// Cast as ritual — no slot consumed
 		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: true})) return;
-		const castResult = await this._showCastResult(spell, spell.level, false, true);
+		const castMeta = this._getNormalizedCastMeta({spell, spellData, slotLevel: spell.level});
+		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta});
+		if (focusSelection.cancelled) return;
+		if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
+		const castResult = await this._showCastResult(spell, spell.level, false, true, castMeta);
 		if (castResult?.cancelled) return;
 		await this._pConsumeMaterialComponent({spell, spellData, variantUsed: false});
 
@@ -3574,7 +3584,21 @@ class CharacterSheetSpells {
 		}
 
 		this._state.consumeStatesEndingOnSpellCast?.();
+		this._state.applyCommittedSpellCastTriggers?.(spellData, castMeta);
+		const receipt = await this._state.pPublishCommittedSpellCast?.({
+			spell,
+			spellData,
+			focusInventoryRow: focusSelection.focusInventoryRow,
+			damageEvidence: castResult?.damageEvidence,
+			cast: {
+				type: "ritual",
+				slotLevel: spell.level,
+				isRitual: true,
+				focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+			},
+		});
 		this._page.saveCharacter();
+		return receipt;
 	}
 
 	/* -------------------------------------------------------------------------- */
@@ -5023,6 +5047,171 @@ class CharacterSheetSpells {
 		return this._state.rollbackActionEconomy?.(transaction.receipt) ?? true;
 	}
 
+	_registerAlchemicalEruptionHook () {
+		this._state.registerCommittedSpellCastHook?.(
+			CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			receipt => this._pHandleAlchemicalEruption(receipt),
+			{hookId: "efa-alchemical-eruption"},
+		);
+	}
+
+	_getCommittedSpellDamageEvidence ({damageResult, castMeta = null} = {}) {
+		if (castMeta?.damageEvidence) return castMeta.damageEvidence;
+		if (!damageResult || !Number.isFinite(Number(damageResult.total)) || Number(damageResult.total) <= 0) return null;
+
+		const rawRolls = Array.isArray(damageResult.damageRolls) && damageResult.damageRolls.length
+			? damageResult.damageRolls
+			: [{
+				damageType: damageResult.damageType,
+				total: damageResult.total,
+			}];
+		const damage = rawRolls
+			.map((roll, index) => ({
+				damageType: index === 0
+					? String(damageResult.damageType || roll.damageType || "").toLowerCase()
+					: String(roll.damageType || "").toLowerCase(),
+				amount: rawRolls.length === 1 ? Number(damageResult.total) : Number(roll.total),
+			}))
+			.filter(entry => entry.damageType && Number.isFinite(entry.amount) && entry.amount > 0);
+		if (!damage.length) return null;
+
+		let targets = [];
+		try {
+			targets = (this._state.getCommittedSpellDamageTargetCandidates?.() || [])
+				.map(target => ({...target, outcome: "unconfirmed"}));
+		} catch (error) {
+			// Damage rolls must remain usable even if optional target tracking is unavailable.
+			// eslint-disable-next-line no-console
+			console.warn("[CharacterSheet] Could not collect committed spell target evidence:", error);
+		}
+		return {
+			version: 1,
+			resolution: targets.length ? "target-confirmation-required" : "unavailable",
+			damage,
+			targets,
+		};
+	}
+
+	async _pHandleAlchemicalEruption (receipt) {
+		const eligibility = this._state.getAlchemicalEruptionEligibility?.(receipt);
+		if (!eligibility?.eligible) {
+			const messages = {
+				alreadyUsedThisTurn: "Alchemical Eruption was already used this tracked turn.",
+				noDamageEvidence: "Alchemical Eruption was not offered because this cast has no confirmed damage result.",
+				wrongDamageType: "Alchemical Eruption requires final Acid, Fire, or Poison spell damage.",
+				noTargetDamaged: "Alchemical Eruption was not offered because every recorded target missed or took no damage.",
+			};
+			if (messages[eligibility?.reason]) {
+				JqueryUtil.doToast({type: "info", content: messages[eligibility.reason]});
+			}
+			return {status: "rejected", reason: eligibility?.reason || "ineligible"};
+		}
+
+		const damageTypes = [...new Set(eligibility.eligibleDamage.map(entry => entry.damageType))]
+			.map(type => type.charAt(0).toUpperCase() + type.slice(1))
+			.join("/");
+		const targets = eligibility.eligibleTargets;
+		let target = null;
+
+		if (targets.length === 1) {
+			const candidate = targets[0];
+			const confirmed = await CharacterSheetModal.pGetUserBoolean({
+				title: "Chemical Mastery — Alchemical Eruption",
+				htmlDescription: candidate.outcome === "damaged"
+					? `<strong>${candidate.targetName}</strong> received ${damageTypes} damage from <strong>${receipt.spell.name}</strong>. Add 2d8 Force damage?`
+					: `Confirm that <strong>${candidate.targetName}</strong> actually received ${damageTypes} damage from <strong>${receipt.spell.name}</strong>, then add 2d8 Force damage.`,
+				textYes: "Use Alchemical Eruption",
+				textNo: "Decline",
+			});
+			if (!confirmed) {
+				JqueryUtil.doToast({type: "info", content: "Alchemical Eruption declined; the spell remains committed."});
+				return {status: "declined"};
+			}
+			target = candidate;
+		} else if (targets.length > 1) {
+			const decline = {isDecline: true, targetName: "Decline Alchemical Eruption"};
+			const selected = await CharacterSheetModal.pGetUserEnum({
+				title: "Chemical Mastery — Choose Damaged Target",
+				htmlDescription: `Choose one creature that actually received ${damageTypes} damage from <strong>${receipt.spell.name}</strong>, or decline.`,
+				values: [...targets, decline],
+				fnDisplay: value => value.targetName,
+				isResolveItem: true,
+			});
+			if (!selected || selected.isDecline) {
+				JqueryUtil.doToast({type: "info", content: "Alchemical Eruption declined; the spell remains committed."});
+				return {status: "declined"};
+			}
+			target = selected;
+		} else if (eligibility.isTrackedCombat) {
+			JqueryUtil.doToast({
+				type: "info",
+				content: "Alchemical Eruption could not verify a damaged creature from this cast. Record targets in the combat tracker before resolving the spell.",
+			});
+			return {status: "rejected", reason: "targetEvidenceUnavailable"};
+		} else {
+			const targetName = await CharacterSheetModal.pGetUserString({
+				title: "Chemical Mastery — Manual Target",
+				default: "",
+				htmlDescription: `Outside tracked combat, enter the creature that actually received ${damageTypes} damage from <strong>${receipt.spell.name}</strong>.`,
+			});
+			if (!String(targetName || "").trim()) {
+				JqueryUtil.doToast({type: "info", content: "Alchemical Eruption declined; the spell remains committed."});
+				return {status: "declined"};
+			}
+			target = {targetId: null, targetName: String(targetName).trim(), outcome: "unconfirmed"};
+		}
+
+		let manualConfirmed = false;
+		if (!eligibility.isTrackedCombat) {
+			manualConfirmed = await CharacterSheetModal.pGetUserBoolean({
+				title: "Chemical Mastery — Manual Resolution",
+				htmlDescription: "Combat turns are not being tracked. Confirm that you will enforce this once-per-turn limit manually.",
+				textYes: "Confirm manual resolution",
+				textNo: "Decline",
+			});
+			if (!manualConfirmed) {
+				JqueryUtil.doToast({type: "info", content: "Alchemical Eruption declined; the spell remains committed."});
+				return {status: "declined"};
+			}
+		}
+
+		const result = await this._state.pUseAlchemicalEruption({
+			receipt,
+			target,
+			confirmTargetDamaged: target.outcome !== "damaged",
+			manualConfirmed,
+			fnRollDamage: () => {
+				const roll = this._rollDamageDiceDetailed("2d8");
+				return {dice: "2d8", damageType: "force", total: roll.total};
+			},
+		});
+		if (!result.ok) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: result.reason === "alreadyUsedThisTurn"
+					? "Alchemical Eruption was already used this tracked turn."
+					: "Alchemical Eruption could not be resolved from the committed cast evidence.",
+			});
+			return result;
+		}
+
+		this._page._rollHistory?.addRoll({
+			title: `Alchemical Eruption: ${result.target.targetName}`,
+			total: result.damage.total,
+			breakdown: "2d8 force",
+		});
+		JqueryUtil.doToast({
+			type: "info",
+			content: `Alchemical Eruption dealt <strong>${result.damage.total}</strong> Force damage to <strong>${result.target.targetName}</strong>.${result.manuallyResolved ? " Manually resolved outside tracked combat." : ""}`,
+		});
+		this.render?.();
+		this._page._renderQuickSpells?.();
+		this._page._renderResources?.();
+		this._page._renderActiveStates?.();
+		this._page._combat?.render?.();
+		return result;
+	}
+
 	/**
 	 * Enhanced spell effects handler with target selection and effect application
 	 */
@@ -5562,6 +5751,10 @@ class CharacterSheetSpells {
 			effectsApplied,
 			damageResult,
 			spellData,
+			damageEvidence: this._getCommittedSpellDamageEvidence({
+				damageResult,
+				castMeta: normalizedCastMeta,
+			}),
 		};
 	}
 
@@ -9329,6 +9522,7 @@ class CharacterSheetSpells {
 				spellData,
 				focusInventoryRow: committedFocusRow,
 				focusRequirement: focusSelection.requirement,
+				damageEvidence: castResult?.damageEvidence,
 				cast: {
 					type: "innate",
 					slotLevel: castLevel,
@@ -9350,6 +9544,7 @@ class CharacterSheetSpells {
 			spellData,
 			focusInventoryRow: committedFocusRow,
 			focusRequirement: focusSelection.requirement,
+			damageEvidence: castResult?.damageEvidence,
 			cast: {
 				type: "innate",
 				slotLevel: castLevel,

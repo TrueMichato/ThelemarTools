@@ -109,6 +109,20 @@ describe("CharacterSheetModal", () => {
 			// Untouched — no dialog semantics applied
 			expect(modal.eleModal.getAttribute("role")).toBeNull();
 		});
+
+		it("routes string input dialogs through the character-sheet modal front door", async () => {
+			let inputOpts = null;
+			globalThis.InputUiUtil.pGetUserString = async opts => {
+				inputOpts = opts;
+				return "Goblin";
+			};
+
+			await expect(CharacterSheetModal.pGetUserString({title: "Choose target"})).resolves.toBe("Goblin");
+			await inputOpts.fnGetShowModal({title: "Choose target"});
+
+			expect(calls[0].title).toBe("Choose target");
+			expect(calls[0].cbClose).toEqual(expect.any(Function));
+		});
 	});
 
 	describe("the spawn harness's fallback stub", () => {

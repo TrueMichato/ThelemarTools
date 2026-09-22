@@ -31,6 +31,16 @@ state must be saved, and what the player-facing controls must do.
 > milestone; Conjured Cauldron cast execution ships through the innate-grant
 > milestone above.
 
+> **Alchemical Eruption milestone status:** exact level-15 EFA Alchemist owners
+> now receive the optional post-commit `2d8` Force follow-up when a normalized
+> cast receipt contains positive final Acid, Fire, or Poison damage. The player
+> must confirm one tracked damaged creature (or explicitly resolve a named
+> target manually outside combat). Tracked-combat use commits the canonical
+> persisted turn receipt and resets only through the existing turn lifecycle;
+> outside combat remains explicitly manual and writes no receipt. This milestone does not add
+> Alchemical Savant, innate grant execution, or any other Chemical Mastery
+> behavior.
+
 ## 1. Identity comes before feature names
 
 The word "Alchemist" is not enough to identify the rules. The data contains
@@ -338,6 +348,10 @@ They must not be represented as one shared generic use pool.
 
 ### 7.1 Alchemical Eruption
 
+> **Implemented:** the exact owner is
+> `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA`. The consumer is a
+> runtime committed-cast hook registered only for `Artificer|EFA`.
+
 After an `Artificer|EFA` spell actually deals Acid, Fire, or Poison damage to a
 target, the result offers an optional `2d8` Force damage follow-up against one
 such target.
@@ -346,12 +360,30 @@ such target.
 - It can be used once on each tracked turn.
 - A second use in the same turn is rejected.
 - Advancing to the next tracked turn restores availability.
+- Confirmation commits the exact Chemical Mastery/Alchemist/action turn receipt
+  before the `2d8` roll, so a failed follow-up cannot reopen the use.
+- Save/load during the same tracked turn preserves that receipt; combat
+  lifecycle reset advances the opaque turn and clears it.
 - A spell cast through another class or with an ineligible final damage type
   does not qualify.
+- Damage and target candidates come from the committed receipt's bounded
+  `damageEvidence`; authored spell names or `damageInflict` intent never count
+  as proof.
+- Miss, no-damage, absent-target, cancelled, refunded, ambiguous-owner, and
+  post-Transmuted non-qualifying outcomes fail closed.
+- If several tracked creatures could have received the qualifying damage, the
+  player explicitly chooses one or declines. Selecting an unconfirmed tracked
+  candidate is the explicit confirmation that it actually took the recorded
+  damage.
 
 Outside tracked combat, the sheet cannot prove the once-per-turn boundary. It
 therefore requires an explicit manual confirmation and marks the result as
 manually resolved.
+
+The original cast is already committed before the hook runs. Target choice,
+the `2d8` roll, feedback rendering, or any later hook can fail only as a
+`followUpFailed` receipt entry; spell slots, resources, components, focus
+selection, and the spell result are never refunded or made retryable.
 
 ### 7.2 Chemical Resistance
 

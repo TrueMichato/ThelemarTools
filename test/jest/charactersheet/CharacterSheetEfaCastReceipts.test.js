@@ -24,6 +24,12 @@ const CURE_WOUNDS = {
 	components: {v: true, s: true},
 	duration: [{type: "instant"}],
 };
+const DETECT_MAGIC = {
+	...CURE_WOUNDS,
+	name: "Detect Magic",
+	school: "D",
+	ritual: true,
+};
 const WAIVED_MATERIAL_SPELL = {
 	...CURE_WOUNDS,
 	name: "Waived Material Spell",
@@ -595,6 +601,15 @@ describe("EFA committed cast receipts", () => {
 		addTool(state, {id: "tinkers", name: "Tinker's Tools", type: "AT"});
 		const spell = addExactSpell(state, CURE_WOUNDS);
 		const spells = makeSpellsManager(state, [CURE_WOUNDS]);
+		spells._showCastResult.mockResolvedValue({
+			cancelled: false,
+			damageEvidence: {
+				version: 1,
+				resolution: "confirmed",
+				damage: [{damageType: "fire", amount: 7}],
+				targets: [{targetId: "target-1", targetName: "Goblin", outcome: "damaged"}],
+			},
+		});
 		const consumer = jest.fn(async receipt => receipt.spellUid);
 		state.registerCommittedSpellCastHook("Artificer|EFA", consumer, {hookId: "savant"});
 		const before = state.getSpellSlotsCurrent(1);
@@ -611,7 +626,41 @@ describe("EFA committed cast receipts", () => {
 			castType: "slot",
 			slotLevel: 1,
 			focusInventoryItemId: "tinkers",
+			damageEvidence: {
+				version: 1,
+				resolution: "confirmed",
+				damage: [{damageType: "fire", amount: 7}],
+				targets: [{targetId: "target-1", targetName: "Goblin", outcome: "damaged"}],
+			},
 			followUps: [{hookId: "savant", ok: true, value: "Cure Wounds|XPHB"}],
+		}));
+	});
+
+	it("publishes ritual damage evidence through the dedicated ritual action", async () => {
+		const state = makeState();
+		addTool(state, {id: "tinkers", name: "Tinker's Tools", type: "AT"});
+		const spell = addExactSpell(state, DETECT_MAGIC);
+		state.canCastAsRitual = jest.fn(() => true);
+		const spells = makeSpellsManager(state, [DETECT_MAGIC]);
+		spells._showCastResult.mockResolvedValue({
+			cancelled: false,
+			damageEvidence: {
+				version: 1,
+				resolution: "confirmed",
+				damage: [{damageType: "acid", amount: 6}],
+				targets: [{targetId: "target-1", targetName: "Ooze", outcome: "damaged"}],
+			},
+		});
+
+		const receipt = await spells._castSpellAsRitual(spell.id);
+
+		expect(receipt).toEqual(expect.objectContaining({
+			committed: true,
+			castType: "ritual",
+			focusInventoryItemId: "tinkers",
+			damageEvidence: expect.objectContaining({
+				damage: [{damageType: "acid", amount: 6}],
+			}),
 		}));
 	});
 
