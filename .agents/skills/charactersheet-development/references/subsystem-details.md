@@ -62,7 +62,11 @@ const committedResult = await state.pCommitFeatureUse({
 ```
 
 Hooks are keyed by the exact source-qualified `featureUid`, not by subclass
-names. They run only after the action and resource cost have committed.
+names. They run only after the resource cost and any combat-tracked action have
+committed. Action economy is validated and consumed only while the character is
+in combat; out-of-combat uses spend the resource without persisting a Reaction
+lock.
+
 Cancellation, invalid context, an unavailable action, or insufficient resource
 returns `{ok: false, committed: false, reason}` and invokes no hook. A hook
 failure does not roll back the valid core use; the return remains
@@ -105,6 +109,10 @@ uses are the Intelligence modifier, minimum 1.
 
 The canonical resource is `contextualOnly`, uses the `Reaction` action label,
 recharges on a Long Rest, and mirrors the EFA Flash feature's `uses` object.
+Direct Features/Combat activation returns the committed result; cancelling any
+prompt returns the uncommitted `cancelled` result, so outer activation paths do
+not spend or double-spend the Reaction.
+
 Advanced Artifice adds `shortRestRecovery: 1`; Magical Guidance restores the
 pool fully on a Short Rest when the level-20 EFA Artificer has at least one
 attuned magic item. `efaFlashOfGeniusResourceV1` initializes an existing EFA

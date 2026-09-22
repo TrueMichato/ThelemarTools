@@ -13586,8 +13586,7 @@ class CharacterSheetPage {
 			(feature?.name || "").toLowerCase() === "flash of genius"
 			&& String(feature.classSource || feature.source || "").toUpperCase() === "EFA"
 		) {
-			await this._pActivateEfaFlashOfGenius();
-			return;
+			return this._pActivateEfaFlashOfGenius();
 		}
 		let variableSpend = null;
 		if (stateType?.variablePointSpend) {
@@ -17887,23 +17886,25 @@ class CharacterSheetPage {
 			}),
 		});
 
-		await this._pMaybeApplyTacticalMind({
-			rollLabel: `${skillName}${abilityLabel} Check`,
-			mode: rollResult.mode,
-			stateEffectStr,
-			...(skillFlashResult || {
-				baseTotal: totalWithDice,
-				breakdown: skillBreakdown,
-				resultNote,
-				rollFollowup: CharacterSheetModal.buildRollFollowup({
-					label: `${skillName}${abilityLabel} Check`,
-					total: totalWithDice,
-					naturalRoll: rollResult.roll,
+		if (skillFlashResult?.isSuccess !== true) {
+			await this._pMaybeApplyTacticalMind({
+				rollLabel: `${skillName}${abilityLabel} Check`,
+				mode: rollResult.mode,
+				stateEffectStr,
+				...(skillFlashResult || {
+					baseTotal: totalWithDice,
 					breakdown: skillBreakdown,
-					outcome: resultNote,
+					resultNote,
+					rollFollowup: CharacterSheetModal.buildRollFollowup({
+						label: `${skillName}${abilityLabel} Check`,
+						total: totalWithDice,
+						naturalRoll: rollResult.roll,
+						breakdown: skillBreakdown,
+						outcome: resultNote,
+					}),
 				}),
-			}),
-		});
+			});
+		}
 
 		const finalTotal = skillFlashResult?.baseTotal ?? totalWithDice;
 		return {
@@ -18511,13 +18512,20 @@ class CharacterSheetPage {
 	}
 
 	async _pActivateEfaFlashOfGenius () {
+		const cancelled = {
+			ok: false,
+			committed: false,
+			reason: "cancelled",
+			featureUid: CharacterSheetState.EFA_FLASH_OF_GENIUS_UID,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+		};
 		const rollType = await InputUiUtil.pGetUserEnum({
 			title: "Flash of Genius — Failed Roll",
 			values: ["abilityCheck", "savingThrow"],
 			fnDisplay: value => value === "abilityCheck" ? "Ability check" : "Saving throw",
 			isResolveItem: true,
 		});
-		if (!rollType) return;
+		if (!rollType) return cancelled;
 
 		const failed = await CharacterSheetModal.pGetUserBoolean({
 			title: "Flash of Genius",
@@ -18525,7 +18533,7 @@ class CharacterSheetPage {
 			textYes: "The roll failed",
 			textNo: "Cancel",
 		});
-		if (!failed) return;
+		if (!failed) return cancelled;
 
 		const targetType = await InputUiUtil.pGetUserEnum({
 			title: "Flash of Genius — Target",
@@ -18533,23 +18541,23 @@ class CharacterSheetPage {
 			fnDisplay: value => value === "self" ? "Self" : "Named visible creature within 30 feet",
 			isResolveItem: true,
 		});
-		if (!targetType) return;
+		if (!targetType) return cancelled;
 
 		let targetName = null;
 		let distanceFeet = 0;
 		if (targetType === "creature") {
 			targetName = await InputUiUtil.pGetUserString({title: "Visible target name", default: ""});
-			if (!String(targetName || "").trim()) return;
+			if (!String(targetName || "").trim()) return cancelled;
 			distanceFeet = await InputUiUtil.pGetUserNumber({
 				title: "Target distance (feet)",
 				default: 30,
 				min: 0,
 				max: 30,
 			});
-			if (distanceFeet == null) return;
+			if (distanceFeet == null) return cancelled;
 		}
 
-		await this._pCommitEfaFlashOfGenius({
+		return this._pCommitEfaFlashOfGenius({
 			rollType,
 			isFailed: true,
 			targetType,
@@ -18605,7 +18613,9 @@ class CharacterSheetPage {
 	} = {}) {
 		const resource = (this._state.getResources?.() || []).find(it =>
 			it.featureUid === CharacterSheetState.EFA_FLASH_OF_GENIUS_UID);
-		if (!resource || resource.current <= 0 || !this._state.isActionTypeAvailable?.("reaction")) return null;
+		const isReactionUnavailable = this._state.isInCombat?.()
+			&& !this._state.isActionTypeAvailable?.("reaction");
+		if (!resource || resource.current <= 0 || isReactionUnavailable) return null;
 		if (isFailed === false) return null;
 
 		const useFlash = await CharacterSheetModal.pGetUserBoolean({
@@ -18631,11 +18641,16 @@ class CharacterSheetPage {
 		const bonus = committed.result.bonus;
 		const adjustedTotal = committed.result.adjustedTotal;
 		const flashNote = `Flash of Genius: +${bonus} → ${adjustedTotal}`;
-		let mergedNote = resultNote ? `${resultNote}\n${flashNote}` : flashNote;
+		const noteLines = String(resultNote || "")
+			.split("\n")
+			.filter(line => !/^(?:Success|Failure) vs DC\b/.test(line.trim()))
+			.filter(Boolean);
+		const adjustedSuccess = dc == null ? null : adjustedTotal >= dc;
+		const mergedNoteLines = [...noteLines, flashNote];
 		if (dc != null) {
-			mergedNote = mergedNote.replace(/\n(?:Success|Failure) vs DC \d+(?=\nFlash of Genius:)/, "");
-			mergedNote += `\n${adjustedTotal >= dc ? "Success" : "Failure"} vs DC ${dc} after Flash of Genius`;
+			mergedNoteLines.push(`${adjustedSuccess ? "Success" : "Failure"} vs DC ${dc} after Flash of Genius`);
 		}
+		const mergedNote = mergedNoteLines.join("\n");
 		const adjustedBreakdown = `${breakdown} + ${bonus} (Flash of Genius)`;
 		this._showDiceResult(
 			`${rollLabel}${this._getModeLabel(mode)}${stateEffectStr}`,
@@ -18646,6 +18661,7 @@ class CharacterSheetPage {
 		);
 		return {
 			baseTotal: adjustedTotal,
+			isSuccess: adjustedSuccess,
 			breakdown: adjustedBreakdown,
 			resultNote: mergedNote,
 			rollFollowup: CharacterSheetModal.buildRollFollowup({

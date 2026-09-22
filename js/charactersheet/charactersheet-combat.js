@@ -12440,12 +12440,13 @@ class CharacterSheetCombat {
 			this._page._renderCharacter?.();
 			return;
 		}
-		await this._page._activateFeatureState?.(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
+		const activationResult = await this._page._activateFeatureState?.(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
 		this.renderCombatStates();
 		this._page._renderActiveStates?.();
 		if (feature.isCustomAbility) {
 			this._page._customAbilitiesPanel?.render?.();
 		}
+		return activationResult;
 	}
 
 	_tryConsumeStateToggleAction (stateType, activationInfo = null) {

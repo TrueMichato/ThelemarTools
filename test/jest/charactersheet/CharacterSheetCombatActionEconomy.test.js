@@ -170,10 +170,12 @@ describe("CharacterSheetCombat action economy gating", () => {
 		expect(combat._getActivationButtonText({activationInfo: null})).toBe("Use");
 	});
 
-	it("forwards activationInfo through combat activation helper", () => {
+	it("forwards activationInfo and the atomic activation result through combat activation helper", async () => {
 		let callArgs = null;
+		const activationResult = {ok: false, committed: false, reason: "cancelled"};
 		combat._page._activateFeatureState = (...args) => {
 			callArgs = args;
+			return activationResult;
 		};
 		combat._page._renderActiveStates = () => {};
 		combat.renderCombatStates = () => {};
@@ -185,7 +187,7 @@ describe("CharacterSheetCombat action economy gating", () => {
 		const resourceCost = 1;
 		const activationInfo = {interactionMode: "trigger", effects: [{type: "extraDamage", value: "2d6"}]};
 
-		combat._activateCombatFeature(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
+		const result = await combat._activateCombatFeature(feature, stateTypeId, stateType, resource, resourceCost, activationInfo);
 
 		expect(callArgs).not.toBeNull();
 		expect(callArgs[0]).toBe(feature);
@@ -194,6 +196,7 @@ describe("CharacterSheetCombat action economy gating", () => {
 		expect(callArgs[3]).toBe(resource);
 		expect(callArgs[4]).toBe(resourceCost);
 		expect(callArgs[5]).toBe(activationInfo);
+		expect(result).toBe(activationResult);
 	});
 });
 

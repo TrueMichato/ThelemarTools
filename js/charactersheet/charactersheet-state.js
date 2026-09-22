@@ -18912,9 +18912,36 @@ class CharacterSheetState {
 		if (!spell.ritual) return false;
 		if (spell.level === 0) return false; // Cantrips can't be rituals
 
-		// Check each class individually for multiclass support
 		const classes = this._data.classes || [];
-		for (const cls of classes) {
+		const rawSourceClass = typeof spell.sourceClass === "object"
+			? String(spell.sourceClass?.name || "").trim()
+			: String(spell.sourceClass || "").trim();
+		const [sourceClassName, sourceClassUidSource = ""] = rawSourceClass.split("|");
+		const sourceClassSource = String(
+			(typeof spell.sourceClass === "object" ? spell.sourceClass?.source : null)
+			|| spell.sourceClassSource
+			|| spell.classSource
+			|| sourceClassUidSource
+			|| "",
+		).trim();
+		const ownerClasses = sourceClassName
+			? classes.filter(cls => {
+				const isClassOwner = String(cls.name || "").toLowerCase() === sourceClassName.toLowerCase();
+				const isSubclassOwner = [
+					cls.subclass?.name,
+					cls.subclass?.shortName,
+				].some(name => String(name || "").toLowerCase() === sourceClassName.toLowerCase());
+				if (!isClassOwner && !isSubclassOwner) return false;
+				if (!sourceClassSource) return true;
+				const actualSource = isClassOwner ? cls.source : cls.subclass?.source;
+				return String(actualSource || "").toLowerCase() === sourceClassSource.toLowerCase();
+			})
+			: classes;
+		if (sourceClassName && !ownerClasses.length) return false;
+
+		// Legacy spells without ownership attribution retain the old multiclass
+		// fallback. Attributed spells can only borrow ritual rules from their owner.
+		for (const cls of ownerClasses) {
 			const className = cls.name;
 			const source = cls.source || "PHB";
 			const is2024 = source === "XPHB" || source === "TGTT";
@@ -41267,7 +41294,7 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Commit action economy and a feature resource before invoking source-qualified follow-ups.
+	 * Commit a feature resource and any combat-tracked action economy before invoking source-qualified follow-ups.
 	 * A follow-up failure is reported without rolling back the valid core use.
 	 */
 	async pCommitFeatureUse ({
@@ -41286,11 +41313,12 @@ class CharacterSheetState {
 		if ((Number(resource.current) || 0) < cost) {
 			return {ok: false, committed: false, reason: "insufficientResource", featureUid, classUid, resourceId};
 		}
-		if (!this.isActionTypeAvailable(actionType)) {
+		const isActionTracked = actionType && actionType !== "free" && this.isInCombat();
+		if (isActionTracked && !this.isActionTypeAvailable(actionType)) {
 			return {ok: false, committed: false, reason: "actionUnavailable", featureUid, classUid, actionType};
 		}
 
-		if (!this.consumeActionType(actionType)) {
+		if (isActionTracked && !this.consumeActionType(actionType)) {
 			return {ok: false, committed: false, reason: "actionUnavailable", featureUid, classUid, actionType};
 		}
 		this.setResourceCurrent(resource.id, resource.current - cost);

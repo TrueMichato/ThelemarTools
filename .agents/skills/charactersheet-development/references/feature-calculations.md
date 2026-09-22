@@ -107,6 +107,11 @@ attunement slots but `ignoreRequirements: false`. The source-aware
 `Soul of Artifice|EFA` prevent same-named stored EFA features from falling back
 to TCE effects.
 
+Ritual checks must honor a stored spell's `sourceClass` (and class source when
+present). An EFA Artificer spell cannot borrow ritual authorization from a
+Cleric, Druid, or other multiclass leg; unattributed legacy spells retain the
+existing multiclass fallback.
+
 Until an EFA subclass is implemented in its own bounded milestone, the
 existing Artificer subclass calculation switch remains TCE-only. Do not project
 TCE subclass mechanics onto an EFA subclass merely because the names match.

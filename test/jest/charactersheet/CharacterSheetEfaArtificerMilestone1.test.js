@@ -8,9 +8,21 @@ import {CharacterSheetRest} from "../../../js/charactersheet/charactersheet-rest
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 const CharacterSheetState = globalThis.CharacterSheetState;
+let CharacterSheetPage;
 
 const FLASH_UID = "Flash of Genius|Artificer|EFA";
 const CLASS_UID = "Artificer|EFA";
+
+beforeAll(async () => {
+	globalThis.window = globalThis.window || {
+		addEventListener: () => {},
+		dispatchEvent: () => {},
+		location: {search: ""},
+		matchMedia: () => ({matches: false, addEventListener: () => {}}),
+	};
+	await import("../../../js/charactersheet/charactersheet.js");
+	CharacterSheetPage = globalThis.CharacterSheetPage;
+});
 
 function makeArtificer ({source = "EFA", level = 7, intelligence = 18, withFlashFeature = true} = {}) {
 	const state = new CharacterSheetState();
@@ -31,6 +43,18 @@ function makeArtificer ({source = "EFA", level = 7, intelligence = 18, withFlash
 
 function getFlashResource (state) {
 	return state.getResources().find(resource => resource.featureUid === FLASH_UID);
+}
+
+function makePage (state) {
+	const page = Object.create(CharacterSheetPage.prototype);
+	page._state = state;
+	page._combat = {render: jest.fn()};
+	page._features = {_renderResources: jest.fn(), render: jest.fn()};
+	page._saveCurrentCharacter = jest.fn(async () => {});
+	page._renderResources = jest.fn();
+	page._renderActiveStates = jest.fn();
+	page._renderCharacter = jest.fn();
+	return page;
 }
 
 describe("EFA Artificer Milestone 1 source separation", () => {
@@ -61,6 +85,24 @@ describe("EFA Artificer Milestone 1 source separation", () => {
 		const ritual = {name: "Identify", level: 1, ritual: true, prepared: true};
 		expect(efa.canCastAsRitual(ritual)).toBe(false);
 		expect(tce.canCastAsRitual(ritual)).toBe(true);
+	});
+
+	it("keeps mixed-source Reanimator|RHW on EFA base calculations without TCE subclass projections", () => {
+		const state = makeArtificer({level: 20});
+		state._data.classes[0].subclass = {
+			name: "Reanimator",
+			shortName: "Reanimator",
+			source: "RHW",
+		};
+		const calculations = state.getFeatureCalculations();
+		expect(calculations).toEqual(expect.objectContaining({
+			artificerPlansKnown: 8,
+			artificerCreatedMagicItemsMax: 6,
+			hasEfaSoulOfArtifice: true,
+		}));
+		expect(calculations.hasSoulOfArtifice).toBeUndefined();
+		expect(calculations.experimentalElixirCount).toBeUndefined();
+		expect(calculations.eldritchCannonCount).toBeUndefined();
 	});
 
 	it("uses source-qualified registry effects for same-named EFA capstones", () => {
@@ -205,6 +247,7 @@ describe("EFA Flash of Genius committed use", () => {
 
 	it("commits Reaction and one use exactly once, applies the INT bonus, then invokes hooks", async () => {
 		const state = makeArtificer({level: 7});
+		state.startCombat();
 		const observed = [];
 		state.registerCommittedFeatureUseHook(FLASH_UID, result => {
 			observed.push({
@@ -239,6 +282,98 @@ describe("EFA Flash of Genius committed use", () => {
 		expect(getFlashResource(state).current).toBe(3);
 	});
 
+	it("allows separate out-of-combat uses without persisting Reaction consumption", async () => {
+		const state = makeArtificer({level: 7});
+		const first = await state.pUseFlashOfGenius({
+			rollType: "abilityCheck",
+			isFailed: true,
+			rollTotal: 8,
+			targetType: "self",
+		});
+		const second = await state.pUseFlashOfGenius({
+			rollType: "savingThrow",
+			isFailed: true,
+			rollTotal: 9,
+			targetType: "self",
+		});
+
+		expect(first).toEqual(expect.objectContaining({ok: true, committed: true, remainingUses: 3}));
+		expect(second).toEqual(expect.objectContaining({ok: true, committed: true, remainingUses: 2}));
+		expect(state.isActionTypeAvailable("reaction")).toBe(true);
+		expect(getFlashResource(state).current).toBe(2);
+	});
+
+	it("rejects a second Flash use in the same combat turn", async () => {
+		const state = makeArtificer({level: 7});
+		state.startCombat();
+		const first = await state.pUseFlashOfGenius({
+			rollType: "abilityCheck",
+			isFailed: true,
+			rollTotal: 8,
+			targetType: "self",
+		});
+		const second = await state.pUseFlashOfGenius({
+			rollType: "savingThrow",
+			isFailed: true,
+			rollTotal: 9,
+			targetType: "self",
+		});
+
+		expect(first).toEqual(expect.objectContaining({ok: true, committed: true, remainingUses: 3}));
+		expect(second).toEqual(expect.objectContaining({ok: false, committed: false, reason: "actionUnavailable"}));
+		expect(getFlashResource(state).current).toBe(3);
+	});
+
+	it.each([
+		{enumResults: [null], failedResult: null},
+		{enumResults: ["abilityCheck"], failedResult: false},
+		{enumResults: ["abilityCheck", null], failedResult: true},
+	])("keeps direct activation cancellation atomic (%#)", async ({enumResults, failedResult}) => {
+		const state = makeArtificer({level: 7});
+		state.startCombat();
+		const page = makePage(state);
+		const feature = state.getFeatures().find(it => it.name === "Flash of Genius");
+		const resource = getFlashResource(state);
+		const before = resource.current;
+		const enumSpy = jest.spyOn(globalThis.InputUiUtil, "pGetUserEnum")
+			.mockImplementation(async () => enumResults.shift());
+		const boolSpy = jest.spyOn(globalThis.CharacterSheetModal, "pGetUserBoolean")
+			.mockResolvedValue(failedResult);
+
+		try {
+			const result = await page._activateFeatureState(feature, "custom", {activationAction: "reaction", tracksActionEconomy: true}, resource, 1);
+			expect(result).toEqual(expect.objectContaining({ok: false, committed: false, reason: "cancelled"}));
+			expect(state.isActionTypeAvailable("reaction")).toBe(true);
+			expect(getFlashResource(state).current).toBe(before);
+		} finally {
+			enumSpy.mockRestore();
+			boolSpy.mockRestore();
+		}
+	});
+
+	it("returns the committed direct activation and spends its combat Reaction/use once", async () => {
+		const state = makeArtificer({level: 7});
+		state.startCombat();
+		const page = makePage(state);
+		const feature = state.getFeatures().find(it => it.name === "Flash of Genius");
+		const resource = getFlashResource(state);
+		const enumResults = ["abilityCheck", "self"];
+		const enumSpy = jest.spyOn(globalThis.InputUiUtil, "pGetUserEnum")
+			.mockImplementation(async () => enumResults.shift());
+		const boolSpy = jest.spyOn(globalThis.CharacterSheetModal, "pGetUserBoolean")
+			.mockResolvedValue(true);
+
+		try {
+			const result = await page._activateFeatureState(feature, "custom", {activationAction: "reaction", tracksActionEconomy: true}, resource, 1);
+			expect(result).toEqual(expect.objectContaining({ok: true, committed: true, remainingUses: 3}));
+			expect(state.isActionTypeAvailable("reaction")).toBe(false);
+			expect(getFlashResource(state).current).toBe(3);
+		} finally {
+			enumSpy.mockRestore();
+			boolSpy.mockRestore();
+		}
+	});
+
 	it.each([
 		[{cancelled: true}, "cancelled"],
 		[{rollType: "attack", isFailed: true}, "invalidRollType"],
@@ -263,6 +398,7 @@ describe("EFA Flash of Genius committed use", () => {
 
 	it("spends nothing and emits no hook when Reaction or resource is unavailable", async () => {
 		const reactionState = makeArtificer({level: 7});
+		reactionState.startCombat();
 		const reactionHook = jest.fn();
 		reactionState.registerCommittedFeatureUseHook(FLASH_UID, reactionHook);
 		reactionState.consumeActionType("reaction");
@@ -285,6 +421,7 @@ describe("EFA Flash of Genius committed use", () => {
 
 	it("surfaces post-commit hook failure without rolling back the valid use", async () => {
 		const state = makeArtificer({level: 7});
+		state.startCombat();
 		state.registerCommittedFeatureUseHook(FLASH_UID, () => {
 			throw new Error("Ingenious Movement probe failed");
 		}, {hookId: "failing-probe"});
@@ -303,6 +440,38 @@ describe("EFA Flash of Genius committed use", () => {
 		}]);
 		expect(state.isActionTypeAvailable("reaction")).toBe(false);
 		expect(getFlashResource(state).current).toBe(3);
+	});
+
+	it("replaces a leading failed-DC verdict and skips Tactical Mind when Flash makes the skill check succeed", async () => {
+		const state = makeArtificer({level: 7});
+		state.addClass({name: "Fighter", source: "XPHB", level: 2, hitDice: "d10"});
+		state.addFeature({name: "Second Wind", source: "XPHB", className: "Fighter", classSource: "XPHB", level: 1});
+		state.ensureFighterFeatureUses();
+		const secondWindBefore = state.getSecondWindUsesRemaining();
+		const page = makePage(state);
+		page._getExhaustionPenalty = jest.fn(() => 0);
+		page._rollD20 = jest.fn(() => ({roll: 8, mode: "normal", thelemar_critBonus: 0}));
+		page._pMaybeApplyRedCant = jest.fn(async ({effectiveRoll}) => ({effectiveRoll, applied: false, note: ""}));
+		page._pMaybeApplyFortuneIntervention = jest.fn(async ({effectiveRoll}) => ({effectiveRoll, note: ""}));
+		page._pRollTriggeredFeatDie = jest.fn(async () => null);
+		page._rollStateDiceBonuses = jest.fn(() => null);
+		page._rollModifierDiceBonuses = jest.fn(() => null);
+		page._applyTotalFloor = jest.fn(total => ({total, note: ""}));
+		page.pAnimateD20 = jest.fn(async () => {});
+		page._showDiceResult = jest.fn();
+		page._pMaybeApplyTacticalMind = jest.fn(async () => null);
+		const boolSpy = jest.spyOn(globalThis.CharacterSheetModal, "pGetUserBoolean").mockResolvedValue(true);
+
+		try {
+			const result = await page._rollSkillCheck("arcana", "Arcana", null, null, {dc: 15});
+			expect(result).toEqual(expect.objectContaining({total: 16, isSuccess: true}));
+			expect(result.resultNote).not.toContain("Failure vs DC 15");
+			expect(result.resultNote).toContain("Success vs DC 15 after Flash of Genius");
+			expect(page._pMaybeApplyTacticalMind).not.toHaveBeenCalled();
+			expect(state.getSecondWindUsesRemaining()).toBe(secondWindBefore);
+		} finally {
+			boolSpy.mockRestore();
+		}
 	});
 
 	it("migrates legacy EFA level 7+ saves at maximum once and remains idempotent", () => {
