@@ -795,9 +795,20 @@ derived AC snapshot. EFA Arcane Armor stores
 death, and source-loss handling through `reconcileEfaArmorerState()`. Doffing
 preserves the wrapper binding in a suspended status; another equipped body armor,
 a missing/non-armor bound row, exact source/model loss, or death clears it.
-Smith's Tools proficiency and inventory are checked when transforming or
-switching the armor, but are not ongoing requirements after a successful
-transformation.
+Smith's Tools proficiency and a canonical PHB/XPHB Smith's Tools item are
+binding/transformation prerequisites, not ongoing active-status requirements:
+losing either does not suspend a worn, already-bound Arcane Armor.
+
+Short and Long Rest use one `_buildEfaArmorModelSection()` staged selector. It
+surfaces only for the exact `Artificer|EFA` Armorer with a canonical model, reads
+the three exact level-3 EFA model definitions, and keeps the selector disabled
+with prerequisite-specific text when binding or tools are missing. Doffed armor
+remains switchable. `apply()` revalidates, then routes through
+`CharacterSheetClassUtils.replaceStructuredFeatureChoice()` with canonical
+decision synchronization before save/render. Its structured outcome drives the
+success suffix or stale-prerequisite warning. Because application occurs after
+the full pre-rest snapshot, Undo Rest restores every durable choice store and
+the previously active stable generated row.
 
 ### Usable adventuring gear
 
@@ -2581,6 +2592,7 @@ cannot leave a stale receipt. Save/load normalization preserves a valid receipt 
 - **Natural Recovery** (Land Druid): Same mechanic as Arcane Recovery
 - **Sorcerous Restoration** (Sorcerer 20): Auto-applies via `state.applySorcerousRestoration()`, not manual
 - **Stamina pool** (TGTT): Restores on BOTH short and long rest
+- **EFA Armor Model**: Optional staged switch through the canonical structured-choice transaction; a canonical model keeps the dialog available even when no Hit Dice/HP work remains.
 
 ### Long Rest
 - Full HP + half hit dice recovered (minimum 1 per die type)
@@ -2591,6 +2603,7 @@ cannot leave a stale receipt. Save/load normalization preserves a valid receipt 
   house-rule clear resets both value and owner. The current long-rest dialog preselects that
   clear option. Death saves reset to 0/0.
 - Concentration optionally broken
+- **EFA Armor Model**: Uses the same staged/revalidated selector and transaction as Short Rest.
 
 ### Item Charge Restoration
 Recognizes recharge types: `restLong`, `dawn`, `dusk`, `midnight` (on long rest), `restShort` (short rest only). Parses `rechargeAmount` dice notation (e.g., `"1d6 + 1"`) and rolls if present.

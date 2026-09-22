@@ -5107,6 +5107,32 @@ class CharacterSheetClassUtils {
 					const refreshed = globalThis.CharacterSheetProgression?.refreshDecisionSelectionsFromChoices?.(history);
 					if (refreshed) Object.assign(history, refreshed);
 				}
+				const canonicalDecision = (history.decisions || []).find(item =>
+					item.semanticKey === semanticKey
+					|| (
+						item.type === "featureChoice"
+						&& item.sourceKey === parentFeature
+						&& Number(item.slot || 0) === Number(choiceIndex)
+					));
+				if (canonicalDecision) {
+					canonicalDecision.selection = [choice];
+					canonicalDecision.status = "resolved";
+					canonicalDecision.receipt = {
+						version: 1,
+						sourceDecisionKey: semanticKey,
+						effects: [{
+							type: "materialized",
+							features: [{
+								id: appliedFeature.id,
+								name: appliedFeature.name,
+								source: appliedFeature.source,
+							}],
+							feats: [],
+							resources: [],
+							modifiers: [],
+						}],
+					};
+				}
 			}
 
 			if (recalculate) {

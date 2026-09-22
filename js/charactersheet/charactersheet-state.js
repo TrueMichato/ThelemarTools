@@ -69672,11 +69672,14 @@ class CharacterSheetState {
 		});
 	}
 
+	hasEfaSmithsToolsItem () {
+		return this._hasEfaSmithsToolsItem();
+	}
+
 	_getEfaArcaneArmorStatusSnapshot () {
-		this._data.efaArmorer ||= {arcaneArmorItemId: null};
 		const armorer = this._getEfaArmorerClass();
 		const model = this.getEfaArmorerModel();
-		const boundItemId = this._data.efaArmorer.arcaneArmorItemId || null;
+		const boundItemId = this._data.efaArmorer?.arcaneArmorItemId || null;
 		const boundWrapper = boundItemId ? this._findInventoryRow(boundItemId) : null;
 		const reasons = [];
 		if (!armorer) reasons.push("efa-armorer-unavailable");
@@ -69704,8 +69707,8 @@ class CharacterSheetState {
 		};
 	}
 
-	getEfaArcaneArmorBindingStatus () {
-		this.reconcileEfaArmorerState({cause: "status-query"});
+	getEfaArcaneArmorBindingStatus ({reconcile = true} = {}) {
+		if (reconcile) this.reconcileEfaArmorerState({cause: "status-query"});
 		return this._getEfaArcaneArmorStatusSnapshot();
 	}
 

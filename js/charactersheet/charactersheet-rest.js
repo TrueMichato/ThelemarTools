@@ -4,12 +4,15 @@
  */
 
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {CharacterSheetProgression} from "./charactersheet-progression.js";
 
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee} = /** @type {*} */ (globalThis);
 
 class CharacterSheetRest {
 	static _UNDO_REST_BTN_ID = "charsheet-btn-undo-rest";
+	static _EFA_ARMOR_MODEL_NAMES = ["Dreadnaught", "Guardian", "Infiltrator"];
 
 	constructor (page) {
 		this._page = page;
@@ -47,8 +50,9 @@ class CharacterSheetRest {
 			? CharacterSheetRest.getMemorizeSpellCandidates(this._state)
 			: null;
 		const canMemorizeSpell = !!(memorizeCandidates && memorizeCandidates.prepared.length && memorizeCandidates.spellbook.length);
+		const canRetuneEfaArmorModel = !!this._state.getEfaArmorerModel?.();
 
-		if (currentHp >= maxHp && !availableHitDice.length && !conditions.length && !isConcentrating && !canReduceExhaustion && !canMemorizeSpell) {
+		if (currentHp >= maxHp && !availableHitDice.length && !conditions.length && !isConcentrating && !canReduceExhaustion && !canMemorizeSpell && !canRetuneEfaArmorModel) {
 			JqueryUtil.doToast({type: "info", content: "You're already at full health with no hit dice to spend."});
 			return;
 		}
@@ -322,6 +326,13 @@ class CharacterSheetRest {
 			else modalInner.append(huntersPreySwap.section);
 		}
 
+		const armorModelSwitch = this._buildEfaArmorModelSection({restType: "short"});
+		if (armorModelSwitch) {
+			const amTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (amTarget?.parentNode) amTarget.parentNode.insertBefore(armorModelSwitch.section, amTarget);
+			else modalInner.append(armorModelSwitch.section);
+		}
+
 		// --- Tireless exhaustion reduction (TGTT Ranger) ---
 		const tirelessExhaustion = this._buildTirelessExhaustionSection();
 		if (tirelessExhaustion) {
@@ -426,6 +437,9 @@ class CharacterSheetRest {
 			// Apply Memorize Spell swap, if elected
 			const memorizeSwap = memorizeSpell?.apply() || false;
 
+			const armorModelOutcome = armorModelSwitch?.apply() || null;
+			const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
+
 			this._page.saveCharacter();
 			this._page.renderCharacter();
 			doClose(true);
@@ -439,11 +453,18 @@ class CharacterSheetRest {
 			if (shouldBreakConcentration) message += ` Broke concentration.`;
 			if (tirelessReduced > 0) message += ` Tireless reduced exhaustion by ${tirelessReduced}.`;
 			if (memorizeSwap) message += ` Memorized ${memorizeSwap}.`;
+			message += armorModelFeedback.successSuffix;
 
 			JqueryUtil.doToast({
 				type: "success",
 				content: message,
 			});
+			if (armorModelFeedback.warning) {
+				JqueryUtil.doToast({
+					type: "warning",
+					content: armorModelFeedback.warning,
+				});
+			}
 
 			// Offer a persistent undo for this rest (BUG 8).
 			this._showUndoRestAffordance("short");
@@ -813,6 +834,13 @@ class CharacterSheetRest {
 			else modalInner.append(primalFocusSelect.section);
 		}
 
+		const armorModelSwitch = this._buildEfaArmorModelSection({restType: "long"});
+		if (armorModelSwitch) {
+			const amTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (amTarget?.parentNode) amTarget.parentNode.insertBefore(armorModelSwitch.section, amTarget);
+			else modalInner.append(armorModelSwitch.section);
+		}
+
 		const daemonologistSideSelect = this._buildDaemonologistSideSection();
 		if (daemonologistSideSelect) {
 			const dsTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
@@ -964,6 +992,8 @@ class CharacterSheetRest {
 			const terrorizingForceChanged = terrorizingForceChoice?.apply() || false;
 			const spellMasteryChanged = spellMasterySwap?.apply() || false;
 			const temporalAgeChanged = temporalMasteryAge?.apply() || false;
+			const armorModelOutcome = armorModelSwitch?.apply() || null;
+			const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
 
 			// Save changes
 			this._page.saveCharacter();
@@ -983,11 +1013,18 @@ class CharacterSheetRest {
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
 			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
 			if (atlasResult.changed) message += ` Adventurer's Atlas ${atlasResult.atlas.generation > 1 ? "recreated" : "created"}.`;
+			message += armorModelFeedback.successSuffix;
 
 			JqueryUtil.doToast({
 				type: "success",
 				content: message,
 			});
+			if (armorModelFeedback.warning) {
+				JqueryUtil.doToast({
+					type: "warning",
+					content: armorModelFeedback.warning,
+				});
+			}
 
 			// Offer a persistent undo for this rest (BUG 8).
 			this._showUndoRestAffordance("long");
@@ -1374,6 +1411,263 @@ class CharacterSheetRest {
 			this._state.deactivateState?.("wildShape");
 		}
 		return removed;
+	}
+
+	_getEfaArmorModelOptions () {
+		const expected = new Set(CharacterSheetRest._EFA_ARMOR_MODEL_NAMES);
+		const optionsByName = new Map(
+			(this._page?.getSubclassFeatures?.() || [])
+				.filter(feature =>
+					expected.has(feature?.name)
+					&& feature.source === "EFA"
+					&& feature.className === "Artificer"
+					&& feature.classSource === "EFA"
+					&& feature.subclassShortName === "Armorer"
+					&& feature.subclassSource === "EFA"
+					&& Number(feature.level) === 3)
+				.map(feature => [feature.name, {
+					...feature,
+					ref: `${feature.name}|Artificer|EFA|Armorer|EFA|3|EFA`,
+					type: "subclassFeature",
+					refType: "subclassFeature",
+				}]),
+		);
+		return CharacterSheetRest._EFA_ARMOR_MODEL_NAMES
+			.map(name => optionsByName.get(name))
+			.filter(Boolean);
+	}
+
+	_getEfaArmorModelSwitchContext ({reconcile = false, options = null} = {}) {
+		const model = this._state.getEfaArmorerModel?.();
+		if (!model) return null;
+
+		const exactOptions = options || this._getEfaArmorModelOptions();
+		const binding = this._state.getEfaArcaneArmorBindingStatus?.({reconcile}) || {};
+		const boundName = binding.boundItem?.name || null;
+		const isDoffed = !!binding.boundItemId && binding.boundItem?.equipped === false;
+		let error = null;
+
+		if (exactOptions.length !== CharacterSheetRest._EFA_ARMOR_MODEL_NAMES.length) {
+			error = {
+				code: "armor-model-data-unavailable",
+				message: "Exact EFA Armor Model definitions are unavailable; reload the character data before switching.",
+			};
+		} else if (!binding.boundItemId || !binding.boundItem) {
+			error = {
+				code: "arcane-armor-not-bound",
+				message: "Bind Arcane Armor to a body armor before switching Armor Model.",
+			};
+		} else if (!this._state.hasToolProficiency?.("Smith's Tools")) {
+			error = {
+				code: "missing-smiths-tools-proficiency",
+				message: "Smith's Tools proficiency is required to switch Armor Model.",
+			};
+		} else if (!this._state.hasEfaSmithsToolsItem?.()) {
+			error = {
+				code: "missing-smiths-tools-item",
+				message: "A canonical Smith's Tools item from PHB or XPHB must be in inventory.",
+			};
+		}
+
+		const currentText = `Current model: ${model.name}. Arcane Armor: ${boundName ? `${boundName} (${isDoffed ? "doffed; binding persists" : "worn"})` : "not bound"}.`;
+		const statusText = error?.message
+			|| (isDoffed
+				? `Switching is available while ${boundName} is doffed; model benefits resume when it is worn.`
+				: "Choose the model to apply when this rest finishes.");
+
+		return {
+			model,
+			binding,
+			boundName,
+			isDoffed,
+			options: exactOptions,
+			canSwitch: !error,
+			error,
+			currentText,
+			statusText,
+		};
+	}
+
+	_applyEfaArmorModelSelection ({selectedName, options = null} = {}) {
+		const exactOptions = options || this._getEfaArmorModelOptions();
+		const context = this._getEfaArmorModelSwitchContext({reconcile: true, options: exactOptions});
+		if (!context) {
+			return {
+				changed: false,
+				oldLabel: null,
+				newLabel: null,
+				error: {
+					code: "efa-armorer-unavailable",
+					message: "An exact Artificer|EFA Armorer with a canonical Armor Model is required.",
+				},
+			};
+		}
+
+		const oldLabel = context.model.name;
+		const newOption = exactOptions.find(option => option.name === selectedName);
+		if (!newOption) {
+			return {
+				changed: false,
+				oldLabel,
+				newLabel: oldLabel,
+				error: {
+					code: "armor-model-option-invalid",
+					message: "Choose an exact EFA Armor Model option.",
+				},
+			};
+		}
+		if (newOption.name === oldLabel) {
+			return {changed: false, oldLabel, newLabel: oldLabel, error: null};
+		}
+		if (!context.canSwitch) {
+			return {changed: false, oldLabel, newLabel: oldLabel, error: context.error};
+		}
+
+		const history = (this._state.getLevelHistory?.() || []).find(entry =>
+			entry.class?.name === "Artificer"
+			&& entry.class?.source === "EFA"
+			&& Number(entry.classLevel) === 3);
+		const choices = history?.choices?.featureChoices || [];
+		const choiceIndex = choices.findIndex(choice =>
+			choice.featureName === "Armor Model"
+			&& choice.source === "EFA"
+			&& CharacterSheetRest._EFA_ARMOR_MODEL_NAMES.includes(choice.choice));
+		const oldChoice = choiceIndex >= 0 ? choices[choiceIndex] : null;
+		const decision = (history?.decisions || []).find(item =>
+			item.type === "featureChoice"
+			&& (item.sourceKey === "Armor Model" || item.label === "Armor Model"));
+		const artificer = (this._state.getClasses?.() || []).find(cls =>
+			cls.name === "Artificer"
+			&& cls.source === "EFA"
+			&& (cls.subclass?.shortName || cls.subclass?.name) === "Armorer"
+			&& cls.subclass?.source === "EFA");
+
+		if (!history || !oldChoice || !artificer) {
+			return {
+				changed: false,
+				oldLabel,
+				newLabel: oldLabel,
+				error: {
+					code: "armor-model-history-unavailable",
+					message: "The canonical Armor Model history is unavailable; reload the character before switching.",
+				},
+			};
+		}
+
+		try {
+			CharacterSheetClassUtils.replaceStructuredFeatureChoice({
+				state: this._state,
+				page: this._page,
+				characterLevel: history.level,
+				classLevel: 3,
+				className: "Artificer",
+				classSource: "EFA",
+				subclassName: artificer.subclass?.name,
+				subclassShortName: artificer.subclass?.shortName || artificer.subclass?.name,
+				subclassSource: "EFA",
+				parentFeature: "Armor Model",
+				parentSource: "EFA",
+				choiceIndex,
+				oldChoice,
+				newOption,
+				catalogs: {
+					classFeatures: this._page?.getClassFeatures?.() || [],
+					subclassFeatures: this._page?.getSubclassFeatures?.() || [],
+					optionalFeatures: this._page?.getOptionalFeatures?.() || [],
+				},
+				sourceDecisionKey: decision?.semanticKey || CharacterSheetProgression.getSemanticKey({
+					className: "Artificer",
+					classSource: "EFA",
+					classLevel: 3,
+					type: "featureChoice",
+					sourceKey: "Armor Model",
+					slot: 0,
+				}),
+				persistHistory: true,
+				recalculate: true,
+				syncCanonical: true,
+			});
+			this._state.reconcileEfaArmorerState?.({cause: "rest-model-switch"});
+			return {changed: true, oldLabel, newLabel: newOption.name, error: null};
+		} catch (error) {
+			return {
+				changed: false,
+				oldLabel,
+				newLabel: oldLabel,
+				error: {
+					code: "armor-model-transaction-failed",
+					message: error?.message || "Armor Model could not be switched.",
+				},
+			};
+		}
+	}
+
+	/**
+	 * Build the staged EFA Armor Model selector shared by both rest dialogs.
+	 * Opening or changing the selector is read-only; `apply()` revalidates and
+	 * commits through the canonical structured-choice transaction.
+	 * @param {{restType:"short"|"long"}} opts
+	 * @returns {{section:HTMLElement, control:HTMLSelectElement, label:HTMLLabelElement, currentLine:HTMLElement, statusLine:HTMLElement, apply:function}|null}
+	 */
+	_buildEfaArmorModelSection ({restType} = {}) {
+		const options = this._getEfaArmorModelOptions();
+		const context = this._getEfaArmorModelSwitchContext({reconcile: false, options});
+		if (!context) return null;
+
+		const idBase = `charsheet-${restType || "rest"}-armor-model`;
+		const selectId = `${idBase}-select`;
+		const currentId = `${idBase}-current`;
+		const statusId = `${idBase}-status`;
+
+		const section = e_({tag: "div", clazz: "charsheet__rest-section"});
+		const title = e_({tag: "div", clazz: "charsheet__rest-section-title", txt: "Armor Model"});
+		const currentLine = e_({tag: "p", clazz: "ve-small mb-2", txt: context.currentText});
+		currentLine.id = currentId;
+		const label = e_({tag: "label", clazz: "ve-bold ve-small mb-1", txt: "Armor model after rest"});
+		label.htmlFor = selectId;
+		const control = e_({tag: "select", clazz: "form-control input-sm w-100"});
+		control.id = selectId;
+		control.setAttribute("aria-describedby", `${currentId} ${statusId}`);
+		control.ariaDescribedBy = `${currentId} ${statusId}`;
+		options.forEach(option => {
+			const opt = e_({tag: "option", val: option.name, txt: option.name});
+			opt.value = option.name;
+			if (option.name === context.model.name) opt.selected = true;
+			control.appendChild(opt);
+		});
+		control.value = context.model.name;
+		control.disabled = !context.canSwitch;
+		const statusLine = e_({tag: "p", clazz: "ve-muted ve-small mt-1 mb-0", txt: context.statusText});
+		statusLine.id = statusId;
+
+		section.append(title, currentLine, label, control, statusLine);
+		return {
+			section,
+			control,
+			label,
+			currentLine,
+			statusLine,
+			apply: () => this._applyEfaArmorModelSelection({
+				selectedName: control.value,
+				options,
+			}),
+		};
+	}
+
+	static getEfaArmorModelRestFeedback (outcome) {
+		if (outcome?.changed) {
+			return {
+				successSuffix: ` Armor Model set to ${outcome.newLabel}.`,
+				warning: null,
+			};
+		}
+		if (outcome?.error) {
+			return {
+				successSuffix: "",
+				warning: `Rest completed, but Armor Model remained ${outcome.oldLabel || "unchanged"}: ${outcome.error.message}`,
+			};
+		}
+		return {successSuffix: "", warning: null};
 	}
 
 	/**

@@ -352,10 +352,27 @@ weapons use permanent `_efaArmorerWeaponId` values and retain their independent
 wrapper IDs and customization across model switches/save-load. Only the selected
 model row can expose an attack or item effect while the binding is active.
 
-This binding milestone intentionally does not implement model damage, range,
-Intelligence substitution, riders, target/resource tracking, rest-switching UI,
-Perfected Armor, or Armor Replication. Those mechanics must extend the stable
-rows rather than replace them.
+The Short Rest and Long Rest dialogs expose one shared staged Armor Model
+selector for an exact `Artificer|EFA` Armorer with a canonical model. A switch
+requires an existing Arcane Armor binding, Smith's Tools proficiency, and a
+canonical PHB/XPHB Smith's Tools inventory item. Those tool checks gate the
+transformation only; losing the proficiency or item does not suspend an already
+bound, worn Arcane Armor. Doffed bound armor can still switch models, with its
+benefits remaining suspended until worn.
+
+The selector does not mutate state until the rest is confirmed. Confirmation
+revalidates the prerequisites and calls
+`CharacterSheetClassUtils.replaceStructuredFeatureChoice()`, which updates the
+materialized feature, `chosenSubfeatures`, level-history choice/replay data, and
+the canonical decision/receipt as one rollback-backed transaction. The rest's
+full pre-mutation snapshot therefore makes Undo Rest restore the prior model,
+binding, and active generated row. If prerequisites become stale while the
+dialog is open, the rest still completes but the model remains unchanged and a
+warning names the failed prerequisite.
+
+Model damage, range, Intelligence substitution, riders, target/resource
+tracking, Perfected Armor, and Armor Replication remain deferred. Those
+mechanics must extend the stable rows rather than replace them.
 
 ### Active States & Conditions
 
