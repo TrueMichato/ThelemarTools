@@ -700,12 +700,11 @@ direct mechanical overrides survive model switches and save/load. Managed
 passive effects have stable `_generatedEffectId` values so generated updates can
 coexist with player-authored effects.
 
-Deferred Armorer work includes Giant Stature activation/resources, Force
-Demolisher push/pull resolution, Thunder Pulse's target rider, Defensive Field,
-Lightning Launcher's once-per-turn extra damage, remaining
-level 9/15 mechanics, and E2E coverage. Level-9 Armor Replication uses the
-shared source-qualified plan-extension and constrained generated-item-capacity
-contracts; it does not add an Armorer-specific persisted ledger.
+Remaining Armorer work is limited to level-15 Perfected Armor model effects,
+dedicated NPC/PDF export coverage, and E2E coverage. Level-9 Armor Replication
+uses the shared source-qualified plan-extension and constrained
+generated-item-capacity contracts; it does not add an Armorer-specific persisted
+ledger.
 
 ### Active States & Conditions
 

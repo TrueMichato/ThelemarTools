@@ -18,7 +18,7 @@ partial still have explicitly deferred runtime mechanics.
 #### Artificer Subclasses
 - **Alchemist**: `experimentalElixirCount`, `alchemicalSavantBonus`, `restorativeReagentsUses`, `restorativeReagentsTempHp`
 - **Armorer (TCE legacy calculations)**: `thunderGauntletsDamage`, `defensiveFieldTempHp`, `lightningLauncherDamage`, `infiltratorSpeedBonus`
-- **Armorer (EFA, partial)**: active-bound level-3 model weapon stats and Intelligence substitution; Infiltrator `+5` Speed and Stealth advantage; level-9 Armor Replication plan/capacity extensions and Improved Arsenal's active-model `+1` attack/damage. Deferred: model riders/resources, remaining level 9/15 mechanics, Arcane Armor general benefits, binding UI, and E2E.
+- **Armorer (EFA, partial)**: active-bound Arcane Armor lifecycle and inventory controls; level-3 model weapons, Intelligence substitution, model riders/resources, Infiltrator `+5` Speed and Stealth advantage; level-9 Armor Replication plan/capacity extensions and Improved Arsenal's active-model `+1` attack/damage. Deferred: level-15 Perfected Armor model effects, dedicated NPC/PDF export coverage, and E2E.
 - **Artillerist**: `eldritchCannonHp`, `flamethrowerDamage`, `forceBallistaDamage`, `protectorTempHp`, `maxCannons`, `arcaneFirearmDamage`
 - **Battle Smith**: `steelDefenderHp`, `arcaneJoltDamage`, `arcaneJoltUses`, `deflectAttackDamage`
 - **Cartographer (EFA), Adventurer's Atlas + Mapping Magic milestones**: versioned persistent
