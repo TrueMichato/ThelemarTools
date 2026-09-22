@@ -82,6 +82,12 @@ Drives the level-up wizard for L2+ (and multiclass entries).
 - **`autoFillAllSelections()` — the critical one.**  Optimised
   state-stable polling sweep (per Phase 3): ASI stepper, counters, spell
   picks, optional features.  Use after the spec sets explicit picks.
+- `resolvePendingFeatureChoices()` — drains stacked production feature-choice
+  modals, including multi-tool picks. If the renderer owns the choice lock but
+  no modal becomes observable, it uses the production fulfillment API as the
+  deterministic picker-bypass fallback and syncs the progression ledger. It
+  then drains chained spell choices and fails with queue diagnostics if any
+  required feature or spell choice remains unresolved.
 - `finish()` — closes the wizard.  Polls modal-visible @ 100ms, max 2s.
 - `cancel()` / `expectModalClosed()`.
 - `expectDivineSoulAffinityModalVisible()` /
@@ -187,6 +193,14 @@ The sheet itself.  Most probes go through this.
 
 - `getSubclassChoice(className): {key, name} | null`.
 - `getKnownSpellNames(): string[]`.
+- `probeCartographerFlow(probe, spellThreshold?)` — source-isolated EFA
+  Cartographer transactions for tools/crafting, exact XPHB spell tiers, Mapping
+  Magic, Guided Precision, page-save-bounded Ingenious Movement, Superior
+  Atlas, ASI/Epic Boon progression, and lifecycle teardown. Every state-driven
+  branch restores the character afterward.
+- The `atlas` Cartographer probe drives the real Long Rest modal for the
+  exact-tools gate, optional-self/external-holder creation, recreation, rendered
+  Atlas card, undo, ally-only Awareness negative, and save/load round-trip.
 
 ## When NOT to use a page object
 

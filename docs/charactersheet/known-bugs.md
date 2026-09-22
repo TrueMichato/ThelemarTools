@@ -10195,3 +10195,62 @@ than a manual-only acknowledgement. Gambler-owned typed and legacy resources,
 pending receipts, and table effects are removed on respec or when TGTT is
 disabled without removing unrelated same-named resources. Focused Jest and
 rendered browser probes cover these invariants.
+
+---
+
+## CS-BUG-173 — EFA Tinker's Magic omits its authored Mending cantrip — OPEN
+
+**Symptom.** An `Artificer|EFA` character renders Tinker's Magic at level 1,
+but `Mending|XPHB` is absent from the live cantrip/spell collections. The
+authoritative feature text explicitly says, "You know the Mending cantrip."
+
+**Evidence.** The comprehensive EFA Cartographer matrix builds the class through
+the real wizard and searches the combined known-spell/cantrip surface. At level
+3 it sees the two selected Artificer cantrips and the exact Cartographer spells,
+but no Mending entry. `data/class/class-artificer.json` authors the grant under
+`Tinker's Magic|Artificer|EFA|1|EFA`.
+
+**Coverage.** `tgtt-efa-cartographer-artificer.spec.ts` keeps the exact
+`Mending|XPHB` `spellInList` probe annotated with this bug and skips only that
+effect. Tinker's Magic feature presence and the rest of the Cartographer matrix
+remain required.
+
+---
+
+## CS-BUG-174 — Live Cartographer catalog cannot qualify Guided Precision spells — OPEN
+
+**Symptom.** A real Builder → Level Up `Artificer|EFA` /
+`Cartographer|EFA` reaches level 5 with Guided Precision present and its attack
+route available, but the exact `Guiding Bolt|XPHB` spell route returns no damage
+rider. The same source-qualified contract passes in Jest only when the fixture
+manually nests the EFA subclasses onto the class-catalog entry.
+
+**Root cause evidence.** `getDeferredFlatDamageRiderOptions()` resolves the full
+subclass through `_classCatalog` before reading `additionalSpells`. The live
+catalog shape does not resolve Cartographer there, so every spell route is
+rejected before the source-qualified spell set is checked. The attack route does
+not need the catalog and remains functional.
+
+**Coverage.** `tgtt-efa-cartographer-artificer.spec.ts` keeps the exact spell
+route/shared-receipt scenario as the only skipped Guided Precision effect. The
+same row still requires feature calculations, the own-Faerie-Fire attack rider,
+live Intelligence damage, once-per-turn reset, and concentration/death behavior.
+
+---
+
+## CS-BUG-175 — Cartographer replacement-tool choice reopens after save/load — OPEN
+
+**Symptom.** The real level-3 flow detects the duplicate Calligrapher's Supplies
+grant, fulfills one replacement Artisan's Tool through the production
+`fulfillFeatureChoice()` API, and has no pending choice in-session. Loading that
+same JSON seeds Tools of the Trade again.
+
+**Evidence.** The export contains both a stable canonical `nestedTool` decision
+left `missing` and a second UUID-derived decision marked `resolved`, both for the
+same Alchemist's Supplies selection. The live state is clean until
+`loadFromJson()` reconciles the still-missing canonical record.
+
+**Coverage.** The Cartographer matrix continues to require exact EFA feature
+ownership, both fixed proficiencies, duplicate-dependent replacement counts
+`0/1/2`, and Spell Scroll-only crafting. Only the save/load persistence effect
+is skipped under CS-BUG-175.

@@ -1104,7 +1104,7 @@ export class LevelUpPage {
 	async resolvePendingFeatureChoices (maxPrompts = 10): Promise<number> {
 		let resolved = 0;
 		for (let i = 0; i < maxPrompts; i++) {
-			const clicked = await this.page.evaluate(() => {
+			const status = await this.page.evaluate(() => {
 				// Resolve the TOP-MOST prompt first. Some picks chain (PHB'14 Fighting
 				// Style → "Blessed Warrior" → a cantrip chooser), and the chained modal
 				// stacks ABOVE its parent, so always clearing the first-in-DOM prompt
@@ -1112,19 +1112,126 @@ export class LevelUpPage {
 				// subsequent click on the sheet.
 				const prompts = Array.from(document.querySelectorAll<HTMLElement>(".charsheet__feature-choice, .spell-choice-list"));
 				const wrp = prompts[prompts.length - 1];
-				if (!wrp) return false;
-				const btn = wrp.querySelector<HTMLButtonElement>(".charsheet__feature-choice-opt")
-					// The chained spell chooser has no "defer" — pick the first
-					// still-selectable spell so the modal actually closes.
-					|| wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
+				if (!wrp) {
+					const state: any = (globalThis as any).charSheet?._state;
+					return state?.hasPendingFeatureChoices?.() ? "wait" : "done";
+				}
+
+				const featureOptions = Array.from(wrp.querySelectorAll<HTMLButtonElement>(".charsheet__feature-choice-opt"));
+				const confirm = wrp.querySelector<HTMLButtonElement>('[data-act="confirm"]');
+				if (featureOptions.length) {
+					if (confirm) {
+						for (const option of featureOptions) {
+							if (!confirm.disabled) break;
+							if (!option.classList.contains("active")) option.click();
+						}
+						if (!confirm.disabled) confirm.click();
+						return "clicked";
+					}
+					featureOptions[0].click();
+					return "clicked";
+				}
+
+				// The chained spell chooser has no "defer" — pick the first
+				// still-selectable spell so the modal actually closes.
+				const btn = wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
 					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
-				if (!btn) return false;
+				if (!btn) return "wait";
 				btn.click();
-				return true;
-			}).catch(() => false);
-			if (!clicked) break;
+				return "clicked";
+			}).catch(() => "wait");
+			if (status === "done") break;
+			if (status === "wait") {
+				await this.page.waitForTimeout(250);
+				continue;
+			}
 			resolved++;
 			await this.page.waitForTimeout(250);
+		}
+
+		// The Features renderer can own the production choice lock without the modal
+		// becoming observable before the level-up helper returns. Do not leave that
+		// required decision silently missing: use the same public fulfillment API as
+		// the modal, with deterministic first-option picks, then sync the canonical
+		// progression ledger. This is the established picker-bypass fallback, not an
+		// alternate character-building path.
+		const bypassed = await this.page.evaluate(async (maxRounds) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			const allSpells = cs?.getFilteredSpellData?.() || cs?.getSpells?.() || [];
+			let count = 0;
+			for (let round = 0; round < maxRounds; round++) {
+				const pending = state?.getPendingFeatureChoices?.() || [];
+				if (!pending.length) break;
+				let roundCount = 0;
+				for (const choice of pending) {
+					const options = choice.options || [];
+					const wanted = Math.max(1, Number(choice.count) || 1);
+					let selection: any = null;
+					if (choice.kind === "tool" || choice.kind === "skill") {
+						const values = options.slice(0, wanted).map((it: any) => it?.name ?? it);
+						selection = wanted > 1 ? values : values[0];
+					} else {
+						const first = options[0];
+						if (first) selection = {name: first.name, source: first.source};
+					}
+					if (selection != null && state.fulfillFeatureChoice(choice.id, selection, allSpells)) {
+						count++;
+						roundCount++;
+					}
+				}
+				if (!roundCount) break;
+				state.applyClassFeatureEffects?.();
+			}
+			if (count) {
+				(globalThis as any).CharacterSheetProgression?.syncCanonicalDecisions?.({page: cs, state});
+				await cs.saveCharacter?.();
+				cs.renderCharacter?.();
+			}
+			return count;
+		}, maxPrompts);
+		if (bypassed) {
+			resolved += bypassed;
+			console.log(`[picker bypass] resolved ${bypassed} pending feature choice(s) through the production fulfillment API`);
+		}
+
+		// A deterministic feature pick can enqueue a chained spell pick. Give the
+		// production spell-choice UI one final bounded drain after the bypass.
+		for (let i = 0; i < maxPrompts; i++) {
+			const status = await this.page.evaluate(() => {
+				const prompts = Array.from(document.querySelectorAll<HTMLElement>(".spell-choice-list"));
+				const wrp = prompts[prompts.length - 1];
+				if (!wrp) {
+					const state: any = (globalThis as any).charSheet?._state;
+					return state?.hasPendingSpellChoices?.() ? "wait" : "done";
+				}
+				const btn = wrp.querySelector<HTMLButtonElement>(".spell-choice-select")
+					|| wrp.querySelector<HTMLButtonElement>('[data-act="defer"]');
+				if (!btn) return "wait";
+				btn.click();
+				return "clicked";
+			}).catch(() => "wait");
+			if (status === "done") break;
+			if (status === "clicked") resolved++;
+			await this.page.waitForTimeout(250);
+		}
+
+		const remaining = await this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const summarize = (choice: any) => ({
+				id: choice?.id,
+				kind: choice?.kind,
+				featureName: choice?.featureName,
+				count: choice?.count,
+				optionCount: choice?.options?.length,
+			});
+			return {
+				featureChoices: (state?.getPendingFeatureChoices?.() || []).map(summarize),
+				spellChoices: (state?.getPendingSpellChoices?.() || []).map(summarize),
+			};
+		});
+		if (remaining.featureChoices.length || remaining.spellChoices.length) {
+			throw new Error(`Required level-up choices remain unresolved after bounded picker drain: ${JSON.stringify(remaining)}`);
 		}
 		return resolved;
 	}

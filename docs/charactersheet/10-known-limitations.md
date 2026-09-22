@@ -45,6 +45,10 @@ partial still have explicitly deferred runtime mechanics.
   The Cartographer is always a legal five-foot anchor, including when the
   Cartographer's own map triggered and was consumed; other active map holders are
   additional anchor choices.
+  The complete `Artificer|EFA` / `Cartographer|EFA` L1→20 player lifecycle is
+  covered by `test/e2e/specs/tgtt-efa-cartographer-artificer.spec.ts`, including
+  the real Long Rest Atlas UI, every authored spell threshold, feature-use
+  transactions, exact-source teardown, usage probes, and JSON export round-trip.
   Cross-sheet mutation, coordinates, and DM Screen/Journey map geometry remain
   table/integration boundaries rather than simulated Character Sheet state.
 

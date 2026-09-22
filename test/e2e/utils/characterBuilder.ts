@@ -1080,6 +1080,31 @@ export const PRESET_FULL_SPELLFIRE_SORCERER: CharacterPreset = {
 };
 
 /**
+ * EFA Cartographer Artificer on the exact EFA 2024 chassis.
+ *
+ * `Artificer` also exists in TCE, so both the source priority and exact class /
+ * subclass sources are load-bearing. Dwarf avoids the 2024 Human's additional
+ * Origin-Feat picker, while the INT-first array makes every Cartographer-scaled
+ * pool and rider representative.
+ */
+export const PRESET_FULL_EFA_CARTOGRAPHER_ARTIFICER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA", "XPHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Mira Wayfinder",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Cartographer",
+	subclassSource: "EFA",
+	abilityPriority: ["int", "con", "dex", "wis", "cha", "str"],
+};
+
+/**
  * Wicked Witch Sorcerer (Arcadia 8 subclass re-parented onto the TGTT Sorcerer chassis).
  *
  * The subclass reaches the sheet as a `_copy` in `homebrew/TravelersGuidetoThelemar.json`
@@ -1180,6 +1205,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_SHADOW_MAGIC_SORCERER,
 	PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER,
 	PRESET_FULL_SPELLFIRE_SORCERER,
+	PRESET_FULL_EFA_CARTOGRAPHER_ARTIFICER,
 	PRESET_FULL_WICKED_WITCH_SORCERER,
 	PRESET_FULL_LUNAR_SORCERY_SORCERER,
 ];

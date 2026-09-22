@@ -833,6 +833,11 @@ export type EffectCheck = _EffectCommon & (
 		isNull?: boolean;
 	}
 	| {kind: "gamblerProbe"; probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"}
+	| {
+		kind: "cartographerProbe";
+		probe: "tools" | "toolPersistence" | "spells" | "atlas" | "mappingMagic" | "guidedPrecision" | "guidedPrecisionSpell" | "ingeniousMovement" | "superiorAtlas" | "lifecycle" | "lifecycleSpellCleanup" | "progression";
+		spellThreshold?: 3 | 5 | 9 | 13 | 17;
+	}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
 	| {
@@ -1547,6 +1552,24 @@ async function _runPassiveOrRollEffect (
 			const result = await charSheet.probeGamblerFlow(e.probe);
 			if (!result?.ok) throw new Error(`Gambler ${e.probe} probe failed: ${result?.error || "unknown error"}`);
 			if (e.probe === "ui") _gamblerUiProbeCompleted = true;
+			return;
+		}
+		case "cartographerProbe": {
+			const owningLevel = e.probe === "tools" || e.probe === "toolPersistence" || e.probe === "atlas" || e.probe === "mappingMagic"
+				? 3
+				: e.probe === "guidedPrecision" || e.probe === "guidedPrecisionSpell"
+					? 5
+					: e.probe === "ingeniousMovement"
+						? 9
+						: e.probe === "superiorAtlas"
+							? 15
+							: e.probe === "lifecycle" || e.probe === "lifecycleSpellCleanup"
+								? 17
+								: e.probe === "progression"
+									? 19
+									: e.spellThreshold;
+			if (owningLevel != null && currentLevel != null && currentLevel !== owningLevel) return;
+			await charSheet.probeCartographerFlow(e.probe, e.spellThreshold);
 			return;
 		}
 		case "proficiency": {
@@ -3564,7 +3587,10 @@ export async function assertFeaturesMatrix (
 				// per-pick effects.
 				const expandedEffects: EffectCheck[] = [];
 				for (const eff of fc.effects) {
-					if (eff.skip) continue;
+					if (eff.skip) {
+						console.log(`[features matrix] ${label} effect ${eff.kind} skipped — ${eff.skipReason || "no reason supplied"}`);
+						continue;
+					}
 					if (eff.kind === "pickedFeatureGrants") {
 						const pickRe = eff.pickName instanceof RegExp
 							? eff.pickName

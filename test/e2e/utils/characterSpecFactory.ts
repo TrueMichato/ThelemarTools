@@ -135,7 +135,7 @@ export interface CharacterSpec {
 		 * Pass `{skip: true}` to keep the standard checklist visible
 		 * but skip on builds where the mechanic isn't applicable.
 		 */
-		skillRoll?: {name: string; expectBonusAtLeast?: number} | {skip: true};
+		skillRoll?: {name: string; expectBonusAtLeast?: number} | {skip: true; reason?: string};
 		/**
 		 * Take a short rest and assert that a named SR-restoring resource
 		 * (Warlock pact slots, Monk Discipline Points, Battle Master
@@ -144,7 +144,7 @@ export interface CharacterSpec {
 		 * observable; if the resource isn't online (max=0), the probe
 		 * is a no-op rather than a failure.
 		 */
-		shortRestRestores?: {resourceName: string; expectAfter?: number; spend?: number} | {skip: true};
+		shortRestRestores?: {resourceName: string; expectAfter?: number; spend?: number} | {skip: true; reason?: string};
 		/**
 		 * Concentration probe. Starts concentration on the named spell,
 		 * triggers `thenAction` (raw damage or activating Rage), then
@@ -160,28 +160,28 @@ export interface CharacterSpec {
 			thenAction: "damage" | "rage";
 			damageAmount?: number;
 			expectActive: boolean;
-		} | {skip: true};
+		} | {skip: true; reason?: string};
 		/**
 		 * Death save tracker probe. Marks one success and one failure,
 		 * asserts both counters advanced, then resets. Works for every
 		 * character — there's no "skip cleanly" reason except a known
 		 * product bug, which the {skip:true} sentinel covers.
 		 */
-		deathSaves?: true | {skip: true};
+		deathSaves?: true | {skip: true; reason?: string};
 		/**
 		 * Apply a condition (e.g. "poisoned"), assert it shows up in
 		 * `hasCondition()`, then remove it. Smoke-tests the
 		 * condition→render→state pipeline. `expectEffect` is optional;
 		 * when provided we also assert a derived stat changed.
 		 */
-		applyCondition?: {name: string; expectEffect?: "advantage" | "disadvantage" | "speed-0"} | {skip: true};
+		applyCondition?: {name: string; expectEffect?: "advantage" | "disadvantage" | "speed-0"} | {skip: true; reason?: string};
 		/**
 		 * Optional feat-toggle probe — same shape as `signatureToggle`
 		 * but specifically targeted at feat-driven abilities (Lucky,
 		 * GWM, Sharpshooter, Crossbow Expert). Skipped if the build
 		 * doesn't take the feat.
 		 */
-		featAbility?: {featureName: string | RegExp; expectDelta?: "ac" | "dc" | "attack"} | {skip: true};
+		featAbility?: {featureName: string | RegExp; expectDelta?: "ac" | "dc" | "attack"} | {skip: true; reason?: string};
 		/** Reminder-first Chained Fury flow plus optional creature bookkeeping. */
 		optionalChainTracking?: {skip: true; reason?: string} | {
 			targetName?: string;
@@ -472,6 +472,18 @@ export function describeCharacter (spec: CharacterSpec): void {
 					await levelUpTo(page, atLevel, {...subclassOpts, signatureSpells: preset.signatureSpells});
 				}
 				await charSheet.expectLevel(atLevel);
+				for (const [label, configured] of Object.entries({
+					skillRoll: usage.skillRoll,
+					shortRestRestores: usage.shortRestRestores,
+					concentrationCheck: usage.concentrationCheck,
+					deathSaves: usage.deathSaves,
+					applyCondition: usage.applyCondition,
+					featAbility: usage.featAbility,
+				})) {
+					if ((configured as any)?.skip) {
+						console.log(`[usage probe] ${label} skipped — ${(configured as any).reason || "no reason supplied"}`);
+					}
+				}
 
 				// Install the declared loadout before probing. Without this
 				// the attack probe can only ever see preset-granted gear —

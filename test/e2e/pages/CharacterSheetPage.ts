@@ -4600,6 +4600,836 @@ export class CharacterSheetPage {
 	}
 
 	/**
+	 * Source-isolated EFA Cartographer scenarios. Each state-driven probe restores
+	 * the character in a finally block so the feature matrix can safely revisit
+	 * earlier rows at later checkpoints. The Atlas probe is deliberately separate:
+	 * it drives the real Long Rest UI because creation/recreation is a player-facing
+	 * rest transaction rather than a plain state mutation.
+	 */
+	async probeCartographerFlow (
+		probe: "tools" | "toolPersistence" | "spells" | "atlas" | "mappingMagic" | "guidedPrecision" | "guidedPrecisionSpell" | "ingeniousMovement" | "superiorAtlas" | "lifecycle" | "lifecycleSpellCleanup" | "progression",
+		spellThreshold?: 3 | 5 | 9 | 13 | 17,
+	): Promise<void> {
+		if (probe === "atlas") {
+			await this._probeCartographerAtlasRestFlow();
+			return;
+		}
+
+		await this.page.evaluate(async ({probe, spellThreshold}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			if (!state) throw new Error("Cartographer probe: character state is unavailable");
+			const original = state.toJson();
+			const must = (condition: unknown, message: string) => {
+				if (!condition) throw new Error(`Cartographer ${probe}: ${message}`);
+			};
+			const exactClass = () => state.getClasses().find((it: any) =>
+				it.name === "Artificer"
+				&& it.source === "EFA"
+				&& it.subclass?.name === "Cartographer"
+				&& it.subclass?.source === "EFA",
+			);
+			const ensureTools = () => {
+				if (!state.getInventory().some((it: any) =>
+					it.item?.name === "Cartographer's Tools" && it.item?.source === "XPHB")) {
+					state.addItem({name: "Cartographer's Tools", source: "XPHB", type: "AT"}, 1);
+				}
+			};
+			const createAtlas = (holders = [
+				{name: state.getCharacterName() || "Mira", isSelf: true, status: "active"},
+				{name: "Thorn", isSelf: false, status: "active"},
+			]) => {
+				ensureTools();
+				const result = state.createAdventurersAtlas(holders, {
+					isHoldingTools: true,
+					createdAt: 1_700_000_000_000,
+				});
+				must(result?.ok, `could not create Atlas: ${JSON.stringify(result)}`);
+				return result.atlas;
+			};
+			const findSpell = (name: string) => state.getSpells().find((it: any) =>
+				String(it.name).toLowerCase() === name.toLowerCase()
+				&& String(it.source).toUpperCase() === "XPHB",
+			);
+			const reset = () => {
+				state.loadFromJson(original);
+				cs?._renderCharacter?.();
+			};
+
+			try {
+				must(exactClass(), "build is not Artificer|EFA / Cartographer|EFA");
+
+				if (probe === "tools") {
+					const feature = state.getFeatures().find((it: any) =>
+						it.name === "Tools of the Trade"
+						&& it.source === "EFA"
+						&& it.classSource === "EFA"
+						&& it.subclassSource === "EFA",
+					);
+					must(feature, "exact-source Tools of the Trade feature is missing");
+					const proficiencies = state.getToolProficiencies().map((it: string) => it.toLowerCase());
+					must(proficiencies.includes("calligrapher's supplies"), "Calligrapher's Supplies proficiency is missing");
+					must(proficiencies.includes("cartographer's tools"), "Cartographer's Tools proficiency is missing");
+					must(proficiencies.includes("alchemist's supplies"), "deterministic replacement tool proficiency is missing");
+					must(!state.getPendingFeatureChoices().some((it: any) =>
+						it.featureName === "Tools of the Trade" && it.kind === "tool"),
+					"tool replacement choice was unresolved in-session");
+					must((state._data?.fulfilledFeatureToolChoices || []).includes("tools of the trade"),
+						"Tools of the Trade was not recorded as fulfilled");
+
+					const classUtils: any = (globalThis as any).CharacterSheetClassUtils;
+					const counts = [
+						[],
+						["Calligrapher's Supplies"],
+						["Calligrapher's Supplies", "Cartographer's Tools"],
+					].map(ownedTools => classUtils.getFixedProficiencyGrantContract(feature, {ownedTools}).count);
+					must(JSON.stringify(counts) === JSON.stringify([0, 1, 2]), `replacement-tool counts were ${JSON.stringify(counts)}`);
+
+					const scrollItem = {name: "Spell Scroll (Level 1)", source: "XDMG", type: "SC", spellScrollLevel: 1, rarity: "common"};
+					const scrollRecipe = {
+						name: scrollItem.name,
+						source: scrollItem.source,
+						recipeCategory: "scroll",
+						itemType: scrollItem.type,
+						rarity: scrollItem.rarity,
+						itemUid: "spell scroll (level 1)|xdmg",
+						ingredients: [],
+						entries: [],
+					};
+					const scroll = state.getCraftingTimeCalculation({recipe: scrollRecipe, item: scrollItem});
+					must(scroll?.baselineWorkweeks === 0.2 && scroll?.effectiveWorkweeks === 0.1 && scroll?.multiplier === 0.5,
+						`Spell Scroll crafting descriptor was ${JSON.stringify(scroll)}`);
+					must(scroll?.sourceBreakdown?.[0]?.uid === "Tools of the Trade|Artificer|EFA|Cartographer|EFA|3|EFA",
+						`Spell Scroll owner was ${JSON.stringify(scroll?.sourceBreakdown)}`);
+
+					const potionItem = {name: "Potion of Healing", source: "DMG", type: "P", rarity: "common"};
+					const potionRecipe = {
+						name: potionItem.name,
+						source: potionItem.source,
+						recipeCategory: "potion",
+						itemType: potionItem.type,
+						rarity: potionItem.rarity,
+						itemUid: "potion of healing|dmg",
+						ingredients: [],
+						entries: [],
+					};
+					const potion = state.getCraftingTimeCalculation({recipe: potionRecipe, item: potionItem});
+					must(potion?.multiplier === 1 && potion?.sourceBreakdown?.length === 0,
+						`unrelated recipe was modified: ${JSON.stringify(potion)}`);
+					return;
+				}
+
+				if (probe === "toolPersistence") {
+					const saved = state.toJson();
+					state.loadFromJson(saved);
+					must(exactClass(), "exact EFA class/subclass identity did not round-trip");
+					must(!state.getPendingFeatureChoices().some((it: any) =>
+						it.featureName === "Tools of the Trade" && it.kind === "tool"),
+					"tool replacement choices re-opened after round-trip");
+					must(state.hasToolProficiency("Calligrapher's Supplies") && state.hasToolProficiency("Cartographer's Tools"),
+						"fixed Cartographer tool proficiencies did not round-trip");
+					must(state.hasToolProficiency("Alchemist's Supplies"),
+						"replacement tool proficiency did not round-trip");
+					return;
+				}
+
+				if (probe === "progression") {
+					const levelHistory = state._data?.levelHistory || [];
+					for (const level of [4, 8, 12, 16]) {
+						const entry = levelHistory.find((it: any) => Number(it.level) === level);
+						const asiDecision = entry?.decisions?.find((decision: any) => {
+							if (decision.status !== "resolved") return false;
+							const selection = decision.type === "asi"
+								? decision.selection
+								: decision.type === "asiOrFeat" && decision.selection?.mode === "asi"
+									? decision.selection.asi
+									: null;
+							return selection
+								&& Object.values(selection).reduce((total: number, value: any) => total + Number(value || 0), 0) === 2;
+						});
+						must(asiDecision, `level-${level} ASI decision was ${JSON.stringify(entry?.decisions)}`);
+						if (level === 4) {
+							const featDecision = entry?.decisions?.find((decision: any) =>
+								decision.type === "feat"
+								&& decision.status === "resolved"
+								&& decision.selection?.name
+								&& decision.selection?.source);
+							must(featDecision, `level-4 companion feat decision was ${JSON.stringify(entry?.decisions)}`);
+							const feat = (state._data?.feats || []).find((it: any) =>
+								it.name === featDecision.selection.name
+								&& it.source === featDecision.selection.source);
+							must(feat && Object.keys(feat.appliedEffects || {}).length > 0,
+								`level-4 feat ${featDecision.selection.name}|${featDecision.selection.source} lacks an applied effect ledger`);
+						}
+					}
+					const level19 = levelHistory.find((entry: any) => Number(entry.level) === 19);
+					const boonDecision = level19?.decisions?.find((decision: any) =>
+						decision.type === "feat"
+						&& decision.status === "resolved"
+						&& decision.meta?.improvement?.categories?.includes("EB"),
+					);
+					must(boonDecision?.selection?.name && boonDecision?.selection?.source,
+						`level-19 Epic Boon decision was ${JSON.stringify(boonDecision)}`);
+					const boon = (state._data?.feats || []).find((feat: any) =>
+						feat.name === boonDecision.selection.name
+						&& feat.source === boonDecision.selection.source);
+					must(boon, "resolved Epic Boon is absent from the owned feat list");
+					must(Object.keys(boon.appliedEffects || {}).length > 0,
+						`Epic Boon ${boon.name}|${boon.source} has no applied effect ledger`);
+					return;
+				}
+
+				if (probe === "spells") {
+					must(spellThreshold != null, "spell threshold was not supplied");
+					const tiers: Record<number, string[]> = {
+						3: ["Faerie Fire", "Guiding Bolt", "Healing Word"],
+						5: ["Locate Object", "Mind Spike"],
+						9: ["Call Lightning", "Clairvoyance"],
+						13: ["Banishment", "Locate Creature"],
+						17: ["Scrying", "Teleportation Circle"],
+					};
+					const expected = Object.entries(tiers)
+						.filter(([level]) => Number(level) <= spellThreshold)
+						.flatMap(([, names]) => names);
+					for (const name of expected) {
+						const matches = state.getSpells().filter((it: any) =>
+							String(it.name).toLowerCase() === name.toLowerCase()
+							&& String(it.source).toUpperCase() === "XPHB",
+						);
+						must(matches.length === 1, `${name}|XPHB count was ${matches.length}`);
+						const spell = matches[0];
+						must(spell.alwaysPrepared === true && spell.prepared === true, `${name}|XPHB is not always prepared`);
+						must(spell.subclassSpellGrantOwners?.some((owner: any) =>
+							owner.key === "artificer|efa|cartographer|efa"
+							&& owner.sourceFeature === "Cartographer Spells"),
+						`${name}|XPHB owner ledger was ${JSON.stringify(spell.subclassSpellGrantOwners)}`);
+					}
+					const card = state.getSpellcastingClassBreakdown().find((it: any) =>
+						it.className === "Artificer" && it.classSource === "EFA");
+					must(card, "Artificer|EFA spellcasting card is missing");
+					must(card.spellsGranted >= expected.length, `granted count ${card.spellsGranted} < ${expected.length}`);
+					must(card.spellsCount <= card.spellsMax, `chosen prepared count ${card.spellsCount} exceeds allowance ${card.spellsMax}`);
+
+					const saved = state.toJson();
+					state.loadFromJson(saved);
+					for (const name of expected) {
+						const spell = findSpell(name);
+						must(spell?.subclassSpellGrantOwners?.some((owner: any) => owner.key === "artificer|efa|cartographer|efa"),
+							`${name}|XPHB lost exact owner on round-trip`);
+					}
+					return;
+				}
+
+				if (probe === "mappingMagic") {
+					createAtlas();
+					const snapshot = state.getCartographerMappingMagicSnapshot();
+					const intMod = state.getAbilityMod("int");
+					must(snapshot.illuminatedCartography.usesMax === Math.max(1, intMod),
+						`Illuminated Cartography uses ${snapshot.illuminatedCartography.usesMax}, INT mod ${intMod}`);
+					must(snapshot.illuminatedCartography.spell.name === "Faerie Fire"
+						&& snapshot.illuminatedCartography.spell.source === "XPHB"
+						&& snapshot.illuminatedCartography.economy.type === "action"
+						&& snapshot.illuminatedCartography.expendsSpellSlot === false
+						&& snapshot.illuminatedCartography.requiresPreparation === false,
+					`Illuminated Cartography contract was ${JSON.stringify(snapshot.illuminatedCartography)}`);
+					const faerieFireData = cs?._spells?._allSpells?.find((it: any) =>
+						it.name === "Faerie Fire" && it.source === "XPHB");
+					must(faerieFireData?.time?.[0]?.unit === "action"
+						&& faerieFireData?.duration?.some((it: any) => it.concentration === true),
+					`Faerie Fire|XPHB action/concentration data was ${JSON.stringify(faerieFireData)}`);
+
+					const slotsBefore = state.getSpellSlots()?.[1]?.current;
+					const preparedBefore = state.getSpellcastingClassBreakdown()
+						.find((it: any) => it.className === "Artificer" && it.classSource === "EFA")?.spellsCount;
+					const cast = state.commitFeatureSpellCast("efa-cartographer:illuminated-cartography");
+					must(cast?.ok && cast?.receipt?.spellUid === "faerie fire|xphb" && cast?.receipt?.actionType === "action",
+						`feature cast failed: ${JSON.stringify(cast)}`);
+					must(state.isActionTypeAvailable("action") === true,
+						"out-of-combat feature cast stranded the action ledger");
+					must(state.getSpellSlots()?.[1]?.current === slotsBefore, "feature cast consumed a spell slot");
+					must(state.getSpellcastingClassBreakdown()
+						.find((it: any) => it.className === "Artificer" && it.classSource === "EFA")?.spellsCount === preparedBefore,
+					"feature cast changed the prepared allowance");
+					must(state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent
+						=== snapshot.illuminatedCartography.usesCurrent - 1, "feature cast did not spend one use");
+					state.onLongRest();
+					must(state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent
+						=== snapshot.illuminatedCartography.usesMax, "Long Rest did not restore Illuminated Cartography");
+
+					state.startCombat();
+					state.resetTurnEconomy();
+					const usesBeforeActionGate = state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent;
+					const ordinaryAction = state.commitActionEconomy("action", {trackOnlyInCombat: true});
+					must(ordinaryAction?.ok && ordinaryAction?.tracked
+						&& state.commitFeatureSpellCast("efa-cartographer:illuminated-cartography")?.ok === false
+						&& state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent === usesBeforeActionGate,
+					"ordinary-spell action did not block the feature cast transactionally");
+					state.resetTurnEconomy();
+					const combatFeatureCast = state.commitFeatureSpellCast("efa-cartographer:illuminated-cartography");
+					must(combatFeatureCast?.ok
+						&& state.isActionTypeAvailable("action") === false
+						&& state.commitActionEconomy("action", {trackOnlyInCombat: true})?.ok === false,
+					"feature cast did not reserve the shared combat action ledger");
+					state.endCombat();
+
+					state.resetTurnEconomy();
+					state.setSpeed("walk", 35);
+					const jumpDirect = () => state.useCartographerPortalJump({
+						destinationMode: "direct",
+						confirmedVisible: true,
+						confirmedWithin10Feet: true,
+						confirmedUnoccupied: true,
+					});
+					const directOutOfCombat = jumpDirect();
+					const repeatedOutOfCombat = jumpDirect();
+					must(directOutOfCombat?.ok && repeatedOutOfCombat?.ok
+						&& state.getMovementEconomyState().used === 0
+						&& state.getMovementEconomyState().receipts.length === 0,
+					`out-of-combat Portal Jump stranded movement: ${JSON.stringify({directOutOfCombat, repeatedOutOfCombat})}`);
+					const afterOutOfCombatJumps = state.toJson();
+					state.loadFromJson(afterOutOfCombatJumps);
+					must(jumpDirect()?.ok && state.getMovementEconomyState().used === 0,
+						"out-of-combat Portal Jump stranded movement after save/load");
+
+					state.startCombat();
+					const directInCombat = jumpDirect();
+					must(directInCombat?.ok && state.getMovementEconomyState().used === 17,
+						`Portal Jump did not spend floor(35/2) in combat: ${JSON.stringify(directInCombat)}`);
+					state.resetTurnEconomy();
+					must(state.getMovementEconomyState().used === 0, "canonical turn reset did not release Portal Jump movement");
+					state.setSpeed("walk", 0);
+					must(state.useCartographerPortalJump({destinationMode: "direct"})?.ok === false
+						&& state.getMovementEconomyState().used === 0, "zero-Speed Portal Jump was not refused transactionally");
+					state.setSpeed("walk", 30);
+					state.spendMovement(20, {source: "e2e"});
+					must(state.useCartographerPortalJump({destinationMode: "direct"})?.ok === false
+						&& state.getMovementEconomyState().used === 20, "insufficient-movement Portal Jump mutated its ledger");
+
+					state.resetTurnEconomy();
+					const portalHolder = state.getCartographerPortalJumpState().destinations.holder.holders[0];
+					const hiddenHolderJump = state.useCartographerPortalJump({
+						destinationMode: "holder",
+						holderId: portalHolder.id,
+						confirmedVisible: false,
+						confirmedHolderWithin30Feet: true,
+						confirmedWithin5FeetOfHolder: true,
+						confirmedUnoccupied: true,
+					});
+					must(hiddenHolderJump?.ok === false
+						&& hiddenHolderJump?.reason === "portal-jump-confirmation-required"
+						&& state.getMovementEconomyState().used === 0,
+					`holder Portal Jump accepted a hidden destination: ${JSON.stringify(hiddenHolderJump)}`);
+					const visibleHolderJump = state.useCartographerPortalJump({
+						destinationMode: "holder",
+						holderId: portalHolder.id,
+						confirmedVisible: true,
+						confirmedHolderWithin30Feet: true,
+						confirmedWithin5FeetOfHolder: true,
+						confirmedUnoccupied: true,
+					});
+					must(visibleHolderJump?.ok
+						&& visibleHolderJump?.destination?.visible === true
+						&& visibleHolderJump?.destination?.holder?.name === "Thorn",
+					`visible holder Portal Jump failed: ${JSON.stringify(visibleHolderJump)}`);
+
+					state.resetTurnEconomy();
+					const descriptor = state.getTargetingExceptionDescriptors()[0];
+					const holder = descriptor?.holders?.[0];
+					must(descriptor?.bypass?.sight === true && descriptor?.bypass?.cover === true && descriptor?.bypass?.range === false,
+						`Positioning bypass was ${JSON.stringify(descriptor?.bypass)}`);
+					const positioning = state.resolveTargetingException({
+						descriptorId: descriptor.id,
+						targetHolderId: holder.id,
+						effectRequiresSight: true,
+						confirmedSamePlane: true,
+						confirmedWithinRange: true,
+						confirmedTargetEligibility: true,
+					});
+					must(positioning?.ok && positioning?.applies
+						&& positioning?.preservedRequirements?.includes("range")
+						&& positioning?.holder?.name === "Thorn",
+					`Positioning resolution failed: ${JSON.stringify(positioning)}`);
+
+					const atlas = state.getAdventurersAtlas();
+					const self = atlas.holders.find((it: any) => it.isSelf);
+					state.destroyAdventurersAtlasHolder(self.id);
+					must(state.getCartographerMappingMagicSnapshot().positioning.available === false,
+						"destroyed self map left Positioning available");
+					return;
+				}
+
+				if (probe === "guidedPrecisionSpell") {
+					state.startCombat();
+					const intMod = state.getAbilityMod("int");
+					const spellRider = state.getDeferredFlatDamageRiderOptions({
+						route: "spell",
+						spell: {name: "Guiding Bolt", source: "XPHB"},
+					})[0];
+					must(spellRider, "exact Cartographer spell route did not offer Guided Precision");
+					const spellResult = state.consumeDeferredFlatDamageRider(spellRider);
+					must(spellResult?.value === intMod, `spell rider value ${spellResult?.value} != INT mod ${intMod}`);
+					must(state.getDeferredFlatDamageRiderOptions({route: "attack"}).length === 0,
+						"attack route did not share the once-per-turn receipt");
+					state.resetTurnEconomy();
+					const attackRider = state.getDeferredFlatDamageRiderOptions({route: "attack"})[0];
+					must(attackRider, "turn reset did not release Guided Precision");
+					must(state.consumeDeferredFlatDamageRider(attackRider)?.value === intMod, "attack route used the wrong live INT modifier");
+					must(state.getDeferredFlatDamageRiderOptions({
+						route: "spell",
+						spell: {name: "Mind Spike", source: "XPHB"},
+					}).length === 0, "spell route did not share the attack receipt");
+					must(state.getDeferredFlatDamageRiderOptions({
+						route: "spell",
+						spell: {name: "Faerie Fire", source: "PHB"},
+					}).length === 0, "PHB Faerie Fire passed the XPHB source gate");
+					must(state.getDeferredFlatDamageRiderOptions({
+						route: "spell",
+						spell: {name: "Fireball", source: "XPHB"},
+					}).length === 0, "non-Cartographer spell passed the spell-list gate");
+					return;
+				}
+
+				if (probe === "guidedPrecision") {
+					const intMod = state.getAbilityMod("int");
+					const outsideRider = state.getDeferredFlatDamageRiderOptions({route: "attack"})[0];
+					const outsideResult = state.consumeDeferredFlatDamageRider(outsideRider);
+					must(outsideResult?.value === intMod
+						&& outsideResult?.turnReceipt == null
+						&& state.getDeferredFlatDamageRiderOptions({route: "attack"}).length === 1,
+					`Guided Precision stranded a noncombat receipt: ${JSON.stringify(outsideResult)}`);
+					const outsideSaved = state.toJson();
+					state.loadFromJson(outsideSaved);
+					must(state.getDeferredFlatDamageRiderOptions({route: "attack"}).length === 1,
+						"noncombat Guided Precision became unavailable after save/load");
+
+					state.startCombat();
+					state.consumeActionType("action");
+					state.spendMovement(10, {source: "e2e:guided-precision"});
+					const attackRider = state.getDeferredFlatDamageRiderOptions({route: "attack"})[0];
+					must(attackRider?.requiresOwnSpellTargetUid === "faerie fire|xphb",
+						`attack route did not require own Faerie Fire|XPHB: ${JSON.stringify(attackRider)}`);
+					must(state.consumeDeferredFlatDamageRider(attackRider)?.value === intMod,
+						"attack route used the wrong live INT modifier");
+					must(state.getDeferredFlatDamageRiderOptions({route: "attack"}).length === 0,
+						"attack route did not consume its once-per-turn receipt");
+					const combatRound = state.getCombatRound();
+					state.advanceTurnReceiptBoundary();
+					const nextCreatureRider = state.getDeferredFlatDamageRiderOptions({route: "attack"})[0];
+					must(state.getCombatRound() === combatRound
+						&& state.isActionTypeAvailable("action") === false
+						&& state.getMovementEconomyState().used === 10
+						&& nextCreatureRider
+						&& state.consumeDeferredFlatDamageRider(nextCreatureRider)?.value === intMod,
+					"independent turn boundary did not release Guided Precision while preserving action/movement economy");
+					state.resetTurnEconomy();
+					must(state.isActionTypeAvailable("action") === true
+						&& state.getMovementEconomyState().used === 0
+						&& state.getDeferredFlatDamageRiderOptions({route: "attack"}).length === 1,
+					"canonical Reset Turn did not release Guided Precision and reset turn economy");
+
+					state.setConcentration({name: "Faerie Fire", source: "XPHB", level: 1});
+					must(state.getDamageConcentrationProtection()?.spellUid === "faerie fire|xphb",
+						"own Faerie Fire|XPHB lacks damage-only concentration protection");
+					state.setConcentration({name: "Faerie Fire", source: "PHB", level: 1});
+					must(state.getDamageConcentrationProtection() == null, "PHB Faerie Fire gained XPHB protection");
+					state.setMaxHp(40);
+					state.setCurrentHp(40);
+					state.setConcentration({name: "Faerie Fire", source: "XPHB", level: 1});
+					state.takeDamage(80);
+					must(state.isDead(), "massive damage did not produce death");
+					state.breakConcentration();
+					must(state.getConcentration() == null, "death outcome was falsely protected from concentration loss");
+					return;
+				}
+
+				if (probe === "ingeniousMovement") {
+					state.startCombat();
+					const resource = () => state.getResources().find((it: any) =>
+						it.featureUid === "Flash of Genius|Artificer|EFA");
+					const before = resource()?.current;
+					must(Number.isFinite(before), "Flash of Genius resource is missing");
+					const originalSave = cs._saveCurrentCharacter.bind(cs);
+					const originalResolver = cs._pResolveEfaCartographerIngeniousMovement.bind(cs);
+					const saveSnapshots: any[] = [];
+					cs._saveCurrentCharacter = async () => {
+						const saved = await originalSave();
+						saveSnapshots.push({
+							resource: resource()?.current,
+							reactionAvailable: state.isActionTypeAvailable("reaction"),
+						});
+						return saved;
+					};
+					cs._pResolveEfaCartographerIngeniousMovement = async (committedFlashResult: any) => {
+						must(saveSnapshots.length === 1
+							&& saveSnapshots[0].resource === before - 1
+							&& saveSnapshots[0].reactionAvailable === false,
+						`Flash was not saved before Ingenious Movement: ${JSON.stringify(saveSnapshots)}`);
+						return state.resolveEfaCartographerIngeniousMovement({
+							committedFlashResult,
+							targetType: "creature",
+							targetName: "Thorn",
+							targetWilling: true,
+							targetVisible: true,
+							targetDistanceFeet: 30,
+							teleportDistanceFeet: 30,
+							destinationVisible: true,
+							destinationUnoccupied: true,
+						});
+					};
+					let committed;
+					try {
+						committed = await cs._pCommitEfaFlashOfGenius({
+							rollType: "savingThrow",
+							isFailed: true,
+							targetType: "self",
+						});
+					} finally {
+						cs._saveCurrentCharacter = originalSave;
+						cs._pResolveEfaCartographerIngeniousMovement = originalResolver;
+					}
+					const followUp = committed?.followUps?.[0]?.value;
+					must(committed?.ok && committed?.committed && resource()?.current === before - 1
+						&& state.isActionTypeAvailable("reaction") === false,
+					`Flash commit was not atomic: ${JSON.stringify(committed)}`);
+					must(followUp?.ok && followUp?.resolved && followUp?.target?.name === "Thorn"
+						&& followUp?.teleport?.maxDistanceFeet === 30
+						&& followUp?.teleport?.requiresExternalRelocation === true,
+					`structured teleport follow-up was ${JSON.stringify(followUp)}`);
+
+					reset();
+					state.startCombat();
+					const beforeDecline = resource()?.current;
+					const declineSaveSnapshots: any[] = [];
+					cs._saveCurrentCharacter = async () => {
+						const saved = await originalSave();
+						declineSaveSnapshots.push({
+							resource: resource()?.current,
+							reactionAvailable: state.isActionTypeAvailable("reaction"),
+						});
+						return saved;
+					};
+					cs._pResolveEfaCartographerIngeniousMovement = async (flash: any) => {
+						must(declineSaveSnapshots.length === 1
+							&& declineSaveSnapshots[0].resource === beforeDecline - 1
+							&& declineSaveSnapshots[0].reactionAvailable === false,
+						`declined Flash was not saved before Ingenious Movement: ${JSON.stringify(declineSaveSnapshots)}`);
+						return state.resolveEfaCartographerIngeniousMovement({committedFlashResult: flash, declined: true});
+					};
+					let declined;
+					try {
+						declined = await cs._pCommitEfaFlashOfGenius({
+							rollType: "abilityCheck",
+							isFailed: true,
+							targetType: "self",
+						});
+					} finally {
+						cs._saveCurrentCharacter = originalSave;
+						cs._pResolveEfaCartographerIngeniousMovement = originalResolver;
+					}
+					must(declined?.ok && declined?.committed
+						&& declined?.followUps?.[0]?.value?.declined === true
+						&& resource()?.current === beforeDecline - 1
+						&& state.isActionTypeAvailable("reaction") === false,
+					`declined follow-up refunded or failed to commit Flash: ${JSON.stringify(declined)}`);
+					return;
+				}
+
+				if (probe === "superiorAtlas") {
+					createAtlas();
+					const artificerLevel = exactClass().level;
+					state.setMaxHp(40);
+					state.setCurrentHp(40);
+					const atlas = state.getAdventurersAtlas();
+					const self = atlas.holders.find((it: any) => it.isSelf);
+					const ally = atlas.holders.find((it: any) => !it.isSelf);
+					state.takeDamage(40);
+					const safeHavenId = (globalThis as any).CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID;
+					const safeHaven = state.applyZeroHpIntervention(safeHavenId, {
+						destroyedAt: 1_700_000_040_000,
+					});
+					must(safeHaven?.applied && safeHaven?.committed && safeHaven?.hp === artificerLevel * 2,
+						`Safe Haven result was ${JSON.stringify(safeHaven)}`);
+					must(state.getCurrentHp() === artificerLevel * 2, "Safe Haven HP did not reach the sheet");
+					must(state.getAdventurersAtlas().holders.find((it: any) => it.id === self.id)?.status === "destroyed",
+						"Safe Haven did not destroy the exact self map");
+					must(state.getAdventurersAtlas().holders.find((it: any) => it.id === ally.id)?.status === "active",
+						"Safe Haven destroyed an unrelated external map");
+					must(safeHaven?.postApplication?.teleport?.status === "requires-placement"
+						&& safeHaven?.postApplication?.teleport?.maxDistanceFeet === 5
+						&& safeHaven?.postApplication?.teleport?.anchors?.some((anchor: any) =>
+							anchor.kind === "cartographer"
+							&& anchor.name === state.getCharacterName()
+							&& anchor.isActiveMapHolder === false)
+						&& safeHaven?.postApplication?.teleport?.anchors?.some((anchor: any) =>
+							anchor.kind === "activeMapHolder"
+							&& anchor.name === "Thorn"
+							&& anchor.isActiveMapHolder === true),
+					`Safe Haven placement contract was ${JSON.stringify(safeHaven?.postApplication?.teleport)}`);
+
+					reset();
+					createAtlas();
+					const selfOnlyAtlas = state.getAdventurersAtlas();
+					const selfOnlyMap = selfOnlyAtlas.holders.find((it: any) => it.isSelf);
+					const externalMap = selfOnlyAtlas.holders.find((it: any) => !it.isSelf);
+					state.destroyAdventurersAtlasHolder(externalMap.id);
+					state.setMaxHp(40);
+					state.setCurrentHp(40);
+					state.takeDamage(40);
+					const selfOnlySafeHaven = state.applyZeroHpIntervention(safeHavenId, {
+						destroyedAt: 1_700_000_040_001,
+					});
+					const selfOnlyAnchors = selfOnlySafeHaven?.postApplication?.teleport?.anchors || [];
+					must(selfOnlySafeHaven?.applied
+						&& selfOnlySafeHaven?.consumption?.holderId === selfOnlyMap.id
+						&& selfOnlyAnchors.length === 1
+						&& selfOnlyAnchors[0]?.kind === "cartographer"
+						&& selfOnlyAnchors[0]?.holderId === null
+						&& selfOnlyAnchors[0]?.name === state.getCharacterName()
+						&& selfOnlyAnchors[0]?.isActiveMapHolder === false,
+					`self-only Safe Haven lost the Cartographer anchor: ${JSON.stringify(selfOnlySafeHaven)}`);
+
+					reset();
+					createAtlas([
+						{name: "Thorn", isSelf: false, status: "active"},
+						{name: "Vey", isSelf: false, status: "active"},
+					]);
+					const thorn = state.getAdventurersAtlas().holders.find((it: any) => it.name === "Thorn");
+					const external = state.resolveAdventurersAtlasSafeHavenForExternalHolder(thorn.id, {
+						confirmedReducedToZero: true,
+						killedOutright: false,
+						destroyedAt: 1_700_000_040_000,
+					});
+					must(external?.ok && external?.committed && external?.hp === artificerLevel * 2
+						&& external?.postApplication?.teleport?.applied === false,
+					`external-holder resolver was ${JSON.stringify(external)}`);
+					must(JSON.stringify(external).includes("requires-placement"), "external resolver did not surface placement requirements");
+
+					reset();
+					createAtlas();
+					state.setMaxHp(40);
+					state.setCurrentHp(40);
+					const massiveSelf = state.getAdventurersAtlas().holders.find((it: any) => it.isSelf);
+					state.takeDamage(80);
+					must(state.isDead() && state.getPendingZeroHpIntervention() == null,
+						"Safe Haven was offered after killed-outright damage");
+					must(state.getAdventurersAtlas().holders.find((it: any) => it.id === massiveSelf.id)?.status === "active",
+						"killed-outright damage consumed the self map");
+
+					reset();
+					createAtlas();
+					const unerring = state.getCartographerMappingMagicSnapshot().unerringPath;
+					const findThePathData = cs?._spells?._allSpells?.find((it: any) =>
+						it.name === "Find the Path" && it.source === "XPHB");
+					must(unerring?.available && unerring?.usesCurrent === 1
+						&& unerring?.spell?.name === "Find the Path"
+						&& unerring?.spell?.source === "XPHB"
+						&& unerring?.expendsSpellSlot === false
+						&& unerring?.requiresPreparation === false
+						&& JSON.stringify(unerring?.componentWaivers) === JSON.stringify(["v", "s", "m"])
+						&& unerring?.economy?.label === "1 minute",
+					`Unerring Path contract was ${JSON.stringify(unerring)}`);
+					must(findThePathData?.time?.[0]?.unit === "minute"
+						&& findThePathData?.duration?.some((it: any) => it.concentration === true),
+					`Find the Path|XPHB cast semantics were ${JSON.stringify(findThePathData)}`);
+					const unerringCast = state.commitFeatureSpellCast("efa-cartographer:unerring-path");
+					must(unerringCast?.ok && state.getCartographerMappingMagicSnapshot().unerringPath.usesCurrent === 0,
+						`Unerring Path cast failed: ${JSON.stringify(unerringCast)}`);
+					state.onLongRest();
+					must(state.getCartographerMappingMagicSnapshot().unerringPath.usesCurrent === 1,
+						"Long Rest did not restore Unerring Path");
+					return;
+				}
+
+				if (probe === "lifecycleSpellCleanup") {
+					const saved = state.toJson();
+					state.setSubclass("Artificer", {name: "Armorer", shortName: "Armorer", source: "EFA"});
+					const swappedFaerieFire = findSpell("Faerie Fire");
+					must(!swappedFaerieFire,
+						`subclass swap retained Faerie Fire|XPHB: ${JSON.stringify(swappedFaerieFire)}`);
+					state.loadFromJson(saved);
+					return;
+				}
+
+				if (probe === "lifecycle") {
+					createAtlas();
+					state.commitFeatureSpellCast("efa-cartographer:illuminated-cartography");
+					const saved = state.toJson();
+					const level = exactClass().level;
+
+					state.addClass({
+						name: "Artificer",
+						source: "EFA",
+						level: 2,
+						subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+					});
+					must(state.getCartographerMappingMagicSnapshot().illuminatedCartography.available === false
+						&& state.getAdventurersAtlas().invalidatedReason === "subclass-removed",
+					"level drop did not tear down Cartographer state");
+
+					state.loadFromJson(saved);
+					state.setSubclass("Artificer", {name: "Armorer", shortName: "Armorer", source: "EFA"});
+					const swappedSnapshot = state.getCartographerMappingMagicSnapshot();
+					const swappedAtlas = state.getAdventurersAtlas();
+					must(swappedSnapshot.illuminatedCartography.available === false,
+						`subclass swap left Mapping Magic available: ${JSON.stringify(swappedSnapshot.illuminatedCartography)}`);
+					must(swappedAtlas.invalidatedReason === "subclass-removed",
+						`subclass swap left Atlas valid: ${JSON.stringify(swappedAtlas)}`);
+					must(state.getAdventurersAtlasSafeHavenAvailability()?.available === false,
+						"non-Cartographer subclass retained Safe Haven availability");
+
+					state.loadFromJson(saved);
+					state.setSubclass("Artificer", {name: "Cartographer", shortName: "Cartographer", source: "TCE"});
+					must(state.getCartographerMappingMagicSnapshot().illuminatedCartography.available === false,
+						"same-label TCE subclass passed the EFA source gate");
+
+					state.loadFromJson(saved);
+					state.removeClass("Artificer", "EFA");
+					state.addClass({
+						name: "Artificer",
+						source: "TCE",
+						level,
+						subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+					});
+					must(state.getCartographerMappingMagicSnapshot().illuminatedCartography.available === false,
+						"TCE Artificer passed the EFA class-source gate");
+
+					state.loadFromJson(saved);
+					must(exactClass() && findSpell("Faerie Fire")?.subclassSpellGrantOwners?.some((owner: any) =>
+						owner.key === "artificer|efa|cartographer|efa"),
+					"export round-trip lost EFA identity or spell ownership");
+					must(state.getCartographerMappingMagicSnapshot().castReceipts.some((it: any) =>
+						it.spellUid === "faerie fire|xphb"),
+					"export round-trip lost the exact feature-cast receipt");
+					return;
+				}
+
+				throw new Error(`Unknown Cartographer probe "${probe}"`);
+			} finally {
+				reset();
+			}
+		}, {probe, spellThreshold});
+	}
+
+	private async _probeCartographerAtlasRestFlow (): Promise<void> {
+		const original = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.toJson?.());
+		if (!original) throw new Error("Cartographer Atlas probe: could not snapshot character");
+
+		try {
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				cs._state.addItem({name: "Cartographer's Tools", source: "PHB", type: "AT"}, 1);
+				cs.openAdventurersAtlasLongRest();
+			});
+			let modal = this.page.locator(".ve-ui-modal__inner:visible").filter({hasText: /Long Rest/i}).last();
+			await expect(modal.locator(".charsheet__atlas-rest")).toBeVisible();
+			await expect(modal.locator(".charsheet__atlas-rest-modes input[value='create']")).toBeDisabled();
+			await modal.getByRole("button", {name: "Cancel"}).click({timeout: 10_000});
+			await expect(modal).toBeHidden();
+
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				cs._state.addItem({name: "Cartographer's Tools", source: "XPHB", type: "AT"}, 1);
+				cs.openAdventurersAtlasLongRest();
+			});
+			modal = this.page.locator(".ve-ui-modal__inner:visible").filter({hasText: /Long Rest/i}).last();
+			await expect(modal.locator(".charsheet__atlas-rest")).toBeVisible({timeout: 10_000});
+			await modal.locator(".charsheet__atlas-rest-modes input[value='create']").check({timeout: 10_000});
+			await modal.locator(".charsheet__atlas-rest-held input").check({timeout: 10_000});
+			await modal.locator(".charsheet__atlas-rest-self-choice input").check({timeout: 10_000});
+			const holderRows = modal.locator(".charsheet__atlas-rest-holder");
+			await holderRows.nth(1).getByRole("button", {name: /Remove ally holder/i}).click({timeout: 10_000});
+			await holderRows.first().locator("input").fill("Thorn", {timeout: 10_000});
+			await expect(modal.locator(".charsheet__atlas-rest-feedback")).toContainText(/Ready: 2 active maps/i);
+			await modal.getByRole("button", {name: /Finish Long Rest/i}).click({timeout: 10_000});
+			await expect(modal).toBeHidden();
+
+			const created = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet._state;
+				const atlas = state.getAdventurersAtlas();
+				return {
+					atlas,
+					capacity: state.getAdventurersAtlasCapacity(),
+					initiative: state.getRollBonusDice("initiative"),
+					integration: state.getAdventurersAtlasIntegrationSnapshot(),
+				};
+			});
+			expect(created.atlas).toMatchObject({
+				generation: 1,
+				holders: [
+					expect.objectContaining({name: "Mira Wayfinder", isSelf: true, status: "active"}),
+					expect.objectContaining({name: "Thorn", isSelf: false, status: "active"}),
+				],
+			});
+			expect(created.atlas.capacityAtCreation).toBe(created.capacity);
+			expect(created.initiative).toEqual([{
+				dice: "1d4",
+				sign: 1,
+				source: "Adventurer's Atlas — Awareness",
+			}]);
+			expect(created.integration.holders.find((it: any) => it.name === "Thorn")?.initiativeDie).toBe("1d4");
+
+			await this.switchToTab(this.tabFeatures);
+			const card = this.page.locator(".charsheet__atlas-card");
+			await expect(card).toBeVisible();
+			await expect(card).toContainText(/Active/);
+			await expect(card).toContainText(/Mira Wayfinder/);
+			await expect(card).toContainText(/Thorn/);
+			await expect(card).toContainText(/1d4 to Initiative/);
+
+			await this.page.evaluate(() => (globalThis as any).charSheet.openAdventurersAtlasLongRest());
+			modal = this.page.locator(".ve-ui-modal__inner:visible").filter({hasText: /Long Rest/i}).last();
+			await expect(modal.locator(".charsheet__atlas-rest")).toBeVisible({timeout: 10_000});
+			await modal.locator(".charsheet__atlas-rest-modes input[value='recreate']").check({timeout: 10_000});
+			await modal.locator(".charsheet__atlas-rest-held input").check({timeout: 10_000});
+			await modal.locator(".charsheet__atlas-rest-holder input").first().fill("Vey", {timeout: 10_000});
+			await expect(modal.locator(".charsheet__atlas-rest-feedback")).toContainText(/Ready: 2 active maps/i);
+			await modal.getByRole("button", {name: /Finish Long Rest/i}).click({timeout: 10_000});
+			await expect(modal).toBeHidden();
+			const recreated = await this.page.evaluate(() => {
+				const atlas = (globalThis as any).charSheet._state.getAdventurersAtlas();
+				return {generation: atlas.generation, holders: atlas.holders.map((it: any) => it.name)};
+			});
+			expect(recreated).toEqual({generation: 2, holders: ["Mira Wayfinder", "Vey"]});
+
+			await this.switchToTab(this.tabOverview);
+			await this.page.locator("#charsheet-btn-undo-rest").click({timeout: 10_000});
+			const undone = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet._state;
+				const beforeRoundTrip = state.getAdventurersAtlas();
+				const saved = state.toJson();
+				state.loadFromJson(saved);
+				const afterRoundTrip = state.getAdventurersAtlas();
+				const allyOnly = state.recreateAdventurersAtlas([
+					{name: "Thorn", isSelf: false, status: "active"},
+					{name: "Vey", isSelf: false, status: "active"},
+				], {isHoldingTools: true});
+				return {
+					beforeRoundTrip,
+					afterRoundTrip,
+					allyOnlyOk: allyOnly.ok,
+					allyOnlySelfDie: state.getAdventurersAtlasInitiativeDie(),
+					allyOnlySheetDice: state.getRollBonusDice("initiative"),
+					allyOnlyExternalDice: state.getAdventurersAtlasIntegrationSnapshot().holders.map((it: any) => it.initiativeDie),
+				};
+			});
+			expect(undone.beforeRoundTrip.generation).toBe(1);
+			expect(undone.beforeRoundTrip.holders.map((it: any) => it.name)).toEqual(["Mira Wayfinder", "Thorn"]);
+			expect(undone.afterRoundTrip).toEqual(undone.beforeRoundTrip);
+			expect(undone.allyOnlyOk).toBe(true);
+			expect(undone.allyOnlySelfDie).toBeNull();
+			expect(undone.allyOnlySheetDice).toEqual([]);
+			expect(undone.allyOnlyExternalDice).toEqual(["1d4", "1d4"]);
+		} finally {
+			await this.page.evaluate((saved) => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.loadFromJson?.(saved);
+				cs?._renderCharacter?.();
+			}, original);
+			await this.dismissTransientModals();
+		}
+	}
+
+	/**
 	 * Spawn a character in-memory via `window.charSheet.spawn` (the fast test-setup path — see
 	 * `spawn.spec.ts`) and assert the spawn left nothing unresolved.
 	 */

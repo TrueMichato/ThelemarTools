@@ -11,9 +11,9 @@ For the full *what* and *why* of every check, see the
 the skill reference at
 [`.agents/skills/e2e-character-tests/references/standard.md`](../../.agents/skills/e2e-character-tests/references/standard.md).
 
-## TGTT character specs (31 catalogued)
+## TGTT character specs (34 catalogued)
 
-> The table below lists 31 of the 45 `tgtt-*.spec.ts` files currently in
+> The table below lists 34 of the 48 `tgtt-*.spec.ts` files currently in
 > `test/e2e/specs/`. It has drifted behind the suite; rows are added as specs are
 > written, but the backlog has not been backfilled. Absence from this table does
 > **not** mean a spec does not exist — `tgtt-lycan-blood-hunter.spec.ts` is one
@@ -55,6 +55,7 @@ the skill reference at
 
 | 32 | `tgtt-profane-soul-blood-hunter.spec.ts` | Order of the Profane Soul Blood Hunter (`BH2022` homebrew) · Human | 1–20 | The only Blood Hunter that casts. Pins the order's **reduced** pact table (peaking at 2 slots of 4th, against the warlock's 4 of 5th) so a copy of the warlock progression cannot pass, the Hemocraft-derived casting ability, and the nine-patron choice. Surfaced CS-BUG-157/158/159 and then CS-BUG-160/161 — the latter pair found by reading the *passing* run's export, where a recorded "Pact Magic = Intelligence" choice contradicted the `wis` actually in use. |
 | 33 | `tgtt-ghostslayer-blood-hunter.spec.ts` | Order of the Ghostslayer Blood Hunter (`BH2022` homebrew) · Human | 1–20 | The only order that **modifies the base class's own numbers** rather than adding machinery beside them, so every pin here is order-relative. Curse Specialist's +1 makes Blood Maledict 2/2/3/5/5 at the five checkpoints where a plain Blood Hunter reads 1/2/3/4/4. Brand of Sundering doubles the Crimson Rite die from 11th, pinned **exactly** (`1d4`→`1d6`→`2d8`→`2d10`) through the tightened `crimsonRiteMechanics` `expectDice`; the previous existence-only rider check passed on any value and was deliberately not inherited. Surfaced CS-BUG-162 — the free Blood Curse of the Exorcist was described but never granted, found by reading the passing export rather than trusting the green. |
+| 34 | `tgtt-efa-cartographer-artificer.spec.ts` | Cartographer Artificer (`Artificer|EFA`, `Cartographer|EFA`) · Dwarf | 1–20 | Exact EFA/TCE source isolation; all five XPHB spell thresholds without prepared-count consumption; Tools of the Trade proficiencies, duplicate replacements, and Spell Scroll-only crafting; real Long Rest Atlas create/recreate/undo/card/Awareness flow; Mapping Magic movement/targeting/free casts; Guided Precision shared receipt and concentration protection; committed Flash → Ingenious Movement; Safe Haven and Unerring Path; teardown and export round-trip. |
 
 ## Other specs
 

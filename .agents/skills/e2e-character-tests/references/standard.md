@@ -248,6 +248,7 @@ stay clean). Use this decision tree:
 | Persists a feature choice which drives calculations | choice | `featureChoiceCalculation` |
 | Stateful Blood Hunter mechanics | class mechanic | `bloodMaledictAmplification`, `crimsonRiteMechanics`, `hybridTransformationMechanics` |
 | Mechanic exposed only through a bespoke state API (computed cost, derived bundle, immunity flag, …) | escape hatch | `stateCall` |
+| Several ordered state/UI transactions with dynamic receipts or holder IDs | reusable scenario probe | a page-object-owned dispatcher such as `cartographerProbe`; restore the original character in `finally` |
 
 ### Canonical examples (one per family)
 
