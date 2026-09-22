@@ -2309,6 +2309,10 @@ class CharacterSheetPage {
 		return [...parts, descriptor.identity.source].join("|");
 	}
 
+	static _isFeatureCompanionCreationActionAvailable (state) {
+		return state?.isActionTypeAvailable?.("action", {trackOnlyInCombat: true}) !== false;
+	}
+
 	_getFeatureCompanionDescriptor (companion) {
 		const featureUid = companion?.featureGrant?.uid || companion?.scaling?.featureUid;
 		return featureUid ? CharacterSheetCompanionRules.getDescriptor(featureUid) : null;
@@ -2328,6 +2332,7 @@ class CharacterSheetPage {
 				if (!boundary?.available) return null;
 				const paymentOptions = CharacterSheetPage._getFeatureCompanionPaymentOptions(boundary);
 				const setupTransaction = boundary.setupChoices?.transaction || null;
+				const actionAvailable = CharacterSheetPage._isFeatureCompanionCreationActionAvailable(this._state);
 				const blockedReasons = new Set([
 					"activeCompanion",
 					"toolUnavailable",
@@ -2344,7 +2349,10 @@ class CharacterSheetPage {
 					boundary,
 					paymentOptions,
 					setupTransaction,
-					canAttempt: !blockedReasons.has(boundary.reason)
+					actionAvailable,
+					reason: actionAvailable ? boundary.reason : "actionUnavailable",
+					canAttempt: actionAvailable
+						&& !blockedReasons.has(boundary.reason)
 						&& boundary.focus?.eligibleReferences?.length > 0
 						&& paymentOptions.length > 0,
 				};
@@ -2626,7 +2634,7 @@ class CharacterSheetPage {
 		const id = `charsheet-feature-companion-create-${index}`;
 		const reason = model.canAttempt
 			? `Ready to review the current tool, payment, and ${model.setupTransaction?.requiredCount || 0} required modification choice${model.setupTransaction?.requiredCount === 1 ? "" : "s"}.`
-			: CharacterSheetPage._getFeatureCompanionCreationReasonMessage(model.boundary.reason);
+			: CharacterSheetPage._getFeatureCompanionCreationReasonMessage(model.reason);
 		return `<section class="charsheet__feature-companion-create" data-feature-companion-create-owner="${escape(model.ownerUid)}">
 			<div>
 				<h4 class="charsheet__feature-companion-manager-title">${escape(model.descriptor.identity.name)} (${escape(model.descriptor.identity.source)})</h4>
@@ -2656,9 +2664,9 @@ class CharacterSheetPage {
 		const model = this._getFeatureCompanionCreationModels()
 			.find(candidate => candidate.ownerUid === ownerUid);
 		if (!model?.canAttempt) {
-			const message = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(model?.boundary?.reason);
+			const message = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(model?.reason);
 			if (status) status.textContent = message;
-			return {ok: false, committed: false, reason: model?.boundary?.reason || "featureUnavailable"};
+			return {ok: false, committed: false, reason: model?.reason || "featureUnavailable"};
 		}
 
 		const requiredCount = Number(model.setupTransaction?.requiredCount) || 0;
@@ -2775,11 +2783,17 @@ class CharacterSheetPage {
 				transaction?.options.find(option => option.id === id)?.name || id);
 			const paymentOption = model.paymentOptions[getPaymentIndex()];
 			const toolReference = toolOptions[Number(tool.value)];
-			const isValid = selectedIds.length === requiredCount && !!paymentOption && !!toolReference;
+			const actionAvailable = CharacterSheetPage._isFeatureCompanionCreationActionAvailable(this._state);
+			const isValid = actionAvailable
+				&& selectedIds.length === requiredCount
+				&& !!paymentOption
+				&& !!toolReference;
 			confirm.disabled = !isValid;
-			status.textContent = isValid
-				? "Ready to create. The live boundary will validate these choices once more."
-				: `Choose exactly ${requiredCount} modification${requiredCount === 1 ? "" : "s"}.`;
+			status.textContent = !actionAvailable
+				? CharacterSheetPage._getFeatureCompanionCreationReasonMessage("actionUnavailable")
+				: isValid
+					? "Ready to create. The live boundary will validate these choices once more."
+					: `Choose exactly ${requiredCount} modification${requiredCount === 1 ? "" : "s"}.`;
 			review.innerHTML = `<dl>
 				<div><dt>Tool</dt><dd>${escape(toolReference ? `${toolReference.name} (${toolReference.source})` : "Not selected")}</dd></div>
 				<div><dt>Payment</dt><dd>${escape(paymentOption?.label || "Not selected")}</dd></div>
@@ -2808,9 +2822,11 @@ class CharacterSheetPage {
 					payment: payload.payment,
 					setupChoices: payload.setupChoices,
 				});
-				if (!currentBoundary.executable) {
+				const actionAvailable = CharacterSheetPage._isFeatureCompanionCreationActionAvailable(this._state);
+				if (!actionAvailable || !currentBoundary.executable) {
+					confirm.disabled = true;
 					status.textContent = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(
-						currentBoundary.reason,
+						actionAvailable ? currentBoundary.reason : "actionUnavailable",
 						currentBoundary.setupChoices?.error,
 					);
 					return;

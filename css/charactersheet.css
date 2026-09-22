@@ -16631,6 +16631,10 @@ body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary.disabled {
 	gap: var(--cs-space-md, 0.75rem);
 }
 
+.charsheet__feature-companion-create {
+	flex-wrap: wrap;
+}
+
 .charsheet__feature-companion-manager-title {
 	margin: 0;
 	font: inherit;

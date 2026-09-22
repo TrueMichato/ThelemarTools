@@ -554,6 +554,14 @@ atomic review modal contains:
 - optional appearance text; and
 - a final transaction review.
 
+The R3 boundary deliberately excludes transient combat action economy. The
+Manager therefore also reads the shared
+`isActionTypeAvailable("action", {trackOnlyInCombat: true})` gate. A spent
+Magic action renders an explicit unavailable state, disables the surface, and
+prevents both modal opening and transaction dispatch. The modal repeats this
+gate beside its final live boundary validation so a later turn-state change
+cannot close the review or spend anything.
+
 Confirmation re-reads the boundary with the completed payment and setup-choice
 payload before calling `pCreateFeatureCompanion()`. Cancel, stale validation,
 and transaction failure do not save or re-render and report through an ARIA

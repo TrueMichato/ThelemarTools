@@ -14,6 +14,8 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCompanionRules = globalThis.CharacterSheetCompanionRules;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const CSS_SRC = readFileSync(resolve(__dirname, "../../../css/charactersheet.css"), "utf8");
+const MOBILE_CSS_SRC = readFileSync(resolve(__dirname, "../../../css/charactersheet-mobile.css"), "utf8");
 const ARTIFICER_DATA = JSON.parse(readFileSync(
 	resolve(__dirname, "../../../data/class/class-artificer.json"),
 	"utf8",
@@ -146,6 +148,30 @@ function makeButtonStub () {
 		setAttribute: (name, value) => attributes.set(name, value),
 		removeAttribute: name => attributes.delete(name),
 		getAttribute: name => attributes.get(name),
+	};
+}
+
+function makeBoundCreationSurfaceStub (ownerUid = FEATURE_UID) {
+	const button = makeButtonStub();
+	const status = {textContent: ""};
+	let clickHandler = null;
+	const getAttribute = button.getAttribute;
+	button.getAttribute = name => name === "data-feature-companion-create"
+		? ownerUid
+		: getAttribute(name);
+	button.addEventListener = (type, handler) => {
+		if (type === "click") clickHandler = handler;
+	};
+	button.closest = selector => selector === "[data-feature-companion-create-owner]"
+		? {querySelector: childSelector => childSelector === "[role=status]" ? status : null}
+		: null;
+	return {
+		button,
+		status,
+		root: {
+			querySelectorAll: selector => selector === "[data-feature-companion-create]" ? [button] : [],
+		},
+		pClick: async () => clickHandler?.(),
 	};
 }
 
@@ -308,6 +334,45 @@ describe("Reanimator R5a creation boundary UI", () => {
 		});
 	});
 
+	test("blocks creation when the required Magic action is spent and restores it on the next turn", async () => {
+		const state = makeState();
+		addTool(state);
+		state.startCombat();
+		expect(state.consumeActionType("action")).toBe(true);
+
+		const page = makePage(state);
+		page._pShowFeatureCompanionCreationModal = jest.fn();
+		const pCreate = jest.spyOn(state, "pCreateFeatureCompanion");
+		const before = JSON.stringify(state.toJson());
+		const model = getCreationModel(page);
+
+		expect(model).toMatchObject({
+			actionAvailable: false,
+			canAttempt: false,
+			reason: "actionUnavailable",
+			boundary: {reason: null},
+		});
+		const html = page._getFeatureCompanionCreationSurfaceHtml(model, 0);
+		expect(html).toContain("Your Magic action is unavailable right now.");
+		expect(html).toMatch(/data-feature-companion-create="[^"]+"\s+disabled/);
+
+		const surface = makeBoundCreationSurfaceStub();
+		page._bindFeatureCompanionCreationActions(surface.root);
+		await surface.pClick();
+
+		expect(page._pShowFeatureCompanionCreationModal).not.toHaveBeenCalled();
+		expect(pCreate).not.toHaveBeenCalled();
+		expect(JSON.stringify(state.toJson())).toBe(before);
+		expect(surface.status.textContent).toBe("Your Magic action is unavailable right now.");
+
+		state.resetTurnEconomy();
+		expect(getCreationModel(page)).toMatchObject({
+			actionAvailable: true,
+			canAttempt: true,
+			reason: null,
+		});
+	});
+
 	test("creates directly only when tool, payment, and modification decisions are deterministic", async () => {
 		const state = makeState({withSpellSlots: false});
 		addTool(state);
@@ -375,7 +440,16 @@ describe("Reanimator R5a creation boundary UI", () => {
 			"Final creation review",
 			"Immutable modifications",
 			"Nothing is spent until Create is confirmed",
+			"CharacterSheetPage._isFeatureCompanionCreationActionAvailable",
 			"currentBoundary.executable",
 		]) expect(source).toContain(contract);
+	});
+
+	test("wraps the desktop creation status onto its own row and preserves the mobile column", () => {
+		expect(CSS_SRC).toMatch(/\.charsheet__feature-companion-create\s*\{[^}]*flex-wrap:\s*wrap;/s);
+		expect(CSS_SRC).toMatch(/\.charsheet__feature-companion-live\s*\{[^}]*flex-basis:\s*100%;/s);
+		expect(MOBILE_CSS_SRC).toMatch(
+			/\.charsheet__feature-companion-manager-header,\s*\.charsheet__feature-companion-create\s*\{[^}]*flex-direction:\s*column;/s,
+		);
 	});
 });

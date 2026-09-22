@@ -1346,6 +1346,13 @@ final review. Re-read the boundary with the completed payload before commit.
 Cancel and validation failure never save. Use `CharacterSheetModal` for focus
 trap/restoration and a polite live region for validation/result text.
 
+The generic creation boundary does not include transient combat action
+economy. Manager UI must separately consult
+`isActionTypeAvailable("action", {trackOnlyInCombat: true})`: when false,
+surface `actionUnavailable`, disable creation, and do not open the modal or
+dispatch `pCreateFeatureCompanion()`. Repeat that shared gate in the modal's
+final live validation so a turn-state change cannot close or commit the review.
+
 Do not route this flow through Battle Smith
 `completeFeatureCompanionSetup()`: Battle Smith's appearance/locomotion/Tools
 of the Trade setup remains a distinct persisted acquisition transaction.
