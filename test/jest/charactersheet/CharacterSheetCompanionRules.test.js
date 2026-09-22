@@ -2,7 +2,8 @@ import "../../../js/charactersheet/charactersheet-companion-rules.js";
 
 const CharacterSheetCompanionRules = globalThis.CharacterSheetCompanionRules;
 const EFA_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA";
-const TCE_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
+const TCE_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3";
+const TCE_UID_WITH_EXTRA_SOURCE = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
 
 const getContext = (overrides = {}) => ({
 	artificerLevel: 3,
@@ -48,6 +49,7 @@ describe("CharacterSheetCompanionRules", () => {
 				passivePerception: 10,
 			});
 			expect(resolved.actions.forceEmpoweredRend).toMatchObject({
+				attackType: "melee",
 				attackBonus: context.spellAttackBonus,
 				damage: {dice: "1d8", flat: expected.rendFlat, type: "force"},
 			});
@@ -91,7 +93,7 @@ describe("CharacterSheetCompanionRules", () => {
 				actionType: "action",
 				rangeFeet: 5,
 				targets: ["self", "construct", "object"],
-				uses: {max: 3, recharge: "daily"},
+				uses: {max: 3, recharge: "longRest"},
 			});
 			expect(resolved.reactions.deflectAttack).toMatchObject({
 				actionType: "reaction",
@@ -142,7 +144,7 @@ describe("CharacterSheetCompanionRules", () => {
 					mayCreateReplacement: true,
 					arcaneJoltRecharge: "all",
 				},
-				repairRecharge: "daily",
+				repairRecharge: "longRest",
 			});
 		});
 
@@ -245,6 +247,7 @@ describe("CharacterSheetCompanionRules", () => {
 				passivePerception: expected.passive,
 			});
 			expect(resolved.actions.forceEmpoweredRend).toMatchObject({
+				attackType: "meleeWeaponAttack",
 				attackBonus: context.spellAttackBonus,
 				damage: {dice: "1d8", flat: expected.rendFlat, type: "force"},
 			});
@@ -259,10 +262,12 @@ describe("CharacterSheetCompanionRules", () => {
 		it("returns null for unknown or incomplete feature UIDs", () => {
 			expect(CharacterSheetCompanionRules.getDescriptor("Steel Defender")).toBeNull();
 			expect(CharacterSheetCompanionRules.resolve("Steel Defender|EFA", getContext())).toBeNull();
+			expect(CharacterSheetCompanionRules.resolve(TCE_UID_WITH_EXTRA_SOURCE, getContext())).toBeNull();
 			expect(CharacterSheetCompanionRules.resolve(
 				"Steel Defender|Artificer|EFA|Battle Smith|TCE|3|EFA",
 				getContext(),
 			)).toBeNull();
+			expect(CharacterSheetCompanionRules.resolve(TCE_UID, getContext()).identity.source).toBe("TCE");
 		});
 
 		it("keeps same-named EFA and TCE rules source-isolated", () => {

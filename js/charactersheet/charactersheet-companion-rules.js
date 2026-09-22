@@ -7,7 +7,7 @@
 
 const COMPANION_FEATURE_UIDS = Object.freeze({
 	EFA_STEEL_DEFENDER: "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA",
-	TCE_STEEL_DEFENDER: "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE",
+	TCE_STEEL_DEFENDER: "Steel Defender|Artificer|TCE|Battle Smith|TCE|3",
 });
 
 const ABILITIES = Object.freeze(["str", "dex", "con", "int", "wis", "cha"]);
@@ -70,7 +70,7 @@ const COMPANION_RULES = deepFreeze({
 			forceEmpoweredRend: {
 				name: "Force-Empowered Rend",
 				actionType: "action",
-				attackType: "meleeSpellAttack",
+				attackType: "melee",
 				attackBonusFormula: "spellAttackBonus",
 				reachFeet: 5,
 				damage: {
@@ -85,7 +85,7 @@ const COMPANION_RULES = deepFreeze({
 				rangeFeet: 5,
 				targets: ["self", "construct", "object"],
 				healing: {dice: "2d8", flatFormula: "intelligenceModifier"},
-				uses: {max: 3, recharge: "daily"},
+				uses: {max: 3, recharge: "longRest"},
 			},
 		},
 		reactions: {
@@ -145,7 +145,7 @@ const COMPANION_RULES = deepFreeze({
 				mayCreateReplacement: true,
 				arcaneJoltRecharge: "all",
 			},
-			repairRecharge: "daily",
+			repairRecharge: "longRest",
 		},
 		arcaneJolt: {
 			unlockArtificerLevel: 9,
