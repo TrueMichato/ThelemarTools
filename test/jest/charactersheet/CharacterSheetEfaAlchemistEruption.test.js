@@ -196,6 +196,25 @@ describe("EFA Alchemist Alchemical Eruption eligibility", () => {
 		}))).toEqual(expect.objectContaining({eligible: false, reason: "wrongCastingSubclass"}));
 	});
 
+	it("rejects an item-power cast even when attributed to exact Artificer|EFA ownership", async () => {
+		const state = makeState();
+		state.startCombat();
+		const fnRollDamage = forceRoll();
+
+		const result = await state.pUseAlchemicalEruption({
+			receipt: makeReceipt({
+				castingClassUid: "Artificer|EFA",
+				castingSubclassUid: "Alchemist|Artificer|EFA|EFA",
+				castType: "item",
+			}),
+			target: {targetId: "target-1", targetName: "Goblin"},
+			fnRollDamage,
+		});
+
+		expect(result).toEqual(expect.objectContaining({ok: false, reason: "wrongCastType"}));
+		expect(fnRollDamage).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		["below level", {level: 14}, "belowLevel"],
 		["another EFA subclass", {subclassName: "Artillerist"}, "wrongSubclass"],

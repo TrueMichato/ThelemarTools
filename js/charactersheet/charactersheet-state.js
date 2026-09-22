@@ -52073,6 +52073,9 @@ class CharacterSheetState {
 		if (receipt.castingClassUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) {
 			return {eligible: false, reason: "wrongCastingClass"};
 		}
+		if (receipt.castType === "item" || receipt.cast?.type === "item") {
+			return {eligible: false, reason: "wrongCastType"};
+		}
 		if (
 			receipt.castingSubclassUid
 			&& receipt.castingSubclassUid !== CharacterSheetState.EFA_ALCHEMIST_CASTING_SUBCLASS_UID

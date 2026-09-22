@@ -366,6 +366,9 @@ such target.
   lifecycle reset advances the opaque turn and clears it.
 - A spell cast through another class or with an ineligible final damage type
   does not qualify.
+- An item-power cast is not an Artificer spell for this feature, even when the
+  item power carries exact `Artificer|EFA` attribution for other receipt
+  consumers.
 - Damage and target candidates come from the committed receipt's bounded
   `damageEvidence`; authored spell names or `damageInflict` intent never count
   as proof.
