@@ -134,6 +134,103 @@ describe("EFA Artificer plan progression integration", () => {
 		expect(reloaded.toJson().inventory).toEqual(inventoryBefore);
 	});
 
+	test("public EFA projection excludes wrong-source decisions and keeps exact mixed-source extension owners", () => {
+		const state = buildLevel2State();
+		const page = getPage(state);
+		Progression.syncCanonicalDecisions({page, state});
+		const entry = state.getLevelHistoryEntry(2);
+		const exact = entry.decisions.find(decision =>
+			decision.type === Plans.DECISION_TYPE_ACQUIRE
+				&& decision.meta.slotId === "efa-replicate-plan-1",
+		);
+		entry.decisions.push({
+			...structuredClone(exact),
+			id: "wrong-source-plan",
+			semanticKey: "wrong-source-plan",
+			classSource: "TCE",
+			meta: {
+				...structuredClone(exact.meta),
+				slotId: "tce-replicate-plan-1",
+				owner: {
+					...structuredClone(exact.meta.owner),
+					classSource: "EFA",
+				},
+			},
+		});
+		entry.decisions.push({
+			...structuredClone(exact),
+			id: "conflicting-meta-owner-plan",
+			semanticKey: "conflicting-meta-owner-plan",
+			meta: {
+				...structuredClone(exact.meta),
+				slotId: "conflicting-meta-owner-plan",
+				owner: {
+					...structuredClone(exact.meta.owner),
+					classSource: "TCE",
+				},
+			},
+		});
+		const partialConflict = {
+			...structuredClone(exact),
+			id: "partial-owner-conflict-plan",
+			semanticKey: "partial-owner-conflict-plan",
+			classSource: "TCE",
+			meta: {
+				...structuredClone(exact.meta),
+				slotId: "partial-owner-conflict-plan",
+			},
+		};
+		delete partialConflict.className;
+		entry.decisions.push(partialConflict);
+		const extension = {
+			...structuredClone(exact),
+			id: "mixed-source-extension",
+			semanticKey: "mixed-source-extension",
+			classLevel: 9,
+			meta: {
+				...structuredClone(exact.meta),
+				slotId: "efa-mixed-source-extension",
+				owner: {
+					className: "Artificer",
+					classSource: "EFA",
+					subclassShortName: "Armorer",
+					subclassSource: "HB-SUB",
+					featureName: "Armor Plan",
+					featureSource: "HB-FEATURE",
+				},
+			},
+		};
+		delete extension.className;
+		delete extension.classSource;
+		entry.decisions.push(extension);
+		entry.decisions.push({
+			...structuredClone(exact),
+			id: "ambiguous-exact-owner",
+			semanticKey: "ambiguous-exact-owner",
+			status: "ambiguous",
+			selection: {name: exact.selection.name},
+			meta: {
+				...structuredClone(exact.meta),
+				slotId: "efa-ambiguous-plan",
+			},
+		});
+
+		const decisions = state.getEfaArtificerPlanDecisions();
+		expect(decisions.map(decision => decision.semanticKey)).not.toContain("wrong-source-plan");
+		expect(decisions.map(decision => decision.semanticKey)).not.toContain("conflicting-meta-owner-plan");
+		expect(decisions.map(decision => decision.semanticKey)).not.toContain("partial-owner-conflict-plan");
+		expect(decisions.map(decision => decision.semanticKey)).toEqual(expect.arrayContaining([
+			"mixed-source-extension",
+			"ambiguous-exact-owner",
+		]));
+		const projection = state.getEfaArtificerPlanProjection();
+		expect(projection.slots.map(slot => slot.slotId)).toContain("efa-mixed-source-extension");
+		expect(projection.slots.map(slot => slot.slotId)).not.toContain("tce-replicate-plan-1");
+		expect(projection.slots.map(slot => slot.slotId)).not.toContain("conflicting-meta-owner-plan");
+		expect(projection.slots.map(slot => slot.slotId)).not.toContain("partial-owner-conflict-plan");
+		expect(projection.unresolved.map(decision => decision.semanticKey)).toContain("ambiguous-exact-owner");
+	});
+
 	test("keeps source-less legacy plan evidence repairable instead of guessing", () => {
 		const state = buildLevel2State();
 		const entry = state.getLevelHistoryEntry(2);
@@ -147,6 +244,33 @@ describe("EFA Artificer plan progression integration", () => {
 		expect(first.status).toBe("ambiguous");
 		expect(first.meta.validationMessage).toMatch(/source-qualified/i);
 		expect(first.selection).toEqual({name: "Bag of Holding"});
+	});
+
+	test("progression rejects a replacement which selects the unchanged target plan", () => {
+		const state = buildLevel2State();
+		const page = getPage(state);
+		Progression.syncCanonicalDecisions({page, state});
+		const entry = state.getLevelHistoryEntry(2);
+		const target = entry.decisions.find(decision =>
+			decision.type === Plans.DECISION_TYPE_ACQUIRE
+				&& decision.meta.slotId === "efa-replicate-plan-1",
+		);
+		const replacement = entry.decisions.find(decision => decision.type === Plans.DECISION_TYPE_REPLACE);
+		replacement.selection = {
+			targetSlotId: target.meta.slotId,
+			previousPlan: structuredClone(target.selection),
+			nextPlan: structuredClone(target.selection),
+			priorReplacementSemanticKey: null,
+		};
+		replacement.status = "resolved";
+
+		const manifest = Progression.buildManifest({page, state});
+		const rebuilt = manifest.decisions.find(decision => decision.semanticKey === replacement.semanticKey);
+		expect(rebuilt.status).toBe("invalid");
+		expect(rebuilt.meta.validationMessage).toMatch(/new plan/i);
+		expect(manifest.issues).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "same-plan-replacement", decisionId: rebuilt.id}),
+		]));
 	});
 
 	test("Builder handoff creates the shared Quick Build plan step and history projection", async () => {
@@ -306,6 +430,77 @@ describe("EFA Artificer plan progression integration", () => {
 				levels: [{characterLevel: 3, className: "Artificer", classSource: "EFA", classLevel: 3}],
 			});
 			expect(result).toBeNull();
+			expect(state.toJson()).toEqual(before);
+		} finally {
+			modal.mockRestore();
+		}
+	});
+
+	test("picker disables the unchanged target and commits Keep Current Plans without mutation", async () => {
+		const state = buildLevel2State();
+		const page = getPage(state);
+		Progression.syncCanonicalDecisions({page, state});
+		const before = state.toJson();
+		const targetSlot = state.getEfaArtificerPlans()[0];
+		const opportunity = Plans.getProgressionOpportunities({
+			className: "Artificer",
+			classSource: "EFA",
+			classLevel: 3,
+		}).find(it => it.kind === "replacement");
+		const modalInner = globalThis.e_({tag: "div"});
+		const modalFooter = globalThis.e_({tag: "div"});
+		const modal = jest.spyOn(CharacterSheetModal, "pGetShow").mockImplementation(async () => {
+			return {
+				eleModalInner: modalInner,
+				eleModalFooter: modalFooter,
+				doClose: jest.fn(),
+			};
+		});
+		try {
+			const pending = Picker.pGetUserDecisions({
+				page,
+				state,
+				opportunities: [opportunity],
+				initialSlots: [targetSlot],
+			});
+			await new Promise(resolve => setImmediate(resolve));
+			const collectBy = (element, predicate) => [
+				...(predicate(element) ? [element] : []),
+				...(element?.children || []).flatMap(child => collectBy(child, predicate)),
+			];
+			const targetSelect = collectBy(modalInner, element => element?.tag === "select")[0];
+			targetSelect.value = targetSlot.slotId;
+			targetSelect._handlers.change();
+			const collect = element => [
+				...(element?._clazz?.split(/\s+/).includes("charsheet__artificer-plan-result") ? [element] : []),
+				...(element?.children || []).flatMap(collect),
+			];
+			const rows = collect(modalInner);
+			const candidates = Plans.getEligibleCandidates({
+				catalog: Picker.getCatalog(page),
+				classLevel: 3,
+			});
+			expect(rows).toHaveLength(candidates.length);
+			const targetIndex = candidates.findIndex(candidate => candidate.itemUid === targetSlot.selection.itemUid);
+			expect(targetIndex).toBeGreaterThanOrEqual(0);
+			expect(rows[targetIndex]).toMatchObject({
+				disabled: true,
+				title: expect.stringMatching(/current plan.*Keep Current Plans/i),
+			});
+			expect(rows.some((row, ix) => ix !== targetIndex && !row.disabled)).toBe(true);
+			rows.find((row, ix) => ix !== targetIndex && !row.disabled).click();
+			const keepCurrent = collectBy(modalInner, element => element?.textContent === "Keep Current Plans").at(-1);
+			expect(keepCurrent).toBeDefined();
+			keepCurrent.click();
+			const commit = collectBy(modalFooter, element => element?.textContent === "Review & Commit Plans").at(-1);
+			expect(commit).toBeDefined();
+			commit.click();
+			expect(await pending).toEqual([
+				expect.objectContaining({
+					opportunityId: opportunity.opportunityId,
+					selection: null,
+				}),
+			]);
 			expect(state.toJson()).toEqual(before);
 		} finally {
 			modal.mockRestore();

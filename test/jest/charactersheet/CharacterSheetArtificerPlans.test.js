@@ -118,9 +118,20 @@ describe("CharacterSheetArtificerPlans", () => {
 			selection: {
 				targetSlotId: decisions[0].slotId,
 				previousPlan: decisions[0].selection,
-				nextPlan: byUid.get("Uncommon Ring|TST"),
+				nextPlan: decisions[0].selection,
 			},
 		};
+		const samePlan = Plans.validateDraft({catalog, decisions: [...decisions, replacement]});
+		expect(samePlan.issues).toEqual(expect.arrayContaining([
+			expect.objectContaining({code: "same-plan-replacement"}),
+		]));
+		const samePlanProjection = Plans.projectDecisions({decisions: [...decisions, replacement]});
+		expect(samePlanProjection.unresolved).toEqual(expect.arrayContaining([
+			expect.objectContaining({opportunityId: replacement.opportunityId}),
+		]));
+		expect(samePlanProjection.slots.find(slot => slot.slotId === replacement.selection.targetSlotId)?.lineage).toEqual([]);
+
+		replacement.selection.nextPlan = byUid.get("Uncommon Ring|TST");
 		const collision = Plans.validateDraft({catalog, decisions: [...decisions, replacement]});
 		expect(collision.issues).toEqual(expect.arrayContaining([
 			expect.objectContaining({code: "duplicate-plan"}),

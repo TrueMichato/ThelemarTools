@@ -297,6 +297,9 @@ category provenance, exact item UID, and replacement lineage. Receipts use the
 Public APIs:
 
 - `CharacterSheetArtificerPlans.parseCatalog({feature, items})`
+- `isExactDecisionOwner(decision)` requires at least one complete exact
+  `Artificer|EFA` owner pair and rejects any conflicting supplied top-level or
+  `meta.owner` class name/source field
 - `getProgressionOpportunities({className, classSource, classLevel, extensions})`
 - `getEligibleCandidates({catalog, classLevel, constraints})`
 - `validateDraft({catalog, decisions, initialSlots})`
@@ -311,7 +314,11 @@ Public APIs:
 The extension descriptor keeps class, subclass, and feature sources independent;
 it never assumes `subclassSource === classSource`. The shared picker is used by
 Level Up, Quick Build (including Builder handoff), and Respec. Cancellation and
-invalid validation paths are non-mutating.
+invalid validation paths are non-mutating. Replacements must select a different
+exact plan identity; the current target is disabled in the picker and
+`same-plan-replacement` is rejected by model/progression validation. Public EFA
+state projections discard same-type decisions whose base owner is not exact
+`Artificer|EFA`.
 
 This contract distinguishes a known plan from a replicated item instance.
 Milestone 2 has no item creation, inventory mutation, or expiration behavior;

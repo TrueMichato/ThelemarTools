@@ -11438,12 +11438,14 @@ class CharacterSheetState {
 	 * @returns {Array}
 	 */
 	getEfaArtificerPlanDecisions () {
+		const service = globalThis.CharacterSheetArtificerPlans;
+		if (!service) return [];
 		return this.getLevelHistory()
 			.flatMap(entry => entry.decisions || [])
 			.filter(decision => [
-				globalThis.CharacterSheetArtificerPlans?.DECISION_TYPE_ACQUIRE,
-				globalThis.CharacterSheetArtificerPlans?.DECISION_TYPE_REPLACE,
-			].includes(decision.type))
+				service.DECISION_TYPE_ACQUIRE,
+				service.DECISION_TYPE_REPLACE,
+			].includes(decision.type) && service.isExactDecisionOwner(decision))
 			.map(decision => CharacterSheetProgression._copy(decision));
 	}
 

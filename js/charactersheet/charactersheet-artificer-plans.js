@@ -38,6 +38,26 @@ class CharacterSheetArtificerPlans {
 			&& this._normalize(classSource) === this._normalize(this.CLASS_SOURCE);
 	}
 
+	static isExactDecisionOwner (decision) {
+		const owners = [
+			{className: decision?.className, classSource: decision?.classSource},
+			{
+				className: decision?.meta?.owner?.className,
+				classSource: decision?.meta?.owner?.classSource,
+			},
+		];
+		const hasExactCompleteOwner = owners.some(owner =>
+			owner.className != null
+			&& owner.classSource != null
+			&& this.isExactOwner(owner),
+		);
+		return hasExactCompleteOwner
+			&& owners.every(owner =>
+				(owner.className == null || this._normalize(owner.className) === this._normalize(this.CLASS_NAME))
+				&& (owner.classSource == null || this._normalize(owner.classSource) === this._normalize(this.CLASS_SOURCE)),
+			);
+	}
+
 	static getPlansKnown (classLevel) {
 		return CharacterSheetClassUtils.getEfaArtificerPlansKnown(Number(classLevel) || 0);
 	}
@@ -481,6 +501,14 @@ class CharacterSheetArtificerPlans {
 				issues.push({...validation, opportunityId: decision.opportunityId});
 				continue;
 			}
+			if (this.getSelectionIdentity(target.selection) === this.getSelectionIdentity(validation.selection)) {
+				issues.push({
+					code: "same-plan-replacement",
+					opportunityId: decision.opportunityId,
+					message: "Choose a new plan, or keep the current plans without recording a replacement.",
+				});
+				continue;
+			}
 			const duplicate = [...slots.values()].find(slot =>
 				slot.slotId !== targetSlotId
 				&& this.getSelectionIdentity(slot.selection) === this.getSelectionIdentity(validation.selection),
@@ -547,6 +575,10 @@ class CharacterSheetArtificerPlans {
 			if (kind !== "replacement") continue;
 			const target = slots.get(decision.selection.targetSlotId);
 			if (!target || !this.isExactSelection(decision.selection.nextPlan)) {
+				unresolved.push(this._copy(decision));
+				continue;
+			}
+			if (this.getSelectionIdentity(target.selection) === this.getSelectionIdentity(decision.selection.nextPlan)) {
 				unresolved.push(this._copy(decision));
 				continue;
 			}

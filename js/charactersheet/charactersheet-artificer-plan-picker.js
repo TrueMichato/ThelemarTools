@@ -67,6 +67,14 @@ class CharacterSheetArtificerPlanPicker {
 		const resolvedOpportunities = opportunities || this.getOpportunitiesForLevels({levels, extensions});
 		if (!resolvedOpportunities.length) return [];
 		const selections = this._getInitialSelectionMap(initialSelections);
+		const replacementTargets = new Map(
+			resolvedOpportunities
+				.filter(opportunity => opportunity.kind === "replacement")
+				.map(opportunity => [
+					opportunity.opportunityId,
+					selections.get(opportunity.opportunityId)?.targetSlotId || "",
+				]),
+		);
 		const baseSlots = initialSlots || state?.getEfaArtificerPlanProjection?.().slots || [];
 		let activeIndex = Math.max(0, resolvedOpportunities.findIndex(opportunity => opportunity.required && !selections.get(opportunity.opportunityId)));
 		if (activeIndex < 0) activeIndex = 0;
@@ -161,7 +169,9 @@ class CharacterSheetArtificerPlanPicker {
 					: "Choose one exact plan. Fixed plans and wildcard-category items share the same source-qualified identity.",
 			}));
 
-			let targetSlotId = opportunity.kind === "replacement" ? current?.targetSlotId || "" : null;
+			let targetSlotId = opportunity.kind === "replacement"
+				? replacementTargets.get(opportunity.opportunityId) || current?.targetSlotId || ""
+				: null;
 			if (opportunity.kind === "replacement") {
 				if (!slotsBefore.length) {
 					editor.append(e_({tag: "div", clazz: "ve-alert ve-alert-warning", txt: "No resolved plan is available to replace. Repair earlier plan decisions first."}));
@@ -180,6 +190,7 @@ class CharacterSheetArtificerPlanPicker {
 				});
 				target.addEventListener("change", () => {
 					targetSlotId = target.value;
+					replacementTargets.set(opportunity.opportunityId, targetSlotId);
 					selections.delete(opportunity.opportunityId);
 					render();
 				});
@@ -207,6 +218,7 @@ class CharacterSheetArtificerPlanPicker {
 				option.value = value;
 				kindFilter.append(option);
 			});
+			kindFilter.value = "all";
 			searchRow.append(search, kindFilter);
 			editor.append(searchRow);
 
@@ -248,14 +260,22 @@ class CharacterSheetArtificerPlanPicker {
 				for (const candidate of candidates.slice(0, 250)) {
 					const identity = CharacterSheetArtificerPlans.getSelectionIdentity(candidate);
 					const isDuplicate = used.has(identity);
+					const isCurrentTarget = opportunity.kind === "replacement"
+						&& identity === CharacterSheetArtificerPlans.getSelectionIdentity(targetSlot?.selection);
+					const isLocked = isDuplicate || isCurrentTarget;
+					const lockedReason = isCurrentTarget
+						? "This is the current plan. Use Keep Current Plans instead of recording a replacement."
+						: isDuplicate
+							? "Already known in another plan slot."
+							: "";
 					const row = e_({
 						tag: "button",
 						clazz: `ve-btn charsheet__artificer-plan-result ${CharacterSheetArtificerPlans.getSelectionIdentity(currentPlan) === identity ? "selected" : ""}`,
 					});
 					row.type = "button";
-					row.disabled = isDuplicate;
+					row.disabled = isLocked;
 					row.setAttribute("aria-pressed", CharacterSheetArtificerPlans.getSelectionIdentity(currentPlan) === identity ? "true" : "false");
-					row.setAttribute("aria-label", `${candidate.displayName || candidate.name}, ${this._getSourceLabel(candidate.source)}, ${candidate.planKind}, available at level ${candidate.tableLevel}${isDuplicate ? ", already known in another plan slot" : ""}`);
+					row.setAttribute("aria-label", `${candidate.displayName || candidate.name}, ${this._getSourceLabel(candidate.source)}, ${candidate.planKind}, available at level ${candidate.tableLevel}${lockedReason ? `, ${lockedReason}` : ""}`);
 					row.append(
 						ee`<span class="charsheet__artificer-plan-result-main">
 							<span class="ve-bold">${candidate.displayName || candidate.name}</span>
@@ -266,9 +286,10 @@ class CharacterSheetArtificerPlanPicker {
 							<span class="badge">${candidate.planKind === "fixed" ? "Fixed" : "Wildcard"}</span>
 							<span class="badge">Level ${candidate.tableLevel}+</span>
 							${isDuplicate ? ee`<span class="badge">Already known</span>` : ""}
+							${isCurrentTarget ? ee`<span class="badge">Current plan</span>` : ""}
 						</span>`,
 					);
-					if (isDuplicate) row.title = "Already known in another plan slot.";
+					if (lockedReason) row.title = lockedReason;
 					row.addEventListener("click", () => {
 						if (opportunity.kind === "replacement") {
 							selections.set(opportunity.opportunityId, {
@@ -304,11 +325,12 @@ class CharacterSheetArtificerPlanPicker {
 			kindFilter.addEventListener("change", renderResults);
 			renderResults();
 
-			if (opportunity.kind === "replacement" && current) {
+			if (opportunity.kind === "replacement" && (current || targetSlotId)) {
 				const clear = e_({tag: "button", clazz: "ve-btn ve-btn-default ve-btn-sm mt-2", txt: "Keep Current Plans"});
 				clear.type = "button";
 				clear.addEventListener("click", () => {
 					selections.delete(opportunity.opportunityId);
+					replacementTargets.delete(opportunity.opportunityId);
 					render();
 				});
 				editor.append(clear);
@@ -345,7 +367,9 @@ class CharacterSheetArtificerPlanPicker {
 			resolveResult(decisions);
 			doClose(true);
 		});
-		eleModalFooter.append(ee`<div class="charsheet__artificer-plan-actions">${cancel}${commit}</div>`);
+		const actions = e_({tag: "div", clazz: "charsheet__artificer-plan-actions"});
+		actions.append(cancel, commit);
+		eleModalFooter.append(actions);
 		render();
 		return resultPromise;
 	}

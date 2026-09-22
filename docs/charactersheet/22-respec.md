@@ -175,13 +175,19 @@ Builder's higher-level handoff, Level Up, Quick Build, and Respec all use
 validation succeeds, supports search and fixed/wildcard filtering, disables
 duplicate exact items, shows source/eligibility badges, and presents the old
 and new plan together before a replacement commit. Cancel and invalid commit
-paths do not change live or candidate state.
+paths do not change live or candidate state. The current target plan is also
+disabled with an accessible explanation: choosing it is not a replacement, so
+the player must use **Keep Current Plans** for the non-mutating path.
 
 Legacy plan evidence with no exact source-qualified catalog identity is
 preserved as `ambiguous` and remains repairable in Respec. It is never guessed
 from a display name. `CharacterSheetState.getEfaArtificerPlanDecisions()`,
 `getEfaArtificerPlanProjection()`, and `getEfaArtificerPlans()` expose the
-ledger and current stable-slot projection for later consumers.
+ledger and current stable-slot projection for later consumers. These APIs
+include only decisions owned by exact `Artificer|EFA`: at least one complete
+top-level or `meta.owner` class pair must be exact, and every supplied class
+name/source field across both locations must agree. Subclass and feature source
+fields remain independent for mixed-source extensions.
 
 This milestone stops at plan decisions. It does not create, grant, mutate,
 remove, or expire replicated inventory items; those item-instance effects are
