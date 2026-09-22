@@ -14306,7 +14306,17 @@ class CharacterSheetPage {
 
 		// Prompt for concentration check if concentrating
 		if (this._state.isConcentrating?.()) {
-			await this._promptConcentrationCheck(preview.damage);
+			const protection = this._state.getDamageConcentrationProtection?.();
+			if (protection) {
+				const spellName = this._state.getConcentrationLabel?.() || "the spell";
+				this._showDiceResult(
+					"Concentration Protected",
+					"Protected",
+					`${protection.name}: taking damage can't end concentration on ${spellName}.`,
+				);
+			} else {
+				await this._promptConcentrationCheck(preview.damage);
+			}
 		}
 		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		if (characterId === this._currentCharacterId) {

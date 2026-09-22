@@ -3465,6 +3465,24 @@ class CharacterSheetCombat {
 		return riders;
 	}
 
+	async _pSelectDeferredFlatDamageRiderForAttack (attack) {
+		const rider = this._state.getDeferredFlatDamageRiderOptions?.({route: "attack", attack})?.[0];
+		if (!rider) return null;
+
+		const targetSpellName = rider.requiresOwnSpellTargetUid
+			? rider.requiresOwnSpellTargetUid.split("|")[0].toTitleCase()
+			: null;
+		const isApply = await CharacterSheetModal.pGetUserBoolean({
+			title: rider.name,
+			htmlDescription: targetSpellName
+				? `<p>Did this attack hit a creature affected by <strong>your own ${targetSpellName}</strong>?</p><p>Choose Apply to confirm the target and add this rider to the attack's damage.</p>`
+				: `<p>Apply ${rider.name} to this attack's damage?</p>`,
+			textYes: `Apply ${rider.name}`,
+			textNo: "Decline",
+		});
+		return isApply === true ? rider : null;
+	}
+
 	async _rollDamage (attackId, isCrit = false) {
 		const attacks = this._state.getAttacks();
 		let attack = attacks.find(a => a.id === attackId);
@@ -3544,6 +3562,7 @@ class CharacterSheetCombat {
 			});
 			if (!weaponDamageType) return;
 		}
+		const acceptedDeferredFlatDamageRider = await this._pSelectDeferredFlatDamageRiderForAttack(attack);
 		const triggeredFeatDamage = await this._page._pRollTriggeredFeatDie?.({
 			trigger: "damage",
 			context: {
@@ -3561,6 +3580,9 @@ class CharacterSheetCombat {
 			return roll;
 		};
 		const damageRoll = rollTypedDamage(damageExpression, weaponDamageType);
+		const deferredFlatDamageRider = acceptedDeferredFlatDamageRider
+			? this._state.consumeDeferredFlatDamageRider?.(acceptedDeferredFlatDamageRider)
+			: null;
 		// Exploding weapon dice (Brutal). Only the weapon's OWN dice explode — riders, sneak
 		// attack and Doubleshot are separate rolls and are left alone. A maximized roll is
 		// excluded: those dice were set to their maximum, not rolled to it.
@@ -3807,7 +3829,7 @@ class CharacterSheetCombat {
 			spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 		}
 
-		const totalBonus = abilityMod + standingDamageTotal + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus;
+		const totalBonus = abilityMod + standingDamageTotal + critDamageBonus + spellDamageBonus + ammoFlatDamageBonus + (deferredFlatDamageRider?.value || 0);
 
 		// Get extra damage dice from active states (e.g., Hex, Flame Tongue)
 		const isMeleeForExtraDamage = this._getAttackRollKind(attack).isMelee && !attack.isSpell;
@@ -3892,6 +3914,7 @@ class CharacterSheetCombat {
 		if (critDamageBonus) subtitle += ` + ${critDamageBonus} (crit bonus)`;
 		if (spellDamageBonus) subtitle += ` + ${spellDamageBonus} (spell item)`;
 		if (ammoFlatDamageBonus) subtitle += ` + ${ammoFlatDamageBonus} (${ammoForDamage?.name || "ammunition"})`;
+		if (deferredFlatDamageRider) subtitle += ` + ${deferredFlatDamageRider.value} (${deferredFlatDamageRider.name})`;
 		if (sneakAttackDamage) subtitle += ` + ${sneakAttackDamage} (sneak attack ${sneakAttackDice})`;
 		for (const rp of riderParts) {
 			subtitle += ` + ${rp.total} (${rp.name} ${rp.dice}${rp.type ? ` ${rp.type}` : ""})`;

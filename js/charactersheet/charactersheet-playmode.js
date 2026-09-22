@@ -2181,12 +2181,12 @@ export class CharacterSheetPlayMode {
 					e.stopPropagation();
 					if (spell.concentration && this._state.isConcentrating?.()) {
 						this._promptConcentrationBreak(spell, () => {
-							if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+							if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source});
 							this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
 							this._renderStatusBar();
 						});
 					} else {
-						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source});
 						this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
 						this._renderStatusBar();
 					}
@@ -2221,7 +2221,7 @@ export class CharacterSheetPlayMode {
 				{separator: true},
 			];
 			if (spell.level > 0) menuItems.push({label: "Cast Spell", icon: "concentration", onClick: () => this._castSpell(spell)});
-			if (spell.ritual) menuItems.push({label: "Cast as Ritual", icon: "ritual", onClick: () => { if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level}); this._logActivity("ritual", `Cast ${spell.name} as ritual`); this._renderStatusBar(); }});
+			if (spell.ritual) menuItems.push({label: "Cast as Ritual", icon: "ritual", onClick: () => { if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source}); this._logActivity("ritual", `Cast ${spell.name} as ritual`); this._renderStatusBar(); }});
 			if (spell.level > 0 && !spell.alwaysPrepared && showPreparedToggle) menuItems.push({label: spell.prepared ? "Unprepare" : "Prepare", icon: "check", onClick: () => { this._state.setSpellPrepared?.(spell.id, !spell.prepared); this._openDrawerByType("spells"); }});
 			menuItems.push({label: "Add Note", icon: "edit", onClick: () => this._showEntityNoteModal("spell", spell.id, spell.name, () => { this._renderSpellsQuick(); if (this._openDrawer === "spells") this._openDrawerByType("spells"); })});
 			menuItems.push({label: spellIsFav ? "Remove Favorite" : "Add Favorite", icon: "inspiration", onClick: () => this._toggleFavorite({id: `spell:${spell.name}`, type: "spell", name: spell.name, icon: "spell", detail: spell.level === 0 ? "Cantrip" : `Level ${spell.level}`, ref: spell})});
@@ -3427,14 +3427,14 @@ export class CharacterSheetPlayMode {
 			// Cantrip concentration check
 			if (spell.concentration && this._state.isConcentrating?.()) {
 				this._promptConcentrationBreak(spell, () => {
-					this._state.setConcentration?.({name: spell.name, level: 0});
+					this._state.setConcentration?.({name: spell.name, level: 0, source: spell.source});
 					this._logActivity("spell", `Cast ${spell.name} (cantrip, concentration)`);
 					this._renderStatusBar();
 				});
 				return;
 			}
 			if (spell.concentration) {
-				this._state.setConcentration?.({name: spell.name, level: 0});
+				this._state.setConcentration?.({name: spell.name, level: 0, source: spell.source});
 			}
 			this._logActivity("spell", `Cast ${spell.name} (cantrip)`);
 			if (spell.concentration) this._renderStatusBar();
@@ -3491,7 +3491,7 @@ export class CharacterSheetPlayMode {
 
 		// Set concentration
 		if (spell.concentration) {
-			this._state.setConcentration?.({name: spell.name, level: slot.level});
+			this._state.setConcentration?.({name: spell.name, level: slot.level, source: spell.source});
 		}
 
 		const slotLabel = slot.isPact ? `pact slot (lvl ${slot.level})` : (slot.level === spell.level ? `level ${slot.level}` : `upcast level ${slot.level}`);
@@ -3759,7 +3759,15 @@ export class CharacterSheetPlayMode {
 			} else {
 				this._state.takeDamage(val, {damageType});
 				await this._page._pOfferZeroHpIntervention?.();
-				if (this._state.isConcentrating?.()) this._doConcentrationCheck(defenses.damage);
+				if (this._state.isConcentrating?.()) {
+					const protection = this._state.getDamageConcentrationProtection?.();
+					if (protection) {
+						const spellName = this._state.getConcentrationLabel?.() || "the spell";
+						this._logActivity("shield", `${protection.name}: damage can't end concentration on ${spellName}`);
+					} else {
+						this._doConcentrationCheck(defenses.damage);
+					}
+				}
 			}
 			const afterHp = this._state.getCurrentHp();
 			const afterTemp = this._state.getTempHp();
@@ -3996,12 +4004,12 @@ export class CharacterSheetPlayMode {
 				overlay.remove();
 				if (spell.concentration && this._state.isConcentrating?.()) {
 					this._promptConcentrationBreak(spell, () => {
-						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+						if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source});
 						this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
 						this._renderStatusBar();
 					});
 				} else {
-					if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level});
+					if (spell.concentration) this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source});
 					this._logActivity("ritual", `Cast ${spell.name} as ritual (no slot)`);
 					this._renderStatusBar();
 				}

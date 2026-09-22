@@ -4349,6 +4349,8 @@ class CharacterSheetState {
 	static ADVENTURERS_ATLAS_INITIATIVE_DIE = "1d4";
 	static ADVENTURERS_ATLAS_HOLDER_STATUSES = new Set(["active", "destroyed"]);
 	static _adventurersAtlasHolderIdSeq = 0;
+	static GUIDED_PRECISION_FEATURE_UID = "Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA";
+	static GUIDED_PRECISION_FAERIE_FIRE_UID = "faerie fire|xphb";
 
 	static _getEmptyAdventurersAtlas () {
 		return {
@@ -5265,6 +5267,9 @@ class CharacterSheetState {
 			// Shared once-per-turn receipts for data-driven triggered resource pools.
 			// Keyed by resource id → combat round; ignored outside combat.
 			resourceTurnUsage: {},
+			// Shared once-per-turn receipts for deferred flat-damage riders. The stable
+			// source-feature UID is the key, so spell and attack consumers share one ceiling.
+			deferredFlatDamageRiderTurnUsage: {},
 			pendingDamageMaximization: null, // Deferred one-shot damage maximization (e.g. Destructive Wrath)
 			// Deferred one-shot flat bonus on the damage of your next spell
 			// (e.g. Summer's Defiant Blood). See `armPendingSpellDamageBonus`.
@@ -5737,6 +5742,9 @@ class CharacterSheetState {
 		}
 		if (!this._data.resourceTurnUsage || typeof this._data.resourceTurnUsage !== "object" || Array.isArray(this._data.resourceTurnUsage)) {
 			this._data.resourceTurnUsage = {};
+		}
+		if (!this._data.deferredFlatDamageRiderTurnUsage || typeof this._data.deferredFlatDamageRiderTurnUsage !== "object" || Array.isArray(this._data.deferredFlatDamageRiderTurnUsage)) {
+			this._data.deferredFlatDamageRiderTurnUsage = {};
 		}
 		if (this._data.characterBase && typeof this._data.characterBase === "object") {
 			if (!Number(this._data.characterBase.v)) this._data.characterBase.v = 1;
@@ -30481,6 +30489,7 @@ class CharacterSheetState {
 					// =========================================================
 					const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
 					const subclassName = effectiveSubclass?.name?.toLowerCase() || effectiveSubclass?.shortName?.toLowerCase();
+					const subclassSource = effectiveSubclass?.source || effectiveSubclass?.subclassSource;
 					if (
 						isEfa
 						&& level >= 3
@@ -30501,6 +30510,21 @@ class CharacterSheetState {
 						if (level >= 5) {
 							calculations.hasExtraAttack = true;
 							calculations.attacksPerAction = 2;
+						}
+					}
+
+					if (
+						isEfa
+						&& level >= 3
+						&& subclassName === "cartographer"
+						&& `${subclassSource ?? ""}`.toUpperCase() === "EFA"
+					) {
+						calculations.hasAdventurersAtlas = true;
+						calculations.adventurersAtlasCapacity = Math.max(2, 1 + intMod);
+						calculations.hasAdventurersAtlasAwareness = true;
+						if (level >= 5) {
+							calculations.hasGuidedPrecision = true;
+							calculations.guidedPrecisionSourceFeatureUid = CharacterSheetState.GUIDED_PRECISION_FEATURE_UID;
 						}
 					}
 
@@ -30637,13 +30661,6 @@ class CharacterSheetState {
 									calculations.deflectAttackDamageBonus = intMod;
 									calculations.deflectAttackDamage = `1d4+${intMod}`;
 								}
-								break;
-							}
-							case "cartographer": {
-								if (cls.source?.toUpperCase() !== "EFA" || cls.subclass?.source?.toUpperCase() !== "EFA") break;
-								calculations.hasAdventurersAtlas = true;
-								calculations.adventurersAtlasCapacity = Math.max(2, 1 + intMod);
-								calculations.hasAdventurersAtlasAwareness = true;
 								break;
 							}
 						}
@@ -33408,6 +33425,7 @@ class CharacterSheetState {
 		// (e.g. Iron Will). Idempotent; surfaces in the conditional-modifier opt-in picker.
 		this._syncCombatMethodConditionalModifiers();
 		this.reconcileTargetEffects();
+		this._pruneDeferredFlatDamageRiderTurnUsage();
 
 		return appliedEffects;
 	}
@@ -46821,6 +46839,138 @@ class CharacterSheetState {
 	 */
 	resetPendingSpellDamageBonusCooldowns () {
 		this._data.pendingSpellDamageBonusUsedKeys = [];
+	}
+
+	// =====================================================================
+	// GENERIC: deferred flat-damage riders
+	//
+	// A deferred rider is offered by a consumer (spell or attack), then resolved
+	// only after the player accepts and a qualifying damage roll exists. The state
+	// owns source qualification, current-value evaluation, and the shared turn
+	// receipt; consumers own only their unknowable target/roll choices.
+	// =====================================================================
+
+	_getGuidedPrecisionClassEntry () {
+		return (this._data.classes || []).find(cls => {
+			if (cls?.name !== "Artificer" || cls?.source !== "EFA" || Number(cls.level) < 5) return false;
+			const subclassNames = [cls.subclass?.name, cls.subclass?.shortName]
+				.map(it => String(it || "").trim().toLowerCase());
+			const subclassSource = cls.subclass?.source || cls.subclass?.subclassSource;
+			return subclassSource === "EFA" && subclassNames.includes("cartographer");
+		}) || null;
+	}
+
+	_getFullSubclassForClassEntry (cls) {
+		if (!cls?.subclass) return null;
+		const fullClass = (this._classCatalog || []).find(classData =>
+			classData?.name === cls.name && classData?.source === cls.source,
+		);
+		if (!fullClass) return null;
+		return CharacterSheetClassUtils.resolveFullSubclass({
+			name: cls.subclass.name,
+			shortName: cls.subclass.shortName,
+			source: cls.subclass.source || cls.subclass.subclassSource,
+		}, fullClass);
+	}
+
+	_isDeferredFlatDamageRiderUsedThisTurn (receiptKey) {
+		if (!receiptKey || !this.isInCombat()) return false;
+		return this._data.deferredFlatDamageRiderTurnUsage?.[receiptKey] === this.getCombatRound();
+	}
+
+	_markDeferredFlatDamageRiderUsedThisTurn (receiptKey) {
+		if (!receiptKey || !this.isInCombat()) return;
+		if (!this._data.deferredFlatDamageRiderTurnUsage || typeof this._data.deferredFlatDamageRiderTurnUsage !== "object") {
+			this._data.deferredFlatDamageRiderTurnUsage = {};
+		}
+		this._data.deferredFlatDamageRiderTurnUsage[receiptKey] = this.getCombatRound();
+	}
+
+	_pruneDeferredFlatDamageRiderTurnUsage () {
+		if (this._getGuidedPrecisionClassEntry()) return;
+		delete this._data.deferredFlatDamageRiderTurnUsage?.[CharacterSheetState.GUIDED_PRECISION_FEATURE_UID];
+	}
+
+	/**
+	 * Return deferred flat-damage riders eligible for one damage route.
+	 * @param {{route: "spell"|"attack", spell?: object|null}} context
+	 * @returns {Array<object>}
+	 */
+	getDeferredFlatDamageRiderOptions ({route, spell = null} = /** @type {*} */ ({})) {
+		const cls = this._getGuidedPrecisionClassEntry();
+		if (!cls) return [];
+
+		const receiptKey = CharacterSheetState.GUIDED_PRECISION_FEATURE_UID;
+		if (this._isDeferredFlatDamageRiderUsedThisTurn(receiptKey)) return [];
+
+		if (route === "spell") {
+			const subclass = this._getFullSubclassForClassEntry(cls);
+			if (!CharacterSheetClassUtils.subclassAdditionalSpellsIncludeSpell(spell, subclass)) return [];
+		} else if (route !== "attack") {
+			return [];
+		}
+
+		return [{
+			id: "guided-precision",
+			name: "Guided Precision",
+			sourceFeatureUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+			receiptKey,
+			valueResolver: {type: "abilityModifier", ability: "int"},
+			...(route === "attack"
+				? {requiresOwnSpellTargetUid: CharacterSheetState.GUIDED_PRECISION_FAERIE_FIRE_UID}
+				: {}),
+		}];
+	}
+
+	/**
+	 * Resolve and consume an accepted deferred rider. Ability modifiers are read here,
+	 * at damage resolution time, rather than when the offer was displayed.
+	 * @param {*} rider
+	 * @returns {{name:string, sourceFeatureUid:string, receiptKey:string, value:number}|null}
+	 */
+	consumeDeferredFlatDamageRider (rider) {
+		if (!rider?.sourceFeatureUid || rider.sourceFeatureUid !== CharacterSheetState.GUIDED_PRECISION_FEATURE_UID) return null;
+		if (rider.receiptKey !== CharacterSheetState.GUIDED_PRECISION_FEATURE_UID) return null;
+		if (!this._getGuidedPrecisionClassEntry()) return null;
+		if (this._isDeferredFlatDamageRiderUsedThisTurn(rider.receiptKey)) return null;
+
+		let value;
+		if (rider.valueResolver?.type === "abilityModifier") {
+			value = this.getAbilityMod(rider.valueResolver.ability);
+		} else {
+			value = Number(rider.value);
+		}
+		if (!Number.isFinite(value)) return null;
+
+		this._markDeferredFlatDamageRiderUsedThisTurn(rider.receiptKey);
+		return {
+			name: rider.name || "Damage Bonus",
+			sourceFeatureUid: rider.sourceFeatureUid,
+			receiptKey: rider.receiptKey,
+			value,
+		};
+	}
+
+	getDamageConcentrationProtectionProviders () {
+		if (!this._getGuidedPrecisionClassEntry()) return [];
+		return [{
+			name: "Guided Precision",
+			sourceFeatureUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+			spellUid: CharacterSheetState.GUIDED_PRECISION_FAERIE_FIRE_UID,
+		}];
+	}
+
+	/**
+	 * Return a named provider that suppresses concentration checks caused by damage.
+	 * Other concentration-ending causes never query this contract.
+	 * @param {*} [concentration]
+	 * @returns {{name:string, sourceFeatureUid:string, spellUid:string}|null}
+	 */
+	getDamageConcentrationProtection (concentration = this.getSpellConcentration()) {
+		if (!concentration || concentration.kind === "power") return null;
+		const spellUid = `${String(concentration.spellName || concentration.name || "").trim().toLowerCase()}|${String(concentration.spellSource || concentration.source || "").trim().toLowerCase()}`;
+		return this.getDamageConcentrationProtectionProviders()
+			.find(provider => provider.spellUid === spellUid) || null;
 	}
 
 	/**
@@ -68044,6 +68194,7 @@ class CharacterSheetState {
 	startCombat () {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
+		this._data.deferredFlatDamageRiderTurnUsage = {};
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: 1});
 		this._data.sanguineMasteryLastRerollRound = null;
@@ -68081,6 +68232,7 @@ class CharacterSheetState {
 		this._data.hybridBloodlustTurnStartRound = null;
 		this._data.hybridBloodlustTurnStartCheck = null;
 		this._data.resourceTurnUsage = {};
+		this._data.deferredFlatDamageRiderTurnUsage = {};
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: null});
 
@@ -71308,6 +71460,9 @@ class CharacterSheetState {
 		const appliedMetamagic = typeof spellNameOrObj === "string"
 			? null
 			: (spellNameOrObj?.appliedMetamagic || spellNameOrObj?.metamagic || null);
+		const spellSource = typeof spellNameOrObj === "string"
+			? null
+			: (spellNameOrObj?.source || spellNameOrObj?.spellSource || null);
 
 		this.addConcentration({
 			id: `spell:${spellName}`,
@@ -71315,6 +71470,7 @@ class CharacterSheetState {
 			name: spellName, // Use 'name' for consistency with getConcentratingSpell()
 			spellName,
 			spellLevel: level,
+			spellSource,
 			...(appliedMetamagic ? {appliedMetamagic} : {}),
 			focusedRerollAvailable: appliedMetamagic?.key === "focused",
 			lingersOnBreak: appliedMetamagic?.key === "lingering",
@@ -71330,9 +71486,7 @@ class CharacterSheetState {
 	 * @param {object|string} spell - The spell object with name/source, or spell name
 	 */
 	setConcentrating (spell) {
-		const name = typeof spell === "string" ? spell : spell?.name || spell?.spellName;
-		const level = typeof spell === "string" ? 0 : (spell?.level || spell?.spellLevel || 0);
-		this.setConcentration(name, level);
+		this.setConcentration(spell);
 	}
 
 	/**

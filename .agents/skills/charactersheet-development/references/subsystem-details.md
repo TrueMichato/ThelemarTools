@@ -231,8 +231,26 @@ on load. Entries are `{id, kind: "spell"|"power"|"ability", name, order, modeNam
   when nothing was concentrated on — callers rely on that defensively.
 - `_teardownConcentration()` removes the matching active manifestation for a power,
   so the "concentration ended ⇒ power stopped" invariant holds however it was dropped.
+- Spell concentration records carry `spellSource` when the cast route knows it. Damage-only
+  exceptions must use `getDamageConcentrationProtection()` from the real damage intake
+  consumers; they must not alter `breakConcentration()`, replacement, incapacitation, death,
+  or rest teardown. Source-specific providers fail closed for legacy source-less records.
 
 See `docs/charactersheet/17-talent-psionics.md` for the psionic side.
+
+### Deferred Flat-Damage Riders
+
+Optional flat bonuses which resolve on a damage roll use the state-level
+`getDeferredFlatDamageRiderOptions()` / `consumeDeferredFlatDamageRider()` contract.
+Spell and attack consumers may own prompts for facts the sheet cannot know (such as whether
+the target is affected by the caster's own spell), but state owns source qualification,
+resolution-time ability modifiers, and the shared persisted turn receipt.
+
+The receipt key is the stable source-feature UID. This is required when one feature can trigger
+through multiple modules: Guided Precision's Cartographer-spell and attack routes both use
+`Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA`, so accepting one blocks the other
+until the combat round advances. Declining or cancelling never calls the consume method and
+therefore never writes a receipt. Subclass/class teardown prunes source-owned receipts.
 
 ### Subclass-Scoped State Effects
 

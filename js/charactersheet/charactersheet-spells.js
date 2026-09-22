@@ -2369,7 +2369,7 @@ class CharacterSheetSpells {
 		const castResult = await this._showCastResult(spell, slotLevel, false, false, {sourceItem: power.itemName});
 		if (castResult?.cancelled) return false;
 		if (requiresConcentration) {
-			this._state.setConcentration?.(spell.name, slotLevel);
+			this._state.setConcentration?.({name: spell.name, level: slotLevel, source: spell.source || spellData.source});
 			this._updateConcentrationUI();
 		}
 		this._state.consumeStatesEndingOnSpellCast?.();
@@ -2571,7 +2571,7 @@ class CharacterSheetSpells {
 			// Set concentration for concentration cantrips (rare but possible)
 			const vcRemovesConc0 = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 			if (requiresConcentration && !vcRemovesConc0) {
-				this._state.setConcentration?.({name: spell.name, level: 0, appliedMetamagic: castMeta?.appliedMetamagic || null});
+				this._state.setConcentration?.({name: spell.name, level: 0, source: spell.source || spellData.source, appliedMetamagic: castMeta?.appliedMetamagic || null});
 				this._updateConcentrationUI();
 			}
 			this._state.consumeStatesEndingOnSpellCast?.();
@@ -2648,7 +2648,7 @@ class CharacterSheetSpells {
 				await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 				const vcRemovesConcR = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 				if (requiresConcentration && !vcRemovesConcR) {
-					this._state.setConcentration?.({name: spell.name, level: spell.level, appliedMetamagic: castMeta?.appliedMetamagic || null});
+					this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source || spellData.source, appliedMetamagic: castMeta?.appliedMetamagic || null});
 					this._updateConcentrationUI();
 				}
 				this._state.consumeStatesEndingOnSpellCast?.();
@@ -2957,7 +2957,7 @@ class CharacterSheetSpells {
 		// Set concentration if spell requires it
 		const vcRemovesConcN = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 		if (requiresConcentration && !vcRemovesConcN) {
-			this._state.setConcentration?.({name: spell.name, level: selectedSlot.level, appliedMetamagic: castMeta?.appliedMetamagic || null});
+			this._state.setConcentration?.({name: spell.name, level: selectedSlot.level, source: spell.source || spellData.source, appliedMetamagic: castMeta?.appliedMetamagic || null});
 			this._updateConcentrationUI();
 		}
 
@@ -3016,7 +3016,7 @@ class CharacterSheetSpells {
 		await this._pConsumeMaterialComponent({spell, spellData, variantUsed: false});
 
 		if (requiresConcentration) {
-			this._state.setConcentration?.(spell.name, spell.level);
+			this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source || spellData.source});
 			this._updateConcentrationUI();
 		}
 
@@ -4483,7 +4483,8 @@ class CharacterSheetSpells {
 				effectsApplied = await this._applySpellEffectsToSelf(spell, spellData, effects, slotLevel);
 			} else {
 				// Damage or other effects targeting enemies
-				damageResult = this._rollSpellDamage(spellData, slotLevel, spell.level, appliedMetamagic, spell);
+				const deferredFlatDamageRider = await this._pSelectDeferredFlatDamageRiderForSpell({spell, spellData});
+				damageResult = this._rollSpellDamage(spellData, slotLevel, spell.level, appliedMetamagic, spell, deferredFlatDamageRider);
 				damageInfo = damageResult?.text || "";
 
 				// Roll healing if spell heals but targets others by default (like Mass Cure Wounds)
@@ -6648,6 +6649,51 @@ class CharacterSheetSpells {
 		return {bonus: pending.value, sources: [{name: pending.sourceName || "feature", value: pending.value}]};
 	}
 
+	_getSpellDamageRollComponents (spellData) {
+		const entries = JSON.stringify(spellData?.entries || []);
+		const damageTypes = spellData?.damageInflict || [];
+		const components = [];
+		const re = /\{@damage\s+([^}|]+)(?:\|[^}]*)?}/g;
+		let match;
+		while ((match = re.exec(entries)) !== null) {
+			components.push({
+				index: components.length,
+				dice: match[1].trim(),
+				damageType: this._getPrimaryRolledDamageType(entries, match, damageTypes.slice(components.length)),
+				match,
+			});
+		}
+		return components;
+	}
+
+	async _pSelectDeferredFlatDamageRiderForSpell ({spell, spellData}) {
+		const damageRolls = this._getSpellDamageRollComponents(spellData);
+		if (!damageRolls.length) return null;
+		const rider = this._state.getDeferredFlatDamageRiderOptions?.({route: "spell", spell})?.[0];
+		if (!rider) return null;
+
+		const isUse = await CharacterSheetModal.pGetUserBoolean({
+			title: rider.name,
+			htmlDescription: `<p>Add your current Intelligence modifier to one damage roll of ${spell?.name || spellData?.name || "this spell"}?</p>`,
+			textYes: `Apply ${rider.name}`,
+			textNo: "Decline",
+		});
+		if (isUse !== true) return null;
+
+		let selectedRoll = damageRolls[0];
+		if (damageRolls.length > 1) {
+			selectedRoll = await CharacterSheetModal.pGetUserEnum({
+				title: `${rider.name} — Choose Damage Roll`,
+				values: damageRolls,
+				isResolveItem: true,
+				isAllowNull: true,
+				fnDisplay: roll => `${roll.dice} ${roll.damageType}`,
+			});
+			if (!selectedRoll || typeof selectedRoll === "symbol") return null;
+		}
+		return {...rider, damageRollIndex: selectedRoll.index};
+	}
+
 	async _pApplyTriggeredFeatCriticalHit ({spell, spellData}) {
 		const triggeredFeatDie = await this._page._pRollTriggeredFeatDie?.({
 			trigger: "criticalHit",
@@ -6686,7 +6732,7 @@ class CharacterSheetSpells {
 		};
 	}
 
-	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null) {
+	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null, deferredFlatDamageRider = null) {
 		// Weapon-channel cantrips (Booming/Green-Flame Blade) cast on their own roll ONLY
 		// the secondary/movement damage; the on-hit damage rides the weapon attack instead.
 		const channel = this.getWeaponChannelCantripForCharacter(spell, spellData);
@@ -6698,14 +6744,11 @@ class CharacterSheetSpells {
 		}
 
 		// Look for damage dice in spell entries
-		const damageTypes = spellData.damageInflict || [];
 		const entries = JSON.stringify(spellData.entries || []);
-
-		// Find damage dice patterns like {@damage 8d6}
-		const damageMatch = entries.match(/\{@damage\s+([^}]+)\}/);
-		if (!damageMatch) return "";
-
-		let baseDice = damageMatch[1];
+		const damageRolls = this._getSpellDamageRollComponents(spellData);
+		if (!damageRolls.length) return "";
+		const primaryRoll = damageRolls[0];
+		let baseDice = primaryRoll.dice;
 
 		// Handle upcast damage
 		if (slotLevel && slotLevel > baseLevel && spellData.entriesHigherLevel) {
@@ -6728,6 +6771,7 @@ class CharacterSheetSpells {
 				}
 			}
 		}
+		primaryRoll.dice = baseDice;
 
 		// Magic Missile & projectile clones: N auto-hitting darts, each dealing
 		// the same dice (e.g. 3 × (1d4 + 1) at L1, +1 dart per slot level above base).
@@ -6736,35 +6780,75 @@ class CharacterSheetSpells {
 		// Roll the damage
 		try {
 			const isOvercharged = appliedMetamagic?.key === "overcharged";
-			const damageType = this._getPrimaryRolledDamageType(entries, damageMatch, damageTypes);
-			const isDestructiveWrath = !isOvercharged && this._state.canApplyPendingDamageMaximization?.(damageType);
-			const detail = this._rollDamageDiceDetailed(baseDice, {
-				maximize: isOvercharged || isDestructiveWrath,
-				diceMultiplier: projectile ? projectile.count : 1,
+			const rollsToResolve = deferredFlatDamageRider && damageRolls.length > 1 ? damageRolls : [primaryRoll];
+			let destructiveWrathApplied = false;
+			const resolvedRolls = rollsToResolve.map((roll, index) => {
+				const isDestructiveWrath = !isOvercharged
+					&& !destructiveWrathApplied
+					&& this._state.canApplyPendingDamageMaximization?.(roll.damageType);
+				const detail = this._rollDamageDiceDetailed(roll.dice, {
+					maximize: isOvercharged || isDestructiveWrath,
+					diceMultiplier: index === 0 && projectile ? projectile.count : 1,
+				});
+				if (isDestructiveWrath && this._state.consumePendingDamageMaximization?.(roll.damageType)) destructiveWrathApplied = true;
+				return {
+					...roll,
+					detail,
+					total: detail.total,
+					diceLabel: index === 0 && projectile ? `${projectile.count}× ${roll.dice}` : roll.dice,
+					maximized: isOvercharged || isDestructiveWrath,
+				};
 			});
-			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
+			const resolvedDeferredRider = deferredFlatDamageRider
+				? this._state.consumeDeferredFlatDamageRider?.(deferredFlatDamageRider)
+				: null;
+			if (resolvedDeferredRider) {
+				const selected = resolvedRolls.find(roll => roll.index === (deferredFlatDamageRider.damageRollIndex ?? 0))
+					|| resolvedRolls[0];
+				selected.total += resolvedDeferredRider.value;
+				selected.deferredFlatDamageRider = resolvedDeferredRider;
+			}
 			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
 			const featureBonus = this._getCantripDamageBonus(spell, spellData);
 			const riderBonus = this._consumePendingSpellDamageBonus();
-			const total = detail.total + spellDamageBonus + featureBonus.bonus + riderBonus.bonus;
-			const bonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
+			const total = resolvedRolls.reduce((sum, roll) => sum + roll.total, 0) + spellDamageBonus + featureBonus.bonus + riderBonus.bonus;
+			const globalBonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
 				+ [...featureBonus.sources, ...riderBonus.sources].map(s => ` + ${s.value} ${s.name}`).join("");
-			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
-			const diceLabel = projectile ? `${projectile.count}× ${baseDice}` : baseDice;
+			const primaryResolved = resolvedRolls[0];
+			const damageType = primaryResolved.damageType;
+			const diceLabel = primaryResolved.diceLabel;
+			const maximizedLabel = primaryResolved.maximized ? " maximized" : "";
 			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
 			const push = triggeredEffects.find(it => it.type === "forcedMovement");
 			const pushText = push ? `<br>Thunderbolt Strike: You may push a ${push.maxTargetSize} or smaller target up to ${push.distance} feet ${push.direction}.` : "";
 
 			// Animate the actual dice that were rolled.
-			void this._page.pAnimateDamageDice?.(detail.groups);
+			void this._page.pAnimateDamageDice?.(resolvedRolls.flatMap(roll => roll.detail.groups || []));
+
+			const rollBreakdown = resolvedRolls.length === 1
+				? `${diceLabel}${globalBonusStr}${resolvedDeferredRider ? ` + ${resolvedDeferredRider.value} ${resolvedDeferredRider.name}` : ""}${maximizedLabel}`
+				: resolvedRolls.map(roll => {
+					const deferredLabel = roll.deferredFlatDamageRider
+						? ` + ${roll.deferredFlatDamageRider.value} ${roll.deferredFlatDamageRider.name}`
+						: "";
+					return `${roll.diceLabel}${deferredLabel}: ${roll.total} ${roll.damageType}${roll.maximized ? " maximized" : ""}`;
+				}).join("; ") + globalBonusStr;
 
 			return {
-				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${diceLabel}${bonusStr}${maximizedLabel})${pushText}`,
+				text: `<br>Damage: <strong>${total}</strong> ${damageType} (${rollBreakdown})${pushText}`,
 				total,
 				dice: diceLabel,
 				damageType,
-				maximized: isOvercharged || isDestructiveWrath,
+				maximized: primaryResolved.maximized,
 				triggeredEffects,
+				damageRolls: resolvedRolls.map(roll => ({
+					index: roll.index,
+					dice: roll.diceLabel,
+					damageType: roll.damageType,
+					total: roll.total,
+					deferredFlatDamageRider: roll.deferredFlatDamageRider || null,
+				})),
+				deferredFlatDamageRider: resolvedDeferredRider,
 			};
 		} catch (e) {
 			return null;

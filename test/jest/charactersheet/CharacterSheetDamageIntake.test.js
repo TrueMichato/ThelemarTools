@@ -9,6 +9,11 @@ const HTML = fs.readFileSync(new URL("charactersheet.html", ROOT), "utf8");
 const JS = fs.readFileSync(new URL("js/charactersheet/charactersheet.js", ROOT), "utf8");
 const MOBILE_JS = fs.readFileSync(new URL("js/charactersheet/charactersheet-mobile.js", ROOT), "utf8");
 const CSS = fs.readFileSync(new URL("css/charactersheet.css", ROOT), "utf8");
+const ARTIFICER_DATA = JSON.parse(fs.readFileSync(new URL("data/class/class-artificer.json", ROOT), "utf8"));
+const FULL_EFA_ARTIFICER = {
+	...ARTIFICER_DATA.class.find(cls => cls.name === "Artificer" && cls.source === "EFA"),
+	subclasses: ARTIFICER_DATA.subclass.filter(sc => sc.className === "Artificer" && sc.classSource === "EFA"),
+};
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 let CharacterSheetPage;
@@ -58,8 +63,23 @@ function makePage (state = new CharacterSheetState()) {
 	page._flashHpBar = jest.fn();
 	page._pOfferZeroHpIntervention = jest.fn();
 	page._pOfferMaterialDamageReactions = jest.fn();
+	page._promptConcentrationCheck = jest.fn();
 	page._syncDamageIntakeControls = jest.fn();
 	return page;
+}
+
+function makeCartographer () {
+	const state = new CharacterSheetState();
+	state.setClassCatalog([FULL_EFA_ARTIFICER]);
+	state.addClass({
+		name: "Artificer",
+		source: "EFA",
+		level: 5,
+		subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+	});
+	state.setAbilityBase("int", 16);
+	state.setHp(30, 30, 0);
+	return state;
 }
 
 describe("Canonical damage/heal intake structure", () => {
@@ -205,6 +225,39 @@ describe("One-shot HP undo", () => {
 		expect(state.getCurrentHp()).toBe(23);
 		expect(page._lastHpChange).toBeNull();
 		expect(page._renderDamageIntakes).toHaveBeenCalled();
+	});
+});
+
+describe("Damage-triggered concentration protection", () => {
+	it("skips the actual damage concentration prompt for XPHB Faerie Fire and names the provider", async () => {
+		const state = makeCartographer();
+		state.setConcentration({name: "Faerie Fire", source: "XPHB", level: 1});
+		const page = makePage(state);
+
+		await page._pApplyDamage(5, {damageType: "fire"});
+
+		expect(page._promptConcentrationCheck).not.toHaveBeenCalled();
+		expect(page._showDiceResult).toHaveBeenNthCalledWith(
+			2,
+			"Concentration Protected",
+			"Protected",
+			expect.stringMatching(/Guided Precision.*Faerie Fire/i),
+		);
+	});
+
+	it.each([
+		["another spell", {name: "Call Lightning", source: "XPHB", level: 3}],
+		["another Faerie Fire printing", {name: "Faerie Fire", source: "PHB", level: 1}],
+		["a legacy source-less concentration", {name: "Faerie Fire", level: 1}],
+	])("keeps the normal damage concentration check for %s", async (_label, concentration) => {
+		const state = makeCartographer();
+		state.setConcentration(concentration);
+		const page = makePage(state);
+
+		await page._pApplyDamage(5);
+
+		expect(page._promptConcentrationCheck).toHaveBeenCalledWith(5);
+		expect(page._showDiceResult).toHaveBeenCalledTimes(1);
 	});
 });
 

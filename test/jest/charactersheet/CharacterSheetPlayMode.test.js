@@ -98,6 +98,55 @@ describe("CharacterSheetPlayMode", () => {
 		});
 	});
 
+	describe("Damage concentration protection", () => {
+		it("preserves spell source when casting a concentration spell", () => {
+			const fakeState = {
+				setSpellSlotCurrent: jest.fn(),
+				setConcentration: jest.fn(),
+			};
+			const pm = new CharacterSheetPlayMode({getState: () => fakeState});
+			pm._logActivity = jest.fn();
+			pm._renderSpellsQuick = jest.fn();
+			pm._renderStatusBar = jest.fn();
+
+			pm._doExecuteCast(
+				{name: "Faerie Fire", source: "XPHB", level: 1, concentration: true},
+				{level: 1, current: 1, max: 2},
+			);
+
+			expect(fakeState.setConcentration).toHaveBeenCalledWith({
+				name: "Faerie Fire",
+				source: "XPHB",
+				level: 1,
+			});
+		});
+
+		it("uses the state provider instead of rolling a damage concentration check in the fallback pipeline", async () => {
+			const fakeState = {
+				applyDamageDefenses: () => ({damage: 8, applied: null, reduction: 0}),
+				getTempHp: () => 0,
+				getCurrentHp: () => 20,
+				takeDamage: jest.fn(),
+				isConcentrating: () => true,
+				getDamageConcentrationProtection: () => ({name: "Guided Precision"}),
+				getConcentrationLabel: () => "Faerie Fire",
+			};
+			const pm = new CharacterSheetPlayMode({getState: () => fakeState});
+			pm._logActivity = jest.fn();
+			pm._renderStatusBar = jest.fn();
+			pm._doConcentrationCheck = jest.fn();
+
+			await pm._applyHpChange("damage", 8, "fire");
+
+			expect(fakeState.takeDamage).toHaveBeenCalledWith(8, {damageType: "fire"});
+			expect(pm._doConcentrationCheck).not.toHaveBeenCalled();
+			expect(pm._logActivity).toHaveBeenCalledWith(
+				"shield",
+				"Guided Precision: damage can't end concentration on Faerie Fire",
+			);
+		});
+	});
+
 	describe("Item attunement", () => {
 		const addItem = (item) => {
 			state.addItem(item);
