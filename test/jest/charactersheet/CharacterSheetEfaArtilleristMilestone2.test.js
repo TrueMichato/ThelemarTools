@@ -106,6 +106,17 @@ const makeRawCannon = ({
 	...overrides,
 });
 
+const makeCompanionListStub = () => ({
+	innerHTML: "",
+	insertAdjacentHTML (position, html) {
+		switch (position) {
+			case "beforeend": this.innerHTML += html; break;
+			case "afterbegin": this.innerHTML = `${html}${this.innerHTML}`; break;
+			default: throw new Error(`Unsupported insertAdjacentHTML position: ${position}`);
+		}
+	},
+});
+
 const loadWithPreReconciliationCompanionSnapshot = ({saved, recordId}) => {
 	const restored = new CharacterSheetState();
 	restored.setClassSummonTemplateCatalog(objectData);
@@ -113,7 +124,7 @@ const loadWithPreReconciliationCompanionSnapshot = ({saved, recordId}) => {
 	let beforeReconcile = null;
 	restored.reconcileClassSummons = () => {
 		const previousDocument = globalThis.document;
-		const list = {innerHTML: ""};
+		const list = makeCompanionListStub();
 		globalThis.document = {
 			getElementById: id => id === "charsheet-companions-list" ? list : null,
 		};
@@ -671,7 +682,7 @@ describe("EFA cannon integration boundaries", () => {
 		const state = makeState();
 		const {instanceId} = createCannon(state);
 		const previousDocument = globalThis.document;
-		const list = {innerHTML: ""};
+		const list = makeCompanionListStub();
 		globalThis.document = {
 			getElementById: id => id === "charsheet-companions-list" ? list : null,
 		};
