@@ -372,6 +372,13 @@ class CharacterSheetInventory {
 				if (itemId) this._showItemPowersModal(itemId);
 				return;
 			}
+			if (e.target.closest(".charsheet__item-inline-power")) {
+				const button = e.target.closest(".charsheet__item-inline-power");
+				const itemId = _getItemId(button);
+				const powerId = button?.dataset.powerId;
+				if (itemId && powerId) this._pInvokeItemPower(itemId, powerId);
+				return;
+			}
 			if (e.target.closest(".charsheet__item-restore-charge")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._restoreCharge(itemId);
@@ -4296,6 +4303,22 @@ class CharacterSheetInventory {
 		const items = this._state.getItems();
 		const item = items.find(i => i.id === itemId);
 		if (!item) return;
+		const modelWeaponStatus = this._state.getEfaArmorerModelWeaponInventoryStatus?.(item);
+		if (modelWeaponStatus) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: `${item.name} is a derived Armor Model component and cannot be equipped independently.`,
+			});
+			return;
+		}
+		const arcaneArmorStatus = this._state.getEfaArcaneArmorBindingStatus?.();
+		if (arcaneArmorStatus?.boundItemId === itemId) {
+			const power = this._state.getItemPowers?.().find(candidate =>
+				candidate.itemId === itemId
+				&& candidate.efaArcaneArmorAction === (item.equipped ? "doff" : "don"));
+			if (power) this._pInvokeItemPower(itemId, power.id);
+			return;
+		}
 
 		const newEquipped = !item.equipped;
 
@@ -5699,11 +5722,17 @@ class CharacterSheetInventory {
 			: result.power.kind === "spell" ? "Cast" : "Invoked";
 		JqueryUtil.doToast({
 			type: "success",
-			content: `${verb} ${result.power.name} from ${result.power.itemName}${chargeText}.`,
+			content: result.message || `${verb} ${result.power.name} from ${result.power.itemName}${chargeText}.`,
 		});
 		closeModal?.();
 		this._updateItemBonuses(this._state.getItems());
 		this._renderItemList();
+		if (result.power?.isEfaArcaneArmorPower) {
+			this._renderEquippedItems();
+			this._updateArmorClass();
+			this._updateEncumbrance();
+			this._page?.renderCharacter?.();
+		}
 		this._page?._combat?.renderCombatItemPowers?.();
 		this._page?._combat?.renderCombatActionEconomy?.();
 		this._page?._playMode?._renderActionsHub?.();
@@ -5713,7 +5742,8 @@ class CharacterSheetInventory {
 
 	async _showItemPowersModal (itemId) {
 		const item = this._state.getItems().find(it => it.id === itemId);
-		const powers = this._state.getItemPowers?.().filter(power => power.itemId === itemId) || [];
+		const powers = this._state.getItemPowers?.()
+			.filter(power => power.itemId === itemId && !power.isInlinePrimary) || [];
 		if (!item || !powers.length) return;
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
 			title: `${item.name} — Powers`,
@@ -5774,10 +5804,10 @@ class CharacterSheetInventory {
 				const use = e_({
 					tag: "button",
 					clazz: `ve-btn ve-btn-sm ${power.isDestructive ? "ve-btn-danger" : "ve-btn-primary"}`,
-					text: power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke",
+					text: power.invokeLabel || (power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke"),
 				});
 				use.disabled = !power.isAvailable;
-				use.title = power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`;
+				use.title = power.unavailableReason || `${power.invokeLabel || (power.kind === "spell" ? "Cast" : "Invoke")} ${power.name}`;
 				use.addEventListener("click", () => this._pInvokeItemPower(itemId, power.id, {
 					closeModal: () => doClose(true),
 					chargesCost: chargeChoice ? parseInt(chargeChoice.value, 10) : null,
@@ -5792,6 +5822,8 @@ class CharacterSheetInventory {
 
 	_renderItemDetails (item) {
 		let html = "";
+		const arcaneArmorStatus = this._state.getEfaArcaneArmorBindingStatus?.();
+		const isActiveArcaneArmor = arcaneArmorStatus?.active && arcaneArmorStatus.boundItemId === item.id;
 
 		// Type and rarity - filter out special rarity values
 		const typeStr = this._getItemTypeTag(item);
@@ -5823,7 +5855,7 @@ class CharacterSheetInventory {
 		if (item.armor) {
 			html += `<p><strong>AC:</strong> ${item.ac}</p>`;
 			if (item.strength) {
-				html += `<p><strong>Strength Required:</strong> ${item.strength}</p>`;
+				html += `<p><strong>Strength Required:</strong> ${item.strength}${isActiveArcaneArmor ? ` <span class="text-success">— ignored while worn as Arcane Armor</span>` : ""}</p>`;
 			}
 			if (item.stealth) {
 				html += `<p><strong>Stealth:</strong> Disadvantage</p>`;
@@ -7109,8 +7141,13 @@ class CharacterSheetInventory {
 				: "Form an Ioun bond in the Ioun Stone manager — bonding takes days, and never costs an attunement slot")
 			: (item.attuned ? "End attunement" : "Attune");
 		const hasCharges = item.charges && item.charges > 0;
-		const itemPowers = this._state.getItemPowers?.().filter(power => power.itemId === item.id) || [];
+		const allItemPowers = this._state.getItemPowers?.().filter(power => power.itemId === item.id) || [];
+		const inlinePrimaryPower = allItemPowers.find(power => power.isInlinePrimary) || null;
+		const itemPowers = allItemPowers.filter(power => !power.isInlinePrimary);
 		const hasPowers = itemPowers.length > 0;
+		const isBoundArcaneArmor = ["don", "doff"].includes(inlinePrimaryPower?.efaArcaneArmorAction);
+		const modelWeaponStatus = this._state.getEfaArmorerModelWeaponInventoryStatus?.(item) || null;
+		const showEquipControl = canEquip && !isBoundArcaneArmor && !modelWeaponStatus;
 		const canRecharge = hasCharges && !!item.recharge;
 		const rechargeFormula = canRecharge ? CharacterSheetState.getItemRechargeFormula(item) : "";
 		// Staff of Healing (and similar charged healing staves): a "Cast" affordance lets the
@@ -7236,6 +7273,20 @@ class CharacterSheetInventory {
 						${packProvenanceName ? `<span class="ve-small ve-muted" title="${item._fromPack.replace(/"/g, "&quot;")}">From ${packProvenanceName}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
 						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
+						${inlinePrimaryPower ? `
+							<span class="ve-small charsheet__item-inline-power-status charsheet__item-inline-power-status--${inlinePrimaryPower.statusTone}" title="${(inlinePrimaryPower.statusDescription || inlinePrimaryPower.statusLabel).replace(/"/g, "&quot;")}">
+								<span aria-hidden="true">${inlinePrimaryPower.statusIcon || "⚙"}</span>
+								<span>${inlinePrimaryPower.statusLabel}</span>
+							</span>
+							${inlinePrimaryPower.statusDescription ? `<span class="ve-small ve-muted">${inlinePrimaryPower.statusDescription}</span>` : ""}
+							${inlinePrimaryPower.referenceText ? `<span class="ve-small ve-muted">${inlinePrimaryPower.referenceText}</span>` : ""}
+						` : ""}
+						${modelWeaponStatus ? `
+							<span class="ve-small charsheet__item-inline-power-status charsheet__item-inline-power-status--${modelWeaponStatus.active ? "active" : "suspended"}" title="${modelWeaponStatus.reason.replace(/"/g, "&quot;")}">
+								<span aria-hidden="true">${modelWeaponStatus.active ? "⚙" : "○"}</span>
+								<span>${modelWeaponStatus.label}</span>
+							</span>
+						` : ""}
 						${materialEntity ? `<span class="ve-small charsheet__item-material-badge" title="${(`${materialEntity.name} — ${CharacterSheetMaterials.getSummary(materialEntity, item)}`).replace(/"/g, "&quot;")}"><span aria-hidden="true">⚙</span> <span class="sr-only">Material:</span>${materialEntity.name}<span class="sr-only"> — ${CharacterSheetMaterials.getSummary(materialEntity, item)}</span></span>` : ""}
 						${iounHost ? `<span class="ve-small charsheet__item-material-badge" title="${iounSetStatusTitle.qq()}"><span aria-hidden="true">◉</span> Set in ${iounHostName.qq()}${isIounMatrixDoubled ? " · Numeric effects ×2" : (isIounMatrixExcluded ? " · Fragment not doubled" : "")}</span>` : ""}
 						${mcStatus ? `<button type="button" class="ve-small charsheet__item-mc-badge charsheet__item-mc-badge--${mcStatus.isSuppressing ? "suppress" : mcStatus.isOverloaded ? "over" : "ok"} charsheet__item-mc-config" title="${this._getMagicCapacityTooltip(materialEntity, mcStatus).replace(/"/g, "&quot;")}" aria-label="${CharacterSheetMaterials.getMagicCapacityAriaLabel(materialEntity, mcStatus).replace(/"/g, "&quot;")}"><span aria-hidden="true">✦ ${mcStatus.count}/${mcStatus.capacityDisplay}</span></button>` : ""}
@@ -7269,6 +7320,18 @@ class CharacterSheetInventory {
 							</button>
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-restore-charge" title="Restore 1 charge" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-plus"></span>
+							</button>
+						` : ""}
+						${inlinePrimaryPower ? `
+							<button
+								type="button"
+								class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-inline-power"
+								data-power-id="${inlinePrimaryPower.id}"
+								title="${(inlinePrimaryPower.unavailableReason || inlinePrimaryPower.description || `${inlinePrimaryPower.invokeLabel} ${item.name}`).replace(/"/g, "&quot;")}"
+								aria-label="${(`${inlinePrimaryPower.invokeLabel} ${item.name} — ${inlinePrimaryPower.activationType}${inlinePrimaryPower.unavailableReason ? `: ${inlinePrimaryPower.unavailableReason}` : ""}`).replace(/"/g, "&quot;")}"
+								${inlinePrimaryPower.isAvailable ? "" : "disabled"}
+							>
+								<span aria-hidden="true">${inlinePrimaryPower.statusIcon || "⚙"}</span> ${inlinePrimaryPower.invokeLabel}
 							</button>
 						` : ""}
 						${hasPowers ? `
@@ -7314,7 +7377,7 @@ class CharacterSheetInventory {
 								💎 Stored Spells
 							</button>
 						` : ""}
-						${canEquip ? `
+						${showEquipControl ? `
 							<button type="button" class="ve-btn ve-btn-xs ${item.equipped ? "ve-btn-success" : "ve-btn-default"} charsheet__item-equip" title="${item.equipped ? "Unequip" : "Equip"}">
 								<span class="glyphicon glyphicon-hand-right"></span> ${item.equipped ? "Equipped" : "Equip"}
 							</button>

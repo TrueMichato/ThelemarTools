@@ -3322,9 +3322,12 @@ class CharacterSheetSpells {
 		// Only a no-cost (focus-satisfiable) material component is "cast using a focus";
 		// gold-cost components use the consumed item, not a focus.
 		if (!info || !info.requiresFocus) return null;
-		const focus = this._state.getSpellcastingFocusStatus?.();
+		const focus = this._state.getSpellcastingFocusStatus?.({spell});
 		if (!focus?.ok) return null;
 		if (!focus.itemName) return focus.source; // feature-only (e.g. Star Map)
+		if (focus.isClassScoped && focus.itemSource) {
+			return `${focus.itemName} (${focus.itemSource}) — ${focus.source}`;
+		}
 		// Avoid redundant "(component pouch)" when the item name already says it.
 		const showSource = focus.source && !focus.itemName.toLowerCase().includes(focus.source.toLowerCase());
 		return showSource ? `${focus.itemName} (${focus.source})` : focus.itemName;
@@ -3350,7 +3353,7 @@ class CharacterSheetSpells {
 		if ((this._state.getMatchingVariantComponents?.(spell, spellData) || []).length) return null;
 
 		if (info.requiresFocus) {
-			const focus = this._state.getSpellcastingFocusStatus?.() || {ok: false};
+			const focus = this._state.getSpellcastingFocusStatus?.({spell}) || {ok: false};
 			if (focus.ok) return null;
 			// Bards can use a musical instrument as a focus, so surface that option too.
 			const isBard = this._state._isBard?.();

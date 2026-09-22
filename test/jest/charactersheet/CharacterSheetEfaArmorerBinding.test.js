@@ -1,8 +1,16 @@
 import "./setup.js";
 import fs from "node:fs";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-upgrades.js";
+import "../../../js/charactersheet/charactersheet-inventory.js";
+import "../../../js/charactersheet/charactersheet-combat.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetInventory = globalThis.CharacterSheetInventory;
+const CharacterSheetCombat = globalThis.CharacterSheetCombat;
+const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 const ITEMS = JSON.parse(fs.readFileSync("data/items-base.json", "utf8")).baseitem;
 const ARTIFICER_DATA = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
 
@@ -161,6 +169,7 @@ function buildState ({
 	addProficiency = true,
 	addTools = true,
 	addArmor = true,
+	armorName = "Plate Armor",
 	classSource = "EFA",
 	subclassSource = "EFA",
 	subclassName = "Armorer",
@@ -168,9 +177,12 @@ function buildState ({
 	const state = new CharacterSheetState();
 	addEfaArmorer(state, {classSource, subclassSource, subclassName});
 	if (model && classSource === "EFA") setCanonicalModel(state, model);
+	state.addArmorProficiency("Light Armor");
+	state.addArmorProficiency("Medium Armor");
+	if (subclassName === "Armorer") state.addArmorProficiency("Heavy Armor");
 	if (addProficiency) state.addToolProficiency("Smith's Tools");
 	const tools = addTools ? addInventoryItem(state, getBaseItem("Smith's Tools"), false) : null;
-	const armor = addArmor ? addInventoryItem(state, getBaseItem("Plate Armor"), true) : null;
+	const armor = addArmor ? addInventoryItem(state, getBaseItem(armorName), true) : null;
 	return {state, armor, tools};
 }
 
@@ -202,6 +214,32 @@ function setHeavyArmorStealthSnapshot (state) {
 		type: "heavy",
 		stealth: true,
 	});
+}
+
+function getArcaneArmorPower (state, itemId, action) {
+	return state.getItemPowers().find(power =>
+		power.itemId === itemId
+		&& power.efaArcaneArmorAction === action);
+}
+
+function makeInventoryConsumer (state) {
+	const inventory = Object.create(CharacterSheetInventory.prototype);
+	inventory._state = state;
+	inventory._page = {
+		_combat: {
+			renderCombatItemPowers: () => {},
+			renderCombatActionEconomy: () => {},
+		},
+		_playMode: {_renderActionsHub: () => {}},
+		renderCharacter: () => {},
+		_saveCurrentCharacter: () => {},
+	};
+	inventory._updateItemBonuses = () => {};
+	inventory._renderItemList = () => {};
+	inventory._renderEquippedItems = () => {};
+	inventory._updateArmorClass = () => {};
+	inventory._updateEncumbrance = () => {};
+	return inventory;
 }
 
 describe("EFA Armorer Arcane Armor binding", () => {
@@ -246,7 +284,7 @@ describe("EFA Armorer Arcane Armor binding", () => {
 	});
 
 	it("keeps Arcane Armor active after the transformation tools are no longer available", () => {
-		const {state, armor, tools} = buildState({model: "Infiltrator"});
+		const {state, armor, tools} = buildState({model: "Infiltrator", armorName: "Leather Armor"});
 		state.setAbilityBase("str", 16);
 		const baseSpeed = state.getWalkSpeed();
 		expect(state.bindEfaArcaneArmor(armor.id)).toMatchObject({ok: true});
@@ -418,6 +456,224 @@ describe("EFA Armorer Arcane Armor binding", () => {
 			active: false,
 			suspended: true,
 		});
+	});
+});
+
+describe("EFA Armorer Arcane Armor inventory powers and while-worn benefits", () => {
+	it("exposes and commits the Magic-action transformation on the exact armor row", () => {
+		const {state, armor} = buildState();
+		const power = getArcaneArmorPower(state, armor.id, "transform");
+
+		expect(power).toMatchObject({
+			id: "efa-armorer:arcane-armor:transform",
+			actionType: "action",
+			activationType: "Magic (Action)",
+			invokeLabel: "Transform",
+			isInlinePrimary: true,
+			isAvailable: true,
+			statusLabel: "Arcane Armor · Ready to transform",
+		});
+		expect(state.getEfaArcaneArmorBindingStatus().boundItemId).toBeNull();
+
+		expect(state.invokeItemPower(armor.id, power.id)).toMatchObject({
+			ok: true,
+			message: "Transformed Plate Armor into Arcane Armor.",
+		});
+		expect(state.getEfaArcaneArmorBindingStatus()).toMatchObject({
+			boundItemId: armor.id,
+			active: true,
+		});
+		expect(getArcaneArmorPower(state, armor.id, "doff")).toMatchObject({
+			activationType: "Utilize (Action)",
+			invokeLabel: "Doff",
+		});
+	});
+
+	it.each([
+		["a canonical model", () => buildState({model: null}), "armor-model-unresolved"],
+		["equipped armor", () => {
+			const setup = buildState();
+			setup.state.setItemEquipped(setup.armor.id, false);
+			return setup;
+		}, "armor-not-equipped"],
+		["Smith's Tools proficiency", () => buildState({addProficiency: false}), "missing-smiths-tools-proficiency"],
+		["a canonical Smith's Tools item", () => buildState({addTools: false}), "missing-smiths-tools-item"],
+		["no other worn body armor", () => {
+			const setup = buildState();
+			addInventoryItem(setup.state, getBaseItem("Leather Armor"), true);
+			return setup;
+		}, "other-armor-equipped"],
+	])("shows the exact disabled remediation when transformation lacks %s", (_label, makeSetup, expectedCode) => {
+		const {state, armor} = makeSetup();
+		const power = getArcaneArmorPower(state, armor.id, "transform");
+
+		expect(power).toMatchObject({
+			isAvailable: false,
+			statusLabel: "Arcane Armor · Blocked",
+		});
+		expect(power.unavailableReason).toBeTruthy();
+		expect(state.getEfaArcaneArmorTransformationStatus(armor.id).code).toBe(expectedCode);
+		expect(state.invokeItemPower(armor.id, power.id)).toMatchObject({
+			ok: false,
+			reason: power.unavailableReason,
+		});
+		expect(state.getEfaArcaneArmorBindingStatus().boundItemId).toBeNull();
+	});
+
+	it("does not expose EFA Arcane Armor powers to the TCE Armorer", () => {
+		const {state, armor} = buildState({classSource: "TCE", subclassSource: "TCE"});
+		expect(state.getItemPowers().filter(power => power.itemId === armor.id && power.isEfaArcaneArmorPower)).toEqual([]);
+	});
+
+	it("uses Quick Don/Doff without a continuous Smith's Tools gate and restores invalidated armor penalties", () => {
+		const {state, armor, tools} = buildState();
+		state.setAbilityBase("str", 10);
+		state.setSpeed("walk", 30);
+		state.invokeItemPower(armor.id, getArcaneArmorPower(state, armor.id, "transform").id);
+
+		expect(state.getArmorStrengthPenalty()).toBe(0);
+		expect(state.getWalkSpeed()).toBe(30);
+		expect(state.getArmorStrengthRequirement()).toMatchObject({
+			required: 15,
+			current: 10,
+			met: true,
+			ignored: true,
+			reason: "Arcane Armor",
+		});
+
+		state.removeItem(tools.id);
+		state.removeToolProficiency("Smith's Tools");
+		const doff = getArcaneArmorPower(state, armor.id, "doff");
+		expect(state.invokeItemPower(armor.id, doff.id)).toMatchObject({ok: true});
+		expect(state.getEfaArcaneArmorBindingStatus()).toMatchObject({
+			boundItemId: armor.id,
+			active: false,
+			suspended: true,
+		});
+		expect(state.getArmorStrengthRequirement()).toBeNull();
+
+		const staleDoff = state.invokeItemPower(armor.id, doff.id);
+		expect(staleDoff).toMatchObject({ok: false, reason: "Item power not found."});
+		expect(state.getItems().find(item => item.id === armor.id)?.equipped).toBe(false);
+
+		const don = getArcaneArmorPower(state, armor.id, "don");
+		expect(state.invokeItemPower(armor.id, don.id)).toMatchObject({ok: true});
+		expect(state.getWalkSpeed()).toBe(30);
+
+		state.removeClass("Artificer", "EFA");
+		expect(state.getEfaArcaneArmorBindingStatus().boundItemId).toBeNull();
+		expect(state.getArmorStrengthPenalty()).toBe(-10);
+		expect(state.getWalkSpeed()).toBe(20);
+		expect(state.getArmorStrengthRequirement()).toEqual({required: 15, current: 10, met: false});
+	});
+
+	it("scopes the worn armor focus to Artificer|EFA spells and reports the editable item name/source", () => {
+		const {state, armor} = buildState();
+		state.replaceItem(armor.id, {
+			...getBaseItem("Plate Armor"),
+			name: "Aegis of the Last Watch",
+			_isCustom: true,
+		});
+		state.invokeItemPower(armor.id, getArcaneArmorPower(state, armor.id, "transform").id);
+		state.addClass({name: "Wizard", source: "XPHB", level: 1, spellcastingAbility: "int"});
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = state;
+		const artificerSpell = {
+			name: "Cure Wounds",
+			source: "XPHB",
+			sourceClass: "Artificer",
+			components: {m: "a healer's kit"},
+		};
+		const wizardSpell = {
+			name: "Identify",
+			source: "XPHB",
+			sourceClass: "Wizard",
+			sourceClassSource: "XPHB",
+			components: {m: "a pearl"},
+		};
+		const tceArtificerSpell = {
+			...artificerSpell,
+			sourceClassSource: "TCE",
+		};
+
+		expect(state.getSpellcastingFocusStatus({spell: artificerSpell})).toMatchObject({
+			ok: true,
+			source: "Arcane Armor",
+			itemName: "Aegis of the Last Watch",
+			itemSource: "XPHB",
+			isClassScoped: true,
+		});
+		expect(spells._getMaterialComponentBlock(artificerSpell, artificerSpell)).toBeNull();
+		expect(spells._getSpellFocusNote(artificerSpell, artificerSpell)).toBe("Aegis of the Last Watch (XPHB) — Arcane Armor");
+		expect(state.getSpellcastingFocusStatus({spell: wizardSpell}).ok).toBe(false);
+		expect(state.getSpellcastingFocusStatus({spell: tceArtificerSpell}).ok).toBe(false);
+		expect(spells._getMaterialComponentBlock(wizardSpell, wizardSpell)).toContain("Cannot cast Identify");
+
+		state.invokeItemPower(armor.id, getArcaneArmorPower(state, armor.id, "doff").id);
+		expect(state.getSpellcastingFocusStatus({spell: artificerSpell}).ok).toBe(false);
+		expect(spells._getMaterialComponentBlock(artificerSpell, artificerSpell)).toContain("Cannot cast Cure Wounds");
+	});
+
+	it("renders explicit bound armor and stable generated-model status on real Inventory rows", () => {
+		const {state, armor} = buildState();
+		const inventory = makeInventoryConsumer(state);
+		inventory._page.getItemMaterials = () => [];
+		inventory._page.getMaterialsModule = () => null;
+		inventory._allItems = [];
+
+		let html = inventory._renderItemRow(state.getItems().find(item => item.id === armor.id)).outerHTML;
+		expect(html).toContain("Arcane Armor · Ready to transform");
+		expect(html).toContain("charsheet__item-inline-power");
+		expect(html).toContain("> Transform");
+
+		state.invokeItemPower(armor.id, getArcaneArmorPower(state, armor.id, "transform").id);
+		html = inventory._renderItemRow(state.getItems().find(item => item.id === armor.id)).outerHTML;
+		expect(html).toContain("Arcane Armor · Worn");
+		expect(html).toContain("Strength requirement ignored");
+		expect(html).toContain("Cannot be removed against your will.");
+		expect(html).toContain("> Doff");
+		expect(html).not.toContain("charsheet__item-equip");
+
+		for (const generated of getGeneratedRows(state)) {
+			const generatedHtml = inventory._renderItemRow(generated).outerHTML;
+			const isActive = generated._efaArmorerWeaponId === MODEL_IDS.Guardian;
+			expect(generatedHtml).toContain(isActive ? "Active Armor Model Weapon" : `Dormant: ${MODEL_NAMES.find(name => MODEL_IDS[name] === generated._efaArmorerWeaponId)}`);
+			expect(generatedHtml).not.toContain("charsheet__item-equip");
+		}
+
+		state.invokeItemPower(armor.id, getArcaneArmorPower(state, armor.id, "doff").id);
+		html = inventory._renderItemRow(state.getItems().find(item => item.id === armor.id)).outerHTML;
+		expect(html).toContain("Arcane Armor · Doffed / Suspended");
+		expect(html).toContain("> Don");
+		expect(html).not.toContain("charsheet__item-equip");
+	});
+
+	it("spends one Combat Action only after a committed power and spends nothing on a stale rejection", async () => {
+		const {state, armor} = buildState();
+		const inventory = makeInventoryConsumer(state);
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._state = state;
+		combat._page = {_inventory: inventory};
+		combat.renderCombatItemPowers = () => {};
+		combat.renderCombatActionEconomy = () => {};
+		state.startCombat();
+		combat._resetTurnActionUsage();
+
+		const transform = getArcaneArmorPower(state, armor.id, "transform");
+		expect(await combat._pInvokeCombatItemPower(transform)).toBe(true);
+		expect(state.isActionTypeAvailable("action")).toBe(false);
+
+		state.resetActionEconomy();
+		expect(await combat._pInvokeCombatItemPower(transform)).toBe(false);
+		expect(state.isActionTypeAvailable("action")).toBe(true);
+		expect(state.getEfaArcaneArmorBindingStatus()).toMatchObject({
+			boundItemId: armor.id,
+			active: true,
+		});
+
+		state.endCombat();
+		expect(await inventory._pInvokeItemPower(armor.id, getArcaneArmorPower(state, armor.id, "doff").id)).toBe(true);
+		expect(state.getEfaArcaneArmorBindingStatus()).toMatchObject({active: false, suspended: true});
 	});
 });
 
@@ -752,7 +1008,7 @@ describe("EFA Armorer stable generated model weapons", () => {
 	});
 
 	it("applies Infiltrator speed and Stealth advantage only while the binding is active", () => {
-		const {state, armor} = buildState({model: "Infiltrator"});
+		const {state, armor} = buildState({model: "Infiltrator", armorName: "Leather Armor"});
 		state.setAbilityBase("str", 16);
 		const baseSpeed = state.getWalkSpeed();
 
@@ -789,7 +1045,7 @@ describe("EFA Armorer stable generated model weapons", () => {
 		expect(state.getWalkSpeed()).toBe(baseSpeed);
 		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
 			advantage: false,
-			disadvantage: true,
+			disadvantage: false,
 			cancelled: false,
 		});
 		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toEqual([]);
@@ -799,7 +1055,7 @@ describe("EFA Armorer stable generated model weapons", () => {
 		expect(state.getWalkSpeed()).toBe(baseSpeed);
 		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
 			advantage: false,
-			disadvantage: true,
+			disadvantage: false,
 		});
 	});
 
@@ -822,7 +1078,7 @@ describe("EFA Armorer stable generated model weapons", () => {
 	});
 
 	it("switches attack and passive mechanics without activating multiple models", () => {
-		const {state, armor} = buildState({model: "Infiltrator"});
+		const {state, armor} = buildState({model: "Infiltrator", armorName: "Leather Armor"});
 		state.setAbilityBase("str", 16);
 		state.bindEfaArcaneArmor(armor.id);
 		const baseSpeed = state.getWalkSpeed() - 5;
@@ -873,7 +1129,7 @@ describe("EFA Armorer stable generated model weapons", () => {
 	});
 
 	it("round-trips the active Infiltrator attack and passive mechanics", () => {
-		const {state, armor} = buildState({model: "Infiltrator"});
+		const {state, armor} = buildState({model: "Infiltrator", armorName: "Leather Armor"});
 		state.setAbilityBase("str", 16);
 		const baseSpeed = state.getWalkSpeed();
 		state.bindEfaArcaneArmor(armor.id);

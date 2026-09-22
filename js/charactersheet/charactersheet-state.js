@@ -16097,12 +16097,14 @@ class CharacterSheetState {
 	 * snapshot never populated.
 	 *
 	 * @param {object} item Raw (unprojected) inventory item data.
+	 * @param {{itemId?: string|null}} options
 	 * @returns {object}
 	 */
-	_getArmorAcSlotSnapshot (item) {
+	_getArmorAcSlotSnapshot (item, {itemId = null} = {}) {
 		const projected = this.projectItemMaterial(item);
 		const magicBonus = CharacterSheetItemUtils.parseBonus(item.bonusAc);
 		return {
+			...(itemId ? {itemId} : {}),
 			ac: CharacterSheetItemUtils.parseBonus(projected.ac) + magicBonus,
 			type: projected.armorType || item.armorType || this._inferArmorType(projected),
 			name: item.name,
@@ -17286,6 +17288,7 @@ class CharacterSheetState {
 	getArmorStrengthPenalty () {
 		const armor = this._data.ac.armor;
 		if (!armor || !armor.strength) return 0;
+		if (this._isEfaArcaneArmorStrengthRequirementIgnored(armor)) return 0;
 
 		// Parse strength requirement (e.g., "15" or 15)
 		const requiredStr = typeof armor.strength === "string"
@@ -17318,11 +17321,26 @@ class CharacterSheetState {
 		if (isNaN(required)) return null;
 
 		const current = this.getAbilityScore("str");
+		if (this._isEfaArcaneArmorStrengthRequirementIgnored(armor)) {
+			return {
+				required,
+				current,
+				met: true,
+				ignored: true,
+				reason: "Arcane Armor",
+			};
+		}
 		return {
 			required,
 			current,
 			met: current >= required,
 		};
+	}
+
+	_isEfaArcaneArmorStrengthRequirementIgnored (armor = this._data.ac.armor) {
+		if (!armor?.itemId) return false;
+		const status = this.getEfaArcaneArmorBindingStatus();
+		return status.active && status.boundItemId === armor.itemId;
 	}
 	// #endregion
 
@@ -35659,10 +35677,12 @@ class CharacterSheetState {
 	 */
 	_refreshEquippedAcSlots () {
 		const equipped = this._data.inventory.filter(invItem => invItem.equipped && invItem.item);
-		const armor = equipped.find(invItem => this.isBodyArmorItem(invItem.item))?.item || null;
-		const shield = equipped.find(invItem => this.isShieldItem(invItem.item))?.item || null;
+		const armorRow = equipped.find(invItem => this.isBodyArmorItem(invItem.item)) || null;
+		const shieldRow = equipped.find(invItem => this.isShieldItem(invItem.item)) || null;
+		const armor = armorRow?.item || null;
+		const shield = shieldRow?.item || null;
 
-		this.setArmor(armor ? this._getArmorAcSlotSnapshot(armor) : null);
+		this.setArmor(armor ? this._getArmorAcSlotSnapshot(armor, {itemId: armorRow.id}) : null);
 		this.setShield(shield ? {equipped: true, ...this._getShieldAcSlotSnapshot(shield)} : false);
 	}
 
@@ -36664,6 +36684,9 @@ class CharacterSheetState {
 					});
 				}
 			}
+
+			const efaArcaneArmorPower = this._getEfaArcaneArmorItemPower(item);
+			if (efaArcaneArmorPower) out.push(efaArcaneArmorPower);
 		}
 		for (const effect of this.getGemstoneEffects({activeOnly: false})) {
 			if (activeOnly && !effect.active) continue;
@@ -36715,6 +36738,7 @@ class CharacterSheetState {
 		const power = this.getItemPower(itemId, powerId);
 		if (!power) return {ok: false, reason: "Item power not found."};
 		if (!power.isAvailable) return {ok: false, reason: power.unavailableReason};
+		if (power.efaArcaneArmorAction) return this._invokeEfaArcaneArmorItemPower(power);
 		if (power.gemstonePower) {
 			const found = this._findGemstoneByInstanceId(power.gemInstanceId);
 			if (!found) return {ok: false, reason: "Gemstone not found."};
@@ -39078,7 +39102,52 @@ class CharacterSheetState {
 		return null;
 	}
 
-	getSpellcastingFocusStatus () {
+	_getClassScopedSpellcastingFocusCandidates () {
+		const status = this.getEfaArcaneArmorBindingStatus();
+		if (!status.active || !status.boundItem) return [];
+		return [{
+			source: "Arcane Armor",
+			itemName: status.boundItem.name,
+			itemSource: status.boundItem.source,
+			isClassScoped: true,
+			classScopes: [{name: "Artificer", source: "EFA"}],
+		}];
+	}
+
+	_getSpellClassScope (spell) {
+		if (!spell) return null;
+		const rawSourceClass = typeof spell.sourceClass === "object"
+			? String(spell.sourceClass?.name || "").trim()
+			: String(spell.sourceClass || "").trim();
+		const [name, uidSource = ""] = rawSourceClass.split("|");
+		if (!name) return null;
+		return {
+			name,
+			source: String(
+				(typeof spell.sourceClass === "object" ? spell.sourceClass?.source : null)
+				|| spell.sourceClassSource
+				|| spell.classSource
+				|| uidSource
+				|| "",
+			).trim(),
+		};
+	}
+
+	_spellMatchesClassScopedFocus (spell, candidate) {
+		const spellScope = this._getSpellClassScope(spell);
+		if (!spellScope) return false;
+		return (candidate.classScopes || []).some(scope => {
+			if (String(scope.name || "").toLowerCase() !== spellScope.name.toLowerCase()) return false;
+			if (!scope.source) return true;
+			if (spellScope.source) return String(scope.source).toLowerCase() === spellScope.source.toLowerCase();
+			const matchingOwners = (this._data.classes || []).filter(cls =>
+				String(cls.name || "").toLowerCase() === spellScope.name.toLowerCase());
+			return matchingOwners.length === 1
+				&& String(matchingOwners[0].source || "").toLowerCase() === String(scope.source).toLowerCase();
+		});
+	}
+
+	getSpellcastingFocusStatus ({spell = null} = {}) {
 		const inv = this._data.inventory || [];
 		const baseType = it => {
 			const rawType = typeof it.typeCode === "string" ? it.typeCode : it.type;
@@ -39134,6 +39203,10 @@ class CharacterSheetState {
 		if (this._isBard() && has((i, it) => baseType(it) === "INS" && this._isProficientMusicalInstrument(it.name || i.name))) {
 			return {ok: true, source: "musical instrument", itemName: matched.name};
 		}
+
+		const classScopedFocus = this._getClassScopedSpellcastingFocusCandidates()
+			.find(candidate => this._spellMatchesClassScopedFocus(spell, candidate));
+		if (classScopedFocus) return {ok: true, ...classScopedFocus};
 
 		return {ok: false, source: null, itemName: null};
 	}
@@ -70358,19 +70431,54 @@ class CharacterSheetState {
 		return status.boundItem;
 	}
 
+	getEfaArcaneArmorTransformationStatus (itemId) {
+		if (!this._getEfaArmorerClass()) {
+			return this._getEfaBindingError("efa-armorer-unavailable", "Requires a level 3 EFA Artificer Armorer.");
+		}
+		if (!this.getEfaArmorerModel()) {
+			return this._getEfaBindingError("armor-model-unresolved", "Select one canonical EFA Armor Model first.");
+		}
+		if (this.isDead()) {
+			return this._getEfaBindingError("character-dead", "Arcane Armor is unavailable while the character is dead.");
+		}
+
+		const wrapper = this._findInventoryRow(itemId);
+		if (!wrapper) {
+			return this._getEfaBindingError("inventory-row-not-found", "This inventory armor row no longer exists.");
+		}
+		if (!this._isEfaBodyArmor(wrapper)) {
+			return this._getEfaBindingError("not-body-armor", "Choose light, medium, or heavy body armor.");
+		}
+		if (!wrapper.equipped) {
+			return this._getEfaBindingError("armor-not-equipped", "Equip this body armor before transforming it.");
+		}
+		if (!this.hasToolProficiency("Smith's Tools")) {
+			return this._getEfaBindingError("missing-smiths-tools-proficiency", "Gain proficiency with Smith's Tools before transforming this armor.");
+		}
+		if (!this._hasEfaSmithsToolsItem()) {
+			return this._getEfaBindingError("missing-smiths-tools-item", "Carry canonical PHB or XPHB Smith's Tools before transforming this armor.");
+		}
+		if ((this._data.inventory || []).some(other =>
+			other.id !== itemId
+				&& other.equipped
+				&& this._isEfaBodyArmor(other))) {
+			return this._getEfaBindingError("other-armor-equipped", "Doff the other worn body armor before transforming this one.");
+		}
+
+		return {
+			ok: true,
+			code: null,
+			message: null,
+			item: this._flattenEfaInventoryWrapper(wrapper),
+			status: this._getEfaArcaneArmorStatusSnapshot(),
+		};
+	}
+
 	getEfaArcaneArmorEligibleItems () {
 		this.reconcileEfaArmorerState({cause: "eligibility-query"});
-		const status = this._getEfaArcaneArmorStatusSnapshot();
-		if (!status.available) return [];
-		if (!this.hasToolProficiency("Smith's Tools") || !this._hasEfaSmithsToolsItem()) return [];
 		return (this._data.inventory || [])
-			.filter(wrapper =>
-				wrapper.equipped
-				&& this._isEfaBodyArmor(wrapper)
-				&& !(this._data.inventory || []).some(other =>
-					other.id !== wrapper.id
-						&& other.equipped
-						&& this._isEfaBodyArmor(other)))
+			.filter(wrapper => this._isEfaBodyArmor(wrapper))
+			.filter(wrapper => this.getEfaArcaneArmorTransformationStatus(wrapper.id).ok)
 			.map(wrapper => this._flattenEfaInventoryWrapper(wrapper));
 	}
 
@@ -70385,26 +70493,10 @@ class CharacterSheetState {
 
 	bindEfaArcaneArmor (itemId) {
 		this.reconcileEfaArmorerState({cause: "bind-request"});
-		if (!this._getEfaArmorerClass() || !this.getEfaArmorerModel()) {
-			return this._getEfaBindingError("efa-armorer-unavailable", "An exact Artificer|EFA Armorer model at level 3 is required.");
-		}
-		if (this.isDead()) return this._getEfaBindingError("character-dead", "A dead character cannot bind Arcane Armor.");
+		const transform = this.getEfaArcaneArmorTransformationStatus(itemId);
+		if (!transform.ok) return transform;
 		const wrapper = this._findInventoryRow(itemId);
-		if (!wrapper) return this._getEfaBindingError("inventory-row-not-found", `No inventory row exists for id "${itemId}".`);
-		if (!this._isEfaBodyArmor(wrapper)) return this._getEfaBindingError("not-body-armor", "Arcane Armor requires light, medium, or heavy body armor; shields are not eligible.");
-		if (!wrapper.equipped) return this._getEfaBindingError("armor-not-equipped", "The armor must be equipped before it can be bound.");
-		if (!this.hasToolProficiency("Smith's Tools")) {
-			return this._getEfaBindingError("missing-smiths-tools-proficiency", "Smith's Tools proficiency is required.");
-		}
-		if (!this._hasEfaSmithsToolsItem()) {
-			return this._getEfaBindingError("missing-smiths-tools-item", "A canonical Smith's Tools item from PHB or XPHB is required in inventory.");
-		}
-		if ((this._data.inventory || []).some(other =>
-			other.id !== itemId
-				&& other.equipped
-				&& this._isEfaBodyArmor(other))) {
-			return this._getEfaBindingError("other-armor-equipped", "Unequip every other body armor before binding Arcane Armor.");
-		}
+		if (wrapper?.equipped) this.setArmor(this._getArmorAcSlotSnapshot(wrapper.item, {itemId}));
 
 		const changed = this._data.efaArmorer.arcaneArmorItemId !== itemId;
 		this._data.efaArmorer.arcaneArmorItemId = itemId;
@@ -70418,6 +70510,131 @@ class CharacterSheetState {
 		this._data.efaArmorer.arcaneArmorItemId = null;
 		this.reconcileEfaArmorerState({cause: reason});
 		return {ok: true, changed, status: this._getEfaArcaneArmorStatusSnapshot()};
+	}
+
+	_getEfaArcaneArmorItemPower (item) {
+		if (!this._getEfaArmorerClass() || !this._isEfaBodyArmor(item)) return null;
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		const base = {
+			actionType: "action",
+			kind: "ability",
+			requiresEquipped: false,
+			isInlinePrimary: true,
+			isEfaArcaneArmorPower: true,
+			statusIcon: "⚙",
+			itemId: item.id,
+			itemName: item.name,
+			itemSource: item.source,
+			itemHoverData: item,
+			chargesCurrent: 0,
+			chargesMax: 0,
+			usesCurrent: null,
+			isActive: status.active && status.boundItemId === item.id,
+		};
+
+		if (status.boundItemId === item.id) {
+			const isWorn = status.active;
+			const unavailableReason = isWorn
+				? null
+				: status.reasons.every(reason => reason === "bound-armor-not-equipped")
+					? null
+					: "This Arcane Armor binding is no longer valid.";
+			return {
+				...base,
+				id: isWorn ? "efa-armorer:arcane-armor:doff" : "efa-armorer:arcane-armor:don",
+				name: `${isWorn ? "Doff" : "Don"} Arcane Armor`,
+				invokeLabel: isWorn ? "Doff" : "Don",
+				activationType: "Utilize (Action)",
+				efaArcaneArmorAction: isWorn ? "doff" : "don",
+				description: `Use the Utilize action to ${isWorn ? "doff" : "don"} this Arcane Armor.`,
+				statusLabel: isWorn ? "Arcane Armor · Worn" : "Arcane Armor · Doffed / Suspended",
+				statusTone: isWorn ? "active" : "suspended",
+				statusDescription: isWorn
+					? "Utilize to Doff · Strength requirement ignored · Artificer spellcasting focus active."
+					: "Utilize to Don · Strength and Artificer spellcasting-focus benefits are suspended.",
+				referenceText: "Cannot be removed against your will.",
+				isAvailable: !unavailableReason,
+				unavailableReason,
+			};
+		}
+
+		const transform = this.getEfaArcaneArmorTransformationStatus(item.id);
+		return {
+			...base,
+			id: "efa-armorer:arcane-armor:transform",
+			name: "Transform into Arcane Armor",
+			invokeLabel: "Transform",
+			activationType: "Magic (Action)",
+			efaArcaneArmorAction: "transform",
+			description: "Use the Magic action with Smith's Tools to transform this worn armor into Arcane Armor.",
+			statusLabel: transform.ok ? "Arcane Armor · Ready to transform" : "Arcane Armor · Blocked",
+			statusTone: transform.ok ? "ready" : "blocked",
+			statusDescription: transform.ok ? "Ready: Magic action." : transform.message,
+			referenceText: null,
+			isAvailable: transform.ok,
+			unavailableReason: transform.ok ? null : transform.message,
+		};
+	}
+
+	_invokeEfaArcaneArmorItemPower (power) {
+		if (power.efaArcaneArmorAction === "transform") {
+			const result = this.bindEfaArcaneArmor(power.itemId);
+			if (!result.ok) return {ok: false, reason: result.message, code: result.code};
+			return {
+				ok: true,
+				power,
+				itemName: power.itemName,
+				powerName: power.name,
+				message: `Transformed ${power.itemName} into Arcane Armor.`,
+			};
+		}
+
+		const status = this.getEfaArcaneArmorBindingStatus();
+		if (status.boundItemId !== power.itemId) {
+			return {ok: false, reason: "This armor is no longer the bound Arcane Armor."};
+		}
+		const wrapper = this._findInventoryRow(power.itemId);
+		if (!wrapper || !this._isEfaBodyArmor(wrapper)) {
+			return {ok: false, reason: "The bound Arcane Armor inventory row is no longer valid."};
+		}
+
+		if (power.efaArcaneArmorAction === "doff") {
+			if (!status.active || !wrapper.equipped) {
+				return {ok: false, reason: "The Arcane Armor is no longer worn."};
+			}
+			this.setItemEquipped(power.itemId, false);
+			if (this._data.ac.armor?.itemId === power.itemId) this.setArmor(null);
+			return {
+				ok: true,
+				power,
+				itemName: power.itemName,
+				powerName: power.name,
+				message: `Doffed ${power.itemName}; Arcane Armor benefits are suspended.`,
+			};
+		}
+
+		if (power.efaArcaneArmorAction === "don") {
+			if (wrapper.equipped || !status.suspended || !status.reasons.every(reason => reason === "bound-armor-not-equipped")) {
+				return {ok: false, reason: "The Arcane Armor can no longer be donned from this state."};
+			}
+			if ((this._data.inventory || []).some(other =>
+				other.id !== power.itemId
+					&& other.equipped
+					&& this._isEfaBodyArmor(other))) {
+				return {ok: false, reason: "Doff the other worn body armor before donning Arcane Armor."};
+			}
+			this.setItemEquipped(power.itemId, true);
+			this.setArmor(this._getArmorAcSlotSnapshot(wrapper.item, {itemId: power.itemId}));
+			return {
+				ok: true,
+				power,
+				itemName: power.itemName,
+				powerName: power.name,
+				message: `Donned ${power.itemName}; Arcane Armor benefits are active.`,
+			};
+		}
+
+		return {ok: false, reason: "Unsupported Arcane Armor action."};
 	}
 
 	_removeEfaArmorerGeneratedRows () {
@@ -70592,6 +70809,8 @@ class CharacterSheetState {
 						&& wrapper.equipped
 						&& this._isEfaBodyArmor(wrapper));
 				if (invalid) this._data.efaArmorer.arcaneArmorItemId = null;
+				else if (bound.equipped) this.setArmor(this._getArmorAcSlotSnapshot(bound.item, {itemId: boundId}));
+				else if (this._data.ac.armor?.itemId === boundId) this.setArmor(null);
 			}
 
 			this._reconcileEfaArmorerGeneratedActivation();
@@ -70606,6 +70825,21 @@ class CharacterSheetState {
 		if (!def) return true;
 		const status = this._getEfaArcaneArmorStatusSnapshot();
 		return status.active && status.model?.id === def.id;
+	}
+
+	getEfaArmorerModelWeaponInventoryStatus (item) {
+		const def = this._getEfaArmorerWeaponDefinition(item);
+		if (!def) return null;
+		const status = this.getEfaArcaneArmorBindingStatus();
+		const active = status.active && status.model?.id === def.id;
+		return {
+			active,
+			model: def.model,
+			label: active ? "Active Armor Model Weapon" : `Dormant: ${def.model}`,
+			reason: active
+				? `The worn Arcane Armor is using the ${def.model} model.`
+				: `This derived ${def.model} component is not the active worn Armor Model weapon.`,
+		};
 	}
 
 	getItemAttackId (item) {

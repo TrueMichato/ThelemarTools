@@ -8471,6 +8471,29 @@ class CharacterSheetCombat {
 		}
 	}
 
+	async _pInvokeCombatItemPower (power) {
+		if (!power?.isAvailable) {
+			JqueryUtil.doToast({type: "warning", content: power?.unavailableReason || "That item power is unavailable."});
+			return false;
+		}
+		const actionType = ["action", "bonus", "reaction"].includes(power.actionType) ? power.actionType : null;
+		if (actionType && !this._isActionTypeAvailable(actionType)) {
+			const actionLabel = {action: "Action", bonus: "Bonus Action", reaction: "Reaction"}[actionType];
+			JqueryUtil.doToast({type: "warning", content: `${actionLabel} already used this turn.`});
+			return false;
+		}
+		if (power.chargesCostMax > power.chargesCost) {
+			await this._page?._inventory?._showItemPowersModal?.(power.itemId);
+			return false;
+		}
+		const used = await this._page?._inventory?._pInvokeItemPower?.(power.itemId, power.id);
+		if (!used) return false;
+		if (actionType) this._consumeActionType(actionType);
+		this.renderCombatItemPowers();
+		this.renderCombatActionEconomy();
+		return true;
+	}
+
 	renderCombatItemPowers () {
 		const section = document.getElementById("charsheet-combat-item-powers-section");
 		const container = document.getElementById("charsheet-combat-item-powers");
@@ -8519,20 +8542,14 @@ class CharacterSheetCombat {
 				const use = e_({
 					tag: "button",
 					clazz: "ve-btn ve-btn-xs ve-btn-primary",
-					txt: power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke",
+					txt: power.isToggle
+						? (power.isActive ? "Deactivate" : "Activate")
+						: power.invokeLabel || (power.kind === "spell" ? "Cast" : "Invoke"),
 				});
 				use.disabled = !power.isAvailable || !actionAvailable;
 				use.title = power.unavailableReason || (!actionAvailable ? `${labels[type]} already used this turn.` : `${use.textContent} ${power.name}`);
 				use.addEventListener("click", async () => {
-					if (power.chargesCostMax > power.chargesCost) {
-						await this._page?._inventory?._showItemPowersModal?.(power.itemId);
-						return;
-					}
-					const used = await this._page?._inventory?._pInvokeItemPower?.(power.itemId, power.id);
-					if (!used) return;
-					if (["action", "bonus", "reaction"].includes(type)) this._consumeActionType(type);
-					this.renderCombatItemPowers();
-					this.renderCombatActionEconomy();
+					await this._pInvokeCombatItemPower(power);
 				});
 				row.append(body, use);
 				group.append(row);

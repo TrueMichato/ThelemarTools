@@ -830,7 +830,9 @@ effect/proficiency activation gate must agree that they are mechanically inert.
 Their wrapper equip state is derived rather than user-owned: only the selected
 row is equipped while Arcane Armor is active and worn, while all other rows are
 forced unequipped. Generic equip attempts reconcile back without changing model
-activation.
+activation. Inventory suppresses the generic Equip control and derives
+`Active Armor Model Weapon` versus `Dormant: <Model>` from
+`_efaArmorerWeaponId` plus the current binding/model.
 
 Persist equipment bindings by inventory wrapper `id`, never by display name or a
 derived AC snapshot. EFA Arcane Armor stores
@@ -868,6 +870,26 @@ equipped-item effect pipeline; switching model, doffing, clearing the binding,
 death, source loss, or ambiguous model evidence unregisters them immediately.
 This is why armor-imposed Stealth disadvantage cancels Dampening Field instead
 of being removed.
+
+Arcane Armor lifecycle controls are synthetic `itemPowers`, not parallel state:
+the real armor row exposes `Transform` as a Magic action and `Don` / `Doff` as
+Utilize actions. Use distinct stable power IDs per transition so a stale Doff
+button cannot become a Don after state changes. Inventory invokes directly;
+Combat checks action availability first and consumes one Action only after the
+state transaction commits. The bound row's visible status must distinguish
+ready, blocked (with remediation), worn, and doffed/suspended using icon + text,
+and must include the reference rule that the armor cannot be removed against the
+player's will.
+
+The worn binding also supplies two state-owned benefits:
+
+- Carry the inventory wrapper `itemId` into `_data.ac.armor`; only an active
+  binding with the same ID ignores that armor's Strength requirement.
+- Add feature-provided spellcasting foci through a generic class-scoped
+  candidate contract. Component/focus consumers pass the spell into
+  `getSpellcastingFocusStatus({spell})`; EFA Arcane Armor scopes to
+  `Artificer|EFA`, while ordinary foci and component pouches retain their
+  existing unscoped behavior.
 
 ### Usable adventuring gear
 

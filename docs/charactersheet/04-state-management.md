@@ -330,6 +330,8 @@ The public state surface is:
   `chosenSubfeatures` and level-history/canonical decision evidence.
 - `getEfaArcaneArmorEligibleItems()` — returns equipped LA/MA/HA wrappers after
   source-aware Smith's Tools checks.
+- `getEfaArcaneArmorTransformationStatus(id)` — returns the exact blocked
+  prerequisite and player-facing remediation for one real armor row.
 - `getEfaArcaneArmorBinding()` — returns the currently bound inventory row, or
   `null`.
 - `getEfaArcaneArmorBindingStatus()` — reports active/suspended state and
@@ -345,6 +347,24 @@ bound, the armor remains Arcane Armor without the tools until another body
 armor is equipped, the bound row becomes invalid, the exact EFA Armorer/model
 is lost, or the character dies. Doffing only suspends worn benefits.
 
+Dynamically generated item powers expose the lifecycle on that same inventory
+row:
+
+- `Transform` is a Magic action and revalidates every prerequisite before
+  committing the wrapper binding.
+- `Don` / `Doff` are Utilize actions backed by the existing equipped flag.
+- Combat consumes one Action only after `invokeItemPower()` succeeds; stale or
+  rejected powers spend nothing. Inventory can invoke the same powers outside
+  combat without a combat-action gate.
+
+While the exact bound row is worn and active, its AC snapshot retains the
+wrapper `itemId`, allowing the speed/armor-requirement pipeline to ignore that
+armor's Strength requirement without name matching. The same active row is a
+class-scoped focus candidate for `Artificer|EFA` spells only; spell component
+checks pass the spell owner into `getSpellcastingFocusStatus({spell})`, so the
+armor cannot satisfy a Wizard or TCE Artificer spell. Doffing or invalidation
+removes both benefits immediately.
+
 Doffing keeps the binding but suspends its mechanics. Equipping another body
 armor, removing the wrapper, replacing it with a non-armor item, losing the exact
 EFA subclass/model, or dying clears the binding. The three generated model
@@ -353,7 +373,8 @@ wrapper IDs and customization across model switches/save-load. Only the selected
 model row can expose an attack or item effect while the binding is active. Its
 wrapper is derived-equipped only for that active/worn model; all other generated
 rows are forced unequipped, and direct equip toggles reconcile back to this
-derived state.
+derived state. Inventory hides the generic Equip control and labels each row
+`Active Armor Model Weapon` or `Dormant: <Model>` from its stable ID.
 
 The Short Rest and Long Rest dialogs expose one shared staged Armor Model
 selector for an exact `Artificer|EFA` Armorer with a canonical model. A switch
@@ -398,9 +419,7 @@ coexist with player-authored effects.
 Deferred Armorer work includes Giant Stature activation/resources, Force
 Demolisher push/pull resolution, Thunder Pulse's target rider, Defensive Field,
 Lightning Launcher's once-per-turn extra damage, Improved Arsenal, level 9/15,
-Armor Replication, binding UI, and E2E coverage. Arcane Armor's general Strength
-requirement removal, quick don/doff, and spellcasting-focus benefits are also
-deferred rather than approximated.
+Armor Replication, and E2E coverage.
 
 ### Active States & Conditions
 
