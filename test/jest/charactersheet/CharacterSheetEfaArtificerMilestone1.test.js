@@ -107,6 +107,33 @@ describe("EFA Artificer Milestone 1 source separation", () => {
 		expect(calculations.eldritchCannonCount).toBeUndefined();
 	});
 
+	it("separates EFA Alchemist from the TCE compatibility subclass by exact subclass source", () => {
+		const efa = makeArtificer({level: 20});
+		efa._data.classes[0].subclass = {
+			name: "Alchemist",
+			shortName: "Alchemist",
+			source: "EFA",
+		};
+		const compatibility = makeArtificer({level: 20});
+		compatibility._data.classes[0].subclass = {
+			name: "Alchemist",
+			shortName: "Alchemist",
+			source: "TCE",
+		};
+
+		const efaCalculations = efa.getFeatureCalculations();
+		expect(efaCalculations.experimentalElixirCount).toBeUndefined();
+		expect(efaCalculations.hasAlchemicalSavant).toBeUndefined();
+		expect(efaCalculations.hasRestorativeReagents).toBeUndefined();
+		expect(efaCalculations.hasChemicalMastery).toBeUndefined();
+
+		const compatibilityCalculations = compatibility.getFeatureCalculations();
+		expect(compatibilityCalculations.experimentalElixirCount).toBe(3);
+		expect(compatibilityCalculations.hasAlchemicalSavant).toBe(true);
+		expect(compatibilityCalculations.hasRestorativeReagents).toBe(true);
+		expect(compatibilityCalculations.hasChemicalMastery).toBe(true);
+	});
+
 	it("uses source-qualified registry effects for same-named EFA capstones", () => {
 		const efa = makeArtificer({level: 20});
 		efa.addFeature({name: "Magic Item Savant", source: "EFA", classSource: "EFA"});
