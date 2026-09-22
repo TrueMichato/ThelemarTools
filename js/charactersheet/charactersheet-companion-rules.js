@@ -6,7 +6,7 @@
  */
 
 const COMPANION_FEATURE_UIDS = Object.freeze({
-	EFA_STEEL_DEFENDER: "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA",
+	EFA_STEEL_DEFENDER: "Steel Defender|Artificer|EFA|Battle Smith|EFA|3",
 	TCE_STEEL_DEFENDER: "Steel Defender|Artificer|TCE|Battle Smith|TCE|3",
 });
 
@@ -325,16 +325,37 @@ function cloneJson (value) {
 	return JSON.parse(JSON.stringify(value));
 }
 
-function getDescriptorInternal (featureUid) {
+function normalizeFeatureUid (featureUid) {
 	if (typeof featureUid !== "string") return null;
-	if (!Object.prototype.hasOwnProperty.call(COMPANION_RULES, featureUid)) return null;
-	return COMPANION_RULES[featureUid];
+	const parts = featureUid.split("|").map(part => part.trim());
+	if (parts.length !== 6 && parts.length !== 7) return null;
+
+	const [name, className, classSource, subclassShortName, subclassSource, levelRaw, featureSourceRaw] = parts;
+	if (!name || !className || !classSource || !subclassShortName || !subclassSource || !levelRaw) return null;
+
+	const level = Number(levelRaw);
+	if (!Number.isFinite(level)) return null;
+
+	const featureSource = featureSourceRaw || subclassSource;
+	const canonicalParts = [name, className, classSource, subclassShortName, subclassSource, level];
+	if (featureSource !== subclassSource) canonicalParts.push(featureSource);
+	return canonicalParts.join("|");
+}
+
+function getDescriptorInternal (featureUid) {
+	const canonicalUid = normalizeFeatureUid(featureUid);
+	if (!canonicalUid || !Object.prototype.hasOwnProperty.call(COMPANION_RULES, canonicalUid)) return null;
+	return {canonicalUid, descriptor: COMPANION_RULES[canonicalUid]};
 }
 
 function normalizeContext (context) {
 	const out = {};
 	for (const key of ["artificerLevel", "intelligenceModifier", "proficiencyBonus", "spellAttackBonus"]) {
-		const value = Number(context?.[key]);
+		const rawValue = context?.[key];
+		if (rawValue == null || (typeof rawValue === "string" && !rawValue.trim())) {
+			throw new TypeError(`Companion rules require a non-blank ${key}.`);
+		}
+		const value = Number(rawValue);
 		if (!Number.isFinite(value)) throw new TypeError(`Companion rules require a finite ${key}.`);
 		out[key] = value;
 	}
@@ -501,20 +522,20 @@ class CharacterSheetCompanionRules {
 	}
 
 	static getDescriptor (featureUid) {
-		const descriptor = getDescriptorInternal(featureUid);
-		return descriptor ? cloneJson(descriptor) : null;
+		const match = getDescriptorInternal(featureUid);
+		return match ? cloneJson(match.descriptor) : null;
 	}
 
 	static resolve (featureUid, summonerContext) {
-		const descriptor = getDescriptorInternal(featureUid);
-		if (!descriptor) return null;
+		const match = getDescriptorInternal(featureUid);
+		if (!match) return null;
 
 		const context = normalizeContext(summonerContext);
-		switch (featureUid) {
+		switch (match.canonicalUid) {
 			case COMPANION_FEATURE_UIDS.EFA_STEEL_DEFENDER:
-				return resolveEfaSteelDefender(descriptor, context);
+				return resolveEfaSteelDefender(match.descriptor, context);
 			case COMPANION_FEATURE_UIDS.TCE_STEEL_DEFENDER:
-				return resolveTceSteelDefender(descriptor, context);
+				return resolveTceSteelDefender(match.descriptor, context);
 			default:
 				return null;
 		}

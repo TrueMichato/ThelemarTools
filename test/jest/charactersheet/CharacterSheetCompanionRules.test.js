@@ -1,9 +1,10 @@
 import "../../../js/charactersheet/charactersheet-companion-rules.js";
 
 const CharacterSheetCompanionRules = globalThis.CharacterSheetCompanionRules;
-const EFA_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA";
+const EFA_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3";
+const EFA_DATA_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA";
 const TCE_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3";
-const TCE_UID_WITH_EXTRA_SOURCE = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
+const TCE_EXPLICIT_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
 
 const getContext = (overrides = {}) => ({
 	artificerLevel: 3,
@@ -259,15 +260,61 @@ describe("CharacterSheetCompanionRules", () => {
 	});
 
 	describe("UID dispatch and serialization contract", () => {
+		it("normalizes real data refs and packed same-source UIDs to one identity", () => {
+			const context = getContext();
+			const efaPacked = CharacterSheetCompanionRules.resolve(EFA_UID, context);
+			const efaDataRef = CharacterSheetCompanionRules.resolve(EFA_DATA_UID, context);
+			const tceDataRef = CharacterSheetCompanionRules.resolve(TCE_UID, context);
+			const tceExplicit = CharacterSheetCompanionRules.resolve(TCE_EXPLICIT_UID, context);
+
+			expect(efaDataRef).toEqual(efaPacked);
+			expect(tceExplicit).toEqual(tceDataRef);
+			expect(CharacterSheetCompanionRules.getDescriptor(EFA_DATA_UID))
+				.toEqual(CharacterSheetCompanionRules.getDescriptor(EFA_UID));
+			expect(CharacterSheetCompanionRules.getDescriptor(TCE_EXPLICIT_UID))
+				.toEqual(CharacterSheetCompanionRules.getDescriptor(TCE_UID));
+			expect(Object.keys(CharacterSheetCompanionRules.REGISTRY)).toEqual([EFA_UID, TCE_UID]);
+		});
+
 		it("returns null for unknown or incomplete feature UIDs", () => {
 			expect(CharacterSheetCompanionRules.getDescriptor("Steel Defender")).toBeNull();
 			expect(CharacterSheetCompanionRules.resolve("Steel Defender|EFA", getContext())).toBeNull();
-			expect(CharacterSheetCompanionRules.resolve(TCE_UID_WITH_EXTRA_SOURCE, getContext())).toBeNull();
 			expect(CharacterSheetCompanionRules.resolve(
 				"Steel Defender|Artificer|EFA|Battle Smith|TCE|3|EFA",
 				getContext(),
 			)).toBeNull();
+			expect(CharacterSheetCompanionRules.resolve(
+				"Steel Defender|Artificer|TCE|Battle Smith|EFA|3|TCE",
+				getContext(),
+			)).toBeNull();
+			expect(CharacterSheetCompanionRules.resolve(
+				"Steel Defender|Artificer|TCE|Armorer|TCE|3",
+				getContext(),
+			)).toBeNull();
+			expect(CharacterSheetCompanionRules.resolve(
+				"Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE|Display",
+				getContext(),
+			)).toBeNull();
 			expect(CharacterSheetCompanionRules.resolve(TCE_UID, getContext()).identity.source).toBe("TCE");
+		});
+
+		it("rejects missing, null, or blank required summoner context", () => {
+			const missingLevel = getContext();
+			delete missingLevel.artificerLevel;
+
+			expect(() => CharacterSheetCompanionRules.resolve(EFA_UID, missingLevel)).toThrow(TypeError);
+			expect(() => CharacterSheetCompanionRules.resolve(EFA_UID, getContext({
+				artificerLevel: undefined,
+			}))).toThrow(TypeError);
+			expect(() => CharacterSheetCompanionRules.resolve(EFA_UID, getContext({
+				intelligenceModifier: null,
+			}))).toThrow(TypeError);
+			expect(() => CharacterSheetCompanionRules.resolve(EFA_UID, getContext({
+				proficiencyBonus: "",
+			}))).toThrow(TypeError);
+			expect(() => CharacterSheetCompanionRules.resolve(EFA_UID, getContext({
+				spellAttackBonus: "   ",
+			}))).toThrow(TypeError);
 		});
 
 		it("keeps same-named EFA and TCE rules source-isolated", () => {
