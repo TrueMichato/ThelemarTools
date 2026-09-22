@@ -402,6 +402,14 @@ describe("RHW Reanimator R4a derived companion state", () => {
 		const arcane = await createCompanion(arcaneState, ["arcaneConduit"]);
 		const arcaneEffect = arcaneState.getCompanion(arcane.companionId)
 			.scaling.resolved.modifications.effects.arcaneConduit;
+		const expectedKey = [
+			"feature-companion-operation-v1",
+			`owner:${FEATURE_UID}`,
+			"source:Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW",
+			`companion:${arcane.companionId}`,
+			"generation:1",
+			"action:arcane-conduit:damage-rider",
+		].join("|");
 		expect(arcaneEffect).toMatchObject({
 			castingOrigin: {
 				mayCastFromCompanionSpace: true,
@@ -419,12 +427,13 @@ describe("RHW Reanimator R4a derived companion state", () => {
 					actionUid: "arcane-conduit:damage-rider",
 					companionId: arcane.companionId,
 					generation: 1,
+					key: expectedKey,
 					executionStatus: "deferredR4b",
 					committed: false,
 				},
 			},
 		});
-		expect(arcaneState.queryTurnReceipt(arcaneEffect.damageRider.turnReceipt.key))
+		expect(arcaneState.queryTurnReceipt(expectedKey))
 			.toMatchObject({ok: true, used: false, receipt: null});
 
 		const ferocityState = makeState({level: 5, intelligence: 8});
@@ -474,6 +483,45 @@ describe("RHW Reanimator R4a derived companion state", () => {
 				executionStatus: "deferredR4b",
 			},
 		});
+	});
+
+	it("keeps the generation operation key stable, isolated, projected, and uncommitted", async () => {
+		const state = makeState({level: 9, intelligence: 18});
+		const created = await createCompanion(state, ["arcaneConduit", "gaunt"]);
+		const getKey = targetState => targetState.getCompanion(created.companionId)
+			.scaling.resolved.modifications.effects.arcaneConduit.damageRider.turnReceipt.key;
+		const originalKey = getKey(state);
+		const turnReceiptsBefore = JSON.stringify(state._data.turnReceipts);
+
+		state.reconcileFeatureOwnedCompanion(created.companionId, {featureUid: FEATURE_UID});
+		state.reconcileFeatureOwnedCompanion(created.companionId, {featureUid: FEATURE_UID});
+		expect(getKey(state)).toBe(originalKey);
+		expect(state.getFeatureCalculations().reanimatedCompanion.activeCompanion
+			.resolved.modifications.effects.arcaneConduit.damageRider.turnReceipt.key)
+			.toBe(originalKey);
+		expect(JSON.stringify(state._data.turnReceipts)).toBe(turnReceiptsBefore);
+
+		const loaded = new CharacterSheetState();
+		expect(loaded.loadFromJson(copy(state.toJson()))).not.toBe(false);
+		loaded.reconcileFeatureOwnedCompanion(created.companionId, {featureUid: FEATURE_UID});
+		expect(getKey(loaded)).toBe(originalKey);
+		expect(loaded.queryTurnReceipt(originalKey)).toMatchObject({ok: true, used: false, receipt: null});
+		expect(JSON.stringify(loaded._data.turnReceipts)).toBe(turnReceiptsBefore);
+
+		const isolatedState = makeState({level: 9, intelligence: 18});
+		const isolated = await createCompanion(isolatedState, ["arcaneConduit", "gaunt"]);
+		const isolatedReceipt = isolatedState.getCompanion(isolated.companionId)
+			.scaling.resolved.modifications.effects.arcaneConduit.damageRider.turnReceipt;
+		expect(isolatedReceipt).toMatchObject({
+			ownerUid: FEATURE_UID,
+			sourceUid: "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW",
+			actionUid: "arcane-conduit:damage-rider",
+			generation: 1,
+			committed: false,
+			executionStatus: "deferredR4b",
+		});
+		expect(isolatedReceipt.key).not.toBe(originalKey);
+		expect(JSON.stringify(isolatedState._data.turnReceipts)).toBe(turnReceiptsBefore);
 	});
 
 	it("keeps generation choices immutable across level changes while current global scaling turns on and off", async () => {
@@ -577,13 +625,16 @@ describe("RHW Reanimator R4a derived companion state", () => {
 	it("requires a fresh three-choice transaction only for a new level-15 generation", async () => {
 		const state = makeState({level: 9});
 		const first = await createCompanion(state, ["arcaneConduit", "bloated"]);
+		const firstKey = state.getCompanion(first.companionId)
+			.scaling.resolved.modifications.effects.arcaneConduit.damageRider.turnReceipt.key;
+		const turnReceiptsBefore = JSON.stringify(state._data.turnReceipts);
 		state.getClasses()[0].level = 15;
 		state.applyClassFeatureEffects();
 		expect(state.getCompanion(first.companionId).setup.choices.modifications.selectedOptionIds)
 			.toEqual(["arcaneConduit", "bloated"]);
 
 		state.killFeatureOwnedCompanion(first.companionId, {featureUid: FEATURE_UID});
-		const second = await createCompanion(state, ["ferocity", "gaunt", "moist"], {
+		const second = await createCompanion(state, ["arcaneConduit", "gaunt", "moist"], {
 			payment: {type: "spellSlot", pool: "spell", slotLevel: 1},
 		});
 		expect(second).toMatchObject({ok: true, committed: true});
@@ -594,11 +645,24 @@ describe("RHW Reanimator R4a derived companion state", () => {
 					modifications: {
 						acquisitionLevel: 15,
 						requiredCount: 3,
-						selectedOptionIds: ["ferocity", "gaunt", "moist"],
+						selectedOptionIds: ["arcaneConduit", "gaunt", "moist"],
 					},
 				},
 			},
 		});
+		const secondReceipt = state.getCompanion(second.companionId)
+			.scaling.resolved.modifications.effects.arcaneConduit.damageRider.turnReceipt;
+		expect(secondReceipt).toMatchObject({
+			companionId: second.companionId,
+			generation: 2,
+			ownerUid: FEATURE_UID,
+			sourceUid: "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW",
+			actionUid: "arcane-conduit:damage-rider",
+			committed: false,
+			executionStatus: "deferredR4b",
+		});
+		expect(secondReceipt.key).not.toBe(firstKey);
+		expect(JSON.stringify(state._data.turnReceipts)).toBe(turnReceiptsBefore);
 	});
 });
 

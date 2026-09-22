@@ -80038,15 +80038,56 @@ class CharacterSheetState {
 		return MiscUtil.copyFast(result.context);
 	}
 
+	static _getFeatureCompanionGenerationOperationProjection ({
+		companion,
+		ownerUid,
+		operation,
+	}) {
+		const operationOwnerUid = String(operation?.ownerUid || "");
+		const sourceUid = String(operation?.sourceUid || "");
+		const actionUid = String(operation?.actionUid || "");
+		if (!companion?.id || !ownerUid || !operationOwnerUid || !sourceUid || !actionUid) {
+			throw new TypeError("A generation-scoped feature-companion operation requires exact companion, owner, source, and action identities.");
+		}
+		if (operationOwnerUid !== ownerUid) {
+			throw new RangeError(`Feature-companion operation owner "${operationOwnerUid}" does not match "${ownerUid}".`);
+		}
+		const generation = Math.max(1, Number(companion.lifecycle?.generation) || 1);
+		return {
+			companionId: companion.id,
+			generation,
+			key: [
+				"feature-companion-operation-v1",
+				`owner:${operationOwnerUid}`,
+				`source:${sourceUid}`,
+				`companion:${companion.id}`,
+				`generation:${generation}`,
+				`action:${actionUid}`,
+			].join("|"),
+		};
+	}
+
 	static _projectFeatureCompanionRuntimeMetadata (companion, ownerUid, resolved) {
 		const out = MiscUtil.copyFast(resolved);
-		const turnReceipt = out.modifications?.effects?.arcaneConduit?.damageRider?.turnReceipt;
-		if (turnReceipt?.actionUid) {
-			const generation = Math.max(1, Number(companion.lifecycle?.generation) || 1);
-			turnReceipt.companionId = companion.id;
-			turnReceipt.generation = generation;
-			turnReceipt.key = `${ownerUid}:${companion.id}:generation:${generation}:${turnReceipt.actionUid}`;
-		}
+		const walk = value => {
+			if (Array.isArray(value)) {
+				value.forEach(walk);
+				return;
+			}
+			if (!CharacterSheetState._isCompanionSchemaObject(value)) return;
+			if (value.keyScope === "companionGeneration") {
+				Object.assign(
+					value,
+					CharacterSheetState._getFeatureCompanionGenerationOperationProjection({
+						companion,
+						ownerUid,
+						operation: value,
+					}),
+				);
+			}
+			Object.values(value).forEach(walk);
+		};
+		walk(out);
 		return out;
 	}
 

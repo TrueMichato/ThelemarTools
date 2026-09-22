@@ -753,9 +753,11 @@ never assigned invented options.
 
 `scaling.resolved` is the runtime metadata surface for later Manager/Play work.
 Arcane Conduit carries its spell-origin rules and a stable per-generation
-turn-receipt key template with exact owner/source/action UIDs, but no receipt is
-committed in R4a. Ferocity, Bloated, Gaunt, Moist, Improved Reanimation, Death
-Burst, and Lightning Absorption likewise expose calculations/status only.
+turn-receipt key with exact owner/source/action UIDs and stable companion ID +
+generation components. The generic runtime projector handles any
+`keyScope: "companionGeneration"` operation, but no receipt is committed in
+R4a. Ferocity, Bloated, Gaunt, Moist, Improved Reanimation, Death Burst, and
+Lightning Absorption likewise expose calculations/status only.
 Command/Dodge, attacks, pushes, aura saves, reaction damage, casting, healing,
 Death Burst resolution, and Life Transfer execution are deferred to R4b.
 

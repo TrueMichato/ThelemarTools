@@ -355,6 +355,10 @@ Conduit origin/range/school/INT and future turn-receipt metadata, Ferocity's
 Moist swimming/squeezing/acid retaliation. The exact active snapshot is also
 available at
 `getFeatureCalculations().reanimatedCompanion.activeCompanion`.
+Generation-scoped operation metadata receives a deterministic key containing
+the exact owner UID, source UID, companion ID, lifecycle generation, and action
+UID. Reconciliation and save/load reproduce the same key without creating a
+turn receipt; a replacement generation receives a different key.
 
 Lifecycle APIs are `killFeatureOwnedCompanion()`,
 `pDismissFeatureOwnedCompanion()`, `handleFeatureCompanionSummonerDeath()`, and
