@@ -5774,6 +5774,7 @@ class CharacterSheetState {
 		if (this._data.progressionOwnership?.version !== 1 || typeof this._data.progressionOwnership?.values !== "object") {
 			this._data.progressionOwnership = {version: 1, initialized: false, values: {}};
 		}
+		this._normalizeStoredSkillState();
 
 		// Ensure Forked Tongue (Illrigger) state exists. Older saves predate this
 		// feature-state block; backward-compatible default keeps load crash-free and
@@ -9360,9 +9361,65 @@ class CharacterSheetState {
 		});
 	}
 
+	_normalizeStoredSkillState () {
+		const skillProficiencies = {};
+		for (const [value, level] of Object.entries(this._data.skillProficiencies || {})) {
+			const key = this.normalizeSkillProficiencyKey(value);
+			if (!key) continue;
+			skillProficiencies[key] = Math.max(
+				Number(skillProficiencies[key]) || 0,
+				Number(level) || 0,
+			);
+		}
+		this._data.skillProficiencies = skillProficiencies;
+
+		const grantedSkills = {};
+		for (const [value, sources] of Object.entries(this._data.grantedProficiencies?.skills || {})) {
+			const key = this.normalizeSkillProficiencyKey(value);
+			if (!key) continue;
+			grantedSkills[key] = [...new Set([
+				...(grantedSkills[key] || []),
+				...(Array.isArray(sources) ? sources : []),
+			])];
+		}
+		this._data.grantedProficiencies.skills = grantedSkills;
+
+		for (const modifier of this._data.namedModifiers || []) {
+			if (!modifier?.type?.startsWith("skill:")) continue;
+			const key = this.normalizeSkillProficiencyKey(modifier.type.slice("skill:".length));
+			if (key) modifier.type = `skill:${key}`;
+		}
+
+		const ownership = this._data.progressionOwnership;
+		for (const type of ["skills", "expertise"]) {
+			const entries = ownership.values[type];
+			if (!entries) continue;
+			const normalized = {};
+			for (const [storedKey, entry] of Object.entries(entries)) {
+				const key = type === "skills"
+					? this.normalizeSkillProficiencyKey(storedKey)
+					: String(storedKey || "").trim().toLowerCase().replace(/['\s]+/g, "");
+				if (!key) continue;
+				const existing = normalized[key];
+				normalized[key] = {
+					value: existing?.value ?? entry?.value ?? storedKey,
+					sources: [...new Set([
+						...(existing?.sources || []),
+						...(Array.isArray(entry?.sources) ? entry.sources : []),
+					])],
+					preserved: !!existing?.preserved || !!entry?.preserved,
+				};
+			}
+			ownership.values[type] = normalized;
+		}
+	}
+
 	_getProgressionOwnershipKey (type, value) {
 		if (["spells", "cantrips", "innateSpells"].includes(type)) {
 			return `${String(value?.name || "").trim().toLowerCase()}|${String(value?.source || "").trim().toLowerCase()}`;
+		}
+		if (type === "skills") {
+			return this.normalizeSkillProficiencyKey(value?.name || value);
 		}
 		return String(value?.name || value || "").trim().toLowerCase().replace(/['\s]+/g, "");
 	}
@@ -9720,8 +9777,7 @@ class CharacterSheetState {
 				const selected = Array.isArray(decision.selection) ? decision.selection : [decision.selection];
 				if (feat && selected.length === 1) {
 					const value = selected[0];
-					const skill = CharacterSheetClassUtils.normalizeSkillKey?.(value)
-						|| String(value || "").toLowerCase().replace(/['\s]+/g, "");
+					const skill = this.normalizeSkillProficiencyKey(value);
 					if (skill) {
 						const current = this.getSkillProficiency(skill);
 						const ownershipType = decision.type === "nestedExpertise" ? "expertise" : "skills";
@@ -10084,8 +10140,7 @@ class CharacterSheetState {
 				if (!type) continue;
 				if (!this.releaseProgressionOwnership(type, value, sourceId)) continue;
 				if (type === "skills") {
-					const skill = CharacterSheetClassUtils.normalizeSkillKey?.(value)
-						|| String(value || "").toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
+					const skill = this.normalizeSkillProficiencyKey(value);
 					const expertise = this._getProgressionOwnershipEntry("expertise", skill);
 					if (!expertise?.preserved && !expertise?.sources?.length) this.setSkillProficiency(skill, 0);
 				} else if (type === "expertise") {
@@ -12501,12 +12556,22 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Skills
+	static normalizeSkillProficiencyKey (skill) {
+		return String(skill || "").toLowerCase().replace(/\s+/g, "");
+	}
+
+	normalizeSkillProficiencyKey (skill) {
+		return CharacterSheetState.normalizeSkillProficiencyKey(skill);
+	}
+
 	setSkillProficiency (skill, level) {
+		const normalizedSkill = this.normalizeSkillProficiencyKey(skill);
+		if (!normalizedSkill) return;
 		// 0 = none, 1 = proficient, 2 = expertise
 		if (level === 0) {
-			delete this._data.skillProficiencies[skill];
+			delete this._data.skillProficiencies[normalizedSkill];
 		} else {
-			this._data.skillProficiencies[skill] = level;
+			this._data.skillProficiencies[normalizedSkill] = level;
 		}
 	}
 
@@ -12520,7 +12585,8 @@ class CharacterSheetState {
 
 	// Add expertise (level 2 proficiency) to a skill
 	addExpertise (skill) {
-		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
+		const normalizedSkill = this.normalizeSkillProficiencyKey(skill);
+		if (!normalizedSkill) return;
 		// Only add expertise if already proficient or becoming proficient
 		this.setSkillProficiency(normalizedSkill, 2);
 	}
@@ -12532,15 +12598,15 @@ class CharacterSheetState {
 	}
 
 	getSkillProficiency (skill) {
-		const baseProficiency = this._data.skillProficiencies[skill] || 0;
+		const normalizedSkill = this.normalizeSkillProficiencyKey(skill);
+		const baseProficiency = this._data.skillProficiencies[normalizedSkill] || 0;
 		// Scholar feature grants expertise in one skill if already proficient
-		if (this._data.scholarExpertise === skill && baseProficiency >= 1) {
+		if (this.normalizeSkillProficiencyKey(this._data.scholarExpertise) === normalizedSkill && baseProficiency >= 1) {
 			return 2; // Expertise level
 		}
 		// Beastheart grants several skills outright, some with a doubled proficiency bonus.
-		// Only override when the floor is strictly higher, so a legacy boolean `true`
-		// stored in `skillProficiencies` is returned unchanged rather than coerced to 1.
-		const beastheartFloor = this._getBeastheartSkillProficiencyFloor(skill, baseProficiency);
+		// Only override when the floor is strictly higher than the normalized stored level.
+		const beastheartFloor = this._getBeastheartSkillProficiencyFloor(normalizedSkill, baseProficiency);
 		if (beastheartFloor > baseProficiency) return beastheartFloor;
 		return baseProficiency;
 	}
@@ -55220,6 +55286,8 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_trackGrantedProficiency (type, name, abilityId) {
+		if (type === "skills") name = this.normalizeSkillProficiencyKey(name);
+		if (!name) return;
 		if (!this._data.grantedProficiencies) {
 			this._data.grantedProficiencies = {skills: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
 		}
@@ -55243,6 +55311,7 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_untrackGrantedProficiency (type, name, abilityId) {
+		if (type === "skills") name = this.normalizeSkillProficiencyKey(name);
 		if (!this._data.grantedProficiencies?.[type]?.[name]) return false;
 
 		const sources = this._data.grantedProficiencies[type][name];
