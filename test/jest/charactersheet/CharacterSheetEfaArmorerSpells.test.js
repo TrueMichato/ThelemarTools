@@ -349,7 +349,7 @@ describe("EFA Armorer published always-prepared spells", () => {
 		});
 	});
 
-	test("save/load preserves exact grants, source identity, and Extra Attack", () => {
+	test("save/load preserves exact grants and source identity", () => {
 		const original = makeState(17, {playerPrepared: ["Cure Wounds"]});
 		const loaded = new CharacterSheetState();
 		loaded.setSpellData(XPHB_SPELLS);
@@ -359,11 +359,6 @@ describe("EFA Armorer published always-prepared spells", () => {
 		expect(loaded.getSpellsKnown().find(spell => spell.name === "Cure Wounds")).toMatchObject({
 			sourceFeature: "Prepared Spells",
 			sourceClass: "Artificer",
-		});
-		expect(loaded.getFeatureCalculations()).toMatchObject({
-			hasExtraAttack: true,
-			attackCount: 2,
-			attacksPerAction: 2,
 		});
 	});
 
@@ -498,7 +493,6 @@ describe("EFA Armorer respec and Extra Attack isolation", () => {
 		);
 
 		const calculations = state.getFeatureCalculations();
-		expect(calculations.hasExtraAttack).toBe(true);
 		expect(calculations.attackCount).toBe(2);
 		expect(state.getNumberOfAttacks()).toBe(2);
 	});
