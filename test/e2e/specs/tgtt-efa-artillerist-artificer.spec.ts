@@ -24,8 +24,9 @@ const EFA_ARTILLERIST_FEATURES: FeatureCheck[] = [
 		level: 1,
 		name: /tinker's magic/i,
 		kind: "passive",
-		// no measurable derived effect: the created trinket is narrative until
-		// the shared Artificer item-creation milestone supplies its runtime flow.
+		effects: [
+			{kind: "featureUsesEqualAbilityMod", feature: "Tinker's Magic", ability: "int", minimum: 1, recharge: "long"},
+		],
 	},
 	{
 		level: 2,
@@ -246,11 +247,11 @@ describeCharacter({
 		expectLongRestRestores: true,
 		attackName: /longbow|dagger/i,
 		skillRoll: {name: "Arcana"},
-		shortRestRestores: {skip: true},
+		shortRestRestores: {skip: true, reason: "EFA Artillerist has no class or subclass resource that recharges on a Short Rest."},
 		concentrationCheck: {castSpell: "Faerie Fire", thenAction: "damage", expectActive: false},
 		deathSaves: true,
 		applyCondition: {name: "Restrained"},
-		featAbility: {skip: true},
+		featAbility: {skip: true, reason: "This exact-source preset does not select an active feat ability."},
 	},
 	milestones: {
 		1: {totalLevel: 1, spellSlots: {1: 2}},

@@ -518,7 +518,7 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 
 		const confirm = createdElements.find(element => element.textContent === "✓ Finish Short Rest");
 		expect(confirm).toBeDefined();
-		await confirm.click();
+		await confirm._handlers.click();
 
 		expect(state.getGameTimeMinutes()).toBe(60);
 		expect(advanceMinutes).toHaveBeenCalledWith(60, {
