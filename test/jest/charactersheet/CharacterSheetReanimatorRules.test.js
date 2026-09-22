@@ -315,11 +315,11 @@ describe("RHW Reanimated Companion rules", () => {
 						sourceUid: "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW",
 						actionUid: "arcane-conduit:damage-rider",
 						keyScope: "companionGeneration",
-						executionStatus: "deferredR4b",
+						executionStatus: "executable",
 						committed: false,
 					},
 				},
-				executionStatus: "metadataOnly",
+				executionStatus: "executable",
 			});
 		});
 

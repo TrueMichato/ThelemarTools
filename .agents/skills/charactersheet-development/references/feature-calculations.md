@@ -255,10 +255,13 @@ Improved Reanimation is current-level global scaling; Superior Modifications
 changes only new generations.
 
 Arcane Conduit, Ferocity, Bloated, Gaunt, and Moist publish their complete
-derived metadata through the pure resolver. Arcane Conduit includes the exact
-RHW owner/source/action identities needed by the shared turn-receipt API, but
-R4a never commits that receipt. Command combat behavior, attack/push/aura/
-reaction/cast/damage execution, Life Transfer, UI, and Play Mode remain R4b+.
+derived metadata through the pure resolver. R4b marks the resolved operation
+statuses executable and keeps the full active companion projection intact.
+`runtimeImplemented` is true; `lifeTransfer` reports its Reaction cost,
+companion-death/Death-Burst outcome, and whether an exact active companion is
+currently available. Runtime callers still consume the persisted generation
+choice receipt rather than resolving choice-dependent rules from current level
+alone. UI and Play Mode integration remain later milestones.
 
 Jolt to Life uses the exact EFA Artificer level, not total character level. Its
 calculation exposes uses `max(0, current INT modifier)`, exact

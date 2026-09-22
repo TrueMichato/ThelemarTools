@@ -318,7 +318,7 @@ describe("RHW Reanimator R2a progression descriptors", () => {
 		},
 	);
 
-	it("publishes source-aware measurable descriptors while leaving excluded R4 runtime behavior unimplemented", () => {
+	it("publishes source-aware measurable descriptors with the bounded R4b runtime projection", () => {
 		const state = makeState(15);
 		const calculations = state.getFeatureCalculations();
 
@@ -359,7 +359,9 @@ describe("RHW Reanimator R2a progression descriptors", () => {
 			ownershipOnly: false,
 			creationImplemented: true,
 			setupChoiceTransactionImplemented: true,
+			runtimeImplemented: true,
 			activeCompanion: null,
+			operations: null,
 		});
 		expect(calculations.reanimatorModificationFeatureUid).toBe(REFINED_REANIMATION_UID);
 		expect(calculations.improvedReanimationFeatureUid).toBe(IMPROVED_REANIMATION_UID);
@@ -376,6 +378,15 @@ describe("RHW Reanimator R2a progression descriptors", () => {
 			eligibleFocusReferences: [],
 		});
 		expect(calculations.lifeTransferFeatureUid).toBe(REFINED_REANIMATION_UID);
+		expect(calculations.lifeTransfer).toEqual({
+			featureUid: REFINED_REANIMATION_UID,
+			executable: false,
+			status: "companionUnavailable",
+			actionType: "reaction",
+			healing: "companionCurrentHpAfterTriggeringDamage",
+			companionDeath: true,
+			triggersDeathBurst: true,
+		});
 		expect(calculations).not.toHaveProperty("reanimatedCompanionCreated");
 		expect(calculations).not.toHaveProperty("lifeTransferResolution");
 		expect(calculations).not.toHaveProperty("reanimatorToolProficiencyGranted");

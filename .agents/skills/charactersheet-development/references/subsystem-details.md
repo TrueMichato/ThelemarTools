@@ -893,7 +893,7 @@ command cost before mutation. Success returns the structured family:
 {
     ok, committed, operation, actionKey, companionId,
     ownerUid, sourceUid, operationUid, commandMethod,
-    costs, receipts, rolls, target, hp,
+    costs, receipts, rolls, target, hp, riders,
     rollback: null,
     error: null,
 }
@@ -913,6 +913,13 @@ level-15 force retaliation roll when present. Companion Hit Dice use the
 companion Constitution modifier and never touch player Hit Dice. Long rest
 restores descriptor-owned `longRest` Repair uses and half the companion Hit
 Dice (rounded up) without healing or resurrecting the feature companion.
+
+Reanimated Companion Dreadful Swipe uses this same command transaction. Dodge
+is the no-owner-cost default; other actions consume the companion Action plus
+the owner's Bonus Action unless the exact summoner is Incapacitated. It never
+offers Battle Smith's Attack replacement. Swipe uses the exact EFA spell attack
+modifier, doubles only dice on a critical, and returns manual no-Opportunity-
+Attack and eligible Bloated-push riders.
 
 RHW Reanimated Companion uses the same generic creation boundary but has no
 pending incomplete creature. `getFeatureCompanionCreationBoundary()` publishes
@@ -942,15 +949,43 @@ HP, Hit Dice current, uses, turn flags, payment/tool/action/lifecycle receipts,
 and the selected IDs. Legacy R3 deferred generations stay explicit and are
 never assigned invented options.
 
-`scaling.resolved` is the runtime metadata surface for later Manager/Play work.
+`scaling.resolved` is the runtime metadata surface for State execution and
+later Manager/Play work.
 Arcane Conduit carries its spell-origin rules and a stable per-generation
 turn-receipt key with exact owner/source/action UIDs and stable companion ID +
 generation components. The generic runtime projector handles any
-`keyScope: "companionGeneration"` operation, but no receipt is committed in
-R4a. Ferocity, Bloated, Gaunt, Moist, Improved Reanimation, Death Burst, and
-Lightning Absorption likewise expose calculations/status only.
-Command/Dodge, attacks, pushes, aura saves, reaction damage, casting, healing,
-Death Burst resolution, and Life Transfer execution are deferred to R4b.
+`keyScope: "companionGeneration"` operation. R4b commits Arcane Conduit through
+the canonical turn-receipt API only after exact EFA class, school, damage-roll,
+range, active-generation, and user-selection validation; late roll mutation
+failure rolls back only that receipt.
+
+The bounded R4b State surface is:
+
+```javascript
+state.applyFeatureCompanionDamage(payload);
+state.resolveFeatureCompanionDeathBurst(payload);
+state.resolveRhwReanimatorGauntTrigger(payload);
+state.resolveRhwReanimatorMoistTrigger(payload);
+state.getRhwArcaneConduitSpellOriginOptions(companionId);
+state.applyRhwArcaneConduitDamageRider(payload);
+state.performRhwLifeTransfer(payload);
+```
+
+Lightning damage heals the exact active companion instead of damaging it;
+other damage consumes temp HP/current HP and routes a zero-HP transition
+through `killFeatureOwnedCompanion()`. That lifecycle persists one Death Burst
+event and can attach one validated manual per-target resolution. Gaunt and
+Moist are receipt-free triggered resolutions. Life Transfer consumes the
+summoner Reaction only when combat action economy is tracked, heals by current
+post-trigger companion HP (including a valid zero actual heal at full HP), then
+kills the companion through the ordinary lifecycle. Its late failure restores
+summoner HP, Reaction state, companion HP/lifecycle, and Death Burst receipt.
+
+Generation-scoped receipts are pruned by exact projected keys on replacement,
+dismissal/removal, exact source loss, and Respec Apply. Six-part/malformed
+collisions, TCE/EFA Battle Smith receipts, and foreign receipts remain
+untouched. `resetTurnEconomy()` is the only turn boundary which releases an
+otherwise live Arcane Conduit use.
 
 ## Exact-Owner Existing-Inventory Bindings
 

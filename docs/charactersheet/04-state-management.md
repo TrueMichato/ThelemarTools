@@ -452,13 +452,22 @@ values. TCE, RHW, name-only, and generic companions stay on the generic PDF path
 Death/revival/replacement transitions and E2E remain outside this milestone.
 The PDF does not infer or display lifecycle state that State does not model.
 
-The Reanimated Companion R4a boundary is creation/setup and persisted derived
-state only. It does not execute command/default Dodge/Bonus Action behavior,
-Dreadful Swipe attacks or pushes, start-turn fear saves, Moist reaction damage,
-Lightning Absorption healing, Arcane Conduit casting or turn-receipt commits,
-Death Burst targets/saves/damage, or Life Transfer. Those entries are
-`metadataOnly`/`deferredR4b`; UI, Play Mode, and E2E behavior also remain later
-milestones.
+The Reanimated Companion R4b boundary adds source-exact State execution while
+preserving the R3/R4a creation, lifecycle, and immutable generation choices.
+The generic companion operation transaction now executes default Dodge and
+Dreadful Swipe command rules, including Bonus Action/incapacitated autonomy,
+critical dice, Improved Reanimation, and manual Swipe riders. Dedicated
+source-safe State methods execute Lightning Absorption/damage-to-zero, one-shot
+Death Burst target results, Gaunt, Moist, Arcane Conduit origin plus stable
+per-generation turn receipt, and Life Transfer's Reaction/heal/death rollback.
+
+All choice-dependent runtime rules resolve from the active companion's
+persisted R4a setup receipt. Arcane receipts use M1E `turnId`, survive
+save/load and `combatRound` changes, and reset only through
+`resetTurnEconomy()`. Exact generation keys are removed on replacement,
+dismissal/removal, source loss, and Respec Apply without pruning Battle Smith,
+TCE, foreign, or malformed six-part collision state. UI, Play Mode, and E2E
+behavior remain later milestones.
 Other feature companions still do not gain acquisition or lifecycle behavior
 unless their registry policies explicitly support it.
 

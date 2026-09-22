@@ -428,7 +428,7 @@ describe("RHW Reanimator R4a derived companion state", () => {
 					companionId: arcane.companionId,
 					generation: 1,
 					key: expectedKey,
-					executionStatus: "deferredR4b",
+					executionStatus: "executable",
 					committed: false,
 				},
 			},
@@ -472,7 +472,7 @@ describe("RHW Reanimator R4a derived companion state", () => {
 					condition: "frightened",
 					duration: "untilStartOfCreatureNextTurn",
 				},
-				executionStatus: "deferredR4b",
+				executionStatus: "executableManualResolution",
 			},
 		});
 		expect(resolved.modifications.effects.moist).toMatchObject({
@@ -480,7 +480,7 @@ describe("RHW Reanimator R4a derived companion state", () => {
 			acidRetaliation: {
 				attackerMaximumRangeFeet: 10,
 				damage: {flat: 4, type: "acid"},
-				executionStatus: "deferredR4b",
+				executionStatus: "executableManualResolution",
 			},
 		});
 	});
@@ -518,7 +518,7 @@ describe("RHW Reanimator R4a derived companion state", () => {
 			actionUid: "arcane-conduit:damage-rider",
 			generation: 1,
 			committed: false,
-			executionStatus: "deferredR4b",
+			executionStatus: "executable",
 		});
 		expect(isolatedReceipt.key).not.toBe(originalKey);
 		expect(JSON.stringify(isolatedState._data.turnReceipts)).toBe(turnReceiptsBefore);
@@ -659,7 +659,7 @@ describe("RHW Reanimator R4a derived companion state", () => {
 			sourceUid: "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW",
 			actionUid: "arcane-conduit:damage-rider",
 			committed: false,
-			executionStatus: "deferredR4b",
+			executionStatus: "executable",
 		});
 		expect(secondReceipt.key).not.toBe(firstKey);
 		expect(JSON.stringify(state._data.turnReceipts)).toBe(turnReceiptsBefore);

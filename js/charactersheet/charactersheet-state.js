@@ -4473,6 +4473,8 @@ class CharacterSheetState {
 	static RHW_REANIMATOR_SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
 	static RHW_FACILITATED_REVIVAL_FOCUS_RULE_ID = "rhw-facilitated-revival-focus";
 	static RHW_REANIMATOR_TOOL_OWNER_UID = "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW";
+	static RHW_REANIMATOR_ARCANE_CONDUIT_SOURCE_UID = "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW";
+	static RHW_REANIMATOR_ARCANE_CONDUIT_ACTION_UID = "arcane-conduit:damage-rider";
 	static RHW_REANIMATOR_FEATURE_UIDS = Object.freeze({
 		REANIMATOR: "Reanimator|Artificer|EFA|Reanimator|RHW|3",
 		SPELLS: "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3",
@@ -8004,6 +8006,7 @@ class CharacterSheetState {
 		for (const companion of this._data.companions) {
 			const featureUid = companion?.featureGrant?.uid;
 			if (!featureUid) continue;
+			if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) continue;
 			const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
 			if (!rules?.getDescriptor(featureUid)) continue;
 			const contextResult = this._tryGetFeatureCompanionSummonerContext(featureUid);
@@ -48916,7 +48919,11 @@ class CharacterSheetState {
 				ownershipOnly: false,
 				creationImplemented: true,
 				setupChoiceTransactionImplemented: true,
+				runtimeImplemented: true,
 				activeCompanion: activeCompanionProjection,
+				operations: activeCompanionProjection?.resolved?.operations
+					? MiscUtil.copyFast(activeCompanionProjection.resolved.operations)
+					: null,
 			},
 		};
 
@@ -48957,7 +48964,16 @@ class CharacterSheetState {
 			};
 			calculations.hasLifeTransfer = true;
 			calculations.lifeTransferFeatureUid = featureUids.REFINED_REANIMATION;
-			calculations.lifeTransferStatus = "deferredR4b";
+			calculations.lifeTransferStatus = activeCompanion ? "ready" : "companionUnavailable";
+			calculations.lifeTransfer = {
+				featureUid: featureUids.REFINED_REANIMATION,
+				executable: !!activeCompanion,
+				status: activeCompanion ? "ready" : "companionUnavailable",
+				actionType: "reaction",
+				healing: "companionCurrentHpAfterTriggeringDamage",
+				companionDeath: true,
+				triggersDeathBurst: true,
+			};
 		}
 
 		return calculations;
@@ -50348,6 +50364,7 @@ class CharacterSheetState {
 				name: spellName,
 				source: spellSource,
 				level: Number(spellData?.level ?? spell?.level ?? 0),
+				school: spellData?.school || spell?.school || null,
 			},
 			castType: castDescriptor.type,
 			slotLevel: castDescriptor.slotLevel,
@@ -80708,8 +80725,10 @@ class CharacterSheetState {
 	}
 
 	_removeExactFeatureOwnedCompanions (featureUid) {
-		const ownedIds = new Set(this._getExactFeatureOwnedCompanions(featureUid).map(companion => companion.id));
+		const owned = this._getExactFeatureOwnedCompanions(featureUid);
+		const ownedIds = new Set(owned.map(companion => companion.id));
 		if (!ownedIds.size) return 0;
+		for (const companion of owned) this._pruneFeatureCompanionTurnReceipts(companion, {ownerUid: featureUid});
 		const before = this._data.companions.length;
 		this._data.companions = this._data.companions.filter(companion => !ownedIds.has(companion.id));
 		return before - this._data.companions.length;
@@ -81400,6 +81419,7 @@ class CharacterSheetState {
 			featureUid,
 			cause = "companionDeath",
 			remove = false,
+			deathBurstResolution = null,
 		} = {},
 	) {
 		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) {
@@ -81424,6 +81444,18 @@ class CharacterSheetState {
 		const deathBurst = lifecycleRule.triggersDeathBurst === true
 			? this._getFeatureCompanionDeathBurst(companion)
 			: null;
+		let resolvedDeathBurst = null;
+		if (deathBurst && deathBurstResolution != null) {
+			const validation = this._validateRhwDeathBurstResolution(
+				companion,
+				deathBurstResolution,
+				{deathBurst},
+			);
+			if (!validation.ok) {
+				return {ok: false, committed: false, reason: validation.reason};
+			}
+			resolvedDeathBurst = validation.result;
+		}
 		const receipt = {
 			version: CharacterSheetState.FEATURE_COMPANION_LIFECYCLE_RECEIPT_VERSION,
 			receiptId: CryptUtil.uid(),
@@ -81431,6 +81463,7 @@ class CharacterSheetState {
 			companionId,
 			cause,
 			deathBurst: MiscUtil.copyFast(deathBurst),
+			deathBurstResolution: MiscUtil.copyFast(resolvedDeathBurst),
 		};
 		companion.hp.current = 0;
 		companion.hp.temp = 0;
@@ -81440,10 +81473,14 @@ class CharacterSheetState {
 			status: "dead",
 			deathCause: cause,
 			deathBurstEmitted: !!deathBurst,
+			deathBurstResolved: !!resolvedDeathBurst,
 			deathReceipt: receipt,
 		};
 		const companionSnapshot = MiscUtil.copyFast(companion);
-		if (remove) this.removeCompanion(companionId);
+		if (remove) {
+			this._pruneFeatureCompanionTurnReceipts(companion, {ownerUid: featureUid});
+			this.removeCompanion(companionId);
+		}
 
 		return {
 			ok: true,
@@ -81453,6 +81490,7 @@ class CharacterSheetState {
 			removed: remove,
 			companion: companionSnapshot,
 			deathBurst,
+			deathBurstResult: resolvedDeathBurst,
 			receipt,
 		};
 	}
@@ -81487,6 +81525,7 @@ class CharacterSheetState {
 				return {ok: false, committed: false, reason: "actionUnavailable"};
 			}
 			const companionSnapshot = MiscUtil.copyFast(companion);
+			this._pruneFeatureCompanionTurnReceipts(companion, {ownerUid: featureUid});
 			if (!this.removeCompanion(companionId)) throw new Error("Companion dismissal did not remove the active instance.");
 			return {
 				ok: true,
@@ -81521,7 +81560,7 @@ class CharacterSheetState {
 		}
 	}
 
-	handleFeatureCompanionSummonerDeath (featureUid) {
+	handleFeatureCompanionSummonerDeath (featureUid, {deathBurstResolutions = {}} = {}) {
 		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) {
 			return {ok: false, committed: false, reason: "invalidFeature", results: []};
 		}
@@ -81534,6 +81573,7 @@ class CharacterSheetState {
 			featureUid,
 			cause: "summonerDeath",
 			remove: true,
+			deathBurstResolution: deathBurstResolutions[companion.id] || null,
 		}));
 		return {
 			ok: results.every(result => result.ok),
@@ -81541,6 +81581,7 @@ class CharacterSheetState {
 			featureUid,
 			results,
 			deathBursts: results.map(result => result.deathBurst).filter(Boolean),
+			deathBurstResults: results.map(result => result.deathBurstResult).filter(Boolean),
 		};
 	}
 
@@ -81982,6 +82023,27 @@ class CharacterSheetState {
 				actionUid: descriptor.actionUid,
 			}).count;
 		}
+		const generationKeys = new Set();
+		const walk = value => {
+			if (Array.isArray(value)) {
+				value.forEach(walk);
+				return;
+			}
+			if (!CharacterSheetState._isCompanionSchemaObject(value)) return;
+			if (
+				value.keyScope === "companionGeneration"
+				&& value.key
+				&& value.ownerUid === featureUid
+				&& value.companionId === companion.id
+			) generationKeys.add(value.key);
+			Object.values(value).forEach(walk);
+		};
+		walk(companion.scaling?.resolved);
+		for (const key of generationKeys) {
+			const query = this.queryTurnReceipt(key);
+			if (!query.used || !query.receipt) continue;
+			count += this.rollbackTurnReceipt(query.receipt).rolledBack ? 1 : 0;
+		}
 		return count;
 	}
 
@@ -82000,7 +82062,20 @@ class CharacterSheetState {
 		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
 		const descriptor = ownerUid ? rules?.getDescriptor(ownerUid) : null;
 		const contextResult = ownerUid ? this._tryGetFeatureCompanionSummonerContext(ownerUid) : {ok: false};
-		const resolved = contextResult.ok ? rules.resolve(ownerUid, contextResult.context) : null;
+		let resolved = null;
+		let resolverError = null;
+		if (contextResult.ok) {
+			try {
+				resolved = rules.resolve(
+					ownerUid,
+					contextResult.context,
+					companion?.setup || null,
+					{deferSetupChoices: companion?.scaling?.deferSetupChoices === true},
+				);
+			} catch (error) {
+				resolverError = error;
+			}
+		}
 		const sourceUid = descriptor?.identity?.companionUid || null;
 		const base = {
 			companionId,
@@ -82015,6 +82090,7 @@ class CharacterSheetState {
 			companion,
 			descriptor,
 			resolved,
+			resolverError,
 			receipt: null,
 			commandMethods: [],
 			availableCommandMethods: [],
@@ -82031,8 +82107,22 @@ class CharacterSheetState {
 
 		const fail = (reason, message) => ({...base, reason, message});
 		if (!companion) return fail("companionNotFound", "Companion not found.");
+		if (
+			ownerUid
+			&& CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(ownerUid)
+			&& !CharacterSheetState._isExactFeatureCompanionRecord(companion, ownerUid)
+		) return fail("ownerMismatch", "This companion does not match the exact source-qualified owner.");
 		if (!ownerUid || !descriptor || !resolved || !sourceUid) {
-			return fail("unsupportedCompanion", "This companion has no source-qualified operation rules.");
+			return fail(
+				resolverError ? "resolverRejected" : "unsupportedCompanion",
+				resolverError?.message || "This companion has no source-qualified operation rules.",
+			);
+		}
+		if (
+			resolved.modifications?.deferred
+			&& (Number(resolved.modifications.currentRequiredCount) || 0) > 0
+		) {
+			return fail("setupIncomplete", "This companion generation has no complete persisted modification receipt.");
 		}
 
 		const actionReceipt = this._getFeatureCompanionTurnReceiptDescriptor(companion, "action");
@@ -82055,6 +82145,11 @@ class CharacterSheetState {
 		switch (operationKey) {
 			case "forceEmpoweredRend":
 				operationRule = resolved.actions?.forceEmpoweredRend || null;
+				requiresAction = true;
+				requiresCommand = true;
+				break;
+			case "dreadfulSwipe":
+				operationRule = resolved.actions?.dreadfulSwipe || null;
 				requiresAction = true;
 				requiresCommand = true;
 				break;
@@ -82199,9 +82294,11 @@ class CharacterSheetState {
 				commandPolicy: out.resolved.commandPolicy,
 				action: out.operation === "forceEmpoweredRend"
 					? out.resolved.actions?.forceEmpoweredRend
-					: out.operation === "repair"
-						? out.resolved.actions?.repair
-						: null,
+					: out.operation === "dreadfulSwipe"
+						? out.resolved.actions?.dreadfulSwipe
+						: out.operation === "repair"
+							? out.resolved.actions?.repair
+							: null,
 				reaction: out.operation === "deflectAttack"
 					? out.resolved.reactions?.deflectAttack
 					: null,
@@ -82225,8 +82322,52 @@ class CharacterSheetState {
 			rolls: null,
 			target: null,
 			hp: null,
+			riders: null,
 			rollback,
 			error: error ? String(error?.message || error) : null,
+		};
+	}
+
+	static _getNormalizedCreatureSize (size) {
+		const aliases = {
+			t: "tiny",
+			s: "small",
+			m: "medium",
+			l: "large",
+			h: "huge",
+			g: "gargantuan",
+		};
+		const normalized = String(size || "").trim().toLowerCase();
+		const expanded = aliases[normalized] || normalized;
+		return CharacterSheetState.GRAPPLE_SIZE_ORDER.includes(expanded) ? expanded : null;
+	}
+
+	static _getExplicitFiniteNumber (value) {
+		if (value == null || (typeof value === "string" && !value.trim())) return null;
+		const out = Number(value);
+		return Number.isFinite(out) ? out : null;
+	}
+
+	static _getExactDiceRolls (dice, rolls, {critical = false} = {}) {
+		const match = String(dice || "").trim().match(/^(\d+)d(\d+)$/i);
+		if (!match) return {ok: false, reason: "invalidDiceFormula"};
+		const baseCount = Number(match[1]);
+		const faces = Number(match[2]);
+		const expectedCount = baseCount * (critical ? 2 : 1);
+		const values = Array.isArray(rolls?.damageDice)
+			? [...rolls.damageDice]
+			: [rolls?.damageDie, ...(critical ? [rolls?.criticalDamageDie] : [])];
+		if (
+			values.length !== expectedCount
+			|| values.some(value => !Number.isInteger(value) || value < 1 || value > faces)
+		) {
+			return {ok: false, reason: "invalidDamageRoll", expectedCount, faces};
+		}
+		return {
+			ok: true,
+			values,
+			total: values.reduce((sum, value) => sum + value, 0),
+			dice: `${expectedCount}d${faces}`,
 		};
 	}
 
@@ -82287,6 +82428,41 @@ class CharacterSheetState {
 			}
 			if (hitConfirmed && (!Number.isFinite(rolls.damageDie) || rolls.damageDie < 1)) {
 				return this._getCompanionOperationFailure(availability, "invalidDamageRoll", "A valid Rend damage roll is required.");
+			}
+		}
+		if (availability.operation === "dreadfulSwipe") {
+			if (!target?.name?.trim()) {
+				return this._getCompanionOperationFailure(availability, "targetRequired", "Choose a Dreadful Swipe target.");
+			}
+			if (!rangeConfirmed) {
+				return this._getCompanionOperationFailure(availability, "rangeNotConfirmed", "Confirm that the target is within 5 feet.");
+			}
+			if (!Number.isInteger(rolls.attackD20) || rolls.attackD20 < 1 || rolls.attackD20 > 20) {
+				return this._getCompanionOperationFailure(availability, "invalidAttackRoll", "A valid d20 attack roll is required.");
+			}
+			if (hitConfirmed) {
+				const critical = rolls.attackD20 === 20;
+				const damageRoll = CharacterSheetState._getExactDiceRolls(
+					resolved.actions.dreadfulSwipe.damage.dice,
+					rolls,
+					{critical},
+				);
+				if (!damageRoll.ok) {
+					return this._getCompanionOperationFailure(
+						availability,
+						damageRoll.reason,
+						`Dreadful Swipe requires exactly ${damageRoll.expectedCount || 1} valid damage ${damageRoll.expectedCount === 1 ? "die" : "dice"}.`,
+					);
+				}
+				const bloatedPush = resolved.actions.dreadfulSwipe.riders
+					?.find(rider => rider.id === "bloatedPush");
+				if (bloatedPush && !CharacterSheetState._getNormalizedCreatureSize(target.size)) {
+					return this._getCompanionOperationFailure(
+						availability,
+						"invalidTargetSize",
+						"Bloated requires a normalized target size for its push eligibility.",
+					);
+				}
 			}
 		}
 		if (availability.operation === "repair") {
@@ -82442,6 +82618,7 @@ class CharacterSheetState {
 			let resultRolls = {};
 			const resultTarget = target ? MiscUtil.copyFast(target) : null;
 			let hp = null;
+			let riders = null;
 			if (availability.operation === "forceEmpoweredRend") {
 				const attackRule = resolved.actions.forceEmpoweredRend;
 				const damageRule = resolved.actions.forceEmpoweredRend.damage;
@@ -82467,6 +82644,59 @@ class CharacterSheetState {
 						}
 						: null,
 				};
+			}
+			if (availability.operation === "dreadfulSwipe") {
+				const attackRule = resolved.actions.dreadfulSwipe;
+				const damageRule = attackRule.damage;
+				const critical = rolls.attackD20 === 20;
+				const damageRoll = hitConfirmed
+					? CharacterSheetState._getExactDiceRolls(damageRule.dice, rolls, {critical})
+					: null;
+				const targetSize = CharacterSheetState._getNormalizedCreatureSize(target?.size);
+				resultRolls = {
+					attack: {
+						d20: rolls.attackD20,
+						bonus: attackRule.attackBonus,
+						total: rolls.attackD20 + attackRule.attackBonus,
+						critical,
+						fumble: rolls.attackD20 === 1,
+						hitConfirmed: !!hitConfirmed,
+						range: attackRule.reachFeet,
+						type: attackRule.attackType,
+					},
+					damage: hitConfirmed
+						? {
+							dieRolls: damageRoll.values,
+							flat: damageRule.flat,
+							total: damageRoll.total + damageRule.flat,
+							dice: damageRoll.dice,
+							type: damageRule.type,
+							ignoresResistance: damageRule.ignoresResistance === true,
+						}
+						: null,
+				};
+				riders = hitConfirmed
+					? attackRule.riders.map(rider => {
+						if (rider.id !== "bloatedPush") {
+							return {
+								...MiscUtil.copyFast(rider),
+								applies: true,
+								manualResolution: true,
+							};
+						}
+						const maximumSize = CharacterSheetState._getNormalizedCreatureSize(rider.maximumTargetSize);
+						const eligible = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(targetSize) <=
+							CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(maximumSize);
+						return {
+							...MiscUtil.copyFast(rider),
+							applies: eligible,
+							eligible,
+							targetSize,
+							maximumTargetSize: maximumSize,
+							manualResolution: eligible,
+						};
+					})
+					: [];
 			}
 			if (availability.operation === "repair") {
 				resourceSnapshot = {
@@ -82589,6 +82819,7 @@ class CharacterSheetState {
 				rolls: resultRolls,
 				target: resultTarget,
 				hp,
+				riders,
 				rollback: null,
 				error: null,
 			};
@@ -82604,7 +82835,9 @@ class CharacterSheetState {
 	}
 
 	commandCompanionAction (options = {}) {
-		const operation = options.actionKey === "forceEmpoweredRend" ? "forceEmpoweredRend" : "action";
+		const operation = ["forceEmpoweredRend", "dreadfulSwipe"].includes(options.actionKey)
+			? options.actionKey
+			: "action";
 		return this.performCompanionOperation({...options, operation});
 	}
 
@@ -82619,6 +82852,648 @@ class CharacterSheetState {
 
 	spendCompanionHitDie (options = {}) {
 		return this.performCompanionOperation({...options, operation: "hitDie"});
+	}
+
+	_getRhwReanimatedCompanionRuntime (
+		companionId,
+		{
+			requireActive = true,
+			requireAlive = true,
+		} = {},
+	) {
+		const featureUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER;
+		const companion = this.getCompanion(companionId);
+		if (!companion) return {ok: false, reason: "companionNotFound", featureUid, companion: null, resolved: null};
+		if (!CharacterSheetState._isExactFeatureCompanionRecord(companion, featureUid)) {
+			return {ok: false, reason: "ownerMismatch", featureUid, companion, resolved: null};
+		}
+		if (requireActive && !CharacterSheetState._isFeatureOwnedCompanionActive(companion)) {
+			return {ok: false, reason: "companionInactive", featureUid, companion, resolved: null};
+		}
+		if (requireAlive && (Number(companion.hp?.current) || 0) <= 0) {
+			return {ok: false, reason: "companionAtZeroHp", featureUid, companion, resolved: null};
+		}
+
+		const contextResult = this._tryGetFeatureCompanionSummonerContext(featureUid);
+		if (!contextResult.ok) {
+			return {ok: false, reason: "featureUnavailable", featureUid, companion, resolved: null};
+		}
+		try {
+			const resolved = this.resolveFeatureCompanionRules(
+				featureUid,
+				contextResult.context,
+				companion.setup || null,
+				{deferSetupChoices: companion.scaling?.deferSetupChoices === true},
+			);
+			if (
+				resolved.modifications?.deferred
+				&& (Number(resolved.modifications.currentRequiredCount) || 0) > 0
+			) {
+				return {ok: false, reason: "setupIncomplete", featureUid, companion, resolved};
+			}
+			return {
+				ok: true,
+				reason: null,
+				featureUid,
+				companion,
+				resolved: CharacterSheetState._projectFeatureCompanionRuntimeMetadata(
+					companion,
+					featureUid,
+					resolved,
+				),
+			};
+		} catch (error) {
+			return {
+				ok: false,
+				reason: "resolverRejected",
+				error: error instanceof Error ? error.message : String(error),
+				featureUid,
+				companion,
+				resolved: null,
+			};
+		}
+	}
+
+	_validateRhwDeathBurstResolution (companion, input, {deathBurst = null} = {}) {
+		const rule = deathBurst
+			|| companion?.lifecycle?.deathReceipt?.deathBurst
+			|| this._getFeatureCompanionDeathBurst(companion);
+		if (!rule) return {ok: false, reason: "deathBurstUnavailable", result: null};
+		if (!input || typeof input !== "object" || Array.isArray(input)) {
+			return {ok: false, reason: "invalidDeathBurstResolution", result: null};
+		}
+		if (!Array.isArray(input.targets) || !input.targets.length) {
+			return {ok: false, reason: "targetsRequired", result: null};
+		}
+
+		const damageRoll = CharacterSheetState._getExactDiceRolls(
+			rule.damage?.dice,
+			{damageDice: input.rolls?.damageDice},
+		);
+		if (!damageRoll.ok) return {ok: false, reason: "invalidDamageRoll", result: null};
+		const saveDc = Number(rule.save?.dc);
+		if (!Number.isFinite(saveDc)) return {ok: false, reason: "invalidSaveDc", result: null};
+
+		const targets = [];
+		const targetIds = new Set();
+		for (const target of input.targets) {
+			const targetId = String(target?.id || target?.name || "").trim();
+			const saveTotal = CharacterSheetState._getExplicitFiniteNumber(target?.dexSaveTotal);
+			const distanceFeet = CharacterSheetState._getExplicitFiniteNumber(target?.distanceFeet);
+			if (
+				!targetId
+				|| targetIds.has(targetId)
+				|| saveTotal == null
+				|| distanceFeet == null
+				|| distanceFeet < 0
+				|| distanceFeet > rule.area.radiusFeet
+			) {
+				return {ok: false, reason: "invalidTarget", result: null};
+			}
+			targetIds.add(targetId);
+			const saveSucceeded = saveTotal >= saveDc;
+			const fullDamage = damageRoll.total + (Number(rule.damage?.flat) || 0);
+			targets.push({
+				id: target?.id || null,
+				name: target?.name || targetId,
+				distanceFeet,
+				dexSaveTotal: saveTotal,
+				saveSucceeded,
+				damage: saveSucceeded ? Math.floor(fullDamage / 2) : fullDamage,
+				damageType: rule.damage.type,
+				ignoresResistance: rule.damage.ignoresResistance === true,
+				manualApplication: true,
+			});
+		}
+
+		return {
+			ok: true,
+			reason: null,
+			result: {
+				operation: "deathBurst",
+				operationUid: `${rule.name}|Reanimated Companion|RHW`,
+				companionId: companion.id,
+				ownerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER,
+				sourceUid: "Reanimated Companion|RHW",
+				area: MiscUtil.copyFast(rule.area),
+				save: {
+					ability: rule.save.ability,
+					dc: saveDc,
+					onSuccess: rule.save.onSuccess,
+				},
+				damage: {
+					dieRolls: damageRoll.values,
+					dice: damageRoll.dice,
+					flat: Number(rule.damage?.flat) || 0,
+					total: damageRoll.total + (Number(rule.damage?.flat) || 0),
+					type: rule.damage.type,
+					ignoresResistance: rule.damage.ignoresResistance === true,
+				},
+				targets,
+				manualApplication: true,
+			},
+		};
+	}
+
+	resolveFeatureCompanionDeathBurst ({
+		featureUid,
+		companionId,
+		targets,
+		rolls,
+	} = {}) {
+		if (featureUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER) {
+			return {ok: false, committed: false, reason: "invalidFeature"};
+		}
+		const runtime = this._getRhwReanimatedCompanionRuntime(companionId, {
+			requireActive: false,
+			requireAlive: false,
+		});
+		if (!runtime.ok && !["featureUnavailable"].includes(runtime.reason)) {
+			return {ok: false, committed: false, reason: runtime.reason};
+		}
+		const companion = runtime.companion;
+		const receipt = companion?.lifecycle?.deathReceipt;
+		if (!receipt || companion.lifecycle?.deathBurstEmitted !== true) {
+			return {ok: false, committed: false, reason: "deathBurstNotEmitted"};
+		}
+		if (receipt.deathBurstResolution || companion.lifecycle?.deathBurstResolved) {
+			return {
+				ok: true,
+				committed: false,
+				reason: "alreadyResolved",
+				result: MiscUtil.copyFast(receipt.deathBurstResolution || null),
+			};
+		}
+		const validation = this._validateRhwDeathBurstResolution(
+			companion,
+			{targets, rolls},
+			{deathBurst: receipt.deathBurst},
+		);
+		if (!validation.ok) return {ok: false, committed: false, reason: validation.reason};
+
+		receipt.deathBurstResolution = MiscUtil.copyFast(validation.result);
+		companion.lifecycle.deathBurstResolved = true;
+		return {
+			ok: true,
+			committed: true,
+			reason: null,
+			featureUid,
+			companionId,
+			result: MiscUtil.copyFast(validation.result),
+			receipt: MiscUtil.copyFast(receipt),
+		};
+	}
+
+	applyFeatureCompanionDamage ({
+		featureUid,
+		companionId,
+		amount,
+		damageType,
+		deathBurstResolution = null,
+		cancelled = false,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		if (featureUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER) {
+			return {ok: false, committed: false, reason: "invalidFeature"};
+		}
+		const requested = Number(amount);
+		if (!Number.isInteger(requested) || requested <= 0) {
+			return {ok: false, committed: false, reason: "invalidAmount"};
+		}
+		const normalizedType = String(damageType || "").trim().toLowerCase();
+		const damageTypes = new Set([
+			"acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic",
+			"piercing", "poison", "psychic", "radiant", "slashing", "thunder",
+		]);
+		if (!damageTypes.has(normalizedType)) {
+			return {ok: false, committed: false, reason: "invalidDamageType"};
+		}
+
+		const runtime = this._getRhwReanimatedCompanionRuntime(companionId);
+		if (!runtime.ok) return {ok: false, committed: false, reason: runtime.reason};
+		const companion = runtime.companion;
+		const before = {
+			current: companion.hp.current,
+			temp: companion.hp.temp,
+			max: companion.hp.max,
+		};
+		if (normalizedType === "lightning") {
+			const actualHealing = this.healCompanion(companionId, requested);
+			return {
+				ok: true,
+				committed: true,
+				reason: null,
+				featureUid,
+				companionId,
+				damageType: normalizedType,
+				requestedDamage: requested,
+				actualDamage: 0,
+				immunityApplied: true,
+				absorptionApplied: true,
+				healing: {
+					requested: requested,
+					actual: actualHealing,
+				},
+				before,
+				after: {
+					current: companion.hp.current,
+					temp: companion.hp.temp,
+					max: companion.hp.max,
+				},
+				death: null,
+			};
+		}
+
+		const wouldDropToZero = requested >= (Number(companion.hp?.temp) || 0) + (Number(companion.hp?.current) || 0);
+		if (wouldDropToZero && deathBurstResolution != null) {
+			const validation = this._validateRhwDeathBurstResolution(companion, deathBurstResolution);
+			if (!validation.ok) return {ok: false, committed: false, reason: validation.reason};
+		}
+
+		const companionSnapshot = MiscUtil.copyFast(companion);
+		try {
+			const damage = this.damageCompanion(companionId, requested);
+			let death = null;
+			if (damage.droppedToZero) {
+				death = this.killFeatureOwnedCompanion(companionId, {
+					featureUid,
+					cause: "damageToZero",
+					deathBurstResolution,
+				});
+				if (!death.ok || !death.committed) throw new Error(death.reason || "Companion death did not commit.");
+			}
+			const liveCompanion = this.getCompanion(companionId);
+			return {
+				ok: true,
+				committed: true,
+				reason: null,
+				featureUid,
+				companionId,
+				damageType: normalizedType,
+				requestedDamage: requested,
+				actualDamage: damage.tempAbsorbed + damage.hpLost,
+				immunityApplied: false,
+				absorptionApplied: false,
+				healing: null,
+				before,
+				after: {
+					current: liveCompanion.hp.current,
+					temp: liveCompanion.hp.temp,
+					max: liveCompanion.hp.max,
+				},
+				damage,
+				death,
+			};
+		} catch (error) {
+			const index = this._data.companions.findIndex(it => it.id === companionId);
+			if (~index) this._data.companions[index] = companionSnapshot;
+			return {
+				ok: false,
+				committed: false,
+				reason: "transactionRolledBack",
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	resolveRhwReanimatorGauntTrigger ({
+		companionId,
+		target,
+		rangeFeet,
+		wisdomSaveTotal,
+		cancelled = false,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		const runtime = this._getRhwReanimatedCompanionRuntime(companionId);
+		if (!runtime.ok) return {ok: false, committed: false, reason: runtime.reason};
+		const rule = runtime.resolved.modifications?.effects?.gaunt?.fearAura;
+		if (!rule) return {ok: false, committed: false, reason: "modificationUnavailable"};
+		if (
+			!target?.chosen
+			|| !target?.startedTurn
+			|| target?.isCreature !== true
+			|| !String(target?.name || target?.id || "").trim()
+		) {
+			return {ok: false, committed: false, reason: "invalidTrigger"};
+		}
+		const distance = CharacterSheetState._getExplicitFiniteNumber(rangeFeet);
+		if (distance == null || distance < 0 || distance > rule.area.radiusFeet) {
+			return {ok: false, committed: false, reason: "targetOutOfRange"};
+		}
+		const saveTotal = CharacterSheetState._getExplicitFiniteNumber(wisdomSaveTotal);
+		if (saveTotal == null) return {ok: false, committed: false, reason: "invalidSave"};
+		const saveSucceeded = saveTotal >= rule.save.dc;
+		return {
+			ok: true,
+			committed: false,
+			reason: null,
+			operation: "gauntFearAura",
+			operationUid: "Gaunt|Reanimated Companion|RHW",
+			companionId,
+			target: MiscUtil.copyFast(target),
+			save: {
+				ability: rule.save.ability,
+				dc: rule.save.dc,
+				total: saveTotal,
+				succeeded: saveSucceeded,
+			},
+			condition: saveSucceeded
+				? null
+				: {
+					...MiscUtil.copyFast(rule.onFailure),
+					applies: true,
+					manualResolution: true,
+				},
+		};
+	}
+
+	resolveRhwReanimatorMoistTrigger ({
+		companionId,
+		attacker,
+		attackHit,
+		rangeFeet,
+		cancelled = false,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled", damage: null};
+		const runtime = this._getRhwReanimatedCompanionRuntime(companionId);
+		if (!runtime.ok) return {ok: false, committed: false, reason: runtime.reason, damage: null};
+		const rule = runtime.resolved.modifications?.effects?.moist?.acidRetaliation;
+		if (!rule) return {ok: false, committed: false, reason: "modificationUnavailable", damage: null};
+		if (attacker?.isCreature !== true || !String(attacker?.name || attacker?.id || "").trim()) {
+			return {ok: false, committed: false, reason: "invalidAttacker", damage: null};
+		}
+		if (attackHit !== true) return {ok: true, committed: false, reason: "attackMissed", damage: null};
+		const distance = CharacterSheetState._getExplicitFiniteNumber(rangeFeet);
+		if (distance == null || distance < 0 || distance > rule.attackerMaximumRangeFeet) {
+			return {ok: false, committed: false, reason: "attackerOutOfRange", damage: null};
+		}
+		return {
+			ok: true,
+			committed: false,
+			reason: null,
+			operation: "moistAcidRetaliation",
+			operationUid: "Moist|Reanimated Companion|RHW",
+			companionId,
+			attacker: MiscUtil.copyFast(attacker),
+			damage: {
+				total: Number(rule.damage.flat) || 0,
+				flat: Number(rule.damage.flat) || 0,
+				type: rule.damage.type,
+				manualApplication: true,
+			},
+			costs: {
+				companionReaction: false,
+				turnReceipt: false,
+			},
+		};
+	}
+
+	getRhwArcaneConduitSpellOriginOptions (companionId) {
+		const runtime = this._getRhwReanimatedCompanionRuntime(companionId);
+		if (!runtime.ok) return {available: false, reason: runtime.reason, options: []};
+		const rule = runtime.resolved.modifications?.effects?.arcaneConduit?.castingOrigin;
+		if (!rule?.mayCastFromCompanionSpace) {
+			return {available: false, reason: "modificationUnavailable", options: []};
+		}
+		return {
+			available: true,
+			reason: null,
+			companionId,
+			usesSummonerSenses: rule.usesSummonerSenses === true,
+			options: [
+				{id: "summoner", origin: "summonerSpace", senses: "summoner"},
+				{id: "companion", origin: "companionSpace", companionId, senses: "summoner"},
+			],
+		};
+	}
+
+	_applyRhwArcaneConduitDamageRoll (spellCastReceipt, selectedRoll, bonus, operation) {
+		const before = Number(selectedRoll?.total);
+		if (!Number.isFinite(before) || selectedRoll?.kind !== "damage") return null;
+		selectedRoll.total = before + bonus;
+		selectedRoll.arcaneConduit = {
+			ownerUid: operation.ownerUid,
+			sourceUid: operation.sourceUid,
+			actionUid: operation.actionUid,
+			companionId: operation.companionId,
+			generation: operation.generation,
+			bonus,
+		};
+		return {
+			rollId: selectedRoll.rollId,
+			before,
+			bonus,
+			after: selectedRoll.total,
+			damageType: selectedRoll.damageType || null,
+			spellReceiptId: spellCastReceipt.receiptId || null,
+		};
+	}
+
+	applyRhwArcaneConduitDamageRider ({
+		companionId,
+		spellCastReceipt,
+		selectedRollId,
+		companionDistanceFeet,
+		cancelled = false,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		const runtime = this._getRhwReanimatedCompanionRuntime(companionId);
+		if (!runtime.ok) return {ok: false, committed: false, reason: runtime.reason};
+		const rider = runtime.resolved.modifications?.effects?.arcaneConduit?.damageRider;
+		const operation = rider?.turnReceipt;
+		if (!rider || !operation) return {ok: false, committed: false, reason: "modificationUnavailable"};
+		if (
+			operation.ownerUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER
+			|| operation.sourceUid !== CharacterSheetState.RHW_REANIMATOR_ARCANE_CONDUIT_SOURCE_UID
+			|| operation.actionUid !== CharacterSheetState.RHW_REANIMATOR_ARCANE_CONDUIT_ACTION_UID
+			|| operation.companionId !== companionId
+		) return {ok: false, committed: false, reason: "invalidOperationIdentity"};
+
+		const distance = CharacterSheetState._getExplicitFiniteNumber(companionDistanceFeet);
+		if (distance == null || distance < 0 || distance > rider.requiresCompanionWithinFeet) {
+			return {ok: false, committed: false, reason: "companionOutOfRange"};
+		}
+		if (
+			!spellCastReceipt?.ok
+			|| !spellCastReceipt.committed
+			|| spellCastReceipt.castingClassUid !== rider.spellClassUid
+			|| spellCastReceipt.castType === "item"
+		) return {ok: false, committed: false, reason: "invalidSpellSource"};
+		const schoolAliases = {v: "evocation", n: "necromancy"};
+		const schoolRaw = String(spellCastReceipt.spell?.school || "").trim().toLowerCase();
+		const school = schoolAliases[schoolRaw] || schoolRaw;
+		if (!rider.spellSchools.includes(school)) {
+			return {ok: false, committed: false, reason: "invalidSpellSchool"};
+		}
+		const damageRolls = (spellCastReceipt.cast?.rolls || [])
+			.filter(roll => roll?.kind === "damage" && roll.status === "resolved" && Number(roll.total) > 0);
+		if (!damageRolls.length) return {ok: false, committed: false, reason: "spellDealtNoDamage"};
+		const selectedRoll = damageRolls.find(roll => roll.rollId === selectedRollId);
+		if (!selectedRoll) return {ok: false, committed: false, reason: "invalidDamageRollSelection"};
+
+		const existing = this.queryTurnReceipt(operation.key);
+		if (existing.used) {
+			return {
+				ok: false,
+				committed: false,
+				reason: "alreadyUsed",
+				receipt: existing.receipt,
+			};
+		}
+
+		const rollSnapshot = MiscUtil.copyFast(selectedRoll);
+		let receipt = null;
+		try {
+			const receiptResult = this.commitTurnReceipt({
+				key: operation.key,
+				ownerUid: operation.ownerUid,
+				sourceUid: operation.sourceUid,
+				actionUid: operation.actionUid,
+				metadata: {
+					companionId,
+					generation: operation.generation,
+					spellReceiptId: spellCastReceipt.receiptId || null,
+					selectedRollId,
+				},
+			});
+			if (!receiptResult.committed || !receiptResult.receipt) {
+				return {
+					ok: false,
+					committed: false,
+					reason: receiptResult.reason || "receiptCommitFailed",
+					receipt: receiptResult.receipt || null,
+				};
+			}
+			receipt = receiptResult.receipt;
+			const application = this._applyRhwArcaneConduitDamageRoll(
+				spellCastReceipt,
+				selectedRoll,
+				Number(rider.damageRollBonus) || 0,
+				operation,
+			);
+			if (!application) throw new Error("Arcane Conduit damage roll could not be updated.");
+			return {
+				ok: true,
+				committed: true,
+				reason: null,
+				operation: "arcaneConduitDamageRider",
+				operationUid: "Arcane Conduit|Artificer|EFA|Reanimator|RHW",
+				companionId,
+				ownerUid: operation.ownerUid,
+				sourceUid: operation.sourceUid,
+				actionUid: operation.actionUid,
+				key: operation.key,
+				receipt,
+				application,
+			};
+		} catch (error) {
+			Object.keys(selectedRoll).forEach(key => delete selectedRoll[key]);
+			Object.assign(selectedRoll, rollSnapshot);
+			const rollback = receipt ? this.rollbackTurnReceipt(receipt) : null;
+			return {
+				ok: false,
+				committed: false,
+				reason: "transactionRolledBack",
+				error: error instanceof Error ? error.message : String(error),
+				rollback,
+			};
+		}
+	}
+
+	_applyRhwLifeTransferHealing (amount) {
+		const before = this.getHp().current;
+		this.heal(amount);
+		const after = this.getHp().current;
+		return {before, after, requested: amount, actual: after - before};
+	}
+
+	performRhwLifeTransfer ({
+		featureUid,
+		classUid,
+		subclassUid,
+		companionId,
+		trigger,
+		deathBurstResolution = null,
+		cancelled = false,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		if (featureUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION) {
+			return {ok: false, committed: false, reason: "invalidFeature"};
+		}
+		if (classUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) {
+			return {ok: false, committed: false, reason: "invalidClass"};
+		}
+		if (subclassUid !== CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID) {
+			return {ok: false, committed: false, reason: "invalidSubclass"};
+		}
+		const cls = this._getRhwReanimatorClass();
+		if ((Number(cls?.level) || 0) < 15) return {ok: false, committed: false, reason: "featureUnavailable"};
+		const runtime = this._getRhwReanimatedCompanionRuntime(companionId);
+		if (!runtime.ok) return {ok: false, committed: false, reason: runtime.reason};
+		if (
+			trigger?.confirmed !== true
+			|| !String(trigger?.eventId || "").trim()
+			|| !["summoner", "companion"].includes(trigger?.target)
+			|| !Number.isFinite(Number(trigger?.damageAmount))
+			|| Number(trigger.damageAmount) <= 0
+			|| (trigger.target === "companion" && trigger.companionId !== companionId)
+		) return {ok: false, committed: false, reason: "invalidTrigger"};
+		if (!this.isActionTypeAvailable("reaction", {trackOnlyInCombat: true})) {
+			return {ok: false, committed: false, reason: "reactionUnavailable"};
+		}
+		if (deathBurstResolution != null) {
+			const validation = this._validateRhwDeathBurstResolution(runtime.companion, deathBurstResolution);
+			if (!validation.ok) return {ok: false, committed: false, reason: validation.reason};
+		}
+
+		const hpSnapshot = MiscUtil.copyFast(this._data.hp);
+		const companionSnapshot = MiscUtil.copyFast(runtime.companion);
+		const actionEconomySnapshot = MiscUtil.copyFast(this._data.actionEconomyUsage);
+		let reactionReceipt = null;
+		try {
+			reactionReceipt = this.commitActionEconomy("reaction", {trackOnlyInCombat: true});
+			if (!reactionReceipt.ok) throw new Error("Summoner Reaction could not be consumed.");
+			const healingAmount = Number(runtime.companion.hp.current) || 0;
+			const healing = this._applyRhwLifeTransferHealing(healingAmount);
+			if (!healing || healing.requested !== healingAmount) {
+				throw new Error("Life Transfer healing could not be applied.");
+			}
+			const death = this.killFeatureOwnedCompanion(companionId, {
+				featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER,
+				cause: "lifeTransfer",
+				deathBurstResolution,
+			});
+			if (!death.ok || !death.committed) throw new Error(death.reason || "Life Transfer companion death did not commit.");
+			return {
+				ok: true,
+				committed: true,
+				reason: null,
+				featureUid,
+				classUid,
+				subclassUid,
+				companionId,
+				trigger: MiscUtil.copyFast(trigger),
+				reaction: reactionReceipt,
+				healing,
+				death,
+			};
+		} catch (error) {
+			this._data.hp = hpSnapshot;
+			this._data.actionEconomyUsage = actionEconomySnapshot;
+			const index = this._data.companions.findIndex(it => it.id === companionId);
+			if (~index) this._data.companions[index] = companionSnapshot;
+			return {
+				ok: false,
+				committed: false,
+				reason: "transactionRolledBack",
+				error: error instanceof Error ? error.message : String(error),
+				rollback: {
+					summonerHp: true,
+					reaction: true,
+					companion: true,
+				},
+			};
+		}
 	}
 
 	getFeatureOwnedCompanions (featureUid) {
