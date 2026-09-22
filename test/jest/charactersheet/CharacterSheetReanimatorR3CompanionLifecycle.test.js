@@ -322,6 +322,53 @@ describe("RHW Reanimator R3 creation transaction", () => {
 		expect(state.getFeatureOwnedCompanions(FEATURE_UID)[0].id).toBe(second.companionId);
 	});
 
+	it("spends exactly one selected pact slot while preserving free creation", async () => {
+		const state = makeState();
+		addTool(state);
+		state.setPactSlots({current: 2, max: 2, level: 2});
+		const beforePact = copy(state.getPactSlots());
+		const beforeRegularSlots = copy(state.getSpellSlots());
+		const beforeResource = copy(getCreationResource(state));
+
+		const result = await state.pCreateFeatureCompanion(getCreateInput(state, {
+			payment: {type: "spellSlot", pool: "pact", slotLevel: 2},
+		}));
+
+		expect(result).toMatchObject({
+			ok: true,
+			committed: true,
+			creationReceipt: {
+				payment: {
+					type: "spellSlot",
+					pool: "pact",
+					slotLevel: 2,
+					before: 2,
+					after: 1,
+				},
+			},
+		});
+		expect(state.getPactSlots()).toEqual({...beforePact, current: 1});
+		expect(state.getSpellSlots()).toEqual(beforeRegularSlots);
+		expect(getCreationResource(state)).toEqual(beforeResource);
+		expect(state.getFeatureOwnedCompanions(FEATURE_UID)).toHaveLength(1);
+	});
+
+	it("rejects an unavailable pact-slot choice without spending or creating", async () => {
+		const state = makeState();
+		addTool(state);
+		state.setPactSlots({current: 0, max: 2, level: 2});
+		const before = JSON.stringify(getAtomicR3State(state));
+
+		await expect(state.pCreateFeatureCompanion(getCreateInput(state, {
+			payment: {type: "spellSlot", pool: "pact", slotLevel: 2},
+		}))).resolves.toMatchObject({
+			ok: false,
+			committed: false,
+			reason: "unavailablePayment",
+		});
+		expect(JSON.stringify(getAtomicR3State(state))).toBe(before);
+	});
+
 	it("accepts another equipped, proficient XPHB Artisan's Tool through the shared focus resolver", async () => {
 		const state = makeState();
 		addTool(state, {
@@ -359,6 +406,23 @@ describe("RHW Reanimator R3 creation transaction", () => {
 		expect(second).toMatchObject({ok: false, committed: false, reason: "activeCompanion"});
 		expect(JSON.stringify(getAtomicR3State(state))).toBe(before);
 		expect(state.getCompanion(first.companionId)).not.toBeNull();
+	});
+
+	it("spends nothing when the creation Magic action is unavailable", async () => {
+		const state = makeState();
+		addTool(state);
+		state.startCombat();
+		expect(state.consumeActionType("action")).toBe(true);
+		const before = JSON.stringify(getAtomicR3State(state));
+
+		await expect(state.pCreateFeatureCompanion(getCreateInput(state, {
+			payment: {type: "spellSlot", pool: "spell", slotLevel: 1},
+		}))).resolves.toMatchObject({
+			ok: false,
+			committed: false,
+			reason: "actionUnavailable",
+		});
+		expect(JSON.stringify(getAtomicR3State(state))).toBe(before);
 	});
 
 	it.each([
@@ -547,6 +611,28 @@ describe("RHW Reanimator R3 lifecycle and rests", () => {
 		});
 		expect(state.isActionTypeAvailable("action")).toBe(false);
 		expect(state.getCompanion(created.companionId)).toBeNull();
+	});
+
+	it("preserves the active companion without a burst when dismissal has no Magic action", async () => {
+		const state = makeState();
+		const created = await createCompanion(state);
+		state.startCombat();
+		expect(state.consumeActionType("action")).toBe(true);
+		const before = JSON.stringify(getAtomicR3State(state));
+
+		await expect(state.pDismissFeatureOwnedCompanion({
+			featureUid: FEATURE_UID,
+			companionId: created.companionId,
+		})).resolves.toMatchObject({
+			ok: false,
+			committed: false,
+			reason: "actionUnavailable",
+		});
+		expect(JSON.stringify(getAtomicR3State(state))).toBe(before);
+		expect(state.getCompanion(created.companionId)).toMatchObject({
+			active: true,
+			lifecycle: {status: "active", deathBurstEmitted: false},
+		});
 	});
 
 	it("kills and removes the active companion on summoner death with one Death Burst", async () => {
@@ -779,6 +865,64 @@ describe("RHW Reanimator R3 persistence, level sync, and source isolation", () =
 		});
 		expect(loaded.getCompanion(legacyId).featureGrant).toBeUndefined();
 		expect(loaded.getFeatureOwnedCompanions(FEATURE_UID)).toEqual([]);
+	});
+
+	it("never activates or tears down a structurally plausible six-part runtime collision", async () => {
+		const state = makeState();
+		addTool(state);
+		const legacyId = state.addCompanion({
+			name: "Reanimated Companion",
+			source: "RHW",
+			creatureName: "Reanimated Companion",
+			creatureSource: "RHW",
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			active: true,
+			featureGrant: {
+				type: "subclassFeature",
+				uid: LEGACY_FEATURE_UID,
+				className: "Artificer",
+				classSource: "EFA",
+				subclassShortName: "Reanimator",
+				subclassSource: "RHW",
+				level: 3,
+			},
+			hp: {max: 20, current: 9, temp: 0},
+			lifecycle: {status: "active", deathBurstEmitted: false},
+			scaling: {
+				kind: "featureCompanion",
+				featureUid: LEGACY_FEATURE_UID,
+				resolved: {traits: {deathBurst: {damage: {dice: "2d4", type: "necrotic"}}}},
+			},
+		});
+		const before = JSON.stringify(state.getCompanion(legacyId));
+		const boundary = state.getFeatureCompanionCreationBoundary(FEATURE_UID, {
+			classUid: CLASS_UID,
+			subclassUid: SUBCLASS_UID,
+			payment: {type: "freeCreation"},
+		});
+
+		expect(boundary).toMatchObject({
+			available: true,
+			executable: true,
+			activeCompanionIds: [],
+		});
+		expect(state.killFeatureOwnedCompanion(legacyId, {featureUid: FEATURE_UID}))
+			.toMatchObject({ok: false, committed: false, reason: "ownerMismatch"});
+		await expect(state.pDismissFeatureOwnedCompanion({
+			featureUid: FEATURE_UID,
+			companionId: legacyId,
+		})).resolves.toMatchObject({ok: false, committed: false, reason: "ownerMismatch"});
+		expect(JSON.stringify(state.getCompanion(legacyId))).toBe(before);
+
+		expect(state.applyFeatureCompanionRest("long")).toMatchObject({
+			ok: true,
+			removedCompanionIds: [],
+		});
+		expect(JSON.stringify(state.getCompanion(legacyId))).toBe(before);
+
+		state.getClasses()[0].subclass = null;
+		state.applyClassFeatureEffects();
+		expect(JSON.stringify(state.getCompanion(legacyId))).toBe(before);
 	});
 });
 
