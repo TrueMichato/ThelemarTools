@@ -989,6 +989,8 @@ class CharacterSheetRest {
 		if (replicateMagicItemProduction) modalInner.append(replicateMagicItemProduction.section);
 		const spellStoringItemChoice = this._buildEfaSpellStoringItemSection();
 		if (spellStoringItemChoice) modalInner.append(spellStoringItemChoice.section);
+		const steelDefenderReplacement = this._buildEfaSteelDefenderReplacementSection();
+		if (steelDefenderReplacement) modalInner.append(steelDefenderReplacement.section);
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		const syncValidity = () => {
@@ -1133,6 +1135,7 @@ class CharacterSheetRest {
 				const armorModelOutcome = armorModelSwitch?.apply() || null;
 				const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
 				const spellStoringItemResult = this._commitEfaSpellStoringItemChoice(spellStoringItemChoice);
+				const steelDefenderReplacementResult = this._commitEfaSteelDefenderReplacement(steelDefenderReplacement);
 				const efaCannonExpiry = this._state.expireEfaEldritchCannonsForRest?.({minutes: 480});
 
 				// Save changes
@@ -1168,6 +1171,11 @@ class CharacterSheetRest {
 					message += ` Stored ${spellStoringItemResult.storage.spell.name} in ${spellStoringItemResult.storage.host.name}.`;
 				} else if (spellStoringItemResult && !spellStoringItemResult.ok) {
 					message += " Spell-Storing Item was unchanged because the selected host or spell could not be resolved.";
+				}
+				if (steelDefenderReplacementResult?.committed) {
+					message += ` Steel Defender replacement created as generation ${steelDefenderReplacementResult.generation.generation} at ${steelDefenderReplacementResult.hp.current}/${steelDefenderReplacementResult.hp.max} HP.`;
+				} else if (steelDefenderReplacementResult && !steelDefenderReplacementResult.ok) {
+					message += ` Steel Defender replacement made no changes: ${steelDefenderReplacementResult.message || "the staged replacement could not be committed"}.`;
 				}
 				if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
 				if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
@@ -1550,6 +1558,106 @@ class CharacterSheetRest {
 		if (!request) return {ok: true, committed: false, reason: "selection-skipped"};
 		return this._state.commitEfaSpellStoringItemAtLongRest?.(request)
 			|| {ok: false, committed: false, reason: "storage-unavailable"};
+	}
+
+	_buildEfaSteelDefenderReplacementSection () {
+		const ownerUid = this._state.constructor?.EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER;
+		if (!ownerUid) return null;
+		const companion = (this._state.getFeatureOwnedCompanions?.(ownerUid) || []).find(candidate =>
+			String(candidate?.name || "").trim().toLowerCase() === "steel defender"
+			&& String(candidate?.source || "").trim().toUpperCase() === "EFA",
+		);
+		if (!companion) return null;
+
+		const toolRows = this._state.getFeatureCompanionReplacementToolRows?.(companion.id) || [];
+		const section = e_({
+			tag: "fieldset",
+			clazz: "charsheet__rest-section charsheet__steel-defender-replacement",
+		});
+		const legend = e_({
+			tag: "legend",
+			clazz: "charsheet__rest-section-title",
+			txt: "Steel Defender — Optional Replacement",
+		});
+		const summary = e_({
+			tag: "p",
+			clazz: "ve-muted ve-small mb-2",
+			txt: `Create a new generation after this Long Rest. Leaving this blank keeps generation ${Math.max(1, Number(companion.lifecycle?.generation) || 1)} unchanged.`,
+		});
+		const toolLabel = e_({tag: "label", clazz: "charsheet__steel-defender-replacement-field"});
+		toolLabel.append(e_({tag: "span", clazz: "ve-small ve-bold", txt: "Exact persisted Smith's Tools row"}));
+		const toolSelect = e_({tag: "select", clazz: "form-control input-sm"});
+		const blankOption = e_({tag: "option", txt: "Do not replace the defender"});
+		blankOption.value = "";
+		toolSelect.append(blankOption);
+		for (const row of toolRows) {
+			const option = e_({tag: "option", txt: row.label});
+			option.value = row.itemId;
+			toolSelect.append(option);
+		}
+		if (!toolRows.length) toolSelect.disabled = true;
+		toolLabel.append(toolSelect);
+
+		const inHandLabel = e_({tag: "label", clazz: "charsheet__rest-option charsheet__steel-defender-replacement-confirm"});
+		const inHand = e_({tag: "input", type: "checkbox"});
+		inHand.disabled = true;
+		inHandLabel.append(inHand, e_({
+			tag: "span",
+			txt: "I will have this exact Smith's Tools (XPHB) inventory row in hand when the rest finishes.",
+		}));
+		const status = e_({tag: "div", clazz: "ve-small charsheet__steel-defender-replacement-status"});
+		status.setAttribute("role", "status");
+		status.setAttribute("aria-live", "polite");
+		status.setAttribute("aria-atomic", "true");
+		toolSelect.setAttribute("aria-describedby", "charsheet-steel-defender-replacement-status");
+		inHand.setAttribute("aria-describedby", "charsheet-steel-defender-replacement-status");
+		status.id = "charsheet-steel-defender-replacement-status";
+		section.append(legend, summary, toolLabel, inHandLabel, status);
+
+		const renderStatus = () => {
+			const selected = toolRows.find(row => row.itemId === toolSelect.value) || null;
+			inHand.disabled = !selected;
+			if (!selected) inHand.checked = false;
+			status.textContent = !toolRows.length
+				? "No positive-quantity exact Smith's Tools (XPHB) inventory row is available. The Long Rest will finish normally."
+				: !selected
+					? "No replacement selected. The Long Rest will finish normally."
+					: inHand.checked
+						? `Generation ${Math.max(1, Number(companion.lifecycle?.generation) || 1) + 1} will replace the current defender after canonical rest processing.`
+						: "Confirm the selected tools are in hand. Without confirmation, the Long Rest still finishes but replacement makes no changes.";
+			status.classList.toggle("text-warning", !!selected && !inHand.checked);
+			status.classList.toggle("text-success", !!selected && inHand.checked);
+		};
+		toolSelect.onChange(renderStatus);
+		inHand.onChange(renderStatus);
+		renderStatus();
+
+		return {
+			section,
+			companionId: companion.id,
+			toolRows,
+			getRequest: () => toolSelect.value
+				? {
+					companionId: companion.id,
+					toolItemId: toolSelect.value,
+					inHandConfirmed: inHand.checked === true,
+				}
+				: null,
+		};
+	}
+
+	_commitEfaSteelDefenderReplacement (replacement) {
+		const request = replacement?.getRequest?.();
+		if (!request) return null;
+		if (typeof this._page.commitFeatureCompanionReplacementAfterLongRest !== "function") {
+			return {
+				ok: false,
+				committed: false,
+				reason: "pageLifecycleCoordinatorUnavailable",
+				message: "The shared Steel Defender lifecycle coordinator is unavailable.",
+			};
+		}
+		return this._page.commitFeatureCompanionReplacementAfterLongRest(request);
 	}
 
 	_buildEfaReplicateMagicItemProductionSection () {

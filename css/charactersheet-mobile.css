@@ -1978,6 +1978,7 @@
 	}
 
 	.charsheet__feature-companion-setup .btn-feature-companion-setup,
+	.charsheet__feature-companion-lifecycle-actions .ve-btn,
 	.charsheet__feature-companion-operation-controls .ve-btn,
 	.charsheet__companion-card .btn-companion-action {
 		width: 100%;
@@ -1988,6 +1989,25 @@
 		display: grid;
 		grid-template-columns: minmax(0, 1fr);
 		width: 100%;
+	}
+
+	.charsheet__feature-companion-lifecycle-actions,
+	.charsheet__feature-companion-revival .charsheet__modal-actions {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		align-items: stretch;
+		width: 100%;
+	}
+
+	.charsheet__feature-companion-revival select,
+	.charsheet__steel-defender-replacement select {
+		min-height: 44px;
+		font-size: 1rem;
+	}
+
+	.charsheet__feature-companion-revival .charsheet__rest-option,
+	.charsheet__steel-defender-replacement-confirm {
+		min-height: 44px;
 	}
 
 	.charsheet__feature-companion-shape-options {
@@ -2375,5 +2395,15 @@
 	.cs-combat-target-warning {
 		color: var(--cs-warning);
 		font-weight: 600;
+	}
+}
+
+@media (pointer: coarse) {
+	.charsheet__feature-companion-lifecycle-action,
+	.charsheet__feature-companion-revival select,
+	.charsheet__feature-companion-revival .charsheet__rest-option,
+	.charsheet__steel-defender-replacement select,
+	.charsheet__steel-defender-replacement-confirm {
+		min-height: 44px;
 	}
 }

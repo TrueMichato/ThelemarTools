@@ -1464,6 +1464,7 @@ class CharacterSheetPdf {
 		if (companion.setup?.locomotion) {
 			setupRows.push(["Body", companion.setup.locomotion === "fourLegs" ? "Four legs" : "Two legs"]);
 		}
+		const lifecyclePresentation = this._getEfaSteelDefenderLifecyclePdfPresentation(companion);
 
 		const resourceRows = [];
 		if (hitDice.max != null) resourceRows.push(["Hit Dice", `${hitDice.current ?? 0}/${hitDice.max} ${hitDice.die || ""}`.trim()]);
@@ -1513,6 +1514,7 @@ class CharacterSheetPdf {
 			abilities: statistics.abilityScores || companion.abilities || {},
 			metaRows: [
 				...setupRows,
+				...lifecyclePresentation.rows,
 				["Saving Throws", saves],
 				["Skills", skills],
 				["Senses", senses],
@@ -1521,11 +1523,60 @@ class CharacterSheetPdf {
 				["Languages", this._getEfaSteelDefenderLanguages(resolved)],
 			].filter(([, value]) => value),
 			resourceRows,
-			notes: this._getFeatureCompanionCommandNotes(resolved.commandPolicy),
+			notes: [
+				...lifecyclePresentation.notes,
+				...this._getFeatureCompanionCommandNotes(resolved.commandPolicy),
+			],
 			traits: companion.traits || [],
 			actions,
 			reactions,
 		};
+	}
+
+	_getEfaSteelDefenderLifecyclePdfPresentation (companion) {
+		const lifecycle = companion.lifecycle || {};
+		const status = lifecycle.status || (companion.active === false ? "vanished" : "alive");
+		const generation = Math.max(1, Math.floor(Number(lifecycle.generation) || 1));
+		const rows = [
+			["Lifecycle", status === "revivalPending" ? "Revival pending" : status.toTitleCase?.() || status],
+			["Generation", String(generation)],
+		];
+		const notes = [];
+
+		if (status === "dead") {
+			const availability = this._state.getFeatureCompanionRevivalAvailability?.(companion.id, {
+				touchConfirmed: true,
+				deathWithinHourConfirmed: true,
+			});
+			const deathTiming = availability?.deathTiming;
+			if (deathTiming?.known === true) {
+				rows.push(
+					["Death minute", String(deathTiming.diedAtGameMinute)],
+					["Revival deadline", `Game minute ${deathTiming.deadlineMinute}; ${deathTiming.remainingMinutes} minute${deathTiming.remainingMinutes === 1 ? "" : "s"} remaining`],
+				);
+			} else {
+				rows.push(["Death timing", "Unknown; confirm it died within the last hour when beginning revival"]);
+			}
+			notes.push("Revival guidance: take the Magic Action, touch the defender, and expend one normal or Pact Magic spell slot. It returns after 1 canonical minute at full HP.");
+			notes.push("Replacement guidance: after a completed Long Rest, optionally select a positive-quantity persisted Smith's Tools (XPHB) row and confirm it is in hand.");
+		} else if (status === "revivalPending") {
+			const dueAtGameMinute = Number(lifecycle.revivalPending?.dueAtGameMinute);
+			if (Number.isSafeInteger(dueAtGameMinute)) rows.push(["Pending completion", `Game minute ${dueAtGameMinute}`]);
+			notes.push("Advance canonical game time by 1 minute to complete revival at full HP.");
+		} else if (status === "expired") {
+			if (lifecycle.expiredAtGameMinute != null) rows.push(["Expired at", `Game minute ${lifecycle.expiredAtGameMinute}`]);
+			notes.push("The one-hour revival window expired. This generation can only be replaced through the optional Long Rest replacement flow.");
+		} else if (status === "vanished") {
+			if (lifecycle.vanishedAtGameMinute != null) rows.push(["Vanished at", `Game minute ${lifecycle.vanishedAtGameMinute}`]);
+			notes.push(lifecycle.vanishedReason === "summonerDeath"
+				? "This generation vanished when its owner died and does not return when the owner recovers."
+				: "This persisted generation has vanished and is inactive.");
+			notes.push("Create a replacement only after a completed Long Rest with exact Smith's Tools (XPHB) in hand.");
+		} else if (status === "alive") {
+			notes.push("If this defender dies, revival uses the exact one-hour death window and completes only through canonical game-time advancement.");
+		}
+
+		return {rows, notes};
 	}
 
 	_renderCompanionBlock (presentation) {

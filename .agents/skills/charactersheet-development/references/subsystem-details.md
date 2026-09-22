@@ -18,6 +18,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - RHW Reanimator R2a State and Ownership
 - Fixed Proficiency with Fallback Transactions
 - Feature-Companion Acquisition and Setup
+- EFA Steel Defender Lifecycle Surfaces
 
 ## Gemstone Empowerment
 
@@ -882,7 +883,11 @@ missing field, uses native required inputs and a body-shape
 focus to the pending setup control or the created companion's first available
 operation after re-render. Play Mode suppresses its legacy Steel Defender
 summon button only when the exact EFA setup record exists; TCE and unrelated
-Artificer paths remain unchanged.
+Artificer paths remain unchanged. The remaining generic add button is itself
+source-qualified: only an Artificer whose class source and exact Battle Smith
+subclass source are both `TCE` may use it. EFA Battle Smith, EFA
+non-Battle-Smith, unrelated Artificer, and wrong-source/name-only subclass
+records never route through `_addBuiltinCompanion("steel-defender")`.
 
 ## Feature-Companion Operations
 
@@ -1064,6 +1069,10 @@ and one selected normal or Pact Magic slot. It prevalidates every cost, records
 or validation failure. Only canonical time advancement returns the defender
 alive at full HP. A late failure restores the exact Action, selected slot, HP,
 active flag, and lifecycle and reports each rollback result.
+Availability also returns authoritative read-only `deathTiming` display data
+(`known`, `diedAtGameMinute`, `deadlineMinute`, and `remainingMinutes`) on
+post-identity validation results. Manager and PDF surfaces consume that
+projection rather than copying the one-hour deadline formula.
 
 Ordinary `healCompanion`, Repair, Arcane Jolt restoration, companion Hit Dice,
 Short Rest, and Long Rest never revive a non-alive generation. Existing
@@ -1091,6 +1100,48 @@ use each completed Long Rest. Commit keeps the companion ID and setup choices,
 records the prior generation as vanished, increments `generation`, restores
 full HP/Repair/Hit Dice, and clears transient operation/turn/lifecycle data.
 An alive defender is also eligible, and a dead owner is not.
+
+### Lifecycle surfaces
+
+Manager and Play Mode consume the same Page projection and coordinator:
+
+```javascript
+page.getFeatureCompanionLifecycleSurfaceCompanions();
+page.getFeatureCompanionLifecyclePresentation(companion);
+page.pUseFeatureCompanionLifecycle({companionId, operation: "revival" | "completeRevival"});
+page.commitFeatureCompanionReplacementAfterLongRest(options);
+```
+
+The surface projection is deliberately narrower than changing
+`getActiveCompanions()`: it returns ordinary active companions plus only the
+exact persisted inactive `Steel Defender|EFA` owned by
+`Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA`. This preserves dead,
+pending, expired, and owner-death vanished tombstones without exposing
+unrelated inactive companions. Desktop and Play Mode show the same status,
+generation, timing/deadline or pending-completion copy, guidance, stable focus
+keys, visible disabled reasons, and lifecycle actions. Routine companion
+operations remain on `pUseCompanionOperation()`.
+
+The revival modal is a native `fieldset`/`legend` form. Its slot choices come
+from State availability, and commit requires touch plus the same-operation
+died-within-hour confirmation only for unknown-time migrated deaths. It shows
+the Action/slot/touch cost before commit, focuses the first invalid field,
+blocks close/Escape while State is resolving, returns focus to the lifecycle
+control after render, and persists/logs only a `committed` result. The explicit
+**Complete revival (+1 minute)** action calls
+`advanceGameTimeMinutes(1, ...)`; there is no subclass timer.
+
+The existing Long Rest dialog stages optional replacement before confirmation.
+`getFeatureCompanionReplacementToolRows(companionId)` is a detached read-only
+projection of eligible exact inventory rows; State remains final authority.
+The selected request is committed only after canonical Long Rest time and
+recovery establish `lastLongRestMinute`. Blank selection and rest cancellation
+do nothing. The pre-rest full snapshot therefore covers replacement undo.
+
+Exact EFA PDF presentation includes lifecycle status, generation, known death
+minute/deadline/remaining window or unknown timing, pending completion minute,
+expired/vanished notes, and revival/replacement guidance. Generic, TCE, RHW,
+name-only, and wrong-source companion output must not gain these rows.
 
 The shared Page operation also owns interaction feedback. Desktop buttons and
 Play Mode controls expose the same stable operation focus key, so Arcane Jolt

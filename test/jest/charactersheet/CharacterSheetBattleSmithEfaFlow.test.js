@@ -7,6 +7,7 @@ import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-companion-rules.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
+import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetRespecEngine = globalThis.CharacterSheetRespecEngine;
@@ -453,6 +454,296 @@ describe("Battle Smith setup UI and lifecycle integration", () => {
 		expect(source).toContain("getFeatureCompanionSetupFocusTarget");
 		expect(source).toContain("EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER");
 		expect(source).toContain("&& !hasEfaSteelDefenderSetup");
+	});
+
+	test("projects active companions plus only the exact inactive EFA Steel Defender tombstone", () => {
+		const state = makeEfaState();
+		const defender = completeSetup(state);
+		defender.active = false;
+		defender.hp.current = 0;
+		defender.lifecycle = {status: "vanished", generation: 2, vanishedReason: "summonerDeath"};
+		const activeId = state.addCompanion({name: "Owl", source: "PHB", active: true});
+		state.addCompanion({name: "Inactive Owl", source: "PHB", active: false});
+		state.addCompanion({
+			name: "Steel Defender",
+			source: "TCE",
+			active: false,
+			featureGrant: {uid: TCE_STEEL_UID},
+			lifecycle: {status: "vanished", generation: 2},
+		});
+		state.addCompanion({
+			name: "Steel Defender",
+			source: "EFA",
+			active: false,
+			lifecycle: {status: "vanished", generation: 2},
+		});
+
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._state = state;
+		const visibleIds = page.getFeatureCompanionLifecycleSurfaceCompanions().map(it => it.id);
+		expect(visibleIds).toHaveLength(2);
+		expect(new Set(visibleIds)).toEqual(new Set([activeId, defender.id]));
+	});
+
+	test("renders state-specific desktop lifecycle copy, exact tombstone detail, and disabled reasons", () => {
+		const state = makeEfaState();
+		const defender = completeSetup(state);
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._state = state;
+
+		state.advanceGameTimeMinutes(12, {reason: "test", identity: defender.id});
+		state.setCompanionHp(defender.id, 0);
+		let presentation = page.getFeatureCompanionLifecyclePresentation(defender);
+		expect(presentation).toMatchObject({
+			status: "dead",
+			label: "Dead",
+			generation: 1,
+		});
+		expect(presentation.summary).toContain("Died at game minute 12");
+		expect(presentation.summary).toContain("through minute 72");
+		expect(presentation.summary).toContain("60 minutes remaining");
+		expect(presentation.disabledReason).toMatch(/ordinary actions, healing, rolls, and repairs cannot revive it/i);
+		const deadHtml = page._getFeatureCompanionLifecycleHtml(defender);
+		expect(deadHtml).toContain("Begin revival");
+		expect(deadHtml).toContain("Ordinary actions, healing, rolls, and repairs cannot revive it");
+		expect(deadHtml).toContain("-disabled-reason");
+
+		defender.lifecycle = {
+			status: "revivalPending",
+			generation: 1,
+			revivalPending: {dueAtGameMinute: 13},
+		};
+		presentation = page.getFeatureCompanionLifecyclePresentation(defender);
+		expect(presentation.summary).toContain("game minute 13");
+		expect(presentation.canCompleteRevival).toBe(true);
+		expect(page._getFeatureCompanionLifecycleHtml(defender)).toContain("Complete revival (+1 minute)");
+
+		defender.lifecycle = {status: "expired", generation: 1, expiredAtGameMinute: 73};
+		expect(page.getFeatureCompanionLifecyclePresentation(defender).summary).toMatch(/expired at game minute 73/i);
+
+		defender.lifecycle = {
+			status: "vanished",
+			generation: 1,
+			vanishedAtGameMinute: 80,
+			vanishedReason: "summonerDeath",
+		};
+		expect(page.getFeatureCompanionLifecyclePresentation(defender).summary)
+			.toMatch(/owner died.*does not return/i);
+	});
+
+	test("routes revival begin and canonical completion through the shared Page coordinator with commit-only persistence", async () => {
+		const page = Object.create(CharacterSheetPage.prototype);
+		const focusTarget = {isConnected: true, focus: jest.fn()};
+		const companion = {id: "defender-1", hp: {current: 42, max: 42}, lifecycle: {status: "dead"}};
+		page._state = {
+			getCompanion: jest.fn(() => companion),
+			getViewMode: () => "full",
+			advanceGameTimeMinutes: jest.fn(() => ({
+				ok: true,
+				committed: true,
+				priorMinute: 60,
+				newMinute: 61,
+				updated: [{
+					kind: "featureCompanion",
+					companionId: companion.id,
+					transition: "revivalCompleted",
+					atMinute: 61,
+					hp: 42,
+				}],
+			})),
+		};
+		page._pShowFeatureCompanionRevivalModal = jest.fn(async () => ({
+			ok: true,
+			committed: true,
+			operation: "Revival",
+			companionId: companion.id,
+			completionMinute: 61,
+			costs: {ownerAction: "action", spellSlot: {kind: "pact", level: 3, amount: 1}},
+		}));
+		page.saveCharacter = jest.fn(async () => {});
+		page._renderCompanions = jest.fn();
+		page._announceCompanionInteraction = jest.fn();
+		page._getFeatureCompanionPostRenderFocusTarget = jest.fn(() => focusTarget);
+		page._playMode = {_logActivity: jest.fn(), render: jest.fn()};
+
+		await expect(page.pUseFeatureCompanionLifecycle({companionId: companion.id, operation: "revival"}))
+			.resolves.toMatchObject({committed: true, completionMinute: 61});
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(page._renderCompanions).toHaveBeenCalledTimes(1);
+		expect(page._playMode._logActivity).toHaveBeenCalledWith(
+			"companion",
+			expect.stringMatching(/revival begun/i),
+		);
+		expect(page._announceCompanionInteraction).toHaveBeenCalledWith(
+			expect.stringMatching(/Action.*Pact Magic slot.*game minute 61/i),
+			{type: "success", isToast: true},
+		);
+
+		companion.lifecycle = {status: "revivalPending", revivalPending: {dueAtGameMinute: 61}};
+		page.getFeatureCompanionLifecyclePresentation = jest.fn(() => ({
+			status: "revivalPending",
+			canCompleteRevival: true,
+		}));
+		await expect(page.pUseFeatureCompanionLifecycle({companionId: companion.id, operation: "completeRevival"}))
+			.resolves.toMatchObject({
+				committed: true,
+				operation: "completeRevival",
+				transition: {transition: "revivalCompleted", hp: 42},
+			});
+		expect(page._state.advanceGameTimeMinutes).toHaveBeenCalledWith(1, {
+			reason: "efa-steel-defender-revival-completion",
+			identity: companion.id,
+		});
+		expect(page.saveCharacter).toHaveBeenCalledTimes(2);
+		expect(page._renderCompanions).toHaveBeenCalledTimes(2);
+		await Promise.resolve();
+		expect(focusTarget.focus).toHaveBeenCalled();
+	});
+
+	test("does not save, render, or log cancelled and rejected lifecycle operations", async () => {
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._state = {getCompanion: () => ({id: "defender-1", lifecycle: {status: "dead"}})};
+		page._pShowFeatureCompanionRevivalModal = jest.fn()
+			.mockResolvedValueOnce({ok: false, committed: false, reason: "cancelled", message: "No costs were spent."})
+			.mockResolvedValueOnce({ok: false, committed: false, reason: "touchNotConfirmed", message: "Confirm touch."});
+		page.saveCharacter = jest.fn();
+		page._renderCompanions = jest.fn();
+		page._announceCompanionInteraction = jest.fn();
+
+		await expect(page.pUseFeatureCompanionLifecycle({companionId: "defender-1", operation: "revival"}))
+			.resolves.toMatchObject({reason: "cancelled"});
+		await expect(page.pUseFeatureCompanionLifecycle({companionId: "defender-1", operation: "revival"}))
+			.resolves.toMatchObject({reason: "touchNotConfirmed"});
+
+		expect(page.saveCharacter).not.toHaveBeenCalled();
+		expect(page._renderCompanions).not.toHaveBeenCalled();
+		expect(page._announceCompanionInteraction).toHaveBeenLastCalledWith("Confirm touch.", {
+			type: "warning",
+			isToast: true,
+		});
+	});
+
+	test("revival modal contract uses State slots, native confirmations, cost summary, focus, and guarded Escape", () => {
+		const source = CharacterSheetPage.prototype._pShowFeatureCompanionRevivalModal.toString();
+		const availabilitySource = CharacterSheetPage.prototype._getFeatureCompanionRevivalUiAvailability.toString();
+		expect(availabilitySource).toContain("getFeatureCompanionRevivalAvailability");
+		for (const contract of [
+			"beginFeatureCompanionRevival",
+			"spellSlots",
+			"slot.level",
+			"spell slot",
+			"Pact Magic slot",
+			"data-role=\"touch\"",
+			"data-role=\"death-window\"",
+			"Cost before commit",
+			"target?.focus?.()",
+			"event.key !== \"Escape\"",
+			"if (isBusy) return",
+			"cancelled: true",
+			"CharacterSheetModal.focusFirst",
+		]) expect(source).toContain(contract);
+	});
+
+	test("revival modal lists normal and Pact slots, focuses invalid input, guards Escape while committing, and returns the committed State result", async () => {
+		const state = makeEfaState();
+		const defender = completeSetup(state);
+		state.setSpellSlots(1, 2, 2);
+		state.setPactSlots({current: 1, max: 1, level: 3});
+		state.setCompanionHp(defender.id, 0);
+		const before = state.toJson();
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._state = state;
+		const makeElement = () => ({
+			value: "",
+			checked: false,
+			disabled: false,
+			textContent: "",
+			innerHTML: "",
+			classList: {add: jest.fn()},
+			setAttribute: jest.fn(),
+			addEventListener: jest.fn(function (name, handler) { this[`on${name}`] = handler; }),
+			focus: jest.fn(),
+		});
+		const slot = makeElement();
+		const touch = makeElement();
+		const deathWindow = makeElement();
+		const status = makeElement();
+		const cost = makeElement();
+		const cancel = makeElement();
+		const commit = makeElement();
+		const close = makeElement();
+		const modalInner = makeElement();
+		modalInner.querySelector = jest.fn(selector => {
+			if (selector === "[data-role=spell-slot]") return slot;
+			if (selector === "[data-role=touch]") return touch;
+			if (selector === "[data-role=death-window]") return deathWindow;
+			if (selector === "[data-role=cancel]") return cancel;
+			if (selector === "[data-role=commit]") return commit;
+			if (selector.endsWith("-cost")) return cost;
+			if (selector.startsWith("#")) return status;
+			return null;
+		});
+		modalInner.querySelectorAll = jest.fn(() => [cancel, commit]);
+		const modalShell = makeElement();
+		modalShell.querySelector = jest.fn(() => close);
+		const doClose = jest.fn();
+		const modalHandle = {
+			eleModal: modalShell,
+			eleModalInner: modalInner,
+			doClose,
+		};
+		const focusRestoreTarget = {id: "begin-revival"};
+		const replacementFocusTarget = {id: "post-revival"};
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue(modalHandle);
+
+		const pending = page._pShowFeatureCompanionRevivalModal(defender.id, {
+			focusRestoreTarget,
+			getFocusRestoreTarget: () => replacementFocusTarget,
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(modalInner.innerHTML).toContain("Level 1 spell slot (2/2)");
+		expect(modalInner.innerHTML).toContain("Pact Magic slot — level 3 (1/1)");
+		expect(CharacterSheetModal.pGetShow).toHaveBeenCalledWith(expect.objectContaining({
+			focusRestoreTarget,
+			getFocusRestoreTarget: expect.any(Function),
+		}));
+
+		slot.focus.mockClear();
+		commit.onclick();
+		expect(slot.focus).toHaveBeenCalledTimes(1);
+		expect(status.textContent).toMatch(/choose one normal or Pact Magic spell slot/i);
+		expect(state.toJson()).toEqual(before);
+
+		const begin = state.beginFeatureCompanionRevival.bind(state);
+		const beginSpy = jest.spyOn(state, "beginFeatureCompanionRevival");
+		slot.value = "pact";
+		touch.focus.mockClear();
+		commit.onclick();
+		expect(touch.focus).toHaveBeenCalledTimes(1);
+		expect(status.textContent).toMatch(/confirm that you are touching/i);
+		expect(beginSpy).not.toHaveBeenCalled();
+		expect(state.toJson()).toEqual(before);
+
+		touch.checked = true;
+		const escapeEvent = {key: "Escape", preventDefault: jest.fn(), stopImmediatePropagation: jest.fn()};
+		beginSpy.mockImplementation(options => {
+			modalHandle.doClose(false);
+			modalShell.onkeydown(escapeEvent);
+			return begin(options);
+		});
+		commit.onclick();
+		await expect(pending).resolves.toMatchObject({
+			ok: true,
+			committed: true,
+			costs: {spellSlot: {kind: "pact", level: 3, amount: 1}},
+			lifecycle: {status: "revivalPending"},
+		});
+		expect(escapeEvent.preventDefault).toHaveBeenCalledTimes(1);
+		expect(escapeEvent.stopImmediatePropagation).toHaveBeenCalledTimes(1);
+		expect(doClose).toHaveBeenCalledTimes(1);
+		expect(doClose).toHaveBeenCalledWith(true);
+		expect(doClose).not.toHaveBeenCalledWith(false);
 	});
 
 	test("prompts immediately when allowed and leaves deferred setup pending", async () => {

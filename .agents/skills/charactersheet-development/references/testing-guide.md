@@ -19,25 +19,30 @@
 
 ```bash
 # Single file
-NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetBarbarian --no-coverage --forceExit
+npm run test:unit -- test/jest/charactersheet/CharacterSheetBarbarian.test.js --runInBand --no-coverage
 
 # Multiple related suites
-NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetToggleAbilities CharacterSheetCombat --no-coverage --forceExit
+npm run test:unit -- \
+  test/jest/charactersheet/CharacterSheetToggleAbilities.test.js \
+  test/jest/charactersheet/CharacterSheetCombat.test.js \
+  --runInBand --no-coverage
 
 # All character sheet tests
-NODE_OPTIONS='--experimental-vm-modules' npx jest test/jest/charactersheet/ --no-coverage --forceExit
+npm run test:unit -- test/jest/charactersheet/ --runInBand --no-coverage
 
 # Pattern match
-NODE_OPTIONS='--experimental-vm-modules' npx jest -t "Rage damage" --no-coverage
+npm run test:unit -- test/jest/charactersheet/ --runInBand --no-coverage -t "Rage damage"
 
 # With coverage
-NODE_OPTIONS='--experimental-vm-modules' npx jest test/jest/charactersheet/ --coverage
+npm run test:unit -- test/jest/charactersheet/ --runInBand --coverage
 
 # Verbose
-NODE_OPTIONS='--experimental-vm-modules' npx jest CharacterSheetState --no-coverage --verbose
+npm run test:unit -- test/jest/charactersheet/CharacterSheetState.test.js --runInBand --no-coverage --verbose
 ```
 
-`--forceExit` is recommended — some tests hang without it due to async cleanup.
+Use the repository script rather than plain `npx jest`; the script supplies the
+ES-module runtime required by these tests. Prefer `--runInBand` for focused
+Character Sheet gates so modal/global mocks do not race.
 
 ### Getting a character to test against
 
@@ -142,6 +147,32 @@ If you need an additional Parser or Renderer method, add it to setup.js with a m
 | **Builder** | `CharacterSheetBuilderASI.test.js`, `...BuilderFeatureIngestion`, `...QuickBuildApply` | Character creation |
 | **LevelUp** | `CharacterSheetLevelUp.test.js`, `...LevelHistory`, `...MulticlassProgression` | Level progression |
 | **Misc** | `CharacterSheetInventory`, `...Rest`, `...Conditions`, `...Exhaustion`, `...NpcExporter`, etc. | Individual systems |
+
+### EFA Steel Defender lifecycle gate
+
+Lifecycle work spans State, shared Page routing, Manager/Play Mode rendering,
+Long Rest ordering/undo, and PDF source isolation. Keep the focused gate
+causal across these files:
+
+```bash
+npm run test:unit -- \
+  test/jest/charactersheet/CharacterSheetBattleSmithEfaLifecycle.test.js \
+  test/jest/charactersheet/CharacterSheetBattleSmithEfaFlow.test.js \
+  test/jest/charactersheet/CharacterSheetPlayMode.test.js \
+  test/jest/charactersheet/CharacterSheetEfaReplicateRest.test.js \
+  test/jest/charactersheet/CharacterSheetRestUndo.test.js \
+  test/jest/charactersheet/CharacterSheetPdf.test.js \
+  --runInBand --no-coverage
+```
+
+The gate must prove exact owner/source identity, active-plus-exact-tombstone
+projection, visible disabled reasons, normal/Pact revival options, required
+touch and unknown-time confirmation, no-spend cancellation/error, stable focus
+and busy-Escape handling, canonical +1-minute completion, post-rest
+replacement ordering, exact detached Smith's Tools rows, undo, and exact EFA
+PDF output. Before trusting new coverage, plant a real call-site violation
+(shared Page bypass, tombstone filter removal, or pre-rest replacement/touch
+bypass), observe the primary assertion fail, then restore the production code.
 
 ## Writing Tests: Patterns
 

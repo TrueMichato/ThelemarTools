@@ -6648,6 +6648,199 @@ class CharacterSheetPage {
 		if (this._combat) this._combat.render();
 	}
 
+	_isExactEfaSteelDefenderLifecycleCompanion (companion) {
+		const expectedOwnerUid = this._state.constructor?.EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER;
+		return !!expectedOwnerUid
+			&& String(companion?.featureGrant?.uid || "").toLowerCase() === expectedOwnerUid.toLowerCase()
+			&& String(companion?.name || "").trim().toLowerCase() === "steel defender"
+			&& String(companion?.source || "").trim().toUpperCase() === "EFA";
+	}
+
+	getFeatureCompanionLifecycleSurfaceCompanions () {
+		return (this._state.getCompanions?.() || []).filter(companion =>
+			companion?.active !== false || this._isExactEfaSteelDefenderLifecycleCompanion(companion),
+		);
+	}
+
+	getFeatureCompanionLifecycleFocusKey (companionId, operation) {
+		return ["feature-companion-lifecycle", companionId, operation]
+			.map(part => String(part || ""))
+			.join("::");
+	}
+
+	getFeatureCompanionLifecycleFocusTarget (focusKey) {
+		if (!focusKey || typeof document === "undefined") return null;
+		const targets = [...(document.querySelectorAll?.("[data-feature-companion-lifecycle-key]") || [])]
+			.filter(element => element.getAttribute?.("data-feature-companion-lifecycle-key") === focusKey);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	_getFeatureCompanionRevivalUiAvailability (companionId) {
+		const confirmationOptions = {
+			touchConfirmed: true,
+			deathWithinHourConfirmed: true,
+		};
+		const initial = this._state.getFeatureCompanionRevivalAvailability?.(companionId, confirmationOptions);
+		const spellSlots = initial?.spellSlots || [];
+		if (!spellSlots.length) return {...initial, spellSlots};
+		const firstSlot = spellSlots[0];
+		const selectedSpellSlot = {
+			kind: firstSlot.kind,
+			...(firstSlot.kind === "normal" ? {level: firstSlot.level} : {}),
+		};
+		return this._state.getFeatureCompanionRevivalAvailability(companionId, {
+			...confirmationOptions,
+			spellSlot: selectedSpellSlot,
+		});
+	}
+
+	getFeatureCompanionLifecyclePresentation (companion) {
+		if (!this._isExactEfaSteelDefenderLifecycleCompanion(companion)) return null;
+
+		const lifecycle = companion.lifecycle || {};
+		const status = lifecycle.status || (companion.active === false ? "vanished" : "alive");
+		const generation = Math.max(1, Math.floor(Number(lifecycle.generation) || 1));
+		const currentMinute = Number(this._state.getGameTimeMinutes?.()) || 0;
+		const revival = status === "dead"
+			? this._getFeatureCompanionRevivalUiAvailability(companion.id)
+			: null;
+		const timingKnown = revival?.deathTiming?.known === true;
+		const diedAtGameMinute = timingKnown ? revival.deathTiming.diedAtGameMinute : null;
+		const deadlineMinute = timingKnown ? revival.deathTiming.deadlineMinute : null;
+		const remainingMinutes = timingKnown ? revival.deathTiming.remainingMinutes : null;
+		const base = {
+			companionId: companion.id,
+			status,
+			generation,
+			isAlive: status === "alive",
+			currentMinute,
+			diedAtGameMinute: timingKnown ? diedAtGameMinute : null,
+			deadlineMinute,
+			remainingMinutes,
+			timingKnown,
+			tone: "info",
+			label: "Lifecycle unavailable",
+			summary: "This Steel Defender has an unsupported lifecycle state.",
+			guidance: "Use the Long Rest replacement option when State reports it is eligible.",
+			disabledReason: "Steel Defender operations are unavailable in this lifecycle state.",
+			revival: null,
+			canCompleteRevival: false,
+		};
+
+		switch (status) {
+			case "alive":
+				return {
+					...base,
+					tone: "success",
+					label: "Alive",
+					summary: `Generation ${generation} is operational at ${companion.hp?.current ?? 0}/${companion.hp?.max ?? 0} HP.`,
+					guidance: "If it dies, revival requires your Magic Action, touch, and one normal or Pact Magic spell slot within the one-hour window.",
+					disabledReason: null,
+				};
+			case "dead": {
+				const timing = timingKnown
+					? `Died at game minute ${diedAtGameMinute}. Revival is allowed through minute ${deadlineMinute} (${remainingMinutes} minute${remainingMinutes === 1 ? "" : "s"} remaining).`
+					: "The saved death time is unknown. The revival dialog requires a same-operation confirmation that it died within the last hour.";
+				return {
+					...base,
+					tone: "danger",
+					label: "Dead",
+					summary: timing,
+					guidance: "Begin revival before the window closes, or create a replacement after a completed Long Rest with exact Smith's Tools (XPHB) in hand.",
+					disabledReason: "This defender is dead. Ordinary actions, healing, rolls, and repairs cannot revive it.",
+					revival,
+				};
+			}
+			case "revivalPending": {
+				const dueAtGameMinute = Number(lifecycle.revivalPending?.dueAtGameMinute);
+				const canCompleteRevival = Number.isSafeInteger(dueAtGameMinute)
+					&& dueAtGameMinute <= currentMinute + 1;
+				return {
+					...base,
+					tone: "warning",
+					label: "Revival pending",
+					summary: Number.isSafeInteger(dueAtGameMinute)
+						? `Revival completes at game minute ${dueAtGameMinute}; current minute ${currentMinute}.`
+						: "Revival is pending canonical game-time completion.",
+					guidance: "Advance the shared game clock by 1 minute to complete revival at full HP.",
+					disabledReason: "This defender is awaiting revival completion. Ordinary operations remain unavailable.",
+					completionMinute: Number.isSafeInteger(dueAtGameMinute) ? dueAtGameMinute : null,
+					canCompleteRevival,
+				};
+			}
+			case "expired":
+				return {
+					...base,
+					tone: "danger",
+					label: "Revival window expired",
+					summary: lifecycle.expiredAtGameMinute != null
+						? `The defender expired at game minute ${lifecycle.expiredAtGameMinute}; the one-hour revival window has closed.`
+						: "The one-hour revival window has closed.",
+					guidance: "Create a replacement only through the optional Steel Defender fieldset when finishing a Long Rest.",
+					disabledReason: "The revival window expired. This generation cannot act or receive ordinary healing.",
+				};
+			case "vanished": {
+				const isOwnerDeath = lifecycle.vanishedReason === "summonerDeath";
+				return {
+					...base,
+					tone: "danger",
+					label: "Vanished",
+					summary: isOwnerDeath
+						? "This generation vanished when its owner died and does not return when the owner recovers."
+						: "This persisted generation has vanished and is no longer active.",
+					guidance: "After the owner is alive, create a replacement only through the optional Long Rest fieldset with exact Smith's Tools (XPHB) in hand.",
+					disabledReason: isOwnerDeath
+						? "This defender vanished when its owner died. This generation cannot act or be revived."
+						: "This defender has vanished. This generation cannot act or be revived.",
+				};
+			}
+			default:
+				return base;
+		}
+	}
+
+	_getFeatureCompanionLifecycleHtml (companion) {
+		const presentation = this.getFeatureCompanionLifecyclePresentation(companion);
+		if (!presentation) return "";
+		const id = `charsheet-feature-companion-lifecycle-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		const actions = [];
+		if (presentation.status === "dead") {
+			const focusKey = this.getFeatureCompanionLifecycleFocusKey(companion.id, "revival");
+			const disabledReason = presentation.revival?.available
+				? ""
+				: presentation.revival?.message || "Revival is unavailable.";
+			actions.push(`<button type="button" class="ve-btn ve-btn-xs ve-btn-primary btn-feature-companion-lifecycle"
+				data-feature-companion-lifecycle-operation="revival"
+				data-feature-companion-lifecycle-key="${CharacterSheetModal._escapeHtml(focusKey)}"
+				aria-describedby="${id}-summary ${id}-action-reason"
+				${presentation.revival?.available ? "" : "disabled"}>
+				Begin revival
+			</button>`);
+			actions.push(`<span class="ve-small ve-muted" id="${id}-action-reason">${CharacterSheetModal._escapeHtml(disabledReason || "Commits your Magic Action, touch confirmation, and one spell slot.")}</span>`);
+		} else if (presentation.status === "revivalPending") {
+			const focusKey = this.getFeatureCompanionLifecycleFocusKey(companion.id, "completeRevival");
+			actions.push(`<button type="button" class="ve-btn ve-btn-xs ve-btn-primary btn-feature-companion-lifecycle"
+				data-feature-companion-lifecycle-operation="completeRevival"
+				data-feature-companion-lifecycle-key="${CharacterSheetModal._escapeHtml(focusKey)}"
+				aria-describedby="${id}-summary"
+				${presentation.canCompleteRevival ? "" : "disabled"}>
+				Complete revival (+1 minute)
+			</button>`);
+		}
+
+		return `<section class="charsheet__feature-companion-lifecycle charsheet__feature-companion-lifecycle--${CharacterSheetModal._escapeHtml(presentation.tone)}"
+			role="status" aria-live="polite" aria-atomic="true" aria-labelledby="${id}-label" id="${id}">
+			<div class="charsheet__feature-companion-lifecycle-header">
+				<strong id="${id}-label">${CharacterSheetModal._escapeHtml(presentation.label)}</strong>
+				<span class="charsheet__feature-companion-lifecycle-generation">Generation ${presentation.generation}</span>
+			</div>
+			<div class="ve-small" id="${id}-summary">${CharacterSheetModal._escapeHtml(presentation.summary)}</div>
+			<div class="ve-small ve-muted">${CharacterSheetModal._escapeHtml(presentation.guidance)}</div>
+			${presentation.disabledReason ? `<div class="ve-small ve-muted charsheet__feature-companion-lifecycle-disabled-reason" id="${id}-disabled-reason">${CharacterSheetModal._escapeHtml(presentation.disabledReason)}</div>` : ""}
+			${actions.length ? `<div class="charsheet__feature-companion-lifecycle-actions">${actions.join("")}</div>` : ""}
+		</section>`;
+	}
+
 	_renderCompanions () {
 		// Derived state must exist before it is drawn. Bonding is guaranteed here as well
 		// as in `_reconcileClassFeatures` because the builder-completion and level-up
@@ -6664,7 +6857,7 @@ class CharacterSheetPage {
 
 		list.innerHTML = "";
 
-		const companions = this._state.getActiveCompanions?.() || [];
+		const companions = this.getFeatureCompanionLifecycleSurfaceCompanions();
 		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
 
 		// Also render the overview indicator
@@ -6693,8 +6886,16 @@ class CharacterSheetPage {
 				return;
 			}
 
+			const lifecyclePresentation = this.getFeatureCompanionLifecyclePresentation(companion);
+			const isLifecycleBlocked = !!lifecyclePresentation && !lifecyclePresentation.isAlive;
+			const lifecycleStatusId = lifecyclePresentation
+				? `charsheet-feature-companion-lifecycle-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`
+				: null;
+			const lifecycleDisabledAttrs = isLifecycleBlocked
+				? `disabled aria-describedby="${lifecycleStatusId}-summary ${lifecycleStatusId}-disabled-reason"`
+				: "";
 			const hp = companion.hp || {current: 1, max: 1};
-			const hpPercent = Math.round((hp.current / hp.max) * 100);
+			const hpPercent = hp.max > 0 ? Math.round((hp.current / hp.max) * 100) : 0;
 			const hpColor = hpPercent > 50 ? "#22c55e" : hpPercent > 25 ? "#f59e0b" : "#ef4444";
 			const hpBgColor = hpPercent > 50 ? "rgba(34, 197, 94, 0.15)" : hpPercent > 25 ? "rgba(245, 158, 11, 0.15)" : "rgba(239, 68, 68, 0.15)";
 
@@ -6741,12 +6942,15 @@ class CharacterSheetPage {
 				const condName = typeof c === "string" ? c : c.name;
 				const condDef = CharacterSheetState.getConditionEffects(condName);
 				const icon = condDef?.icon || "⚠️";
-				return `<span class="charsheet__companion-condition-badge" data-condition="${condName}" style="
+				return `<span class="charsheet__companion-condition-badge" data-condition="${condName}"
+					${isLifecycleBlocked ? `aria-disabled="true" aria-describedby="${lifecycleStatusId}-summary ${lifecycleStatusId}-disabled-reason"` : ""}
+					style="
 					display: inline-flex; align-items: center; gap: 4px;
 					padding: 2px 8px; background: rgba(239, 68, 68, 0.15);
 					border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px;
-					font-size: 0.8em; cursor: pointer;
-				" title="Click to remove">${icon} ${condName}<span style="margin-left: 4px; opacity: 0.7;">×</span></span>`;
+					font-size: 0.8em; cursor: ${isLifecycleBlocked ? "not-allowed" : "pointer"};
+					${isLifecycleBlocked ? "opacity: 0.55;" : ""}
+				" title="${isLifecycleBlocked ? CharacterSheetModal._escapeHtml(lifecyclePresentation.disabledReason) : "Click to remove"}">${icon} ${condName}<span style="margin-left: 4px; opacity: 0.7;">×</span></span>`;
 			}).join(" ");
 
 			// Get skill modifiers for quick checks
@@ -6922,6 +7126,8 @@ class CharacterSheetPage {
 						</div>
 					</div>
 
+					${this._getFeatureCompanionLifecycleHtml(companion)}
+
 					<!-- Stats Grid -->
 					<div style="
 						display: grid;
@@ -6973,23 +7179,23 @@ class CharacterSheetPage {
 					<!-- Conditions -->
 					<div class="charsheet__companion-conditions mb-2" style="padding: 0 4px; min-height: 28px;">
 						${conditionsHtml}
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-add-condition" style="font-size: 0.75em; padding: 2px 8px; opacity: 0.8;">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-add-condition" style="font-size: 0.75em; padding: 2px 8px; opacity: 0.8;" ${lifecycleDisabledAttrs}>
 							➕ Condition
 						</button>
 					</div>
 
 					<!-- Quick Skill Checks -->
 					<div class="charsheet__companion-quick-rolls mb-2">
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-initiative" title="Roll initiative for ${companion.customName || companion.name}">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-initiative" title="Roll initiative for ${companion.customName || companion.name}" ${lifecycleDisabledAttrs}>
 							⚡ Initiative (${initiativeStr})
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="perception" title="Roll Perception check">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="perception" title="Roll Perception check" ${lifecycleDisabledAttrs}>
 							👁️ Perception (${perceptionStr})
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="stealth" title="Roll Stealth check">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="stealth" title="Roll Stealth check" ${lifecycleDisabledAttrs}>
 							🤫 Stealth (${stealthStr})
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="investigation" title="Roll Investigation check">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-skill" data-skill="investigation" title="Roll Investigation check" ${lifecycleDisabledAttrs}>
 							🔍 Investigation (${investigationStr})
 						</button>
 					</div>
@@ -6999,12 +7205,12 @@ class CharacterSheetPage {
 						<div class="ve-muted ve-small mb-1" style="display: flex; align-items: center; gap: 8px;">
 							<span><strong>Actions:</strong></span>
 							<span class="charsheet__companion-action-status" style="font-size: 0.9em; color: ${usedAction ? "#f59e0b" : "#22c55e"}">
-								${usedAction ? "⏳ Used" : "✅ Available"}
+								${isLifecycleBlocked ? "⛔ Unavailable" : usedAction ? "⏳ Used" : "✅ Available"}
 							</span>
 							<span class="ve-muted">|</span>
 							<span><strong>Reaction:</strong></span>
 							<span class="charsheet__companion-reaction-status" style="font-size: 0.9em; color: ${usedReaction ? "#f59e0b" : "#22c55e"}">
-								${usedReaction ? "⏳ Used" : "✅ Available"}
+								${isLifecycleBlocked ? "⛔ Unavailable" : usedReaction ? "⏳ Used" : "✅ Available"}
 							</span>
 						</div>
 						<div class="ve-flex" style="gap: 6px; flex-wrap: wrap;">
@@ -7019,10 +7225,10 @@ class CharacterSheetPage {
 
 					<!-- Action Buttons -->
 					<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
-						<button class="ve-btn ve-btn-xs ve-btn-success btn-companion-heal" style="flex: 1; min-width: 80px;">
+						<button class="ve-btn ve-btn-xs ve-btn-success btn-companion-heal" style="flex: 1; min-width: 80px;" ${lifecycleDisabledAttrs}>
 							<span class="glyphicon glyphicon-heart"></span> Heal
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-danger btn-companion-damage" style="flex: 1; min-width: 80px;">
+						<button class="ve-btn ve-btn-xs ve-btn-danger btn-companion-damage" style="flex: 1; min-width: 80px;" ${lifecycleDisabledAttrs}>
 							<span class="glyphicon glyphicon-flash"></span> Damage
 						</button>
 						<button class="ve-btn ve-btn-xs ${this._state.getCompanionNote?.(companion.id) ? "ve-btn-warning" : "ve-btn-default"} btn-companion-note" title="${this._state.getCompanionNote?.(companion.id) ? "Edit Note" : "Add Note"}">
@@ -7034,7 +7240,7 @@ class CharacterSheetPage {
 						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-view" title="View full stat block">
 							<span class="glyphicon glyphicon-list-alt"></span>
 						</button>
-						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-dismiss" title="Dismiss companion" style="color: #ef4444;">
+						<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-dismiss" title="Dismiss companion" style="color: #ef4444;" ${lifecycleDisabledAttrs}>
 							<span class="glyphicon glyphicon-remove"></span>
 						</button>
 					</div>
@@ -7108,13 +7314,14 @@ class CharacterSheetPage {
 			// Remove condition badges
 			card.querySelectorAll(".charsheet__companion-condition-badge").forEach(el => {
 				el.addEventListener("click", (evt) => {
+					if (isLifecycleBlocked) return;
 					const condName = evt.currentTarget.dataset.condition;
 					this._state.removeCompanionCondition?.(companion.id, condName);
 					this._saveCurrentCharacter();
 					this._renderCompanions();
 					JqueryUtil.doToast({type: "info", content: `Removed ${condName} from ${companion.name}`});
 				});
-				this._bindActivate(el, {label: `Remove ${el.dataset.condition || "condition"}`});
+				if (!isLifecycleBlocked) this._bindActivate(el, {label: `Remove ${el.dataset.condition || "condition"}`});
 			});
 
 			// Skill check buttons
@@ -7163,6 +7370,13 @@ class CharacterSheetPage {
 				});
 			}));
 
+			card.querySelectorAll(".btn-feature-companion-lifecycle").forEach(el => el.addEventListener("click", async evt => {
+				await this.pUseFeatureCompanionLifecycle({
+					companionId: companion.id,
+					operation: evt.currentTarget.dataset.featureCompanionLifecycleOperation,
+				});
+			}));
+
 			// Attack roll buttons
 			card.querySelectorAll(".btn-companion-attack-roll").forEach(el => el.addEventListener("click", async (evt) => {
 				const actionName = evt.currentTarget.dataset.actionName;
@@ -7178,7 +7392,7 @@ class CharacterSheetPage {
 		const section = document.getElementById("charsheet-companions-section");
 		if (!container || !section) return;
 
-		const companions = this._state.getActiveCompanions?.() || [];
+		const companions = this.getFeatureCompanionLifecycleSurfaceCompanions();
 		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
 
 		if (companions.length === 0 && pendingSetups.length === 0) {
@@ -22285,6 +22499,355 @@ class CharacterSheetPage {
 		const targets = [...(document.querySelectorAll?.("[data-companion-operation-key]") || [])]
 			.filter(element => element.getAttribute?.("data-companion-operation-key") === focusKey);
 		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	_getFeatureCompanionPostRenderFocusTarget (companionId, focusKey) {
+		const exact = this.getFeatureCompanionLifecycleFocusTarget(focusKey);
+		if (exact) return exact;
+		if (typeof document === "undefined") return null;
+		const cards = [...(document.querySelectorAll?.("[data-companion-id]") || [])]
+			.filter(card => card.getAttribute?.("data-companion-id") === companionId);
+		const targets = cards
+			.map(card => card.querySelector?.(
+				"[data-feature-companion-lifecycle-key]:not([disabled]), "
+				+ "[data-companion-operation-key]:not([disabled]), "
+				+ "button:not([disabled])",
+			))
+			.filter(Boolean);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	async _persistFeatureCompanionLifecycleResult (result, {
+		companionId,
+		focusKey = null,
+		successMessage,
+	} = {}) {
+		if (!result?.committed) {
+			this._announceCompanionInteraction(
+				result?.message || "Steel Defender lifecycle operation made no changes.",
+				{type: result?.reason === "cancelled" ? "info" : "warning", isToast: true},
+			);
+			return result;
+		}
+
+		await this.saveCharacter();
+		this._renderCompanions();
+		if (this._state.getViewMode?.() === "play") this._playMode?.render();
+		const postRenderFocusTarget = this._getFeatureCompanionPostRenderFocusTarget(companionId, focusKey);
+		if (postRenderFocusTarget?.focus) {
+			queueMicrotask(() => {
+				if (postRenderFocusTarget.isConnected !== false) postRenderFocusTarget.focus();
+			});
+		}
+		this._announceCompanionInteraction(successMessage, {type: "success", isToast: true});
+		this._playMode?._logActivity?.("companion", successMessage);
+		return result;
+	}
+
+	async pUseFeatureCompanionLifecycle ({companionId, operation} = {}) {
+		const trigger = typeof document !== "undefined"
+			? document.activeElement?.closest?.("button, [role=button]")
+			: null;
+		const focusKey = trigger?.getAttribute?.("data-feature-companion-lifecycle-key")
+			|| this.getFeatureCompanionLifecycleFocusKey(companionId, operation);
+		const getFocusRestoreTarget = () => this._getFeatureCompanionPostRenderFocusTarget(companionId, focusKey);
+
+		if (operation === "revival") {
+			const result = await this._pShowFeatureCompanionRevivalModal(companionId, {
+				focusRestoreTarget: trigger,
+				getFocusRestoreTarget,
+			});
+			if (!result) return null;
+			const slot = result.costs?.spellSlot;
+			const slotLabel = slot?.kind === "pact" ? `one level ${slot.level} Pact Magic slot` : `one level ${slot?.level} spell slot`;
+			return this._persistFeatureCompanionLifecycleResult(result, {
+				companionId,
+				focusKey,
+				successMessage: `Steel Defender revival begun. Spent the owner's Action and ${slotLabel}; the defender remains at 0 HP until game minute ${result.completionMinute}.`,
+			});
+		}
+
+		if (operation === "completeRevival") {
+			const presentation = this.getFeatureCompanionLifecyclePresentation(this._state.getCompanion?.(companionId));
+			if (presentation?.status !== "revivalPending" || !presentation.canCompleteRevival) {
+				const result = {
+					ok: false,
+					committed: false,
+					operation,
+					companionId,
+					reason: "revivalNotPending",
+					message: presentation?.status === "revivalPending"
+						? "This pending revival is not due within the next canonical minute."
+						: "This Steel Defender has no pending revival to complete.",
+					rollback: null,
+					error: null,
+				};
+				return this._persistFeatureCompanionLifecycleResult(result, {companionId, focusKey});
+			}
+			const receipt = this._state.advanceGameTimeMinutes(1, {
+				reason: "efa-steel-defender-revival-completion",
+				identity: companionId,
+			});
+			const transition = receipt?.updated?.find(update =>
+				update?.kind === "featureCompanion"
+				&& update.companionId === companionId
+				&& update.transition === "revivalCompleted",
+			);
+			const result = receipt?.ok && transition
+				? {
+					...receipt,
+					committed: true,
+					operation,
+					companionId,
+					transition,
+					message: "Steel Defender revival completed through canonical game time.",
+				}
+				: {
+					...receipt,
+					ok: false,
+					committed: false,
+					operation,
+					companionId,
+					reason: receipt?.code || "revivalCompletionFailed",
+					message: receipt?.message || "Advancing 1 minute did not complete this Steel Defender revival.",
+				};
+			return this._persistFeatureCompanionLifecycleResult(result, {
+				companionId,
+				focusKey,
+				successMessage: `Advanced game time from minute ${receipt.priorMinute} to ${receipt.newMinute}. Steel Defender revival completed at ${transition?.hp} HP.`,
+			});
+		}
+
+		const result = {
+			ok: false,
+			committed: false,
+			operation,
+			companionId,
+			reason: "unsupportedLifecycleOperation",
+			message: "That Steel Defender lifecycle operation is unsupported.",
+			rollback: null,
+			error: null,
+		};
+		return this._persistFeatureCompanionLifecycleResult(result, {companionId, focusKey});
+	}
+
+	async _pShowFeatureCompanionRevivalModal (
+		companionId,
+		{
+			focusRestoreTarget = null,
+			getFocusRestoreTarget = null,
+		} = {},
+	) {
+		const presentation = this.getFeatureCompanionLifecyclePresentation(this._state.getCompanion?.(companionId));
+		const availability = presentation?.revival;
+		if (!presentation || presentation.status !== "dead" || !availability?.spellSlots?.length) {
+			return {
+				ok: false,
+				committed: false,
+				operation: "Revival",
+				companionId,
+				reason: availability?.reason || "revivalUnavailable",
+				message: availability?.message || "Steel Defender revival is unavailable.",
+				rollback: null,
+				error: null,
+			};
+		}
+
+		let resolveOuter = null;
+		let isSettled = false;
+		let isBusy = false;
+		const cancel = () => this._state.beginFeatureCompanionRevival({
+			companionId,
+			cancelled: true,
+		});
+		const modal = await CharacterSheetModal.pGetShow({
+			title: "Revive Steel Defender",
+			isMinHeight0: true,
+			isWidth100: true,
+			focusRestoreTarget,
+			getFocusRestoreTarget,
+			cbClose: () => {
+				if (!resolveOuter || isSettled || isBusy) return;
+				isSettled = true;
+				resolveOuter(cancel());
+			},
+		});
+		const {eleModal: modalShell, eleModalInner: modalInner} = modal;
+		const doCloseRaw = modal.doClose;
+		modal.doClose = (...args) => {
+			if (isBusy) return;
+			return doCloseRaw?.(...args);
+		};
+		const doClose = modal.doClose;
+
+		return new Promise(resolve => {
+			resolveOuter = resolve;
+			const statusId = `charsheet-steel-defender-revival-status-${String(companionId || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+			const costId = `${statusId}-cost`;
+			const unknownTiming = presentation.timingKnown === false;
+			const optionsHtml = availability.spellSlots.map(slot => {
+				const value = slot.kind === "pact" ? "pact" : `normal:${slot.level}`;
+				const label = slot.kind === "pact"
+					? `Pact Magic slot — level ${slot.level} (${slot.current}/${slot.max})`
+					: `Level ${slot.level} spell slot (${slot.current}/${slot.max})`;
+				return `<option value="${CharacterSheetModal._escapeHtml(value)}">${CharacterSheetModal._escapeHtml(label)}</option>`;
+			}).join("");
+
+			modalInner.innerHTML = `<div class="charsheet__feature-companion-revival" role="form" aria-describedby="${costId} ${statusId}">
+				<p class="ve-muted mb-3">This protected commit spends your Magic Action and one eligible spell slot, records touch, and starts the defender's 1-minute return delay.</p>
+				<fieldset class="charsheet__feature-companion-revival-fields">
+					<legend class="bold">Revival requirements</legend>
+					<label class="ve-flex-col">
+						<span class="bold">Spell slot</span>
+						<select class="form-control input-sm" data-role="spell-slot" required aria-required="true" aria-describedby="${costId} ${statusId}">
+							<option value="">Choose a slot</option>
+							${optionsHtml}
+						</select>
+					</label>
+					<label class="charsheet__rest-option">
+						<input type="checkbox" data-role="touch" required aria-required="true" aria-describedby="${statusId}">
+						<span>I am touching the Steel Defender.</span>
+					</label>
+					${unknownTiming ? `<label class="charsheet__rest-option">
+						<input type="checkbox" data-role="death-window" required aria-required="true" aria-describedby="${statusId}">
+						<span>I confirm in this operation that the defender died within the last hour.</span>
+					</label>` : ""}
+				</fieldset>
+				<div class="charsheet__feature-companion-revival-cost" id="${costId}">
+					<strong>Cost before commit:</strong> select a slot, spend your Action, and confirm touch${unknownTiming ? " plus the unknown death-time window" : ""}.
+				</div>
+				<div class="ve-small mb-3" id="${statusId}" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
+				<div class="charsheet__modal-actions">
+					<button type="button" class="ve-btn ve-btn-default" data-role="cancel">Cancel</button>
+					<button type="button" class="ve-btn ve-btn-primary" data-role="commit" aria-describedby="${costId} ${statusId}">Begin revival</button>
+				</div>
+			</div>`;
+
+			const slot = modalInner.querySelector("[data-role=spell-slot]");
+			const touch = modalInner.querySelector("[data-role=touch]");
+			const deathWindow = modalInner.querySelector("[data-role=death-window]");
+			const status = modalInner.querySelector(`#${statusId}`);
+			const cost = modalInner.querySelector(`#${costId}`);
+			const buttons = [...modalInner.querySelectorAll("button")];
+			const closeButton = modalShell?.querySelector?.(".cs-modal__btn-close");
+			const parseSlot = () => {
+				if (!slot.value) return null;
+				if (slot.value === "pact") return {kind: "pact"};
+				const [, levelRaw] = slot.value.split(":");
+				return {kind: "normal", level: Number(levelRaw)};
+			};
+			const setBusy = value => {
+				isBusy = value;
+				buttons.forEach(button => { button.disabled = value; });
+				slot.disabled = value;
+				touch.disabled = value;
+				if (deathWindow) deathWindow.disabled = value;
+				if (closeButton) closeButton.disabled = value;
+				modalShell?.setAttribute?.("aria-busy", String(value));
+				status.textContent = value
+					? "Committing revival. Keep this dialog open."
+					: "";
+			};
+			const updateCost = () => {
+				const selected = availability.spellSlots.find(option => {
+					const choice = parseSlot();
+					return choice?.kind === option.kind && (option.kind === "pact" || choice.level === option.level);
+				});
+				const slotLabel = selected
+					? selected.kind === "pact" ? `one level ${selected.level} Pact Magic slot` : `one level ${selected.level} spell slot`
+					: "one selected spell slot";
+				cost.innerHTML = `<strong>Cost before commit:</strong> owner Action + ${CharacterSheetModal._escapeHtml(slotLabel)} + touch confirmation${unknownTiming ? " + died-within-hour confirmation" : ""}. The defender remains at 0 HP until minute ${presentation.currentMinute + 1}.`;
+			};
+			const showValidation = (message, target) => {
+				status.textContent = message;
+				status.setAttribute("role", "alert");
+				status.classList.add("text-danger");
+				target?.focus?.();
+			};
+			const validate = () => {
+				if (!parseSlot()) {
+					showValidation("Choose one normal or Pact Magic spell slot.", slot);
+					return false;
+				}
+				if (touch.checked !== true) {
+					showValidation("Confirm that you are touching the Steel Defender.", touch);
+					return false;
+				}
+				if (unknownTiming && deathWindow?.checked !== true) {
+					showValidation("Confirm that the defender died within the last hour.", deathWindow);
+					return false;
+				}
+				return true;
+			};
+			slot.addEventListener("change", updateCost);
+			updateCost();
+			modalShell?.addEventListener?.("keydown", event => {
+				if (!isBusy || event.key !== "Escape") return;
+				event.preventDefault();
+				event.stopImmediatePropagation?.();
+				status.textContent = "Revival is still resolving. Wait for the result before closing.";
+			}, true);
+			modalInner.querySelector("[data-role=cancel]").addEventListener("click", () => {
+				if (isBusy) return;
+				isSettled = true;
+				resolve(cancel());
+				doClose(false);
+			});
+			modalInner.querySelector("[data-role=commit]").addEventListener("click", () => {
+				if (isBusy || !validate()) return;
+				setBusy(true);
+				try {
+					const result = this._state.beginFeatureCompanionRevival({
+						companionId,
+						spellSlot: parseSlot(),
+						touchConfirmed: touch.checked,
+						deathWithinHourConfirmed: deathWindow?.checked === true,
+					});
+					if (!result.ok) {
+						setBusy(false);
+						const focusByReason = {
+							spellSlotRequired: slot,
+							spellSlotUnavailable: slot,
+							touchNotConfirmed: touch,
+							deathTimeConfirmationRequired: deathWindow,
+						};
+						showValidation(result.message || "Revival could not begin.", focusByReason[result.reason] || status);
+						return;
+					}
+					isSettled = true;
+					resolve(result);
+					doCloseRaw?.(true);
+				} catch (error) {
+					setBusy(false);
+					showValidation(error?.message || "Revival could not begin.", status);
+				}
+			});
+			queueMicrotask(() => CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-role=spell-slot]"}));
+		});
+	}
+
+	commitFeatureCompanionReplacementAfterLongRest ({
+		companionId,
+		toolItemId,
+		inHandConfirmed,
+	} = {}) {
+		const result = this._state.replaceFeatureCompanionAfterLongRest({
+			companionId,
+			toolItemId,
+			inHandConfirmed,
+		});
+		if (!result?.committed) {
+			this._announceCompanionInteraction(
+				result?.message || "Steel Defender replacement made no changes.",
+				{type: "warning"},
+			);
+			return result;
+		}
+		const name = this._state.getCompanion?.(companionId)?.customName || "Steel Defender";
+		const message = `${name} replacement committed as generation ${result.generation.generation} at ${result.hp.current}/${result.hp.max} HP.`;
+		this._announceCompanionInteraction(message);
+		this._playMode?._logActivity?.("companion", message);
+		return result;
 	}
 
 	async _pGetCompanionCommandMethod (availability, commandMethod = null) {

@@ -644,7 +644,7 @@ export class CharacterSheetPlayMode {
 			{icon: "notes", label: "Reference", onClick: () => this._openDrawerByType("reference")},
 			{icon: "edit", label: "Notes", onClick: () => this._openDrawerByType("notes")},
 		];
-		if (this._state.getCompanions().length) {
+		if ((this._page.getFeatureCompanionLifecycleSurfaceCompanions?.() || this._state.getCompanions()).length) {
 			items.push({icon: "companion", label: "Companions", onClick: () => this._openDrawerByType("companions")});
 		}
 		items.push(
@@ -3068,12 +3068,18 @@ export class CharacterSheetPlayMode {
 		const hasDruid = classNames.includes("druid");
 		const hasRanger = classNames.includes("ranger");
 		const hasWarlock = classNames.includes("warlock");
-		const hasArtificer = classNames.includes("artificer");
 		const hasPaladin = classNames.includes("paladin");
 		const hasWizard = classNames.includes("wizard");
 		const hasSubclassMoon = classes.some(c => c.subclass?.name?.toLowerCase().includes("moon"));
 		const hasSubclassDrake = classes.some(c => c.subclass?.name?.toLowerCase().includes("drake"));
-		const hasSubclassSteel = classes.some(c => c.subclass?.name?.toLowerCase().includes("steel"));
+		const hasLegacyTceBattleSmith = classes.some(cls =>
+			String(cls?.name || "").trim().toLowerCase() === "artificer"
+			&& String(cls?.source || "").trim().toUpperCase() === "TCE"
+			&& ["name", "shortName"].some(prop =>
+				String(cls?.subclass?.[prop] || "").trim().toLowerCase() === "battle smith",
+			)
+			&& String(cls?.subclass?.source || "").trim().toUpperCase() === "TCE",
+		);
 		const hasSubclassBeast = classes.some(c => c.subclass?.name?.toLowerCase().includes("beast"));
 		const efaSteelDefenderUid = CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER;
 		const efaSteelDefenderSetup = efaSteelDefenderUid
@@ -3130,7 +3136,7 @@ export class CharacterSheetPlayMode {
 		addCompBtn("eagle", "Familiar", hasWarlock || hasWizard, () => this._addBuiltinCompanion("familiar"));
 		addCompBtn("bear", "Beast Companion", hasRanger || hasSubclassBeast, () => this._addBuiltinCompanion("beast-companion"));
 		addCompBtn("dragon", "Drake", hasSubclassDrake, () => this._addBuiltinCompanion("drake"));
-		addCompBtn("settings", "Steel Defender", (hasSubclassSteel || hasArtificer) && !hasEfaSteelDefenderSetup, () => this._addBuiltinCompanion("steel-defender"));
+		addCompBtn("settings", "Steel Defender", hasLegacyTceBattleSmith && !hasEfaSteelDefenderSetup, () => this._addBuiltinCompanion("steel-defender"));
 		addCompBtn("lion", "Wild Shape", hasDruid, () => this._addBuiltinCompanion("wild-shape"));
 		addCompBtn("nature", "Wild Companion", hasDruid, () => this._addBuiltinCompanion("wild-companion"));
 		addCompBtn("horse", "Find Steed", hasPaladin, () => this._addBuiltinCompanion("find-steed"));
@@ -3140,7 +3146,8 @@ export class CharacterSheetPlayMode {
 		customBtn.title = "Add a custom companion";
 		customBtn.addEventListener("click", () => this._showCustomCompanionModal());
 
-		const companions = this._state.getCompanions();
+		const companions = this._page.getFeatureCompanionLifecycleSurfaceCompanions?.()
+			|| this._state.getCompanions();
 		if (!companions.length) {
 			this._renderEmptyState(
 				container,
@@ -3155,6 +3162,14 @@ export class CharacterSheetPlayMode {
 		companions.forEach(comp => {
 			const card = this._makeCard(container, "companion", comp.name || "Companion");
 			card.setAttribute("data-companion-id", comp.id);
+			const lifecycle = this._page.getFeatureCompanionLifecyclePresentation?.(comp) || null;
+			const lifecycleReasonId = this._renderFeatureCompanionLifecycle(card, comp, lifecycle);
+			const isLifecycleBlocked = !!lifecycle && !lifecycle.isAlive;
+			const applyLifecycleDisabled = button => {
+				if (!isLifecycleBlocked || !button) return;
+				button.disabled = true;
+				button.setAttribute("aria-describedby", lifecycleReasonId);
+			};
 
 			// ── Interactive controls (B4) ────────────────────────────
 			const controls = this._ce("div", "pm-companion__controls", card);
@@ -3164,18 +3179,21 @@ export class CharacterSheetPlayMode {
 			this._setIconLabel(initiativeBtn, "initiative", ` Initiative ${this._fmtMod(initiative)}`);
 			initiativeBtn.title = `Roll initiative for ${comp.customName || comp.name || "companion"}`;
 			initiativeBtn.addEventListener("click", () => this._page._rollCompanionInitiative?.(comp));
+			applyLifecycleDisabled(initiativeBtn);
 
 			// Heal button
 			const healBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--heal", controls);
 			this._setIconLabel(healBtn, "heal", " Heal");
 			healBtn.title = "Heal companion";
 			healBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "heal", container));
+			applyLifecycleDisabled(healBtn);
 
 			// Damage button
 			const dmgBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--damage", controls);
 			this._setIconLabel(dmgBtn, "damage", " Damage");
 			dmgBtn.title = "Damage companion";
 			dmgBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "damage", container));
+			applyLifecycleDisabled(dmgBtn);
 
 			// Statblock button
 			const statblockBtn = this._ce("button", "pm-companion__ctrl-btn", controls);
@@ -3204,6 +3222,7 @@ export class CharacterSheetPlayMode {
 				this._logActivity("companion", `Dismissed ${comp.name || "companion"}`);
 				this._openDrawerByType("companions");
 			});
+			applyLifecycleDisabled(dismissBtn);
 
 			// ── HP inline edit ──────────────────────────────────────
 			if (comp.hp?.max) {
@@ -3225,6 +3244,7 @@ export class CharacterSheetPlayMode {
 						this._logActivity("companion", `${comp.name} HP → ${val}/${comp.hp.max}`);
 					}
 				});
+				applyLifecycleDisabled(hpInput);
 
 				const hpMax = this._ce("span", "pm-companion__hp-max", hpRow);
 				hpMax.textContent = `/ ${comp.hp.max}`;
@@ -3346,6 +3366,82 @@ export class CharacterSheetPlayMode {
 				});
 			}
 		});
+	}
+
+	_renderFeatureCompanionLifecycle (card, companion, presentation) {
+		if (!presentation) return null;
+		const id = `pm-feature-companion-lifecycle-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		const region = this._ce(
+			"section",
+			`pm-companion-lifecycle pm-companion-lifecycle--${presentation.tone}`,
+			card,
+		);
+		region.id = id;
+		region.setAttribute("role", "status");
+		region.setAttribute("aria-live", "polite");
+		region.setAttribute("aria-atomic", "true");
+		region.setAttribute("aria-labelledby", `${id}-label`);
+
+		const header = this._ce("div", "pm-companion-lifecycle__header", region);
+		const label = this._ce("strong", null, header);
+		label.id = `${id}-label`;
+		label.textContent = presentation.label;
+		const generation = this._ce("span", "pm-companion-lifecycle__generation", header);
+		generation.textContent = `Generation ${presentation.generation}`;
+		const summary = this._ce("div", "pm-companion-lifecycle__summary", region);
+		summary.id = `${id}-summary`;
+		summary.textContent = presentation.summary;
+		const guidance = this._ce("div", "pm-companion-lifecycle__guidance", region);
+		guidance.textContent = presentation.guidance;
+		const disabledReason = presentation.disabledReason
+			? this._ce("div", "pm-companion-lifecycle__disabled-reason", region)
+			: null;
+		const disabledReasonId = disabledReason ? `${id}-disabled-reason` : `${id}-summary`;
+		if (disabledReason) {
+			disabledReason.id = disabledReasonId;
+			disabledReason.textContent = presentation.disabledReason;
+		}
+
+		if (presentation.status === "dead") {
+			const actionRow = this._ce("div", "pm-companion-lifecycle__actions", region);
+			const revive = this._ce("button", "pm-companion__ctrl-btn", actionRow);
+			revive.type = "button";
+			revive.textContent = "Begin revival";
+			revive.disabled = !presentation.revival?.available;
+			revive.setAttribute("aria-describedby", `${id}-summary ${disabledReasonId} ${id}-action-reason`);
+			revive.setAttribute(
+				"data-feature-companion-lifecycle-key",
+				this._page.getFeatureCompanionLifecycleFocusKey?.(companion.id, "revival") || "",
+			);
+			revive.addEventListener("click", () => this._page.pUseFeatureCompanionLifecycle?.({
+				companionId: companion.id,
+				operation: "revival",
+			}));
+			const reason = this._ce("span", "pm-companion-lifecycle__action-reason", actionRow);
+			reason.id = `${id}-action-reason`;
+			reason.textContent = presentation.revival?.available
+				? "Commits your Magic Action, touch confirmation, and one spell slot."
+				: presentation.revival?.message || "Revival is unavailable.";
+		}
+
+		if (presentation.status === "revivalPending") {
+			const actionRow = this._ce("div", "pm-companion-lifecycle__actions", region);
+			const complete = this._ce("button", "pm-companion__ctrl-btn", actionRow);
+			complete.type = "button";
+			complete.textContent = "Complete revival (+1 minute)";
+			complete.disabled = !presentation.canCompleteRevival;
+			complete.setAttribute("aria-describedby", `${id}-summary ${disabledReasonId}`);
+			complete.setAttribute(
+				"data-feature-companion-lifecycle-key",
+				this._page.getFeatureCompanionLifecycleFocusKey?.(companion.id, "completeRevival") || "",
+			);
+			complete.addEventListener("click", () => this._page.pUseFeatureCompanionLifecycle?.({
+				companionId: companion.id,
+				operation: "completeRevival",
+			}));
+		}
+
+		return disabledReasonId;
 	}
 
 	_renderFeatureCompanionOperations (card, companion) {

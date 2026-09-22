@@ -84752,30 +84752,60 @@ class CharacterSheetState {
 		const timingKnown = identity.companion.lifecycle?.timingKnown === true
 			&& Number.isSafeInteger(diedAtGameMinute)
 			&& diedAtGameMinute >= 0;
+		const deadlineMinute = timingKnown ? diedAtGameMinute + deathWindowMinutes : null;
+		const deathTiming = {
+			known: timingKnown,
+			diedAtGameMinute: timingKnown ? diedAtGameMinute : null,
+			deadlineMinute,
+			remainingMinutes: deadlineMinute == null ? null : Math.max(0, deadlineMinute - currentMinute),
+			deathWithinHourConfirmed: !timingKnown && options.deathWithinHourConfirmed === true,
+		};
+		const withTiming = extra => ({currentMinute, deathTiming, ...extra});
 		if (timingKnown && currentMinute - diedAtGameMinute > deathWindowMinutes) {
-			return fail("revivalWindowExpired", "The Steel Defender died more than 60 minutes ago.");
+			return fail(
+				"revivalWindowExpired",
+				"The Steel Defender died more than 60 minutes ago.",
+				withTiming({}),
+			);
 		}
 		if (!timingKnown && options.deathWithinHourConfirmed !== true) {
 			return fail(
 				"deathTimeConfirmationRequired",
 				"Confirm in this operation that the legacy defender died within the last hour.",
+				withTiming({}),
 			);
 		}
 		if (revivalPolicy.requiresTouch && options.touchConfirmed !== true) {
-			return fail("touchNotConfirmed", "Confirm that you are touching the Steel Defender.");
+			return fail(
+				"touchNotConfirmed",
+				"Confirm that you are touching the Steel Defender.",
+				withTiming({}),
+			);
 		}
 		const ownerActionCost = revivalPolicy.ownerActionCost || "action";
 		if (!this.isActionTypeAvailable(ownerActionCost)) {
-			return fail("ownerActionUnavailable", "The owner's Action has already been used.");
+			return fail(
+				"ownerActionUnavailable",
+				"The owner's Action has already been used.",
+				withTiming({}),
+			);
 		}
 
 		const spellSlots = this._getFeatureCompanionSpellSlotOptions(revivalPolicy.spellSlot?.minimumLevel);
 		if (!spellSlots.length) {
-			return fail("noSpellSlotAvailable", "No eligible normal or Pact Magic spell slot is available.", {spellSlots});
+			return fail(
+				"noSpellSlotAvailable",
+				"No eligible normal or Pact Magic spell slot is available.",
+				withTiming({spellSlots}),
+			);
 		}
 		const selectedSpellSlot = CharacterSheetState._normalizeFeatureCompanionSpellSlotChoice(options.spellSlot);
 		if (!selectedSpellSlot) {
-			return fail("spellSlotRequired", "Select one available normal or Pact Magic spell slot.", {spellSlots});
+			return fail(
+				"spellSlotRequired",
+				"Select one available normal or Pact Magic spell slot.",
+				withTiming({spellSlots}),
+			);
 		}
 		const selected = spellSlots.find(slot =>
 			slot.kind === selectedSpellSlot.kind
@@ -84783,8 +84813,7 @@ class CharacterSheetState {
 		);
 		if (!selected) {
 			return fail("spellSlotUnavailable", "The selected spell slot is not available.", {
-				spellSlots,
-				selectedSpellSlot,
+				...withTiming({spellSlots, selectedSpellSlot}),
 			});
 		}
 
@@ -84800,11 +84829,7 @@ class CharacterSheetState {
 			requiresTouch: revivalPolicy.requiresTouch === true,
 			currentMinute,
 			completionMinute: currentMinute + returnDelayMinutes,
-			deathTiming: {
-				known: timingKnown,
-				diedAtGameMinute: timingKnown ? diedAtGameMinute : null,
-				deathWithinHourConfirmed: !timingKnown && options.deathWithinHourConfirmed === true,
-			},
+			deathTiming,
 			spellSlots,
 			selectedSpellSlot: {...selected},
 			costs: {
@@ -84948,6 +84973,39 @@ class CharacterSheetState {
 				error,
 			);
 		}
+	}
+
+	getFeatureCompanionReplacementToolRows (companionId) {
+		const identity = this._getFeatureCompanionLifecycleOperationIdentity(companionId, "Replacement");
+		if (
+			!identity.companion
+			|| !CharacterSheetState._isExactEfaSteelDefender(identity.companion, identity.lifecyclePolicy)
+		) return [];
+
+		const requiredToolUid = identity.lifecyclePolicy?.policy?.replacement?.requiresToolUid;
+		const [requiredToolName, requiredToolSource] = String(requiredToolUid || "")
+			.split("|")
+			.map(part => part.trim());
+		if (!requiredToolName || !requiredToolSource) return [];
+
+		return (this._data.inventory || [])
+			.filter(row =>
+				typeof row?.id === "string"
+				&& row.id
+				&& (Number(row.quantity) || 0) > 0
+				&& row.item?._isCustom !== true
+				&& row.item?._isGeneratedFeatureItem !== true
+				&& String(row.item?.name || "").trim().toLowerCase() === requiredToolName.toLowerCase()
+				&& String(row.item?.source || "").trim().toUpperCase() === requiredToolSource.toUpperCase(),
+			)
+			.map(row => ({
+				itemId: row.id,
+				itemUid: `${row.item.name}|${row.item.source}`,
+				name: row.item.name,
+				source: row.item.source,
+				quantity: Number(row.quantity),
+				label: `${row.item.name} (${row.item.source}) — quantity ${Number(row.quantity)}`,
+			}));
 	}
 
 	getFeatureCompanionReplacementAvailability (companionId, options = {}) {

@@ -139,7 +139,16 @@ describe("EFA Steel Defender death and canonical minute lifecycle", () => {
 		expect(state.getFeatureCompanionRevivalAvailability(companionId, {
 			spellSlot: {kind: "normal", level: 1},
 			touchConfirmed: true,
-		}).available).toBe(true);
+		})).toMatchObject({
+			available: true,
+			currentMinute: 59,
+			deathTiming: {
+				known: true,
+				diedAtGameMinute: 0,
+				deadlineMinute: 60,
+				remainingMinutes: 1,
+			},
+		});
 
 		state.advanceGameTimeMinutes(1, {reason: "boundary", identity: companionId});
 		expect(state.getGameTimeMinutes()).toBe(60);
@@ -147,7 +156,11 @@ describe("EFA Steel Defender death and canonical minute lifecycle", () => {
 		expect(state.getFeatureCompanionRevivalAvailability(companionId, {
 			spellSlot: {kind: "normal", level: 1},
 			touchConfirmed: true,
-		}).available).toBe(true);
+		})).toMatchObject({
+			available: true,
+			currentMinute: 60,
+			deathTiming: {deadlineMinute: 60, remainingMinutes: 0},
+		});
 
 		const expired = state.advanceGameTimeMinutes(1, {reason: "boundary", identity: companionId});
 		expect(expired.updated).toContainEqual(expect.objectContaining({
@@ -388,6 +401,12 @@ describe("EFA Steel Defender legacy lifecycle migration", () => {
 		})).toMatchObject({
 			available: false,
 			reason: "deathTimeConfirmationRequired",
+			deathTiming: {
+				known: false,
+				diedAtGameMinute: null,
+				deadlineMinute: null,
+				remainingMinutes: null,
+			},
 		});
 		expect(state.beginFeatureCompanionRevival({
 			companionId: "legacy-efa",
@@ -562,6 +581,48 @@ describe("non-alive Steel Defender recovery and operation isolation", () => {
 });
 
 describe("EFA Steel Defender Long Rest replacement", () => {
+	test("projects only detached positive persisted Smith's Tools (XPHB) inventory rows", () => {
+		const {state, companionId} = makeState();
+		const exact = addTool(state);
+		addTool(state, {id: "smith-tools-spare", quantity: 2});
+		addTool(state, {id: "wrong-source-tools", source: "PHB"});
+		addTool(state, {id: "custom-tools", isCustom: true});
+		state._data.inventory.push({
+			id: "generated-tools",
+			item: {
+				name: "Smith's Tools",
+				source: "XPHB",
+				type: "AT",
+				_isGeneratedFeatureItem: true,
+				_generatedItemProvenance: {temporary: true},
+			},
+			quantity: 1,
+		});
+
+		const rows = state.getFeatureCompanionReplacementToolRows(companionId);
+		expect(rows).toEqual([
+			{
+				itemId: exact,
+				itemUid: "Smith's Tools|XPHB",
+				name: "Smith's Tools",
+				source: "XPHB",
+				quantity: 3,
+				label: "Smith's Tools (XPHB) — quantity 3",
+			},
+		]);
+		rows[0].quantity = 99;
+		rows[0].name = "Changed";
+		expect(state.getFeatureCompanionReplacementToolRows(companionId)[0]).toEqual({
+			itemId: exact,
+			itemUid: "Smith's Tools|XPHB",
+			name: "Smith's Tools",
+			source: "XPHB",
+			quantity: 3,
+			label: "Smith's Tools (XPHB) — quantity 3",
+		});
+		expect(state.getFeatureCompanionReplacementToolRows("missing-companion")).toEqual([]);
+	});
+
 	test("requires the exact persisted XPHB Smith's Tools row and explicit in-hand confirmation", () => {
 		const {state, companionId} = makeState();
 		const exact = addTool(state);

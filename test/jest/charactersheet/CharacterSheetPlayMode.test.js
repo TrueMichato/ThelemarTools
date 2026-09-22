@@ -37,6 +37,150 @@ describe("CharacterSheetPlayMode", () => {
 		state = new CharacterSheetState();
 	});
 
+	describe("EFA Steel Defender lifecycle surface", () => {
+		const makeNode = (tag = "div", className = "") => ({
+			tag,
+			className,
+			children: [],
+			attributes: {},
+			textContent: "",
+			disabled: false,
+			appendChild (child) { this.children.push(child); return child; },
+			setAttribute (name, value) { this.attributes[name] = String(value); },
+			addEventListener (name, handler) { this[`on${name}`] = handler; },
+			click () { return this.onclick?.(); },
+		});
+
+		it("renders compact shared lifecycle status, visible disabled reason, and shared Page actions", async () => {
+			const useLifecycle = jest.fn(async () => ({committed: true}));
+			const page = {
+				getState: () => state,
+				getFeatureCompanionLifecycleFocusKey: jest.fn(() => "feature-companion-lifecycle::defender-1::revival"),
+				pUseFeatureCompanionLifecycle: useLifecycle,
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._ce = (tag, className, parent) => {
+				const node = makeNode(tag, className);
+				parent?.appendChild(node);
+				return node;
+			};
+			const card = makeNode();
+			const companion = {id: "defender-1"};
+			const reasonId = pm._renderFeatureCompanionLifecycle(card, companion, {
+				status: "dead",
+				tone: "danger",
+				label: "Dead",
+				generation: 2,
+				summary: "Died at game minute 10. Revival is allowed through minute 70.",
+				guidance: "Begin revival before the window closes.",
+				disabledReason: "This defender is dead. Ordinary operations cannot revive it.",
+				revival: {available: false, message: "No normal or Pact Magic spell slot is available."},
+			});
+
+			expect(reasonId).toBe("pm-feature-companion-lifecycle-defender-1-disabled-reason");
+			expect(card.children[0]).toMatchObject({
+				tag: "section",
+				className: "pm-companion-lifecycle pm-companion-lifecycle--danger",
+				attributes: {
+					role: "status",
+					"aria-live": "polite",
+					"aria-atomic": "true",
+				},
+			});
+			const actionRow = card.children[0].children.at(-1);
+			const [button, reason] = actionRow.children;
+			expect(button).toMatchObject({textContent: "Begin revival", disabled: true});
+			expect(reason.textContent).toMatch(/no normal or Pact Magic spell slot/i);
+			expect(button.attributes["aria-describedby"]).toContain(reasonId);
+			expect(button.attributes["aria-describedby"]).toContain(reason.id);
+
+			button.disabled = false;
+			button.click();
+			expect(useLifecycle).toHaveBeenCalledWith({
+				companionId: companion.id,
+				operation: "revival",
+			});
+		});
+
+		it.each([
+			[
+				"EFA non-Battle-Smith",
+				[{
+					name: "Artificer",
+					source: "EFA",
+					subclass: {name: "Alchemist", shortName: "Alchemist", source: "EFA"},
+				}],
+				false,
+			],
+			[
+				"unrelated Artificer",
+				[{name: "Artificer", source: "PHB"}],
+				false,
+			],
+			[
+				"exact EFA Battle Smith",
+				[{
+					name: "Artificer",
+					source: "EFA",
+					subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "EFA"},
+				}],
+				false,
+			],
+			[
+				"name-only TCE subclass with wrong subclass source",
+				[{
+					name: "Artificer",
+					source: "TCE",
+					subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "EFA"},
+				}],
+				false,
+			],
+			[
+				"legacy exact TCE Battle Smith",
+				[{
+					name: "Artificer",
+					source: "TCE",
+					subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "TCE"},
+				}],
+				true,
+			],
+		])("source-qualifies the legacy Steel Defender add button for %s", (_label, classes, shouldShow) => {
+			const fakeState = {
+				constructor: CharacterSheetState,
+				getClasses: () => classes,
+				getFeatureCompanionSetupRecord: () => null,
+				getPendingFeatureCompanionSetups: () => [],
+				getCompanions: () => [],
+			};
+			const page = {
+				getState: () => fakeState,
+				getFeatureCompanionLifecycleSurfaceCompanions: () => [],
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._ce = (tag, className, parent) => {
+				const node = makeNode(tag, className);
+				parent?.appendChild(node);
+				return node;
+			};
+			pm._setIconLabel = (element, _icon, label) => { element.textContent = label.trim(); };
+			pm._renderEmptyState = jest.fn();
+			pm._addBuiltinCompanion = jest.fn();
+			const container = makeNode();
+
+			pm._renderCompanionsDrawer(container);
+			const steelButton = container.children
+				.flatMap(child => child.children || [])
+				.find(child => child.title === "Steel Defender");
+			expect(!!steelButton).toBe(shouldShow);
+			if (steelButton) {
+				steelButton.click();
+				expect(pm._addBuiltinCompanion).toHaveBeenCalledWith("steel-defender");
+			} else {
+				expect(pm._addBuiltinCompanion).not.toHaveBeenCalled();
+			}
+		});
+	});
+
 	describe("Active-state lifecycle", () => {
 		it("ends known states canonically, drains their queued end save, and persists", async () => {
 			state.activateState("dancing");

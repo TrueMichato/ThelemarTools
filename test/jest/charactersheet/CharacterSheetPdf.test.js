@@ -644,6 +644,70 @@ describe("CharacterSheetPdf", () => {
 			expect(html).not.toContain("[object Object]");
 		});
 
+		test("should render exact EFA lifecycle generation, timing, pending, expired, vanished, and guidance", () => {
+			const renderLifecycle = (lifecycle, {minute = 0} = {}) => {
+				const candidate = getEfaSteelDefenderPdfState();
+				if (minute) candidate.advanceGameTimeMinutes(minute, {reason: "pdf-lifecycle", identity: "test"});
+				const companion = candidate.getFeatureOwnedCompanions(EFA_STEEL_DEFENDER_UID)[0];
+				companion.lifecycle = lifecycle;
+				companion.active = lifecycle.status === "alive";
+				if (lifecycle.status !== "alive") companion.hp.current = 0;
+				return new CharacterSheetPdf(candidate).generate();
+			};
+
+			const alive = renderLifecycle({status: "alive", generation: 4});
+			expect(alive).toContain("<strong>Lifecycle</strong> Alive");
+			expect(alive).toContain("<strong>Generation</strong> 4");
+			expect(alive).toContain("revival uses the exact one-hour death window");
+
+			const deadKnown = renderLifecycle({
+				status: "dead",
+				generation: 4,
+				diedAtGameMinute: 120,
+				timingKnown: true,
+			}, {minute: 135});
+			expect(deadKnown).toContain("<strong>Lifecycle</strong> Dead");
+			expect(deadKnown).toContain("<strong>Death minute</strong> 120");
+			expect(deadKnown).toContain("<strong>Revival deadline</strong> Game minute 180; 45 minutes remaining");
+			expect(deadKnown).toContain("take the Magic Action, touch the defender, and expend one normal or Pact Magic spell slot");
+			expect(deadKnown).toContain("after a completed Long Rest");
+
+			const deadUnknown = renderLifecycle({
+				status: "dead",
+				generation: 2,
+				diedAtGameMinute: null,
+				timingKnown: false,
+			});
+			expect(deadUnknown).toContain("<strong>Death timing</strong> Unknown; confirm it died within the last hour");
+
+			const pending = renderLifecycle({
+				status: "revivalPending",
+				generation: 2,
+				revivalPending: {dueAtGameMinute: 31},
+			}, {minute: 30});
+			expect(pending).toContain("<strong>Lifecycle</strong> Revival pending");
+			expect(pending).toContain("<strong>Pending completion</strong> Game minute 31");
+			expect(pending).toContain("Advance canonical game time by 1 minute");
+
+			const expired = renderLifecycle({
+				status: "expired",
+				generation: 2,
+				expiredAtGameMinute: 61,
+			}, {minute: 61});
+			expect(expired).toContain("<strong>Expired at</strong> Game minute 61");
+			expect(expired).toContain("one-hour revival window expired");
+
+			const vanished = renderLifecycle({
+				status: "vanished",
+				generation: 2,
+				vanishedAtGameMinute: 80,
+				vanishedReason: "summonerDeath",
+			}, {minute: 80});
+			expect(vanished).toContain("<strong>Vanished at</strong> Game minute 80");
+			expect(vanished).toContain("vanished when its owner died and does not return");
+			expect(vanished).toContain("Smith's Tools (XPHB)");
+		});
+
 		test("should keep EFA presentation isolated from name-only, TCE, and RHW companions", () => {
 			const nameOnly = new CharacterSheetState();
 			nameOnly.addCompanion({
@@ -685,6 +749,8 @@ describe("CharacterSheetPdf", () => {
 				expect(html).not.toContain("pdf-companion--efa-steel-defender");
 				expect(html).not.toContain("Command &amp; Action Economy");
 				expect(html).not.toContain("<strong>Arcane Jolt</strong>");
+				expect(html).not.toContain("<strong>Lifecycle</strong>");
+				expect(html).not.toContain("<strong>Generation</strong>");
 				expect(html).not.toContain("[object Object]");
 			}
 			expect(new CharacterSheetPdf(tce).generate()).toContain("<strong>Deflect Attack</strong>");

@@ -34,6 +34,7 @@ const EFA_ARTILLERIST = artificerData.subclass.find(it =>
 );
 
 beforeAll(async () => {
+	await import("../../../js/charactersheet/charactersheet-companion-rules.js");
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
 	CharacterSheetRest = (await import("../../../js/charactersheet/charactersheet-rest.js")).CharacterSheetRest;
 });
@@ -255,6 +256,61 @@ describe("#8 — Undo rest (full-snapshot capture/restore)", () => {
 				if (originalRandomise === undefined) delete globalThis.RollerUtil.randomise;
 				else globalThis.RollerUtil.randomise = originalRandomise;
 			}
+		});
+
+		it("restores the exact Steel Defender generation replaced after the Long Rest", () => {
+			const state = new CharacterSheetState();
+			state.loadFromJson({
+				abilities: {int: 18},
+				classes: [{
+					name: "Artificer",
+					source: "EFA",
+					level: 3,
+					subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "EFA"},
+				}],
+			});
+			const companionId = state.addCompanion({
+				name: "Steel Defender",
+				source: "EFA",
+				type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+				origin: "Battle Smith",
+				hp: {max: 20, current: 0, temp: 0},
+				featureGrant: {uid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER},
+				lifecycle: {status: "dead", generation: 1, diedAtGameMinute: 0, timingKnown: true},
+			});
+			state.reconcileFeatureOwnedCompanion(companionId, {
+				summonerContext: state.getFeatureCompanionSummonerContext(
+					CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER,
+				),
+			});
+			const toolItemId = "smith-tools-row";
+			state.addItem({id: toolItemId, name: "Smith's Tools", source: "XPHB", type: "AT"}, 1);
+			const {rest} = makeRest(state);
+
+			rest._captureRestSnapshot("long");
+			state.onLongRest();
+			expect(state.replaceFeatureCompanionAfterLongRest({
+				companionId,
+				toolItemId,
+				inHandConfirmed: true,
+			})).toMatchObject({ok: true, committed: true});
+			expect(state.getCompanion(companionId).lifecycle).toMatchObject({
+				status: "alive",
+				generation: 2,
+				lastReplacementLongRestMinute: 480,
+			});
+
+			expect(rest._onUndoRest()).toBe(true);
+			expect(state.getGameTimeMinutes()).toBe(0);
+			expect(state.getCompanion(companionId)).toMatchObject({
+				active: false,
+				hp: {current: 0, max: 20},
+				lifecycle: {
+					status: "dead",
+					generation: 1,
+					diedAtGameMinute: 0,
+				},
+			});
 		});
 	});
 

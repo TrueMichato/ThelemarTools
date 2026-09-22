@@ -1,6 +1,7 @@
 import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-companion-rules.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
 
@@ -26,7 +27,7 @@ beforeEach(() => {
 	jest.clearAllMocks();
 });
 
-function makeRest (state) {
+function makeRest (state, pageOverrides = {}) {
 	const rest = Object.create(Rest.prototype);
 	const page = {
 		_lastRestSnapshot: null,
@@ -34,6 +35,7 @@ function makeRest (state) {
 		saveCharacter: jest.fn(),
 		renderCharacter: jest.fn(),
 		getMaterialsModule: () => null,
+		...pageOverrides,
 	};
 	rest._state = state;
 	rest._page = page;
@@ -41,6 +43,34 @@ function makeRest (state) {
 	rest._showGamblerPreparedRollModal = jest.fn();
 	rest._showScribingMemorizeModal = jest.fn();
 	return {rest, page};
+}
+
+function makeEfaReplacementState () {
+	const state = new State();
+	state.loadFromJson({
+		abilities: {int: 18},
+		classes: [{
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Battle Smith", shortName: "Battle Smith", source: "EFA"},
+		}],
+	});
+	const companionId = state.addCompanion({
+		name: "Steel Defender",
+		source: "EFA",
+		type: State.COMPANION_TYPES.CLASS_SUMMON,
+		origin: "Battle Smith",
+		hp: {max: 20, current: 0, temp: 0},
+		featureGrant: {uid: State.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER},
+		lifecycle: {status: "dead", generation: 2, diedAtGameMinute: 0, timingKnown: true},
+	});
+	state.reconcileFeatureOwnedCompanion(companionId, {
+		summonerContext: state.getFeatureCompanionSummonerContext(State.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER),
+	});
+	const toolItemId = "smith-tools-row";
+	state.addItem({id: toolItemId, name: "Smith's Tools", source: "XPHB", type: "AT"}, 1);
+	return {state, companionId, toolItemId};
 }
 
 function mockProductionOptions (state) {
@@ -104,6 +134,110 @@ function mockProductionOptions (state) {
 }
 
 describe("EFA Replicate Magic Item long-rest interaction", () => {
+	test("stages an optional exact-tool Steel Defender replacement without mutating state", () => {
+		const {state, companionId, toolItemId} = makeEfaReplacementState();
+		const before = state.toJson();
+		const {rest} = makeRest(state);
+		const replacement = rest._buildEfaSteelDefenderReplacementSection();
+
+		expect(replacement).toMatchObject({companionId});
+		expect(replacement.section.tag).toBe("fieldset");
+		expect(replacement.section.children[0]).toMatchObject({
+			tag: "legend",
+			textContent: "Steel Defender — Optional Replacement",
+		});
+		expect(replacement.getRequest()).toBeNull();
+		const toolSelect = replacement.section.children[2].children[1];
+		const inHand = replacement.section.children[3].children[0];
+		const status = replacement.section.children[4];
+		expect(status._attrs).toMatchObject({role: "status", "aria-live": "polite", "aria-atomic": "true"});
+		expect(toolSelect.children.map(option => option.value)).toEqual(["", toolItemId]);
+		expect(inHand.disabled).toBe(true);
+
+		toolSelect.value = toolItemId;
+		toolSelect._handlers.change();
+		expect(inHand.disabled).toBe(false);
+		expect(replacement.getRequest()).toEqual({
+			companionId,
+			toolItemId,
+			inHandConfirmed: false,
+		});
+		inHand.checked = true;
+		inHand._handlers.change();
+		expect(replacement.getRequest()).toEqual({
+			companionId,
+			toolItemId,
+			inHandConfirmed: true,
+		});
+		expect(status.textContent).toMatch(/generation 3.*after canonical rest processing/i);
+		expect(state.toJson()).toEqual(before);
+	});
+
+	test("commits selected replacement only after canonical Long Rest time and keeps cancellation non-mutating", async () => {
+		const first = makeEfaReplacementState();
+		const cancelledBefore = first.state.toJson();
+		const cancelled = makeRest(first.state);
+		const firstModal = globalThis.e_({tag: "div"});
+		const firstClose = jest.fn();
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValueOnce({eleModalInner: firstModal, doClose: firstClose});
+		await cancelled.rest._showLongRestDialog();
+		const cancelledFieldset = createdElements.find(element =>
+			element._clazz?.includes("charsheet__steel-defender-replacement"),
+		);
+		const cancelledSelect = cancelledFieldset.children[2].children[1];
+		const cancelledInHand = cancelledFieldset.children[3].children[0];
+		cancelledSelect.value = first.toolItemId;
+		cancelledSelect._handlers.change();
+		cancelledInHand.checked = true;
+		cancelledInHand._handlers.change();
+		firstClose(false);
+		expect(first.state.toJson()).toEqual(cancelledBefore);
+		expect(cancelled.page.saveCharacter).not.toHaveBeenCalled();
+
+		createdElements.length = 0;
+		const second = makeEfaReplacementState();
+		const commitReplacement = jest.fn(request => {
+			expect(second.state.getGameTimeMinutes()).toBe(480);
+			expect(second.state.toJson().gameTime.lastLongRestMinute).toBe(480);
+			return second.state.replaceFeatureCompanionAfterLongRest(request);
+		});
+		const committed = makeRest(second.state, {
+			commitFeatureCompanionReplacementAfterLongRest: commitReplacement,
+		});
+		const secondModal = globalThis.e_({tag: "div"});
+		const secondClose = jest.fn();
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValueOnce({eleModalInner: secondModal, doClose: secondClose});
+		await committed.rest._showLongRestDialog();
+		const fieldset = createdElements.find(element =>
+			element._clazz?.includes("charsheet__steel-defender-replacement"),
+		);
+		const toolSelect = fieldset.children[2].children[1];
+		const inHand = fieldset.children[3].children[0];
+		toolSelect.value = second.toolItemId;
+		toolSelect._handlers.change();
+		inHand.checked = true;
+		inHand._handlers.change();
+		createdElements.find(element => element.textContent === "🌙 Finish Long Rest").click();
+
+		expect(commitReplacement).toHaveBeenCalledWith({
+			companionId: second.companionId,
+			toolItemId: second.toolItemId,
+			inHandConfirmed: true,
+		});
+		expect(second.state.getCompanion(second.companionId)).toMatchObject({
+			active: true,
+			hp: {current: 20, max: 20},
+			lifecycle: {
+				status: "alive",
+				generation: 3,
+				lastReplacementLongRestMinute: 480,
+			},
+		});
+		expect(committed.page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(committed.page.renderCharacter).toHaveBeenCalledTimes(1);
+		expect(secondClose).toHaveBeenCalledWith(true);
+	});
+
 	test("builds a keyboard-native optional picker with labelled rows, live validation, and a non-mutating blank default", () => {
 		const state = new State();
 		mockProductionOptions(state);
