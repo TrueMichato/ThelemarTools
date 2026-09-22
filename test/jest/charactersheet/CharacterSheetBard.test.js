@@ -1877,6 +1877,22 @@ describe("XPHB 2024 Bard Core Features", () => {
 			const calculations = state.getFeatureCalculations();
 			expect(calculations.hasWordsOfCreation).toBeUndefined();
 		});
+
+		it("should not use total character level for the Words of Creation gate", () => {
+			state.addClass({name: "Bard", source: "XPHB", level: 17});
+			state.addClass({name: "Rogue", source: "XPHB", level: 3});
+			expect(state.getTotalLevel()).toBe(20);
+			expect(state.getFeatureCalculations().hasWordsOfCreation).toBeUndefined();
+		});
+
+		it("should support the TGTT 2024 Bard chassis but not PHB Bard", () => {
+			state.addClass({name: "Bard", source: "TGTT", level: 20});
+			expect(state.getFeatureCalculations().hasWordsOfCreation).toBe(true);
+
+			const phb = new CharacterSheetState();
+			phb.addClass({name: "Bard", source: "PHB", level: 20});
+			expect(phb.getFeatureCalculations().hasWordsOfCreation).toBeUndefined();
+		});
 	});
 
 	// -------------------------------------------------------------------------

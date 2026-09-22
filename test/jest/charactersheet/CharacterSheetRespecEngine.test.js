@@ -33,6 +33,7 @@ describe("CharacterSheetRespecEngine", () => {
 		});
 		page = {
 			getClasses: () => [classData],
+			getSpells: () => [],
 			getClassFeatures: () => [],
 			getSubclassFeatures: () => [],
 			getOptionalFeatures: () => [],
@@ -78,6 +79,100 @@ describe("CharacterSheetRespecEngine", () => {
 		expect(engine.state.getDraconicResonanceCatalog()).toEqual([{name: "Wyrm Echo", source: "TGTT"}]);
 		expect(engine.state.getItemRaw(stone.id).ability.cha).toBe(4);
 		expect(CharacterSheetMaterials.getUnresolvedReferences()).toEqual([]);
+	});
+
+	it("installs class and spell catalogs before reconciling Words of Creation in the draft", () => {
+		const wordsSpells = [
+			{name: "Power Word Heal", source: "XPHB", level: 9, school: "E"},
+			{name: "Power Word Kill", source: "XPHB", level: 9, school: "E"},
+		];
+		const wordsBard = {
+			name: "Bard",
+			source: "TGTT",
+			additionalSpells: [{prepared: {20: ["power word heal|xphb", "power word kill|xphb"]}}],
+			classFeatures: [],
+		};
+		state = new CharacterSheetState();
+		state.setSpellData(wordsSpells);
+		state.setClassCatalog([wordsBard]);
+		state._data.classes = [{name: "Bard", source: "TGTT", level: 19, subclass: null}];
+		page = {
+			getClasses: () => [wordsBard],
+			getSpells: () => wordsSpells,
+			getClassFeatures: () => [],
+			getSubclassFeatures: () => [],
+			getOptionalFeatures: () => [],
+			saveCharacter: jest.fn().mockResolvedValue(undefined),
+			renderCharacter: jest.fn(),
+		};
+		engine = new CharacterSheetRespecEngine({page, state});
+		engine.begin();
+		expect(engine.state.getSpellsKnown()).toHaveLength(0);
+
+		engine.state._data.classes[0].level = 20;
+		engine.state.applyClassFeatureEffects();
+		expect(engine.state.getSpellsKnown()).toEqual(expect.arrayContaining([
+			expect.objectContaining({name: "Power Word Heal", source: "XPHB", level: 9, alwaysPrepared: true}),
+			expect.objectContaining({name: "Power Word Kill", source: "XPHB", level: 9, alwaysPrepared: true}),
+		]));
+
+		engine.state._data.classes[0].level = 19;
+		engine.state.applyClassFeatureEffects();
+		expect(engine.state.getSpellsKnown()).toHaveLength(0);
+	});
+
+	it("a 20 to 19 Respec removes only Words-owned grants and restores a manual copy", () => {
+		const wordsSpells = [
+			{name: "Power Word Heal", source: "XPHB", level: 9, school: "E"},
+			{name: "Power Word Kill", source: "XPHB", level: 9, school: "E"},
+		];
+		const wordsBard = {
+			name: "Bard",
+			source: "XPHB",
+			additionalSpells: [{prepared: {20: ["power word heal|xphb", "power word kill|xphb"]}}],
+			classFeatures: [],
+		};
+		state = new CharacterSheetState();
+		state.setSpellData(wordsSpells);
+		state._data.classes = [{name: "Bard", source: "XPHB", level: 20, subclass: null}];
+		state.addSpell({
+			name: "Power Word Heal",
+			source: "XPHB",
+			level: 9,
+			school: "E",
+			sourceFeature: "Spells Prepared",
+			sourceClass: "Bard",
+		}, true);
+		state.setClassCatalog([wordsBard]);
+		state.applyClassFeatureEffects();
+		page = {
+			getClasses: () => [wordsBard],
+			getSpells: () => wordsSpells,
+			getClassFeatures: () => [],
+			getSubclassFeatures: () => [],
+			getOptionalFeatures: () => [],
+			saveCharacter: jest.fn().mockResolvedValue(undefined),
+			renderCharacter: jest.fn(),
+		};
+		engine = new CharacterSheetRespecEngine({page, state});
+		engine.begin();
+
+		engine.state._data.classes[0].level = 19;
+		engine.state.applyClassFeatureEffects();
+
+		expect(engine.state.getSpellsKnown()).toEqual([
+			expect.objectContaining({
+				name: "Power Word Heal",
+				source: "XPHB",
+				prepared: true,
+				alwaysPrepared: false,
+				grantedByClass: false,
+				sourceFeature: "Spells Prepared",
+				sourceClass: "Bard",
+			}),
+		]);
+		expect(engine.state.getSpellsKnown()[0].classGrantOwners).toBeUndefined();
+		expect(engine.state.getSpellsKnown()[0].classGrantOriginalMetadata).toBeUndefined();
 	});
 
 	it("rolls back a legacy staged mutation when its mechanics callback fails", async () => {

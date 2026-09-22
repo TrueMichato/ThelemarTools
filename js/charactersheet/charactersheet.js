@@ -261,11 +261,11 @@ class CharacterSheetPage {
 		this._state.setItemMaterialCatalog(this._itemMaterialsData);
 		this._state.setDraconicResonanceCatalog(this._draconicResonancesData);
 
-		// Inject the full spell database into state so subclass-granted spells
-		// (domain/oath/circle/origin/patron) are enriched with their real
-		// level/school instead of being stored as lean `level: null` refs that
-		// the level-grouped spell list silently drops.
+		// Inject the fully-merged spell and class catalogs before any character load or
+		// build flow. Subclass/base-class grants need both: spell data supplies canonical
+		// level/source metadata, while class data carries structured `additionalSpells`.
 		this._state.setSpellData(this._spellsData);
+		this._state.setClassCatalog(this._classes || []);
 		this._initItemTransferListener();
 
 		// Check for character in URL
