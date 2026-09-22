@@ -1,3 +1,4 @@
+import {jest} from "@jest/globals";
 import {readFileSync} from "node:fs";
 import {dirname, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -11,7 +12,52 @@ import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
+let CharacterSheetPage;
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+let savedWindow;
+let savedDocument;
+let savedRenderer;
+let pageRenderer;
+
+beforeAll(async () => {
+	savedWindow = globalThis.window;
+	savedDocument = globalThis.document;
+	savedRenderer = globalThis.Renderer;
+	pageRenderer = {
+		...savedRenderer,
+		dice: {
+			...savedRenderer?.dice,
+			parseRandomise2: (...args) => savedRenderer?.dice?.parseRandomise2?.(...args) ?? 0,
+		},
+	};
+	globalThis.window = {
+		addEventListener: () => {},
+		dispatchEvent: () => {},
+		location: {search: ""},
+		matchMedia: () => ({matches: false, addEventListener: () => {}}),
+	};
+	globalThis.document = {
+		querySelector: () => null,
+		querySelectorAll: () => [],
+		getElementById: () => null,
+		addEventListener: () => {},
+		body: {classList: {add () {}, remove () {}}},
+	};
+	globalThis.Renderer = pageRenderer;
+	await import("../../../js/charactersheet/charactersheet.js");
+	CharacterSheetPage = globalThis.CharacterSheetPage;
+});
+
+afterEach(() => {
+	jest.restoreAllMocks();
+});
+
+afterAll(() => {
+	globalThis.window = savedWindow;
+	globalThis.document = savedDocument;
+	globalThis.Renderer = savedRenderer;
+});
 
 const MAGIC_LONGSWORD = Object.freeze({
 	name: "Magic Longsword",
@@ -82,6 +128,19 @@ describe("shared magic-item classification", () => {
 		expect(CharacterSheetItemUtils.isMagicWeapon(MUNDANE_FORCE_WEAPON)).toBe(false);
 		expect(CharacterSheetItemUtils.isMagicWeapon({name: "Magic Sword", source: "TST", type: "M", rarity: "none"})).toBe(false);
 		expect(CharacterSheetItemUtils.isMagicWeapon({name: "Rare Amulet", source: "TST", type: "W", rarity: "rare"})).toBe(false);
+	});
+
+	it("does not treat resistance-bypassing attacks as proof that a weapon is a magic item", () => {
+		const weapon = {...MUNDANE_FORCE_WEAPON, countsAsMagical: true};
+		const state = makeBattleSmithState();
+
+		expect(CharacterSheetItemUtils.isMagicWeapon(weapon)).toBe(false);
+		expect(state.isMagicWeapon(weapon)).toBe(false);
+		expect(state.getWeaponAbilityResolution(makeAttack(weapon))).toMatchObject({
+			modifier: 0,
+			ability: "str",
+			source: null,
+		});
 	});
 
 	it("routes normalized catalog magic facts through the shared classifier", () => {
@@ -180,6 +239,41 @@ describe("Battle Ready shared ability resolution", () => {
 			sourceFeatureUid: CharacterSheetState.TCE_BATTLE_READY_FEATURE_UID,
 		});
 	});
+
+	it("uses the resolved Battle Ready ability for ability-scoped attack modifiers", async () => {
+		const state = makeBattleSmithState({str: 16, dex: 10, int: 18});
+		const attack = makeAttack({...MAGIC_LONGSWORD, id: "battle-ready-scoped-attack"});
+		state.addAttack(attack);
+		const storedAttack = state.getAttacks().find(it => it.name === attack.name);
+		const aggregateModifiers = jest.spyOn(state, "aggregateModifiers")
+			.mockImplementation(() => ({
+				total: 0,
+				dice: [],
+				conditionalsAvailable: [{id: "cancel-roll"}],
+			}));
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._state = state;
+		combat._page = {
+			_pPickConditionalModifiers: async () => ({cancelled: true}),
+		};
+		combat._canRollAttackActionAttack = () => true;
+		combat._getAttackRollKind = () => ({isMelee: true});
+
+		await combat._rollAttack(storedAttack.id, null);
+
+		expect(aggregateModifiers).toHaveBeenCalledWith("attack:melee:int");
+		expect(aggregateModifiers).not.toHaveBeenCalledWith("attack:melee:str");
+	});
+
+	it("does not apply Strength-only Rage damage to an Intelligence Battle Ready attack", () => {
+		const state = makeBattleSmithState({str: 16, dex: 10, int: 18});
+		const attack = makeAttack({...MAGIC_LONGSWORD, id: "battle-ready-rage-attack"});
+		const getRageDamageBonus = jest.spyOn(state, "getRageDamageBonus")
+			.mockImplementation((_isMelee, ability) => ability === "str" ? 2 : 0);
+
+		expect(state.getWeaponDisplayDamageBreakdown(attack).rage).toBe(0);
+		expect(getRageDamageBonus).toHaveBeenCalledWith(true, "int");
+	});
 });
 
 describe("Replicate Magic Item provenance", () => {
@@ -237,9 +331,9 @@ describe("Replicate Magic Item provenance", () => {
 
 		const unrelatedState = makeBattleSmithState();
 		const unrelated = createGenerated(unrelatedState, {
-			featureUid: "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA",
+			featureUid: "Experimental Elixir|Artificer|EFA|Alchemist|EFA|3|EFA",
 			classUid: "Artificer|EFA",
-			subclassUid: "Battle Smith|Artificer|EFA|EFA",
+			subclassUid: "Alchemist|Artificer|EFA|EFA",
 			featureSource: "EFA",
 		});
 		expect(unrelatedState.classifyGeneratedFeatureItem(unrelated).status).toBe("valid");
@@ -294,6 +388,44 @@ describe("Battle Ready attribution surfaces", () => {
 			.toBe("INT via Battle Ready");
 	});
 
+	it("rolls the same Battle Ready attack and damage totals shown by Overview and Play Mode", async () => {
+		const state = makeBattleSmithState({str: 10, dex: 10, int: 18});
+		const attack = {
+			...makeAttack({...MAGIC_LONGSWORD, id: "battle-ready-page-roll"}),
+			attackBonus: 1,
+			damage: "1d8",
+			damageBonus: 1,
+			range: "5 ft.",
+		};
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._state = state;
+		page._combat = null;
+		page._getExhaustionPenalty = () => 0;
+		page._rollD20 = () => ({roll: 10, roll1: 10, roll2: 10, mode: "normal", thelemar_critBonus: 0});
+		page._pPickConditionalModifiers = async () => ({appliedConditionalIds: new Set(), applied: [], cancelled: false});
+		page._pMaybeApplyRedCant = async ({effectiveRoll}) => ({effectiveRoll, applied: false, note: ""});
+		page._pMaybeApplyFortuneIntervention = async ({effectiveRoll}) => ({effectiveRoll, note: ""});
+		page._pMaybeApplyTacticalMind = async () => {};
+		page._rollStateDiceBonuses = () => ({total: 0, breakdownStr: ""});
+		page._formatAppliedConditionalsNote = () => "";
+		page._getActiveStateEffectLabel = () => "";
+		page._getModeLabel = () => "";
+		page._formatD20Breakdown = () => "10 + 7";
+		page.pAnimateD20 = async () => {};
+		page._showDiceResult = jest.fn();
+		pageRenderer.dice.parseRandomise2 = jest.fn(() => 5);
+
+		await page._rollAttack(attack);
+
+		expect(page._showDiceResult).toHaveBeenCalledWith(
+			"Magic Longsword",
+			17,
+			expect.stringContaining("→ 10"),
+			expect.any(String),
+			expect.any(String),
+		);
+	});
+
 	it("keeps Overview, Combat, and Play Mode on the shared resolver and attribution field", () => {
 		for (const [file, method] of [
 			["charactersheet.js", "_renderAttacks ()"],
@@ -309,13 +441,18 @@ describe("Battle Ready attribution surfaces", () => {
 		}
 	});
 
-	it("keeps both Combat attack and damage rolls on the shared resolver", () => {
-		const source = readFileSync(resolve(__dirname, "../../../js/charactersheet/charactersheet-combat.js"), "utf8");
-		for (const method of ["_rollAttack (attack", "_rollDamage (attack"]) {
-			const start = source.indexOf(method);
-			const body = source.slice(start, start + 12000);
-			expect(start).toBeGreaterThanOrEqual(0);
-			expect(body).toContain("getWeaponAbilityResolution");
+	it("keeps all attack and damage rolls on the shared resolver", () => {
+		for (const [file, methods] of [
+			["charactersheet-combat.js", ["_rollAttack (attack", "_rollDamage (attack"]],
+			["charactersheet.js", ["_rollAttack (attack"]],
+		]) {
+			const source = readFileSync(resolve(__dirname, `../../../js/charactersheet/${file}`), "utf8");
+			for (const method of methods) {
+				const start = source.indexOf(method);
+				const body = source.slice(start, start + 12000);
+				expect(start).toBeGreaterThanOrEqual(0);
+				expect(body).toContain("getWeaponAbilityResolution");
+			}
 		}
 	});
 });

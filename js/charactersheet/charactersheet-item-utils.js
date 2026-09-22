@@ -48,13 +48,11 @@ export class CharacterSheetItemUtils {
 	 * @param {object} [opts]
 	 * @param {object|null} [opts.generatedItemClassification]
 	 * @param {boolean} [opts.isGeneratedMagicItem]
-	 * @param {boolean} [opts.countsAsMagical]
 	 * @returns {boolean}
 	 */
 	static isMagicItem (item, {
 		generatedItemClassification = null,
 		isGeneratedMagicItem = false,
-		countsAsMagical = false,
 	} = {}) {
 		if (!item || typeof item !== "object") return false;
 
@@ -96,8 +94,6 @@ export class CharacterSheetItemUtils {
 			|| item.magic === true
 			|| item._isMagicItem === true
 			|| item._isMagicWeapon === true
-			|| item.countsAsMagical === true
-			|| countsAsMagical === true
 			|| hasMagicRarity
 			|| hasMagicBonus
 			|| item.wondrous === true

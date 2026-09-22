@@ -1397,11 +1397,12 @@ class CharacterSheetCombat {
 		// Honor an explicit ranged flag first (active-state / spell attacks set isRanged:true
 		// with a plain "60 ft." range that the heuristic below would otherwise read as melee).
 		const {isMelee} = this._getAttackRollKind(attack);
-		// Resolve the concrete ability used for the roll so the scoped attack type is
-		// accurate. A "finesse" weapon uses the better of STR/DEX (mirrors
-		// getWeaponAbilityMod); resolving it here lets STR-scoped states (e.g. Reckless
-		// Attack → "attack:melee:str") correctly apply to a STR-used finesse weapon.
-		const abilityUsed = this._resolveAttackAbilityKey(attack, isMelee);
+		let abilityResolution = this._state.getWeaponAbilityResolution?.(attack) || {
+			modifier: this._state.getWeaponAbilityMod(attack),
+			ability: this._resolveAttackAbilityKey(attack, isMelee),
+			source: null,
+		};
+		const abilityUsed = abilityResolution.ability;
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
 		const conditionalProbe = this._state.aggregateModifiers?.(attackType) || {};
 		let appliedConditionalIds = new Set();
@@ -1444,7 +1445,7 @@ class CharacterSheetCombat {
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
 
 		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
-		const abilityResolution = attackBreakdown?.abilityResolution
+		abilityResolution = attackBreakdown?.abilityResolution
 			|| this._state.getWeaponAbilityResolution?.(attack);
 		const attackContributions = attackBreakdown?.passiveFeatureContributions || [];
 		const externalItemContributions = attackBreakdown?.externalItemContributions || [];

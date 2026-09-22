@@ -18466,7 +18466,12 @@ class CharacterSheetPage {
 			? classification.isMelee
 			: !!(attack.isMelee || attack.type === "melee" || attack.range === "melee"
 				|| (attack.range && !attack.range.includes("/")));
-		const abilityUsed = attack.abilityMod || attack.ability || (isMelee ? "str" : "dex");
+		const abilityResolution = this._state.getWeaponAbilityResolution?.(attack) || {
+			modifier: this._state.getWeaponAbilityMod(attack),
+			ability: attack.abilityMod || attack.ability || (isMelee ? "str" : "dex"),
+			source: null,
+		};
+		const abilityUsed = abilityResolution.ability;
 		const attackType = `attack:${isMelee ? "melee" : "ranged"}:${abilityUsed}`;
 
 		// Probe for conditional attack modifiers (e.g. "advantage on attacks
@@ -18533,31 +18538,23 @@ class CharacterSheetPage {
 			resultNote = resultNote ? `${resultNote}\n${appliedCondsStr}` : appliedCondsStr;
 		}
 
-		// Parse and roll damage
-		let damageRoll = attack.damage;
-
 		const standingDamage = this._state.getWeaponDisplayDamageBreakdown?.(attack);
 		const abilityDamage = attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack);
 		const totalBonusDamage = abilityDamage + (standingDamage?.total ?? (Number(attack.damageBonus) || 0));
-
-		let damageStr = attack.damage;
-		if (totalBonusDamage > 0) {
-			damageStr = `${attack.damage} + ${totalBonusDamage}`;
-		}
-
 		const damageResult = Renderer.dice.parseRandomise2(attack.damage);
 		const totalDamage = damageResult + totalBonusDamage;
 
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
 		const stateEffectStr = (hasAdvantage || hasDisadvantage) ? this._getActiveStateEffectLabel(hasAdvantage, hasDisadvantage) : "";
+		const abilityDamageStr = abilityDamage
+			? ` + ${abilityDamage} (${String(abilityResolution.ability || abilityUsed).toUpperCase()}${abilityResolution.source ? ` via ${abilityResolution.source}` : ""})`
+			: "";
+		const baseDamageStr = standingDamage?.base ? ` + ${standingDamage.base} (weapon)` : "";
+		const featureDamageStr = standingDamage?.feature ? ` + ${standingDamage.feature} (features)` : "";
 		const rageDamageStr = standingDamage?.rage ? ` + ${standingDamage.rage} (rage)` : "";
 		const stateDamageStr = standingDamage?.state ? ` + ${standingDamage.state} (states)` : "";
-		const itemDamageStr = standingDamage?.externalItemContributions?.length
-			? standingDamage.externalItemContributions.map(it => ` + ${it.value} (${it.name})`).join("")
-			: "";
-		const abilitySubstitutionStr = attackBreakdown?.abilitySubstitution
-			? ` (${attackBreakdown.abilitySubstitution.name} substitution)`
-			: "";
+		const itemDamageStr = standingDamage?.item ? ` + ${standingDamage.item} (items)` : "";
+		const hybridDamageStr = standingDamage?.hybrid ? ` + ${standingDamage.hybrid} (hybrid)` : "";
 		const diceBonusStr = stateDice ? ` ${stateDice.breakdownStr}` : "";
 
 		await this.pAnimateD20(rollResult);
@@ -18565,7 +18562,7 @@ class CharacterSheetPage {
 			`${attack.name}${this._getModeLabel(rollResult.mode)}${stateEffectStr}`,
 			attackTotalWithDice,
 			`Attack: ${this._formatD20Breakdown(rollResult, standingAttackBonus + conditionalAttackBonus, exhaustionStr)}${diceBonusStr}
-			 Damage: ${attack.damage} + ${totalBonusDamage}${abilitySubstitutionStr} ${weaponDamageType || ""} = ${damageResult}${rageDamageStr}${stateDamageStr}${itemDamageStr}${totalBonusDamage !== 0 ? ` → ${totalDamage}` : ""}`,
+			 Damage: ${attack.damage} ${weaponDamageType || ""} = ${damageResult}${abilityDamageStr}${baseDamageStr}${featureDamageStr}${itemDamageStr}${stateDamageStr}${rageDamageStr}${hybridDamageStr}${totalBonusDamage ? ` → ${totalDamage}` : ""}`,
 			resultClass,
 			resultNote,
 		);

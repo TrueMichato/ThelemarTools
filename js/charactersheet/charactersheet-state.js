@@ -13315,10 +13315,7 @@ class CharacterSheetState {
 		if (attack?.isSpell || attack?.isSpellAttack || (attack?.abilityMode || attack?.abilityMod) === "spellcasting") return false;
 		const weapon = attack?.sourceItem || attack;
 		if (!this._isWeaponItem(weapon)) return false;
-		const effectiveBonuses = weapon.id != null ? this.getEffectiveItemBonuses?.(weapon.id) : null;
-		return this.isMagicWeapon(weapon, {
-			countsAsMagical: attack?.countsAsMagical === true || effectiveBonuses?.countsAsMagical === true,
-		});
+		return this.isMagicWeapon(weapon);
 	}
 
 	/**
@@ -37438,18 +37435,17 @@ class CharacterSheetState {
 		return classification?.status === "valid" && classification.ownerKey === ownerKey;
 	}
 
-	isMagicItem (item, {countsAsMagical = false} = {}) {
+	isMagicItem (item) {
 		const classification = this.classifyGeneratedFeatureItem(item);
 		return CharacterSheetItemUtils.isMagicItem(item?.item || item, {
 			generatedItemClassification: classification,
 			isGeneratedMagicItem: this._isGeneratedReplicateMagicItem(classification),
-			countsAsMagical,
 		});
 	}
 
-	isMagicWeapon (item, opts = {}) {
+	isMagicWeapon (item) {
 		const itemData = item?.item || item;
-		return CharacterSheetItemUtils.isWeapon(itemData) && this.isMagicItem(itemData, opts);
+		return CharacterSheetItemUtils.isWeapon(itemData) && this.isMagicItem(itemData);
 	}
 
 	/**
@@ -63440,7 +63436,8 @@ class CharacterSheetState {
 		const state = typeof stateRaw === "number" && Number.isFinite(stateRaw) ? stateRaw : 0;
 		const classification = this.getAttackClassification(attack);
 		const isMeleeWeapon = classification.kind === "weapon" && classification.isMelee && !classification.isThrown;
-		const rage = includeActiveStates ? this.getRageDamageBonus(isMeleeWeapon, attack.abilityMod || "str") : 0;
+		const abilityResolution = this.getWeaponAbilityResolution(attack, {includeActiveStates, includePassiveFeatures});
+		const rage = includeActiveStates ? this.getRageDamageBonus(isMeleeWeapon, abilityResolution.ability) : 0;
 		const hybrid = includeActiveStates && this.isStateTypeActive("hybridTransformation") && isMeleeWeapon
 			? (Number(this.getFeatureCalculation("hybridDamageBonus")) || 0)
 			: 0;
