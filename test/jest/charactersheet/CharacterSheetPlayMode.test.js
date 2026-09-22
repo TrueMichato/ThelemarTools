@@ -262,6 +262,7 @@ describe("CharacterSheetPlayMode", () => {
 					getSpeed: () => 30,
 				}),
 			});
+
 			const clickable = [];
 			pm._elActionsHub = actionsHub;
 			pm._makeCard = (parent) => {
@@ -320,6 +321,119 @@ describe("CharacterSheetPlayMode", () => {
 				if (previousDocument === undefined) delete globalThis.document;
 				else globalThis.document = previousDocument;
 			}
+		});
+	});
+
+	describe("Combat Methods", () => {
+		test("delegates use to the shared Combat transaction and does not mutate on a blocked result", async () => {
+			const method = {
+				name: "Spell Shattering Strike",
+				source: "TGTT",
+				staminaCost: 2,
+				staminaCostDisplay: "2",
+				randomOutcomes: {
+					die: "1d4",
+					options: [1, 2, 3, 4].map(roll => ({label: `Roll ${roll}`, effectText: `Effect ${roll}`})),
+				},
+			};
+			const setStaminaCurrent = jest.fn();
+			const useMethod = jest.fn(async () => ({ok: false, reason: "insufficient-stamina", cost: 2}));
+			const page = {
+				getState: () => ({
+					getSettings: () => ({enableTgtt: true}),
+					getCombatMethods: () => [method],
+					getStaminaCurrent: () => 2,
+					getStaminaMax: () => 4,
+					setStaminaCurrent,
+				}),
+				_combat: {_pUseCombatMethod: useMethod},
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._elActionsHub = {children: []};
+			pm._makeCard = jest.fn(() => ({children: []}));
+			pm._makeClickable = jest.fn();
+			pm._logActivity = jest.fn();
+			pm._ce = jest.fn((tag, className, parent) => {
+				const handlers = {};
+				const element = {
+					tag,
+					className,
+					children: [],
+					style: {},
+					classList: {add: jest.fn()},
+					addEventListener: jest.fn((event, handler) => { handlers[event] = handler; }),
+					_handlers: handlers,
+				};
+				parent?.children?.push(element);
+				return element;
+			});
+
+			pm._renderCombatMethods();
+			const useButton = pm._ce.mock.results
+				.map(it => it.value)
+				.find(it => it.className === "pm-feature__use-btn");
+			const outcomeDetails = pm._ce.mock.results
+				.map(it => it.value)
+				.filter(it => it.className === "pm-feature__detail");
+			const costBadge = pm._ce.mock.results
+				.map(it => it.value)
+				.find(it => it.className === "pm-card__badge");
+
+			expect(costBadge.textContent).toBe("2 SP");
+			expect(outcomeDetails.map(it => it.textContent)).toEqual([
+				"Roll 1: Effect 1",
+				"Roll 2: Effect 2",
+				"Roll 3: Effect 3",
+				"Roll 4: Effect 4",
+			]);
+			await useButton._handlers.click({stopPropagation: jest.fn()});
+
+			expect(useMethod).toHaveBeenCalledWith(method, {surface: "playMode"});
+			expect(setStaminaCurrent).not.toHaveBeenCalled();
+			expect(pm._logActivity).not.toHaveBeenCalled();
+		});
+
+		test("logs and rerenders the shared successful outcome reminder", async () => {
+			const method = {name: "Spell Shattering Strike", source: "TGTT", staminaCost: 2, staminaCostDisplay: "2"};
+			const message = "Spell Shattering Strike: if the attack hits and the target fails the DC 14 Wisdom save, roll 4 — stunned.";
+			const page = {
+				getState: () => ({
+					getSettings: () => ({enableTgtt: true}),
+					getCombatMethods: () => [method],
+					getStaminaCurrent: () => 2,
+					getStaminaMax: () => 4,
+				}),
+				_combat: {_pUseCombatMethod: jest.fn(async () => ({ok: true, message, cost: 2, outcome: {roll: 4}}))},
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._elActionsHub = {children: []};
+			pm._makeCard = jest.fn(() => ({children: []}));
+			pm._makeClickable = jest.fn();
+			pm._logActivity = jest.fn();
+			pm._ce = jest.fn((tag, className, parent) => {
+				const handlers = {};
+				const element = {
+					tag,
+					className,
+					children: [],
+					style: {},
+					classList: {add: jest.fn()},
+					addEventListener: jest.fn((event, handler) => { handlers[event] = handler; }),
+					_handlers: handlers,
+				};
+				parent?.children?.push(element);
+				return element;
+			});
+
+			pm._renderCombatMethods();
+			const useButton = pm._ce.mock.results
+				.map(it => it.value)
+				.find(it => it.className === "pm-feature__use-btn");
+			pm._renderCombatMethods = jest.fn();
+			await useButton._handlers.click({stopPropagation: jest.fn()});
+
+			expect(pm._logActivity).toHaveBeenCalledWith("attack", message);
+			expect(pm._renderCombatMethods).toHaveBeenCalledTimes(1);
 		});
 	});
 

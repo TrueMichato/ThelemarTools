@@ -620,30 +620,23 @@ _data.stamina = {
 
 ### Combat Methods
 
-```javascript
-_useMethod(methodId) {
-    const method = this._getMethodById(methodId);
-    if (!method) return;
-    
-    // Check stamina cost
-    if (method.staminaCost > this._state.getStaminaCurrent()) {
-        JqueryUtil.doToast({
-            type: "warning",
-            content: `Not enough stamina! Need ${method.staminaCost}, have ${this._state.getStaminaCurrent()}.`,
-        });
-        return;
-    }
-    
-    // Spend stamina
-    this._state.spendStamina(method.staminaCost);
-    
-    // Apply method effect
-    this._applyMethodEffect(method);
-    
-    // Update display
-    this._renderStamina();
-}
-```
+Method degree and Stamina cost are independent. The sheet uses the authored
+`staminaCost` for fixed-cost methods, preserves explicit zero-cost methods, and
+parses an authored range such as `1-3 Stamina Points` for methods whose effect
+scales with the amount spent. Degree is never used as a payment fallback.
+
+Normal Combat and Play Mode share the same transaction:
+
+1. Resolve the learned method and validate focus/stance gates.
+2. Ask for a variable-cost amount, if required. Cancelling changes nothing.
+3. Verify Stamina or the existing Monk ki/focus fallback before rolling or applying effects.
+4. Resolve any data-authored random outcome.
+5. Spend the selected resource exactly once, dispatch the effect, and save the character.
+
+Blocked actions do not spend resources, roll random outcomes, write activity,
+or partially mutate method state. Random target effects such as Spell
+Shattering Strike are transient reminders; they are not persisted as conditions
+on the player character.
 
 ---
 

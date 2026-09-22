@@ -1825,26 +1825,35 @@ export class CharacterSheetPlayMode {
 			const name = this._ce("span", "pm-feature__name", row);
 			name.textContent = method.name;
 
-			if (method.staminaCost > 0) {
+			if (method.staminaCostMeta?.isVariable || method.staminaCost > 0) {
 				const cost = this._ce("span", "pm-card__badge", row);
-				cost.textContent = `${method.staminaCost} SP`;
+				cost.textContent = `${method.staminaCostDisplay || method.staminaCost} SP`;
 			}
 
 			const useBtn = this._ce("button", "pm-feature__use-btn", row);
 			useBtn.textContent = "Use";
-			const canUse = staminaCur >= (method.staminaCost || 0);
+			const minimumCost = method.staminaCostMeta?.min ?? method.staminaCost ?? 0;
+			const canUse = staminaCur >= minimumCost
+				|| (!!this._state.canUseFocusForStamina?.() && (this._state.getKiPointsCurrent?.() ?? 0) >= minimumCost);
 			if (!canUse) useBtn.classList.add("pm-feature__use-btn--disabled");
 			useBtn.disabled = !canUse;
-			useBtn.addEventListener("click", (e) => {
+			useBtn.addEventListener("click", async (e) => {
 				e.stopPropagation();
-				if (method.staminaCost > 0) {
-					const cur = this._state.getStaminaCurrent?.() || 0;
-					if (cur < method.staminaCost) return;
-					this._state.setStaminaCurrent(cur - method.staminaCost);
-				}
-				this._logActivity("attack", `Used ${method.name}${method.staminaCost ? ` (${method.staminaCost} stamina)` : ""}`);
+				const result = await this._page?._combat?._pUseCombatMethod?.(method, {surface: "playMode"});
+				if (!result?.ok) return;
+				this._logActivity("attack", result.message || `Used ${method.name}`);
 				this._renderCombatMethods();
 			});
+
+			if (method.randomOutcomes) {
+				const details = this._ce("details", "pm-feature__details", row);
+				const summary = this._ce("summary", "pm-feature__details-summary", details);
+				summary.textContent = `${method.randomOutcomes.die} outcomes`;
+				for (const option of method.randomOutcomes.options) {
+					const optionEl = this._ce("div", "pm-feature__detail", details);
+					optionEl.textContent = `${option.label}: ${option.effectText}`;
+				}
+			}
 		});
 	}
 

@@ -46,7 +46,7 @@ class _RenderCombatMethodsImplBase extends RenderPageImplBase {
 
 	_getCommonHtmlParts_staminaAction ({ent}) {
 		const parts = [];
-		if (ent.staminaCost != null) parts.push(`<b>Stamina Cost:</b> ${ent.staminaCost}`);
+		parts.push(`<b>Stamina Cost:</b> ${PageFilterCombatMethods.getStaminaCostDisplay(ent)}`);
 		if (ent.actionType) parts.push(`<b>Action:</b> ${ent.actionType.toTitleCase()}`);
 		const content = parts.join(" &bull; ");
 		return content ? `<tr><td colspan="6">${content}</td></tr>` : "";

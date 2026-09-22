@@ -6868,17 +6868,108 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
-	 * Get the stamina cost from a combat method (either format).
+	 * Convert authored entry content to plain text for combat-method metadata parsing.
+	 * @param {*} entry
+	 * @returns {string}
+	 */
+	static _getCombatMethodEntryText (/** @type {*} */ entry) {
+		if (entry == null) return "";
+		if (typeof entry === "string") return Renderer?.stripTags ? Renderer.stripTags(entry) : entry.replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1");
+		if (Array.isArray(entry)) return entry.map(it => CharacterSheetClassUtils._getCombatMethodEntryText(it)).filter(Boolean).join(" ");
+		if (typeof entry !== "object") return String(entry);
+
+		const parts = [];
+		if (entry.name) parts.push(CharacterSheetClassUtils._getCombatMethodEntryText(entry.name));
+		if (entry.entry) parts.push(CharacterSheetClassUtils._getCombatMethodEntryText(entry.entry));
+		if (entry.entries) parts.push(CharacterSheetClassUtils._getCombatMethodEntryText(entry.entries));
+		return parts.filter(Boolean).join(" ");
+	}
+
+	/**
+	 * Get the authored stamina-cost metadata from a combat method.
+	 * @param {*} feature
+	 * @returns {{isVariable:boolean, min:number, max:number, cost:number|null, display:string}}
+	 */
+	static getMethodStaminaCostMeta (/** @type {*} */ feature) {
+		if (!feature) return {isVariable: false, min: 0, max: 0, cost: 0, display: "0"};
+
+		const entryText = `${CharacterSheetClassUtils._getCombatMethodEntryText(feature.entries || feature.description || "")} ${JSON.stringify(feature.entries || feature.description || "")}`;
+		const rangeMatch = entryText.match(/\((\d+)\s*[-–—]\s*(\d+)\s*(?:Stamina|Exertion)(?:\s+Points?)?\)/i);
+		if (rangeMatch) {
+			const min = Math.max(0, Number(rangeMatch[1]));
+			const max = Math.max(min, Number(rangeMatch[2]));
+			return {isVariable: true, min, max, cost: null, display: `${min}–${max}`};
+		}
+
+		const structured = Number(feature.staminaCost);
+		if (feature.staminaCost !== undefined && feature.staminaCost !== null && Number.isFinite(structured) && structured >= 0) {
+			return {isVariable: false, min: structured, max: structured, cost: structured, display: `${structured}`};
+		}
+
+		const consumesName = String(feature.consumes?.name || "");
+		if (/(?:Stamina|Exertion)/i.test(consumesName)) {
+			const consumed = Number(feature.consumes?.amount ?? 1);
+			const cost = Number.isFinite(consumed) && consumed >= 0 ? consumed : 1;
+			return {isVariable: false, min: cost, max: cost, cost, display: `${cost}`};
+		}
+
+		const fixedMatch = entryText.match(/\((\d+)\s*(?:Stamina|Exertion)(?:\s+Points?)?\)/i);
+		if (fixedMatch) {
+			const cost = Math.max(0, Number(fixedMatch[1]));
+			return {isVariable: false, min: cost, max: cost, cost, display: `${cost}`};
+		}
+
+		return {isVariable: false, min: 0, max: 0, cost: 0, display: "0"};
+	}
+
+	/**
+	 * Get the fixed/default stamina cost from a combat method (either format).
+	 * Variable-cost methods return their minimum for callers which cannot prompt.
 	 * @param {*} feature
 	 * @returns {number}
 	 */
 	static getMethodStaminaCost (/** @type {*} */ feature) {
-		if (!feature) return 0;
-		// New entity: explicit field
-		if (feature.staminaCost !== undefined) return feature.staminaCost;
-		// Legacy: from consumes object
-		if (feature.consumes?.name === "Stamina") return feature.consumes.amount || 1;
-		return 0;
+		const meta = CharacterSheetClassUtils.getMethodStaminaCostMeta(feature);
+		return meta.cost ?? meta.min;
+	}
+
+	/**
+	 * Extract a tightly-authored random outcome list following a `1dN` sentence.
+	 * @param {*} feature
+	 * @returns {{die:string, sides:number, options:Array<{roll:number, label:string, effectText:string, entries:Array<*>}>}|null}
+	 */
+	static getMethodRandomOutcomes (/** @type {*} */ feature) {
+		const entries = Array.isArray(feature?.entries) ? feature.entries : [];
+		const ixDice = entries.findIndex(entry => {
+			if (typeof entry !== "string") return false;
+			return /(?:\{@dice\s+)?1d\d+\}?/i.test(entry);
+		});
+		if (ixDice < 0) return null;
+
+		const diceText = CharacterSheetClassUtils._getCombatMethodEntryText(entries[ixDice]);
+		const diceMatch = diceText.match(/\b1d(\d+)\b/i);
+		if (!diceMatch) return null;
+		const sides = Number(diceMatch[1]);
+		const list = entries[ixDice + 1];
+		if (!Number.isInteger(sides) || sides < 2 || list?.type !== "list" || !Array.isArray(list.items) || list.items.length !== sides) return null;
+
+		const options = list.items.map((item, ix) => {
+			if (item?.type !== "item") return null;
+			const rollMatch = String(item.name || "").match(/^\s*(\d+)\s*\./);
+			const roll = rollMatch ? Number(rollMatch[1]) : NaN;
+			if (roll !== ix + 1) return null;
+			const effectText = CharacterSheetClassUtils._getCombatMethodEntryText(item.entries || item.entry || "");
+			if (!effectText) return null;
+			return {
+				roll,
+				label: `Roll ${roll}`,
+				effectText,
+				entries: Array.isArray(item.entries) ? item.entries : [item.entry].filter(Boolean),
+			};
+		});
+		if (options.some(it => !it)) return null;
+
+		return {die: `1d${sides}`, sides, options};
 	}
 
 	/**
@@ -6902,6 +6993,7 @@ class CharacterSheetClassUtils {
 		if (!feature) return null;
 
 		const traditionCode = CharacterSheetClassUtils.getMethodTraditionCode(feature);
+		const staminaCostMeta = CharacterSheetClassUtils.getMethodStaminaCostMeta(feature);
 
 		return {
 			name: feature.name,
@@ -6909,7 +7001,10 @@ class CharacterSheetClassUtils {
 			tradition: CharacterSheetClassUtils.getMethodTraditionName(feature) || feature.tradition,
 			traditionCode,
 			degree: CharacterSheetClassUtils.getMethodDegree(feature),
-			staminaCost: CharacterSheetClassUtils.getMethodStaminaCost(feature),
+			staminaCost: staminaCostMeta.cost ?? staminaCostMeta.min,
+			staminaCostMeta,
+			staminaCostDisplay: staminaCostMeta.display,
+			randomOutcomes: CharacterSheetClassUtils.getMethodRandomOutcomes(feature),
 			actionType: CharacterSheetClassUtils.getMethodActionType(feature),
 			entries: feature.entries,
 			description: feature.description,
