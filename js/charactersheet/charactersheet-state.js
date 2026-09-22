@@ -20327,13 +20327,31 @@ class CharacterSheetState {
 			this._data.efaArtificerTinker.drainSlotAvailable = false;
 		}
 		slot.current = next;
+		this._ordinarySpellSlotMutationRevisions ||= {};
+		if (next !== previous) {
+			this._ordinarySpellSlotMutationRevisions[level] = (this._ordinarySpellSlotMutationRevisions[level] || 0) + 1;
+		}
 		if (!isExpenditure || next >= previous) return null;
+		const drainModifierIds = didClearDrainSlotAvailable
+			? this._getEfaMagicItemTinkerDrainModifiers()
+				.filter(modifier =>
+					modifier.enabled !== false
+					&& modifier.type === `spellSlots:${level}`
+					&& Number(modifier.value) === 1,
+				)
+				.map(modifier => modifier.id)
+				.filter(Boolean)
+				.sort()
+			: [];
 		return {
 			type: "ordinarySpellSlotExpenditure",
 			level: Number(level),
 			currentBefore: previous,
 			currentAfter: next,
+			maxAtExpenditure: Number(slot.max),
+			mutationRevision: this._ordinarySpellSlotMutationRevisions[level] || 0,
 			didClearDrainSlotAvailable,
+			drainModifierIds,
 		};
 	}
 
@@ -20659,26 +20677,38 @@ class CharacterSheetState {
 		if (
 			!slot
 			|| Number(slot.current) !== Number(receipt.currentAfter)
+			|| Number(slot.max) !== Number(receipt.maxAtExpenditure)
+			|| Number(this._ordinarySpellSlotMutationRevisions?.[level] || 0) !== Number(receipt.mutationRevision)
 			|| Number(receipt.currentBefore) <= Number(receipt.currentAfter)
 		) return false;
+		if (receipt.didClearDrainSlotAvailable) {
+			const expectedModifierIds = Array.isArray(receipt.drainModifierIds)
+				? receipt.drainModifierIds.map(String).sort()
+				: [];
+			const currentModifierIds = this._getEfaMagicItemTinkerDrainModifiers()
+				.filter(modifier =>
+					modifier.enabled !== false
+					&& modifier.type === `spellSlots:${level}`
+					&& Number(modifier.value) === 1,
+				)
+				.map(modifier => String(modifier.id || ""))
+				.filter(Boolean)
+				.sort();
+			if (
+				this._data.efaArtificerTinker?.drainSlotAvailable
+				|| !this._data.efaArtificerTinker?.drainUsed
+				|| Number(this._data.efaArtificerTinker?.drainSlotLevel) !== level
+				|| !expectedModifierIds.length
+				|| expectedModifierIds.length !== currentModifierIds.length
+				|| expectedModifierIds.some((id, ix) => id !== currentModifierIds[ix])
+			) return false;
+		}
 		this._setOrdinarySpellSlotCurrent(
 			level,
 			receipt.currentBefore,
 			{isExpenditure: false, isAllowAboveMax: receipt.currentBefore > slot.max},
 		);
-		if (
-			receipt.didClearDrainSlotAvailable
-			&& !this._data.efaArtificerTinker?.drainSlotAvailable
-			&& this._data.efaArtificerTinker?.drainUsed
-			&& Number(this._data.efaArtificerTinker?.drainSlotLevel) === level
-			&& this._getEfaMagicItemTinkerDrainModifiers().some(modifier =>
-				modifier.enabled !== false
-				&& modifier.type === `spellSlots:${level}`
-				&& Number(modifier.value) === 1,
-			)
-		) {
-			this._data.efaArtificerTinker.drainSlotAvailable = true;
-		}
+		if (receipt.didClearDrainSlotAvailable) this._data.efaArtificerTinker.drainSlotAvailable = true;
 		return true;
 	}
 

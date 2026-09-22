@@ -3381,9 +3381,14 @@ class CharacterSheetSpells {
 					// was already decremented by the spend above — read it fresh and +1.
 					const slots = this._state.getPactSlots();
 					this._state.setPactSlotsCurrent((slots.current ?? 0) + 1);
-				} else if (!this._state.restoreOrdinarySpellSlotExpenditure?.(ordinarySlotExpenditure)) {
-					const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
-					this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
+				} else {
+					const restoreExpenditure = this._state.restoreOrdinarySpellSlotExpenditure;
+					if (typeof restoreExpenditure === "function") {
+						restoreExpenditure.call(this._state, ordinarySlotExpenditure);
+					} else {
+						const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
+						this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
+					}
 				}
 			}
 		};

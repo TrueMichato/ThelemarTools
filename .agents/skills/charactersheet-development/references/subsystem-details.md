@@ -472,8 +472,11 @@ explicitly use the non-consuming mode, so they neither spend nor re-arm the
 marker. Mutations at other slot levels leave it intact. Genuine expenditures
 return an ephemeral ordinary-slot receipt; the Spells-tab cast flow uses that
 receipt to restore both current and `drainSlotAvailable` after target
-cancellation or a thrown result failure. Only the matching receipt can re-arm
-the marker, so ordinary recovery/refund calls remain non-consuming. Derived
+cancellation or a thrown result failure. The receipt pins the slot maximum,
+per-level mutation revision, and exact Drain modifier IDs. Source/level cleanup
+or any later same-level mutation therefore invalidates it, and a rejected
+receipt never falls back to incrementing the live slot. Only the matching
+receipt can re-arm the marker, so ordinary recovery/refund calls remain non-consuming. Derived
 maximum recalculation separately preserves `max(0, current - oldMax)` temporary
 availability (for example a Font of Magic-created slot), preventing Drain
 addition or cleanup from clamping an unrelated above-max slot away.

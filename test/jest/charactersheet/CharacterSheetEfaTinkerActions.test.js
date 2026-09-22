@@ -887,6 +887,60 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
 	});
 
+	test("a stale cancelled-cast receipt cannot resurrect Drain after level-loss cleanup", async () => {
+		const {state} = buildState();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		const {spell, spells} = makeSpellCastHarness(state, {
+			showCastResult: jest.fn(async () => {
+				state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
+				state.reconcileEfaArtificerTinker({reason: "test-cast-pending-level-loss"});
+				expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
+				return {cancelled: true};
+			}),
+		});
+
+		await spells._castSpell(spell.id, {
+			withMetamagic: false,
+			decision: {slotLevel: 1, castAsRitual: false, skipComponentPrompt: true},
+		});
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
+		expect(state.toJson().efaArtificerTinker).toMatchObject({
+			drainUsed: false,
+			drainSlotLevel: null,
+			drainSlotAvailable: false,
+		});
+	});
+
+	test("direct restoration rejects a Drain receipt invalidated by source cleanup", () => {
+		const {state} = buildState();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		const receipt = state.setSpellSlots(1, 5, 2, {isExpenditure: true});
+		expect(receipt).toMatchObject({
+			type: "ordinarySpellSlotExpenditure",
+			currentBefore: 3,
+			currentAfter: 2,
+			didClearDrainSlotAvailable: true,
+		});
+
+		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
+		state.reconcileEfaArtificerTinker({reason: "test-receipt-level-loss"});
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
+
+		expect(state.restoreOrdinarySpellSlotExpenditure(receipt)).toBe(false);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
+	});
+
 	test("a thrown real cast result restores the exact Drain expenditure before rethrowing", async () => {
 		const {state} = buildState();
 		state.setSpellSlotCurrent(1, 2);

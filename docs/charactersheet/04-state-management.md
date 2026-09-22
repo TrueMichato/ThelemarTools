@@ -905,9 +905,12 @@ availability marker only at the Drain level. Recalculation, maximum clamping,
 rest/recovery, refunds, progression, Drain cleanup, and slot creation use the
 non-consuming mode; they neither spend nor re-arm the marker. Other slot levels
 also leave it intact. A cast expenditure returns an ephemeral receipt recording
-whether that exact spend cleared the marker; target cancellation or a thrown
-cast-result failure restores the numeric slot and marker from that receipt.
-Unrelated recovery/refund calls cannot re-arm it. Non-consuming maximum
+the slot maximum, per-level mutation revision, exact Drain modifier IDs, and
+whether that spend cleared the marker. Target cancellation or a thrown
+cast-result failure restores the numeric slot and marker only while that full
+identity still matches. Source/level cleanup or any later same-level mutation
+invalidates the receipt; a rejected receipt never falls back to incrementing
+the live slot. Unrelated recovery/refund calls cannot re-arm it. Non-consuming maximum
 recalculation also preserves `max(0, current - oldMax)` independently-created
 above-max slots (such as Font of Magic), so adding/removing Drain changes only
 Drain's own maximum and available slot.
