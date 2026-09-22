@@ -11,6 +11,7 @@ import "../../../js/charactersheet/charactersheet-respec-engine.js";
 import {CharacterSheetRest} from "../../../js/charactersheet/charactersheet-rest.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetArtificerPlans = globalThis.CharacterSheetArtificerPlans;
 const CharacterSheetRespecEngine = globalThis.CharacterSheetRespecEngine;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,24 @@ const XPHB_SPELLS = JSON.parse(readFileSync(
 	resolve(__dirname, "../../../data/spells/spells-xphb.json"),
 	"utf8",
 )).spell;
+const ITEM_DATA = JSON.parse(readFileSync(
+	resolve(__dirname, "../../../data/items.json"),
+	"utf8",
+));
+const MAGIC_VARIANT_DATA = JSON.parse(readFileSync(
+	resolve(__dirname, "../../../data/magicvariants.json"),
+	"utf8",
+));
+const PLAN_ITEMS = [
+	...ITEM_DATA.item,
+	...MAGIC_VARIANT_DATA.magicvariant.map(variant => ({
+		...variant,
+		source: variant.source || variant.inherits?.source,
+	})),
+	{name: "+1 Shield", source: "XDMG"},
+	{name: "Armor of Resistance", source: "XDMG"},
+	{name: "+2 Shield", source: "XDMG"},
+];
 
 const EFA_ARTIFICER = ARTIFICER_DATA.class.find(cls => cls.name === "Artificer" && cls.source === "EFA");
 const REANIMATOR = ARTIFICER_DATA.subclass.find(subclass =>
@@ -159,9 +178,11 @@ function makeRespecPage (state) {
 	return {
 		getState: () => state,
 		getClasses: () => [EFA_ARTIFICER],
-		getClassFeatures: () => [],
-		getSubclassFeatures: () => [],
+		getClassFeatures: () => ARTIFICER_DATA.classFeature,
+		getSubclassFeatures: () => ARTIFICER_DATA.subclassFeature,
 		getOptionalFeatures: () => [],
+		getItems: () => PLAN_ITEMS,
+		filterByAllowedSources: values => values,
 		getSpells: () => XPHB_SPELLS,
 		getFilteredSpellData: () => XPHB_SPELLS,
 		saveCharacter: jest.fn().mockResolvedValue(undefined),
@@ -170,6 +191,21 @@ function makeRespecPage (state) {
 }
 
 function resolveFixtureOnlyRespecDecisions (engine) {
+	const used = new Set();
+	while (true) {
+		const decision = engine.manifest.decisions.find(it =>
+			it.type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE
+			&& it.required
+			&& it.selection == null);
+		if (!decision) break;
+		const selection = decision.options.find(option => {
+			const identity = CharacterSheetArtificerPlans.getSelectionIdentity(option);
+			return identity && !used.has(identity);
+		});
+		if (!selection) throw new Error("No legal unique Artificer plan remained for the Facilitated Revival Respec fixture.");
+		used.add(CharacterSheetArtificerPlans.getSelectionIdentity(selection));
+		engine.stageGraphMutation(decision.id, selection);
+	}
 	for (const decision of engine.manifest.decisions) decision.status = "resolved";
 	expect(engine.getValidation().errors).toEqual([]);
 }
