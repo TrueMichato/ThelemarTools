@@ -16120,7 +16120,7 @@ class CharacterSheetPage {
 	 *   `null` when no dice bonuses apply.
 	 */
 	_rollStateDiceBonuses (rollType) {
-		const dice = this._state.getRollBonusDiceFromStates?.(rollType) || [];
+		const dice = this._state.getRollBonusDice?.(rollType) || this._state.getRollBonusDiceFromStates?.(rollType) || [];
 		if (!dice.length) return null;
 		let total = 0;
 		const parts = [];
@@ -21600,6 +21600,7 @@ class CharacterSheetPage {
 	getSkillsData () { return this._skillsData; }
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }
+	openAdventurersAtlasLongRest () { return this._rest?.openAdventurersAtlasLongRest?.(); }
 	hasCurrentCharacter () { return !!this._currentCharacterId; }
 	getLevelUpHelper () { return this._levelUp; }
 

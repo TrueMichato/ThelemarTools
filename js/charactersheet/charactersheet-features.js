@@ -1008,6 +1008,9 @@ class CharacterSheetFeatures {
 			return;
 		}
 
+		const atlasCard = this._renderAdventurersAtlasCard();
+		if (atlasCard) container.append(atlasCard);
+
 		if (!features.length) {
 			container.append(e_({outer: `<div class="ve-muted ve-text-center py-2">No class features yet</div>`}));
 			return;
@@ -1214,6 +1217,153 @@ class CharacterSheetFeatures {
 		});
 
 		container.append(summary);
+	}
+
+	_getAdventurersAtlasCardModel () {
+		if (!this._state.hasAdventurersAtlasFeature?.()) return null;
+		const atlas = this._state.getAdventurersAtlas();
+		const status = this._state.getAdventurersAtlasStatus();
+		const selfHolder = atlas.holders.find(holder => holder.isSelf) || null;
+		const initiativeDie = this._state.getAdventurersAtlasInitiativeDie();
+		const reasonLabels = {
+			"character-death": "Character death",
+			"subclass-removed": "Cartographer subclass removed",
+		};
+		return {
+			status,
+			statusLabel: status === "not-created"
+				? "Not created"
+				: status === "invalidated"
+					? `Invalidated — ${reasonLabels[atlas.invalidatedReason] || atlas.invalidatedReason}`
+					: "Active",
+			generation: atlas.generation,
+			createdAt: atlas.createdAt,
+			createdLabel: atlas.createdAt ? new Date(atlas.createdAt).toLocaleString() : null,
+			capacityAtCreation: atlas.capacityAtCreation,
+			nextCapacity: this._state.getAdventurersAtlasCapacity(),
+			activeHolders: atlas.holders.filter(holder => holder.status === "active"),
+			destroyedHolders: atlas.holders.filter(holder => holder.status === "destroyed"),
+			selfStatus: !selfHolder ? "Not mapped" : selfHolder.status === "active" ? "Active map" : "Map destroyed",
+			awarenessLabel: initiativeDie ? `${initiativeDie.dice} to Initiative` : "Inactive",
+			hasTools: this._state.hasCartographersToolsForAtlas(),
+			actionLabel: atlas.generation ? "Plan Atlas recreation" : "Plan Atlas creation",
+		};
+	}
+
+	_renderAdventurersAtlasCard () {
+		const model = this._getAdventurersAtlasCardModel();
+		if (!model) return null;
+
+		const card = e_({
+			tag: "article",
+			clazz: `charsheet__atlas-card charsheet__atlas-card--${model.status}`,
+			attrs: {"aria-labelledby": "charsheet-atlas-card-title"},
+		});
+		const header = e_({tag: "header", clazz: "charsheet__atlas-card-header"});
+		const headingGroup = e_({tag: "div"});
+		headingGroup.append(
+			e_({tag: "div", clazz: "charsheet__atlas-card-kicker", txt: "Cartographer feature"}),
+			e_({tag: "h3", clazz: "charsheet__atlas-card-title", attrs: {id: "charsheet-atlas-card-title"}, txt: "Adventurer's Atlas"}),
+		);
+		header.append(
+			headingGroup,
+			e_({
+				tag: "span",
+				clazz: "charsheet__atlas-card-status",
+				attrs: {"aria-label": `Atlas status: ${model.statusLabel}`},
+				txt: model.statusLabel,
+			}),
+		);
+		card.append(header);
+		card.append(e_({
+			tag: "p",
+			clazz: "charsheet__atlas-card-summary",
+			txt: "The Atlas records its map holders and freezes its capacity when created. An active self map grants Awareness.",
+		}));
+
+		const facts = e_({tag: "dl", clazz: "charsheet__atlas-card-facts"});
+		const appendFact = (term, detail) => {
+			facts.append(e_({
+				tag: "div",
+				clazz: "charsheet__atlas-card-fact",
+				children: [
+					e_({tag: "dt", txt: term}),
+					e_({tag: "dd", txt: detail}),
+				],
+			}));
+		};
+		appendFact("Capacity at creation", model.capacityAtCreation == null ? "Not set" : `${model.capacityAtCreation} holders`);
+		appendFact("Self map", model.selfStatus);
+		appendFact("Awareness", model.awarenessLabel);
+		if (model.generation) {
+			appendFact("Created", model.createdLabel);
+			appendFact("Generation", `${model.generation}`);
+		}
+		card.append(facts);
+
+		if (!model.generation) {
+			card.append(e_({
+				tag: "p",
+				clazz: "charsheet__atlas-card-empty",
+				txt: `No Atlas has been created. If created now, it can hold ${model.nextCapacity} maps.`,
+			}));
+		} else {
+			const rosters = e_({tag: "div", clazz: "charsheet__atlas-card-rosters"});
+			const buildRoster = (title, holders, isDestroyed) => {
+				const roster = e_({tag: "section", clazz: "charsheet__atlas-card-roster"});
+				roster.append(e_({tag: "h4", txt: `${title} (${holders.length})`}));
+				if (!holders.length) {
+					roster.append(e_({tag: "p", clazz: "charsheet__atlas-card-none", txt: "None"}));
+					return roster;
+				}
+				const list = e_({tag: "ul"});
+				holders.forEach(holder => {
+					const detail = isDestroyed && holder.destroyedBy
+						? ` — destroyed by ${holder.destroyedBy}`
+						: "";
+					list.append(e_({
+						tag: "li",
+						children: [
+							e_({tag: "span", clazz: "charsheet__atlas-card-holder-name", txt: holder.name}),
+							e_({tag: "span", clazz: "charsheet__atlas-card-holder-detail", txt: `${holder.isSelf ? " (you)" : ""}${detail}`}),
+						],
+					}));
+				});
+				roster.append(list);
+				return roster;
+			};
+			rosters.append(
+				buildRoster("Active holders", model.activeHolders, false),
+				buildRoster("Destroyed holders", model.destroyedHolders, true),
+			);
+			card.append(rosters);
+		}
+
+		const footer = e_({tag: "footer", clazz: "charsheet__atlas-card-footer"});
+		const context = e_({
+			tag: "p",
+			clazz: "charsheet__atlas-card-context",
+			attrs: {id: "charsheet-atlas-card-action-context"},
+			txt: model.hasTools
+				? "Cartographer's Tools are available. The roster is committed only when the Long Rest finishes."
+				: "Add Cartographer's Tools|XPHB to inventory before creating or recreating the Atlas.",
+		});
+		const btnPlan = e_({
+			tag: "button",
+			clazz: "ve-btn ve-btn-primary charsheet__atlas-card-action",
+			attrs: {
+				type: "button",
+				"aria-describedby": "charsheet-atlas-card-action-context",
+			},
+			txt: model.actionLabel,
+		});
+		btnPlan.addEventListener("click", () => {
+			const opened = this._page.openAdventurersAtlasLongRest?.();
+			if (!opened) JqueryUtil.doToast({type: "warning", content: "The Long Rest planner is not available."});
+		});
+		footer.append(context, btnPlan);
+		card.append(footer);
+		return card;
 	}
 
 	_renderRaceFeatures () {

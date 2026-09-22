@@ -4344,6 +4344,32 @@ globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 class CharacterSheetState {
 	static EFA_ARTIFICER_CLASS_UID = "Artificer|EFA";
 	static EFA_FLASH_OF_GENIUS_UID = "Flash of Genius|Artificer|EFA";
+	static ADVENTURERS_ATLAS_VERSION = 1;
+	static ADVENTURERS_ATLAS_INTEGRATION_VERSION = 1;
+	static ADVENTURERS_ATLAS_INITIATIVE_DIE = "1d4";
+	static ADVENTURERS_ATLAS_HOLDER_STATUSES = new Set(["active", "destroyed"]);
+	static _adventurersAtlasHolderIdSeq = 0;
+
+	static _getEmptyAdventurersAtlas () {
+		return {
+			version: CharacterSheetState.ADVENTURERS_ATLAS_VERSION,
+			generation: 0,
+			createdAt: null,
+			capacityAtCreation: null,
+			invalidatedReason: null,
+			holders: [],
+		};
+	}
+
+	static _copyAndFreeze (value) {
+		const copied = MiscUtil.copyFast(value);
+		const freeze = (it) => {
+			if (!it || typeof it !== "object" || Object.isFrozen(it)) return it;
+			Object.values(it).forEach(freeze);
+			return Object.freeze(it);
+		};
+		return freeze(copied);
+	}
 
 	/**
 	 * Return whether a feature is a class/subclass progression feature whose
@@ -5128,6 +5154,7 @@ class CharacterSheetState {
 			// Features and traits
 			features: [], // [{name, source, description, uses: {current, max, recharge}}]
 			feats: [], // [{name, source}]
+			adventurersAtlas: CharacterSheetState._getEmptyAdventurersAtlas(),
 
 			// Weapon Masteries (2024 rules)
 			weaponMasteries: [], // ["Longsword|XPHB", "Shortsword|XPHB"] - weapon keys (name|source)
@@ -5610,6 +5637,7 @@ class CharacterSheetState {
 		// Ensure nested customModifiers objects exist
 		this._data.customModifiers.speed = {...this._getDefaultState().customModifiers.speed, ...this._data.customModifiers.speed};
 		this._data.customModifiers.senses = {...this._getDefaultState().customModifiers.senses, ...this._data.customModifiers.senses};
+		this._migrateAdventurersAtlasState();
 
 		// Divine Favor (TGTT) — backward-compatible nested-merge so old saves get defaults
 		this._data.divineFavor = {...this._getDefaultState().divineFavor, ...this._data.divineFavor};
@@ -6090,6 +6118,340 @@ class CharacterSheetState {
 		this._ensureFeatRegistryResources();
 		this._endBladesongForInvalidEquipment();
 		this._migrateEfaFlashOfGeniusResource();
+		this._syncAdventurersAtlasEligibility();
+		this._syncCharacterDeathConsequences();
+	}
+
+	_migrateAdventurersAtlasState () {
+		this._data.adventurersAtlas = this._normalizeAdventurersAtlasState(this._data.adventurersAtlas);
+	}
+
+	_normalizeAdventurersAtlasState (rawAtlas) {
+		const getEmpty = () => CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!rawAtlas || typeof rawAtlas !== "object" || Array.isArray(rawAtlas)) return getEmpty();
+		if (rawAtlas.version !== CharacterSheetState.ADVENTURERS_ATLAS_VERSION) return getEmpty();
+
+		const generation = Number(rawAtlas.generation);
+		if (!Number.isInteger(generation) || generation < 0) return getEmpty();
+		if (!generation) return getEmpty();
+
+		const createdAt = Number(rawAtlas.createdAt);
+		const capacityAtCreation = Number(rawAtlas.capacityAtCreation);
+		if (!Number.isFinite(createdAt) || createdAt <= 0) return getEmpty();
+		if (!Number.isInteger(capacityAtCreation) || capacityAtCreation < 2) return getEmpty();
+
+		let invalidatedReason = null;
+		if (rawAtlas.invalidatedReason != null) {
+			if (typeof rawAtlas.invalidatedReason !== "string" || !rawAtlas.invalidatedReason.trim()) return getEmpty();
+			invalidatedReason = rawAtlas.invalidatedReason.trim();
+		}
+
+		const holders = [];
+		const seenIds = new Set();
+		let hasSelf = false;
+		for (const rawHolder of Array.isArray(rawAtlas.holders) ? rawAtlas.holders : []) {
+			if (!rawHolder || typeof rawHolder !== "object" || Array.isArray(rawHolder)) continue;
+			const id = typeof rawHolder.id === "string" ? rawHolder.id.trim() : "";
+			const name = typeof rawHolder.name === "string" ? rawHolder.name.trim() : "";
+			const {isSelf, status} = rawHolder;
+			if (!id || !name || typeof isSelf !== "boolean" || !CharacterSheetState.ADVENTURERS_ATLAS_HOLDER_STATUSES.has(status)) continue;
+			if (seenIds.has(id) || (isSelf && hasSelf)) continue;
+
+			let destroyedBy = null;
+			let destroyedAt = null;
+			if (status === "destroyed") {
+				destroyedAt = Number(rawHolder.destroyedAt);
+				if (!Number.isFinite(destroyedAt) || destroyedAt <= 0) continue;
+				if (rawHolder.destroyedBy != null) {
+					if (typeof rawHolder.destroyedBy !== "string") continue;
+					destroyedBy = rawHolder.destroyedBy.trim() || null;
+				}
+			}
+
+			seenIds.add(id);
+			if (isSelf) hasSelf = true;
+			holders.push({id, name, isSelf, status, destroyedBy, destroyedAt});
+		}
+
+		const normalized = {
+			version: CharacterSheetState.ADVENTURERS_ATLAS_VERSION,
+			generation,
+			createdAt,
+			capacityAtCreation,
+			invalidatedReason,
+			holders,
+		};
+		return this._validateAdventurersAtlasState(normalized).ok ? normalized : getEmpty();
+	}
+
+	_validateAdventurersAtlasState (atlas) {
+		const errors = [];
+		if (!atlas || typeof atlas !== "object" || Array.isArray(atlas)) {
+			errors.push("Atlas state must be an object.");
+			return {ok: false, errors};
+		}
+		if (atlas.version !== CharacterSheetState.ADVENTURERS_ATLAS_VERSION) errors.push("Atlas state version is not supported.");
+		if (!Number.isInteger(atlas.generation) || atlas.generation < 0) errors.push("Atlas generation must be a non-negative integer.");
+
+		if (atlas.generation === 0) {
+			if (atlas.createdAt != null || atlas.capacityAtCreation != null || atlas.invalidatedReason != null || atlas.holders?.length) {
+				errors.push("An uncreated Atlas cannot contain creation data or holders.");
+			}
+			return {ok: !errors.length, errors};
+		}
+
+		if (!Number.isFinite(atlas.createdAt) || atlas.createdAt <= 0) errors.push("Atlas creation time is invalid.");
+		if (!Number.isInteger(atlas.capacityAtCreation) || atlas.capacityAtCreation < 2) errors.push("Atlas creation capacity must be at least two.");
+		if (atlas.invalidatedReason != null && (typeof atlas.invalidatedReason !== "string" || !atlas.invalidatedReason.trim())) {
+			errors.push("Atlas invalidation reason is invalid.");
+		}
+
+		const holders = Array.isArray(atlas.holders) ? atlas.holders : [];
+		if (holders.length < 2) errors.push("The Atlas must contain at least two holder maps.");
+		if (Number.isInteger(atlas.capacityAtCreation) && holders.length > atlas.capacityAtCreation) {
+			errors.push("The Atlas roster exceeds its creation-time capacity.");
+		}
+
+		const ids = new Set();
+		let selfCount = 0;
+		let activeCount = 0;
+		for (const holder of holders) {
+			if (!holder || typeof holder !== "object") {
+				errors.push("Atlas holder rows must be objects.");
+				continue;
+			}
+			if (typeof holder.id !== "string" || !holder.id.trim()) errors.push("Every Atlas holder needs a stable ID.");
+			else if (ids.has(holder.id)) errors.push(`Atlas holder ID "${holder.id}" is duplicated.`);
+			else ids.add(holder.id);
+			if (typeof holder.name !== "string" || !holder.name.trim()) errors.push("Every Atlas holder needs a name.");
+			if (typeof holder.isSelf !== "boolean") errors.push("Every Atlas holder must explicitly identify whether it is the character.");
+			else if (holder.isSelf) selfCount++;
+			if (!CharacterSheetState.ADVENTURERS_ATLAS_HOLDER_STATUSES.has(holder.status)) errors.push("Every Atlas holder needs a valid status.");
+			if (holder.status === "active") activeCount++;
+			if (holder.status === "destroyed" && (!Number.isFinite(holder.destroyedAt) || holder.destroyedAt <= 0)) {
+				errors.push("Destroyed Atlas holders need a destruction time.");
+			}
+		}
+		if (selfCount !== 1) errors.push("The Atlas must have exactly one self holder.");
+		if (Number.isInteger(atlas.capacityAtCreation) && activeCount > atlas.capacityAtCreation) {
+			errors.push("The active Atlas roster exceeds its creation-time capacity.");
+		}
+		return {ok: !errors.length, errors};
+	}
+
+	getAdventurersAtlas () {
+		return CharacterSheetState._copyAndFreeze(this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas());
+	}
+
+	getAdventurersAtlasStatus () {
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!atlas.generation) return "not-created";
+		if (atlas.invalidatedReason) return "invalidated";
+		return "active";
+	}
+
+	hasAdventurersAtlasFeature () {
+		return this._data.classes.some(cls => {
+			if (cls?.name?.toLowerCase() !== "artificer" || cls?.source?.toUpperCase() !== "EFA" || Number(cls?.level || 0) < 3) return false;
+			return cls?.subclass?.name?.toLowerCase() === "cartographer" && cls?.subclass?.source?.toUpperCase() === "EFA";
+		});
+	}
+
+	hasCartographersToolsForAtlas () {
+		return this._data.inventory.some(row => {
+			const item = row?.item || row;
+			return typeof item?.name === "string"
+				&& typeof item?.source === "string"
+				&& item.name.trim().toLowerCase() === "cartographer's tools"
+				&& item.source.trim().toUpperCase() === "XPHB"
+				&& Number(row?.quantity ?? item?.quantity ?? 1) > 0;
+		});
+	}
+
+	getAdventurersAtlasCapacity () {
+		return Math.max(2, 1 + this.getAbilityMod("int"));
+	}
+
+	validateAdventurersAtlasRoster (rawHolders, {capacity = this.getAdventurersAtlasCapacity()} = {}) {
+		const errors = [];
+		if (!Number.isInteger(capacity) || capacity < 2) errors.push("Atlas capacity must be an integer of at least two.");
+		if (!Array.isArray(rawHolders)) {
+			errors.push("Atlas holders must be supplied as a roster.");
+			return CharacterSheetState._copyAndFreeze({ok: false, errors, holders: []});
+		}
+
+		const holders = [];
+		const ids = new Set();
+		let selfCount = 0;
+		for (const [ix, rawHolder] of rawHolders.entries()) {
+			if (!rawHolder || typeof rawHolder !== "object" || Array.isArray(rawHolder)) {
+				errors.push(`Holder ${ix + 1} is malformed.`);
+				continue;
+			}
+			const id = rawHolder.id == null ? null : typeof rawHolder.id === "string" ? rawHolder.id.trim() : "";
+			const name = typeof rawHolder.name === "string" ? rawHolder.name.trim() : "";
+			if (!name) errors.push(`Holder ${ix + 1} needs a name.`);
+			if (id === "") errors.push(`Holder ${ix + 1} has an invalid ID.`);
+			if (id && ids.has(id)) errors.push(`Holder ID "${id}" is duplicated.`);
+			if (id) ids.add(id);
+			if (typeof rawHolder.isSelf !== "boolean") errors.push(`Holder ${ix + 1} must explicitly identify whether it is the character.`);
+			else if (rawHolder.isSelf) selfCount++;
+			if (rawHolder.status !== "active") errors.push(`Holder ${ix + 1} must explicitly begin as active.`);
+			holders.push({
+				id,
+				name,
+				isSelf: rawHolder.isSelf,
+				status: rawHolder.status,
+				destroyedBy: null,
+				destroyedAt: null,
+			});
+		}
+		if (holders.length < 2) errors.push("The Atlas must map at least two creatures.");
+		if (Number.isInteger(capacity) && holders.length > capacity) errors.push(`The Atlas can map at most ${capacity} creatures.`);
+		if (selfCount !== 1) errors.push("The Atlas roster must contain exactly one self holder.");
+		return CharacterSheetState._copyAndFreeze({ok: !errors.length, errors, holders});
+	}
+
+	_getNextAdventurersAtlasHolderId (usedIds) {
+		let id;
+		do {
+			id = `atlas-holder-${Date.now()}-${++CharacterSheetState._adventurersAtlasHolderIdSeq}`;
+		} while (usedIds.has(id));
+		return id;
+	}
+
+	_getAdventurersAtlasMutationFailure (...errors) {
+		return CharacterSheetState._copyAndFreeze({
+			ok: false,
+			changed: false,
+			errors: errors.flat().filter(Boolean),
+			atlas: this.getAdventurersAtlas(),
+		});
+	}
+
+	_commitAdventurersAtlasRoster (rawHolders, {isHoldingTools = false, createdAt = Date.now(), isRecreate = false} = {}) {
+		if (!this.hasAdventurersAtlasFeature()) return this._getAdventurersAtlasMutationFailure("Adventurer's Atlas requires the EFA Cartographer subclass at level 3 or higher.");
+		if (this.isDead()) return this._getAdventurersAtlasMutationFailure("A dead character cannot create or recreate an Adventurer's Atlas.");
+		if (!this.hasCartographersToolsForAtlas()) return this._getAdventurersAtlasMutationFailure("Cartographer's Tools|XPHB must be present in inventory.");
+		if (isHoldingTools !== true) return this._getAdventurersAtlasMutationFailure("Confirm that Cartographer's Tools are being held during the Long Rest.");
+
+		const current = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!isRecreate && current.generation) return this._getAdventurersAtlasMutationFailure("The existing Atlas must be recreated rather than created.");
+		if (isRecreate && !current.generation) return this._getAdventurersAtlasMutationFailure("No existing Atlas is available to recreate.");
+
+		const capacityAtCreation = this.getAdventurersAtlasCapacity();
+		const validation = this.validateAdventurersAtlasRoster(rawHolders, {capacity: capacityAtCreation});
+		if (!validation.ok) return this._getAdventurersAtlasMutationFailure(validation.errors);
+		const normalizedCreatedAt = Number(createdAt);
+		if (!Number.isFinite(normalizedCreatedAt) || normalizedCreatedAt <= 0) {
+			return this._getAdventurersAtlasMutationFailure("Atlas creation time is invalid.");
+		}
+
+		const usedIds = new Set();
+		const holders = validation.holders.map(holder => {
+			const id = !isRecreate && holder.id ? holder.id : this._getNextAdventurersAtlasHolderId(usedIds);
+			usedIds.add(id);
+			return {...holder, id};
+		});
+		const next = {
+			version: CharacterSheetState.ADVENTURERS_ATLAS_VERSION,
+			generation: isRecreate ? current.generation + 1 : 1,
+			createdAt: normalizedCreatedAt,
+			capacityAtCreation,
+			invalidatedReason: null,
+			holders,
+		};
+		const stateValidation = this._validateAdventurersAtlasState(next);
+		if (!stateValidation.ok) return this._getAdventurersAtlasMutationFailure(stateValidation.errors);
+
+		this._data.adventurersAtlas = next;
+		return CharacterSheetState._copyAndFreeze({ok: true, changed: true, errors: [], atlas: next});
+	}
+
+	createAdventurersAtlas (holders, options = {}) {
+		return this._commitAdventurersAtlasRoster(holders, {...options, isRecreate: false});
+	}
+
+	recreateAdventurersAtlas (holders, options = {}) {
+		return this._commitAdventurersAtlasRoster(holders, {...options, isRecreate: true});
+	}
+
+	invalidateAdventurersAtlas (reason) {
+		if (typeof reason !== "string" || !reason.trim()) return this._getAdventurersAtlasMutationFailure("An Atlas invalidation reason is required.");
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!atlas.generation || atlas.invalidatedReason) {
+			return CharacterSheetState._copyAndFreeze({ok: true, changed: false, errors: [], atlas});
+		}
+		this._data.adventurersAtlas = {...atlas, invalidatedReason: reason.trim()};
+		return CharacterSheetState._copyAndFreeze({ok: true, changed: true, errors: [], atlas: this._data.adventurersAtlas});
+	}
+
+	destroyAdventurersAtlasHolder (holderId, {destroyedBy = null, destroyedAt = Date.now()} = {}) {
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!atlas.generation || atlas.invalidatedReason) return this._getAdventurersAtlasMutationFailure("Only holders in an active Atlas can be destroyed.");
+		const ixHolder = atlas.holders.findIndex(holder => holder.id === holderId);
+		if (!~ixHolder) return this._getAdventurersAtlasMutationFailure("Atlas holder was not found.");
+		if (atlas.holders[ixHolder].status === "destroyed") {
+			return CharacterSheetState._copyAndFreeze({ok: true, changed: false, errors: [], atlas});
+		}
+		const at = Number(destroyedAt);
+		if (!Number.isFinite(at) || at <= 0) return this._getAdventurersAtlasMutationFailure("Atlas holder destruction time is invalid.");
+		if (destroyedBy != null && typeof destroyedBy !== "string") return this._getAdventurersAtlasMutationFailure("Atlas holder destruction cause is invalid.");
+		const holders = atlas.holders.map((holder, ix) => ix === ixHolder
+			? {...holder, status: "destroyed", destroyedBy: destroyedBy?.trim() || null, destroyedAt: at}
+			: holder);
+		this._data.adventurersAtlas = {...atlas, holders};
+		return CharacterSheetState._copyAndFreeze({ok: true, changed: true, errors: [], atlas: this._data.adventurersAtlas});
+	}
+
+	getAdventurersAtlasInitiativeDie () {
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!this.hasAdventurersAtlasFeature() || this.isDead() || !atlas.generation || atlas.invalidatedReason) return null;
+		if (!atlas.holders.some(holder => holder.isSelf && holder.status === "active")) return null;
+		return CharacterSheetState._copyAndFreeze({
+			dice: CharacterSheetState.ADVENTURERS_ATLAS_INITIATIVE_DIE,
+			sign: 1,
+			source: "Adventurer's Atlas — Awareness",
+		});
+	}
+
+	getAdventurersAtlasIntegrationSnapshot () {
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		const isUsable = this.hasAdventurersAtlasFeature() && !this.isDead() && !!atlas.generation && !atlas.invalidatedReason;
+		return CharacterSheetState._copyAndFreeze({
+			version: CharacterSheetState.ADVENTURERS_ATLAS_INTEGRATION_VERSION,
+			atlasVersion: atlas.version,
+			generation: atlas.generation,
+			status: this.getAdventurersAtlasStatus(),
+			createdAt: atlas.createdAt,
+			capacityAtCreation: atlas.capacityAtCreation,
+			invalidatedReason: atlas.invalidatedReason,
+			holders: atlas.holders.map(holder => ({
+				id: holder.id,
+				name: holder.name,
+				isSelf: holder.isSelf,
+				status: holder.status,
+				destroyedBy: holder.destroyedBy,
+				destroyedAt: holder.destroyedAt,
+				initiativeDie: isUsable && holder.status === "active"
+					? CharacterSheetState.ADVENTURERS_ATLAS_INITIATIVE_DIE
+					: null,
+			})),
+		});
+	}
+
+	_syncAdventurersAtlasEligibility () {
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!atlas.generation || atlas.invalidatedReason || this.hasAdventurersAtlasFeature()) return false;
+		return this.invalidateAdventurersAtlas("subclass-removed").changed;
+	}
+
+	_syncCharacterDeathConsequences () {
+		if (!this.isDead()) return false;
+		this._deactivateStatesForEndCondition({isDead: true});
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!atlas.generation || atlas.invalidatedReason) return false;
+		return this.invalidateAdventurersAtlas("character-death").changed;
 	}
 
 	/**
@@ -8667,6 +9029,7 @@ class CharacterSheetState {
 		this.ensureTalentResources();
 		// Recalculate companion stats (HP, AC, etc. may scale with level/PB)
 		this.recalculateAllCompanions();
+		this._syncAdventurersAtlasEligibility();
 	}
 
 	/**
@@ -8692,6 +9055,7 @@ class CharacterSheetState {
 		// Re-apply class feature effects for new level
 		this.applyClassFeatureEffects();
 		this._ensureBattleMasterSuperiorityDice();
+		this._syncAdventurersAtlasEligibility();
 
 		return true;
 	}
@@ -8707,6 +9071,7 @@ class CharacterSheetState {
 		// Re-apply class feature effects after class removal
 		this.applyClassFeatureEffects();
 		this._ensureBattleMasterSuperiorityDice();
+		this._syncAdventurersAtlasEligibility();
 	}
 
 	/**
@@ -9154,6 +9519,7 @@ class CharacterSheetState {
 		if (this._data.hp.current > this._data.hp.max) {
 			this._data.hp.current = this._data.hp.max;
 		}
+		this._syncAdventurersAtlasEligibility();
 
 		return {success: true, removed: removedInfo};
 	}
@@ -9217,6 +9583,7 @@ class CharacterSheetState {
 			}
 			// Re-apply class feature effects for new subclass
 			this.applyClassFeatureEffects();
+			this._syncAdventurersAtlasEligibility();
 		}
 	}
 
@@ -12285,6 +12652,7 @@ class CharacterSheetState {
 		// Update bloodied condition based on new HP
 		this._updateBloodiedCondition();
 		this.reconcileEfaArmorerState({cause: "damage"});
+		this._syncCharacterDeathConsequences();
 
 		return true;
 	}
@@ -13185,6 +13553,7 @@ class CharacterSheetState {
 			this._data.deathSaves.failures = Math.min(3, Math.max(0, failures));
 		}
 		this.reconcileEfaArmorerState({cause: "death-saves"});
+		this._syncCharacterDeathConsequences();
 	}
 
 	/**
@@ -13199,6 +13568,7 @@ class CharacterSheetState {
 			this._data.deathSaves.failures = Math.min(3, this._data.deathSaves.failures + 1);
 		}
 		this.reconcileEfaArmorerState({cause: "death-save"});
+		this._syncCharacterDeathConsequences();
 
 		return {
 			successes: this._data.deathSaves.successes,
@@ -13227,6 +13597,7 @@ class CharacterSheetState {
 	addDeathSaveFailure (count = 1) {
 		this._data.deathSaves.failures = Math.min(3, this._data.deathSaves.failures + count);
 		this.reconcileEfaArmorerState({cause: "death-save-failure"});
+		this._syncCharacterDeathConsequences();
 	}
 
 	/**
@@ -13260,6 +13631,7 @@ class CharacterSheetState {
 	setDeathSaveFailures (count) {
 		this._data.deathSaves.failures = Math.min(3, Math.max(0, count));
 		this.reconcileEfaArmorerState({cause: "death-save-failures"});
+		this._syncCharacterDeathConsequences();
 	}
 
 	/**
@@ -15058,7 +15430,7 @@ class CharacterSheetState {
 		// Buff dice (e.g. Gift of Alacrity's 1d8) are rolled at roll time and
 		// can't collapse to a flat number, so surface them separately for the
 		// breakdown display. The canonical/effective numbers are unchanged.
-		const diceBonuses = this.getRollBonusDiceFromStates("initiative")
+		const diceBonuses = this.getRollBonusDice("initiative")
 			.map(d => ({dice: d.dice, sign: d.sign, source: d.source}));
 
 		return {total, canonical, components, diceBonuses};
@@ -30267,6 +30639,13 @@ class CharacterSheetState {
 								}
 								break;
 							}
+							case "cartographer": {
+								if (cls.source?.toUpperCase() !== "EFA" || cls.subclass?.source?.toUpperCase() !== "EFA") break;
+								calculations.hasAdventurersAtlas = true;
+								calculations.adventurersAtlasCapacity = Math.max(2, 1 + intMod);
+								calculations.hasAdventurersAtlasAwareness = true;
+								break;
+							}
 						}
 					}
 					break;
@@ -41468,12 +41847,14 @@ class CharacterSheetState {
 		const max = this.getMaxExhaustion();
 		this._data.exhaustion = Math.max(0, Math.min(max, level));
 		this.reconcileEfaArmorerState({cause: "exhaustion"});
+		this._syncCharacterDeathConsequences();
 	}
 
 	addExhaustion (amount = 1) {
 		const max = this.getMaxExhaustion();
 		this._data.exhaustion = Math.min(max, (this._data.exhaustion || 0) + amount);
 		this.reconcileEfaArmorerState({cause: "exhaustion"});
+		this._syncCharacterDeathConsequences();
 	}
 
 	removeExhaustion (amount = 1) {
@@ -69209,6 +69590,15 @@ class CharacterSheetState {
 			out.push({dice: e.dice, sign, source: e.stateName || e.source || "Buff"});
 		}
 		return out;
+	}
+
+	getRollBonusDice (rollType) {
+		const dice = [...this.getRollBonusDiceFromStates(rollType)];
+		if (rollType === "initiative") {
+			const atlasDie = this.getAdventurersAtlasInitiativeDie();
+			if (atlasDie) dice.push(atlasDie);
+		}
+		return dice;
 	}
 
 	/**

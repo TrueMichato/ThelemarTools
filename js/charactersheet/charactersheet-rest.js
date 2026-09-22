@@ -633,7 +633,7 @@ class CharacterSheetRest {
 		};
 	}
 
-	async _showLongRestDialog () {
+	async _showLongRestDialog ({focusAdventurersAtlas = false} = {}) {
 		const currentHp = this._state.getHp().current;
 		const maxHp = this._state.getHp().max;
 		const hitDice = this._state.getHitDice();
@@ -840,18 +840,35 @@ class CharacterSheetRest {
 		if (spellMasterySwap) modalInner.append(spellMasterySwap.section);
 		const temporalMasteryAge = this._buildTemporalMasteryAgeSection();
 		if (temporalMasteryAge) modalInner.append(temporalMasteryAge.section);
+		const adventurersAtlas = this._buildAdventurersAtlasLongRestSection();
+		if (adventurersAtlas) modalInner.append(adventurersAtlas.section);
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
-		if (temporalMasteryAge) {
-			const syncValidity = () => { btnConfirm.disabled = !temporalMasteryAge.isValid(); };
-			temporalMasteryAge.onChange(syncValidity);
-			syncValidity();
-		}
+		const syncValidity = () => {
+			btnConfirm.disabled = !!(
+				(temporalMasteryAge && !temporalMasteryAge.isValid())
+				|| (adventurersAtlas && !adventurersAtlas.isValid())
+			);
+		};
+		temporalMasteryAge?.onChange(syncValidity);
+		adventurersAtlas?.onChange(syncValidity);
+		syncValidity();
 		btnConfirm.onClick(() => {
 			if (temporalMasteryAge && !temporalMasteryAge.isValid()) return;
+			if (adventurersAtlas && !adventurersAtlas.isValid()) {
+				adventurersAtlas.focusFirstInvalid();
+				return;
+			}
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
 			// Captured BEFORE any mutation below; transient and never persisted.
 			this._captureRestSnapshot("long");
+			const atlasResult = this._applyAdventurersAtlasLongRestPlan(adventurersAtlas?.getPlan());
+			if (!atlasResult.ok) {
+				if (this._page) this._page._lastRestSnapshot = null;
+				JqueryUtil.doToast({type: "danger", content: atlasResult.errors.join(" ")});
+				adventurersAtlas?.focusFirstInvalid();
+				return;
+			}
 
 			// Full HP recovery
 			this._state.setHp(maxHp, maxHp);
@@ -965,6 +982,7 @@ class CharacterSheetRest {
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
 			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
+			if (atlasResult.changed) message += ` Adventurer's Atlas ${atlasResult.atlas.generation > 1 ? "recreated" : "created"}.`;
 
 			JqueryUtil.doToast({
 				type: "success",
@@ -991,6 +1009,220 @@ class CharacterSheetRest {
 			${btnCancel}
 			${btnConfirm}
 		</div>`.appendTo(modalInner);
+		if (focusAdventurersAtlas) adventurersAtlas?.selectCreateModeAndFocus();
+	}
+
+	openAdventurersAtlasLongRest () {
+		return this._showLongRestDialog({focusAdventurersAtlas: true});
+	}
+
+	_applyAdventurersAtlasLongRestPlan (plan) {
+		if (!plan || plan.mode === "keep") {
+			return {ok: true, changed: false, errors: [], atlas: this._state.getAdventurersAtlas()};
+		}
+		if (plan.mode === "create") {
+			return this._state.createAdventurersAtlas(plan.holders, {isHoldingTools: plan.isHoldingTools});
+		}
+		if (plan.mode === "recreate") {
+			return this._state.recreateAdventurersAtlas(plan.holders, {isHoldingTools: plan.isHoldingTools});
+		}
+		return {
+			ok: false,
+			changed: false,
+			errors: ["Unknown Adventurer's Atlas Long Rest action."],
+			atlas: this._state.getAdventurersAtlas(),
+		};
+	}
+
+	_buildAdventurersAtlasLongRestSection () {
+		if (!this._state.hasAdventurersAtlasFeature?.()) return null;
+
+		const atlas = this._state.getAdventurersAtlas();
+		const capacity = this._state.getAdventurersAtlasCapacity();
+		const hasTools = this._state.hasCartographersToolsForAtlas();
+		const isRecreate = atlas.generation > 0;
+		const groupName = `adventurers-atlas-mode-${Date.now()}`;
+		const listeners = new Set();
+		let lastErrors = [];
+
+		const section = e_({
+			tag: "section",
+			clazz: "charsheet__rest-section charsheet__atlas-rest",
+			attrs: {
+				"aria-labelledby": "charsheet-atlas-rest-title",
+				tabindex: "-1",
+			},
+		});
+		const title = e_({
+			tag: "div",
+			clazz: "charsheet__rest-section-title",
+			attrs: {id: "charsheet-atlas-rest-title"},
+			txt: "Adventurer's Atlas",
+		});
+		const intro = e_({
+			tag: "p",
+			clazz: "charsheet__atlas-rest-copy",
+			txt: `Keep the current Atlas, or ${isRecreate ? "replace every existing map" : "create it"} while holding Cartographer's Tools. Capacity for a new Atlas will be ${capacity} and is frozen when created.`,
+		});
+		section.append(title, intro);
+
+		const modeGroup = e_({tag: "div", clazz: "charsheet__atlas-rest-modes", attrs: {role: "radiogroup", "aria-label": "Adventurer's Atlas action"}});
+		const radioKeep = e_({tag: "input", type: "radio", attrs: {name: groupName, value: "keep"}});
+		radioKeep.checked = true;
+		const radioChange = e_({tag: "input", type: "radio", attrs: {name: groupName, value: isRecreate ? "recreate" : "create"}});
+		radioChange.disabled = !hasTools;
+		ee`<label class="charsheet__atlas-rest-mode">${radioKeep}<span><strong>Keep current Atlas</strong><small>${isRecreate ? "No maps or holder statuses change." : "Finish the rest without creating an Atlas."}</small></span></label>`.appendTo(modeGroup);
+		ee`<label class="charsheet__atlas-rest-mode">${radioChange}<span><strong>${isRecreate ? "Recreate Atlas" : "Create Atlas"}</strong><small>${hasTools ? "Validate this roster and commit it only when the rest finishes." : "Requires Cartographer's Tools|XPHB in inventory."}</small></span></label>`.appendTo(modeGroup);
+		section.append(modeGroup);
+
+		const controls = e_({tag: "div", clazz: "charsheet__atlas-rest-controls"});
+		controls.hidden = true;
+		const cbHeld = e_({tag: "input", type: "checkbox"});
+		const heldLabel = ee`<label class="charsheet__rest-option charsheet__atlas-rest-held">${cbHeld}<span>I confirm I am holding Cartographer's Tools for this rest.</span></label>`;
+		controls.append(heldLabel);
+
+		const rosterHeading = e_({tag: "div", clazz: "charsheet__atlas-rest-roster-heading"});
+		rosterHeading.append(
+			e_({tag: "span", txt: `Map holders (2–${capacity})`}),
+		);
+		const btnAddHolder = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-default", attrs: {type: "button"}, txt: "Add holder"});
+		rosterHeading.append(btnAddHolder);
+		controls.append(rosterHeading);
+
+		const roster = e_({tag: "div", clazz: "charsheet__atlas-rest-roster"});
+		controls.append(roster);
+		const status = e_({
+			tag: "div",
+			clazz: "charsheet__atlas-rest-feedback",
+			attrs: {role: "status", "aria-live": "polite", "aria-atomic": "true", tabindex: "-1"},
+		});
+		controls.append(status);
+		section.append(controls);
+
+		const previousSelf = atlas.holders.find(holder => holder.isSelf)?.name;
+		const previousOthers = atlas.holders.filter(holder => !holder.isSelf).map(holder => holder.name);
+		const rows = [
+			{isSelf: true, name: previousSelf || this._state.getCharacterName?.() || "Character"},
+			...previousOthers.slice(0, Math.max(1, capacity - 1)).map(name => ({isSelf: false, name})),
+		];
+		if (rows.length < 2) rows.push({isSelf: false, name: ""});
+
+		const getDraftHolders = () => rows.map(row => ({
+			id: null,
+			name: row.input?.value || row.name || "",
+			isSelf: row.isSelf,
+			status: "active",
+			destroyedBy: null,
+			destroyedAt: null,
+		}));
+
+		const notifyChange = () => listeners.forEach(fn => fn());
+		const sync = () => {
+			const isChanging = radioChange.checked;
+			controls.hidden = !isChanging;
+			if (!isChanging) {
+				lastErrors = [];
+				status.textContent = "";
+				status.classList.remove("charsheet__atlas-rest-feedback--error", "charsheet__atlas-rest-feedback--ready");
+				notifyChange();
+				return;
+			}
+			const validation = this._state.validateAdventurersAtlasRoster(getDraftHolders(), {capacity});
+			lastErrors = [
+				...(!hasTools ? ["Cartographer's Tools|XPHB must be in inventory."] : []),
+				...(!cbHeld.checked ? ["Confirm that the tools are being held."] : []),
+				...validation.errors,
+			];
+			status.classList.toggle("charsheet__atlas-rest-feedback--error", !!lastErrors.length);
+			status.classList.toggle("charsheet__atlas-rest-feedback--ready", !lastErrors.length);
+			status.textContent = lastErrors.length
+				? `Needs attention: ${lastErrors.join(" ")}`
+				: `Ready: ${rows.length} active maps will replace the prior Atlas when this Long Rest finishes.`;
+			btnAddHolder.disabled = rows.length >= capacity;
+			notifyChange();
+		};
+
+		const renderRows = () => {
+			roster.replaceChildren();
+			rows.forEach((row, ix) => {
+				const inputId = `charsheet-atlas-holder-${Date.now()}-${ix}`;
+				const input = e_({
+					tag: "input",
+					clazz: "form-control input-sm",
+					attrs: {
+						id: inputId,
+						type: "text",
+						autocomplete: "off",
+						placeholder: row.isSelf ? "Your character" : "Creature name",
+					},
+				});
+				input.value = row.name;
+				row.input = input;
+				input.addEventListener("input", sync);
+				const rowEle = e_({tag: "div", clazz: "charsheet__atlas-rest-holder"});
+				const label = e_({
+					tag: "label",
+					attrs: {for: inputId},
+					txt: row.isSelf ? "Self holder" : `Holder ${ix + 1}`,
+				});
+				const field = e_({tag: "div", clazz: "charsheet__atlas-rest-holder-field"});
+				field.append(input);
+				if (row.isSelf) field.append(e_({tag: "span", clazz: "charsheet__atlas-rest-self", txt: "You"}));
+				else {
+					const btnRemove = e_({
+						tag: "button",
+						clazz: "ve-btn ve-btn-xs ve-btn-default",
+						attrs: {type: "button", "aria-label": `Remove holder ${ix + 1}`},
+						txt: "Remove",
+					});
+					btnRemove.addEventListener("click", () => {
+						rows.splice(ix, 1);
+						renderRows();
+						sync();
+					});
+					field.append(btnRemove);
+				}
+				rowEle.append(label, field);
+				roster.append(rowEle);
+			});
+			btnAddHolder.disabled = rows.length >= capacity;
+		};
+
+		btnAddHolder.addEventListener("click", () => {
+			if (rows.length >= capacity) return;
+			rows.push({isSelf: false, name: ""});
+			renderRows();
+			sync();
+			rows.at(-1)?.input?.focus();
+		});
+		radioKeep.addEventListener("change", sync);
+		radioChange.addEventListener("change", sync);
+		cbHeld.addEventListener("change", sync);
+		renderRows();
+		sync();
+
+		return {
+			section,
+			getPlan: () => radioKeep.checked
+				? {mode: "keep"}
+				: {mode: isRecreate ? "recreate" : "create", holders: getDraftHolders(), isHoldingTools: cbHeld.checked},
+			isValid: () => radioKeep.checked || !lastErrors.length,
+			onChange: fn => listeners.add(fn),
+			focusFirstInvalid: () => {
+				if (!radioChange.checked) return radioChange.focus();
+				if (!cbHeld.checked) return cbHeld.focus();
+				const firstEmpty = rows.find(row => !row.input?.value.trim());
+				if (firstEmpty) return firstEmpty.input.focus();
+				status.focus?.();
+			},
+			selectCreateModeAndFocus: () => {
+				if (!hasTools) return section.focus();
+				radioChange.checked = true;
+				radioKeep.checked = false;
+				sync();
+				queueMicrotask(() => (rows.find(row => !row.isSelf)?.input || cbHeld).focus());
+			},
+		};
 	}
 
 	_buildTemporalMasteryAgeSection () {

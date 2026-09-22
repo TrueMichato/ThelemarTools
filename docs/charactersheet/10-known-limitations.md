@@ -15,11 +15,19 @@ While the character sheet has extensive functionality and test coverage, several
 The following classes have **complete** mechanical calculations for all subclasses:
 
 #### Artificer Subclasses ✅
-All Artificer subclasses are fully implemented with mechanical calculations:
+The four core Artificer subclasses are fully implemented with mechanical calculations:
 - **Alchemist**: `experimentalElixirCount`, `alchemicalSavantBonus`, `restorativeReagentsUses`, `restorativeReagentsTempHp`
 - **Armorer**: `thunderGauntletsDamage`, `defensiveFieldTempHp`, `lightningLauncherDamage`, `infiltratorSpeedBonus`
 - **Artillerist**: `eldritchCannonHp`, `flamethrowerDamage`, `forceBallistaDamage`, `protectorTempHp`, `maxCannons`, `arcaneFirearmDamage`
 - **Battle Smith**: `steelDefenderHp`, `arcaneJoltDamage`, `arcaneJoltUses`, `deflectAttackDamage`
+- **Cartographer (EFA), Adventurer's Atlas milestone**: versioned persistent
+  Atlas state, Long Rest creation/recreation with held-tool confirmation,
+  creation-time capacity freezing, death/subclass invalidation, rest undo,
+  authoritative Features rendering, and the self-holder Awareness initiative
+  die are supported. External holder initiative is exposed through an immutable
+  integration snapshot. Cartographer spells, Portal Jump/movement, Positioning,
+  Guided Precision, Ingenious Movement, Safe Haven consumption, and Unerring
+  Path remain outside this bounded milestone.
 
 #### Druid Circles ✅
 All Druid circles are fully implemented:

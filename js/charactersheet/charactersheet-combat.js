@@ -4700,7 +4700,7 @@ class CharacterSheetCombat {
 		const rollResult = this._page.rollD20({event, stateAdvantage: initMode.advantage, stateDisadvantage: initMode.disadvantage});
 
 		// Buff dice (e.g. Gift of Alacrity's 1d8) rolled into the total.
-		const stateDiceList = this._state.getRollBonusDiceFromStates?.("initiative") || [];
+		const stateDiceList = this._state.getRollBonusDice?.("initiative") || this._state.getRollBonusDiceFromStates?.("initiative") || [];
 		let diceTotal = 0;
 		let diceStr = "";
 		for (const d of stateDiceList) {

@@ -1812,6 +1812,43 @@
 		padding: 0.5rem 0.75rem;
 	}
 
+	.charsheet__atlas-card {
+		padding: var(--cs-space-md, 0.75rem);
+	}
+
+	.charsheet__atlas-card-header,
+	.charsheet__atlas-card-footer {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__atlas-card-status {
+		align-self: flex-start;
+	}
+
+	.charsheet__atlas-card-facts,
+	.charsheet__atlas-card-rosters,
+	.charsheet__atlas-rest-modes {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__atlas-card-action {
+		width: 100%;
+	}
+
+	.charsheet__atlas-rest-holder {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__atlas-rest-holder-field {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__atlas-rest-holder-field .ve-btn {
+		align-self: flex-start;
+	}
+
 	/* ====================================================================
 	   Tab-Specific: Companions — Card Layout
 	   ==================================================================== */
