@@ -1059,13 +1059,22 @@ export class CharacterSheetPage {
 	async hasClassFeatureUid (uid: string): Promise<boolean> {
 		return this.page.evaluate((featureUid) => {
 			const state: any = (globalThis as any).charSheet?._state;
-			const [name, className, classSource, rawLevel, featureSource] = String(featureUid).split("|");
+			const parts = String(featureUid).split("|");
+			const isSubclassFeature = parts.length >= 7;
+			const [name, className, classSource] = parts;
+			const subclassShortName = isSubclassFeature ? parts[3] : "";
+			const subclassSource = isSubclassFeature ? parts[4] : "";
+			const rawLevel = isSubclassFeature ? parts[5] : parts[3];
+			const featureSource = isSubclassFeature ? parts[6] : parts[4];
 			const level = Number(rawLevel);
 			const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
 			return (state?.getFeatures?.() || []).some((feature: any) =>
 				norm(feature?.name) === norm(name)
 				&& norm(feature?.className) === norm(className)
 				&& norm(feature?.classSource) === norm(classSource)
+				&& (!isSubclassFeature
+					|| (norm(feature?.subclassShortName || feature?.subclassName) === norm(subclassShortName)
+						&& norm(feature?.subclassSource) === norm(subclassSource)))
 				&& Number(feature?.level) === level
 				&& norm(feature?.source || feature?.classSource) === norm(featureSource || classSource),
 			);
@@ -3280,6 +3289,518 @@ export class CharacterSheetPage {
 		await button.waitFor({state: "visible", timeout: 5000});
 		await button.click();
 		await this.page.waitForTimeout(200);
+	}
+
+	async probeEfaArmorerFlow (
+		probe: "core" | "models" | "improved" | "perfected" | "progression",
+	): Promise<void> {
+		await this.page.evaluate(async (probeName) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			if (!state) throw new Error("EFA Armorer probe: character state is unavailable");
+			const State: any = (globalThis as any).CharacterSheetState;
+			const original = state.toJson();
+			const must = (condition: unknown, message: string) => {
+				if (!condition) throw new Error(`EFA Armorer ${probeName}: ${message}`);
+			};
+			const exactClass = () => state.getClasses().find((it: any) =>
+				it?.name === "Artificer"
+				&& it?.source === "EFA"
+				&& (it?.subclass?.shortName || it?.subclass?.name) === "Armorer"
+				&& it?.subclass?.source === "EFA",
+			);
+			const modelIds: Record<string, string> = {
+				Dreadnaught: "efa-armorer:dreadnaught:force-demolisher",
+				Guardian: "efa-armorer:guardian:thunder-pulse",
+				Infiltrator: "efa-armorer:infiltrator:lightning-launcher",
+			};
+			const modelStats: Record<string, {name: string; damage: string; damageType: string; range: string}> = {
+				Dreadnaught: {name: "Force Demolisher", damage: "1d10", damageType: "force", range: "10 ft."},
+				Guardian: {name: "Thunder Pulse", damage: "1d8", damageType: "thunder", range: "5 ft."},
+				Infiltrator: {name: "Lightning Launcher", damage: "1d6", damageType: "lightning", range: "90/300"},
+			};
+			const isBodyArmor = (wrapper: any) => ["LA", "MA", "HA"].includes(
+				String(wrapper?.item?.typeCode || wrapper?.item?.type || "").split("|")[0].toUpperCase(),
+			);
+			const getGeneratedRows = () => state.getItems()
+				.filter((item: any) => item?._efaArmorerWeaponId)
+				.sort((a: any, b: any) => a._efaArmorerWeaponId.localeCompare(b._efaArmorerWeaponId));
+			const getGeneratedIds = () => Object.fromEntries(
+				getGeneratedRows().map((item: any) => [item._efaArmorerWeaponId, item.id]),
+			);
+			const getActiveAttack = () => {
+				const attacks = state.getFeatureGrantedAttacks()
+					.filter((attack: any) => attack?._efaArmorerWeaponId);
+				must(attacks.length === 1, `expected one active model attack, saw ${JSON.stringify(attacks)}`);
+				return attacks[0];
+			};
+			const assertAttack = (model: string, damage = modelStats[model].damage) => {
+				const expected = modelStats[model];
+				const attack = getActiveAttack();
+				must(attack.id === modelIds[model], `${model} logical attack ID was ${attack.id}`);
+				must(attack._efaArmorerWeaponId === modelIds[model], `${model} stable weapon metadata was ${attack._efaArmorerWeaponId}`);
+				must(attack.name === expected.name || attack.name.startsWith("E2E "), `${model} attack name was ${attack.name}`);
+				must(attack.damage === damage, `${model} damage was ${attack.damage}, expected ${damage}`);
+				must(String(attack.damageType).toLowerCase() === expected.damageType, `${model} damage type was ${attack.damageType}`);
+				must(attack.range === expected.range, `${model} range was ${attack.range}`);
+				must(state.resolveAttackAbilityKey(attack.abilityMod) === "int", `${model} did not resolve attacks with Intelligence`);
+				must(state.getWeaponAbilityMod(attack) === state.getAbilityMod("int"), `${model} attack modifier did not equal live Intelligence modifier`);
+				return attack;
+			};
+			const switchModelAtRest = (name: string) => {
+				if (state.getEfaArmorerModel()?.name === name) return;
+				const staged = cs?._rest?._buildEfaArmorModelSection?.({restType: "short"});
+				must(staged && !staged.control.disabled, `Short Rest Armor Model control was unavailable for ${name}`);
+				staged.control.value = name;
+				staged.control.dispatchEvent(new Event("change", {bubbles: true}));
+				const outcome = staged.apply();
+				must(outcome?.changed && outcome?.newLabel === name,
+					`Short Rest Armor Model switch failed: ${JSON.stringify(outcome)}`);
+				must(state.getEfaArmorerModel()?.name === name, `canonical model did not resolve to ${name}`);
+			};
+			const ensureFixture = ({
+				fixture,
+				name,
+				source,
+				type,
+				equipped = false,
+				extra = {},
+			}: {
+				fixture: string;
+				name: string;
+				source: string;
+				type: string;
+				equipped?: boolean;
+				extra?: Record<string, unknown>;
+			}) => {
+				let wrapper = state.getInventory().find((row: any) => row.item?._e2eEfaArmorerFixture === fixture);
+				if (!wrapper) {
+					state.addItem({
+						name,
+						source,
+						type,
+						_isCustom: true,
+						_e2eEfaArmorerFixture: fixture,
+						...extra,
+					}, 1, equipped, false);
+					wrapper = state.getInventory().find((row: any) => row.item?._e2eEfaArmorerFixture === fixture);
+				}
+				must(wrapper, `${name}|${source} fixture was not added`);
+				if (equipped) state.setItemEquipped(wrapper.id, true);
+				return wrapper;
+			};
+			const ensureArmorSupport = () => {
+				const tools = ensureFixture({
+					fixture: "smiths-tools",
+					name: "Smith's Tools",
+					source: "XPHB",
+					type: "AT",
+				});
+				must(state.hasToolProficiency("Smith's Tools"), "Smith's Tools proficiency is missing");
+				must(state.hasEfaSmithsToolsItem(), "canonical Smith's Tools inventory item is missing");
+				const armor = ensureFixture({
+					fixture: "arcane-armor",
+					name: "E2E Plate Armor",
+					source: "XPHB",
+					type: "HA",
+					equipped: true,
+					extra: {ac: 18, armor: true, strength: 15, stealth: true},
+				});
+				for (const wrapper of state.getInventory()) {
+					if (wrapper.id !== armor.id && wrapper.equipped && isBodyArmor(wrapper)) {
+						state.setItemEquipped(wrapper.id, false);
+					}
+				}
+				state.setItemEquipped(armor.id, true);
+				return {armor, tools};
+			};
+			const ensureBound = (model: string) => {
+				const {armor, tools} = ensureArmorSupport();
+				const status = state.getEfaArcaneArmorBindingStatus();
+				if (status.boundItemId !== armor.id) {
+					state.clearEfaArcaneArmorBinding({reason: "e2e-rebind"});
+					const result = state.bindEfaArcaneArmor(armor.id);
+					must(result?.ok, `could not bind Arcane Armor: ${JSON.stringify(result)}`);
+				}
+				switchModelAtRest(model);
+				const bound = state.getEfaArcaneArmorBindingStatus();
+				must(bound.active && bound.boundItemId === armor.id, `binding was not active: ${JSON.stringify(bound)}`);
+				must(bound.model?.name === model && bound.model?.source === "EFA", `binding model was ${JSON.stringify(bound.model)}`);
+				return {armor, tools, status: bound};
+			};
+			const restore = async () => {
+				const loaded = await state.loadFromJson(structuredClone(original));
+				must(loaded !== false, "snapshot restore was rejected");
+				cs?._renderCharacter?.();
+			};
+
+			try {
+				must(exactClass(), "build is not exact Artificer|EFA / Armorer|EFA");
+				must(!state.getClasses().some((it: any) =>
+					it?.name === "Artificer"
+					&& (it?.subclass?.shortName || it?.subclass?.name) === "Armorer"
+					&& it?.subclass?.source === "TCE"),
+				"TCE Armorer leaked into the exact-source build");
+
+				if (probeName === "core") {
+					must(state.getEfaArmorerModel()?.name === "Dreadnaught", `first resolved Armor Model was ${JSON.stringify(state.getEfaArmorerModel())}`);
+					const {armor} = ensureArmorSupport();
+					state.clearEfaArcaneArmorBinding({reason: "e2e-core-transform"});
+					const transform = state.getItemPowers().find((power: any) =>
+						power.itemId === armor.id && power.efaArcaneArmorAction === "transform");
+					must(transform?.isAvailable, `Arcane Armor transform power was unavailable: ${JSON.stringify(transform)}`);
+					const transformed = await state.invokeItemPower(armor.id, transform.id);
+					must(transformed?.ok, `Arcane Armor transform failed: ${JSON.stringify(transformed)}`);
+
+					const status = state.getEfaArcaneArmorBindingStatus();
+					must(status.active && status.boundItemId === armor.id, `bound status was ${JSON.stringify(status)}`);
+					must(status.model?.name === "Dreadnaught" && status.model?.source === "EFA", `bound model was ${JSON.stringify(status.model)}`);
+					const json = state.toJson();
+					must(json.efaArmorer?.arcaneArmorItemId === armor.id, "exported binding identity did not match the inventory wrapper");
+					const choiceRows = (json.chosenSubfeatures || []).filter((it: any) => it.parent === "Armor Model");
+					must(choiceRows.length === 1, `Armor Model chosen-subfeature count was ${choiceRows.length}`);
+					must(choiceRows[0].name === "Dreadnaught" && choiceRows[0].source === "EFA" && Number(choiceRows[0].characterLevel) === 3,
+						`Armor Model choice was not exact/timed at level 3: ${JSON.stringify(choiceRows[0])}`);
+					const historyChoices = (json.levelHistory || [])
+						.flatMap((entry: any) => (entry.choices?.featureChoices || [])
+							.filter((choice: any) => choice.featureName === "Armor Model")
+							.map((choice: any) => ({classLevel: entry.classLevel, ...choice})));
+					must(historyChoices.length === 1 && Number(historyChoices[0].classLevel) === 3,
+						`Armor Model progression timing was ${JSON.stringify(historyChoices)}`);
+					const rows = getGeneratedRows();
+					must(rows.length === 3, `generated model weapon count was ${rows.length}`);
+					must(JSON.stringify(rows.map((it: any) => it._efaArmorerWeaponId)) === JSON.stringify(Object.values(modelIds).sort()),
+						`generated stable IDs were ${JSON.stringify(rows.map((it: any) => it._efaArmorerWeaponId))}`);
+					assertAttack("Dreadnaught");
+					const idsBefore = getGeneratedIds();
+
+					const doff = state.getItemPowers().find((power: any) =>
+						power.itemId === armor.id && power.efaArcaneArmorAction === "doff");
+					must((await state.invokeItemPower(armor.id, doff.id))?.ok, "Doff Arcane Armor failed");
+					must(state.getEfaArcaneArmorBindingStatus().suspended, "doffing did not suspend the binding");
+					must(state.getFeatureGrantedAttacks().filter((attack: any) => attack?._efaArmorerWeaponId).length === 0,
+						"doffing left a model attack active");
+					const don = state.getItemPowers().find((power: any) =>
+						power.itemId === armor.id && power.efaArcaneArmorAction === "don");
+					must((await state.invokeItemPower(armor.id, don.id))?.ok, "Don Arcane Armor failed");
+					assertAttack("Dreadnaught");
+
+					const saved = state.toJson();
+					must(await state.loadFromJson(structuredClone(saved)) !== false, "active Arcane Armor export was rejected");
+					must(JSON.stringify(getGeneratedIds()) === JSON.stringify(idsBefore), "generated wrapper IDs changed across export/import");
+					must(state.getEfaArcaneArmorBindingStatus().boundItemId === armor.id, "binding wrapper identity changed across export/import");
+					assertAttack("Dreadnaught");
+					cs?._renderCharacter?.();
+					return;
+				}
+
+				if (probeName === "models") {
+					const {armor} = ensureBound("Dreadnaught");
+					state.setSize("medium");
+					state.recoverResources("long");
+					state.endCombat();
+					state.startCombat();
+					state.resetTurnEconomy();
+					const dreadnaught = assertAttack("Dreadnaught");
+					const forcedMovement = state.resolveEfaForceDemolisherHitRider({
+						attackId: dreadnaught.id,
+						targetSize: "small",
+						direction: "push",
+						distance: 10,
+					});
+					must(forcedMovement?.ok && forcedMovement.distance === 10 && forcedMovement.direction === "push",
+						`Force Demolisher movement was ${JSON.stringify(forcedMovement)}`);
+					const giantBefore = state.getEfaGiantStatureStatus();
+					must(giantBefore.ok && giantBefore.reachBonus === 5 && giantBefore.sizeChoices?.join(",") === "large",
+						`base Giant Stature status was ${JSON.stringify(giantBefore)}`);
+					const giant = await state.activateEfaGiantStature({targetSize: "large"});
+					must(giant?.ok && giant.result?.reachBonus === 5 && giant.result?.targetSize === "large",
+						`base Giant Stature activation was ${JSON.stringify(giant)}`);
+					must(state.getSize() === "large" && state.getMeleeReach() === 10, "base Giant Stature did not change size/reach");
+					must(state.getResource("Giant Stature").current === giantBefore.resource.current - 1,
+						"Giant Stature did not spend one use");
+					state.recoverResources("long");
+					must(state.getResource("Giant Stature").current === state.getResource("Giant Stature").max,
+						"Long Rest recovery did not restore Giant Stature");
+
+					switchModelAtRest("Guardian");
+					must(!state.isStateTypeActive("giantStature"), "model switch did not tear down Giant Stature");
+					ensureBound("Guardian");
+					state.resetTurnEconomy();
+					const guardian = assertAttack("Guardian");
+					const pulse = state.applyTargetEffect({
+						source: "efa-armorer-thunder-pulse",
+						effect: "attack-disadvantage-other-targets",
+						targetName: "Ogre",
+						targetEffect: {
+							source: "efa-armorer-thunder-pulse",
+							effect: "attack-disadvantage-other-targets",
+							attackId: guardian.id,
+						},
+					});
+					must(pulse?.ok && state.getTargetAttackDisadvantage(pulse.target.id, {defenderOwnerUid: "another-owner"}),
+						`Thunder Pulse target rider was ${JSON.stringify(pulse)}`);
+					must(!state.getTargetAttackDisadvantage(pulse.target.id, {
+						defenderOwnerUid: State.EFA_ARMORER_FEATURE_OWNERS.thunderPulse.uid,
+					}), "Thunder Pulse disadvantaged attacks against the wearer");
+					state.setTempHp(0);
+					state.setCurrentHp(Math.max(1, Math.floor(state.getMaxHp() / 2)));
+					const field = state.activateEfaDefensiveField();
+					must(field?.ok && field.tempHp === exactClass().level && state.getTempHp() === exactClass().level,
+						`Defensive Field result was ${JSON.stringify(field)}`);
+					state.setItemEquipped(armor.id, false);
+					must(state.getTempHp() === 0, "doffing Arcane Armor did not remove Defensive Field temporary HP");
+					state.setItemEquipped(armor.id, true);
+
+					const baseSpeed = state.getWalkSpeed();
+					ensureBound("Infiltrator");
+					const infiltrator = assertAttack("Infiltrator");
+					const infiltratorSpeed = state.getWalkSpeed();
+					must(infiltratorSpeed === baseSpeed + 5,
+						`Powered Steps speed was ${infiltratorSpeed}, expected ${baseSpeed + 5}`);
+					const plateStealth = state.getAdvantageState("skill:stealth");
+					must(plateStealth.cancelled === true
+						&& plateStealth.sources.some((source: string) => source.includes("Dampening Field"))
+						&& plateStealth.sources.includes("Armor"),
+					`Dampening Field did not cancel Plate disadvantage: ${JSON.stringify(plateStealth)}`);
+					must(state.replaceItem(armor.id, {...armor.item, stealth: false}),
+						"could not remove the fixture armor's Stealth penalty");
+					const dampening = state.getAdvantageState("skill:stealth");
+					must(dampening.advantage === true && dampening.disadvantage === false && dampening.cancelled === false,
+						`Dampening Field did not grant Stealth advantage without an armor penalty: ${JSON.stringify(dampening)}`);
+					const rider = state.getFeatureCalculations().weaponDamageRiders?.find((it: any) =>
+						it.id === "efa-armorer-lightning-launcher-extra-damage");
+					must(rider?.dice === "1d6" && rider.damageType === "lightning" && rider.perTurn === true,
+						`Lightning Launcher rider was ${JSON.stringify(rider)}`);
+					const receipt = State.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT;
+					const firstReceipt = state.commitTurnReceipt(receipt);
+					const duplicateReceipt = state.commitTurnReceipt(receipt);
+					must(firstReceipt?.ok && duplicateReceipt?.ok === false && duplicateReceipt?.reason === "alreadyUsed",
+						`Lightning Launcher turn gate was ${JSON.stringify({firstReceipt, duplicateReceipt})}`);
+					state.resetTurnEconomy();
+					must(state.commitTurnReceipt(receipt)?.ok, "Lightning Launcher did not refresh on the next turn");
+					state.setItemEquipped(armor.id, false);
+					must(state.getWalkSpeed() === baseSpeed, "doffing did not remove Powered Steps");
+					must(state.getAdvantageState("skill:stealth").advantage === false, "doffing did not remove Dampening Field");
+					must(state.getFeatureGrantedAttacks().filter((attack: any) => attack?._efaArmorerWeaponId).length === 0,
+						"doffing left Lightning Launcher active");
+					state.setItemEquipped(armor.id, true);
+					must(infiltrator.id === modelIds.Infiltrator, "Infiltrator stable attack identity changed");
+					return;
+				}
+
+				if (probeName === "improved") {
+					const {armor} = ensureBound("Dreadnaught");
+					const plans = state.getEfaArtificerPlans();
+					const armorPlan = plans.find((plan: any) =>
+						plan.constraints?.itemKinds?.includes("armor")
+						&& plan.constraints?.itemKinds?.includes("shield"));
+					must(armorPlan?.selection?.itemUid, `required Armor Replication plan was ${JSON.stringify(armorPlan)}`);
+					const armorDecision = state.getLevelHistoryEntry(9)?.decisions?.find((decision: any) =>
+						decision.meta?.slotId === armorPlan.slotId);
+					const armorOwner = armorDecision?.meta?.owner;
+					must(armorOwner?.className === "Artificer"
+						&& armorOwner?.classSource === "EFA"
+						&& armorOwner?.subclassShortName === "Armorer"
+						&& armorOwner?.subclassSource === "EFA",
+					`Armor Replication plan owner was ${JSON.stringify(armorOwner)}`);
+					const extensions = state.getEfaArmorerArmorReplicationLifecycleExtensions();
+					must(extensions.length === 1
+						&& extensions[0].capacity === 1
+						&& extensions[0].allowedItemKinds?.join(",") === "armor,shield",
+					`Armor Replication lifecycle extension was ${JSON.stringify(extensions)}`);
+					const baseCapacity = state.getFeatureCalculations().artificerCreatedMagicItemsMax;
+					const options = state.getEfaReplicateMagicItemProductionOptions();
+					must(options.maxCreatedItems === baseCapacity + 1,
+						`Armor Replication capacity was ${options.maxCreatedItems}, expected ${baseCapacity + 1}`);
+					const owner = State.EFA_REPLICATE_MAGIC_ITEM_OWNER;
+					for (const row of state.getGeneratedFeatureItemRows(owner)) state.removeItem(row.id);
+					const descriptors = state.getEfaReplicateMagicItemLifecycleDescriptors();
+					for (let i = 0; i < baseCapacity; ++i) {
+						state.createGeneratedFeatureItem({
+							item: {name: `E2E Replicated Wand ${i + 1}`, source: "TST", type: "WD"},
+							owner,
+						});
+					}
+					const armorReplica = state.createGeneratedFeatureItem({
+						item: {name: "E2E Replicated Armor", source: "TST", type: "HA"},
+						owner,
+					});
+					let capacity = state.getGeneratedFeatureItemCapacitySnapshot({owner, descriptors});
+					must(capacity.fits && capacity.baseCapacity === baseCapacity && capacity.extensionCapacityUsed === 1,
+						`armor extension capacity snapshot was ${JSON.stringify(capacity)}`);
+					state.removeItem(armorReplica.itemId);
+					state.createGeneratedFeatureItem({
+						item: {name: "E2E Overflow Wand", source: "TST", type: "WD"},
+						owner,
+					});
+					capacity = state.getGeneratedFeatureItemCapacitySnapshot({owner, descriptors});
+					must(capacity.fits === false && capacity.extensionCapacityUsed === 0,
+						`non-armor item incorrectly used Armor Replication capacity: ${JSON.stringify(capacity)}`);
+
+					const initialIds = getGeneratedIds();
+					for (const model of Object.keys(modelIds)) {
+						ensureBound(model);
+						const attack = assertAttack(model);
+						must(attack.attackBonus === 1 && attack.damageBonus === 1,
+							`${model} Improved Arsenal bonuses were attack=${attack.attackBonus}, damage=${attack.damageBonus}`);
+						const row = getGeneratedRows().find((it: any) => it._efaArmorerWeaponId === modelIds[model]);
+						state.replaceItem(row.id, {...row, name: `E2E ${model} Arsenal`});
+						const renamed = getActiveAttack();
+						must(renamed.id === modelIds[model] && renamed.name === `E2E ${model} Arsenal`,
+							`${model} rename lost stable attack identity: ${JSON.stringify(renamed)}`);
+					}
+					must(JSON.stringify(getGeneratedIds()) === JSON.stringify(initialIds),
+						`model switches changed generated wrapper IDs: ${JSON.stringify(getGeneratedIds())}`);
+					state.setItemEquipped(armor.id, false);
+					must(state.getFeatureGrantedAttacks().filter((attack: any) => attack?._efaArmorerWeaponId).length === 0,
+						"doffing left Improved Arsenal active");
+					return;
+				}
+
+				if (probeName === "perfected") {
+					const {armor} = ensureBound("Dreadnaught");
+					state.setSize("medium");
+					state.recoverResources("long");
+					state.endCombat();
+					state.startCombat();
+					state.resetTurnEconomy();
+					assertAttack("Dreadnaught", "2d6");
+					const giantBefore = state.getEfaGiantStatureStatus();
+					const giant = await state.activateEfaGiantStature({targetSize: "huge"});
+					must(giant?.ok
+						&& giant.result?.reachBonus === 10
+						&& giant.result?.targetSize === "huge"
+						&& giant.result?.strengthAdvantage === true,
+					`Perfected Dreadnaught activation was ${JSON.stringify(giant)}`);
+					must(state.getSize() === "huge" && state.getMeleeReach() === 15,
+						"Perfected Dreadnaught did not apply Huge size and +10-foot reach");
+					const effects = state.getActiveStateEffects();
+					must(effects.some((it: any) => it.type === "advantage" && it.target === "check:str")
+						&& effects.some((it: any) => it.type === "advantage" && it.target === "save:str"),
+					"Perfected Dreadnaught did not grant Strength check/save advantage");
+					must(state.getResource("Giant Stature").current === giantBefore.resource.current - 1,
+						"Perfected Dreadnaught did not spend Giant Stature");
+
+					ensureBound("Guardian");
+					must(!state.isStateTypeActive("giantStature"), "Guardian switch did not tear down Giant Stature");
+					state.resetTurnEconomy();
+					assertAttack("Guardian", "1d10");
+					const guardianStatus = state.getEfaPerfectedGuardianStatus();
+					must(guardianStatus.ok
+						&& guardianStatus.range === 30
+						&& guardianStatus.maxTargetSize === "huge"
+						&& guardianStatus.maxPullDistance === 25
+						&& guardianStatus.resource.max === Math.max(1, state.getAbilityMod("int")),
+					`Perfected Guardian status was ${JSON.stringify(guardianStatus)}`);
+					const invalid = await state.activateEfaPerfectedGuardian({
+						targetName: "Dragon",
+						targetSize: "gargantuan",
+						distance: 20,
+						isVisible: true,
+						endedTurn: true,
+						saveOutcome: "failed",
+						pullDistance: 10,
+					});
+					must(invalid?.ok === false
+						&& state.getEfaPerfectedGuardianStatus().resource.current === guardianStatus.resource.current
+						&& state.isActionTypeAvailable("reaction"),
+					`invalid Guardian trigger spent resources: ${JSON.stringify(invalid)}`);
+					const guardian = await state.activateEfaPerfectedGuardian({
+						targetName: "Ogre",
+						targetSize: "large",
+						distance: 30,
+						isVisible: true,
+						endedTurn: true,
+						saveOutcome: "failed",
+						pullDistance: 25,
+					});
+					must(guardian?.ok
+						&& guardian.pullDistance === 25
+						&& guardian.finalDistance === 5
+						&& guardian.meleeAttackOptions?.some((it: any) => it.id === modelIds.Guardian),
+					`Perfected Guardian result was ${JSON.stringify(guardian)}`);
+					must(!state.isActionTypeAvailable("reaction")
+						&& state.getEfaPerfectedGuardianStatus().resource.current === guardianStatus.resource.current - 1,
+					"Perfected Guardian did not spend its Reaction/use");
+					state.recoverResources("long");
+					must(state.getEfaPerfectedGuardianStatus().resource.current === state.getEfaPerfectedGuardianStatus().resource.max,
+						"Long Rest did not restore Perfected Guardian");
+
+					ensureBound("Infiltrator");
+					state.resetTurnEconomy();
+					const infiltrator = assertAttack("Infiltrator", "2d6");
+					const glimmer = state.applyTargetEffect({
+						source: "efa-armorer-lightning-launcher-glimmer",
+						effect: "glimmer",
+						targetName: "Ogre",
+						targetEffect: {
+							source: "efa-armorer-lightning-launcher-glimmer",
+							effect: "glimmer",
+							attackId: infiltrator.id,
+						},
+					});
+					must(glimmer?.ok
+						&& glimmer.target?.dimLightFeet === 5
+						&& state.getTargetAttackDisadvantage(glimmer.target.id, {
+							defenderOwnerUid: State.EFA_ARMORER_FEATURE_OWNERS.perfectedArmor.uid,
+						})
+						&& !state.getTargetAttackDisadvantage(glimmer.target.id, {defenderOwnerUid: "another-owner"}),
+					`Perfected Infiltrator glimmer was ${JSON.stringify(glimmer)}`);
+					const flightStatus = state.getEfaPerfectedArmorFlightStatus();
+					must(flightStatus.ok
+						&& flightStatus.flySpeed === flightStatus.speed * 2
+						&& flightStatus.resource.max === Math.max(1, state.getAbilityMod("int")),
+					`Perfected Infiltrator flight status was ${JSON.stringify(flightStatus)}`);
+					const flight = await state.activateEfaPerfectedArmorFlight();
+					must(flight?.ok
+						&& state.getSpeedByType("fly") === flightStatus.flySpeed
+						&& !state.isActionTypeAvailable("bonus")
+						&& state.getEfaPerfectedArmorFlightStatus().resource.current === flightStatus.resource.current - 1,
+					`Perfected Infiltrator flight result was ${JSON.stringify(flight)}`);
+					state.setItemEquipped(armor.id, false);
+					must(!state.isStateTypeActive("efaPerfectedArmorFlight")
+						&& state.getTargetEffects({source: "efa-armorer-lightning-launcher-glimmer"}).length === 0,
+					"doffing did not tear down Perfected Infiltrator states");
+					state.setItemEquipped(armor.id, true);
+					state.recoverResources("long");
+					must(state.getEfaPerfectedArmorFlightStatus().resource.current === state.getEfaPerfectedArmorFlightStatus().resource.max,
+						"Long Rest did not restore Perfected Infiltrator flight");
+					return;
+				}
+
+				const levelHistory = state._data.levelHistory || [];
+				for (const level of [4, 8, 12, 16]) {
+					const entry = levelHistory.find((it: any) =>
+						it.class?.name === "Artificer"
+						&& it.class?.source === "EFA"
+						&& Number(it.classLevel) === level);
+					const asi = entry?.choices?.asi;
+					must(asi
+						&& Object.values(asi).reduce((total: number, value: any) => total + Number(value || 0), 0) === 2,
+					`level-${level} ASI choice was ${JSON.stringify(entry?.choices)}`);
+				}
+				const level19 = levelHistory.find((entry: any) =>
+					entry.class?.name === "Artificer"
+					&& entry.class?.source === "EFA"
+					&& Number(entry.classLevel) === 19);
+				const boonDecision = level19?.decisions?.find((decision: any) =>
+					decision.type === "feat"
+					&& decision.status === "resolved"
+					&& decision.meta?.improvement?.categories?.includes("EB"));
+				must(boonDecision?.selection?.name && boonDecision?.selection?.source,
+					`level-19 Epic Boon decision was ${JSON.stringify(boonDecision)}`);
+				const boon = (state._data.feats || []).find((feat: any) =>
+					feat.name === boonDecision.selection.name
+					&& feat.source === boonDecision.selection.source);
+				must(boon && Object.keys(boon.appliedEffects || {}).length > 0,
+					`Epic Boon ${boon?.name || "selection"} has no applied effect ledger`);
+				must(state.getEfaArmorerModel()?.name === "Dreadnaught",
+					"progression changed the persistent canonical Armor Model");
+			} finally {
+				if (probeName !== "core") await restore();
+			}
+		}, probe);
 	}
 
 	async probeEfaArtilleristFlow (

@@ -771,7 +771,7 @@ function auditSpec (specPath) {
 	const skipReasonCount = skipReasonMatches.length;
 
 	// Helper-driven coverage (build*Checks helpers contribute checks too).
-	const helperUsage = src.match(/\b(buildSpecialtyChecks|buildBattleTacticChecks|buildMetamagicChecks|buildInvocationChecks|buildJesterActChecks|buildTricksterTrickChecks|buildPreciseStrikeChecks|buildDreamwalkerChecks|buildWeaponMasteryChecks|buildAnyInvocationChecks|buildAnyMetamagicChecks|buildAnyManeuverChecks|buildAnyArcaneShotChecks|buildAnyPactBoonChecks|buildCatalogChecks|buildZodiacFormChecks)\b/g) || [];
+	const helperUsage = src.match(/\b(buildSpecialtyChecks|buildBattleTacticChecks|buildMetamagicChecks|buildInvocationChecks|buildJesterActChecks|buildTricksterTrickChecks|buildPreciseStrikeChecks|buildDreamwalkerChecks|buildWeaponMasteryChecks|buildAnyInvocationChecks|buildAnyMetamagicChecks|buildAnyManeuverChecks|buildAnyArcaneShotChecks|buildAnyPactBoonChecks|buildCatalogChecks|buildZodiacFormChecks|buildEfaArtificerBaseChecks)\b/g) || [];
 	const helperCount = new Set(helperUsage).size;
 
 	// "Effective" coverage: hand-written effects + reason comments +

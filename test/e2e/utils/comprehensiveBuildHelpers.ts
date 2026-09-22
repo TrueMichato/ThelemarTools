@@ -484,6 +484,8 @@ export interface MilestoneExpect {
 	pactSlots?: {level?: number; max?: number};
 	/** Names of feature toggles that must be present on the Features tab. */
 	expectToggles?: (string | RegExp)[];
+	/** Exact source-qualified class/subclass feature UIDs that must be present. */
+	expectFeatureUids?: string[];
 	/** Resource trackers that must exist with max≥value. */
 	expectResources?: Record<string, number>;
 }
@@ -539,6 +541,12 @@ export async function assertMilestone (charSheet: CharacterSheetPage, expected: 
 		for (const want of expected.expectToggles) {
 			const re = want instanceof RegExp ? want : new RegExp(want, "i");
 			expect(features.some(f => re.test(f)), `expected toggle matching ${re}`).toBe(true);
+		}
+	}
+
+	if (expected.expectFeatureUids?.length) {
+		for (const uid of expected.expectFeatureUids) {
+			expect(await charSheet.hasClassFeatureUid(uid), `expected exact feature ${uid}`).toBe(true);
 		}
 	}
 
@@ -878,6 +886,7 @@ export type EffectCheck = _EffectCommon & (
 		spellThreshold?: 3 | 5 | 9 | 13 | 17;
 	}
 	| {kind: "efaArtilleristProbe"; probe: "baseCannon" | "arcaneFirearm" | "explosiveCannon" | "fortifiedPosition"}
+	| {kind: "efaArmorerProbe"; probe: "core" | "models" | "improved" | "perfected" | "progression"}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
 	| {
@@ -1669,6 +1678,12 @@ export async function runEffectCheck (
 		case "sourceQualifiedFeature": {
 			const result = await charSheet.page.evaluate(({uid, excludedUids}) => {
 				const state: any = (globalThis as any).charSheet?._state;
+				const normalizeUid = (value: string) => {
+					const parts = String(value).split("|");
+					if (parts.length !== 5) return value;
+					const [name, className, classSource, level, featureSource] = parts;
+					return [name, className, classSource, "", "", level, featureSource].join("|");
+				};
 				const toUid = (feature: any) => [
 					feature?.name,
 					feature?.className,
@@ -1680,9 +1695,11 @@ export async function runEffectCheck (
 				].map(value => String(value ?? "")).join("|");
 				const uids = (state?.getFeatures?.() || []).map(toUid);
 				const lower = new Set(uids.map((it: string) => it.toLowerCase()));
+				const expectedUid = normalizeUid(uid);
+				const expectedExcludedUids = (excludedUids || []).map(normalizeUid);
 				return {
-					present: lower.has(uid.toLowerCase()),
-					excludedPresent: (excludedUids || []).filter((it: string) => lower.has(it.toLowerCase())),
+					present: lower.has(expectedUid.toLowerCase()),
+					excludedPresent: expectedExcludedUids.filter((it: string) => lower.has(it.toLowerCase())),
 					uids,
 				};
 			}, {uid: e.uid, excludedUids: e.excludedUids || []});
@@ -1812,6 +1829,18 @@ export async function runEffectCheck (
 		case "efaArtilleristProbe": {
 			const result = await charSheet.probeEfaArtilleristFlow(e.probe);
 			if (!result?.ok) throw new Error(`EFA Artillerist ${e.probe} probe failed: ${result?.error || "unknown error"}`);
+			return;
+		}
+		case "efaArmorerProbe": {
+			const owningLevel = e.probe === "core" || e.probe === "models"
+				? 3
+				: e.probe === "improved"
+					? 9
+					: e.probe === "perfected"
+						? 15
+						: 19;
+			if (currentLevel != null && currentLevel !== owningLevel) return;
+			await charSheet.probeEfaArmorerFlow(e.probe);
 			return;
 		}
 		case "proficiency": {

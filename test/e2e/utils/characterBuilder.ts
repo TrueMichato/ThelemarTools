@@ -41,6 +41,8 @@ export interface CharacterPreset {
 	subclassName?: string;
 	/** Subclass source ("TGTT", "TGTT-2014", "TGTT-2024", ...). */
 	subclassSource?: string;
+	/** Exact embedded feature-option picks made during level-up, keyed by parent feature name. */
+	preferredFeatureChoices?: Record<string, string>;
 	/**
 	 * Optional signature spells to deterministically pick during creation /
 	 * level-up wizards instead of relying on auto-fill. See pickSignatureSpells.
@@ -285,6 +287,21 @@ export const PRESET_FULL_EFA_ARTILLERIST_ARTIFICER: CharacterPreset = {
 	subclassSource: "EFA",
 	signatureSpells: ["Fire Bolt", "Guidance", "Cure Wounds", "Faerie Fire"],
 };
+
+/** Exact-source EFA Armorer Artificer; the required Armor Model resolves to Dreadnaught first. */
+export const PRESET_FULL_EFA_ARMORER_ARTIFICER = buildEfaArtificerPreset({
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Kelda Ironmantle",
+	optFeatCount: 1,
+	subclassName: "Armorer",
+	subclassSource: "EFA",
+	preferredFeatureChoices: {"Armor Model": "Dreadnaught"},
+	prioritySources: ["XPHB"],
+});
 
 /** Bard — spellcaster with known spells */
 export const PRESET_BARD: CharacterPreset = {
@@ -1588,6 +1605,7 @@ export async function levelUpTo (
 		subclassName?: string;
 		subclassSource?: string;
 		namedSubclassChoice?: {title: string; name: string};
+		preferredFeatureChoices?: Record<string, string>;
 		signatureSpells?: string[];
 		targetClassName?: string;
 		preferredFeatProgressionPattern?: RegExp;
@@ -1707,6 +1725,14 @@ export async function levelUpTo (
 			preferredFeatProgressionPattern: opts?.preferredFeatProgressionPattern,
 			signatureSpells: opts?.signatureSpells,
 		});
+
+		// Nested Artificer plan pickers and other auto-fill surfaces may re-render
+		// the wizard. Apply caller-pinned feature options to the final live group.
+		if (await levelUp.isAccordionVisible("featoptions")) {
+			for (const [featureName, optionName] of Object.entries(opts?.preferredFeatureChoices || {})) {
+				await levelUp.selectFeatureOption(featureName, optionName);
+			}
+		}
 
 		// Finish this level
 		await levelUp.finish();

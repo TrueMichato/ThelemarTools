@@ -396,6 +396,23 @@ export class LevelUpPage {
 		throw new Error(`Could not find subclass "${subclassName}"${sourceAbbv ? ` with source "${sourceAbbv}"` : ""}. Visible options: ${JSON.stringify(optionTexts)}`);
 	}
 
+	async selectFeatureOption (featureName: string, optionName: string): Promise<void> {
+		const accordion = this.page.locator('[data-accordion-id="featoptions"]');
+		await accordion.waitFor({state: "visible", timeout: 10000});
+		const group = accordion.locator(".charsheet__levelup-feat-opt-group")
+			.filter({has: this.page.locator("strong", {hasText: featureName})})
+			.first();
+		await group.waitFor({state: "visible", timeout: 10000});
+		const option = group.locator("label.charsheet__levelup-feat-opt-item")
+			.filter({has: this.page.locator(".feat-opt-name", {hasText: optionName})})
+			.first();
+		await option.waitFor({state: "visible", timeout: 10000});
+		const checkbox = option.locator("input[type='checkbox']");
+		if (!await checkbox.isChecked()) await option.click();
+		await expect(checkbox).toBeChecked();
+		await expect(group.locator(".feat-opt-count")).toHaveText("1");
+	}
+
 	// ========== KNOWN SPELLS SECTION ==========
 
 	/**

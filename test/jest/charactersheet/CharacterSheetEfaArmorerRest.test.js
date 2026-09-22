@@ -203,9 +203,10 @@ describe("EFA Armorer Armor Model rest switching", () => {
 		["short", "Dreadnaught"],
 		["long", "Infiltrator"],
 	])("stages and commits an exact canonical model on %s rest", (restType, targetModel) => {
-		const {state} = seedEfaArmorer();
+		const {state, armor} = seedEfaArmorer();
 		const {rest} = makeRest(state);
 		const before = copy(state.toJson());
+		const speedBefore = state.getWalkSpeed();
 		const staged = rest._buildEfaArmorModelSection({restType});
 
 		expect(staged).toBeTruthy();
@@ -222,6 +223,19 @@ describe("EFA Armorer Armor Model rest switching", () => {
 			error: null,
 		});
 		expectOneModelEverywhere(state, targetModel);
+		if (targetModel === "Infiltrator") {
+			expect(state.getWalkSpeed()).toBe(speedBefore + 5);
+			expect(state.getAdvantageState("skill:stealth")).toMatchObject({cancelled: true});
+			expect(state._data.namedModifiers.filter(modifier => modifier.type === "speed:walk")).toEqual([
+				expect.objectContaining({
+					name: expect.stringContaining("Powered Steps"),
+					value: 5,
+					sourceType: "item",
+				}),
+			]);
+			state.setItemEquipped(armor.id, false);
+			expect(state.getWalkSpeed()).toBe(speedBefore);
+		}
 		expect(CharacterSheetRest.getEfaArmorModelRestFeedback(outcome)).toEqual({
 			successSuffix: ` Armor Model changed from Guardian to ${targetModel} on Plate Armor.`,
 			warning: null,

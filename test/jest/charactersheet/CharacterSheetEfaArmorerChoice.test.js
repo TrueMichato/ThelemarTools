@@ -115,6 +115,10 @@ function expectOneModelEverywhere (state, modelName) {
 		&& EFA_MODEL_NAMES.includes(feature.name));
 	expect(models).toHaveLength(1);
 	expect(models[0].name).toBe(modelName);
+	expect(state.getFeatures().filter(feature =>
+		feature.source === "EFA"
+		&& EFA_MODEL_NAMES.includes(feature.name),
+	)).toEqual([expect.objectContaining({name: modelName, parentFeature: "Armor Model"})]);
 
 	expect(state.getChosenSubfeatures().filter(record =>
 		record.parent === "Armor Model"
@@ -229,6 +233,25 @@ describe("EFA Armorer Armor Model acquisition flows", () => {
 		});
 
 		expectOneModelEverywhere(state, "Guardian");
+		expect(state.getArmorProficiencies()).toContain("Heavy Armor");
+		for (const name of ["Dreadnaught", "Infiltrator"]) {
+			state.addFeature({
+				...getArmorOption(name),
+				className: "Artificer",
+				classSource: "EFA",
+				subclassShortName: "Armorer",
+				subclassSource: "EFA",
+				level: 3,
+			});
+		}
+		expect(state.getFeatures().filter(feature => EFA_MODEL_NAMES.includes(feature.name))).toHaveLength(3);
+		state.getFeatureCalculations();
+		expectOneModelEverywhere(state, "Guardian");
+		const saved = copy(state.toJson());
+		expect(state.loadFromJson(saved)).not.toBe(false);
+		state.setClassFeatureCatalog(DATA.classFeature, DATA.subclassFeature, []);
+		expectOneModelEverywhere(state, "Guardian");
+		expect(state.getArmorProficiencies()).toContain("Heavy Armor");
 		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
 	});
 

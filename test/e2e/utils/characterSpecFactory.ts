@@ -174,11 +174,11 @@ export interface CharacterSpec {
 		 * Take a short rest and assert that a named SR-restoring resource
 		 * (Warlock pact slots, Monk Discipline Points, Battle Master
 		 * superiority dice, etc.) is restored to the expected value.
-		 * The probe first spends one charge so the restoration delta is
-		 * observable; if the resource isn't online (max=0), the probe
-		 * is a no-op rather than a failure.
+		 * The probe spends one charge by default, or the full live pool when
+		 * `spend: "all"` is requested, so restoration deltas are observable.
+		 * If the resource isn't online (max=0), the probe is a no-op.
 		 */
-		shortRestRestores?: {resourceName: string; expectAfter?: number; spend?: number} | {skip: true; reason?: string};
+		shortRestRestores?: {resourceName: string; expectAfter?: number; spend?: number | "all"} | {skip: true; reason?: string};
 		/**
 		 * Concentration probe. Starts concentration on the named spell,
 		 * triggers `thenAction` (raw damage or activating Rage), then
@@ -261,7 +261,13 @@ const L7_TIMEOUT_MS = 600_000;
 export function describeCharacter (spec: CharacterSpec): void {
 	const {preset, displayName, milestones = {}, midTierLoadout, signatureToggle, signatureToggleSkip, featureCompanion, skipMega, skipL7, skipL3, skipL5, featuresMatrix} = spec;
 	const subclassOpts = preset.subclassName
-		? {subclassName: preset.subclassName, subclassSource: preset.subclassSource, namedSubclassChoice: preset.namedSubclassChoice, preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
+		? {
+			subclassName: preset.subclassName,
+			subclassSource: preset.subclassSource,
+			namedSubclassChoice: preset.namedSubclassChoice,
+			preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern,
+			preferredFeatureChoices: preset.preferredFeatureChoices,
+		}
 		: preset.preferredFeatProgressionPattern
 			? {preferredFeatProgressionPattern: preset.preferredFeatProgressionPattern}
 			: undefined;
@@ -671,10 +677,11 @@ export function describeCharacter (spec: CharacterSpec): void {
 				//   short rest), since exact post-rest values are caster/level
 				//   dependent and brittle for spec-author guesses.
 				if (usage.shortRestRestores && !(usage.shortRestRestores as any).skip) {
-					const sr = usage.shortRestRestores as {resourceName: string; expectAfter?: number; spend?: number};
+					const sr = usage.shortRestRestores as {resourceName: string; expectAfter?: number; spend?: number | "all"};
 					const before = await charSheet.getResource(sr.resourceName).catch(() => null);
 					if (before && before.max > 0) {
-						await charSheet.useResourceByName(sr.resourceName, sr.spend || 1).catch(() => null);
+						const spend = sr.spend === "all" ? before.current : sr.spend || 1;
+						await charSheet.useResourceByName(sr.resourceName, spend).catch(() => null);
 						await charSheet.triggerShortRest();
 						const after = await charSheet.getResource(sr.resourceName).catch(() => ({current: -1, max: -1}));
 						if (sr.expectAfter != null) {

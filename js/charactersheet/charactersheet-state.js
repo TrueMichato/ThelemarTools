@@ -8987,27 +8987,34 @@ class CharacterSheetState {
 		history.classLevel = 3;
 		history.choices ||= {};
 
-		const evidence = [];
-		(this._data.features || []).filter(isExactModelFeature).forEach(feature => evidence.push(fromExactEntity(feature)));
-		(this._data.chosenSubfeatures || []).filter(isExactChosen).forEach(record => evidence.push(fromExactEntity(record)));
+		const structuredEvidence = [];
+		(this._data.chosenSubfeatures || []).filter(isExactChosen).forEach(record => structuredEvidence.push(fromExactEntity(record)));
 		(history.choices.featureChoices || []).forEach(choice => {
 			if (!eq(choice.featureName, "Armor Model")) return;
 			const option = fromExactEntity(choice);
-			if (option) evidence.push(option);
+			if (option) structuredEvidence.push(option);
 		});
 		(history.choices.replayData?.featureChoices || []).forEach(snapshot => {
 			if (!eq(snapshot.parentFeature, "Armor Model")) return;
 			const option = fromExactEntity(snapshot);
-			if (option) evidence.push(option);
+			if (option) structuredEvidence.push(option);
 		});
 		(history.decisions || [])
 			.filter(decision => decision.type === "featureChoice" && eq(decision.sourceKey || decision.label, "Armor Model"))
 			.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : [decision.selection])
 			.forEach(selection => {
 				const option = fromExactEntity(selection);
-				if (option) evidence.push(option);
+				if (option) structuredEvidence.push(option);
 			});
-		const selectedRefs = [...new Set(evidence.filter(Boolean).map(option => option.ref.toLowerCase()))];
+		const structuredRefs = [...new Set(structuredEvidence.filter(Boolean).map(option => option.ref.toLowerCase()))];
+		const legacyFeatureRefs = [...new Set(
+			(this._data.features || [])
+				.filter(isExactModelFeature)
+				.map(feature => fromExactEntity(feature))
+				.filter(Boolean)
+				.map(option => option.ref.toLowerCase()),
+		)];
+		const selectedRefs = structuredRefs.length ? structuredRefs : legacyFeatureRefs;
 		const selected = selectedRefs.length === 1 ? byRef.get(selectedRefs[0]) : null;
 
 		const existingChoices = history.choices.featureChoices || [];
@@ -34981,6 +34988,8 @@ class CharacterSheetState {
 						&& subclassName === "armorer"
 						&& subclassSource === "EFA"
 					) {
+						calculations.hasEfaArmorerToolsOfTheTrade = true;
+						calculations.efaArmorerToolsOfTheTradeFeatureUid = "Tools of the Trade|Artificer|EFA|Armorer|EFA|3|EFA";
 						(calculations.craftingTimeModifiers ||= []).push({
 							id: "efa-armorer-tools-of-the-trade-armor-crafting",
 							owner: {
@@ -37837,6 +37846,14 @@ class CharacterSheetState {
 				type: "weaponProficiency",
 				weapon: "Martial Ranged Weapons",
 				source: "Tools of the Trade",
+			});
+		}
+		if (calculations.hasEfaArmorerToolsOfTheTrade) {
+			effects.push({
+				type: "armorProficiency",
+				armor: "Heavy Armor",
+				source: "Tools of the Trade",
+				sourceFeatureUid: calculations.efaArmorerToolsOfTheTradeFeatureUid,
 			});
 		}
 
@@ -61756,6 +61773,14 @@ class CharacterSheetState {
 			return;
 		}
 
+		// Exact EFA Armorer model child features are implemented by the generated
+		// model weapon bound to Arcane Armor. Parsing their prose here would add an
+		// unconditional second copy of Powered Steps/Dampening Field which survives
+		// doffing and double-stacks while Infiltrator is active.
+		if (CharacterSheetState.isEfaArmorerModelFeature(feature)) {
+			return;
+		}
+
 		// Battle Tactics (TGTT Fighter, optionalFeatureTypes "BT") and Arcane Shots
 		// (Arcane Archer, "AS") are NOT passive character modifiers and must not be
 		// text-parsed into always-on named modifiers:
@@ -81137,6 +81162,33 @@ class CharacterSheetState {
 		}
 	}
 
+	_reconcileEfaArmorerModelFeatures (model) {
+		if (!model) return;
+		const modelFeatures = (this._data.features || [])
+			.filter(feature => CharacterSheetState.isEfaArmorerModelFeature(feature));
+		if (!modelFeatures.length) return;
+
+		const matching = modelFeatures.filter(feature => feature.name === model.name);
+		const keeper = matching.find(feature => feature.parentFeature === "Armor Model") || matching[0] || null;
+		for (const feature of modelFeatures) {
+			if (feature === keeper) continue;
+			const removedResources = (this._data.resources || []).filter(resource => resource.featureId === feature.id);
+			this._data.resources = (this._data.resources || []).filter(resource => resource.featureId !== feature.id);
+			this._pruneTurnReceiptsForResources(removedResources);
+			this._data.attacks = (this._data.attacks || []).filter(attack => attack.featureId !== feature.id);
+			this.clearPendingFeatureChoicesByFeature(feature.id);
+			this.removeModifiersByFeature(feature.id);
+			for (const activeState of [...(this._data.activeStates || [])]) {
+				if (activeState.sourceFeatureId === feature.id) this.removeActiveState(activeState.id);
+			}
+			this._data.features = (this._data.features || []).filter(candidate => candidate.id !== feature.id);
+		}
+		if (!keeper) return;
+		keeper.parentFeature = "Armor Model";
+		keeper.isFeatureOption = true;
+		keeper.acquisitionLevel = 3;
+	}
+
 	_reconcileEfaArmorerGeneratedRows ({armorer, model}) {
 		if (!armorer) {
 			this._removeEfaArmorerGeneratedRows();
@@ -81279,6 +81331,7 @@ class CharacterSheetState {
 			this._migrateEfaArmorerBinding();
 			const armorer = this._getEfaArmorerClass();
 			const model = this.getEfaArmorerModel();
+			this._reconcileEfaArmorerModelFeatures(model);
 			this._reconcileEfaArmorerGeneratedRows({armorer, model});
 
 			const boundId = this._data.efaArmorer.arcaneArmorItemId;
