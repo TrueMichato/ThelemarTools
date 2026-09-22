@@ -584,6 +584,13 @@ Public State contracts:
   reactions, Repair, and Hit Dice. Focused wrappers (`commandCompanionAction`,
   `useCompanionRepair`, `useCompanionReaction`, and
   `spendCompanionHitDie`) delegate to the same coordinator.
+- `getFeatureCompanionRevivalAvailability()` /
+  `beginFeatureCompanionRevival()` and
+  `getFeatureCompanionReplacementAvailability()` /
+  `replaceFeatureCompanionAfterLongRest()` are the State-only lifecycle
+  boundaries for the exact EFA Steel Defender. They prevalidate exact
+  ownership, canonical Action/slot/tool/rest costs, return source-qualified
+  identities, and publish per-mutation rollback results after any late failure.
 - `migrateLegacyFeatureCompanions()` has a narrow Steel Defender recognition
   adapter but dispatches through the same registry/reconciler. It requires exact
   defender source/type/statblock identity plus exact class/subclass source,
@@ -596,8 +603,13 @@ The resolved JSON-safe rules result lives under
 legacy proficiency projections. Unknown future feature descriptors remain
 persisted and untouched until their registry entry exists.
 
-Lifecycle transitions/revival/replacement, Arcane Jolt, Battle Ready weapon
-substitution, PDF/export, and E2E coverage remain later milestones.
+Exact EFA lifecycle policy is also registry-owned. State persists
+`alive`/`dead`/`revivalPending`/`expired`/`vanished`, preserves unknown
+JSON-safe lifecycle fields and the stable companion ID, and processes expiry
+and pending-revival due minutes inside the same `advanceGameTimeMinutes()`
+transaction as generated-item lifecycle work. Reconciliation may change
+derived maxima but never heals, revives, or erases lifecycle state. Lifecycle
+UI, PDF/export, and E2E coverage remain later milestones.
 
 ## Key Integration Points
 

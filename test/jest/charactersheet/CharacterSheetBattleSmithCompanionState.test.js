@@ -125,7 +125,7 @@ describe("Battle Smith feature-companion State resolution", () => {
 		expect(state.getCompanionSkillMod(id, "Perception")).toBe(10);
 	});
 
-	test("preserves stable identity, exact current HP, spent resources, and source-specific metadata", () => {
+	test("preserves stable identity, spent resources, and source metadata while enforcing dead lifecycle HP", () => {
 		const state = getState({classes: [getOwnerClass("EFA", 9)], intelligence: 18});
 		const id = addFeatureCompanion(state, {
 			customName: "Aegis",
@@ -157,7 +157,7 @@ describe("Battle Smith feature-companion State resolution", () => {
 		expect(companion.customName).toBe("Aegis");
 		expect(companion.hp).toEqual({
 			max: 50,
-			current: 6,
+			current: 0,
 			temp: 3,
 			sourceSpecific: {ward: true},
 		});
@@ -171,6 +171,7 @@ describe("Battle Smith feature-companion State resolution", () => {
 			status: "dead",
 			generation: 4,
 			diedAtGameMinute: 720,
+			timingKnown: true,
 			customTimestamp: 721,
 		});
 		expect(companion.uses).toEqual({

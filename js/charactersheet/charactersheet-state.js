@@ -8016,6 +8016,7 @@ class CharacterSheetState {
 		}
 
 		this.migrateLegacyFeatureCompanions();
+		this._migrateFeatureCompanionLifecycles();
 
 		for (const companion of this._data.companions) {
 			const featureUid = companion?.featureGrant?.uid;
@@ -37431,7 +37432,11 @@ class CharacterSheetState {
 		try {
 			this._normalizeGameTimeState();
 			this._data.gameTime.minute = newMinute;
-			const lifecycle = this._advanceGeneratedFeatureItemLifecyclesToMinute({
+			const companionLifecycle = this._advanceFeatureCompanionLifecyclesToMinute({
+				priorMinute,
+				newMinute,
+			});
+			const generatedLifecycle = this._advanceGeneratedFeatureItemLifecyclesToMinute({
 				priorMinute,
 				newMinute,
 			});
@@ -37444,8 +37449,8 @@ class CharacterSheetState {
 				reason: normalizedReason,
 				identity: normalizedIdentity,
 				receiptId,
-				updated: lifecycle.updated,
-				removed: lifecycle.removed,
+				updated: [...companionLifecycle.updated, ...generatedLifecycle.updated],
+				removed: generatedLifecycle.removed,
 			};
 		} catch (error) {
 			this._data = snapshot;
@@ -38213,6 +38218,78 @@ class CharacterSheetState {
 		}
 	}
 
+	_advanceFeatureCompanionLifecyclesToMinute ({newMinute}) {
+		const updated = [];
+		for (const companion of this._data.companions || []) {
+			const policy = this._getFeatureCompanionLifecyclePolicy(companion);
+			if (!CharacterSheetState._isExactEfaSteelDefender(companion, policy)) continue;
+			const lifecycle = companion.lifecycle || {};
+			const status = CharacterSheetState._getFeatureCompanionLifecycleStatus(companion);
+
+			if (status === "revivalPending") {
+				const dueAtGameMinute = Number(lifecycle.revivalPending?.dueAtGameMinute);
+				if (
+					Number.isSafeInteger(dueAtGameMinute)
+					&& dueAtGameMinute >= 0
+					&& dueAtGameMinute <= newMinute
+				) {
+					const pending = MiscUtil.copyFast(lifecycle.revivalPending);
+					const lastRevival = {
+						...pending,
+						completedAtGameMinute: dueAtGameMinute,
+					};
+					delete lifecycle.revivalPending;
+					delete lifecycle.diedAtGameMinute;
+					delete lifecycle.timingKnown;
+					delete lifecycle.deathReason;
+					delete lifecycle.expiredAtGameMinute;
+					lifecycle.status = "alive";
+					lifecycle.lastRevival = lastRevival;
+					companion.lifecycle = lifecycle;
+					companion.active = true;
+					companion.hp.current = companion.hp.max;
+					companion.hp.temp = 0;
+					updated.push({
+						kind: "featureCompanion",
+						companionId: companion.id,
+						ownerUid: policy.ownerUid,
+						sourceUid: policy.sourceUid,
+						transition: "revivalCompleted",
+						atMinute: dueAtGameMinute,
+						hp: companion.hp.current,
+					});
+				}
+				continue;
+			}
+
+			if (status !== "dead" || lifecycle.timingKnown !== true) continue;
+			const diedAtGameMinute = Number(lifecycle.diedAtGameMinute);
+			const deathWindowMinutes = Number(policy.policy?.revival?.deathWindowMinutes);
+			if (
+				!Number.isSafeInteger(diedAtGameMinute)
+				|| diedAtGameMinute < 0
+				|| !Number.isSafeInteger(deathWindowMinutes)
+				|| deathWindowMinutes < 0
+			) continue;
+			const expiresAtGameMinute = diedAtGameMinute + deathWindowMinutes + 1;
+			if (expiresAtGameMinute > newMinute) continue;
+			lifecycle.status = "expired";
+			lifecycle.expiredAtGameMinute = expiresAtGameMinute;
+			companion.lifecycle = lifecycle;
+			companion.active = false;
+			companion.hp.current = 0;
+			updated.push({
+				kind: "featureCompanion",
+				companionId: companion.id,
+				ownerUid: policy.ownerUid,
+				sourceUid: policy.sourceUid,
+				transition: "expired",
+				atMinute: expiresAtGameMinute,
+			});
+		}
+		return {updated};
+	}
+
 	_advanceGeneratedFeatureItemLifecyclesToMinute ({priorMinute, newMinute}) {
 		this._migrateGeneratedFeatureItemExpiryMinutes({currentMinute: priorMinute});
 		const updated = [];
@@ -38331,6 +38408,44 @@ class CharacterSheetState {
 		return !!this.getPendingZeroHpIntervention()?.interventions?.some(intervention => intervention.available);
 	}
 
+	_vanishFeatureCompanionsForFinalizedOwnerDeath ({receiptId}) {
+		const vanished = [];
+		for (const companion of this._data.companions || []) {
+			const policy = this._getFeatureCompanionLifecyclePolicy(companion);
+			if (
+				!CharacterSheetState._isExactEfaSteelDefender(companion, policy)
+				|| policy.policy?.onSummonerDeath !== "vanishes"
+				|| companion.lifecycle?.status === "vanished"
+			) continue;
+			const previousStatus = CharacterSheetState._getFeatureCompanionLifecycleStatus(companion) || "alive";
+			companion.lifecycle = {
+				...(CharacterSheetState._isCompanionSchemaObject(companion.lifecycle) ? companion.lifecycle : {}),
+				status: "vanished",
+				vanishedAtGameMinute: this.getGameTimeMinutes(),
+				vanishedReason: "summonerDeath",
+				ownerDeathReceiptId: receiptId,
+				ownerDeathTransition: {
+					version: 1,
+					previousStatus,
+					generation: Math.max(1, Math.floor(Number(companion.lifecycle?.generation) || 1)),
+				},
+			};
+			delete companion.lifecycle.revivalPending;
+			companion.active = false;
+			companion.hp.current = 0;
+			companion.hp.temp = 0;
+			this._pruneFeatureCompanionTurnReceipts(companion);
+			vanished.push({
+				companionId: companion.id,
+				ownerUid: policy.ownerUid,
+				sourceUid: policy.sourceUid,
+				previousStatus,
+				status: "vanished",
+			});
+		}
+		return vanished;
+	}
+
 	reconcileGeneratedFeatureItemDeathTransition ({reason = "reconcile"} = {}) {
 		if (this._hasActionablePendingZeroHpIntervention()) {
 			return {ok: true, code: "death-transition-deferred", reason, assigned: []};
@@ -38345,6 +38460,9 @@ class CharacterSheetState {
 			transition.isFinalizedDead = true;
 			transition.receiptId = CryptUtil.uid();
 		}
+		const vanishedCompanions = this._vanishFeatureCompanionsForFinalizedOwnerDeath({
+			receiptId: transition.receiptId,
+		});
 		const assigned = [];
 		for (const row of this._data.inventory || []) {
 			const before = row.item?._generatedItemProvenance?.lifecycle?.expiryRecords?.length || 0;
@@ -38358,6 +38476,7 @@ class CharacterSheetState {
 			reason,
 			receiptId: transition.receiptId,
 			assigned,
+			vanishedCompanions,
 		};
 	}
 
@@ -49908,8 +50027,7 @@ class CharacterSheetState {
 		}
 		if (
 			companion.active === false
-			|| companion.lifecycle?.status === "vanished"
-			|| companion.lifecycle?.status === "dead"
+			|| CharacterSheetState._getFeatureCompanionLifecycleBlock(companion)
 			|| (Number(companion.hp?.current) || 0) <= 0
 		) {
 			return {ok: false, reason: "defenderInactive", message: "A dead or inactive Steel Defender cannot trigger Arcane Jolt."};
@@ -50008,7 +50126,7 @@ class CharacterSheetState {
 			}
 			if (
 				companion.active === false
-				|| ["dead", "vanished"].includes(companion.lifecycle?.status)
+				|| CharacterSheetState._getFeatureCompanionLifecycleBlock(companion)
 				|| (Number(companion.hp?.current) || 0) <= 0
 			) {
 				return {ok: false, reason: "targetDeadOrUnavailable", message: "Arcane Jolt cannot revive a dead or vanished companion."};
@@ -81374,6 +81492,14 @@ class CharacterSheetState {
 		"hitDice",
 	]);
 
+	static FEATURE_COMPANION_LIFECYCLE_STATUSES = Object.freeze([
+		"alive",
+		"dead",
+		"revivalPending",
+		"expired",
+		"vanished",
+	]);
+
 	static FEATURE_COMPANION_MIGRATION_KEY = "featureCompanionLegacyV1";
 	static FEATURE_COMPANION_CREATION_RESOURCE_VERSION = 1;
 	static FEATURE_COMPANION_LIFECYCLE_RECEIPT_VERSION = 1;
@@ -82614,6 +82740,139 @@ class CharacterSheetState {
 		return resolved;
 	}
 
+	static _getFeatureCompanionLifecycleStatus (companion) {
+		const status = typeof companion?.lifecycle?.status === "string"
+			? companion.lifecycle.status.trim()
+			: "";
+		return status || null;
+	}
+
+	static _getFeatureCompanionLifecycleBlock (companion) {
+		const status = CharacterSheetState._getFeatureCompanionLifecycleStatus(companion);
+		switch (status) {
+			case null:
+			case "active":
+			case "alive":
+				return null;
+			case "dead":
+				return {reason: "companionDead", message: "This companion is dead."};
+			case "revivalPending":
+				return {reason: "companionRevivalPending", message: "This companion is awaiting revival completion."};
+			case "expired":
+				return {reason: "companionExpired", message: "This companion's revival window has expired."};
+			case "vanished":
+				return {reason: "companionVanished", message: "This companion has vanished."};
+			default:
+				return {
+					reason: "companionLifecycleUnavailable",
+					message: `This companion has unsupported lifecycle state "${status}".`,
+				};
+		}
+	}
+
+	_getFeatureCompanionLifecyclePolicy (companion) {
+		if (!CharacterSheetState._isExactEfaSteelDefender(companion)) return null;
+		const ownerUid = companion?.featureGrant?.uid || null;
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+		const descriptor = ownerUid ? rules?.getDescriptor(ownerUid) : null;
+		if (!ownerUid || !descriptor) return null;
+		const contextResult = this._tryGetFeatureCompanionSummonerContext(ownerUid);
+		if (!contextResult.ok) return null;
+		const resolved = rules.resolve(ownerUid, contextResult.context);
+		if (!resolved?.lifecycle) return null;
+		return {
+			ownerUid: CharacterSheetState._normalizeFeatureCompanionUid(ownerUid),
+			sourceUid: descriptor.identity?.companionUid || null,
+			descriptor,
+			resolved,
+			policy: resolved.lifecycle,
+		};
+	}
+
+	static _isExactEfaSteelDefender (companion, lifecyclePolicy = null) {
+		const ownerUid = CharacterSheetState._normalizeFeatureCompanionUid(companion?.featureGrant?.uid);
+		const policyOwnerUid = CharacterSheetState._normalizeFeatureCompanionUid(lifecyclePolicy?.ownerUid);
+		const expectedOwnerUid = CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER;
+		return ownerUid?.toLowerCase() === expectedOwnerUid.toLowerCase()
+			&& (!policyOwnerUid || policyOwnerUid.toLowerCase() === ownerUid.toLowerCase())
+			&& String(companion?.name || "").trim().toLowerCase() === "steel defender"
+			&& String(companion?.source || "").trim().toUpperCase() === "EFA"
+			&& (
+				!lifecyclePolicy?.sourceUid
+				|| lifecyclePolicy.sourceUid.toLowerCase() === CharacterSheetState.EFA_STEEL_DEFENDER_UID.toLowerCase()
+			);
+	}
+
+	_migrateFeatureCompanionLifecycles () {
+		for (const companion of this._data.companions || []) {
+			const policy = this._getFeatureCompanionLifecyclePolicy(companion);
+			if (!CharacterSheetState._isExactEfaSteelDefender(companion, policy)) continue;
+
+			const lifecycle = CharacterSheetState._isCompanionSchemaObject(companion.lifecycle)
+				? MiscUtil.copyFast(companion.lifecycle)
+				: {};
+			const status = CharacterSheetState._getFeatureCompanionLifecycleStatus({lifecycle});
+			const currentHp = Math.max(0, Number(companion.hp?.current) || 0);
+			if (!status || (status === "alive" && currentHp === 0)) {
+				lifecycle.status = currentHp > 0 ? "alive" : "dead";
+			}
+
+			if (lifecycle.status === "dead") {
+				const hasPersistedDeathMinute = lifecycle.timingKnown !== false
+					&& lifecycle.diedAtGameMinute != null;
+				const diedAtGameMinute = hasPersistedDeathMinute
+					? Number(lifecycle.diedAtGameMinute)
+					: Number.NaN;
+				if (hasPersistedDeathMinute && Number.isSafeInteger(diedAtGameMinute) && diedAtGameMinute >= 0) {
+					lifecycle.diedAtGameMinute = diedAtGameMinute;
+					lifecycle.timingKnown = true;
+				} else {
+					lifecycle.diedAtGameMinute = null;
+					lifecycle.timingKnown = false;
+				}
+				companion.active = false;
+				if (companion.hp) companion.hp.current = 0;
+			} else if (["revivalPending", "expired", "vanished"].includes(lifecycle.status)) {
+				companion.active = false;
+				if (companion.hp) companion.hp.current = 0;
+			}
+
+			companion.lifecycle = lifecycle;
+		}
+	}
+
+	_markFeatureCompanionDead (companion, {priorHp, reason = "hp-reduced-to-zero"} = {}) {
+		const policy = this._getFeatureCompanionLifecyclePolicy(companion);
+		if (!CharacterSheetState._isExactEfaSteelDefender(companion, policy)) return null;
+		if (!(Number(priorHp) > 0) || (Number(companion.hp?.current) || 0) > 0) return null;
+		const currentStatus = CharacterSheetState._getFeatureCompanionLifecycleStatus(companion);
+		if (currentStatus && currentStatus !== "alive") return null;
+
+		const diedAtGameMinute = this.getGameTimeMinutes();
+		const lifecycle = {
+			...(CharacterSheetState._isCompanionSchemaObject(companion.lifecycle) ? companion.lifecycle : {}),
+			status: "dead",
+			diedAtGameMinute,
+			timingKnown: true,
+			deathReason: reason,
+		};
+		delete lifecycle.revivalPending;
+		delete lifecycle.expiredAtGameMinute;
+		delete lifecycle.vanishedAtGameMinute;
+		companion.lifecycle = lifecycle;
+		companion.active = false;
+		companion.hp.current = 0;
+		this._pruneFeatureCompanionTurnReceipts(companion);
+		return {
+			kind: "featureCompanion",
+			companionId: companion.id,
+			ownerUid: policy.ownerUid,
+			sourceUid: policy.sourceUid,
+			transition: "dead",
+			atMinute: diedAtGameMinute,
+		};
+	}
+
 	_tryGetFeatureCompanionSummonerContext (featureUid) {
 		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
 		const descriptor = rules?.getDescriptor(featureUid);
@@ -82856,6 +83115,9 @@ class CharacterSheetState {
 			resolved: MiscUtil.copyFast(resolved),
 		};
 
+		if (CharacterSheetState._isExactEfaSteelDefender(companion, this._getFeatureCompanionLifecyclePolicy(companion))) {
+			this._migrateFeatureCompanionLifecycles();
+		}
 		return companion;
 	}
 
@@ -83000,7 +83262,11 @@ class CharacterSheetState {
 		const reactionAvailable = reactionReceipt ? !this.queryTurnReceipt(reactionReceipt.key).used : false;
 		base.status.actionAvailable = actionAvailable;
 		base.status.reactionAvailable = reactionAvailable;
-		if (companion.active === false || companion.lifecycle?.status === "vanished") {
+		const lifecycleBlock = CharacterSheetState._getFeatureCompanionLifecycleBlock(companion);
+		if (lifecycleBlock) {
+			return fail(lifecycleBlock.reason, lifecycleBlock.message);
+		}
+		if (companion.active === false) {
 			return fail("companionInactive", "This companion is inactive.");
 		}
 		if ((Number(companion.hp?.current) || 0) <= 0) {
@@ -83365,6 +83631,14 @@ class CharacterSheetState {
 			} else {
 				if (!targetCompanion || String(targetCompanion.creatureType || "").toLowerCase() !== "construct") {
 					return this._getCompanionOperationFailure(availability, "invalidRepairTarget", "Repair can target only a Construct or object.");
+				}
+				const lifecycleBlock = CharacterSheetState._getFeatureCompanionLifecycleBlock(targetCompanion);
+				if (lifecycleBlock) {
+					return this._getCompanionOperationFailure(
+						availability,
+						`repairTarget${lifecycleBlock.reason.charAt(0).toUpperCase()}${lifecycleBlock.reason.slice(1)}`,
+						`Repair cannot restore that target: ${lifecycleBlock.message}`,
+					);
 				}
 				if ((Number(targetCompanion.hp?.current) || 0) <= 0) {
 					return this._getCompanionOperationFailure(availability, "repairTargetAtZeroHp", "Repair cannot target a modeled construct at 0 HP.");
@@ -84373,6 +84647,506 @@ class CharacterSheetState {
 					companion: true,
 				},
 			};
+		}
+	}
+
+	_getFeatureCompanionLifecycleOperationIdentity (companionId, operation) {
+		const companion = this.getCompanion(companionId);
+		const lifecyclePolicy = this._getFeatureCompanionLifecyclePolicy(companion);
+		const sourceUid = lifecyclePolicy?.sourceUid || null;
+		return {
+			companion,
+			lifecyclePolicy,
+			companionId: companion?.id || companionId || null,
+			operation,
+			ownerUid: lifecyclePolicy?.ownerUid || companion?.featureGrant?.uid || null,
+			sourceUid,
+			operationUid: sourceUid ? `${operation}|${sourceUid}` : null,
+		};
+	}
+
+	_getFeatureCompanionLifecycleOperationFailure (identity, reason, message, rollback = null, error = null) {
+		return {
+			ok: false,
+			committed: false,
+			operation: identity.operation,
+			companionId: identity.companionId,
+			ownerUid: identity.ownerUid,
+			sourceUid: identity.sourceUid,
+			operationUid: identity.operationUid,
+			reason,
+			message,
+			costs: null,
+			lifecycle: identity.companion?.lifecycle ? MiscUtil.copyFast(identity.companion.lifecycle) : null,
+			rollback,
+			error: error ? String(error?.message || error) : null,
+		};
+	}
+
+	_getFeatureCompanionSpellSlotOptions (minimumLevel = 1) {
+		const min = Math.max(1, Math.floor(Number(minimumLevel) || 1));
+		const out = [];
+		for (const [levelKey, slot] of Object.entries(this._data.spellcasting?.spellSlots || {})) {
+			const level = Number(levelKey);
+			const current = Math.max(0, Number(slot?.current) || 0);
+			if (!Number.isInteger(level) || level < min || current <= 0) continue;
+			out.push({kind: "normal", level, current, max: Math.max(current, Number(slot?.max) || 0)});
+		}
+		const pact = this.getPactSlots();
+		if ((Number(pact.current) || 0) > 0 && (Number(pact.level) || 0) >= min) {
+			out.push({
+				kind: "pact",
+				level: Number(pact.level),
+				current: Number(pact.current),
+				max: Math.max(Number(pact.current), Number(pact.max) || 0),
+			});
+		}
+		return out.sort((a, b) => a.level - b.level || a.kind.localeCompare(b.kind));
+	}
+
+	static _normalizeFeatureCompanionSpellSlotChoice (spellSlot) {
+		if (!spellSlot || typeof spellSlot !== "object" || Array.isArray(spellSlot)) return null;
+		const rawKind = String(spellSlot.kind || spellSlot.type || "").trim().toLowerCase();
+		const kind = rawKind === "spell" ? "normal" : rawKind;
+		if (!["normal", "pact"].includes(kind)) return null;
+		const level = Number(spellSlot.level);
+		if (kind === "normal" && (!Number.isInteger(level) || level < 1)) return null;
+		if (kind === "pact" && spellSlot.level != null && (!Number.isInteger(level) || level < 1)) return null;
+		return {kind, level: kind === "normal" ? level : (Number.isInteger(level) ? level : null)};
+	}
+
+	getFeatureCompanionRevivalAvailability (companionId, options = {}) {
+		const identity = this._getFeatureCompanionLifecycleOperationIdentity(companionId, "Revival");
+		const fail = (reason, message, extra = {}) => ({
+			...identity,
+			companion: undefined,
+			lifecyclePolicy: undefined,
+			available: false,
+			reason,
+			message,
+			...extra,
+		});
+		if (!options || typeof options !== "object" || Array.isArray(options)) {
+			return fail("invalidRevivalOptions", "Revival options must be an object.");
+		}
+		if (!identity.companion) return fail("companionNotFound", "Companion not found.");
+		if (!CharacterSheetState._isExactEfaSteelDefender(identity.companion, identity.lifecyclePolicy)) {
+			return fail("unsupportedCompanion", "Only the exact owned EFA Steel Defender can use this revival.");
+		}
+		const revivalPolicy = identity.lifecyclePolicy?.policy?.revival;
+		if (!revivalPolicy) return fail("revivalUnavailable", "This companion has no revival policy.");
+		if (this.isDead()) return fail("ownerDead", "A dead owner cannot take the Magic Action required to revive the defender.");
+
+		const status = CharacterSheetState._getFeatureCompanionLifecycleStatus(identity.companion);
+		if (status !== "dead") {
+			const block = CharacterSheetState._getFeatureCompanionLifecycleBlock(identity.companion);
+			return fail(
+				block?.reason || "companionNotDead",
+				block?.message || "The defender must be dead before revival can begin.",
+			);
+		}
+
+		const currentMinute = this.getGameTimeMinutes();
+		const deathWindowMinutes = Number(revivalPolicy.deathWindowMinutes);
+		const diedAtGameMinute = Number(identity.companion.lifecycle?.diedAtGameMinute);
+		const timingKnown = identity.companion.lifecycle?.timingKnown === true
+			&& Number.isSafeInteger(diedAtGameMinute)
+			&& diedAtGameMinute >= 0;
+		if (timingKnown && currentMinute - diedAtGameMinute > deathWindowMinutes) {
+			return fail("revivalWindowExpired", "The Steel Defender died more than 60 minutes ago.");
+		}
+		if (!timingKnown && options.deathWithinHourConfirmed !== true) {
+			return fail(
+				"deathTimeConfirmationRequired",
+				"Confirm in this operation that the legacy defender died within the last hour.",
+			);
+		}
+		if (revivalPolicy.requiresTouch && options.touchConfirmed !== true) {
+			return fail("touchNotConfirmed", "Confirm that you are touching the Steel Defender.");
+		}
+		const ownerActionCost = revivalPolicy.ownerActionCost || "action";
+		if (!this.isActionTypeAvailable(ownerActionCost)) {
+			return fail("ownerActionUnavailable", "The owner's Action has already been used.");
+		}
+
+		const spellSlots = this._getFeatureCompanionSpellSlotOptions(revivalPolicy.spellSlot?.minimumLevel);
+		if (!spellSlots.length) {
+			return fail("noSpellSlotAvailable", "No eligible normal or Pact Magic spell slot is available.", {spellSlots});
+		}
+		const selectedSpellSlot = CharacterSheetState._normalizeFeatureCompanionSpellSlotChoice(options.spellSlot);
+		if (!selectedSpellSlot) {
+			return fail("spellSlotRequired", "Select one available normal or Pact Magic spell slot.", {spellSlots});
+		}
+		const selected = spellSlots.find(slot =>
+			slot.kind === selectedSpellSlot.kind
+			&& (slot.kind === "pact" || slot.level === selectedSpellSlot.level),
+		);
+		if (!selected) {
+			return fail("spellSlotUnavailable", "The selected spell slot is not available.", {
+				spellSlots,
+				selectedSpellSlot,
+			});
+		}
+
+		const returnDelayMinutes = Number(revivalPolicy.returnDelayMinutes);
+		return {
+			...identity,
+			companion: undefined,
+			lifecyclePolicy: undefined,
+			available: true,
+			reason: null,
+			message: null,
+			actionType: revivalPolicy.actionType,
+			requiresTouch: revivalPolicy.requiresTouch === true,
+			currentMinute,
+			completionMinute: currentMinute + returnDelayMinutes,
+			deathTiming: {
+				known: timingKnown,
+				diedAtGameMinute: timingKnown ? diedAtGameMinute : null,
+				deathWithinHourConfirmed: !timingKnown && options.deathWithinHourConfirmed === true,
+			},
+			spellSlots,
+			selectedSpellSlot: {...selected},
+			costs: {
+				ownerAction: ownerActionCost,
+				spellSlot: {kind: selected.kind, level: selected.level, amount: 1},
+			},
+		};
+	}
+
+	_commitFeatureCompanionRevivalPending (companion, availability) {
+		const lifecycle = {
+			...(CharacterSheetState._isCompanionSchemaObject(companion.lifecycle) ? companion.lifecycle : {}),
+			status: "revivalPending",
+			revivalPending: {
+				version: 1,
+				startedAtGameMinute: availability.currentMinute,
+				dueAtGameMinute: availability.completionMinute,
+				deathTiming: MiscUtil.copyFast(availability.deathTiming),
+				spellSlot: {
+					kind: availability.selectedSpellSlot.kind,
+					level: availability.selectedSpellSlot.level,
+				},
+			},
+		};
+		companion.lifecycle = lifecycle;
+		companion.active = false;
+		companion.hp.current = 0;
+		companion.hp.temp = 0;
+		return lifecycle;
+	}
+
+	beginFeatureCompanionRevival (options = {}) {
+		if (!options || typeof options !== "object" || Array.isArray(options)) {
+			const identity = this._getFeatureCompanionLifecycleOperationIdentity(null, "Revival");
+			return this._getFeatureCompanionLifecycleOperationFailure(
+				identity,
+				"invalidRevivalOptions",
+				"Revival options must be an object.",
+			);
+		}
+		const {
+			companionId,
+			spellSlot = null,
+			touchConfirmed = false,
+			deathWithinHourConfirmed = false,
+			cancelled = false,
+		} = options;
+		const identity = this._getFeatureCompanionLifecycleOperationIdentity(companionId, "Revival");
+		if (cancelled) {
+			return this._getFeatureCompanionLifecycleOperationFailure(
+				identity,
+				"cancelled",
+				"Revival cancelled before any Action or spell slot was spent.",
+			);
+		}
+		const availability = this.getFeatureCompanionRevivalAvailability(companionId, {
+			spellSlot,
+			touchConfirmed,
+			deathWithinHourConfirmed,
+		});
+		if (!availability.available) {
+			return this._getFeatureCompanionLifecycleOperationFailure(
+				identity,
+				availability.reason,
+				availability.message,
+			);
+		}
+
+		const companion = identity.companion;
+		const lifecycleSnapshot = MiscUtil.copyFast(companion.lifecycle || {});
+		const activeSnapshot = companion.active;
+		const hpSnapshot = MiscUtil.copyFast(companion.hp || {});
+		const ownerActionCost = availability.costs.ownerAction;
+		const slot = availability.selectedSpellSlot;
+		const slotBefore = slot.kind === "pact"
+			? Number(this.getPactSlots().current) || 0
+			: Number(this._data.spellcasting.spellSlots?.[slot.level]?.current) || 0;
+		let ownerActionSpent = false;
+		let spellSlotSpent = false;
+		const rollback = {ownerAction: null, spellSlot: null, lifecycle: null};
+		const doRollback = () => {
+			companion.lifecycle = lifecycleSnapshot;
+			companion.active = activeSnapshot;
+			companion.hp = hpSnapshot;
+			rollback.lifecycle = {ok: true, status: companion.lifecycle?.status || null};
+			if (spellSlotSpent) {
+				if (slot.kind === "pact") this.setPactSlotsCurrent(slotBefore);
+				else this.setSpellSlotCurrent(slot.level, slotBefore);
+				const current = slot.kind === "pact"
+					? this.getPactSlots().current
+					: this._data.spellcasting.spellSlots?.[slot.level]?.current;
+				rollback.spellSlot = {
+					ok: current === slotBefore,
+					kind: slot.kind,
+					level: slot.level,
+					current,
+				};
+			}
+			if (ownerActionSpent) {
+				rollback.ownerAction = {
+					ok: this.restoreActionType(ownerActionCost),
+					actionType: ownerActionCost,
+				};
+			}
+			return rollback;
+		};
+
+		try {
+			if (!this.consumeActionType(ownerActionCost)) throw new Error("Owner Action could not be consumed.");
+			ownerActionSpent = true;
+			const spentSlot = slot.kind === "pact" ? this.usePactSlot() : this.useSpellSlot(slot.level);
+			if (!spentSlot) throw new Error("Selected spell slot could not be consumed.");
+			spellSlotSpent = true;
+			this._commitFeatureCompanionRevivalPending(companion, availability);
+			if (companion.lifecycle?.status !== "revivalPending") {
+				throw new Error("Steel Defender revival-pending lifecycle did not commit.");
+			}
+			return {
+				ok: true,
+				committed: true,
+				operation: identity.operation,
+				companionId: identity.companionId,
+				ownerUid: identity.ownerUid,
+				sourceUid: identity.sourceUid,
+				operationUid: identity.operationUid,
+				reason: null,
+				message: "Revival begun; canonical game-time advancement will complete it after 1 minute.",
+				actionType: availability.actionType,
+				costs: MiscUtil.copyFast(availability.costs),
+				completionMinute: availability.completionMinute,
+				lifecycle: MiscUtil.copyFast(companion.lifecycle),
+				rollback: null,
+				error: null,
+			};
+		} catch (error) {
+			return this._getFeatureCompanionLifecycleOperationFailure(
+				identity,
+				"transactionRolledBack",
+				"Revival failed and every committed mutation was rolled back.",
+				doRollback(),
+				error,
+			);
+		}
+	}
+
+	getFeatureCompanionReplacementAvailability (companionId, options = {}) {
+		const identity = this._getFeatureCompanionLifecycleOperationIdentity(companionId, "Replacement");
+		const fail = (reason, message, extra = {}) => ({
+			...identity,
+			companion: undefined,
+			lifecyclePolicy: undefined,
+			available: false,
+			reason,
+			message,
+			...extra,
+		});
+		if (!options || typeof options !== "object" || Array.isArray(options)) {
+			return fail("invalidReplacementOptions", "Replacement options must be an object.");
+		}
+		if (!identity.companion) return fail("companionNotFound", "Companion not found.");
+		if (!CharacterSheetState._isExactEfaSteelDefender(identity.companion, identity.lifecyclePolicy)) {
+			return fail("unsupportedCompanion", "Only the exact owned EFA Steel Defender can be replaced here.");
+		}
+		const replacementPolicy = identity.lifecyclePolicy?.policy?.replacement;
+		if (!replacementPolicy) return fail("replacementUnavailable", "This companion has no replacement policy.");
+		if (this.isDead()) return fail("ownerDead", "A dead owner cannot replace the Steel Defender.");
+		const status = CharacterSheetState._getFeatureCompanionLifecycleStatus(identity.companion);
+		if (status && !CharacterSheetState.FEATURE_COMPANION_LIFECYCLE_STATUSES.includes(status)) {
+			return fail("companionLifecycleUnavailable", `Unsupported lifecycle state "${status}".`);
+		}
+
+		const lastLongRestMinute = Number(this._data.gameTime?.lastLongRestMinute);
+		if (!Number.isSafeInteger(lastLongRestMinute) || lastLongRestMinute <= 0) {
+			return fail("longRestRequired", "Finish a canonical Long Rest before replacing the defender.");
+		}
+		if ((Number(identity.companion.lifecycle?.lastReplacementLongRestMinute) || -1) >= lastLongRestMinute) {
+			return fail("replacementAlreadyUsed", "A Steel Defender replacement has already been created from this Long Rest.");
+		}
+		if (options.inHandConfirmed !== true) {
+			return fail("toolInHandNotConfirmed", "Confirm that the selected Smith's Tools are in hand.");
+		}
+		if (typeof options.toolItemId !== "string" || !options.toolItemId.trim()) {
+			return fail("toolItemRequired", "Select the exact Smith's Tools inventory row.");
+		}
+		const toolRow = (this._data.inventory || []).find(row => row?.id === options.toolItemId) || null;
+		if (!toolRow || (Number(toolRow.quantity) || 0) <= 0) {
+			return fail("toolItemUnavailable", "The selected inventory row is unavailable or empty.");
+		}
+		const [requiredToolName, requiredToolSource] = String(replacementPolicy.requiresToolUid || "")
+			.split("|")
+			.map(part => part.trim());
+		const exactTool = String(toolRow.item?.name || "").trim().toLowerCase() === requiredToolName.toLowerCase()
+			&& String(toolRow.item?.source || "").trim().toUpperCase() === requiredToolSource.toUpperCase();
+		if (!exactTool) {
+			return fail(
+				"wrongToolItem",
+				`The selected inventory row must be the exact ${replacementPolicy.requiresToolUid}.`,
+			);
+		}
+		if (toolRow.item?._isCustom === true || toolRow.item?._isGeneratedFeatureItem === true) {
+			return fail("syntheticToolItem", "A custom or generated item cannot satisfy the exact Smith's Tools requirement.");
+		}
+		return {
+			...identity,
+			companion: undefined,
+			lifecyclePolicy: undefined,
+			available: true,
+			reason: null,
+			message: null,
+			lastLongRestMinute,
+			toolItem: {
+				itemId: toolRow.id,
+				itemUid: `${toolRow.item.name}|${toolRow.item.source}`,
+				quantity: Number(toolRow.quantity),
+			},
+			costs: {toolInHand: true},
+		};
+	}
+
+	_commitFeatureCompanionReplacement (companion, availability) {
+		const previousLifecycle = CharacterSheetState._isCompanionSchemaObject(companion.lifecycle)
+			? MiscUtil.copyFast(companion.lifecycle)
+			: {};
+		const previousGeneration = Math.max(1, Math.floor(Number(previousLifecycle.generation) || 1));
+		const generationHistory = Array.isArray(previousLifecycle.generationHistory)
+			? MiscUtil.copyFast(previousLifecycle.generationHistory)
+			: [];
+		generationHistory.push({
+			version: 1,
+			generation: previousGeneration,
+			status: "vanished",
+			vanishedAtGameMinute: this.getGameTimeMinutes(),
+			reason: "longRestReplacement",
+			longRestMinute: availability.lastLongRestMinute,
+		});
+
+		for (const key of [
+			"diedAtGameMinute",
+			"timingKnown",
+			"deathReason",
+			"revivalPending",
+			"expiredAtGameMinute",
+			"vanishedAtGameMinute",
+			"lastRevival",
+		]) delete previousLifecycle[key];
+		companion.lifecycle = {
+			...previousLifecycle,
+			status: "alive",
+			generation: previousGeneration + 1,
+			generationHistory,
+			lastReplacementLongRestMinute: availability.lastLongRestMinute,
+		};
+		companion.active = true;
+		companion.hp.current = companion.hp.max;
+		companion.hp.temp = 0;
+		companion.conditions = [];
+		companion.exhaustion = 0;
+		companion.isRampaging = false;
+		if (companion.uses?.repair) companion.uses.repair.current = companion.uses.repair.max;
+		if (companion.hitDice) companion.hitDice.current = companion.hitDice.max;
+		companion.turnUsage = {action: false, reaction: false, flags: {}};
+		this._pruneFeatureCompanionTurnReceipts(companion);
+		return {previousGeneration, generation: previousGeneration + 1};
+	}
+
+	replaceFeatureCompanionAfterLongRest (options = {}) {
+		if (!options || typeof options !== "object" || Array.isArray(options)) {
+			const identity = this._getFeatureCompanionLifecycleOperationIdentity(null, "Replacement");
+			return this._getFeatureCompanionLifecycleOperationFailure(
+				identity,
+				"invalidReplacementOptions",
+				"Replacement options must be an object.",
+			);
+		}
+		const {
+			companionId,
+			toolItemId = null,
+			inHandConfirmed = false,
+			cancelled = false,
+		} = options;
+		const identity = this._getFeatureCompanionLifecycleOperationIdentity(companionId, "Replacement");
+		if (cancelled) {
+			return this._getFeatureCompanionLifecycleOperationFailure(
+				identity,
+				"cancelled",
+				"Replacement cancelled without changing the defender.",
+			);
+		}
+		const availability = this.getFeatureCompanionReplacementAvailability(companionId, {
+			toolItemId,
+			inHandConfirmed,
+		});
+		if (!availability.available) {
+			return this._getFeatureCompanionLifecycleOperationFailure(
+				identity,
+				availability.reason,
+				availability.message,
+			);
+		}
+		const companion = identity.companion;
+		const companionSnapshot = MiscUtil.copyFast(companion);
+		const turnReceiptsSnapshot = MiscUtil.copyFast(this._data.turnReceipts);
+		try {
+			const generation = this._commitFeatureCompanionReplacement(companion, availability);
+			if (
+				companion.lifecycle?.status !== "alive"
+				|| companion.lifecycle?.lastReplacementLongRestMinute !== availability.lastLongRestMinute
+			) {
+				throw new Error("Steel Defender replacement lifecycle did not commit.");
+			}
+			return {
+				ok: true,
+				committed: true,
+				operation: identity.operation,
+				companionId: identity.companionId,
+				ownerUid: identity.ownerUid,
+				sourceUid: identity.sourceUid,
+				operationUid: identity.operationUid,
+				reason: null,
+				message: "Steel Defender replacement created from the completed Long Rest.",
+				costs: MiscUtil.copyFast(availability.costs),
+				toolItem: MiscUtil.copyFast(availability.toolItem),
+				generation,
+				lifecycle: MiscUtil.copyFast(companion.lifecycle),
+				hp: MiscUtil.copyFast(companion.hp),
+				rollback: null,
+				error: null,
+			};
+		} catch (error) {
+			for (const key of Object.keys(companion)) delete companion[key];
+			Object.assign(companion, companionSnapshot);
+			this._data.turnReceipts = turnReceiptsSnapshot;
+			return this._getFeatureCompanionLifecycleOperationFailure(
+				identity,
+				"transactionRolledBack",
+				"Replacement failed and every committed mutation was rolled back.",
+				{
+					companion: {ok: true, companionId: companion.id},
+					turnReceipts: {ok: true},
+				},
+				error,
+			);
 		}
 	}
 
@@ -87133,7 +87907,12 @@ class CharacterSheetState {
 	setCompanionHp (companionId, hp) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return;
+		if (typeof hp !== "number" || !Number.isFinite(hp)) return;
+		const lifecycleBlock = CharacterSheetState._getFeatureCompanionLifecycleBlock(companion);
+		if (lifecycleBlock && hp > 0) return;
+		const priorHp = Math.max(0, Number(companion.hp.current) || 0);
 		companion.hp.current = Math.max(0, Math.min(hp, companion.hp.max));
+		this._markFeatureCompanionDead(companion, {priorHp, reason: "setCompanionHp"});
 	}
 
 	/**
@@ -87145,8 +87924,18 @@ class CharacterSheetState {
 	damageCompanion (companionId, amount) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return {remaining: 0, tempAbsorbed: 0, hpLost: 0, droppedToZero: false};
+		if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+			return {
+				remaining: 0,
+				tempAbsorbed: 0,
+				hpLost: 0,
+				droppedToZero: false,
+				reason: "invalidDamageAmount",
+			};
+		}
+		const normalizedAmount = amount;
 
-		let remaining = amount;
+		let remaining = normalizedAmount;
 		let tempAbsorbed = 0;
 
 		// Temp HP absorbs damage first
@@ -87160,12 +87949,18 @@ class CharacterSheetState {
 		const hpBefore = companion.hp.current;
 		companion.hp.current = Math.max(0, companion.hp.current - remaining);
 		const hpLost = hpBefore - companion.hp.current;
+		const droppedToZero = hpBefore > 0 && companion.hp.current === 0;
+		const lifecycleTransition = this._markFeatureCompanionDead(companion, {
+			priorHp: hpBefore,
+			reason: "damageCompanion",
+		});
 
 		return {
 			remaining: Math.max(0, remaining - hpBefore),
 			tempAbsorbed,
 			hpLost,
-			droppedToZero: companion.hp.current === 0,
+			droppedToZero,
+			lifecycleTransition,
 		};
 	}
 
@@ -87178,9 +87973,12 @@ class CharacterSheetState {
 	healCompanion (companionId, amount) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return 0;
+		if (CharacterSheetState._getFeatureCompanionLifecycleBlock(companion)) return 0;
+		if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return 0;
+		const normalizedAmount = amount;
 
 		const before = companion.hp.current;
-		companion.hp.current = Math.min(companion.hp.max, companion.hp.current + amount);
+		companion.hp.current = Math.min(companion.hp.max, companion.hp.current + normalizedAmount);
 		return companion.hp.current - before;
 	}
 

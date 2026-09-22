@@ -686,7 +686,7 @@ describe("Improved Defender scaling, rest, and source isolation", () => {
 		expect(getJoltResource(state)).toMatchObject({current: 5, max: 5, spentUses: 0});
 		expect(state._data.resources.find(resource => resource.id === "other-arcane-jolt").current).toBe(0);
 		expect(state.getCompanion(companionId)).toMatchObject({
-			hp: {current: 11},
+			hp: {current: 0},
 			lifecycle: {status: "dead"},
 		});
 	});

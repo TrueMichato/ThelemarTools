@@ -138,10 +138,13 @@ const COMPANION_RULES = deepFreeze({
 			onSummonerDeath: "vanishes",
 			revival: {
 				deathWindow: "1 hour",
+				deathWindowMinutes: 60,
 				actionType: "magicAction",
+				ownerActionCost: "action",
 				requiresTouch: true,
 				spellSlot: {minimumLevel: 1, expend: 1},
 				returnDelay: "1 minute",
+				returnDelayMinutes: 1,
 				hitPointsRestored: "all",
 			},
 			replacement: {
@@ -526,11 +529,14 @@ const COMPANION_RULES = deepFreeze({
 			mending: {healingDice: "2d6"},
 			revival: {
 				deathWindow: "1 hour",
+				deathWindowMinutes: 60,
 				actionType: "action",
+				ownerActionCost: "action",
 				rangeFeet: 5,
 				requiresToolUid: "Smith's Tools|PHB",
 				spellSlot: {minimumLevel: 1, expend: 1},
 				returnDelay: "1 minute",
+				returnDelayMinutes: 1,
 				hitPointsRestored: "all",
 			},
 			replacement: {

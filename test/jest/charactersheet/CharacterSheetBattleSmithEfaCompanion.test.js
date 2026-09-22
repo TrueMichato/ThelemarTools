@@ -267,7 +267,7 @@ describe("Battle Smith shared companion command policy", () => {
 		const availability = state.getCompanionOperationAvailability(companionId, "forceEmpoweredRend");
 		expect(availability).toMatchObject({
 			available: false,
-			reason: "companionAtZeroHp",
+			reason: "companionDead",
 			status: {
 				actionAvailable: true,
 				reactionAvailable: true,

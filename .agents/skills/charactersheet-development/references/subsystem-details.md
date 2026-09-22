@@ -87,6 +87,10 @@ transaction. A teardown failure restores the state snapshot and returns a
 failure receipt rather than a success-shaped result. Public time APIs accept
 only non-array object option bags; malformed bags return
 `invalid-game-time-options` or `invalid-rest-time-options` without mutation.
+Exact EFA Steel Defender due-times participate in this same transaction:
+known-time dead defenders expire at death minute +61, while a pending revival
+completes at its recorded due minute before dead-state expiry is considered.
+There is no companion wall clock, timer pass, or subclass-owned time state.
 
 Every generated row is custom, quantity 1, and has a unique wrapper id and
 `_generatedItemId`, so it never stacks with ordinary or generated rows.
@@ -1015,6 +1019,78 @@ dismissal/removal, exact source loss, and Respec Apply. Six-part/malformed
 collisions, TCE/EFA Battle Smith receipts, and foreign receipts remain
 untouched. `resetTurnEconomy()` is the only turn boundary which releases an
 otherwise live Arcane Conduit use.
+## EFA Steel Defender Lifecycle
+
+`CharacterSheetCompanionRules` owns the EFA lifecycle policy, including the
+60-minute death window, canonical owner Action cost, one-minute return delay,
+spell-slot minimum, exact replacement tool UID, and summoner-death fate. State
+consumes the resolved policy and persists one lifecycle object on the existing
+stable companion:
+
+```javascript
+{
+    status: "alive" | "dead" | "revivalPending" | "expired" | "vanished",
+    generation,
+    diedAtGameMinute?,
+    timingKnown?,
+    revivalPending?: {startedAtGameMinute, dueAtGameMinute, deathTiming, spellSlot},
+    expiredAtGameMinute?,
+    vanishedAtGameMinute?,
+    generationHistory?,
+}
+```
+
+Unknown JSON-safe lifecycle fields survive migration, reconciliation, and
+round-trip. An exact EFA legacy defender already at 0 HP but without a
+trustworthy death minute becomes `dead` with `timingKnown: false`; State never
+invents a timestamp or heals it. TCE, RHW, generic, name-only, and
+foreign-source companions are not claimed by this migration.
+
+Public revival APIs are:
+
+```javascript
+state.getFeatureCompanionRevivalAvailability(companionId, {
+    spellSlot: {kind: "normal", level} | {kind: "pact"},
+    touchConfirmed,
+    deathWithinHourConfirmed?, // required in the same operation for unknown-time legacy death
+});
+state.beginFeatureCompanionRevival(options);
+```
+
+Revival remains legal through death minute +60. The atomic begin operation
+requires the exact dead defender, explicit touch, an available owner Action,
+and one selected normal or Pact Magic slot. It prevalidates every cost, records
+`revivalPending` due at current minute +1, and spends nothing on cancellation
+or validation failure. Only canonical time advancement returns the defender
+alive at full HP. A late failure restores the exact Action, selected slot, HP,
+active flag, and lifecycle and reports each rollback result.
+
+Ordinary `healCompanion`, Repair, Arcane Jolt restoration, companion Hit Dice,
+Short Rest, and Long Rest never revive a non-alive generation. Existing
+companion action/reaction/Repair/Hit Die availability reports explicit
+`companionDead`, `companionRevivalPending`, `companionExpired`, or
+`companionVanished` reasons. Finalized owner-death mutations use the existing
+death-transition seam; actionable zero-HP interventions defer the transition.
+Once finalized, only the exact EFA defender becomes persisted `vanished`,
+inactive, and 0 HP, and later owner recovery does not restore that generation.
+
+Long-rest replacement is optional and explicit:
+
+```javascript
+state.getFeatureCompanionReplacementAvailability(companionId, {
+    toolItemId,
+    inHandConfirmed,
+});
+state.replaceFeatureCompanionAfterLongRest(options);
+```
+
+It requires a completed canonical Long Rest and a positive-quantity persisted
+inventory row for exact `Smith's Tools|XPHB`; proficiency, editable name-only,
+wrong-source, custom, and generated rows do not qualify. One replacement may
+use each completed Long Rest. Commit keeps the companion ID and setup choices,
+records the prior generation as vanished, increments `generation`, restores
+full HP/Repair/Hit Dice, and clears transient operation/turn/lifecycle data.
+An alive defender is also eligible, and a dead owner is not.
 
 The shared Page operation also owns interaction feedback. Desktop buttons and
 Play Mode controls expose the same stable operation focus key, so Arcane Jolt

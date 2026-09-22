@@ -250,6 +250,7 @@ describe("EFA Battle Smith acquisition and setup", () => {
 			status: "dead",
 			generation: 4,
 			diedAtGameMinute: 720,
+			timingKnown: true,
 			customLifecycleMarker: "preserve",
 		});
 
@@ -265,6 +266,7 @@ describe("EFA Battle Smith acquisition and setup", () => {
 			status: "dead",
 			generation: 4,
 			diedAtGameMinute: 720,
+			timingKnown: true,
 			customLifecycleMarker: "preserve",
 		});
 	});

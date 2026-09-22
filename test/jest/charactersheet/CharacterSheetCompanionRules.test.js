@@ -127,10 +127,13 @@ describe("CharacterSheetCompanionRules", () => {
 				onSummonerDeath: "vanishes",
 				revival: {
 					deathWindow: "1 hour",
+					deathWindowMinutes: 60,
 					actionType: "magicAction",
+					ownerActionCost: "action",
 					requiresTouch: true,
 					spellSlot: {minimumLevel: 1, expend: 1},
 					returnDelay: "1 minute",
+					returnDelayMinutes: 1,
 					hitPointsRestored: "all",
 				},
 				replacement: {
