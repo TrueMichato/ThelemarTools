@@ -230,6 +230,7 @@ describe("Replicate Magic Item provenance", () => {
 			featureUid: "Right Tool for the Job|Artificer|EFA|3",
 			classUid: "Artificer|EFA",
 			subclassUid: null,
+			featureSource: "EFA",
 		});
 		expect(wrongOwnerState.classifyGeneratedFeatureItem(wrongOwner).status).toBe("valid");
 		expect(wrongOwnerState.isMagicWeapon(wrongOwner)).toBe(false);
@@ -239,6 +240,7 @@ describe("Replicate Magic Item provenance", () => {
 			featureUid: "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA",
 			classUid: "Artificer|EFA",
 			subclassUid: "Battle Smith|Artificer|EFA|EFA",
+			featureSource: "EFA",
 		});
 		expect(unrelatedState.classifyGeneratedFeatureItem(unrelated).status).toBe("valid");
 		expect(unrelatedState.isMagicWeapon(unrelated)).toBe(false);
