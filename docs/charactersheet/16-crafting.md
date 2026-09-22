@@ -63,7 +63,9 @@ Baseline precedence is:
 3. For value-less magic `item`/`potion` recipes with a recognized rarity, the XDMG p. 221
    **Magic Item Crafting Time and Cost** table: Common 1, Uncommon 2, Rare 10, Very Rare 25, and
    Legendary 50 workweeks (five eight-hour crafting days per workweek). The XDMG footnote halves
-   these baselines for non-scroll consumables; Spell Scrolls use their separate XPHB table.
+   these baselines for non-scroll consumables. The sheet projects its one-use item taxonomy here:
+   ammunition (`A`), firearm ammunition (`AF`), oils (`Oil`), and potions (`P`), plus the `potion`
+   recipe category. Spell Scrolls (`SC`) remain excluded and use their separate XPHB table.
 
 Unsupported categories and rarities return `isSupported: false` with a reason. The workbench shows
 that reason in both preview and outcome rather than silently omitting time. It never guesses from a

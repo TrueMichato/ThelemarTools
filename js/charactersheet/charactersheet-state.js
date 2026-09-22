@@ -47965,7 +47965,9 @@ class CharacterSheetState {
 			legendary: 250,
 		}),
 	});
-	static _CRAFTING_TIME_CONSUMABLE_ITEM_TYPES = Object.freeze(["OIL", "P"]);
+	// Project the Character Sheet's one-use taxonomy into the XDMG rule, excluding SC because
+	// Spell Scrolls use their separate XPHB scribing table.
+	static _CRAFTING_TIME_CONSUMABLE_ITEM_TYPES = Object.freeze(["A", "AF", "OIL", "P"]);
 
 	/**
 	 * Resolve the output taxonomy used by crafting-time modifier filters.

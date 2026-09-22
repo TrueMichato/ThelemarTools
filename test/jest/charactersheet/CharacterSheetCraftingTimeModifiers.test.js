@@ -38,6 +38,7 @@ const MAGIC_ARMOR_RECIPE = {
 
 const REAL_ARMOR_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "+1 Dusk Armor" && recipe.source === "HHHVI");
 const REAL_POTION_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "Dra-gone Paste" && recipe.source === "HHHVI");
+const REAL_AMMUNITION_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "+1 Dragon Arrow" && recipe.source === "HHHVI");
 const REAL_DISH_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.recipeCategory === "dish");
 const REAL_MATERIAL = CRAFTING_DATA.craftingMaterial[0];
 
@@ -173,6 +174,57 @@ describe("Character Sheet crafting-time modifiers", () => {
 				rarity,
 				isConsumable: true,
 			});
+		});
+
+		it("halves the uncommon baseline for a real generated ammunition recipe", () => {
+			expect(REAL_AMMUNITION_RECIPE).toMatchObject({
+				recipeCategory: "item",
+				itemType: "A",
+				rarity: "uncommon",
+			});
+			expect(REAL_AMMUNITION_RECIPE).not.toHaveProperty("value");
+
+			const result = new CharacterSheetState().getCraftingTimeCalculation({recipe: REAL_AMMUNITION_RECIPE});
+
+			expect(result.isSupported).toBe(true);
+			expect(result.baselineWorkweeks).toBe(1);
+			expect(result.effectiveWorkweeks).toBe(1);
+			expect(result.baselineSource).toMatchObject({
+				type: "xdmg-rarity",
+				rarity: "uncommon",
+				isConsumable: true,
+			});
+		});
+
+		it("projects AF ammunition into the same non-scroll consumable rule", () => {
+			const result = new CharacterSheetState().getCraftingTimeCalculation({
+				recipe: {...REAL_AMMUNITION_RECIPE, name: "Synthetic Firearm Ammunition", itemType: "AF"},
+			});
+
+			expect(result.isSupported).toBe(true);
+			expect(result.baselineWorkweeks).toBe(1);
+			expect(result.baselineSource.isConsumable).toBe(true);
+		});
+
+		it("does not halve the baseline for ordinary gear", () => {
+			const result = new CharacterSheetState().getCraftingTimeCalculation({
+				recipe: {name: "Ordinary Magic Gear", recipeCategory: "item", itemType: "G", rarity: "uncommon"},
+			});
+
+			expect(result.isSupported).toBe(true);
+			expect(result.baselineWorkweeks).toBe(2);
+			expect(result.baselineSource.isConsumable).toBe(false);
+		});
+
+		it("keeps Spell Scrolls on their separate unsupported scribing path", () => {
+			const result = new CharacterSheetState().getCraftingTimeCalculation({
+				recipe: {name: "Spell Scroll", recipeCategory: "item", itemType: "SC", rarity: "uncommon"},
+			});
+
+			expect(result.isSupported).toBe(false);
+			expect(result.reason).toContain("Spell Scrolls use the separate XPHB scribing table");
+			expect(result.sourceBreakdown).toEqual([]);
+			expect(result.modifiers).toEqual([]);
 		});
 
 		it("preserves explicit and value-derived precedence over the rarity fallback", () => {
