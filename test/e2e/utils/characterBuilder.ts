@@ -250,6 +250,25 @@ export const PRESET_FULL_EFA_BATTLE_SMITH_ARTIFICER: CharacterPreset = {
 	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
 };
 
+/** Exact EFA Artificer with the RHW Reanimator subclass. */
+export const PRESET_FULL_EFA_REANIMATOR_ARTIFICER: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["RHW", "EFA", "XPHB"],
+	skipConditionalPrompt: true,
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Mara Gravewright",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Reanimator",
+	subclassSource: "RHW",
+	abilityPriority: ["int", "con", "dex", "wis", "cha", "str"],
+	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
+};
+
 /** Exact-source EFA Alchemist Artificer. The subclass arrives at level 3. */
 export const PRESET_FULL_EFA_ALCHEMIST: CharacterPreset = {
 	race: "Dwarf",
@@ -1340,6 +1359,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_SHADOW_SORCERY_RHW_SORCERER,
 	PRESET_FULL_SPELLFIRE_SORCERER,
 	PRESET_FULL_EFA_CARTOGRAPHER_ARTIFICER,
+	PRESET_FULL_EFA_REANIMATOR_ARTIFICER,
 	PRESET_FULL_WICKED_WITCH_SORCERER,
 	PRESET_FULL_LUNAR_SORCERY_SORCERER,
 	PRESET_FULL_EFA_ARTILLERIST_ARTIFICER,

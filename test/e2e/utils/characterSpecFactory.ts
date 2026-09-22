@@ -108,6 +108,8 @@ export interface CharacterSpec {
 	megaTimeoutMs?: number;
 	/** Run the feature matrix only in its dedicated MEGA test, avoiding duplicate long probes. */
 	featureMatrixDedicatedOnly?: boolean;
+	/** Prepare one final state fixture before the automatic successful MEGA export is captured. */
+	prepareFinalExport?: (charSheet: CharacterSheetPage) => Promise<void>;
 	/** Set true to skip the L1→20 mega test (e.g. for multiclass cases handled separately). */
 	skipMega?: boolean;
 	/**
@@ -527,6 +529,7 @@ export function describeCharacter (spec: CharacterSpec): void {
 					await assertFeaturesMatrix(charSheet, featuresMatrix, cp);
 				}
 			}
+			if (spec.prepareFinalExport) await spec.prepareFinalExport(charSheet);
 		});
 
 		// ── Features-matrix-only MEGA (Phase 6) ────────────────────────

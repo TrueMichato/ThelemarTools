@@ -3934,6 +3934,541 @@ export class CharacterSheetPage {
 		}
 	}
 
+	async probeRhwReanimatorFlow (
+		probe: "l3Lifecycle" | "arcaneConduit" | "macabreModifications" | "refinedReanimation" | "roundTripRespec",
+	): Promise<{ok: boolean; error?: string}> {
+		const ownerUid = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW";
+		const classUid = "Artificer|EFA";
+		const subclassUid = "Reanimator|Artificer|EFA|RHW";
+		const refinedUid = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15|RHW";
+		const toolId = "e2e-rhw-reanimator-tool";
+		const snapshot = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.toJson?.());
+		if (!snapshot) return {ok: false, error: "Could not snapshot the character before the Reanimator probe"};
+
+		try {
+			if (probe === "l3Lifecycle") {
+				await this.page.evaluate(({toolId}) => {
+					const cs: any = (globalThis as any).charSheet;
+					const state = cs?._state;
+					state?.removeItem?.(toolId);
+					state?.addItem?.({
+						id: toolId,
+						name: "Tinker's Tools",
+						source: "XPHB",
+						type: "AT|XPHB",
+						quantity: 1,
+						equipped: true,
+						_isCustom: true,
+					}, 1, true);
+					state?.setItemEquipped?.(toolId, true);
+					state?.addToolProficiency?.("Tinker's Tools");
+					state?.onLongRest?.();
+					cs?._renderCharacter?.();
+				}, {toolId});
+				await this.switchToTab(this.tabCompanions);
+				const create = this.page.locator(`[data-feature-companion-create="${ownerUid}"]`);
+				await create.waitFor({state: "visible", timeout: 5000});
+				await create.click();
+				const modal = this.page.locator(".charsheet__feature-companion-create-modal");
+				await modal.waitFor({state: "visible", timeout: 5000});
+				await modal.locator('[data-role="creation-appearance"]').fill("A stitched brass hound");
+				await expect(modal.locator('[name="feature-companion-payment"]:checked')).toHaveCount(1);
+				await expect(modal.locator('[data-role="creation-modification"]:checked')).toHaveCount(0);
+				await modal.locator('[data-role="creation-confirm"]').click();
+				await modal.waitFor({state: "hidden", timeout: 10_000});
+				const manager = this.page.locator(`[data-feature-companion-owner="${ownerUid}"]`).first();
+				await expect(manager.locator('[data-feature-companion-operation="dreadfulSwipe"]')).toBeVisible();
+
+				const managerResult = await this.page.evaluate(({ownerUid, classUid, subclassUid}) => {
+					const state: any = (globalThis as any).charSheet?._state;
+					const must = (condition: any, message: string) => {
+						if (!condition) throw new Error(message);
+					};
+					const [companion] = state.getFeatureOwnedCompanions(ownerUid);
+					const fixedOwnerUid = "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3";
+					for (const spellUid of ["False Life|XPHB", "Spare the Dying|XPHB", "Witch Bolt|XPHB"]) {
+						const [name, source] = spellUid.split("|");
+						const spell = [
+							...(state.getSpellsKnown?.() || []),
+							...(state.getCantripsKnown?.() || []),
+						].find((candidate: any) => candidate.name === name && candidate.source === source);
+						must(spell?.subclassSpellGrantOwners?.some((owner: any) =>
+							owner.grantOwnerUid === fixedOwnerUid
+							&& owner.sourceClass === "Artificer"
+							&& owner.sourceClassSource === "EFA"
+							&& owner.sourceSubclass === "Reanimator"
+							&& owner.sourceSubclassSource === "RHW"),
+						`fixed spell owner was ${JSON.stringify({spellUid, owners: spell?.subclassSpellGrantOwners})}`);
+					}
+					must(companion?.featureGrant?.uid === ownerUid, `runtime owner was ${companion?.featureGrant?.uid}`);
+					must(companion?.creatureName === "Reanimated Companion" && companion?.creatureSource === "RHW",
+						`creature identity was ${companion?.creatureName}|${companion?.creatureSource}`);
+					must(companion?.setup?.choices?.modifications?.selectedOptionIds?.length === 0,
+						`L3 modification receipt was ${JSON.stringify(companion?.setup?.choices?.modifications)}`);
+					must(companion?.lifecycle?.generation === 1 && companion?.lifecycle?.creationReceipt,
+						`creation lifecycle was ${JSON.stringify(companion?.lifecycle)}`);
+					const swipe = state.commandCompanionAction({
+						companionId: companion.id,
+						actionKey: "dreadfulSwipe",
+						commandMethod: "bonusAction",
+						target: {name: "Ogre", size: "L"},
+						rangeConfirmed: true,
+						hitConfirmed: true,
+						rolls: {attackD20: 12, damageDice: [3]},
+					});
+					must(swipe?.ok && swipe?.rolls?.damage?.dice === "1d4" && swipe?.rolls?.damage?.type === "necrotic",
+						`Dreadful Swipe was ${JSON.stringify(swipe)}`);
+					must(state.getActionEconomyState()?.bonus === false, "Dreadful Swipe did not spend the Bonus Action");
+					state.resetTurnEconomy();
+					must(state.getActionEconomyState()?.bonus === true, "turn reset did not restore the Bonus Action");
+					companion.hp.current = Math.max(1, companion.hp.max - 5);
+					const lightning = state.applyFeatureCompanionDamage({
+						featureUid: ownerUid,
+						companionId: companion.id,
+						amount: 4,
+						damageType: "lightning",
+					});
+					must(lightning?.ok && lightning?.actualDamage === 0 && lightning?.absorptionApplied === true,
+						`Lightning Absorption was ${JSON.stringify(lightning)}`);
+					return {companionId: companion.id, classUid, subclassUid};
+				}, {ownerUid, classUid, subclassUid});
+
+				await this.enterPlayMode();
+				await this.page.evaluate(() => {
+					(globalThis as any).charSheet?.getPlayMode?.()?._openDrawerByType?.("companions");
+				});
+				const playSurface = this.page.locator(`.pm-companion-operations--rhw[data-feature-companion-owner="${ownerUid}"]`);
+				await expect(playSurface).toBeVisible();
+				await expect(playSurface.locator('[data-feature-companion-operation="dreadfulSwipe"]')).toBeVisible();
+				await this.exitPlayMode();
+
+				await this.page.evaluate(({ownerUid, companionId}) => {
+					const state: any = (globalThis as any).charSheet?._state;
+					const must = (condition: any, message: string) => {
+						if (!condition) throw new Error(message);
+					};
+					const death = state.killFeatureOwnedCompanion(companionId, {featureUid: ownerUid});
+					must(death?.ok && death?.committed && death?.deathBurst?.damage?.dice === "2d4",
+						`death event was ${JSON.stringify(death)}`);
+					const burst = state.resolveFeatureCompanionDeathBurst({
+						featureUid: ownerUid,
+						companionId,
+						targets: [],
+						rolls: {damageDice: [1, 2]},
+					});
+					must(burst?.ok && burst?.committed && burst?.result?.targets?.length === 0,
+						`zero-target Death Burst was ${JSON.stringify(burst)}`);
+					const saved = state.toJson();
+					must(state.loadFromJson(saved) !== false, "round-trip load failed");
+					const persisted = state.getCompanion(companionId);
+					must(persisted?.lifecycle?.deathBurstResolved === true
+						&& persisted?.lifecycle?.deathReceipt?.deathBurstResolution?.targets?.length === 0,
+					`death receipt was ${JSON.stringify(persisted?.lifecycle)}`);
+					state.onLongRest();
+					must(!state.getCompanion(companionId), "Long Rest did not expire the dead generation");
+					const creationResource = state._data.resources.find((resource: any) =>
+						resource.featureUid === ownerUid
+						&& resource.classUid === "Artificer|EFA"
+						&& resource.subclassUid === "Reanimator|Artificer|EFA|RHW"
+						&& resource.featureCompanionCreation?.version === 1);
+					must(creationResource?.current === creationResource?.max,
+						`Long Rest did not restore creation state: ${JSON.stringify(creationResource)}`);
+				}, {ownerUid, companionId: managerResult.companionId});
+				return {ok: true};
+			}
+
+			const result = await this.page.evaluate(async ({probe, ownerUid, classUid, subclassUid, refinedUid, toolId}) => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				const must = (condition: any, message: string) => {
+					if (!condition) throw new Error(message);
+				};
+				const ensureTool = () => {
+					state.removeItem(toolId);
+					state.addItem({
+						id: toolId,
+						name: "Tinker's Tools",
+						source: "XPHB",
+						type: "AT|XPHB",
+						quantity: 1,
+						equipped: true,
+						_isCustom: true,
+					}, 1, true);
+					state.setItemEquipped(toolId, true);
+					state.addToolProficiency("Tinker's Tools");
+				};
+				const createCompanion = async (selectedOptionIds: string[], payment: any = {type: "freeCreation"}) => {
+					ensureTool();
+					const boundary = state.getFeatureCompanionCreationBoundary(ownerUid, {classUid, subclassUid, payment});
+					must(boundary?.ok !== false && boundary?.setupChoices?.transaction, `creation boundary was ${JSON.stringify(boundary)}`);
+					const transaction = boundary.setupChoices.transaction;
+					const setupChoices = {
+						transactionId: transaction.transactionId,
+						selectedOptions: selectedOptionIds.map(id => {
+							const option = transaction.options.find((candidate: any) => candidate.id === id);
+							must(option, `missing creation option ${id}`);
+							return structuredClone(option);
+						}),
+					};
+					const focusRow = state.getInventory().find((row: any) => row.id === toolId);
+					const created = await state.pCreateFeatureCompanion({
+						featureUid: ownerUid,
+						classUid,
+						subclassUid,
+						focusReference: state.getSpellCastFocusReference(focusRow),
+						payment,
+						setupChoices,
+						appearance: "A stitched brass hound",
+					});
+					must(created?.ok && created?.committed, `creation failed: ${JSON.stringify(created)}`);
+					return state.getCompanion(created.companionId);
+				};
+				const spellReceipt = (receiptId: string) => ({
+					receiptVersion: 1,
+					receiptId,
+					ok: true,
+					committed: true,
+					castingClassUid: classUid,
+					spellUid: "Blight|XPHB",
+					spell: {name: "Blight", source: "XPHB", level: 4, school: "N"},
+					castType: "slot",
+					cast: {
+						rolls: [{
+							rollId: "damage:0",
+							kind: "damage",
+							damageType: "necrotic",
+							total: 7,
+							status: "resolved",
+						}],
+					},
+				});
+
+				if (probe === "arcaneConduit") {
+					const companion = await createCompanion(["arcaneConduit"]);
+					const operation = companion.scaling.resolved.modifications.effects.arcaneConduit.damageRider.turnReceipt;
+					must(operation?.ownerUid === ownerUid
+						&& operation?.sourceUid === "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW",
+					`Arcane Conduit identity was ${JSON.stringify(operation)}`);
+					const firstReceipt = spellReceipt("e2e-rhw-arcane-1");
+					const first = state.applyRhwArcaneConduitDamageRider({
+						companionId: companion.id,
+						spellCastReceipt: firstReceipt,
+						selectedRollId: "damage:0",
+						companionDistanceFeet: 120,
+					});
+					must(first?.ok && first?.application?.bonus === state.getAbilityMod("int")
+						&& firstReceipt.cast.rolls[0].arcaneConduit?.ownerUid === ownerUid,
+					`first Arcane Conduit use was ${JSON.stringify(first)}`);
+					const duplicate = state.applyRhwArcaneConduitDamageRider({
+						companionId: companion.id,
+						spellCastReceipt: spellReceipt("e2e-rhw-arcane-2"),
+						selectedRollId: "damage:0",
+						companionDistanceFeet: 5,
+					});
+					must(duplicate?.reason === "alreadyUsed", `same-turn gate was ${JSON.stringify(duplicate)}`);
+					const saved = state.toJson();
+					must(state.loadFromJson(saved) !== false, "Arcane Conduit round-trip failed");
+					must(state.applyRhwArcaneConduitDamageRider({
+						companionId: companion.id,
+						spellCastReceipt: spellReceipt("e2e-rhw-arcane-3"),
+						selectedRollId: "damage:0",
+						companionDistanceFeet: 5,
+					})?.reason === "alreadyUsed", "round-trip lost the once-per-turn receipt");
+					state.resetTurnEconomy();
+					must(state.applyRhwArcaneConduitDamageRider({
+						companionId: companion.id,
+						spellCastReceipt: spellReceipt("e2e-rhw-arcane-4"),
+						selectedRollId: "damage:0",
+						companionDistanceFeet: 5,
+					})?.ok, "turn reset did not restore Arcane Conduit");
+					return {ok: true};
+				}
+
+				if (probe === "macabreModifications") {
+					const base = state.toJson();
+					const bloatedGaunt = await createCompanion(["bloated", "gaunt"]);
+					const resolved = bloatedGaunt.scaling.resolved;
+					must(resolved.statistics?.size?.[0] === "L"
+						&& resolved.statistics?.speed?.walk === 45
+						&& resolved.statistics?.speed?.climb === 45,
+					`Bloated/Gaunt statistics were ${JSON.stringify(resolved.statistics)}`);
+					must(resolved.traits?.deathBurst?.damage?.dice === "4d4"
+						&& resolved.traits?.deathBurst?.damage?.flat === state.getAbilityMod("int")
+						&& resolved.traits?.deathBurst?.damage?.ignoresResistance === true,
+					`Improved/Bloated Death Burst was ${JSON.stringify(resolved.traits?.deathBurst)}`);
+					must(resolved.modifications?.effects?.gaunt?.fearAura?.save?.dc === state.getSpellSaveDcForAbility("int"),
+						`Gaunt fear aura was ${JSON.stringify(resolved.modifications?.effects?.gaunt)}`);
+					const swipe = state.commandCompanionAction({
+						companionId: bloatedGaunt.id,
+						actionKey: "dreadfulSwipe",
+						commandMethod: "bonusAction",
+						target: {name: "Ogre", size: "L"},
+						rangeConfirmed: true,
+						hitConfirmed: true,
+						rolls: {attackD20: 12, damageDice: [4]},
+					});
+					must(swipe?.ok && swipe?.rolls?.damage?.ignoresResistance === true
+						&& swipe?.riders?.some((rider: any) => rider.id === "bloatedPush" && rider.applies === true),
+					`Bloated/Improved Swipe was ${JSON.stringify(swipe)}`);
+
+					must(state.loadFromJson(base) !== false, "could not reset Macabre probe");
+					const gauntMoist = await createCompanion(["gaunt", "moist"]);
+					const moist = gauntMoist.scaling.resolved.modifications.effects.moist;
+					must(gauntMoist.scaling.resolved.statistics?.speed?.swim === 45
+						&& moist?.squeeze?.minimumSpaceInches === 1
+						&& moist?.acidRetaliation?.damage?.flat === state.getAbilityMod("int"),
+					`Moist projection was ${JSON.stringify({statistics: gauntMoist.scaling.resolved.statistics, moist})}`);
+					return {ok: true};
+				}
+
+				if (probe === "refinedReanimation") {
+					const beforeSlot = state.getSpellSlots()?.[1]?.current;
+					const companion = await createCompanion(
+						["ferocity", "gaunt", "moist"],
+						{type: "spellSlot", pool: "spell", slotLevel: 1},
+					);
+					must(companion.setup?.choices?.modifications?.requiredCount === 3
+						&& companion.setup?.choices?.modifications?.selectedOptionIds?.join(",") === "ferocity,gaunt,moist",
+					`Superior modification receipt was ${JSON.stringify(companion.setup?.choices?.modifications)}`);
+					must(state.getSpellSlots()?.[1]?.current === beforeSlot - 1,
+						"spell-slot companion payment did not decrement the exact slot");
+					const resource = state._data.resources.find((candidate: any) =>
+						candidate.featureUid === refinedUid
+						&& candidate.classUid === classUid
+						&& candidate.subclassUid === subclassUid);
+					const raiseDead = state.getSpellsKnown().find((spell: any) =>
+						spell.name === "Raise Dead" && spell.source === "XPHB");
+					must(resource?.max === 1
+						&& raiseDead?.subclassSpellGrantOwners?.some((owner: any) => owner.grantOwnerUid === refinedUid),
+					`Refined ownership was ${JSON.stringify({resource, owners: raiseDead?.subclassSpellGrantOwners})}`);
+					const focusRow = state.getInventory().find((row: any) => row.id === toolId);
+					const revival = await state.pUseRhwFacilitatedRevival({
+						featureUid: refinedUid,
+						classUid,
+						subclassUid,
+						spellName: "Raise Dead",
+						spellSource: "XPHB",
+						spellOwnerUid: refinedUid,
+						focusReference: state.getSpellCastFocusReference(focusRow),
+					});
+					must(revival?.ok && resource.current === 0, `Facilitated Revival was ${JSON.stringify(revival)}`);
+					state._data.hp.current = 5;
+					state._data.hp.max = Math.max(20, state._data.hp.max || 0);
+					companion.hp.current = 7;
+					state.startCombat();
+					const transfer = state.performRhwLifeTransfer({
+						featureUid: refinedUid,
+						classUid,
+						subclassUid,
+						companionId: companion.id,
+						trigger: {
+							eventId: "e2e-rhw-life-transfer",
+							target: "summoner",
+							damageAmount: 3,
+							confirmed: true,
+						},
+						deathBurstResolution: {targets: [], rolls: {damageDice: [1, 2, 3, 4]}},
+					});
+					must(transfer?.ok && transfer?.committed
+						&& transfer?.healing?.actual === 7
+						&& state.getActionEconomyState()?.reaction === false
+						&& state.getCompanion(companion.id)?.lifecycle?.deathBurstResolved === true,
+					`Life Transfer was ${JSON.stringify(transfer)}`);
+					state.onLongRest();
+					must(resource.current === resource.max, "Long Rest did not restore Facilitated Revival");
+					return {ok: true};
+				}
+
+				const companion = await createCompanion(["arcaneConduit", "gaunt", "moist"]);
+				const arcane = state.applyRhwArcaneConduitDamageRider({
+					companionId: companion.id,
+					spellCastReceipt: spellReceipt("e2e-rhw-respec-arcane"),
+					selectedRollId: "damage:0",
+					companionDistanceFeet: 5,
+				});
+				must(arcane?.ok, `Respec fixture Arcane Conduit failed: ${JSON.stringify(arcane)}`);
+				const saved = state.toJson();
+				must(state.loadFromJson(saved) !== false, "L20 Reanimator round-trip failed");
+				const fixedOwnerUid = "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3";
+				const expectedSpellUids = [
+					"False Life|XPHB",
+					"Spare the Dying|XPHB",
+					"Witch Bolt|XPHB",
+					"Blindness/Deafness|XPHB",
+					"Enhance Ability|XPHB",
+					"Animate Dead|XPHB",
+					"Lightning Bolt|XPHB",
+					"Blight|XPHB",
+					"Death Ward|XPHB",
+					"Antilife Shell|XPHB",
+					"Raise Dead|XPHB",
+				];
+				const allKnown = [
+					...(state.getSpellsKnown?.() || []),
+					...(state.getCantripsKnown?.() || []),
+				];
+				for (const spellUid of expectedSpellUids) {
+					const [name, source] = spellUid.split("|");
+					const spell = allKnown.find((candidate: any) => candidate.name === name && candidate.source === source);
+					must(spell?.subclassSpellGrantOwners?.some((owner: any) =>
+						owner.grantOwnerUid === fixedOwnerUid
+						&& owner.sourceClassSource === "EFA"
+						&& owner.sourceSubclassSource === "RHW"),
+					`round-trip fixed spell owner was ${JSON.stringify({spellUid, owners: spell?.subclassSpellGrantOwners})}`);
+				}
+				const persisted = state.getCompanion(companion.id);
+				must(persisted?.featureGrant?.uid === ownerUid
+					&& persisted?.setup?.choices?.modifications?.selectedOptionIds?.join(",") === "arcaneConduit,gaunt,moist",
+				`round-trip companion was ${JSON.stringify(persisted)}`);
+				const engine = cs?._respec?._engine;
+				must(engine, "live Respec engine is unavailable");
+				engine.begin();
+				const candidate = engine.state;
+				const candidateCompanion = candidate.getCompanion(companion.id);
+				must(candidateCompanion?.featureGrant?.uid === ownerUid
+					&& candidateCompanion?.setup?.choices?.modifications?.selectedOptionIds?.join(",") === "arcaneConduit,gaunt,moist",
+				"same-subclass candidate did not preserve legal Reanimator state");
+				must(state.getCompanion(companion.id), "beginning Respec mutated live companion state");
+				const candidateClass = candidate.getClasses().find((entry: any) =>
+					entry.name === "Artificer" && entry.source === "EFA");
+				candidateClass.subclass.source = "TCE";
+				candidate.applyClassFeatureEffects();
+				must(!candidate.getCompanion(companion.id), "wrong-source candidate retained the RHW companion");
+				must(state.getCompanion(companion.id)?.featureGrant?.uid === ownerUid,
+					"invalid candidate mutation leaked into live state");
+				engine.cancel();
+				must(state.getCompanion(companion.id)?.featureGrant?.uid === ownerUid,
+					"cancelling Respec failed to preserve live state");
+				return {ok: true};
+			}, {probe, ownerUid, classUid, subclassUid, refinedUid, toolId});
+			return result;
+		} catch (error) {
+			return {ok: false, error: error instanceof Error ? error.message : String(error)};
+		} finally {
+			await this.exitPlayMode().catch(() => {});
+			await this.page.evaluate((saved) => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.loadFromJson?.(saved);
+				cs?._state?.setViewMode?.("full");
+				cs?.getPlayMode?.()?.deactivate?.();
+				cs?._renderCharacter?.();
+			}, snapshot).catch(() => {});
+			await this.dismissTransientModals().catch(() => {});
+		}
+	}
+
+	async prepareRhwReanimatorExportArtifact (): Promise<void> {
+		const result = await this.page.evaluate(async () => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const ownerUid = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW";
+			const classUid = "Artificer|EFA";
+			const subclassUid = "Reanimator|Artificer|EFA|RHW";
+			const refinedUid = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15|RHW";
+			const toolId = "e2e-rhw-reanimator-export-tool";
+			const must = (condition: any, message: string) => {
+				if (!condition) throw new Error(message);
+			};
+			for (const companion of state.getFeatureOwnedCompanions(ownerUid)) {
+				await state.pDismissFeatureOwnedCompanion({featureUid: ownerUid, companionId: companion.id});
+			}
+			state.onLongRest();
+			state.removeItem(toolId);
+			state.addItem({
+				id: toolId,
+				name: "Tinker's Tools",
+				source: "XPHB",
+				type: "AT|XPHB",
+				quantity: 1,
+				equipped: true,
+				_isCustom: true,
+			}, 1, true);
+			state.setItemEquipped(toolId, true);
+			state.addToolProficiency("Tinker's Tools");
+			const payment = {type: "spellSlot", pool: "spell", slotLevel: 1};
+			const boundary = state.getFeatureCompanionCreationBoundary(ownerUid, {classUid, subclassUid, payment});
+			const transaction = boundary?.setupChoices?.transaction;
+			must(transaction, `export creation boundary was ${JSON.stringify(boundary)}`);
+			const selectedOptionIds = ["arcaneConduit", "bloated", "moist"];
+			const focusRow = state.getInventory().find((row: any) => row.id === toolId);
+			const created = await state.pCreateFeatureCompanion({
+				featureUid: ownerUid,
+				classUid,
+				subclassUid,
+				focusReference: state.getSpellCastFocusReference(focusRow),
+				payment,
+				setupChoices: {
+					transactionId: transaction.transactionId,
+					selectedOptions: selectedOptionIds.map(id =>
+						structuredClone(transaction.options.find((option: any) => option.id === id))),
+				},
+				appearance: "A stitched brass hound prepared for R6 export validation",
+			});
+			must(created?.ok && created?.committed, `export companion creation failed: ${JSON.stringify(created)}`);
+			const companion = state.getCompanion(created.companionId);
+			const spellCastReceipt = {
+				receiptVersion: 1,
+				receiptId: "e2e-rhw-export-arcane",
+				ok: true,
+				committed: true,
+				castingClassUid: classUid,
+				spellUid: "Blight|XPHB",
+				spell: {name: "Blight", source: "XPHB", level: 4, school: "N"},
+				castType: "slot",
+				cast: {
+					rolls: [{
+						rollId: "damage:0",
+						kind: "damage",
+						damageType: "necrotic",
+						total: 7,
+						status: "resolved",
+					}],
+				},
+			};
+			must(state.applyRhwArcaneConduitDamageRider({
+				companionId: companion.id,
+				spellCastReceipt,
+				selectedRollId: "damage:0",
+				companionDistanceFeet: 5,
+			})?.ok, "export Arcane Conduit receipt did not commit");
+			state._data.hp.current = 5;
+			state._data.hp.max = Math.max(20, state._data.hp.max || 0);
+			companion.hp.current = 7;
+			state.startCombat();
+			const transfer = state.performRhwLifeTransfer({
+				featureUid: refinedUid,
+				classUid,
+				subclassUid,
+				companionId: companion.id,
+				trigger: {
+					eventId: "e2e-rhw-export-life-transfer",
+					target: "summoner",
+					damageAmount: 3,
+					confirmed: true,
+				},
+				deathBurstResolution: {targets: [], rolls: {damageDice: [1, 2, 3, 4]}},
+			});
+			must(transfer?.ok && transfer?.committed, `export Life Transfer failed: ${JSON.stringify(transfer)}`);
+			const exported = state.toJson();
+			const exportedCompanion = exported.companions.find((candidate: any) => candidate.id === companion.id);
+			const refinedResource = exported.resources.find((candidate: any) => candidate.featureUid === refinedUid);
+			const raiseDead = exported.spellcasting.spellsKnown.find((spell: any) =>
+				spell.name === "Raise Dead" && spell.source === "XPHB");
+			must(exportedCompanion?.featureGrant?.uid === ownerUid
+				&& exportedCompanion?.creatureName === "Reanimated Companion"
+				&& exportedCompanion?.creatureSource === "RHW"
+				&& exportedCompanion?.lifecycle?.deathBurstResolved === true
+				&& exportedCompanion?.lifecycle?.deathReceipt?.deathBurstResolution?.targets?.length === 0,
+			`export companion was ${JSON.stringify(exportedCompanion)}`);
+			must(refinedResource?.featureUid === refinedUid
+				&& raiseDead?.subclassSpellGrantOwners?.some((owner: any) => owner.grantOwnerUid === refinedUid),
+			"export lost canonical Refined ownership");
+			cs?._renderCharacter?.();
+			return {ok: true, companionId: companion.id};
+		});
+		if (!result?.ok) throw new Error("Failed to prepare the final Reanimator export artifact");
+	}
+
 	async _probeEfaArcaneFirearm (): Promise<{ok: boolean; error?: string}> {
 		const itemId = "e2e-efa-arcane-firearm";
 		try {

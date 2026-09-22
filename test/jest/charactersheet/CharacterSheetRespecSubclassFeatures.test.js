@@ -211,6 +211,84 @@ describe("CharacterSheetRespec subclass change — multiclass safety (Bug #2)", 
 	});
 });
 
+describe("CharacterSheetRespec subclass change — exact source isolation", () => {
+	test("matches old subclass features by exact subclass source", () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+		});
+		for (const source of ["RHW", "TCE"]) {
+			state.addFeature({
+				name: "Reanimated Companion",
+				source,
+				level: 3,
+				className: "Artificer",
+				classSource: "EFA",
+				subclassName: "Reanimator",
+				subclassShortName: "Reanimator",
+				subclassSource: source,
+				isSubclassFeature: true,
+				entries: [],
+			});
+		}
+		const respec = makeRespec(state);
+
+		expect(respec._getSubclassFeatures(
+			{name: "Reanimator", shortName: "Reanimator", source: "RHW"},
+			{name: "Artificer", source: "EFA"},
+		)).toEqual([
+			expect.objectContaining({name: "Reanimated Companion", subclassSource: "RHW"}),
+		]);
+	});
+
+	test("updates only level-history rows for the exact class and subclass source", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Wizard",
+			source: "XPHB",
+			level: 6,
+			subclass: {name: "School of Evocation", shortName: "Evocation", source: "PHB"},
+		});
+		state.addClass({
+			name: "Fighter",
+			source: "PHB",
+			level: 3,
+			subclass: {name: "School of Evocation", shortName: "Evocation", source: "PHB"},
+		});
+		addOldEvocationFeature(state);
+		state.recordLevelChoice({
+			level: 3,
+			class: {name: "Wizard", source: "XPHB"},
+			choices: {subclass: {name: "School of Evocation", shortName: "Evocation", source: "PHB"}},
+		});
+		state.recordLevelChoice({
+			level: 4,
+			class: {name: "Fighter", source: "PHB"},
+			choices: {subclass: {name: "School of Evocation", shortName: "Evocation", source: "PHB"}},
+		});
+		const respec = makeRespec(state);
+
+		await respec._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Wizard", source: "XPHB"}},
+			{name: "School of Evocation", shortName: "Evocation", source: "PHB"},
+			bladesingerSubclass(),
+		);
+
+		expect(state.getLevelHistoryEntry(3).choices.subclass).toMatchObject({
+			name: "Bladesinger",
+			source: "FRHoF",
+		});
+		expect(state.getLevelHistoryEntry(4).choices.subclass).toMatchObject({
+			name: "School of Evocation",
+			source: "PHB",
+		});
+	});
+});
+
 describe("CharacterSheetRespec subclass change — exact subclass lifecycle cleanup", () => {
 	test("invalidates an active EFA Cartographer Atlas while preserving snapshot-based Undo", async () => {
 		const state = new CharacterSheetState();

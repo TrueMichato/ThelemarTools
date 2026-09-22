@@ -57,7 +57,7 @@ const COMPANION_UID = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3";
 const STRANGE_MODIFICATIONS_UID = "Strange Modifications|Artificer|EFA|Reanimator|RHW|5";
 const IMPROVED_REANIMATION_UID = "Improved Reanimation|Artificer|EFA|Reanimator|RHW|9";
 const MACABRE_MODIFICATIONS_UID = "Macabre Modifications|Artificer|EFA|Reanimator|RHW|9";
-const REFINED_REANIMATION_UID = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15";
+const REFINED_REANIMATION_UID = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15|RHW";
 const CLASS_UID = "Artificer|EFA";
 const SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
 

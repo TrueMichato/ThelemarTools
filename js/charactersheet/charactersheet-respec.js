@@ -4989,18 +4989,14 @@ class CharacterSheetRespec {
 			// discriminator.
 			if (classContext?.name && f.className && f.className !== classContext.name) return false;
 
-			// Check if feature is explicitly a subclass feature
-			if (f.isSubclassFeature) {
-				// Match by subclass name or short name
-				if (f.subclassName === subclass.name || f.subclassShortName === subclass.shortName) {
-					return true;
-				}
+			const matchesName = f.subclassName === subclass.name
+				|| f.subclassShortName === subclass.shortName;
+			if (!matchesName) return false;
+			if (subclass.source) {
+				if (!f.subclassSource) return false;
+				if (f.subclassSource !== subclass.source) return false;
 			}
-			// Check if feature has subclass source matching
-			if (f.subclassSource === subclass.source && f.subclassShortName === subclass.shortName) {
-				return true;
-			}
-			return false;
+			return f.isSubclassFeature === true || f.subclassSource === subclass.source;
 		});
 	}
 
@@ -5108,8 +5104,16 @@ class CharacterSheetRespec {
 		// Update all level history entries that had the old subclass
 		const levelHistory = this._state.getLevelHistory();
 		levelHistory.forEach(entry => {
-			if ((!oldSubclass && entry.level === level)
-				|| entry.choices?.subclass?.name === oldSubclass?.name) {
+			const isExactClass = entry.class?.name === history.class.name
+				&& (!history.class.source || entry.class?.source === history.class.source);
+			const historicalSubclass = entry.choices?.subclass;
+			const isExactOldSubclass = !!oldSubclass
+				&& (
+					historicalSubclass?.name === oldSubclass.name
+					|| historicalSubclass?.shortName === oldSubclass.shortName
+				)
+				&& (!oldSubclass.source || historicalSubclass?.source === oldSubclass.source);
+			if (isExactClass && ((!oldSubclass && entry.level === level) || isExactOldSubclass)) {
 				this._state.updateLevelChoice(entry.level, {
 					subclass: {
 						name: newSubclass.name,

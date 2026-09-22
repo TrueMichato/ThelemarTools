@@ -887,6 +887,7 @@ export type EffectCheck = _EffectCommon & (
 	}
 	| {kind: "efaArtilleristProbe"; probe: "baseCannon" | "arcaneFirearm" | "explosiveCannon" | "fortifiedPosition"}
 	| {kind: "efaArmorerProbe"; probe: "core" | "models" | "improved" | "perfected" | "progression"}
+	| {kind: "rhwReanimatorProbe"; probe: "l3Lifecycle" | "arcaneConduit" | "macabreModifications" | "refinedReanimation" | "roundTripRespec"}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
 	| {
@@ -1841,6 +1842,11 @@ export async function runEffectCheck (
 						: 19;
 			if (currentLevel != null && currentLevel !== owningLevel) return;
 			await charSheet.probeEfaArmorerFlow(e.probe);
+			return;
+		}
+		case "rhwReanimatorProbe": {
+			const result = await charSheet.probeRhwReanimatorFlow(e.probe);
+			if (!result?.ok) throw new Error(`RHW Reanimator ${e.probe} probe failed: ${result?.error || "unknown error"}`);
 			return;
 		}
 		case "proficiency": {

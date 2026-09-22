@@ -4507,6 +4507,7 @@ class CharacterSheetState {
 	static RHW_REANIMATOR_TOOL_OWNER_UID = "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW";
 	static RHW_REANIMATOR_ARCANE_CONDUIT_SOURCE_UID = "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW";
 	static RHW_REANIMATOR_ARCANE_CONDUIT_ACTION_UID = "arcane-conduit:damage-rider";
+	static RHW_REANIMATOR_LEGACY_REFINED_OWNER_UID = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15";
 	static RHW_REANIMATOR_FEATURE_UIDS = Object.freeze({
 		REANIMATOR: "Reanimator|Artificer|EFA|Reanimator|RHW|3",
 		SPELLS: "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3",
@@ -4516,7 +4517,7 @@ class CharacterSheetState {
 		STRANGE_MODIFICATIONS: "Strange Modifications|Artificer|EFA|Reanimator|RHW|5",
 		IMPROVED_REANIMATION: "Improved Reanimation|Artificer|EFA|Reanimator|RHW|9",
 		MACABRE_MODIFICATIONS: "Macabre Modifications|Artificer|EFA|Reanimator|RHW|9",
-		REFINED_REANIMATION: "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15",
+		REFINED_REANIMATION: "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15|RHW",
 	});
 	static RHW_REANIMATOR_SPELLS = Object.freeze([
 		Object.freeze({level: 3, name: "False Life", source: "XPHB"}),
@@ -51719,10 +51720,59 @@ class CharacterSheetState {
 		) || null;
 	}
 
+	_migrateRhwRefinedOwnerUid (cls) {
+		if (!this._isRhwReanimatorClass(cls)) return false;
+		const legacyOwnerUid = CharacterSheetState.RHW_REANIMATOR_LEGACY_REFINED_OWNER_UID;
+		const ownerUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION;
+		let didMigrate = false;
+
+		for (const resource of this._data.resources || []) {
+			if (
+				resource?.featureUid !== legacyOwnerUid
+				|| resource?.classUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+				|| resource?.subclassUid !== CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID
+			) continue;
+			resource.featureUid = ownerUid;
+			didMigrate = true;
+		}
+
+		const ownerKey = `${this._getSubclassSpellGrantBaseKey(cls)}|owner:${ownerUid.toLowerCase()}`;
+		for (const spell of [
+			...(this._data.spellcasting?.spellsKnown || []),
+			...(this._data.spellcasting?.cantripsKnown || []),
+		]) {
+			for (const owner of spell?.subclassSpellGrantOwners || []) {
+				if (
+					owner?.grantOwnerUid !== legacyOwnerUid
+					|| owner?.sourceClass !== "Artificer"
+					|| owner?.sourceClassSource !== "EFA"
+					|| owner?.sourceSubclass !== "Reanimator"
+					|| owner?.sourceSubclassSource !== "RHW"
+					|| owner?.sourceFeature !== "Facilitated Revival"
+				) continue;
+				owner.grantOwnerUid = ownerUid;
+				owner.key = ownerKey;
+				didMigrate = true;
+			}
+			if (!Array.isArray(spell?.subclassSpellGrantOwners)) continue;
+			const seen = new Set();
+			spell.subclassSpellGrantOwners = spell.subclassSpellGrantOwners.filter(owner => {
+				if (owner?.grantOwnerUid !== ownerUid) return true;
+				const key = String(owner.key || ownerKey).toLowerCase();
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			});
+		}
+
+		return didMigrate;
+	}
+
 	_removeRhwReanimatorResources () {
 		const featureUids = new Set([
 			CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SKILL_SET,
 			CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+			CharacterSheetState.RHW_REANIMATOR_LEGACY_REFINED_OWNER_UID,
 		]);
 		this._data.resources = (this._data.resources || []).filter(resource =>
 			!(
@@ -51792,12 +51842,17 @@ class CharacterSheetState {
 				ownerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
 				desiredGrants: [],
 			});
+			this._reconcileRhwReanimatorSpellOwnerSet(null, {
+				ownerUid: CharacterSheetState.RHW_REANIMATOR_LEGACY_REFINED_OWNER_UID,
+				desiredGrants: [],
+			});
 			this._removeRhwReanimatorResources();
 			this._removeFeatureCompanionCreationResources(companionOwnerUid);
 			this._removeExactFeatureOwnedCompanions(companionOwnerUid);
 			return;
 		}
 
+		this._migrateRhwRefinedOwnerUid(cls);
 		const level = Number(cls.level) || 0;
 		const fixedGrants = CharacterSheetState.RHW_REANIMATOR_SPELLS
 			.filter(spell => level >= spell.level)

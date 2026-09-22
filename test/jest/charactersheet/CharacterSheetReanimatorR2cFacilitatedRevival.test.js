@@ -49,7 +49,8 @@ const REANIMATOR = ARTIFICER_DATA.subclass.find(subclass =>
 	&& subclass.className === "Artificer"
 	&& subclass.classSource === "EFA",
 );
-const FEATURE_UID = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15";
+const FEATURE_UID = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15|RHW";
+const LEGACY_FEATURE_UID = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15";
 const CLASS_UID = "Artificer|EFA";
 const SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
 const FIXED_SPELLS_UID = "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3";
@@ -525,6 +526,50 @@ describe("RHW Reanimator R2c persistence, rest, ownership, and Respec", () => {
 			id: "stable-smiths",
 			item: expect.objectContaining({name: "Smith's Tools", source: "XPHB"}),
 		}));
+	});
+
+	it("migrates only exact six-part legacy Refined owners to the canonical seven-part identity", () => {
+		const state = makeState();
+		const exported = copy(state.toJson());
+		const resource = exported.resources.find(candidate => candidate.featureUid === FEATURE_UID);
+		resource.current = 0;
+		resource.featureUid = LEGACY_FEATURE_UID;
+		exported.resources.push({
+			...copy(resource),
+			id: "wrong-source-refined-resource",
+			featureUid: "Refined Reanimation|Artificer|EFA|Reanimator|TCE|15",
+			subclassUid: "Reanimator|Artificer|EFA|TCE",
+		});
+		const raiseDead = exported.spellcasting.spellsKnown.find(spell =>
+			spell.name === "Raise Dead" && spell.source === "XPHB");
+		const owner = raiseDead.subclassSpellGrantOwners.find(candidate => candidate.grantOwnerUid === FEATURE_UID);
+		owner.grantOwnerUid = LEGACY_FEATURE_UID;
+		owner.key = owner.key.replace(FEATURE_UID.toLowerCase(), LEGACY_FEATURE_UID.toLowerCase());
+		raiseDead.subclassSpellGrantOwners.push({
+			...copy(owner),
+			key: "wrong-source-refined-owner",
+			sourceSubclassSource: "TCE",
+		});
+
+		const loaded = new CharacterSheetState();
+		loaded.setSpellData(XPHB_SPELLS);
+		expect(loaded.loadFromJson(exported)).not.toBe(false);
+
+		expect(getResource(loaded)).toMatchObject({current: 0, max: 1, featureUid: FEATURE_UID});
+		expect(loaded._data.resources.some(candidate => candidate.featureUid === LEGACY_FEATURE_UID)).toBe(false);
+		expect(loaded._data.resources).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				id: "wrong-source-refined-resource",
+				featureUid: "Refined Reanimation|Artificer|EFA|Reanimator|TCE|15",
+			}),
+		]));
+		expect(getOwners(loaded, FEATURE_UID)).toHaveLength(1);
+		expect(getOwners(loaded, FEATURE_UID)[0].key).toContain(`owner:${FEATURE_UID.toLowerCase()}`);
+		expect(getOwners(loaded, LEGACY_FEATURE_UID)).toHaveLength(1);
+		expect(getOwners(loaded, LEGACY_FEATURE_UID)[0]).toMatchObject({
+			key: "wrong-source-refined-owner",
+			sourceSubclassSource: "TCE",
+		});
 	});
 
 	it("exact subclass teardown removes only RHW ownership and its spent resource", async () => {
