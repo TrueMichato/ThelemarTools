@@ -2568,7 +2568,7 @@ class CharacterSheetPage {
 				.map(([sense, range]) => `${sense.toTitleCase()} ${range} ft.`)
 				.join(", ") || "—";
 		const hitDice = companion.hitDice || {};
-		const operationUi = this._getFeatureCompanionOperationUiModel(companion, descriptor);
+		const operationUi = this.getFeatureCompanionOperationSurfaceModel(companion, descriptor);
 		const readiness = this._getFeatureCompanionReadiness({
 			companion,
 			status,
@@ -2604,7 +2604,8 @@ class CharacterSheetPage {
 			},
 			readiness: readiness.readiness,
 			readinessSource: readiness.source,
-			isOverviewOnly: !operationUi,
+			operationUi,
+			isOverviewOnly: !operationUi || operationUi.renderInManager === true,
 		};
 	}
 
@@ -2632,6 +2633,9 @@ class CharacterSheetPage {
 				<div>${escape(model.provenance.appearance)}</div>
 			</details>`
 			: "";
+		const operationsHtml = model.operationUi?.renderInManager
+			? this._getFeatureCompanionOperationSurfaceHtml(model.operationUi)
+			: "";
 		return `<section class="charsheet__feature-companion-manager charsheet__feature-companion-manager--${model.status.key}"
 			data-feature-companion-owner="${escape(model.expectedOwnerUid)}"
 			aria-labelledby="${id}">
@@ -2654,7 +2658,7 @@ class CharacterSheetPage {
 			<div class="charsheet__feature-companion-readiness" role="group" aria-label="Read-only turn availability">
 				<span><strong>Action:</strong> ${escape(model.readiness.action)}</span>
 				<span><strong>Reaction:</strong> ${escape(model.readiness.reaction)}</span>
-				<span class="ve-muted">Status only; use in-play controls where supported.</span>
+				<span class="ve-muted">${model.operationUi?.renderInManager ? "Canonical receipts; use the Operate controls below." : "Status only; use in-play controls where supported."}</span>
 			</div>
 			<div class="charsheet__feature-companion-manager-grid">
 				<div>
@@ -2668,7 +2672,45 @@ class CharacterSheetPage {
 				</div>
 			</div>
 			${appearanceHtml}
+			${operationsHtml}
 			${diagnosticsHtml}
+		</section>`;
+	}
+
+	_getFeatureCompanionOperationSurfaceHtml (model) {
+		const escape = CharacterSheetModal._escapeHtml;
+		const id = `charsheet-feature-companion-operations-${String(model.companionId || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		const reasons = model.controls
+			.filter(control => !control.available)
+			.map(control => `${control.label}: ${control.reason}`);
+		const controls = model.controls.map(control =>
+			`<button type="button" class="ve-btn ve-btn-xs ${control.tone === "danger" ? "ve-btn-danger" : control.tone === "primary" ? "ve-btn-primary" : "ve-btn-default"}"
+				data-feature-companion-operation="${escape(control.operation)}"
+				data-feature-companion-id="${escape(model.companionId)}"
+				data-feature-companion-owner="${escape(model.ownerUid)}"
+				data-companion-operation-key="${escape(this.getCompanionOperationFocusKey(model.companionId, control.operation, control.actionKey))}"
+				aria-describedby="${id}-status ${id}-reasons"
+				title="${escape(control.description || control.reason || control.label)}"
+				${control.available ? "" : "disabled"}>
+				${escape(control.label)}
+			</button>`,
+		).join("");
+		return `<section class="charsheet__feature-companion-operations" role="region" aria-labelledby="${id}-heading">
+			<div class="charsheet__feature-companion-operation-header">
+				<div>
+					<h5 id="${id}-heading" class="charsheet__feature-companion-operation-title">${escape(model.heading)}</h5>
+					<div class="ve-small ve-muted">${escape(model.summary)}</div>
+				</div>
+				<span class="charsheet__feature-companion-operation-mode">${escape(model.modeLabel)}</span>
+			</div>
+			<div id="${id}-status" class="charsheet__feature-companion-operation-status">${escape(model.statusText)}</div>
+			<div class="ve-small ve-muted">${escape(model.costText)}</div>
+			<div class="ve-small ve-muted">${escape(model.rangeText)}</div>
+			<div class="charsheet__feature-companion-operation-controls" role="group" aria-label="${escape(model.heading)}">
+				${controls}
+			</div>
+			<div id="${id}-reasons" class="charsheet__feature-companion-disabled-reasons ve-small ve-muted" role="status" aria-live="polite" aria-atomic="true">${escape(reasons.join(" "))}</div>
+			<div class="charsheet__feature-companion-live" data-feature-companion-operation-status role="status" aria-live="polite" aria-atomic="true"></div>
 		</section>`;
 	}
 
@@ -2699,6 +2741,32 @@ class CharacterSheetPage {
 				const surface = button.closest("[data-feature-companion-create-owner]");
 				const status = surface?.querySelector("[role=status]");
 				await this._pCreateFeatureCompanionFromManager(ownerUid, {button, status});
+			});
+		});
+	}
+
+	_bindFeatureCompanionOperationActions (root) {
+		root?.querySelectorAll?.("[data-feature-companion-operation]").forEach(button => {
+			button.addEventListener("click", async () => {
+				const surface = button.closest(".charsheet__feature-companion-operations");
+				const status = surface?.querySelector("[data-feature-companion-operation-status]");
+				button.disabled = true;
+				button.setAttribute("aria-busy", "true");
+				if (status) status.textContent = `Resolving ${button.textContent.trim()}…`;
+				try {
+					const result = await this.pUseFeatureCompanionOperation({
+						featureUid: button.getAttribute("data-feature-companion-owner"),
+						companionId: button.getAttribute("data-feature-companion-id"),
+						operation: button.getAttribute("data-feature-companion-operation"),
+						focusKey: button.getAttribute("data-companion-operation-key"),
+					});
+					if (status?.isConnected) status.textContent = this._getFeatureCompanionOperationResultMessage(result);
+				} finally {
+					if (button.isConnected) {
+						button.disabled = false;
+						button.removeAttribute("aria-busy");
+					}
+				}
 			});
 		});
 	}
@@ -2897,6 +2965,159 @@ class CharacterSheetPage {
 			rendLabel: rend.name || descriptor.actions?.forceEmpoweredRend?.name || "Attack",
 			repairLabel: repair.name || descriptor.actions?.repair?.name || "Repair",
 			deflectLabel: deflect.name || descriptor.reactions?.deflectAttack?.name || "Reaction",
+		};
+	}
+
+	getFeatureCompanionOperationSurfaceModel (companion, descriptor = null) {
+		const resolvedDescriptor = descriptor || this._getFeatureCompanionDescriptor(companion);
+		if (
+			this._isExactRhwReanimatorCompanion(companion)
+			&& companion.scaling?.resolved?.operations?.command?.status === "executable"
+		) {
+			return this._getRhwReanimatorOperationSurfaceModel(companion, resolvedDescriptor);
+		}
+		return this._getFeatureCompanionOperationUiModel(companion, resolvedDescriptor);
+	}
+
+	_getRhwReanimatorOperationSurfaceModel (companion, descriptor) {
+		if (!descriptor) return null;
+		const ownerUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER;
+		const resolved = companion.scaling?.resolved || {};
+		const effects = resolved.modifications?.effects || {};
+		const lifecycleStatus = String(companion.lifecycle?.status || "").toLowerCase();
+		const isActive = companion.active !== false
+			&& Number(companion.hp?.current) > 0
+			&& !["dead", "dismissed", "expired", "inactive", "vanished"].includes(lifecycleStatus);
+		const lifecycleReason = isActive
+			? null
+			: lifecycleStatus === "dead" || Number(companion.hp?.current) <= 0
+				? "The current generation is dead."
+				: "The current generation is inactive or expired.";
+		const dodge = this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "dodge"});
+		const swipe = this.getCompanionOperationAvailability(companion.id, "dreadfulSwipe", {actionKey: "dreadfulSwipe"});
+		const ownerMagicActionAvailable = this._state.isActionTypeAvailable?.("action", {trackOnlyInCombat: true}) !== false;
+		const ownerBonusActionAvailable = this._state.isActionTypeAvailable?.("bonus", {trackOnlyInCombat: true}) !== false;
+		const ownerReactionAvailable = this._state.isActionTypeAvailable?.("reaction", {trackOnlyInCombat: true}) !== false;
+		const arcaneConduit = effects.arcaneConduit || null;
+		const arcaneReceipt = arcaneConduit?.damageRider?.turnReceipt?.key
+			? this._state.queryTurnReceipt?.(arcaneConduit.damageRider.turnReceipt.key)
+			: null;
+		const castableArcaneConduitSpells = arcaneConduit ? this._getRhwArcaneConduitCastableSpells() : [];
+		const deathBurstPending = companion.lifecycle?.deathBurstEmitted === true
+			&& companion.lifecycle?.deathBurstResolved !== true;
+		const hasLifeTransfer = this._state.getFeatureCalculations?.().hasRefinedReanimation === true;
+		const getManualAvailability = ({extraAvailable = true, reason = null} = {}) => ({
+			available: isActive && extraAvailable,
+			reason: isActive ? reason : lifecycleReason,
+		});
+		const controls = [
+			{
+				operation: "action",
+				actionKey: "dodge",
+				label: "Default Dodge",
+				available: dodge.available,
+				reason: dodge.message || "The companion Action is unavailable.",
+				description: `Use the descriptor default action (${resolved.commandPolicy?.defaultAction || "Dodge"}) without an owner command.`,
+			},
+			{
+				operation: "dreadfulSwipe",
+				actionKey: "dreadfulSwipe",
+				label: resolved.actions?.dreadfulSwipe?.name || "Dreadful Swipe",
+				available: swipe.available,
+				reason: swipe.message || "Dreadful Swipe is unavailable.",
+				description: `${resolved.actions?.dreadfulSwipe?.reachFeet || 5}-foot melee attack; confirm the target and result before costs commit.`,
+				tone: "primary",
+			},
+			{
+				operation: "damage",
+				label: "Damage / Lightning",
+				...getManualAvailability(),
+				description: "Apply typed damage canonically. Lightning damage is prevented and heals by the prevented amount.",
+			},
+			...(effects.gaunt ? [{
+				operation: "gaunt",
+				label: effects.gaunt.name || "Gaunt",
+				...getManualAvailability(),
+				description: `Resolve the chosen creature's Wisdom save within ${effects.gaunt.fearAura?.area?.radiusFeet || 10} feet.`,
+			}] : []),
+			...(effects.moist ? [{
+				operation: "moist",
+				label: effects.moist.name || "Moist",
+				...getManualAvailability(),
+				description: `Resolve acid retaliation against a creature that hit within ${effects.moist.acidRetaliation?.attackerMaximumRangeFeet || 10} feet; no Reaction is spent.`,
+			}] : []),
+			...(arcaneConduit ? [{
+				operation: "arcaneConduit",
+				label: arcaneConduit.name || "Arcane Conduit",
+				...getManualAvailability({
+					extraAvailable: !arcaneReceipt?.used && castableArcaneConduitSpells.length > 0,
+					reason: arcaneReceipt?.used
+						? "Arcane Conduit has already modified a damage roll this turn."
+						: !castableArcaneConduitSpells.length
+							? "No prepared exact EFA Artificer evocation or necromancy spell is available."
+							: null,
+				}),
+				description: `Cast from either space using the summoner's senses; add ${arcaneConduit.damageRider?.damageRollBonus || 0} to one resolved damage roll once per turn.`,
+			}] : []),
+			...(hasLifeTransfer ? [{
+				operation: "lifeTransfer",
+				label: "Life Transfer",
+				...getManualAvailability({
+					extraAvailable: ownerReactionAvailable,
+					reason: ownerReactionAvailable ? null : "The summoner Reaction is unavailable.",
+				}),
+				description: "After confirmed damage, spend the summoner Reaction, heal by the companion's current HP, then kill the companion and resolve Death Burst.",
+				tone: "danger",
+			}] : []),
+			...(deathBurstPending ? [{
+				operation: "deathBurst",
+				label: "Resolve Death Burst",
+				available: true,
+				reason: null,
+				description: "Record every target within the emanation, resolve Dexterity saves, and roll the generation's canonical damage.",
+				tone: "danger",
+			}] : []),
+			{
+				operation: "dismiss",
+				label: "Dismiss",
+				...getManualAvailability({
+					extraAvailable: ownerMagicActionAvailable,
+					reason: ownerMagicActionAvailable ? null : "The summoner Magic Action is unavailable.",
+				}),
+				description: "Spend the summoner Magic Action to dismiss this generation harmlessly without Death Burst.",
+				tone: "danger",
+			},
+		];
+		const commandText = swipe.commandMethods?.length
+			? swipe.commandMethods
+				.map(method => `${method.label}: ${method.available ? "available" : method.reason}`)
+				.join(" • ")
+			: swipe.message || "Dreadful Swipe uses the companion Action.";
+		const rangeParts = [
+			`Swipe ${resolved.actions?.dreadfulSwipe?.reachFeet || 5} ft.`,
+			effects.gaunt ? `Gaunt ${effects.gaunt.fearAura?.area?.radiusFeet || 10} ft.` : null,
+			effects.moist ? `Moist ${effects.moist.acidRetaliation?.attackerMaximumRangeFeet || 10} ft.` : null,
+			arcaneConduit ? `Conduit ${arcaneConduit.damageRider?.requiresCompanionWithinFeet || 120} ft.` : null,
+			"Manual confirmations are required where the sheet cannot measure the table.",
+		].filter(Boolean);
+		return {
+			kind: "rhwReanimator",
+			renderInManager: true,
+			companionId: companion.id,
+			ownerUid,
+			heading: "Operate Reanimated Companion",
+			modeLabel: "RHW · live",
+			summary: `Uncommanded action: ${String(resolved.commandPolicy?.defaultAction || "dodge").toTitleCase()}; movement and reaction remain autonomous.`,
+			statusText: [
+				dodge.status?.actionAvailable ? "Action ready" : "Action used",
+				dodge.status?.reactionAvailable ? "Companion Reaction ready" : "Companion Reaction used",
+				ownerMagicActionAvailable ? "Owner Magic Action ready" : "Owner Magic Action used",
+				ownerBonusActionAvailable ? "Owner Bonus Action ready" : "Owner Bonus Action used",
+				ownerReactionAvailable ? "Owner Reaction ready" : "Owner Reaction used",
+			].join(" • "),
+			costText: commandText,
+			rangeText: rangeParts.join(" • "),
+			controls,
 		};
 	}
 
@@ -7256,9 +7477,33 @@ class CharacterSheetPage {
 			&& String(companion?.source || "").trim().toUpperCase() === "EFA";
 	}
 
+	_isExactRhwReanimatorCompanion (companion) {
+		const expectedOwnerUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS?.COMPANION_OWNER;
+		const resolvedIdentity = companion?.scaling?.resolved?.identity;
+		return !!expectedOwnerUid
+			&& companion?.featureGrant?.uid === expectedOwnerUid
+			&& companion?.name === "Reanimated Companion"
+			&& companion?.source === "RHW"
+			&& companion?.creatureName === "Reanimated Companion"
+			&& companion?.creatureSource === "RHW"
+			&& resolvedIdentity?.companionUid === "Reanimated Companion|RHW"
+			&& resolvedIdentity?.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+			&& resolvedIdentity?.subclassUid === CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID;
+	}
+
+	isRhwReanimatorFeatureOwnedCompanion (companion) {
+		return companion?.featureGrant?.uid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS?.COMPANION_OWNER;
+	}
+
 	getFeatureCompanionLifecycleSurfaceCompanions () {
 		return (this._state.getCompanions?.() || []).filter(companion =>
-			companion?.active !== false || this._isExactEfaSteelDefenderLifecycleCompanion(companion),
+			companion?.active !== false
+			|| this._isExactEfaSteelDefenderLifecycleCompanion(companion)
+			|| (
+				this._isExactRhwReanimatorCompanion(companion)
+				&& companion.lifecycle?.deathBurstEmitted === true
+				&& companion.lifecycle?.deathBurstResolved !== true
+			),
 		);
 	}
 
@@ -7477,6 +7722,7 @@ class CharacterSheetPage {
 		featureCompanionCreationModels.forEach((model, index) => {
 			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionCreationSurfaceHtml(model, index));
 		});
+		this._bindFeatureCompanionOperationActions(list);
 		this._bindFeatureCompanionCreationActions(list);
 
 		if (companions.length === 0) {
@@ -23185,6 +23431,8 @@ class CharacterSheetPage {
 	resetTurnEconomy () {
 		this._state.resetTurnEconomy();
 		this._combat?.resetTurnAttackUsage?.();
+		this._renderCompanions?.();
+		this._playMode?._refreshOpenDrawer?.("companions");
 	}
 
 	startCombat () {
@@ -23242,9 +23490,36 @@ class CharacterSheetPage {
 		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
 	}
 
+	_restoreCompanionOperationFocus (focusKey, companionId = null) {
+		if (!focusKey) return;
+		queueMicrotask(() => {
+			const exact = this.getCompanionOperationFocusTarget(focusKey);
+			const target = exact && !exact.disabled
+				? exact
+				: companionId ? this._getCompanionOperationPostRenderFocusTarget(companionId) : null;
+			target?.focus?.();
+		});
+	}
+
+	_renderCompanionOperationSurfaces () {
+		this._renderCompanions();
+		if (this._state.getViewMode?.() !== "play") return;
+		this._playMode?.render();
+		this._playMode?._refreshOpenDrawer?.("companions");
+	}
+
+	_getCompanionOperationPostRenderFocusTarget (companionId) {
+		if (!companionId || typeof document === "undefined") return null;
+		const targets = [...(document.querySelectorAll?.("[data-companion-id]") || [])]
+			.filter(card => card.getAttribute?.("data-companion-id") === companionId)
+			.map(card => card.querySelector?.("[data-companion-operation-key]:not([disabled])"))
+			.filter(Boolean);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
 	_getFeatureCompanionPostRenderFocusTarget (companionId, focusKey) {
 		const exact = this.getFeatureCompanionLifecycleFocusTarget(focusKey);
-		if (exact) return exact;
+		if (exact && !exact.disabled) return exact;
 		if (typeof document === "undefined") return null;
 		const cards = [...(document.querySelectorAll?.("[data-companion-id]") || [])]
 			.filter(card => card.getAttribute?.("data-companion-id") === companionId);
@@ -23915,7 +24190,446 @@ class CharacterSheetPage {
 		});
 	}
 
+	_getFeatureCompanionOperationResultMessage (result) {
+		if (result?.reason === "cancelled") return "Operation cancelled. No companion cost or receipt was committed.";
+		if (result?.reason === "spellDealtNoDamage") return "The spell resolved without an eligible damage roll; Arcane Conduit was not spent.";
+		if (!result?.ok) {
+			const messages = {
+				actionUnavailable: "The required action is unavailable.",
+				alreadyUsed: "That once-per-turn operation has already been used.",
+				companionInactive: "The current companion generation is inactive.",
+				companionOutOfRange: "The companion is outside the required range.",
+				companionUnavailable: "The exact active companion generation is unavailable.",
+				featureUnavailable: "The exact Reanimator feature is unavailable.",
+				invalidFeature: "The source-qualified Reanimator owner does not match.",
+				modificationUnavailable: "That modification is not selected for this generation.",
+				ownerMismatch: "The companion is not owned by the exact RHW Reanimator runtime.",
+				reactionUnavailable: "The summoner Reaction is unavailable.",
+				transactionRolledBack: "The operation failed late and was rolled back without committing its costs.",
+				unsupportedOperation: "That operation is not supported by the RHW runtime dispatcher.",
+			};
+			return result?.message || messages[result?.reason] || "The companion operation could not be resolved.";
+		}
+		if (result.operation === "gauntFearAura") {
+			return result.condition
+				? `${result.target.name} failed the DC ${result.save.dc} Wisdom save; apply Frightened manually.`
+				: `${result.target.name} succeeded on the DC ${result.save.dc} Wisdom save.`;
+		}
+		if (result.operation === "moistAcidRetaliation") {
+			return result.damage
+				? `Apply ${result.damage.total} ${result.damage.type} damage to ${result.attacker.name}.`
+				: "The attack missed; Moist dealt no damage.";
+		}
+		if (result.operation === "arcaneConduitDamageRider") {
+			return `Arcane Conduit added ${result.application.bonus} damage (${result.application.before} → ${result.application.after}); its generation receipt is now spent.`;
+		}
+		if (result.operation === "deathBurst" || result.result?.operation === "deathBurst") {
+			const resolution = result.result || result;
+			return `Death Burst resolved for ${resolution.targets?.length || 0} target${resolution.targets?.length === 1 ? "" : "s"}; apply damage manually.`;
+		}
+		if (result.healing?.actual != null && result.absorptionApplied) {
+			return `Lightning Absorption prevented the damage and restored ${result.healing.actual} HP.`;
+		}
+		if (result.damageType && result.actualDamage != null) {
+			return `Applied ${result.actualDamage} ${result.damageType} damage.${result.death ? " The companion died." : ""}`;
+		}
+		if (result.healing && result.death) {
+			return `Life Transfer restored ${result.healing.actual} HP and killed the companion.`;
+		}
+		if (result.receipt?.cause === "earlyDismissal") return "The companion was dismissed harmlessly without Death Burst.";
+		return result.message || "Companion operation resolved.";
+	}
+
+	async _pDispatchFeatureCompanionOperation (payload) {
+		return this._state.pDispatchFeatureCompanionOperation(payload);
+	}
+
+	_getRhwArcaneConduitCastableSpells () {
+		const schoolAliases = {v: "evocation", n: "necromancy"};
+		return (this._state.getSpells?.() || []).filter(spell => {
+			if (this._state.resolveSpellCastingClassIdentity?.(spell)?.uid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return false;
+			if (Number(spell.level) > 0 && spell.prepared === false && spell.alwaysPrepared !== true) return false;
+			const spellData = this._spells?._allSpells?.find(candidate =>
+				candidate.name === spell.name && candidate.source === spell.source);
+			const rawSchool = String(spellData?.school || spell.school || "").trim().toLowerCase();
+			return ["evocation", "necromancy"].includes(schoolAliases[rawSchool] || rawSchool);
+		});
+	}
+
+	_rollDiceValues (count, faces) {
+		return Array.from({length: count}, () => this.rollDice(1, faces));
+	}
+
+	async _pGetRhwDeathBurstResolution (companion, {title = "Resolve Death Burst"} = {}) {
+		const rule = companion?.scaling?.resolved?.traits?.deathBurst;
+		const diceMatch = String(rule?.damage?.dice || "").match(/^(\d+)d(\d+)$/i);
+		if (!rule || !diceMatch) return null;
+		const targetCount = await InputUiUtil.pGetUserNumber({
+			title: `${title} — target count`,
+			htmlDescription: `Count every creature within the ${rule.area.radiusFeet}-foot emanation. The sheet records save totals and manual damage; it does not apply damage to external targets.`,
+			default: 1,
+			min: 1,
+			isInt: true,
+		});
+		if (!Number.isInteger(targetCount) || targetCount < 1) return null;
+
+		const targets = [];
+		for (let i = 0; i < targetCount; i++) {
+			const name = await InputUiUtil.pGetUserString({
+				title: `${title} — target ${i + 1} name`,
+				default: "",
+			});
+			if (!String(name || "").trim()) return null;
+			const distanceFeet = await InputUiUtil.pGetUserNumber({
+				title: `${name} distance from companion`,
+				default: Math.min(5, rule.area.radiusFeet),
+				min: 0,
+				max: rule.area.radiusFeet,
+			});
+			if (!Number.isFinite(distanceFeet)) return null;
+			const dexSaveTotal = await InputUiUtil.pGetUserNumber({
+				title: `${name} Dexterity save total (DC ${rule.save.dc})`,
+				default: rule.save.dc,
+				min: -100,
+				max: 100,
+				isInt: true,
+			});
+			if (!Number.isFinite(dexSaveTotal)) return null;
+			targets.push({
+				id: `manual-${i + 1}-${String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+				name: String(name).trim(),
+				distanceFeet,
+				dexSaveTotal,
+			});
+		}
+
+		return {
+			targets,
+			rolls: {
+				damageDice: this._rollDiceValues(Number(diceMatch[1]), Number(diceMatch[2])),
+			},
+		};
+	}
+
+	async _pUseRhwArcaneConduit ({featureUid, companion}) {
+		const originOptions = this._state.getRhwArcaneConduitSpellOriginOptions?.(companion.id);
+		if (!originOptions?.available) {
+			return this._pDispatchFeatureCompanionOperation({
+				featureUid,
+				companionId: companion.id,
+				operation: "arcaneConduit",
+				cancelled: false,
+			});
+		}
+		const originId = await InputUiUtil.pGetUserEnum({
+			title: "Arcane Conduit casting origin",
+			htmlDescription: "Choose the spell's origin. Either option uses the summoner's senses and the spell's normal casting cost.",
+			values: originOptions.options.map(option => option.id),
+			fnDisplay: id => id === "companion" ? "Reanimated Companion's space" : "Summoner's space",
+			isResolveItem: true,
+		});
+		if (!originId) return {ok: false, committed: false, reason: "cancelled"};
+
+		const spells = this._getRhwArcaneConduitCastableSpells();
+		const spellId = await InputUiUtil.pGetUserEnum({
+			title: "Cast with Arcane Conduit",
+			htmlDescription: "Choose a prepared exact EFA Artificer evocation or necromancy spell. Normal spell casting, slot, focus, and action-economy validation still applies.",
+			values: spells.map(spell => spell.id),
+			fnDisplay: id => {
+				const spell = spells.find(candidate => candidate.id === id);
+				return spell ? `${spell.name} (${spell.source})` : id;
+			},
+			isResolveItem: true,
+		});
+		if (!spellId) return {ok: false, committed: false, reason: "cancelled"};
+
+		const hookId = `rhw-arcane-conduit-ui:${companion.id}:${Number(companion.lifecycle?.generation) || 1}`;
+		const unregister = this._state.registerCommittedSpellCastHook(
+			CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			async receipt => {
+				const damageRolls = (receipt?.cast?.rolls || [])
+					.filter(roll => roll?.kind === "damage" && roll.status === "resolved" && Number(roll.total) > 0);
+				if (!damageRolls.length) {
+					const result = await this._pDispatchFeatureCompanionOperation({
+						featureUid,
+						companionId: companion.id,
+						operation: "arcaneConduit",
+						spellCastReceipt: receipt,
+						selectedRollId: null,
+						companionDistanceFeet: 0,
+					});
+					return {
+						...result,
+						ok: result.reason === "spellDealtNoDamage",
+						originId,
+					};
+				}
+				let selectedRollId = damageRolls[0]?.rollId || null;
+				if (damageRolls.length > 1) {
+					selectedRollId = await InputUiUtil.pGetUserEnum({
+						title: "Arcane Conduit damage roll",
+						htmlDescription: "Choose the resolved damage roll that receives the once-per-turn Intelligence modifier.",
+						values: damageRolls.map(roll => roll.rollId),
+						fnDisplay: id => {
+							const roll = damageRolls.find(candidate => candidate.rollId === id);
+							return roll ? `${roll.total} ${roll.damageType || "damage"} (${id})` : id;
+						},
+						isResolveItem: true,
+					});
+				}
+				if (!selectedRollId) return {ok: true, committed: false, reason: "cancelled", originId};
+				const companionDistanceFeet = await InputUiUtil.pGetUserNumber({
+					title: "Companion distance from summoner",
+					htmlDescription: "Confirm the exact distance when the spell dealt damage.",
+					default: 30,
+					min: 0,
+					max: 120,
+				});
+				if (!Number.isFinite(companionDistanceFeet)) {
+					return {ok: true, committed: false, reason: "cancelled", originId};
+				}
+				const result = await this._pDispatchFeatureCompanionOperation({
+					featureUid,
+					companionId: companion.id,
+					operation: "arcaneConduit",
+					spellCastReceipt: receipt,
+					selectedRollId,
+					companionDistanceFeet,
+				});
+				return {...result, originId};
+			},
+			{hookId},
+		);
+
+		let receipt;
+		try {
+			receipt = await this._spells?._castSpell?.(spellId);
+		} finally {
+			unregister();
+		}
+		if (!receipt) return {ok: false, committed: false, reason: "cancelled"};
+		const followUp = receipt.followUps?.find(candidate => candidate.hookId === hookId);
+		const result = followUp?.value || {
+			ok: false,
+			committed: false,
+			reason: followUp?.error ? "transactionRolledBack" : "spellDealtNoDamage",
+			error: followUp?.error || null,
+		};
+		if (result.committed) {
+			await this.saveCharacter();
+			this._renderCompanionOperationSurfaces();
+		}
+		this._announceCompanionInteraction(this._getFeatureCompanionOperationResultMessage(result), {
+			type: result.reason === "cancelled" || result.reason === "spellDealtNoDamage"
+				? "info"
+				: result.ok ? "success" : "warning",
+			isToast: true,
+		});
+		return result;
+	}
+
+	async pUseFeatureCompanionOperation ({
+		featureUid,
+		companionId,
+		operation,
+		focusKey: requestedFocusKey = null,
+	} = {}) {
+		const focusKey = requestedFocusKey || (typeof document !== "undefined"
+			? document.activeElement?.closest?.("[data-companion-operation-key]")
+				?.getAttribute?.("data-companion-operation-key")
+			: null);
+		const companion = this._state.getCompanion?.(companionId);
+		if (
+			featureUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER
+			|| !this._isExactRhwReanimatorCompanion(companion)
+		) {
+			const result = await this._pDispatchFeatureCompanionOperation({featureUid, companionId, operation});
+			this._announceCompanionInteraction(this._getFeatureCompanionOperationResultMessage(result), {type: "danger", isToast: true});
+			return result;
+		}
+		const surface = this.getFeatureCompanionOperationSurfaceModel(companion);
+		const control = surface?.controls?.find(candidate => candidate.operation === operation);
+		if (!control?.available) {
+			const result = {
+				ok: false,
+				committed: false,
+				reason: "operationUnavailable",
+				message: control?.reason || "That operation is unavailable.",
+			};
+			this._announceCompanionInteraction(this._getFeatureCompanionOperationResultMessage(result), {type: "warning", isToast: true});
+			return result;
+		}
+		if (operation === "action" || operation === "dreadfulSwipe") {
+			return this.pUseCompanionOperation({
+				featureUid,
+				companionId,
+				operation,
+				actionKey: operation === "action" ? "dodge" : "dreadfulSwipe",
+			});
+		}
+		if (operation === "arcaneConduit") {
+			const result = await this._pUseRhwArcaneConduit({featureUid, companion});
+			if (result.committed) this._restoreCompanionOperationFocus(focusKey, companion.id);
+			return result;
+		}
+
+		let payload = {featureUid, companionId, operation};
+		if (operation === "damage") {
+			const amount = await InputUiUtil.pGetUserNumber({
+				title: "Apply companion damage",
+				htmlDescription: "Enter the incoming damage before immunity and temporary HP. Lightning damage is prevented and converted to healing.",
+				default: 1,
+				min: 1,
+				isInt: true,
+			});
+			const damageType = Number.isInteger(amount)
+				? await InputUiUtil.pGetUserEnum({
+					title: "Damage type",
+					values: ["acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic", "piercing", "poison", "psychic", "radiant", "slashing", "thunder"],
+					fnDisplay: value => value.toTitleCase(),
+					isResolveItem: true,
+				})
+				: null;
+			if (!Number.isInteger(amount) || !damageType) payload.cancelled = true;
+			else {
+				payload = {...payload, amount, damageType};
+				const wouldDie = damageType !== "lightning"
+					&& amount >= (Number(companion.hp?.current) || 0) + (Number(companion.hp?.temp) || 0);
+				if (wouldDie && companion.scaling?.resolved?.traits?.deathBurst) {
+					const deathBurstResolution = await this._pGetRhwDeathBurstResolution(companion, {title: "Damage-triggered Death Burst"});
+					if (!deathBurstResolution) payload.cancelled = true;
+					else payload.deathBurstResolution = deathBurstResolution;
+				}
+			}
+		} else if (operation === "gaunt") {
+			const rule = companion.scaling?.resolved?.modifications?.effects?.gaunt?.fearAura;
+			const name = await InputUiUtil.pGetUserString({title: "Gaunt chosen creature", default: ""});
+			const startedTurn = String(name || "").trim()
+				? await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Gaunt trigger",
+					htmlDescription: "Confirm this is the chosen creature and it started its turn within the Gaunt emanation.",
+					textYes: "Trigger confirmed",
+					textNo: "Cancel",
+				})
+				: false;
+			const rangeFeet = startedTurn
+				? await InputUiUtil.pGetUserNumber({
+					title: `${name} distance`,
+					default: Math.min(5, rule?.area?.radiusFeet || 10),
+					min: 0,
+					max: rule?.area?.radiusFeet || 10,
+				})
+				: null;
+			const wisdomSaveTotal = Number.isFinite(rangeFeet)
+				? await InputUiUtil.pGetUserNumber({
+					title: `${name} Wisdom save total (DC ${rule?.save?.dc || "—"})`,
+					default: rule?.save?.dc || 10,
+					min: -100,
+					max: 100,
+					isInt: true,
+				})
+				: null;
+			payload = !String(name || "").trim() || !startedTurn || !Number.isFinite(rangeFeet) || !Number.isFinite(wisdomSaveTotal)
+				? {...payload, cancelled: true}
+				: {
+					...payload,
+					target: {id: String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: String(name).trim(), chosen: true, startedTurn: true, isCreature: true},
+					rangeFeet,
+					wisdomSaveTotal,
+				};
+		} else if (operation === "moist") {
+			const rule = companion.scaling?.resolved?.modifications?.effects?.moist?.acidRetaliation;
+			const name = await InputUiUtil.pGetUserString({title: "Moist attacker", default: ""});
+			const outcome = String(name || "").trim()
+				? await InputUiUtil.pGetUserEnum({
+					title: "Triggering attack result",
+					values: ["hit", "miss", "cancel"],
+					fnDisplay: value => ({hit: "Hit", miss: "Miss", cancel: "Cancel"})[value],
+					isResolveItem: true,
+				})
+				: "cancel";
+			const rangeFeet = outcome === "hit"
+				? await InputUiUtil.pGetUserNumber({
+					title: `${name} distance`,
+					default: Math.min(5, rule?.attackerMaximumRangeFeet || 10),
+					min: 0,
+					max: rule?.attackerMaximumRangeFeet || 10,
+				})
+				: 0;
+			payload = !String(name || "").trim() || !outcome || outcome === "cancel" || !Number.isFinite(rangeFeet)
+				? {...payload, cancelled: true}
+				: {
+					...payload,
+					attacker: {id: String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: String(name).trim(), isCreature: true},
+					attackHit: outcome === "hit",
+					rangeFeet,
+				};
+		} else if (operation === "lifeTransfer") {
+			const target = await InputUiUtil.pGetUserEnum({
+				title: "Life Transfer damage trigger",
+				htmlDescription: "Choose who just took confirmed damage. The triggering damage must already be applied.",
+				values: ["summoner", "companion"],
+				fnDisplay: value => value === "summoner" ? "Summoner" : "Reanimated Companion",
+				isResolveItem: true,
+			});
+			const damageAmount = target
+				? await InputUiUtil.pGetUserNumber({title: "Confirmed triggering damage", default: 1, min: 1, isInt: true})
+				: null;
+			const confirmed = Number.isFinite(damageAmount)
+				? await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Life Transfer",
+					htmlDescription: "This spends the summoner Reaction, heals the summoner by the companion's current HP, kills the companion, and resolves Death Burst.",
+					textYes: "Transfer life",
+					textNo: "Cancel",
+				})
+				: false;
+			const deathBurstResolution = confirmed
+				? await this._pGetRhwDeathBurstResolution(companion, {title: "Life Transfer Death Burst"})
+				: null;
+			payload = !target || !Number.isFinite(damageAmount) || !confirmed || !deathBurstResolution
+				? {...payload, cancelled: true}
+				: {
+					...payload,
+					trigger: {
+						confirmed: true,
+						eventId: `rhw-life-transfer-ui:${CryptUtil.uid()}`,
+						target,
+						damageAmount,
+						...(target === "companion" ? {companionId} : {}),
+					},
+					deathBurstResolution,
+				};
+		} else if (operation === "deathBurst") {
+			const resolution = await this._pGetRhwDeathBurstResolution(companion);
+			if (!resolution) return {ok: false, committed: false, reason: "cancelled"};
+			payload = {...payload, ...resolution};
+		} else if (operation === "dismiss") {
+			const confirmed = await InputUiUtil.pGetUserBoolean({
+				title: "Dismiss Reanimated Companion?",
+				htmlDescription: "Spend the summoner Magic Action to collapse this generation harmlessly. Dismissal does not trigger Death Burst.",
+				textYes: "Dismiss",
+				textNo: "Cancel",
+			});
+			if (!confirmed) payload.cancelled = true;
+		}
+
+		const result = await this._pDispatchFeatureCompanionOperation(payload);
+		const message = this._getFeatureCompanionOperationResultMessage(result);
+		this._announceCompanionInteraction(message, {
+			type: result.ok ? "success" : result.reason === "cancelled" ? "info" : "danger",
+			isToast: true,
+		});
+		if (result.committed) {
+			await this.saveCharacter();
+			this._renderCompanionOperationSurfaces();
+			this._restoreCompanionOperationFocus(focusKey, companionId);
+		}
+		this._playMode?._logActivity?.("companion", message);
+		return result;
+	}
+
 	async pUseCompanionOperation ({
+		featureUid = null,
 		companionId,
 		operation,
 		actionKey = null,
@@ -23929,8 +24643,11 @@ class CharacterSheetPage {
 			? () => this.getCompanionOperationFocusTarget(operationFocusKey)
 			: null;
 		const initialAvailability = this.getCompanionOperationAvailability(companionId, operation, {actionKey});
+		const pDispatch = payload => featureUid
+			? this._pDispatchFeatureCompanionOperation({featureUid, ...payload})
+			: Promise.resolve(this._state.performCompanionOperation(payload));
 		if (!initialAvailability.available) {
-			const unavailable = this._state.performCompanionOperation({
+			const unavailable = await pDispatch({
 				companionId,
 				operation,
 				actionKey,
@@ -23945,7 +24662,7 @@ class CharacterSheetPage {
 
 		const selectedCommandMethod = await this._pGetCompanionCommandMethod(initialAvailability, commandMethod);
 		if (initialAvailability.availableCommandMethods.length && !selectedCommandMethod) {
-			const cancelled = this._state.performCompanionOperation({companionId, operation, actionKey, cancelled: true});
+			const cancelled = await pDispatch({companionId, operation, actionKey, cancelled: true});
 			this._showCompanionOperationResult(cancelled);
 			return cancelled;
 		}
@@ -23965,15 +24682,17 @@ class CharacterSheetPage {
 			rolls: {},
 		};
 
-		if (operation === "forceEmpoweredRend" || operation === "rend") {
-			const targetName = await InputUiUtil.pGetUserString({title: "Force-Empowered Rend target", default: ""});
+		if (operation === "forceEmpoweredRend" || operation === "rend" || operation === "dreadfulSwipe") {
+			const isDreadfulSwipe = operation === "dreadfulSwipe";
+			const operationLabel = isDreadfulSwipe ? "Dreadful Swipe" : "Force-Empowered Rend";
+			const targetName = await InputUiUtil.pGetUserString({title: `${operationLabel} target`, default: ""});
 			if (!String(targetName || "").trim()) payload.cancelled = true;
 			else {
 				payload.target = {name: String(targetName).trim()};
 				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
-					title: "Confirm Rend Range",
-					htmlDescription: `${initialAvailability.availableCommandMethods.find(it => it.id === selectedCommandMethod)?.label || "The selected owner command"} and the defender's action will be spent together. The sheet cannot verify distance; confirm the target is within the defender's 5-foot reach.`,
-					textYes: "Within 5 feet",
+					title: `Confirm ${operationLabel} range`,
+					htmlDescription: `${initialAvailability.availableCommandMethods.find(it => it.id === selectedCommandMethod)?.label || "The selected owner command"} and the companion's Action will be spent together. The sheet cannot verify distance; confirm the target is within ${initialAvailability.rules.action.reachFeet}-foot reach.`,
+					textYes: `Within ${initialAvailability.rules.action.reachFeet} feet`,
 					textNo: "Cancel",
 				});
 				if (!payload.rangeConfirmed) payload.cancelled = true;
@@ -23981,8 +24700,8 @@ class CharacterSheetPage {
 			if (!payload.cancelled) {
 				payload.rolls.attackD20 = this.rollDice(1, 20);
 				const outcome = await InputUiUtil.pGetUserEnum({
-					title: `Rend attack total: ${payload.rolls.attackD20 + initialAvailability.rules.action.attackBonus}`,
-					htmlDescription: "Confirm whether the attack hit before committing the defender action.",
+					title: `${operationLabel} attack total: ${payload.rolls.attackD20 + initialAvailability.rules.action.attackBonus}`,
+					htmlDescription: "Confirm whether the attack hit before committing the companion Action.",
 					values: ["hit", "miss", "cancel"],
 					fnDisplay: value => ({hit: "Hit — roll damage", miss: "Miss", cancel: "Cancel without spending"})[value],
 					isResolveItem: true,
@@ -23991,7 +24710,24 @@ class CharacterSheetPage {
 				else {
 					payload.hitConfirmed = outcome === "hit";
 					if (payload.hitConfirmed) {
-						payload.rolls.damageDie = this.rollDice(payload.rolls.attackD20 === 20 ? 2 : 1, 8);
+						if (isDreadfulSwipe) {
+							const match = String(initialAvailability.rules.action.damage.dice).match(/^(\d+)d(\d+)$/i);
+							const diceCount = Number(match?.[1]) * (payload.rolls.attackD20 === 20 ? 2 : 1);
+							payload.rolls.damageDice = this._rollDiceValues(diceCount, Number(match?.[2]));
+							if (initialAvailability.rules.action.riders?.some(rider => rider.id === "bloatedPush")) {
+								const targetSize = await InputUiUtil.pGetUserEnum({
+									title: "Dreadful Swipe target size",
+									htmlDescription: "Bloated uses the target's normalized size to determine whether the manual push rider applies.",
+									values: ["S", "M", "L", "H", "G"],
+									fnDisplay: value => ({S: "Small", M: "Medium", L: "Large", H: "Huge", G: "Gargantuan"})[value],
+									isResolveItem: true,
+								});
+								if (!targetSize) payload.cancelled = true;
+								else payload.target.size = targetSize;
+							}
+						} else {
+							payload.rolls.damageDie = this.rollDice(payload.rolls.attackD20 === 20 ? 2 : 1, 8);
+						}
 					}
 				}
 			}
@@ -24034,22 +24770,24 @@ class CharacterSheetPage {
 			}
 		}
 
-		const result = this._state.performCompanionOperation(payload);
+		const result = await pDispatch(payload);
 		this._showCompanionOperationResult(result);
 		if (result.committed) {
 			await this.saveCharacter();
-			this._renderCompanions();
-			if (this._state.getViewMode?.() === "play") this._playMode?.render();
-			const arcaneJoltTrigger = {
-				type: "steelDefenderRend",
-				operationResult: result,
-			};
-			if (this._state.getEfaArcaneJoltTriggerStatus?.(arcaneJoltTrigger)?.available) {
-				await this.pOfferEfaArcaneJolt({
-					trigger: arcaneJoltTrigger,
-					focusRestoreTarget: operationFocusTarget,
-					getFocusRestoreTarget,
-				});
+			this._renderCompanionOperationSurfaces();
+			this._restoreCompanionOperationFocus(operationFocusKey, companionId);
+			if (result.operation === "forceEmpoweredRend") {
+				const arcaneJoltTrigger = {
+					type: "steelDefenderRend",
+					operationResult: result,
+				};
+				if (this._state.getEfaArcaneJoltTriggerStatus?.(arcaneJoltTrigger)?.available) {
+					await this.pOfferEfaArcaneJolt({
+						trigger: arcaneJoltTrigger,
+						focusRestoreTarget: operationFocusTarget,
+						getFocusRestoreTarget,
+					});
+				}
 			}
 		}
 		return result;
@@ -24072,22 +24810,41 @@ class CharacterSheetPage {
 		const costSummary = [
 			result.costs?.ownerAction === "bonus" ? "owner Bonus Action" : null,
 			result.costs?.ownerAction === "replaceOneAttack" ? "one owner Attack" : null,
-			result.costs?.companionAction ? "defender action" : null,
-			result.costs?.companionReaction ? "defender reaction" : null,
+			result.costs?.companionAction
+				? result.ownerUid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER
+					? "companion Action"
+					: "defender action"
+				: null,
+			result.costs?.companionReaction
+				? result.ownerUid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER
+					? "companion Reaction"
+					: "defender reaction"
+				: null,
 			result.costs?.repairUses ? `${result.costs.repairUses} Repair use${result.costs.repairUses === 1 ? "" : "s"}` : null,
 		].filter(Boolean).join(", ");
 		const costSuffix = costSummary ? ` Spent: ${costSummary}.` : "";
 		let activity = `${name}: ${result.operation}`;
 		if (result.rolls?.attack) {
 			const attack = result.rolls.attack;
+			const isDreadfulSwipe = result.operation === "dreadfulSwipe";
+			const operationLabel = isDreadfulSwipe ? "Dreadful Swipe" : "Force-Empowered Rend";
+			const damageType = result.rolls.damage?.type || "force";
+			const manualRiders = (result.riders || [])
+				.filter(rider => rider.applies && rider.manualResolution)
+				.map(rider => rider.id === "bloatedPush"
+					? `Push the eligible target ${rider.distanceFeet} feet manually.`
+					: rider.id === "preventOpportunityAttacks"
+						? "The target cannot take opportunity attacks until the start of its next turn."
+						: "Apply the operation rider manually.")
+				.join(" ");
 			this._showDiceResult(
-				`${name} — Force-Empowered Rend`,
+				`${name} — ${operationLabel}`,
 				attack.total,
 				`d20 (${attack.d20}) + ${attack.bonus}`,
 				attack.critical ? "critical" : attack.fumble ? "fumble" : "",
-				result.rolls.damage ? `${result.rolls.damage.total} force damage` : "Miss",
+				result.rolls.damage ? `${result.rolls.damage.total} ${damageType} damage${manualRiders ? ` · ${manualRiders}` : ""}` : "Miss",
 			);
-			activity = `${name} used Rend against ${result.target?.name || "the target"} (${attack.total} to hit${result.rolls.damage ? `, ${result.rolls.damage.total} force` : ", miss"}).${costSuffix}`;
+			activity = `${name} used ${operationLabel} against ${result.target?.name || "the target"} (${attack.total} to hit${result.rolls.damage ? `, ${result.rolls.damage.total} ${damageType}` : ", miss"}).${manualRiders ? ` ${manualRiders}` : ""}${costSuffix}`;
 			this._announceCompanionInteraction(activity);
 		} else if (result.operation === "repair") {
 			const healing = result.rolls.healing.total;

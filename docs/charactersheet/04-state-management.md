@@ -529,8 +529,9 @@ persisted R4a setup receipt. Arcane receipts use M1E `turnId`, survive
 save/load and `combatRound` changes, and reset only through
 `resetTurnEconomy()`. Exact generation keys are removed on replacement,
 dismissal/removal, source loss, and Respec Apply without pruning Battle Smith,
-TCE, foreign, or malformed six-part collision state. UI, Play Mode, and E2E
-behavior remain later milestones.
+TCE, foreign, or malformed six-part collision state. R5b consumes these
+boundaries in the Companions Manager and Play Mode; E2E/export behavior remains
+outside that milestone.
 
 R5a adds the descriptor-driven Companions-tab Manager foundation. Every
 registry-backed feature companion is summarized from
@@ -580,10 +581,38 @@ payload before calling `pCreateFeatureCompanion()`. Cancel, stale validation,
 and transaction failure do not save or re-render and report through an ARIA
 live region. `CharacterSheetModal` owns focus trapping and restoration.
 
-R5a exposes RHW operation metadata as status only. Reanimated Companion command
-execution, Dreadful Swipe, Death Burst/Lightning Absorption, modification
-riders, and Play Mode controls remain deferred to R4b/R5b/R6. Existing EFA/TCE
-Battle Smith setup and supported Steel Defender transactions remain unchanged.
+R5b adds one source-exact live-operation route. Manager buttons and Play Mode
+buttons both call `CharacterSheetPage.pUseFeatureCompanionOperation()`, which
+owns prompts, manual confirmations, persistence, result publication, and focus
+restoration. Its single Page-to-State call invokes
+`pDispatchFeatureCompanionOperation()`; that dispatcher supplies the immutable
+RHW class/subclass/feature identities and delegates to the accepted R4b
+methods. It does not add formulas, usage flags, or a parallel receipt store.
+
+The Operate surface includes default Dodge, commanded Dreadful Swipe, typed
+damage and Lightning Absorption, Gaunt, Moist, Arcane Conduit, Life Transfer,
+pending Death Burst resolution, and canonical dismissal. Labels, ranges,
+save DCs, modification availability, damage dice, and manual-rider copy come
+from the active generation's detached descriptor result. Action, companion
+Reaction, owner Magic Action, owner Bonus Action, and owner Reaction readiness
+come from canonical operation/action-economy queries. Only
+`resetTurnEconomy()` resets the persisted turn receipts.
+
+Arcane Conduit registers a temporary exact `Artificer|EFA` committed-spell
+hook, then uses the normal spell-casting flow. After a committed evocation or
+necromancy cast, the player chooses one resolved damage roll and confirms the
+companion's range; the R4b method then updates that roll and commits the
+generation-qualified once-per-turn receipt. Cancelling the rider does not
+spend its receipt, and save/load preserves a committed receipt.
+
+Exact RHW feature-owned records never receive Play Mode's legacy direct HP
+input, Heal/Damage buttons, dismissal handler, or `turnUsage` controls. A
+source/setup mismatch suppresses those handlers and renders an explicit
+diagnostic instead of name-adopting the record. Valid RHW generations use a
+read-only HP display plus the shared canonical controls; dead generations
+remain reachable only while Death Burst needs resolution. Existing EFA/TCE
+Battle Smith setup, operation, lifecycle, and legacy `active` behavior remain
+unchanged. R5b does not add E2E/export work or R6 surfaces.
 
 Other feature companions still do not gain acquisition or lifecycle behavior
 unless their registry policies explicitly support it.

@@ -87239,6 +87239,70 @@ class CharacterSheetState {
 		}
 	}
 
+	async pDispatchFeatureCompanionOperation ({
+		featureUid,
+		companionId,
+		operation,
+		...input
+	} = {}) {
+		if (featureUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER) {
+			return {ok: false, committed: false, reason: "invalidFeature"};
+		}
+
+		switch (operation) {
+			case "action":
+			case "dreadfulSwipe":
+				return this.performCompanionOperation({
+					companionId,
+					operation,
+					...input,
+				});
+			case "damage":
+				return this.applyFeatureCompanionDamage({
+					featureUid,
+					companionId,
+					...input,
+				});
+			case "deathBurst":
+				return this.resolveFeatureCompanionDeathBurst({
+					featureUid,
+					companionId,
+					...input,
+				});
+			case "gaunt":
+				return this.resolveRhwReanimatorGauntTrigger({
+					companionId,
+					...input,
+				});
+			case "moist":
+				return this.resolveRhwReanimatorMoistTrigger({
+					companionId,
+					...input,
+				});
+			case "arcaneConduit":
+				return this.applyRhwArcaneConduitDamageRider({
+					companionId,
+					...input,
+				});
+			case "lifeTransfer":
+				return this.performRhwLifeTransfer({
+					featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+					classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+					subclassUid: CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID,
+					companionId,
+					...input,
+				});
+			case "dismiss":
+				return this.pDismissFeatureOwnedCompanion({
+					featureUid,
+					companionId,
+					...input,
+				});
+			default:
+				return {ok: false, committed: false, reason: "unsupportedOperation"};
+		}
+	}
+
 	_getFeatureCompanionLifecycleOperationIdentity (companionId, operation) {
 		const companion = this.getCompanion(companionId);
 		const lifecyclePolicy = this._getFeatureCompanionLifecyclePolicy(companion);

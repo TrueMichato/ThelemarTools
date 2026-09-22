@@ -3422,6 +3422,11 @@ export class CharacterSheetPlayMode {
 		companions.forEach(comp => {
 			const card = this._makeCard(container, "companion", comp.name || "Companion");
 			card.setAttribute("data-companion-id", comp.id);
+			const featureOperationModel = this._page.getFeatureCompanionOperationSurfaceModel?.(comp) || null;
+			const isRhwReanimator = featureOperationModel?.kind === "rhwReanimator"
+				|| this._page.isRhwReanimatorFeatureOwnedCompanion?.(comp) === true;
+			const isRhwLifecycleBlocked = isRhwReanimator
+				&& (comp.active === false || Number(comp.hp?.current) <= 0);
 			const lifecycle = this._page.getFeatureCompanionLifecyclePresentation?.(comp) || null;
 			const lifecycleReasonId = this._renderFeatureCompanionLifecycle(card, comp, lifecycle);
 			const isLifecycleBlocked = !!lifecycle && !lifecycle.isAlive;
@@ -3440,20 +3445,23 @@ export class CharacterSheetPlayMode {
 			initiativeBtn.title = `Roll initiative for ${comp.customName || comp.name || "companion"}`;
 			initiativeBtn.addEventListener("click", () => this._page._rollCompanionInitiative?.(comp));
 			applyLifecycleDisabled(initiativeBtn);
+			if (isRhwLifecycleBlocked) initiativeBtn.disabled = true;
 
-			// Heal button
-			const healBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--heal", controls);
-			this._setIconLabel(healBtn, "heal", " Heal");
-			healBtn.title = "Heal companion";
-			healBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "heal", container));
-			applyLifecycleDisabled(healBtn);
+			if (!isRhwReanimator) {
+				// Heal button
+				const healBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--heal", controls);
+				this._setIconLabel(healBtn, "heal", " Heal");
+				healBtn.title = "Heal companion";
+				healBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "heal", container));
+				applyLifecycleDisabled(healBtn);
 
-			// Damage button
-			const dmgBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--damage", controls);
-			this._setIconLabel(dmgBtn, "damage", " Damage");
-			dmgBtn.title = "Damage companion";
-			dmgBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "damage", container));
-			applyLifecycleDisabled(dmgBtn);
+				// Damage button
+				const dmgBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--damage", controls);
+				this._setIconLabel(dmgBtn, "damage", " Damage");
+				dmgBtn.title = "Damage companion";
+				dmgBtn.addEventListener("click", () => this._promptCompanionHpChange(comp, "damage", container));
+				applyLifecycleDisabled(dmgBtn);
+			}
 
 			// Statblock button
 			const statblockBtn = this._ce("button", "pm-companion__ctrl-btn", controls);
@@ -3471,18 +3479,20 @@ export class CharacterSheetPlayMode {
 				this._openDrawerByType("companions");
 			}));
 
-			// Dismiss button
-			const dismissBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--dismiss", controls);
-			this._setIconLabel(dismissBtn, "close", " Dismiss");
-			dismissBtn.title = "Remove this companion";
-			dismissBtn.addEventListener("click", () => {
-				if (!confirm(`Remove ${comp.name || "this companion"}?`)) return;
-				this._state.removeCompanion(comp.id);
-				this._persistCompanionMutation();
-				this._logActivity("companion", `Dismissed ${comp.name || "companion"}`);
-				this._openDrawerByType("companions");
-			});
-			applyLifecycleDisabled(dismissBtn);
+			if (!isRhwReanimator) {
+				// Dismiss button
+				const dismissBtn = this._ce("button", "pm-companion__ctrl-btn pm-companion__ctrl-btn--dismiss", controls);
+				this._setIconLabel(dismissBtn, "close", " Dismiss");
+				dismissBtn.title = "Remove this companion";
+				dismissBtn.addEventListener("click", () => {
+					if (!confirm(`Remove ${comp.name || "this companion"}?`)) return;
+					this._state.removeCompanion(comp.id);
+					this._persistCompanionMutation();
+					this._logActivity("companion", `Dismissed ${comp.name || "companion"}`);
+					this._openDrawerByType("companions");
+				});
+				applyLifecycleDisabled(dismissBtn);
+			}
 
 			// ── HP inline edit ──────────────────────────────────────
 			if (comp.hp?.max) {
@@ -3490,21 +3500,27 @@ export class CharacterSheetPlayMode {
 				const hpLabel = this._ce("span", "pm-companion__hp-label", hpRow);
 				hpLabel.textContent = "HP";
 
-				const hpInput = this._ce("input", "pm-companion__hp-input", hpRow);
-				hpInput.type = "number";
-				hpInput.min = "0";
-				hpInput.max = String(comp.hp.max);
-				hpInput.value = String(comp.hp.current ?? comp.hp.max);
-				hpInput.setAttribute("aria-label", `${comp.name || "Companion"} current HP`);
-				hpInput.addEventListener("change", () => {
-					const val = parseInt(hpInput.value);
-					if (!isNaN(val)) {
-						this._state.setCompanionHp(comp.id, val);
-						this._persistCompanionMutation();
-						this._logActivity("companion", `${comp.name} HP → ${val}/${comp.hp.max}`);
-					}
-				});
-				applyLifecycleDisabled(hpInput);
+				if (isRhwReanimator) {
+					const hpValue = this._ce("output", "pm-companion__hp-value", hpRow);
+					hpValue.setAttribute("aria-label", `${comp.name || "Companion"} current HP`);
+					hpValue.textContent = String(comp.hp.current ?? comp.hp.max);
+				} else {
+					const hpInput = this._ce("input", "pm-companion__hp-input", hpRow);
+					hpInput.type = "number";
+					hpInput.min = "0";
+					hpInput.max = String(comp.hp.max);
+					hpInput.value = String(comp.hp.current ?? comp.hp.max);
+					hpInput.setAttribute("aria-label", `${comp.name || "Companion"} current HP`);
+					hpInput.addEventListener("change", () => {
+						const val = parseInt(hpInput.value);
+						if (!isNaN(val)) {
+							this._state.setCompanionHp(comp.id, val);
+							this._persistCompanionMutation();
+							this._logActivity("companion", `${comp.name} HP → ${val}/${comp.hp.max}`);
+						}
+					});
+					applyLifecycleDisabled(hpInput);
+				}
 
 				const hpMax = this._ce("span", "pm-companion__hp-max", hpRow);
 				hpMax.textContent = `/ ${comp.hp.max}`;
@@ -3519,7 +3535,13 @@ export class CharacterSheetPlayMode {
 			}
 
 			if (comp.featureGrant?.uid && comp.scaling?.resolved) {
-				this._renderFeatureCompanionOperations(card, comp);
+				if (isRhwReanimator && !featureOperationModel) {
+					const warning = this._ce("div", "pm-companion-operations__reasons", card);
+					warning.setAttribute("role", "alert");
+					warning.textContent = "RHW operations are disabled because the source-qualified owner, creature identity, or resolved setup does not match. Review the Companions Manager diagnostics.";
+				} else {
+					this._renderFeatureCompanionOperations(card, comp, featureOperationModel);
+				}
 			}
 
 			// ── Stats row ───────────────────────────────────────────
@@ -3704,7 +3726,11 @@ export class CharacterSheetPlayMode {
 		return disabledReasonId;
 	}
 
-	_renderFeatureCompanionOperations (card, companion) {
+	_renderFeatureCompanionOperations (card, companion, surfaceModel = null) {
+		if (surfaceModel?.kind === "rhwReanimator") {
+			this._renderRhwReanimatorOperations(card, surfaceModel);
+			return;
+		}
 		const rend = this._page.getCompanionOperationAvailability?.(companion.id, "forceEmpoweredRend");
 		const repair = this._page.getCompanionOperationAvailability?.(companion.id, "repair");
 		const deflect = this._page.getCompanionOperationAvailability?.(companion.id, "deflectAttack");
@@ -3845,6 +3871,71 @@ export class CharacterSheetPlayMode {
 				.map(spec => `${spec.label}: ${otherActions[spec.actionKey]?.message}`),
 		];
 		const reason = this._ce("div", "pm-feature__desc pm-companion-operations__reasons", operationRegion);
+		reason.style.display = "block";
+		reason.id = `${operationId}-reasons`;
+		reason.setAttribute("role", "status");
+		reason.setAttribute("aria-live", "polite");
+		reason.setAttribute("aria-atomic", "true");
+		reason.textContent = reasons.length ? reasons.join(" ") : "All listed operations are available.";
+	}
+
+	_renderRhwReanimatorOperations (card, model) {
+		const header = this._ce("div", "pm-card__header", card);
+		const title = this._ce("span", "pm-card__badge", header);
+		title.textContent = "Operate";
+		const operationId = `pm-companion-operations-${String(model.companionId || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		title.id = `${operationId}-heading`;
+
+		const region = this._ce("section", "pm-companion-operations pm-companion-operations--rhw", card);
+		region.setAttribute("role", "region");
+		region.setAttribute("aria-labelledby", title.id);
+		region.setAttribute("data-feature-companion-owner", model.ownerUid);
+
+		const summary = this._ce("div", "pm-feature__desc", region);
+		summary.style.display = "block";
+		summary.textContent = model.summary;
+		const status = this._ce("div", "pm-feature__desc pm-companion-operations__status", region);
+		status.style.display = "block";
+		status.id = `${operationId}-status`;
+		status.textContent = model.statusText;
+		const costs = this._ce("div", "pm-feature__desc", region);
+		costs.style.display = "block";
+		costs.textContent = model.costText;
+		const ranges = this._ce("div", "pm-feature__desc", region);
+		ranges.style.display = "block";
+		ranges.textContent = model.rangeText;
+
+		const controls = this._ce("div", "pm-companion__controls pm-companion-operations__controls", region);
+		controls.setAttribute("role", "group");
+		controls.setAttribute("aria-label", model.heading);
+		model.controls.forEach(control => {
+			const btn = this._ce(
+				"button",
+				`pm-companion__ctrl-btn${control.tone === "danger" ? " pm-companion__ctrl-btn--dismiss" : ""}`,
+				controls,
+			);
+			btn.type = "button";
+			btn.textContent = control.label;
+			btn.disabled = !control.available;
+			btn.title = control.description || control.reason || control.label;
+			btn.setAttribute("aria-describedby", `${operationId}-status ${operationId}-reasons`);
+			btn.setAttribute(
+				"data-companion-operation-key",
+				this._page.getCompanionOperationFocusKey?.(model.companionId, control.operation, control.actionKey) || "",
+			);
+			btn.setAttribute("data-feature-companion-operation", control.operation);
+			btn.addEventListener("click", () => this._page.pUseFeatureCompanionOperation?.({
+				featureUid: model.ownerUid,
+				companionId: model.companionId,
+				operation: control.operation,
+				focusKey: btn.getAttribute("data-companion-operation-key"),
+			}));
+		});
+
+		const reasons = model.controls
+			.filter(control => !control.available)
+			.map(control => `${control.label}: ${control.reason}`);
+		const reason = this._ce("div", "pm-feature__desc pm-companion-operations__reasons", region);
 		reason.style.display = "block";
 		reason.id = `${operationId}-reasons`;
 		reason.setAttribute("role", "status");

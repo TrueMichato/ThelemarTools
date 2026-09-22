@@ -1995,6 +1995,11 @@
 		flex-direction: column;
 	}
 
+	.charsheet__feature-companion-operation-header {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
 	.charsheet__feature-companion-setup .btn-feature-companion-setup,
 	.charsheet__feature-companion-lifecycle-actions .ve-btn,
 	.charsheet__feature-companion-operation-controls .ve-btn,
@@ -2039,6 +2044,7 @@
 	}
 
 	.charsheet__feature-companion-status,
+	.charsheet__feature-companion-operation-mode,
 	.charsheet__feature-companion-create-btn {
 		align-self: flex-start;
 	}
