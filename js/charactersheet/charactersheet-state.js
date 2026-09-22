@@ -4752,6 +4752,8 @@ class CharacterSheetState {
 	setItemCatalog (allItems) {
 		this._allItems = Array.isArray(allItems) ? allItems : [];
 		this._migrateInventoryItemMetadata();
+		this._migrateGeneratedFeatureItemProvenance();
+		this.reconcileEfaReplicateMagicItems({reason: "catalog-loaded"});
 	}
 
 	/**
@@ -6458,6 +6460,8 @@ class CharacterSheetState {
 		// Idempotent; only ever sets a missing/false flag to true.
 		this._migrateInventoryItemWeaponFlag();
 		this.reconcileEfaArmorerState({cause: "load"});
+		this._migrateGeneratedFeatureItemProvenance();
+		this.reconcileEfaReplicateMagicItems({reason: "load"});
 		this._ensureFeatRegistryResources();
 		this._endBladesongForInvalidEquipment();
 		this._migrateLegacyTurnReceipts();
@@ -10546,6 +10550,7 @@ class CharacterSheetState {
 		this._ensureBattleMasterSuperiorityDice();
 		this._syncAdventurersAtlasEligibility();
 		this._reconcileClassSummonsAfterOwnerChange();
+		this.reconcileEfaReplicateMagicItems({reason: "class-removed"});
 	}
 
 	/**
@@ -10996,6 +11001,7 @@ class CharacterSheetState {
 			this._data.hp.current = this._data.hp.max;
 		}
 		this._syncAdventurersAtlasEligibility();
+		this.reconcileEfaReplicateMagicItems({reason: "level-removed"});
 
 		return {success: true, removed: removedInfo};
 	}
@@ -11638,6 +11644,7 @@ class CharacterSheetState {
 	 * meaning that a row exists for the character level.
 	 */
 	setProgressionManifest (manifest) {
+		const previousPlans = this.getEfaArtificerPlans();
 		this._data.levelHistory = CharacterSheetProgression.reconcileHistoryWithManifest({
 			history: this._data.levelHistory,
 			manifest,
@@ -11647,6 +11654,19 @@ class CharacterSheetState {
 			characterBase: this._data.characterBase,
 		});
 		this._syncFixedProficiencyFallbackDecisionReferences();
+		const nextPlansBySlot = new Map(this.getEfaArtificerPlans().map(plan => [plan.slotId, plan]));
+		for (const previous of previousPlans) {
+			const next = nextPlansBySlot.get(previous.slotId);
+			const previousUid = previous.selection?.planUid || previous.selection?.itemUid;
+			const nextUid = next?.selection?.planUid || next?.selection?.itemUid;
+			if (next && String(previousUid || "").toLowerCase() === String(nextUid || "").toLowerCase()) continue;
+			this.commitGeneratedFeatureItemPlanLineage({
+				owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+				removedPlan: previous.selection,
+				slotId: previous.slotId,
+			});
+		}
+		this.reconcileEfaReplicateMagicItems({reason: "progression-manifest-committed"});
 	}
 
 	_normalizeStoredSkillState () {
@@ -37055,6 +37075,13 @@ class CharacterSheetState {
 
 	// #region Inventory
 	static GENERATED_FEATURE_ITEM_PROVENANCE_VERSION = 1;
+	static GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION = 1;
+	static EFA_REPLICATE_MAGIC_ITEM_FEATURE_UID = "Replicate Magic Item|Artificer|EFA|2|EFA";
+	static EFA_REPLICATE_MAGIC_ITEM_OWNER = Object.freeze({
+		featureUid: "Replicate Magic Item|Artificer|EFA|2",
+		classUid: "Artificer|EFA",
+		subclassUid: null,
+	});
 
 	static _normalizeGeneratedFeatureItemOwner (owner, {isLegacySubclassFeatureUid = false} = {}) {
 		if (!owner || typeof owner !== "object" || Array.isArray(owner)) return null;
@@ -37110,6 +37137,164 @@ class CharacterSheetState {
 		]
 			.map(part => part.toLowerCase())
 			.join("::");
+	}
+
+	static _normalizeGeneratedFeatureItemCatalog (catalog) {
+		if (catalog == null) return null;
+		if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) return null;
+		const plan = catalog.plan && typeof catalog.plan === "object" && !Array.isArray(catalog.plan)
+			? MiscUtil.copyFast(catalog.plan)
+			: null;
+		const resolvedItem = catalog.resolvedItem && typeof catalog.resolvedItem === "object" && !Array.isArray(catalog.resolvedItem)
+			? MiscUtil.copyFast(catalog.resolvedItem)
+			: null;
+		if (!plan?.selection?.name || !plan?.selection?.source || !resolvedItem?.name || !resolvedItem?.source) return null;
+		plan.slotId = plan.slotId == null ? null : String(plan.slotId);
+		plan.selection.name = String(plan.selection.name).trim();
+		plan.selection.source = String(plan.selection.source).trim();
+		plan.selection.planUid = plan.selection.planUid == null ? null : String(plan.selection.planUid).trim();
+		plan.selection.itemUid = plan.selection.itemUid == null ? null : String(plan.selection.itemUid).trim();
+		resolvedItem.name = String(resolvedItem.name).trim();
+		resolvedItem.source = String(resolvedItem.source).trim();
+		resolvedItem.itemUid = resolvedItem.itemUid == null
+			? `${resolvedItem.name}|${resolvedItem.source}`
+			: String(resolvedItem.itemUid).trim();
+		if (!plan.selection.name || !plan.selection.source || !resolvedItem.name || !resolvedItem.source || !resolvedItem.itemUid) return null;
+		return {plan, resolvedItem};
+	}
+
+	static _normalizeGeneratedFeatureItemCreation (creation) {
+		if (creation == null) return null;
+		if (!creation || typeof creation !== "object" || Array.isArray(creation)) return null;
+		const order = Number(creation.order);
+		const receiptId = creation.receiptId == null ? "" : String(creation.receiptId).trim();
+		if (!Number.isSafeInteger(order) || order < 1 || !receiptId) return null;
+		return {
+			order,
+			receiptId,
+			event: creation.event == null ? null : String(creation.event),
+			batchId: creation.batchId == null ? null : String(creation.batchId),
+		};
+	}
+
+	static _normalizeGeneratedFeatureItemLifecycle (lifecycle) {
+		if (lifecycle == null) return null;
+		if (!lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)) return null;
+		const version = Number(lifecycle.version);
+		if (!Number.isSafeInteger(version) || version !== CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION) return null;
+		const state = lifecycle.state == null ? "active" : String(lifecycle.state);
+		if (!["active", "unresolved"].includes(state)) return null;
+		const deathExpiryDaysRemaining = lifecycle.deathExpiryDaysRemaining == null
+			? null
+			: Number(lifecycle.deathExpiryDaysRemaining);
+		if (
+			deathExpiryDaysRemaining != null
+			&& (!Number.isSafeInteger(deathExpiryDaysRemaining) || deathExpiryDaysRemaining < 0)
+		) return null;
+		const callbacks = lifecycle.callbacks == null
+			? {}
+			: lifecycle.callbacks && typeof lifecycle.callbacks === "object" && !Array.isArray(lifecycle.callbacks)
+				? MiscUtil.copyFast(lifecycle.callbacks)
+				: null;
+		if (!callbacks) return null;
+		return {
+			version,
+			state,
+			deathExpiryDaysRemaining,
+			deathExpiryAssignedReceiptId: lifecycle.deathExpiryAssignedReceiptId == null
+				? null
+				: String(lifecycle.deathExpiryAssignedReceiptId),
+			callbacks,
+			metadata: lifecycle.metadata && typeof lifecycle.metadata === "object" && !Array.isArray(lifecycle.metadata)
+				? MiscUtil.copyFast(lifecycle.metadata)
+				: {},
+		};
+	}
+
+	static _normalizeGeneratedFeatureItemProvenance (provenance) {
+		if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) return null;
+		if (provenance.version !== CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION) return null;
+		const owner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(provenance.owner);
+		if (!owner) return null;
+		const metadata = provenance.metadata == null
+			? {}
+			: provenance.metadata && typeof provenance.metadata === "object" && !Array.isArray(provenance.metadata)
+				? MiscUtil.copyFast(provenance.metadata)
+				: null;
+		if (!metadata) return null;
+		const catalog = CharacterSheetState._normalizeGeneratedFeatureItemCatalog(provenance.catalog);
+		if (provenance.catalog != null && !catalog) return null;
+		const creation = CharacterSheetState._normalizeGeneratedFeatureItemCreation(provenance.creation);
+		if (provenance.creation != null && !creation) return null;
+		const lifecycle = CharacterSheetState._normalizeGeneratedFeatureItemLifecycle(provenance.lifecycle);
+		if (provenance.lifecycle != null && !lifecycle) return null;
+		const extensions = provenance.extensions == null
+			? []
+			: Array.isArray(provenance.extensions)
+				? provenance.extensions
+					.filter(it => it && typeof it === "object" && !Array.isArray(it))
+					.map(it => MiscUtil.copyFast(it))
+				: null;
+		if (!extensions) return null;
+		return {
+			version: provenance.version,
+			owner,
+			metadata,
+			catalog,
+			creation,
+			lifecycle,
+			extensions,
+		};
+	}
+
+	static createGeneratedFeatureItemLifecycleDescriptor ({
+		id,
+		owner,
+		capacity,
+		isBase = false,
+		allowedOwners = null,
+		allowedItemKinds = null,
+		categoryPredicate = null,
+		generatedPredicate = null,
+		lifecycleCallbacks = null,
+		metadata = null,
+	} = {}) {
+		const normalizedOwner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(owner);
+		if (!normalizedOwner) throw new Error("Generated-item lifecycle descriptors require an exact owner.");
+		const normalizedCapacity = Number(capacity);
+		if (!Number.isSafeInteger(normalizedCapacity) || normalizedCapacity < 0) {
+			throw new Error("Generated-item lifecycle descriptor capacity must be a non-negative integer.");
+		}
+		const descriptorId = id == null ? "" : String(id).trim();
+		if (!descriptorId) throw new Error("Generated-item lifecycle descriptors require an id.");
+		const normalizedAllowedOwners = (allowedOwners || [normalizedOwner])
+			.map(it => CharacterSheetState._normalizeGeneratedFeatureItemOwner(it));
+		if (normalizedAllowedOwners.some(it => !it)) {
+			throw new Error("Generated-item lifecycle descriptor allowed owners must be exact.");
+		}
+		return {
+			version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+			id: descriptorId,
+			owner: normalizedOwner,
+			capacity: normalizedCapacity,
+			isBase: !!isBase,
+			allowedOwners: normalizedAllowedOwners,
+			allowedItemKinds: allowedItemKinds == null
+				? null
+				: [...new Set(allowedItemKinds.map(it => String(it).trim().toLowerCase()).filter(Boolean))],
+			categoryPredicate: categoryPredicate && typeof categoryPredicate === "object" && !Array.isArray(categoryPredicate)
+				? MiscUtil.copyFast(categoryPredicate)
+				: null,
+			generatedPredicate: generatedPredicate && typeof generatedPredicate === "object" && !Array.isArray(generatedPredicate)
+				? MiscUtil.copyFast(generatedPredicate)
+				: null,
+			lifecycleCallbacks: lifecycleCallbacks && typeof lifecycleCallbacks === "object" && !Array.isArray(lifecycleCallbacks)
+				? MiscUtil.copyFast(lifecycleCallbacks)
+				: {},
+			metadata: metadata && typeof metadata === "object" && !Array.isArray(metadata)
+				? MiscUtil.copyFast(metadata)
+				: {},
+		};
 	}
 
 	/**
@@ -37175,6 +37360,33 @@ class CharacterSheetState {
 		if (!owner || !isMetadataValid) {
 			return {status: "ordinary", repairRequired: false, reason: "malformed-generated-metadata"};
 		}
+		if (
+			provenance.lifecycle != null
+			&& (!Number.isSafeInteger(provenance.lifecycle?.version)
+				|| provenance.lifecycle.version !== CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION)
+		) {
+			return {
+				status: "stale",
+				repairRequired: true,
+				reason: "unsupported-lifecycle-version",
+				generatedItemId,
+				owner,
+				ownerKey: CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner),
+				provenance: MiscUtil.copyFast(provenance),
+			};
+		}
+		const normalizedProvenance = CharacterSheetState._normalizeGeneratedFeatureItemProvenance(provenance);
+		if (!normalizedProvenance) {
+			return {
+				status: "stale",
+				repairRequired: true,
+				reason: "malformed-generated-lifecycle-metadata",
+				generatedItemId,
+				owner,
+				ownerKey: CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner),
+				provenance: MiscUtil.copyFast(provenance),
+			};
+		}
 		const generatedIdMatches = (this._data.inventory || [])
 			.filter(row => row?.item?._generatedItemId === generatedItemId);
 		if (generatedIdMatches.length > 1) {
@@ -37188,7 +37400,7 @@ class CharacterSheetState {
 			generatedItemId,
 			owner,
 			ownerKey: CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner),
-			provenance: MiscUtil.copyFast(provenance),
+			provenance: normalizedProvenance,
 		};
 	}
 
@@ -37216,10 +37428,20 @@ class CharacterSheetState {
 	/**
 	 * Create one non-stacking generated inventory row with exact, versioned ownership.
 	 *
-	 * @param {{item: object, owner: object, metadata?: object, equipped?: boolean, attuned?: boolean}} opts
+	 * @param {{item: object, owner: object, metadata?: object, catalog?: object, creation?: object, lifecycle?: object, extensions?: object[], equipped?: boolean, attuned?: boolean}} opts
 	 * @returns {{ok: boolean, code: string, itemId?: string, generatedItemId?: string, classification?: object}}
 	 */
-	createGeneratedFeatureItem ({item, owner, metadata = {}, equipped = false, attuned = false} = {}) {
+	createGeneratedFeatureItem ({
+		item,
+		owner,
+		metadata = {},
+		catalog = null,
+		creation = null,
+		lifecycle = null,
+		extensions = [],
+		equipped = false,
+		attuned = false,
+	} = {}) {
 		const normalizedOwner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(owner);
 		if (!normalizedOwner) return {ok: false, code: "invalid-generated-item-owner"};
 		if (
@@ -37236,6 +37458,29 @@ class CharacterSheetState {
 		if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
 			return {ok: false, code: "invalid-generated-item-metadata"};
 		}
+		const normalizedCatalog = CharacterSheetState._normalizeGeneratedFeatureItemCatalog(catalog);
+		if (catalog != null && !normalizedCatalog) return {ok: false, code: "invalid-generated-item-catalog"};
+		const normalizedCreation = creation == null
+			? {
+				order: this._getNextGeneratedFeatureItemCreationOrder(),
+				receiptId: CryptUtil.uid(),
+				event: null,
+				batchId: null,
+			}
+			: CharacterSheetState._normalizeGeneratedFeatureItemCreation(creation);
+		if (!normalizedCreation) return {ok: false, code: "invalid-generated-item-creation"};
+		const normalizedLifecycle = lifecycle == null
+			? {
+				version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+				state: "active",
+				deathExpiryDaysRemaining: null,
+				deathExpiryAssignedReceiptId: null,
+				callbacks: {},
+				metadata: {},
+			}
+			: CharacterSheetState._normalizeGeneratedFeatureItemLifecycle(lifecycle);
+		if (!normalizedLifecycle) return {ok: false, code: "invalid-generated-item-lifecycle"};
+		if (!Array.isArray(extensions)) return {ok: false, code: "invalid-generated-item-extensions"};
 
 		const getUniqueId = isTaken => {
 			let id;
@@ -37268,6 +37513,12 @@ class CharacterSheetState {
 				version: CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION,
 				owner: normalizedOwner,
 				metadata: MiscUtil.copyFast(metadata),
+				catalog: normalizedCatalog,
+				creation: normalizedCreation,
+				lifecycle: normalizedLifecycle,
+				extensions: extensions
+					.filter(it => it && typeof it === "object" && !Array.isArray(it))
+					.map(it => MiscUtil.copyFast(it)),
 			},
 		}, 1, !!equipped, !!attuned);
 
@@ -37280,6 +37531,15 @@ class CharacterSheetState {
 			generatedItemId,
 			classification: this.classifyGeneratedFeatureItem(wrapper),
 		};
+	}
+
+	_getNextGeneratedFeatureItemCreationOrder () {
+		let maxOrder = 0;
+		for (const row of this._data.inventory || []) {
+			const provenance = CharacterSheetState._normalizeGeneratedFeatureItemProvenance(row?.item?._generatedItemProvenance);
+			if (Number.isSafeInteger(provenance?.creation?.order)) maxOrder = Math.max(maxOrder, provenance.creation.order);
+		}
+		return maxOrder + 1;
 	}
 
 	/**
@@ -37307,6 +37567,541 @@ class CharacterSheetState {
 		const itemIds = this.getGeneratedFeatureItemRows(owner).map(row => row.id);
 		itemIds.forEach(itemId => this.removeItem(itemId));
 		return itemIds;
+	}
+
+	getGeneratedFeatureItemManagementRows () {
+		return (this._data.inventory || [])
+			.filter(row => {
+				const item = row?.item;
+				return item?._isGeneratedFeatureItem != null
+					|| item?._generatedItemId != null
+					|| item?._generatedItemProvenance != null;
+			})
+			.map(row => {
+				const classification = this.classifyGeneratedFeatureItem(row);
+				const issues = [];
+				if (classification.status !== "valid") issues.push(classification.reason);
+				const catalog = classification.provenance?.catalog;
+				if (classification.status === "valid" && catalog?.resolvedItem) {
+					const matches = this._getExactCatalogItems(catalog.resolvedItem);
+					if (matches.length !== 1) issues.push(matches.length ? "ambiguous-catalog-item" : "missing-catalog-item");
+				}
+				return {
+					itemId: row.id,
+					name: row.item?.name || "Generated Item",
+					classification,
+					issues,
+					repairRequired: !!issues.length,
+				};
+			});
+	}
+
+	_getExactCatalogItems ({name, source} = {}) {
+		if (!name || !source) return [];
+		const normalizedName = String(name).trim().toLowerCase();
+		const normalizedSource = String(source).trim().toLowerCase();
+		return (this._allItems || []).filter(item =>
+			String(item?.name || "").trim().toLowerCase() === normalizedName
+			&& String(item?.source || "").trim().toLowerCase() === normalizedSource,
+		);
+	}
+
+	static _getGeneratedFeatureItemKind (item) {
+		const type = String(item?.type || item?.typeCode || "").trim().toUpperCase();
+		if (item?.weapon || ["M", "R", "AF"].includes(type)) return "weapon";
+		if (["LA", "MA", "HA"].includes(type)) return "armor";
+		if (type === "S") return "shield";
+		if (type === "WD") return "wand";
+		if (type === "ST") return "staff";
+		if (type === "RD") return "rod";
+		if (type === "RG") return "ring";
+		if (type === "P") return "potion";
+		if (type === "SC") return "scroll";
+		return "wondrous";
+	}
+
+	_getEfaReplicateMagicItemClassLevel () {
+		return Number(this._data.classes?.find(cls =>
+			String(cls?.name || "").toLowerCase() === "artificer"
+			&& String(cls?.source || "").toUpperCase() === "EFA",
+		)?.level) || 0;
+	}
+
+	getEfaReplicateMagicItemLifecycleDescriptors ({extensions = []} = {}) {
+		const base = CharacterSheetState.createGeneratedFeatureItemLifecycleDescriptor({
+			id: "efa-replicate-magic-item-base",
+			owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+			capacity: CharacterSheetClassUtils.getEfaArtificerCreatedMagicItemsMax(this._getEfaReplicateMagicItemClassLevel()),
+			isBase: true,
+			lifecycleCallbacks: {
+				onLongRest: "retain",
+				onDeath: "expire-after-1d4-days",
+				onLifecycleDay: "decrement-expiry",
+				onPlanRemoved: "remove",
+				onOwnerRemoved: "remove",
+			},
+			metadata: {
+				sourceFeatureUid: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_FEATURE_UID,
+				temporary: true,
+			},
+		});
+		const normalizedExtensions = extensions.map(extension => CharacterSheetState.createGeneratedFeatureItemLifecycleDescriptor(extension));
+		return [base, ...normalizedExtensions];
+	}
+
+	_generatedFeatureItemMatchesLifecycleDescriptor (row, descriptor) {
+		const classification = this.classifyGeneratedFeatureItem(row);
+		if (classification.status !== "valid") return false;
+		const allowedOwnerKeys = new Set((descriptor.allowedOwners || [])
+			.map(owner => CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner)));
+		if (!allowedOwnerKeys.has(classification.ownerKey)) return false;
+		const kind = CharacterSheetState._getGeneratedFeatureItemKind(row.item);
+		if (descriptor.allowedItemKinds?.length && !descriptor.allowedItemKinds.includes(kind)) return false;
+		const generatedPredicate = descriptor.generatedPredicate || {};
+		if (
+			generatedPredicate.featureUid
+			&& String(classification.owner?.featureUid || "").toLowerCase() !== String(generatedPredicate.featureUid).toLowerCase()
+		) return false;
+		if (
+			generatedPredicate.planUid
+			&& String(classification.provenance?.catalog?.plan?.selection?.planUid || "").toLowerCase() !== String(generatedPredicate.planUid).toLowerCase()
+		) return false;
+		const categoryPredicate = descriptor.categoryPredicate || {};
+		if (categoryPredicate.itemKinds?.length && !categoryPredicate.itemKinds.map(it => String(it).toLowerCase()).includes(kind)) return false;
+		if (
+			categoryPredicate.variantNames?.length
+			&& !categoryPredicate.variantNames
+				.map(it => String(it).toLowerCase())
+				.includes(String(row.item?._variantName || "").toLowerCase())
+		) return false;
+		return true;
+	}
+
+	getGeneratedFeatureItemCapacitySnapshot ({owner, rows = null, descriptors = []} = {}) {
+		const ownerKey = CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner);
+		if (!ownerKey) return {fits: false, capacity: 0, baseCapacity: 0, extensionCapacityUsed: 0, rows: []};
+		const consideredRows = (rows || this.getGeneratedFeatureItemRows(owner))
+			.filter(row => this.classifyGeneratedFeatureItem(row).ownerKey === ownerKey);
+		const applicable = descriptors.filter(descriptor =>
+			CharacterSheetState._getGeneratedFeatureItemOwnerKey(descriptor.owner) === ownerKey,
+		);
+		const baseCapacity = applicable
+			.filter(descriptor => descriptor.isBase)
+			.reduce((total, descriptor) => total + descriptor.capacity, 0);
+		const extensionSlots = applicable
+			.filter(descriptor => !descriptor.isBase)
+			.flatMap(descriptor => Array.from({length: descriptor.capacity}, () => descriptor));
+		const matchedRows = new Set();
+		const matchSlot = slotIndex => {
+			const descriptor = extensionSlots[slotIndex];
+			for (let rowIndex = 0; rowIndex < consideredRows.length; rowIndex++) {
+				if (matchedRows.has(rowIndex)) continue;
+				if (!this._generatedFeatureItemMatchesLifecycleDescriptor(consideredRows[rowIndex], descriptor)) continue;
+				matchedRows.add(rowIndex);
+				return true;
+			}
+			return false;
+		};
+		let extensionCapacityUsed = 0;
+		for (let i = 0; i < extensionSlots.length; i++) {
+			if (matchSlot(i)) extensionCapacityUsed++;
+		}
+		const capacity = baseCapacity + extensionCapacityUsed;
+		return {
+			fits: consideredRows.length <= capacity,
+			capacity,
+			baseCapacity,
+			extensionCapacityUsed,
+			rows: consideredRows,
+		};
+	}
+
+	_resolveEfaReplicateMagicItemPlanOptions (plan) {
+		const selection = plan?.selection;
+		if (!selection?.name || !selection?.source) {
+			return {ok: false, code: "invalid-plan-selection", plan, options: []};
+		}
+		const directMatches = this._getExactCatalogItems(selection);
+		const variantMatches = (this._allItems || []).filter(item =>
+			String(item?._category || "").toLowerCase() === "specific variant"
+			&& String(item?._variantName || "").trim().toLowerCase() === String(selection.name).trim().toLowerCase()
+			&& String(item?.source || "").trim().toLowerCase() === String(selection.source).trim().toLowerCase(),
+		);
+		const directIsGenericVariant = directMatches.some(item =>
+			String(item?.type || "").toUpperCase() === "GV"
+			|| String(item?._category || "").toLowerCase() === "generic variant"
+			|| item?.requires != null,
+		);
+		const rawOptions = directIsGenericVariant || (!directMatches.length && variantMatches.length)
+			? variantMatches
+			: directMatches;
+		const optionCounts = new Map();
+		for (const item of rawOptions) {
+			const itemUid = `${item.name}|${item.source}`.toLowerCase();
+			optionCounts.set(itemUid, (optionCounts.get(itemUid) || 0) + 1);
+		}
+		if ([...optionCounts.values()].some(count => count > 1)) {
+			return {ok: false, code: "ambiguous-plan-catalog-item", plan, options: []};
+		}
+		const optionsByUid = new Map();
+		for (const item of rawOptions) {
+			const itemUid = `${item.name}|${item.source}`.toLowerCase();
+			if (!optionsByUid.has(itemUid)) optionsByUid.set(itemUid, item);
+		}
+		const options = [...optionsByUid.values()]
+			.map(item => ({
+				itemUid: `${item.name}|${item.source}`,
+				name: item.name,
+				source: item.source,
+				kind: CharacterSheetState._getGeneratedFeatureItemKind(item),
+				variantName: item._variantName || null,
+				baseItem: item.baseItem || null,
+				category: item._category || null,
+				requiresAttunement: !!(item.requiresAttunement ?? item.reqAttune),
+				item: MiscUtil.copyFast(item),
+			}))
+			.sort((a, b) => a.name.localeCompare(b.name) || a.source.localeCompare(b.source));
+		if (!options.length) return {ok: false, code: "missing-plan-catalog-item", plan, options};
+		return {
+			ok: true,
+			code: options.length === 1 ? "resolved-plan-item" : "specific-variant-selection-required",
+			plan: CharacterSheetProgression._copy(plan),
+			options,
+		};
+	}
+
+	getEfaReplicateMagicItemProductionOptions () {
+		const plans = this.getEfaArtificerPlans().map(plan => this._resolveEfaReplicateMagicItemPlanOptions(plan));
+		const classLevel = this._getEfaReplicateMagicItemClassLevel();
+		const maxCreatedItems = CharacterSheetClassUtils.getEfaArtificerCreatedMagicItemsMax(classLevel);
+		const tinkersTools = (this._data.inventory || []).find(row =>
+			row.equipped
+			&& String(row.item?.name || "").trim().toLowerCase() === "tinker's tools"
+			&& String(row.item?.source || "").trim().toUpperCase() === "XPHB",
+		) || null;
+		return {
+			available: classLevel >= 2 && maxCreatedItems > 0 && !!tinkersTools,
+			classLevel,
+			maxCreatedItems,
+			tinkersToolsItemId: tinkersTools?.id || null,
+			plans,
+			unresolvedPlans: this.getEfaArtificerPlanProjection().unresolved,
+			unavailableReason: classLevel < 2
+				? "Replicate Magic Item is not available."
+				: !tinkersTools
+					? "Equip Tinker's Tools (XPHB) to create replicated items."
+					: null,
+		};
+	}
+
+	_resolveEfaReplicateMagicItemRequest (request) {
+		const options = this.getEfaReplicateMagicItemProductionOptions();
+		if (!options.available) return {ok: false, code: "replicate-production-unavailable", message: options.unavailableReason};
+		const selections = Array.isArray(request?.selections) ? request.selections : [];
+		if (!selections.length) return {ok: true, code: "replicate-production-skipped", options, resolved: []};
+		if (selections.length > options.maxCreatedItems) {
+			return {ok: false, code: "replicate-production-over-batch-limit", message: `Choose at most ${options.maxCreatedItems} items.`};
+		}
+		const plansBySlot = new Map(options.plans.map(plan => [plan.plan?.slotId, plan]));
+		const usedSlots = new Set();
+		const usedPlanUids = new Set();
+		const resolved = [];
+		for (const selection of selections) {
+			const slotId = selection?.slotId == null ? "" : String(selection.slotId);
+			const plan = plansBySlot.get(slotId);
+			if (!plan?.ok) return {ok: false, code: plan?.code || "unknown-replicate-plan", message: "The selected plan cannot be resolved."};
+			const planUid = String(plan.plan.selection?.planUid || plan.plan.selection?.itemUid || `${plan.plan.selection.name}|${plan.plan.selection.source}`).toLowerCase();
+			if (usedSlots.has(slotId) || usedPlanUids.has(planUid)) {
+				return {ok: false, code: "duplicate-replicate-plan", message: "Each item in the batch must use a different known plan."};
+			}
+			usedSlots.add(slotId);
+			usedPlanUids.add(planUid);
+			const requestedItemUid = selection?.resolvedItemUid == null ? null : String(selection.resolvedItemUid).toLowerCase();
+			const matches = requestedItemUid
+				? plan.options.filter(option => option.itemUid.toLowerCase() === requestedItemUid)
+				: plan.options;
+			if (matches.length !== 1) {
+				return {
+					ok: false,
+					code: matches.length ? "ambiguous-resolved-catalog-item" : "missing-resolved-catalog-item",
+					message: plan.options.length > 1
+						? "Choose the specific enhanced item for this generic variant plan."
+						: "The selected catalog item is unavailable.",
+				};
+			}
+			resolved.push({
+				slotId,
+				plan: plan.plan,
+				resolvedItem: matches[0],
+				attune: !!selection.attune,
+			});
+		}
+		return {ok: true, code: "replicate-production-resolved", options, resolved};
+	}
+
+	commitEfaReplicateMagicItemsAtLongRest (request = {}) {
+		const preflight = this._resolveEfaReplicateMagicItemRequest(request);
+		if (!preflight.ok || preflight.code === "replicate-production-skipped") return preflight;
+		const descriptors = this.getEfaReplicateMagicItemLifecycleDescriptors({extensions: request.extensions || []});
+		const owner = CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER;
+		const currentRows = this.getGeneratedFeatureItemRows(owner);
+		const batchId = CryptUtil.uid();
+		const nextCreationOrder = this._getNextGeneratedFeatureItemCreationOrder();
+		const projectedRows = [
+			...currentRows,
+			...preflight.resolved.map((entry, index) => ({
+				id: `projected-${index}`,
+				item: {
+					...entry.resolvedItem.item,
+					_isGeneratedFeatureItem: true,
+					_generatedItemId: `projected-generated-${index}`,
+					_generatedItemProvenance: {
+						version: CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION,
+						owner,
+						metadata: {},
+						catalog: {
+							plan: {slotId: entry.slotId, selection: entry.plan.selection},
+							resolvedItem: {
+								itemUid: entry.resolvedItem.itemUid,
+								name: entry.resolvedItem.name,
+								source: entry.resolvedItem.source,
+							},
+						},
+						creation: {
+							order: nextCreationOrder + index,
+							receiptId: `projected-${index}`,
+							event: "long-rest",
+							batchId,
+						},
+						lifecycle: {
+							version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+							state: "active",
+							deathExpiryDaysRemaining: null,
+							deathExpiryAssignedReceiptId: null,
+							callbacks: descriptors[0].lifecycleCallbacks,
+							metadata: {},
+						},
+						extensions: descriptors.slice(1).map(descriptor => ({descriptorId: descriptor.id})),
+					},
+				},
+			})),
+		];
+		const evicted = [];
+		while (!this.getGeneratedFeatureItemCapacitySnapshot({owner, rows: projectedRows, descriptors}).fits) {
+			const oldest = projectedRows
+				.slice()
+				.sort((a, b) => {
+					const aOrder = Number(a.item?._generatedItemProvenance?.creation?.order) || Number.MAX_SAFE_INTEGER;
+					const bOrder = Number(b.item?._generatedItemProvenance?.creation?.order) || Number.MAX_SAFE_INTEGER;
+					return aOrder - bOrder;
+				})[0];
+			if (!oldest || String(oldest.id).startsWith("projected-")) {
+				return {ok: false, code: "replicate-production-capacity-exceeded", message: "The selected items exceed the available created-item capacity."};
+			}
+			evicted.push(oldest);
+			projectedRows.splice(projectedRows.indexOf(oldest), 1);
+		}
+
+		const snapshot = this.toJson();
+		const created = [];
+		const attunement = [];
+		try {
+			evicted.forEach(row => this.removeItem(row.id));
+			let plannedAttuned = (this._data.inventory || []).filter(row => row.attuned).length;
+			for (const [index, entry] of preflight.resolved.entries()) {
+				const item = entry.resolvedItem.item;
+				let attunementResult = {requested: entry.attune, status: "declined", reasons: []};
+				if (entry.attune) {
+					const requiresAttunement = !!(item.requiresAttunement ?? item.reqAttune);
+					if (!requiresAttunement) {
+						attunementResult = {requested: true, status: "not-required", reasons: []};
+					} else {
+						const requirements = this.meetsAttunementRequirements(item);
+						if (!requirements.canAttune) {
+							attunementResult = {requested: true, status: "requirements-failed", reasons: requirements.reasons};
+						} else if (plannedAttuned >= this.getMaxAttunement()) {
+							attunementResult = {requested: true, status: "cap-reached", reasons: ["No attunement slots are available."]};
+						} else {
+							attunementResult = {requested: true, status: "attuned", reasons: []};
+							plannedAttuned++;
+						}
+					}
+				}
+				const result = this.createGeneratedFeatureItem({
+					item,
+					owner,
+					metadata: {
+						sourceFeatureUid: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_FEATURE_UID,
+						temporary: true,
+					},
+					catalog: {
+						plan: {
+							slotId: entry.slotId,
+							acquisitionLevel: entry.plan.acquisitionLevel,
+							lineage: entry.plan.lineage,
+							selection: entry.plan.selection,
+						},
+						resolvedItem: {
+							itemUid: entry.resolvedItem.itemUid,
+							name: entry.resolvedItem.name,
+							source: entry.resolvedItem.source,
+							variantName: entry.resolvedItem.variantName,
+							baseItem: entry.resolvedItem.baseItem,
+							category: entry.resolvedItem.category,
+						},
+					},
+					creation: {
+						order: nextCreationOrder + index,
+						receiptId: CryptUtil.uid(),
+						event: "long-rest",
+						batchId,
+					},
+					lifecycle: {
+						version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+						state: "active",
+						deathExpiryDaysRemaining: null,
+						deathExpiryAssignedReceiptId: null,
+						callbacks: descriptors[0].lifecycleCallbacks,
+						metadata: {},
+					},
+					extensions: descriptors.slice(1).map(descriptor => ({
+						descriptorId: descriptor.id,
+						metadata: descriptor.metadata,
+					})),
+				});
+				if (!result.ok) throw new Error(result.code);
+				if (attunementResult.status === "attuned" && !this.attune(result.itemId)) {
+					attunementResult = {
+						requested: true,
+						status: "cap-reached",
+						reasons: ["The item was created, but attunement could not be completed."],
+					};
+				}
+				created.push({
+					itemId: result.itemId,
+					generatedItemId: result.generatedItemId,
+					slotId: entry.slotId,
+					plan: entry.plan.selection,
+					resolvedItem: entry.resolvedItem,
+				});
+				attunement.push({...attunementResult, itemId: result.itemId});
+			}
+		} catch (error) {
+			this._data = snapshot;
+			this._reapplyItemEffects();
+			return {ok: false, code: "replicate-production-rolled-back", message: error.message};
+		}
+		return {
+			ok: true,
+			code: "replicate-production-committed",
+			batchId,
+			created,
+			evicted: evicted.map(row => ({itemId: row.id, name: row.item?.name})),
+			attunement,
+		};
+	}
+
+	commitGeneratedFeatureItemPlanLineage ({owner, removedPlan, slotId = null} = {}) {
+		const ownerKey = CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner);
+		if (!ownerKey || !removedPlan) return [];
+		const removedPlanUid = String(removedPlan.planUid || removedPlan.itemUid || `${removedPlan.name}|${removedPlan.source}`).toLowerCase();
+		const itemIds = this.getGeneratedFeatureItemRows(owner)
+			.filter(row => {
+				const catalogPlan = this.classifyGeneratedFeatureItem(row).provenance?.catalog?.plan;
+				if (!catalogPlan) return false;
+				if (slotId != null && String(catalogPlan.slotId) !== String(slotId)) return false;
+				const selection = catalogPlan.selection || {};
+				const planUid = String(selection.planUid || selection.itemUid || `${selection.name}|${selection.source}`).toLowerCase();
+				return planUid === removedPlanUid;
+			})
+			.map(row => row.id);
+		itemIds.forEach(itemId => this.removeItem(itemId));
+		return itemIds;
+	}
+
+	reconcileEfaReplicateMagicItems ({reason = "reconcile"} = {}) {
+		const owner = CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER;
+		const rows = this.getGeneratedFeatureItemRows(owner);
+		const plans = this.getEfaArtificerPlans();
+		const classLevel = this._getEfaReplicateMagicItemClassLevel();
+		const currentPlanUids = new Set(plans.map(plan => {
+			const selection = plan.selection || {};
+			return String(selection.planUid || selection.itemUid || `${selection.name}|${selection.source}`).toLowerCase();
+		}));
+		const removed = [];
+		const unresolved = [];
+		for (const row of rows) {
+			const classification = this.classifyGeneratedFeatureItem(row);
+			const catalog = classification.provenance?.catalog;
+			if (classLevel < 2) {
+				removed.push(row.id);
+				continue;
+			}
+			if (!catalog?.plan?.selection || !catalog?.resolvedItem) {
+				unresolved.push({itemId: row.id, reason: "missing-catalog-provenance"});
+				continue;
+			}
+			const selection = catalog.plan.selection;
+			const planUid = String(selection.planUid || selection.itemUid || `${selection.name}|${selection.source}`).toLowerCase();
+			if (!currentPlanUids.has(planUid)) {
+				removed.push(row.id);
+				continue;
+			}
+			const matches = this._getExactCatalogItems(catalog.resolvedItem);
+			const lifecycle = row.item._generatedItemProvenance.lifecycle;
+			if (matches.length !== 1) {
+				lifecycle.state = "unresolved";
+				unresolved.push({
+					itemId: row.id,
+					reason: matches.length ? "ambiguous-catalog-item" : "missing-catalog-item",
+				});
+			} else {
+				lifecycle.state = "active";
+			}
+		}
+		removed.forEach(itemId => this.removeItem(itemId));
+		return {
+			reason,
+			removed,
+			unresolved,
+			management: this.getGeneratedFeatureItemManagementRows(),
+		};
+	}
+
+	_migrateGeneratedFeatureItemProvenance () {
+		let nextOrder = 1;
+		for (const row of this._data.inventory || []) {
+			const item = row?.item;
+			if (!item?._isGeneratedFeatureItem || !item?._generatedItemProvenance) continue;
+			const provenance = item._generatedItemProvenance;
+			const owner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(provenance.owner);
+			if (!owner || provenance.version !== CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION) continue;
+			if (!CharacterSheetState._normalizeGeneratedFeatureItemCreation(provenance.creation)) {
+				provenance.creation = {
+					order: nextOrder,
+					receiptId: `migrated-${item._generatedItemId || row.id}`,
+					event: "migration",
+					batchId: null,
+				};
+			}
+			nextOrder = Math.max(nextOrder, provenance.creation.order + 1);
+			if (provenance.lifecycle == null) {
+				const isEfaReplicate = CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner) ===
+					CharacterSheetState._getGeneratedFeatureItemOwnerKey(CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER);
+				provenance.lifecycle = {
+					version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+					state: "active",
+					deathExpiryDaysRemaining: null,
+					deathExpiryAssignedReceiptId: null,
+					callbacks: isEfaReplicate
+						? this.getEfaReplicateMagicItemLifecycleDescriptors()[0].lifecycleCallbacks
+						: {},
+					metadata: {},
+				};
+			}
+			if (!Array.isArray(provenance.extensions)) provenance.extensions = [];
+			if (!provenance.metadata || typeof provenance.metadata !== "object" || Array.isArray(provenance.metadata)) provenance.metadata = {};
+		}
 	}
 
 	getInventory () { return [...this._data.inventory]; }
@@ -41466,6 +42261,14 @@ class CharacterSheetState {
 				requiresProficiency: true,
 			}
 			: null;
+		const generatedOwner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(raw.filter?.generatedFeature?.owner);
+		const generatedFeature = generatedOwner
+			? {
+				owner: generatedOwner,
+				itemKinds: normalizeList(raw.filter.generatedFeature.itemKinds).map(kind => kind.toLowerCase()),
+				lifecycleStates: normalizeList(raw.filter.generatedFeature.lifecycleStates).map(state => state.toLowerCase()),
+			}
+			: null;
 		const rawSourceFeatureUid = String(raw.sourceFeatureUid || "").trim();
 		const hasInvalidSourceFeatureUid = raw.sourceFeatureUid != null
 			&& !!rawSourceFeatureUid
@@ -41499,6 +42302,7 @@ class CharacterSheetState {
 				itemTypes,
 				itemSources,
 				weapon,
+				generatedFeature,
 				requiresProficiency: raw.filter?.requiresProficiency === true,
 			},
 			ui: {
@@ -41561,6 +42365,11 @@ class CharacterSheetState {
 						requiresProficiency: true,
 					}
 					: null,
+				generatedFeature: {
+					owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+					itemKinds: ["weapon", "wand"],
+					lifecycleStates: ["active"],
+				},
 				requiresProficiency: true,
 			},
 			ui: {
@@ -41568,19 +42377,19 @@ class CharacterSheetState {
 					? "Choose Artificer Spellcasting Focus"
 					: "Choose Artificer Spellcasting Tools",
 				description: hasBattleReady && hasArcaneArmorFocus
-					? "Choose your worn Arcane Armor or an equipped, proficient tool or weapon as the spellcasting focus."
+					? "Choose your worn Arcane Armor, an equipped proficient tool or weapon, or an equipped replicated Wand or Weapon as the spellcasting focus."
 					: hasBattleReady
-						? "Choose the equipped, proficient tool or weapon you are using as the material focus for this spell."
+						? "Choose an equipped proficient tool or weapon, or an equipped replicated Wand or Weapon, as the material focus for this spell."
 						: hasArcaneArmorFocus
-					? "Choose your worn Arcane Armor or an equipped, proficient tool as the spellcasting focus."
-					: "Choose the equipped, proficient tool you are using as the material focus for this spell.",
+					? "Choose your worn Arcane Armor, an equipped proficient tool, or an equipped replicated Wand or Weapon as the spellcasting focus."
+					: "Choose the equipped proficient tool or replicated Wand or Weapon you are using as the material focus for this spell.",
 				unavailableMessage: hasBattleReady && hasArcaneArmorFocus
-					? "EFA Battle Smith spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or a proficient weapon."
+					? "EFA Battle Smith spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, a proficient weapon, or an equipped replicated Wand or Weapon."
 					: hasBattleReady
-						? "EFA Battle Smith spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or a proficient weapon."
+						? "EFA Battle Smith spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, a proficient weapon, or an equipped replicated Wand or Weapon."
 						: hasArcaneArmorFocus
-					? "EFA Artificer spells require worn Arcane Armor or an equipped, proficient spellcasting tool."
-					: "EFA Artificer spells require equipped Thieves' Tools, Tinker's Tools, or proficient Artisan's Tools.",
+					? "EFA Artificer spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon."
+					: "EFA Artificer spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon.",
 			},
 		};
 	}
@@ -41601,7 +42410,11 @@ class CharacterSheetState {
 		const weaponFilter = requirement.filter.weapon?.category === "any"
 			? requirement.filter.weapon
 			: null;
-		if (!inventoryItemIds.size && !itemUids.size && !itemNames.size && !itemTypes.size && !weaponFilter) return [];
+		const generatedFeature = requirement.filter.generatedFeature;
+		const generatedOwnerKey = CharacterSheetState._getGeneratedFeatureItemOwnerKey(generatedFeature?.owner);
+		const generatedItemKinds = new Set((generatedFeature?.itemKinds || []).map(kind => String(kind).toLowerCase()));
+		const generatedLifecycleStates = new Set((generatedFeature?.lifecycleStates || []).map(state => String(state).toLowerCase()));
+		if (!inventoryItemIds.size && !itemUids.size && !itemNames.size && !itemTypes.size && !weaponFilter && !generatedOwnerKey) return [];
 		return (this._data.inventory || []).filter(wrapper => {
 			if (!wrapper?.id || !wrapper.equipped || Number(wrapper.quantity ?? 1) <= 0) return false;
 			const item = wrapper.item;
@@ -41620,25 +42433,61 @@ class CharacterSheetState {
 			const isWeaponUsable = !!weaponFilter
 				&& this._isWeaponItem(item)
 				&& this._isWeaponProficient(item);
-			return isAuthorizedEntityUsable || isWeaponUsable;
+			const classification = generatedOwnerKey ? this.classifyGeneratedFeatureItem(wrapper) : null;
+			const isGeneratedFeatureUsable = !!generatedOwnerKey
+				&& classification?.status === "valid"
+				&& classification.ownerKey === generatedOwnerKey
+				&& (!generatedItemKinds.size || generatedItemKinds.has(CharacterSheetState._getGeneratedFeatureItemKind(item)))
+				&& (!generatedLifecycleStates.size
+					|| generatedLifecycleStates.has(String(classification.provenance?.lifecycle?.state || "").toLowerCase()));
+			return isAuthorizedEntityUsable || isWeaponUsable || isGeneratedFeatureUsable;
 		});
 	}
 
 	getSpellCastFocusReference (wrapper) {
 		if (!wrapper?.id || !wrapper.item?.name || !wrapper.item?.source) return null;
-		return {
+		const classification = this.classifyGeneratedFeatureItem(wrapper);
+		const reference = {
 			inventoryItemId: wrapper.id,
 			itemUid: `${wrapper.item.name}|${wrapper.item.source}`,
 			name: wrapper.item.name,
 			source: wrapper.item.source,
 		};
+		if (classification.status === "valid") {
+			reference.generatedFeatureItem = {
+				generatedItemId: classification.generatedItemId,
+				owner: classification.owner,
+				planUid: classification.provenance?.catalog?.plan?.selection?.planUid || null,
+				catalogItemUid: classification.provenance?.catalog?.resolvedItem?.itemUid || null,
+				creationReceiptId: classification.provenance?.creation?.receiptId || null,
+			};
+		}
+		return reference;
 	}
 
 	resolveSpellCastFocusReference (reference) {
 		if (!reference?.inventoryItemId || !reference.itemUid) return null;
 		const wrapper = (this._data.inventory || []).find(it => it.id === reference.inventoryItemId);
 		if (!wrapper?.item?.name || !wrapper.item?.source) return null;
-		return `${wrapper.item.name}|${wrapper.item.source}` === reference.itemUid ? wrapper : null;
+		if (`${wrapper.item.name}|${wrapper.item.source}` !== reference.itemUid) return null;
+		if (reference.generatedFeatureItem) {
+			const classification = this.classifyGeneratedFeatureItem(wrapper);
+			if (classification.status !== "valid") return null;
+			if (classification.generatedItemId !== reference.generatedFeatureItem.generatedItemId) return null;
+			if (
+				CharacterSheetState._getGeneratedFeatureItemOwnerKey(classification.owner) !==
+				CharacterSheetState._getGeneratedFeatureItemOwnerKey(reference.generatedFeatureItem.owner)
+			) return null;
+			if (
+				(classification.provenance?.catalog?.resolvedItem?.itemUid || null) !==
+				(reference.generatedFeatureItem.catalogItemUid || null)
+			) return null;
+			if (
+				(classification.provenance?.creation?.receiptId || null) !==
+				(reference.generatedFeatureItem.creationReceiptId || null)
+			) return null;
+		}
+		return wrapper;
 	}
 
 	resolveCommittedSpellCastReceiptFocus (receipt) {

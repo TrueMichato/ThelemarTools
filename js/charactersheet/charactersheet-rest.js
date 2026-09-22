@@ -951,6 +951,8 @@ class CharacterSheetRest {
 		if (temporalMasteryAge) modalInner.append(temporalMasteryAge.section);
 		const adventurersAtlas = this._buildAdventurersAtlasLongRestSection();
 		if (adventurersAtlas) modalInner.append(adventurersAtlas.section);
+		const replicateMagicItemProduction = this._buildEfaReplicateMagicItemProductionSection();
+		if (replicateMagicItemProduction) modalInner.append(replicateMagicItemProduction.section);
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		const syncValidity = () => {
@@ -1077,6 +1079,7 @@ class CharacterSheetRest {
 			const temporalAgeChanged = temporalMasteryAge?.apply() || false;
 			const armorModelOutcome = armorModelSwitch?.apply() || null;
 			const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
+			const replicateMagicItemResult = this._commitEfaReplicateMagicItemProduction(replicateMagicItemProduction);
 
 			// Save changes
 			this._page.saveCharacter();
@@ -1091,6 +1094,24 @@ class CharacterSheetRest {
 			if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
 			if (spellMasteryChanged) message += ` Spell Mastery changed to ${spellMasteryChanged}.`;
 			if (temporalAgeChanged) message += ` Temporal Mastery changed age to ${temporalAgeChanged}.`;
+			if (replicateMagicItemResult?.ok && replicateMagicItemResult.code === "replicate-production-committed") {
+				message += ` Created ${replicateMagicItemResult.created.length} replicated item${replicateMagicItemResult.created.length === 1 ? "" : "s"}.`;
+				if (replicateMagicItemResult.evicted.length) {
+					message += ` Removed ${replicateMagicItemResult.evicted.length} oldest replicated item${replicateMagicItemResult.evicted.length === 1 ? "" : "s"} to stay within capacity.`;
+				}
+				const failedAttunements = replicateMagicItemResult.attunement.filter(result =>
+					["requirements-failed", "cap-reached"].includes(result.status),
+				);
+				if (failedAttunements.length) {
+					message += ` ${failedAttunements.length} requested attunement${failedAttunements.length === 1 ? "" : "s"} could not be completed; the item${failedAttunements.length === 1 ? " was" : "s were"} still created.`;
+				}
+			} else if (
+				replicateMagicItemResult
+				&& !replicateMagicItemResult.ok
+				&& replicateMagicItemProduction?.getRequest().selections.length
+			) {
+				message += ` Replicate Magic Item made no inventory changes: ${replicateMagicItemResult.message || "the production choices could not be resolved"}.`;
+			}
 			if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
 			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
@@ -1359,6 +1380,186 @@ class CharacterSheetRest {
 				queueMicrotask(() => (rows[0]?.input || cbIncludeSelf).focus());
 			},
 		};
+	}
+
+	_buildEfaReplicateMagicItemProductionSection () {
+		const production = this._state.getEfaReplicateMagicItemProductionOptions?.();
+		if (!production || production.classLevel < 2 || production.maxCreatedItems < 1) return null;
+
+		const section = e_({
+			tag: "fieldset",
+			clazz: "charsheet__rest-section charsheet__replicate-rest",
+		});
+		const title = e_({tag: "legend", clazz: "charsheet__rest-section-title", txt: "Replicate Magic Item — Optional Production"});
+		const currentCount = this._state.getGeneratedFeatureItemRows?.(CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER)?.length || 0;
+		const summary = e_({
+			tag: "p",
+			clazz: "ve-muted ve-small mb-2",
+			txt: `Create up to ${production.maxCreatedItems} items from different known plans. You currently have ${currentCount}/${production.maxCreatedItems}. Leaving every row blank skips production without affecting the rest.`,
+		});
+		const rowsContainer = e_({tag: "div", clazz: "charsheet__replicate-rest-rows"});
+		const status = e_({tag: "div", clazz: "ve-small charsheet__replicate-rest-status"});
+		status.setAttribute("aria-live", "polite");
+		status.setAttribute("role", "status");
+		section.append(title, summary, rowsContainer, status);
+
+		if (!production.available) {
+			status.textContent = production.unavailableReason || "Replicate Magic Item production is unavailable.";
+			status.classList.add("text-warning");
+			return {
+				section,
+				rows: [],
+				getRequest: () => ({selections: []}),
+				getValidation: () => ({isValid: true, issues: []}),
+				onChange: () => {},
+			};
+		}
+
+		const planBySlot = new Map(production.plans.map(plan => [String(plan.plan?.slotId), plan]));
+		const rows = [];
+		let notifyChange = () => {};
+		const appendOption = (select, {value = "", label, disabled = false} = {}) => {
+			const option = e_({tag: "option", txt: label});
+			option.value = value;
+			option.disabled = disabled;
+			select.append(option);
+			return option;
+		};
+		const clearSelect = select => {
+			select.innerHTML = "";
+			if (Array.isArray(select._children)) select._children.length = 0;
+		};
+		const getSelectedOption = row => {
+			const plan = planBySlot.get(String(row.planSelect.value || ""));
+			if (!plan?.ok) return null;
+			return plan.options.find(option => option.itemUid === row.itemSelect.value) || null;
+		};
+
+		const renderValidation = () => {
+			const issues = [];
+			const selectedSlots = rows.map(row => row.planSelect.value).filter(Boolean);
+			if (new Set(selectedSlots).size !== selectedSlots.length) issues.push("Each produced item must use a different known plan.");
+			for (const row of rows) {
+				if (!row.planSelect.value) continue;
+				const plan = planBySlot.get(String(row.planSelect.value));
+				if (!plan?.ok) issues.push(`${plan?.plan?.selection?.displayName || plan?.plan?.selection?.name || "A selected plan"} is unavailable in the item catalog.`);
+				else if (!getSelectedOption(row)) issues.push(`Choose the specific item for ${plan.plan.selection.displayName || plan.plan.selection.name}.`);
+			}
+			status.textContent = issues.length
+				? `${issues.join(" ")} The long rest will still finish, but unresolved production makes no inventory changes.`
+				: selectedSlots.length
+					? `${selectedSlots.length} item${selectedSlots.length === 1 ? "" : "s"} will be created when the rest finishes.`
+					: "No production selected. The long rest will finish normally.";
+			status.classList.toggle("text-warning", !!issues.length);
+			status.classList.toggle("text-success", !issues.length && !!selectedSlots.length);
+			notifyChange();
+			return {isValid: !issues.length, issues};
+		};
+
+		for (let index = 0; index < production.maxCreatedItems; index++) {
+			const rowId = `efa-replicate-rest-${index + 1}`;
+			const row = e_({tag: "div", clazz: "charsheet__replicate-rest-row"});
+			const rowLabel = e_({tag: "div", clazz: "charsheet__replicate-rest-row-label", txt: `Item ${index + 1}`});
+			const planLabel = e_({tag: "label", clazz: "charsheet__replicate-rest-field"});
+			planLabel.setAttribute("for", `${rowId}-plan`);
+			planLabel.append(e_({tag: "span", clazz: "ve-small ve-bold", txt: "Known plan"}));
+			const planSelect = e_({tag: "select", clazz: "form-control input-xs"});
+			planSelect.id = `${rowId}-plan`;
+			appendOption(planSelect, {label: "No item"});
+			for (const plan of production.plans) {
+				appendOption(planSelect, {
+					value: String(plan.plan?.slotId || ""),
+					label: plan.ok
+						? (plan.plan.selection.displayName || plan.plan.selection.name)
+						: `${plan.plan?.selection?.displayName || plan.plan?.selection?.name || "Unavailable plan"} — unavailable`,
+					disabled: !plan.ok,
+				});
+			}
+			planLabel.append(planSelect);
+
+			const itemLabel = e_({tag: "label", clazz: "charsheet__replicate-rest-field"});
+			itemLabel.setAttribute("for", `${rowId}-item`);
+			itemLabel.append(e_({tag: "span", clazz: "ve-small ve-bold", txt: "Created item"}));
+			const itemSelect = e_({tag: "select", clazz: "form-control input-xs"});
+			itemSelect.id = `${rowId}-item`;
+			itemSelect.disabled = true;
+			appendOption(itemSelect, {label: "Choose a plan first"});
+			itemLabel.append(itemSelect);
+
+			const attuneLabel = e_({tag: "label", clazz: "charsheet__rest-option charsheet__replicate-rest-attune"});
+			const attune = e_({tag: "input", type: "checkbox"});
+			attune.disabled = true;
+			attuneLabel.append(attune, e_({tag: "span", txt: "Attune immediately if possible"}));
+			row.append(rowLabel, planLabel, itemLabel, attuneLabel);
+			rowsContainer.append(row);
+
+			const rowState = {row, planSelect, itemSelect, attune};
+			rows.push(rowState);
+			const updatePlan = () => {
+				clearSelect(itemSelect);
+				const plan = planBySlot.get(String(planSelect.value || ""));
+				if (!plan?.ok) {
+					itemSelect.disabled = true;
+					appendOption(itemSelect, {label: planSelect.value ? "Plan unavailable" : "Choose a plan first"});
+					attune.checked = false;
+					attune.disabled = true;
+					renderValidation();
+					return;
+				}
+				if (plan.options.length === 1) {
+					appendOption(itemSelect, {
+						value: plan.options[0].itemUid,
+						label: `${plan.options[0].name} (${plan.options[0].source})`,
+					});
+					itemSelect.value = plan.options[0].itemUid;
+					itemSelect.disabled = true;
+				} else {
+					appendOption(itemSelect, {label: "Choose a specific item"});
+					for (const option of plan.options) {
+						appendOption(itemSelect, {
+							value: option.itemUid,
+							label: `${option.name} (${option.source})`,
+						});
+					}
+					itemSelect.value = "";
+					itemSelect.disabled = false;
+				}
+				const selected = getSelectedOption(rowState);
+				attune.disabled = !selected?.requiresAttunement;
+				if (attune.disabled) attune.checked = false;
+				renderValidation();
+			};
+			planSelect.onChange(updatePlan);
+			itemSelect.onChange(() => {
+				const selected = getSelectedOption(rowState);
+				attune.disabled = !selected?.requiresAttunement;
+				if (attune.disabled) attune.checked = false;
+				renderValidation();
+			});
+			attune.onChange(renderValidation);
+		}
+		renderValidation();
+
+		return {
+			section,
+			rows,
+			getRequest: () => ({
+				selections: rows
+					.filter(row => row.planSelect.value)
+					.map(row => ({
+						slotId: row.planSelect.value,
+						resolvedItemUid: row.itemSelect.value || null,
+						attune: !!row.attune.checked,
+					})),
+			}),
+			getValidation: renderValidation,
+			onChange: fn => { notifyChange = typeof fn === "function" ? fn : () => {}; },
+		};
+	}
+
+	_commitEfaReplicateMagicItemProduction (production) {
+		if (!production) return null;
+		return this._state.commitEfaReplicateMagicItemsAtLongRest(production.getRequest());
 	}
 
 	_buildTemporalMasteryAgeSection () {

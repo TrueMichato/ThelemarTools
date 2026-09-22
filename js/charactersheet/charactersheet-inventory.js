@@ -7220,6 +7220,25 @@ class CharacterSheetInventory {
 		const vcSpellLabels = isVariantComponent ? this._getVariantComponentSpellLabels(item) : [];
 		const canOpenPack = !!this._getEffectivePackContents(item)?.length;
 		const packProvenanceName = item._fromPack ? item._fromPack.split("|")[0] : "";
+		const generatedClassification = this._state.classifyGeneratedFeatureItem?.(item) || {status: "ordinary", reason: "unsupported"};
+		const hasGeneratedMarker = item._isGeneratedFeatureItem != null
+			|| item._generatedItemId != null
+			|| item._generatedItemProvenance != null;
+		const generatedProvenance = generatedClassification.status === "valid"
+			? generatedClassification.provenance
+			: null;
+		const generatedPlan = generatedProvenance?.catalog?.plan?.selection || null;
+		const generatedOrder = generatedProvenance?.creation?.order || null;
+		const generatedRepairRequired = hasGeneratedMarker && (
+			generatedClassification.status !== "valid"
+			|| generatedProvenance?.lifecycle?.state === "unresolved"
+		);
+		const generatedFeatureLabel = generatedProvenance?.metadata?.sourceFeatureUid
+			? String(generatedProvenance.metadata.sourceFeatureUid).split("|")[0]
+			: "Generated feature item";
+		const generatedFeatureSource = generatedProvenance?.metadata?.sourceFeatureUid
+			? String(generatedProvenance.metadata.sourceFeatureUid).split("|").at(-1)
+			: null;
 
 		const itemNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
@@ -7270,6 +7289,10 @@ class CharacterSheetInventory {
 						</span>
 						<span class="charsheet__item-meta">
 							${typeTag ? `<span class="badge badge-secondary ve-small">${typeTag}</span>` : ""}
+							${generatedProvenance ? `<span class="badge badge-warning ve-small" title="Temporary item created by ${generatedFeatureLabel.replace(/"/g, "&quot;")}${generatedFeatureSource ? ` (${generatedFeatureSource.replace(/"/g, "&quot;")})` : ""}">⌛ Temporary</span>` : ""}
+							${generatedPlan ? `<span class="badge badge-info ve-small" title="Known plan: ${String(generatedPlan.name || generatedPlan.displayName || "").replace(/"/g, "&quot;")} (${String(generatedPlan.source || "").replace(/"/g, "&quot;")})">Plan: ${String(generatedPlan.displayName || generatedPlan.name || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>` : ""}
+							${generatedOrder ? `<span class="ve-muted ve-small" title="Stable generated-item creation order">Created #${generatedOrder}</span>` : ""}
+							${generatedRepairRequired ? `<span class="badge badge-danger ve-small" title="Generated-item provenance or catalog resolution needs repair. The item remains in inventory; edit, delete, or restore its exact catalog source.">Repair required</span>` : ""}
 							${isVariantComponent ? `<span class="badge badge-info ve-small" title="Variant Spell Component — can enhance matching spells when cast">🧪 Component</span>` : ""}
 							${isArtifact ? `<span class="badge badge-danger ve-small" title="Artifact">⚗️ Artifact</span>` : item.rarity && !["none", "unknown", "unknown (magic)", "varies"].includes(item.rarity.toLowerCase()) ? `<span class="badge badge-info ve-small">${item.rarity.toTitleCase()}</span>` : ""}
 							${item.weight ? `<span class="ve-muted ve-small">${(item.weight * item.quantity).toFixed(1)} lb.</span>` : ""}

@@ -15084,6 +15084,50 @@ body.has-quickbuild-overlay .toast__container {
 	cursor: not-allowed;
 }
 
+.charsheet__replicate-rest-rows {
+	display: grid;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__replicate-rest-row {
+	display: grid;
+	grid-template-columns: minmax(4rem, 0.45fr) minmax(10rem, 1fr) minmax(12rem, 1.25fr) minmax(12rem, auto);
+	gap: var(--cs-space-sm, 0.5rem);
+	align-items: end;
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.1));
+	border: 1px solid var(--cs-border, rgba(99, 102, 241, 0.1));
+	border-radius: var(--cs-radius-md, 10px);
+}
+
+.charsheet__replicate-rest-row-label {
+	align-self: center;
+	font-weight: 700;
+}
+
+.charsheet__replicate-rest-field {
+	display: grid;
+	gap: var(--cs-space-xs, 0.25rem);
+	margin: 0;
+}
+
+.charsheet__replicate-rest-attune {
+	margin: 0;
+	min-height: 2rem;
+}
+
+.charsheet__replicate-rest-status {
+	min-height: 1.25rem;
+	margin-top: var(--cs-space-sm, 0.5rem);
+}
+
+@media (max-width: 700px) {
+	.charsheet__replicate-rest-row {
+		grid-template-columns: 1fr;
+		align-items: stretch;
+	}
+}
+
 /* Combat Tab Resources and States */
 /* Resources flow into a responsive grid so the section stays short and every
    resource (plus the full-width Sneak Attack / weapon-rider blocks appended

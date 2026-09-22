@@ -12,6 +12,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
 - Custom Abilities (data structure, effect routing, reapply on load)
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
+- Generated Feature Items and EFA Replicate Magic Item
 - Stable-Key Per-Turn Receipts
 - Committed Feature Uses and EFA Flash of Genius
 - RHW Reanimator R2a State and Ownership
@@ -41,6 +42,128 @@ standing flat-damage line. Chalice storage uses
 `getGemstoneSpellStorage`/`storeGemstoneSpell`/`castGemstoneStoredSpell`/
 `removeGemstoneStoredSpell`; its two-level capacity is gem-scoped and persists
 across unsocket/resocket.
+
+## Generated Feature Items and EFA Replicate Magic Item
+
+Generated items remain ordinary inventory rows with exact versioned provenance;
+there is no feature-specific parallel inventory. Use the existing public
+surface:
+
+```javascript
+state.createGeneratedFeatureItem({
+    item,
+    owner,       // exact featureUid/classUid/subclassUid
+    metadata,
+    catalog,     // exact plan selection + resolved catalog item
+    creation,    // stable order/receipt/event/batch
+    lifecycle,   // versioned state/callback metadata
+    extensions,
+    equipped,
+    attuned,
+});
+state.classifyGeneratedFeatureItem(itemOrWrapper);
+state.getGeneratedFeatureItemRows(owner);
+state.removeGeneratedFeatureItemsByOwner(owner);
+state.getGeneratedFeatureItemManagementRows();
+```
+
+Every generated row is custom, quantity 1, and has a unique wrapper id and
+`_generatedItemId`, so it never stacks with ordinary or generated rows.
+`replaceItem`, save/export/import, containers, notes, favorites, equipment,
+attunement, charges, item effects, attacks, and item powers continue to use
+normal inventory behavior. Removal goes through `removeItem`; deleting a
+generated container therefore spills its surviving contents normally.
+
+The persisted `_generatedItemProvenance` shape is:
+
+```javascript
+{
+    version: 1,
+    owner: {featureUid, classUid, subclassUid},
+    metadata: {sourceFeatureUid?, temporary?, ...},
+    catalog: {
+        plan: {slotId, acquisitionLevel?, lineage?, selection},
+        resolvedItem: {itemUid, name, source, variantName?, baseItem?, category?},
+    } | null,
+    creation: {order, receiptId, event, batchId},
+    lifecycle: {
+        version: 1,
+        state: "active" | "unresolved",
+        deathExpiryDaysRemaining: null,
+        deathExpiryAssignedReceiptId: null,
+        callbacks: {},
+        metadata: {},
+    },
+    extensions: [],
+}
+```
+
+Load migration only upgrades rows that already carry valid exact generated
+ownership. It assigns missing creation/lifecycle defaults idempotently and
+never claims name-only legacy items. Unsupported provenance/lifecycle
+versions, duplicate generated ids, malformed owners, and missing/ambiguous
+catalog identities stay in inventory and surface through
+`getGeneratedFeatureItemManagementRows()` plus the inventory's **Repair
+required** badge.
+
+EFA Replicate Magic Item uses exact owner
+`Replicate Magic Item|Artificer|EFA|2` / `Artificer|EFA`. Its production APIs
+are:
+
+```javascript
+state.getEfaReplicateMagicItemProductionOptions();
+state.commitEfaReplicateMagicItemsAtLongRest({selections, extensions?});
+state.getEfaReplicateMagicItemLifecycleDescriptors({extensions?});
+state.getGeneratedFeatureItemCapacitySnapshot({owner, rows?, descriptors});
+state.commitGeneratedFeatureItemPlanLineage({owner, removedPlan, slotId?});
+state.reconcileEfaReplicateMagicItems({reason?});
+```
+
+Direct plans resolve one exact source-qualified catalog entity. A fixed generic
+variant such as `+1 Weapon|XDMG` resolves the enhanced specific variants whose
+`_variantName` and variant source match; the player must choose one exact
+specific item. Missing or ambiguous resolution fails before inventory
+mutation.
+
+Long-rest production is optional and atomic. It requires equipped
+`Tinker's Tools|XPHB`, accepts at most the EFA simultaneous-created-item
+maximum, and requires a different known plan for every item in the batch. A
+blank/cancelled or unresolved production request does not mutate inventory;
+the surrounding long rest still commits. When the cap would be exceeded, the
+oldest exact-owner rows are evicted by persisted creation order. Immediate
+self-attunement is optional: requirement/cap failure is reported but does not
+cancel a valid creation.
+
+Capacity extensions use the same structured descriptor path as the base cap.
+Descriptors declare exact allowed owners, allowed item kinds, optional
+category/generated predicates, lifecycle callback metadata, and extension
+metadata. This is the reusable seam for later Experimental Elixir, Armorer,
+and Reanimator consumers; those consumers are not registered by the base
+Replicate implementation.
+
+Committed M2 plan replacement calls the generic plan-lineage hook; class/source
+loss reconciles only the exact EFA owner. Equipped live Replicate-generated
+Wands and Weapons are additional legal focuses for exact `Artificer|EFA`
+casting. Spell-cast focus references preserve wrapper id, catalog item UID,
+generated id, exact owner, and creation receipt.
+
+**Operate-mode interaction brief.** The audience is a player finishing a long
+rest under table-time pressure. Recovery remains the primary hierarchy;
+Replicate production is a later optional fieldset showing current/capacity,
+up to the exact cap of labelled native selects, optional attunement, and a live
+status message. Blank rows mean "skip." Duplicate plans, unavailable catalog
+rows, and missing specific variants explain that the rest will still finish
+while production remains non-mutating. The controls use keyboard-native
+selects/checkboxes, fieldset/legend grouping, explicit labels, an `aria-live`
+status, existing Rest modal styling, and a single-column mobile layout.
+Anti-goals are a nested modal, forced creation, Replicate-only inventory,
+long-rest expiry, or subclass-specific mechanics.
+
+Base Replicate rows deliberately do not expire on long rest. Death countdown
+assignment and explicit lifecycle-day advancement are reserved for the
+follow-up milestone; passive death/HP reads must remain mutation-free, and a
+pending zero-HP intervention must defer any future death finalization until
+the intervention is cleared.
 
 ## Stable-Key Per-Turn Receipts
 

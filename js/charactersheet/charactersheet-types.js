@@ -469,6 +469,30 @@ void globalThis;
  */
 
 /**
+ * Versioned exact provenance carried by a generated inventory item's nested
+ * item payload. Generated rows stay in the ordinary inventory collection.
+ *
+ * @typedef {object} GeneratedFeatureItemProvenance
+ * @property {1} version
+ * @property {{featureUid: string, classUid: string, subclassUid: string|null}} owner
+ * @property {Object<string, *>} metadata
+ * @property {{
+ *   plan: {slotId: string|null, acquisitionLevel?: number, lineage?: Array<*>, selection: ArtificerPlanSelection},
+ *   resolvedItem: {itemUid: string, name: string, source: SourceCode, variantName?: string|null, baseItem?: string|null, category?: string|null}
+ * }|null} catalog
+ * @property {{order: number, receiptId: string, event: string|null, batchId: string|null}} creation
+ * @property {{
+ *   version: 1,
+ *   state: "active"|"unresolved",
+ *   deathExpiryDaysRemaining: number|null,
+ *   deathExpiryAssignedReceiptId: string|null,
+ *   callbacks: Object<string, string>,
+ *   metadata: Object<string, *>
+ * }} lifecycle
+ * @property {Array<Object<string, *>>} extensions
+ */
+
+/**
  * Exact Replicate Magic Item plan identity. `itemUid`/`planUid` identify the
  * plan; they are not inventory wrapper IDs.
  *
