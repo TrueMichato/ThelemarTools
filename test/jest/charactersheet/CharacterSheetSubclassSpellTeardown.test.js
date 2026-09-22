@@ -152,12 +152,23 @@ describe("state-level subclass spell teardown", () => {
 		for (const spell of getCartographerSpells(loaded)) {
 			expect(spell.subclassSpellGrantOwners).toEqual([foreignOwner]);
 			expect(spell.subclassSpellGrantOriginalMetadata).toEqual({
-				present: ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"],
+				present: [
+					"alwaysPrepared",
+					"prepared",
+					"sourceFeature",
+					"sourceClass",
+					"sourceClassSource",
+					"sourceSubclass",
+					"sourceSubclassSource",
+				],
 				values: {
 					alwaysPrepared: false,
 					prepared: false,
 					sourceFeature: "Prepared Spells",
 					sourceClass: "Artificer",
+					sourceClassSource: null,
+					sourceSubclass: null,
+					sourceSubclassSource: null,
 				},
 			});
 			expect(spell).toMatchObject({
