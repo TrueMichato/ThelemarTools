@@ -16,6 +16,8 @@ const CharacterSheetRespec = globalThis.CharacterSheetRespec;
 const CharacterSheetRespecEngine = globalThis.CharacterSheetRespecEngine;
 let CharacterSheetPage;
 const savedWindow = globalThis.window;
+const savedDataUtil = globalThis.DataUtil;
+const dataUtilLoadJSON = jest.fn();
 
 beforeAll(async () => {
 	globalThis.window = {
@@ -23,12 +25,18 @@ beforeAll(async () => {
 		location: {search: ""},
 		matchMedia: () => ({matches: false, addEventListener: () => {}}),
 	};
+	globalThis.DataUtil = {
+		...(savedDataUtil || {}),
+		loadJSON: dataUtilLoadJSON,
+	};
 	await import("../../../js/charactersheet/charactersheet.js");
 	CharacterSheetPage = globalThis.CharacterSheetPage;
 });
 
 afterAll(() => {
 	globalThis.window = savedWindow;
+	if (savedDataUtil === undefined) delete globalThis.DataUtil;
+	else globalThis.DataUtil = savedDataUtil;
 });
 
 const artificerData = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
@@ -371,30 +379,31 @@ describe("EFA Artillerist Tools of the Trade", () => {
 	test("resolves a shipped value-less recipe through CharacterSheetPage.getItems and applies EFA time", async () => {
 		const craftingData = JSON.parse(fs.readFileSync("data/crafting.json", "utf8"));
 		const efa = makeArtilleristState({source: "EFA", level: 3});
+		const tce = makeArtilleristState({source: "TCE", level: 3});
 		const page = Object.create(CharacterSheetPage.prototype);
 		page._state = efa;
 		page._itemsData = [];
 		page._craftingMaterialsBrewData = [];
 		page._pCraftingCatalog = null;
-		const originalDataUtil = globalThis.DataUtil;
-		globalThis.DataUtil = {loadJSON: jest.fn().mockResolvedValue(craftingData)};
+		dataUtilLoadJSON.mockResolvedValueOnce(craftingData);
 
-		try {
-			const catalog = await page.pGetCraftingCatalog();
-			const recipe = catalog.recipes.find(it => it.itemUid === "+1 dragon wand|hhhvi");
-			const item = page.getItems().find(it =>
-				it.name.toLowerCase() === "+1 dragon wand"
-				&& it.source.toLowerCase() === "hhhvi");
+		const catalog = await page.pGetCraftingCatalog();
+		const recipe = catalog.recipes.find(it => it.itemUid === "+1 dragon wand|hhhvi");
+		const item = page.getItems().find(it =>
+			it.name.toLowerCase() === "+1 dragon wand"
+			&& it.source.toLowerCase() === "hhhvi");
+		const baseWorkweeks = CharacterSheetCrafting.getCraftingWorkweeks(recipe, {items: page.getItems()});
+		const efaWorkweeks = CharacterSheetCrafting.getCraftingWorkweeks(recipe, {state: efa, items: page.getItems()});
+		const tceWorkweeks = CharacterSheetCrafting.getCraftingWorkweeks(recipe, {state: tce, items: page.getItems()});
 
-			expect(recipe.value).toBeUndefined();
-			expect(item).toEqual(expect.objectContaining({type: "WD|DMG"}));
-			expect(CharacterSheetCrafting.getCraftingWorkweeks(recipe, {
-				state: efa,
-				items: page.getItems(),
-			})).toBe(5);
-		} finally {
-			globalThis.DataUtil = originalDataUtil;
-		}
+		expect(dataUtilLoadJSON).toHaveBeenCalledTimes(1);
+		expect(dataUtilLoadJSON).toHaveBeenCalledWith(expect.stringMatching(/data\/crafting\.json$/));
+		expect(recipe.value).toBeUndefined();
+		expect(recipe.resultItem).toEqual(expect.objectContaining({type: "WD|DMG", rarity: "rare"}));
+		expect(item).toEqual(expect.objectContaining({type: "WD|DMG", rarity: "rare"}));
+		expect(baseWorkweeks).toBe(10);
+		expect(efaWorkweeks / baseWorkweeks).toBe(0.5);
+		expect(tceWorkweeks / baseWorkweeks).toBe(1);
 	});
 
 	test("completes a real Respec transaction into EFA Artillerist with a persisted replacement tool", async () => {
