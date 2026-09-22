@@ -531,6 +531,39 @@ save/load and `combatRound` changes, and reset only through
 dismissal/removal, source loss, and Respec Apply without pruning Battle Smith,
 TCE, foreign, or malformed six-part collision state. UI, Play Mode, and E2E
 behavior remain later milestones.
+
+R5a adds the descriptor-driven Companions-tab Manager foundation. Every
+registry-backed feature companion is summarized from
+`CharacterSheetCompanionRules` plus its detached `scaling.resolved` snapshot:
+exact source-qualified identity, lifecycle state, AC/HP/Hit Dice,
+movement/senses, immutable modifications, creation tool/payment provenance,
+and read-only Action/Reaction availability. Owner, creature source, resolved
+identity, and modification-receipt mismatches render as explicit invalid/setup
+diagnostics; the UI never name-adopts a same-label or wrong-source record.
+
+RHW creation remains a distinct R3 transaction. It does **not** use Battle
+Smith's persisted `featureCompanionSetups` record or
+`completeFeatureCompanionSetup()`. The Manager reads the live
+`getFeatureCompanionCreationBoundary()` result and creates directly only when
+tool, payment, and modification choices are deterministic. Otherwise one
+atomic review modal contains:
+
+- the boundary's equipped, proficient XPHB Artisan's Tool references;
+- free creation versus available spell/pact slots;
+- the exact versioned Strange/Macabre/Superior modification transaction;
+- optional appearance text; and
+- a final transaction review.
+
+Confirmation re-reads the boundary with the completed payment and setup-choice
+payload before calling `pCreateFeatureCompanion()`. Cancel, stale validation,
+and transaction failure do not save or re-render and report through an ARIA
+live region. `CharacterSheetModal` owns focus trapping and restoration.
+
+R5a exposes RHW operation metadata as status only. Reanimated Companion command
+execution, Dreadful Swipe, Death Burst/Lightning Absorption, modification
+riders, and Play Mode controls remain deferred to R4b/R5b/R6. Existing EFA/TCE
+Battle Smith setup and supported Steel Defender transactions remain unchanged.
+
 Other feature companions still do not gain acquisition or lifecycle behavior
 unless their registry policies explicitly support it.
 

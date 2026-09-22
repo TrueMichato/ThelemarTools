@@ -16604,6 +16604,248 @@ body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary.disabled {
 	cursor: progress;
 }
 
+.charsheet__feature-companion-manager,
+.charsheet__feature-companion-create {
+	margin-bottom: var(--cs-space-md, 0.75rem);
+	padding: var(--cs-space-md, 0.75rem);
+	background: var(--cs-bg-base, var(--rgb-bg));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 10px);
+	color: var(--cs-text-primary, var(--rgb-font));
+}
+
+.charsheet__feature-companion-manager--dead,
+.charsheet__feature-companion-manager--invalid {
+	border-color: var(--cs-accent-ruby);
+}
+
+.charsheet__feature-companion-manager--expired {
+	border-color: var(--cs-accent-gold);
+}
+
+.charsheet__feature-companion-manager-header,
+.charsheet__feature-companion-create {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__feature-companion-manager-title {
+	margin: 0;
+	font: inherit;
+	font-size: var(--cs-text-lg, 1.125rem);
+	font-weight: 700;
+	color: var(--cs-text-primary, var(--rgb-font));
+}
+
+.charsheet__feature-companion-status {
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+	gap: 0.35rem;
+	padding: 0.2rem 0.55rem;
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-full, 999px);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.charsheet__feature-companion-status--active {
+	border-color: var(--cs-accent-emerald);
+	color: var(--cs-accent-emerald);
+	background: var(--cs-accent-emerald-light);
+}
+
+.charsheet__feature-companion-status--dead,
+.charsheet__feature-companion-status--invalid {
+	border-color: var(--cs-accent-ruby);
+	color: var(--cs-accent-ruby);
+	background: var(--cs-accent-ruby-light);
+}
+
+.charsheet__feature-companion-status--expired {
+	border-color: var(--cs-accent-gold);
+	color: var(--cs-accent-gold);
+	background: var(--cs-accent-gold-light);
+}
+
+.charsheet__feature-companion-facts {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: 1px;
+	margin-top: var(--cs-space-sm, 0.5rem);
+	overflow: hidden;
+	background: var(--cs-border-subtle, var(--cs-border, var(--rgb-border-grey)));
+	border: 1px solid var(--cs-border-subtle, var(--cs-border, var(--rgb-border-grey)));
+	border-radius: var(--cs-radius-sm);
+}
+
+.charsheet__feature-companion-facts > div {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	padding: 0.45rem 0.55rem;
+	background: var(--cs-bg-recessed, var(--cs-bg-base, var(--rgb-bg)));
+}
+
+.charsheet__feature-companion-facts span,
+.charsheet__feature-companion-label {
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--cs-text-muted, var(--rgb-font--muted));
+}
+
+.charsheet__feature-companion-facts strong {
+	margin-top: 0.1rem;
+	font-variant-numeric: tabular-nums;
+	overflow-wrap: anywhere;
+}
+
+.charsheet__feature-companion-readiness {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem 0.9rem;
+	margin-top: var(--cs-space-sm, 0.5rem);
+	padding: 0.45rem 0.55rem;
+	background: var(--cs-bg-recessed, var(--cs-bg-base, var(--rgb-bg)));
+	border: 1px solid var(--cs-border-subtle, var(--cs-border, var(--rgb-border-grey)));
+	border-radius: var(--cs-radius-sm);
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.charsheet__feature-companion-manager-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+	gap: var(--cs-space-md, 0.75rem);
+	margin-top: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__feature-companion-chips,
+.charsheet__feature-companion-choice-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-top: 0.25rem;
+}
+
+.charsheet__feature-companion-chip {
+	display: inline-flex;
+	align-items: center;
+	padding: 0.15rem 0.45rem;
+	background: var(--cs-bg-recessed, var(--cs-bg-base, var(--rgb-bg)));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-full, 999px);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 600;
+}
+
+.charsheet__feature-companion-appearance {
+	margin-top: var(--cs-space-sm, 0.5rem);
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.charsheet__feature-companion-appearance summary {
+	cursor: pointer;
+	font-weight: 700;
+}
+
+.charsheet__feature-companion-appearance > div {
+	margin-top: 0.25rem;
+	white-space: pre-wrap;
+}
+
+.charsheet__feature-companion-diagnostics {
+	margin-top: var(--cs-space-sm, 0.5rem);
+	padding: 0.45rem 0.55rem;
+	background: var(--cs-accent-ruby-light);
+	border: 1px solid var(--cs-accent-ruby);
+	border-radius: var(--cs-radius-sm);
+	color: var(--cs-text-primary, var(--rgb-font));
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.charsheet__feature-companion-diagnostics ul {
+	margin: 0.25rem 0 0;
+	padding-left: 1.25rem;
+}
+
+.charsheet__feature-companion-create > div:first-child {
+	min-width: 0;
+}
+
+.charsheet__feature-companion-create-btn {
+	flex: 0 0 auto;
+}
+
+.charsheet__feature-companion-live {
+	flex-basis: 100%;
+	min-height: 1.2em;
+	font-size: var(--cs-text-sm, 0.875rem);
+	color: var(--cs-text-secondary, var(--rgb-font--muted));
+}
+
+.charsheet__feature-companion-operations,
+.charsheet__feature-companion-review {
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-recessed, var(--cs-bg-base, var(--rgb-bg)));
+	border: 1px solid var(--cs-border-subtle, var(--cs-border, var(--rgb-border-grey)));
+	border-radius: var(--cs-radius-sm);
+}
+
+body.is-charsheet-page .ve-ui-modal__inner.ve-w-100:has(.charsheet__feature-companion-create-modal) {
+	height: auto !important;
+	max-width: 680px;
+}
+
+.charsheet__feature-companion-create-modal {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__feature-companion-create-modal fieldset {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.charsheet__feature-companion-choice {
+	display: inline-flex;
+	align-items: flex-start;
+	gap: 0.4rem;
+	padding: 0.4rem 0.55rem;
+	background: var(--cs-bg-recessed, var(--cs-bg-base, var(--rgb-bg)));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm);
+	cursor: pointer;
+}
+
+.charsheet__feature-companion-choice:focus-within {
+	outline: 2px solid var(--cs-primary);
+	outline-offset: 2px;
+}
+
+.charsheet__feature-companion-review dl {
+	display: grid;
+	gap: 0.25rem;
+	margin: 0.25rem 0 0;
+}
+
+.charsheet__feature-companion-review dl > div {
+	display: grid;
+	grid-template-columns: minmax(6rem, 0.35fr) minmax(0, 1fr);
+	gap: 0.5rem;
+}
+
+.charsheet__feature-companion-review dt,
+.charsheet__feature-companion-review dd {
+	margin: 0;
+}
+
 /* Edit Ability Scores modal: only six short rows, so opt out of the tall
    picker default above and size to content (kills ~200px of dead space).
    Rows are flat divider-separated data rows, not nested cards. */

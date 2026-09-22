@@ -1977,6 +1977,24 @@
 		flex-direction: column;
 	}
 
+	.charsheet__feature-companion-facts {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.charsheet__feature-companion-facts > div:last-child {
+		grid-column: 1 / -1;
+	}
+
+	.charsheet__feature-companion-manager-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__feature-companion-manager-header,
+	.charsheet__feature-companion-create {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
 	.charsheet__feature-companion-setup .btn-feature-companion-setup,
 	.charsheet__feature-companion-lifecycle-actions .ve-btn,
 	.charsheet__feature-companion-operation-controls .ve-btn,
@@ -2018,6 +2036,16 @@
 	.charsheet__feature-companion-shape-options label {
 		min-height: 44px;
 		padding: 0.65rem 0.75rem;
+	}
+
+	.charsheet__feature-companion-status,
+	.charsheet__feature-companion-create-btn {
+		align-self: flex-start;
+	}
+
+	.charsheet__feature-companion-review dl > div {
+		grid-template-columns: 1fr;
+		gap: 0;
 	}
 }
 

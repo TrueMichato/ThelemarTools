@@ -21,6 +21,7 @@ import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import "./charactersheet-respec-engine.js";
 import {CharacterSheetSpellPicker} from "./charactersheet-spell-picker.js";
 import {CharacterSheetProfPicker} from "./charactersheet-prof-editor.js";
+import {CharacterSheetCompanionRules} from "./charactersheet-companion-rules.js";
 import {CharacterSheetUpgrades} from "./charactersheet-upgrades.js";
 import {CharacterSheetMaterials} from "./charactersheet-materials.js";
 import {CharacterSheetPlayMode} from "./charactersheet-playmode.js";
@@ -2298,6 +2299,546 @@ class CharacterSheetPage {
 		} else {
 			JqueryUtil.doToast({type: "warning", content: "Familiar picker not available."});
 		}
+	}
+
+	static _getFeatureCompanionOwnerUid (descriptor) {
+		if (descriptor?.identity?.runtimeOwnerUid) return descriptor.identity.runtimeOwnerUid;
+		const parts = String(descriptor?.identity?.featureUid || "").split("|");
+		if (parts.length === 7) return parts.join("|");
+		if (parts.length !== 6 || !descriptor?.identity?.source) return null;
+		return [...parts, descriptor.identity.source].join("|");
+	}
+
+	_getFeatureCompanionDescriptor (companion) {
+		const featureUid = companion?.featureGrant?.uid || companion?.scaling?.featureUid;
+		return featureUid ? CharacterSheetCompanionRules.getDescriptor(featureUid) : null;
+	}
+
+	_getFeatureCompanionCreationModels () {
+		if (!this._state?.getFeatureCompanionCreationBoundary) return [];
+		return Object.values(CharacterSheetCompanionRules.getRegistry())
+			.filter(descriptor => descriptor?.creationPolicy)
+			.map(descriptor => {
+				const ownerUid = CharacterSheetPage._getFeatureCompanionOwnerUid(descriptor);
+				if (!ownerUid) return null;
+				const boundary = this._state.getFeatureCompanionCreationBoundary(ownerUid, {
+					classUid: descriptor.identity.classUid,
+					subclassUid: descriptor.identity.subclassUid,
+				});
+				if (!boundary?.available) return null;
+				const paymentOptions = CharacterSheetPage._getFeatureCompanionPaymentOptions(boundary);
+				const setupTransaction = boundary.setupChoices?.transaction || null;
+				const blockedReasons = new Set([
+					"activeCompanion",
+					"toolUnavailable",
+					"unavailablePayment",
+					"invalidFeature",
+					"invalidClass",
+					"invalidSubclass",
+					"creationUnsupported",
+					"ownerNotFound",
+				]);
+				return {
+					ownerUid,
+					descriptor,
+					boundary,
+					paymentOptions,
+					setupTransaction,
+					canAttempt: !blockedReasons.has(boundary.reason)
+						&& boundary.focus?.eligibleReferences?.length > 0
+						&& paymentOptions.length > 0,
+				};
+			})
+			.filter(Boolean);
+	}
+
+	static _getFeatureCompanionPaymentOptions (boundary) {
+		const out = [];
+		const free = boundary?.paymentOptions?.freeCreation;
+		if (free?.current > 0) {
+			out.push({
+				key: "freeCreation",
+				label: `Free creation (${free.current}/${free.max})`,
+				payment: {type: "freeCreation"},
+			});
+		}
+		for (const slot of boundary?.paymentOptions?.spellSlots || []) {
+			const isPact = slot.pool === "pact";
+			out.push({
+				key: `${isPact ? "pact" : "spell"}:${slot.slotLevel}`,
+				label: `Level ${slot.slotLevel} ${isPact ? "pact" : "spell"} slot (${slot.current}/${slot.max})`,
+				payment: {
+					type: "spellSlot",
+					pool: isPact ? "pact" : "spell",
+					slotLevel: slot.slotLevel,
+				},
+			});
+		}
+		return out;
+	}
+
+	static _buildFeatureCompanionCreationPayload ({
+		model,
+		focusReference,
+		payment,
+		selectedOptionIds = [],
+		appearance = "",
+	}) {
+		if (!model?.ownerUid || !model?.descriptor || !focusReference || !payment) {
+			throw new TypeError("Companion creation requires an exact owner, tool, and payment.");
+		}
+		const transaction = model.setupTransaction;
+		const selectedOptions = transaction
+			? selectedOptionIds.map(id => {
+				const option = transaction.options.find(candidate => candidate.id === id);
+				if (!option) throw new RangeError(`Companion creation option "${id}" is no longer available.`);
+				return MiscUtil.copyFast(option);
+			})
+			: [];
+		return {
+			featureUid: model.ownerUid,
+			classUid: model.descriptor.identity.classUid,
+			subclassUid: model.descriptor.identity.subclassUid,
+			focusReference: MiscUtil.copyFast(focusReference),
+			payment: MiscUtil.copyFast(payment),
+			setupChoices: transaction
+				? {
+					transactionId: transaction.transactionId,
+					selectedOptions,
+				}
+				: null,
+			appearance: String(appearance || "").trim() || null,
+		};
+	}
+
+	static _getFeatureCompanionCreationReasonMessage (reason, fallback = "") {
+		const messages = {
+			activeCompanion: "An active exact-owner companion already exists.",
+			actionUnavailable: "Your Magic action is unavailable right now.",
+			cancelled: "Creation was cancelled. No action, payment, or tool receipt was committed.",
+			coreCommitFailed: "Creation failed during the atomic commit. Nothing was spent.",
+			invalidChoice: "The modification choices are invalid. Review the current options.",
+			invalidChoiceName: "A modification changed. Review the current options.",
+			invalidChoiceSource: "A modification came from the wrong source. Review the current options.",
+			invalidTool: "The selected tool is no longer eligible.",
+			missingChoice: "Choose the required modifications for this generation.",
+			missingChoiceTransaction: "The modification review is stale. Reopen creation.",
+			staleChoiceTransaction: "The modification options changed. Review them again.",
+			toolUnavailable: "Equip an eligible XPHB Artisan's Tool you are proficient with.",
+			tooFewChoices: "Choose every required modification for this generation.",
+			tooManyChoices: "Choose only the required number of modifications.",
+			unavailablePayment: "No free creation, spell slot, or pact slot is currently available.",
+			unknownChoice: "A selected modification is no longer available.",
+		};
+		return messages[reason] || fallback || "Companion creation is not currently available.";
+	}
+
+	_getFeatureCompanionManagerModel (companion) {
+		const descriptor = this._getFeatureCompanionDescriptor(companion);
+		if (!descriptor) return null;
+
+		const expectedOwnerUid = CharacterSheetPage._getFeatureCompanionOwnerUid(descriptor);
+		const expectedIdentity = descriptor.identity;
+		const resolvedIdentity = companion.scaling?.resolved?.identity;
+		const diagnostics = [];
+		if (String(companion.featureGrant?.uid || "").toLowerCase() !== String(expectedOwnerUid || "").toLowerCase()) {
+			diagnostics.push("The feature owner does not match the registered source-qualified owner.");
+		}
+		if (companion.source !== expectedIdentity.source || companion.creatureSource !== expectedIdentity.source) {
+			diagnostics.push(`Expected companion source ${expectedIdentity.source}; found ${companion.source || companion.creatureSource || "none"}.`);
+		}
+		if (companion.name !== expectedIdentity.name || companion.creatureName !== expectedIdentity.name) {
+			diagnostics.push(`Expected ${expectedIdentity.name}; the stored companion identity does not match.`);
+		}
+		if (!resolvedIdentity) {
+			diagnostics.push("Resolved registry setup is missing.");
+		} else {
+			for (const key of ["companionUid", "classUid", "subclassUid"]) {
+				if (resolvedIdentity[key] !== expectedIdentity[key]) {
+					diagnostics.push(`Resolved ${key.replace(/Uid$/, " identity")} does not match the registry.`);
+				}
+			}
+		}
+
+		const modificationReceipt = companion.setup?.choices?.modifications || null;
+		if (descriptor.modifications) {
+			if (companion.scaling?.deferSetupChoices) {
+				diagnostics.push("Modification setup is deferred for this legacy generation.");
+			} else if (!modificationReceipt) {
+				diagnostics.push("The immutable modification receipt is missing.");
+			} else {
+				if (modificationReceipt.ownerUid !== expectedOwnerUid) {
+					diagnostics.push("The modification receipt belongs to a different source-qualified owner.");
+				}
+				if (modificationReceipt.rulesVersion !== descriptor.schemaVersion) {
+					diagnostics.push("The modification receipt uses a different rules version.");
+				}
+				if (
+					!Array.isArray(modificationReceipt.selectedOptionIds)
+					|| modificationReceipt.selectedOptionIds.length !== Number(modificationReceipt.requiredCount)
+				) {
+					diagnostics.push("The modification receipt has an invalid selection count.");
+				}
+			}
+		}
+
+		const lifecycleStatus = String(companion.lifecycle?.status || "").toLowerCase();
+		const isDead = lifecycleStatus === "dead" || Number(companion.hp?.current) <= 0;
+		const isExpired = ["expired", "dismissed", "inactive", "vanished"].includes(lifecycleStatus);
+		const status = diagnostics.length
+			? {key: "invalid", label: "Invalid setup", icon: "⚠️"}
+			: isDead
+				? {
+					key: "dead",
+					label: companion.lifecycle?.deathBurstEmitted ? "Dead · Death Burst emitted" : "Dead",
+					icon: "☠️",
+				}
+				: isExpired
+					? {key: "expired", label: "Expired", icon: "⌛"}
+					: {key: "active", label: "Active", icon: "●"};
+
+		const resolved = companion.scaling?.resolved || {};
+		const selectedModificationIds = modificationReceipt?.selectedOptionIds
+			|| resolved.modifications?.selected
+			|| [];
+		const modifications = selectedModificationIds.map(id =>
+			descriptor.modifications?.options?.[id]?.name || id);
+		const receipt = companion.lifecycle?.creationReceipt || null;
+		const tool = receipt?.tool
+			? `${receipt.tool.name || String(receipt.tool.itemUid || "").split("|")[0]} (${receipt.tool.source || String(receipt.tool.itemUid || "").split("|")[1] || "unknown source"})`
+			: "No creation tool receipt";
+		const payment = receipt?.payment?.type === "freeCreation"
+			? "Free creation"
+			: receipt?.payment?.type === "spellSlot"
+				? `Level ${receipt.payment.slotLevel} ${receipt.payment.pool === "pact" ? "pact" : "spell"} slot`
+				: "No creation payment receipt";
+		const senses = Array.isArray(companion.senses) && companion.senses.length
+			? companion.senses
+				.map(sense => String(sense).replace(/^[a-z]+/, match => match.toTitleCase()))
+				.join(", ")
+			: Object.entries(resolved.statistics?.senses || {})
+				.map(([sense, range]) => `${sense.toTitleCase()} ${range} ft.`)
+				.join(", ") || "—";
+		const hitDice = companion.hitDice || {};
+		const actionAvailable = status.key === "active" && !companion.turnUsage?.action;
+		const reactionAvailable = status.key === "active" && !companion.turnUsage?.reaction;
+
+		return {
+			companion,
+			descriptor,
+			expectedOwnerUid,
+			status,
+			diagnostics,
+			displayName: companion.customName
+				? `${companion.customName} — ${expectedIdentity.name}`
+				: expectedIdentity.name,
+			source: expectedIdentity.source,
+			stats: {
+				hp: `${Number(companion.hp?.current) || 0}/${Number(companion.hp?.max) || 0}`,
+				ac: companion.ac ?? resolved.statistics?.ac ?? "—",
+				hitDice: hitDice.max
+					? `${Number(hitDice.current) || 0}/${hitDice.max} ${hitDice.die || ""}`.trim()
+					: "—",
+				movement: this._getCompanionSpeedString(companion) || "—",
+				senses,
+			},
+			modifications,
+			provenance: {
+				tool,
+				payment,
+				appearance: companion.setup?.appearance || "",
+				generation: Number(companion.lifecycle?.generation) || 1,
+			},
+			readiness: {
+				action: actionAvailable ? "Available" : status.key === "active" ? "Used" : "Unavailable",
+				reaction: reactionAvailable ? "Available" : status.key === "active" ? "Used" : "Unavailable",
+			},
+			isOverviewOnly: resolved.operations?.command?.status === "deferredR4b",
+		};
+	}
+
+	_getFeatureCompanionManagerModels () {
+		return (this._state.getCompanions?.() || [])
+			.map(companion => this._getFeatureCompanionManagerModel(companion))
+			.filter(Boolean);
+	}
+
+	_getFeatureCompanionManagerHtml (model, index) {
+		const escape = CharacterSheetModal._escapeHtml;
+		const id = `charsheet-feature-companion-manager-${index}`;
+		const diagnosticsHtml = model.diagnostics.length
+			? `<div class="charsheet__feature-companion-diagnostics" role="alert">
+				<div class="bold">Source or setup mismatch</div>
+				<ul>${model.diagnostics.map(message => `<li>${escape(message)}</li>`).join("")}</ul>
+			</div>`
+			: "";
+		const modificationsHtml = model.modifications.length
+			? model.modifications.map(name => `<span class="charsheet__feature-companion-chip">${escape(name)}</span>`).join("")
+			: `<span class="ve-muted">None for this generation</span>`;
+		const appearanceHtml = model.provenance.appearance
+			? `<details class="charsheet__feature-companion-appearance">
+				<summary>Appearance</summary>
+				<div>${escape(model.provenance.appearance)}</div>
+			</details>`
+			: "";
+		return `<section class="charsheet__feature-companion-manager charsheet__feature-companion-manager--${model.status.key}"
+			data-feature-companion-owner="${escape(model.expectedOwnerUid)}"
+			aria-labelledby="${id}">
+			<header class="charsheet__feature-companion-manager-header">
+				<div>
+					<h4 id="${id}" class="charsheet__feature-companion-manager-title">${escape(model.displayName)}</h4>
+					<div class="ve-muted ve-small">${escape(model.descriptor.identity.name)} (${escape(model.source)}) · Generation ${model.provenance.generation}</div>
+				</div>
+				<span class="charsheet__feature-companion-status charsheet__feature-companion-status--${model.status.key}">
+					<span aria-hidden="true">${model.status.icon}</span> ${escape(model.status.label)}
+				</span>
+			</header>
+			<div class="charsheet__feature-companion-facts" role="group" aria-label="${escape(model.descriptor.identity.name)} statistics">
+				<div><span>HP</span><strong>${escape(model.stats.hp)}</strong></div>
+				<div><span>AC</span><strong>${escape(model.stats.ac)}</strong></div>
+				<div><span>Hit Dice</span><strong>${escape(model.stats.hitDice)}</strong></div>
+				<div><span>Movement</span><strong>${escape(model.stats.movement)}</strong></div>
+				<div><span>Senses</span><strong>${escape(model.stats.senses)}</strong></div>
+			</div>
+			<div class="charsheet__feature-companion-readiness" role="group" aria-label="Read-only turn availability">
+				<span><strong>Action:</strong> ${escape(model.readiness.action)}</span>
+				<span><strong>Reaction:</strong> ${escape(model.readiness.reaction)}</span>
+				<span class="ve-muted">Status only; use in-play controls where supported.</span>
+			</div>
+			<div class="charsheet__feature-companion-manager-grid">
+				<div>
+					<div class="charsheet__feature-companion-label">Modifications</div>
+					<div class="charsheet__feature-companion-chips">${modificationsHtml}</div>
+				</div>
+				<div>
+					<div class="charsheet__feature-companion-label">Creation provenance</div>
+					<div>${escape(model.provenance.tool)}</div>
+					<div>${escape(model.provenance.payment)}</div>
+				</div>
+			</div>
+			${appearanceHtml}
+			${diagnosticsHtml}
+		</section>`;
+	}
+
+	_getFeatureCompanionCreationSurfaceHtml (model, index) {
+		const escape = CharacterSheetModal._escapeHtml;
+		const id = `charsheet-feature-companion-create-${index}`;
+		const reason = model.canAttempt
+			? `Ready to review the current tool, payment, and ${model.setupTransaction?.requiredCount || 0} required modification choice${model.setupTransaction?.requiredCount === 1 ? "" : "s"}.`
+			: CharacterSheetPage._getFeatureCompanionCreationReasonMessage(model.boundary.reason);
+		return `<section class="charsheet__feature-companion-create" data-feature-companion-create-owner="${escape(model.ownerUid)}">
+			<div>
+				<h4 class="charsheet__feature-companion-manager-title">${escape(model.descriptor.identity.name)} (${escape(model.descriptor.identity.source)})</h4>
+				<div class="ve-small ve-muted">${escape(reason)}</div>
+			</div>
+			<button type="button" class="ve-btn ve-btn-primary charsheet__feature-companion-create-btn"
+				data-feature-companion-create="${escape(model.ownerUid)}"
+				${model.canAttempt ? "" : "disabled"}>
+				Create ${escape(model.descriptor.identity.name)}
+			</button>
+			<div id="${id}" class="charsheet__feature-companion-live" role="status" aria-live="polite"></div>
+		</section>`;
+	}
+
+	_bindFeatureCompanionCreationActions (root) {
+		root?.querySelectorAll?.("[data-feature-companion-create]").forEach(button => {
+			button.addEventListener("click", async () => {
+				const ownerUid = button.getAttribute("data-feature-companion-create");
+				const surface = button.closest("[data-feature-companion-create-owner]");
+				const status = surface?.querySelector("[role=status]");
+				await this._pCreateFeatureCompanionFromManager(ownerUid, {button, status});
+			});
+		});
+	}
+
+	async _pCreateFeatureCompanionFromManager (ownerUid, {button = null, status = null} = {}) {
+		const model = this._getFeatureCompanionCreationModels()
+			.find(candidate => candidate.ownerUid === ownerUid);
+		if (!model?.canAttempt) {
+			const message = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(model?.boundary?.reason);
+			if (status) status.textContent = message;
+			return {ok: false, committed: false, reason: model?.boundary?.reason || "featureUnavailable"};
+		}
+
+		const requiredCount = Number(model.setupTransaction?.requiredCount) || 0;
+		const requiresReview = model.boundary.focus.eligibleReferences.length !== 1
+			|| model.paymentOptions.length !== 1
+			|| requiredCount > 0;
+		let payload;
+		if (requiresReview) {
+			payload = await this._pShowFeatureCompanionCreationModal(model, {focusRestoreTarget: button});
+			if (!payload) {
+				if (status) status.textContent = "Creation cancelled. No state changed.";
+				return {ok: false, committed: false, reason: "cancelled"};
+			}
+		} else {
+			payload = CharacterSheetPage._buildFeatureCompanionCreationPayload({
+				model,
+				focusReference: model.boundary.focus.eligibleReferences[0],
+				payment: model.paymentOptions[0].payment,
+			});
+		}
+
+		if (button) {
+			button.disabled = true;
+			button.setAttribute("aria-busy", "true");
+		}
+		if (status) status.textContent = `Creating ${model.descriptor.identity.name}…`;
+		const result = await this._state.pCreateFeatureCompanion(payload);
+		if (!result?.ok || !result.committed) {
+			const message = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(result?.reason, result?.error);
+			if (status) status.textContent = message;
+			if (button) {
+				button.disabled = false;
+				button.removeAttribute("aria-busy");
+			}
+			JqueryUtil.doToast({type: "danger", content: message});
+			return result;
+		}
+
+		if (status) status.textContent = `${model.descriptor.identity.name} created.`;
+		await this.saveCharacter?.();
+		this.renderCharacter?.();
+		JqueryUtil.doToast({type: "success", content: `${model.descriptor.identity.name} created.`});
+		return result;
+	}
+
+	async _pShowFeatureCompanionCreationModal (model, {focusRestoreTarget = null} = {}) {
+		const escape = CharacterSheetModal._escapeHtml;
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: `Create ${model.descriptor.identity.name}`,
+			isMinHeight0: true,
+			isWidth100: true,
+			focusRestoreTarget,
+		});
+		const toolOptions = model.boundary.focus.eligibleReferences;
+		const transaction = model.setupTransaction;
+		const requiredCount = Number(transaction?.requiredCount) || 0;
+		const toolHtml = toolOptions.map((tool, index) =>
+			`<option value="${index}">${escape(tool.name)} (${escape(tool.source)})</option>`).join("");
+		const paymentHtml = model.paymentOptions.map((option, index) =>
+			`<label class="charsheet__feature-companion-choice">
+				<input type="radio" name="feature-companion-payment" value="${index}" ${index === 0 ? "checked" : ""}>
+				<span>${escape(option.label)}</span>
+			</label>`).join("");
+		const modificationHtml = transaction?.options?.length
+			? transaction.options.map(option =>
+				`<label class="charsheet__feature-companion-choice">
+					<input type="checkbox" data-role="creation-modification" value="${escape(option.id)}">
+					<span>${escape(option.name)} <span class="ve-muted">(${escape(option.source)})</span></span>
+				</label>`).join("")
+			: `<div class="ve-muted ve-small">No modification choice is required for this generation.</div>`;
+
+		modalInner.innerHTML = `<form class="charsheet__feature-companion-create-modal" novalidate>
+			<p class="ve-muted">Review one atomic creation transaction. Nothing is spent until Create is confirmed and the state boundary accepts the current choices.</p>
+			<label class="ve-flex-col">
+				<span class="charsheet__feature-companion-label">Eligible equipped tool</span>
+				<select class="form-control input-xs" data-role="creation-tool">${toolHtml}</select>
+			</label>
+			<fieldset>
+				<legend class="charsheet__feature-companion-label">Payment</legend>
+				<div class="charsheet__feature-companion-choice-list">${paymentHtml}</div>
+			</fieldset>
+			<fieldset>
+				<legend class="charsheet__feature-companion-label">Immutable modifications</legend>
+				<div class="ve-small ve-muted mb-2">Choose exactly ${requiredCount}. These choices belong to this generation and cannot be changed after creation.</div>
+				<div class="charsheet__feature-companion-choice-list">${modificationHtml}</div>
+			</fieldset>
+			<label class="ve-flex-col">
+				<span class="charsheet__feature-companion-label">Appearance <span class="ve-muted">(optional)</span></span>
+				<textarea class="form-control" rows="3" data-role="creation-appearance"></textarea>
+			</label>
+			<div class="charsheet__feature-companion-review" role="group" aria-label="Final creation review">
+				<div class="charsheet__feature-companion-label">Final review</div>
+				<div data-role="creation-review"></div>
+			</div>
+			<div class="charsheet__feature-companion-live" data-role="creation-status" role="status" aria-live="polite"></div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="creation-cancel">Cancel</button>
+				<button type="submit" class="ve-btn ve-btn-primary" data-role="creation-confirm">Create ${escape(model.descriptor.identity.name)}</button>
+			</div>
+		</form>`;
+
+		const form = modalInner.querySelector("form");
+		const tool = modalInner.querySelector("[data-role=creation-tool]");
+		const appearance = modalInner.querySelector("[data-role=creation-appearance]");
+		const review = modalInner.querySelector("[data-role=creation-review]");
+		const status = modalInner.querySelector("[data-role=creation-status]");
+		const confirm = modalInner.querySelector("[data-role=creation-confirm]");
+		const getSelectedIds = () => [...modalInner.querySelectorAll("[data-role=creation-modification]:checked")]
+			.map(input => input.value);
+		const getPaymentIndex = () => Number(modalInner.querySelector("[name=feature-companion-payment]:checked")?.value);
+		const updateReview = () => {
+			const selectedIds = getSelectedIds();
+			const selectedNames = selectedIds.map(id =>
+				transaction?.options.find(option => option.id === id)?.name || id);
+			const paymentOption = model.paymentOptions[getPaymentIndex()];
+			const toolReference = toolOptions[Number(tool.value)];
+			const isValid = selectedIds.length === requiredCount && !!paymentOption && !!toolReference;
+			confirm.disabled = !isValid;
+			status.textContent = isValid
+				? "Ready to create. The live boundary will validate these choices once more."
+				: `Choose exactly ${requiredCount} modification${requiredCount === 1 ? "" : "s"}.`;
+			review.innerHTML = `<dl>
+				<div><dt>Tool</dt><dd>${escape(toolReference ? `${toolReference.name} (${toolReference.source})` : "Not selected")}</dd></div>
+				<div><dt>Payment</dt><dd>${escape(paymentOption?.label || "Not selected")}</dd></div>
+				<div><dt>Modifications</dt><dd>${escape(selectedNames.join(", ") || "None")}</dd></div>
+				<div><dt>Appearance</dt><dd>${escape(appearance.value.trim() || "Not specified")}</dd></div>
+			</dl>`;
+		};
+		form.addEventListener("input", updateReview);
+		form.addEventListener("change", updateReview);
+		modalInner.querySelector("[data-role=creation-cancel]").addEventListener("click", () => doClose(null));
+		form.addEventListener("submit", event => {
+			event.preventDefault();
+			try {
+				const paymentOption = model.paymentOptions[getPaymentIndex()];
+				const focusReference = toolOptions[Number(tool.value)];
+				const payload = CharacterSheetPage._buildFeatureCompanionCreationPayload({
+					model,
+					focusReference,
+					payment: paymentOption?.payment,
+					selectedOptionIds: getSelectedIds(),
+					appearance: appearance.value,
+				});
+				const currentBoundary = this._state.getFeatureCompanionCreationBoundary(model.ownerUid, {
+					classUid: model.descriptor.identity.classUid,
+					subclassUid: model.descriptor.identity.subclassUid,
+					payment: payload.payment,
+					setupChoices: payload.setupChoices,
+				});
+				if (!currentBoundary.executable) {
+					status.textContent = CharacterSheetPage._getFeatureCompanionCreationReasonMessage(
+						currentBoundary.reason,
+						currentBoundary.setupChoices?.error,
+					);
+					return;
+				}
+				doClose({payload});
+			} catch (error) {
+				status.textContent = error instanceof Error ? error.message : String(error);
+			}
+		});
+		updateReview();
+		CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-role=creation-tool]"});
+		const [result] = await pGetResolved();
+		return result?.payload || null;
+	}
+
+	_getFeatureCompanionOperationUiModel (companion, descriptor) {
+		const resolved = companion?.scaling?.resolved;
+		const rend = resolved?.actions?.forceEmpoweredRend;
+		const repair = resolved?.actions?.repair;
+		const deflect = resolved?.reactions?.deflectAttack;
+		if (!descriptor || !rend || !repair || !deflect) return null;
+		return {
+			heading: `${descriptor.identity.name} command status`,
+			summary: `Uncommanded action: ${String(resolved.commandPolicy?.defaultAction || "dodge").toTitleCase()}; movement and reaction are autonomous.`,
+			rendLabel: rend.name || descriptor.actions?.forceEmpoweredRend?.name || "Attack",
+			repairLabel: repair.name || descriptor.actions?.repair?.name || "Repair",
+			deflectLabel: deflect.name || descriptor.reactions?.deflectAttack?.name || "Reaction",
+		};
 	}
 
 	/**
@@ -6859,6 +7400,9 @@ class CharacterSheetPage {
 
 		const companions = this.getFeatureCompanionLifecycleSurfaceCompanions();
 		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
+		const featureCompanionModels = this._getFeatureCompanionManagerModels();
+		const featureCompanionCreationModels = this._getFeatureCompanionCreationModels()
+			.filter(model => !model.boundary.activeCompanionIds?.length);
 
 		// Also render the overview indicator
 		this._renderCompanionsOverviewIndicator();
@@ -6868,14 +7412,24 @@ class CharacterSheetPage {
 		}
 		this._bindFeatureCompanionSetupActions(list);
 
+		featureCompanionModels.forEach((model, index) => {
+			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionManagerHtml(model, index));
+		});
+		featureCompanionCreationModels.forEach((model, index) => {
+			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionCreationSurfaceHtml(model, index));
+		});
+		this._bindFeatureCompanionCreationActions(list);
+
 		if (companions.length === 0) {
-			list.insertAdjacentHTML("beforeend", `
-				<div class="charsheet__companions-empty">
-					<div class="charsheet__companions-empty-icon">🦉</div>
-					<div class="ve-muted charsheet__companions-empty-title">No active companions</div>
-					<div class="ve-muted ve-small">Cast <em>Find Familiar</em> or click the button above to summon one.</div>
-				</div>
-			`);
+			if (!featureCompanionModels.length && !featureCompanionCreationModels.length) {
+				list.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__companions-empty">
+						<div class="charsheet__companions-empty-icon">🦉</div>
+						<div class="ve-muted charsheet__companions-empty-title">No active companions</div>
+						<div class="ve-muted ve-small">Cast <em>Find Familiar</em> or click the button above to summon one.</div>
+					</div>
+				`);
+			}
 			return;
 		}
 
@@ -6885,6 +7439,9 @@ class CharacterSheetPage {
 				this._renderGroupedCompanion(companion, list);
 				return;
 			}
+
+			const featureCompanionModel = this._getFeatureCompanionManagerModel(companion);
+			if (featureCompanionModel?.isOverviewOnly) return;
 
 			const lifecyclePresentation = this.getFeatureCompanionLifecyclePresentation(companion);
 			const isLifecycleBlocked = !!lifecyclePresentation && !lifecyclePresentation.isAlive;
@@ -6963,7 +7520,9 @@ class CharacterSheetPage {
 			const initiativeMod = this._state.getCompanionInitiative?.(companion.id) || 0;
 			const initiativeStr = initiativeMod >= 0 ? `+${initiativeMod}` : `${initiativeMod}`;
 
-			const isFeatureOperationCompanion = !!companion.featureGrant?.uid && !!companion.scaling?.resolved;
+			const featureCompanionDescriptor = this._getFeatureCompanionDescriptor(companion);
+			const featureOperationUi = this._getFeatureCompanionOperationUiModel(companion, featureCompanionDescriptor);
+			const isFeatureOperationCompanion = !!featureOperationUi;
 			const dodgeAvailability = isFeatureOperationCompanion
 				? this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "dodge"})
 				: null;
@@ -7037,21 +7596,21 @@ class CharacterSheetPage {
 				};
 				return `
 					<section class="charsheet__feature-companion-operations mb-2" role="region" aria-labelledby="${operationId}-heading">
-						<div class="ve-small mb-1" id="${operationId}-heading"><strong>Steel Defender operations</strong> — uncommanded action: Dodge; movement and reaction are autonomous.</div>
+						<div class="ve-small mb-1" id="${operationId}-heading"><strong>${CharacterSheetModal._escapeHtml(featureOperationUi.heading)}</strong> — ${CharacterSheetModal._escapeHtml(featureOperationUi.summary)}</div>
 						<div class="ve-muted ve-small mb-2 charsheet__feature-companion-command-status">${CharacterSheetModal._escapeHtml(commandStatus)}</div>
 						<div class="ve-muted ve-small mb-2">Rend: 5-foot reach. Repair: visible Construct or object within 5 feet. Deflect: visible attacker within 5 feet. The sheet asks you to confirm ranges it cannot verify.</div>
 						<div class="charsheet__feature-companion-operation-controls mb-2" role="group" aria-label="Steel Defender feature operations">
 							<button class="ve-btn ve-btn-xs ve-btn-danger btn-feature-companion-operation" data-operation="forceEmpoweredRend"
 								${getButtonAttrs("forceEmpoweredRend", rendAvailability)} title="${CharacterSheetModal._escapeHtml(rendAvailability?.message || "5-foot melee weapon attack using your spell attack bonus.")}">
-								⚔️ Rend
+								⚔️ ${CharacterSheetModal._escapeHtml(featureOperationUi.rendLabel)}
 							</button>
 							<button class="ve-btn ve-btn-xs ve-btn-success btn-feature-companion-operation" data-operation="repair"
 								${getButtonAttrs("repair", repairAvailability)} title="${CharacterSheetModal._escapeHtml(repairAvailability?.message || "Visible Construct or object within 5 feet; confirm range manually.")}">
-								<span class="glyphicon glyphicon-heart"></span> Repair ${repair.current}/${repair.max}
+								<span class="glyphicon glyphicon-heart"></span> ${CharacterSheetModal._escapeHtml(featureOperationUi.repairLabel)} ${repair.current}/${repair.max}
 							</button>
 							<button class="ve-btn ve-btn-xs ve-btn-default btn-feature-companion-operation" data-operation="deflectAttack"
 								${getButtonAttrs("deflectAttack", deflectAvailability)} title="${CharacterSheetModal._escapeHtml(deflectAvailability?.message || "Visible attacker within 5 feet; protects a different creature.")}">
-								↩ Deflect
+								↩ ${CharacterSheetModal._escapeHtml(featureOperationUi.deflectLabel)}
 							</button>
 						</div>
 						<div class="ve-small" id="${operationId}-status">

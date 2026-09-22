@@ -1327,6 +1327,31 @@ requires that same positive-quantity wrapper to be equipped. Long Rest is the
 only player-facing carve/re-carve surface; cancellation and failed persistence
 restore the pre-rest snapshot, and rest undo restores the prior binding.
 
+R5a adds the descriptor-driven Companions-tab Manager foundation. Registry
+companions are summarized from `CharacterSheetCompanionRules` plus their
+detached `scaling.resolved` snapshot: exact source-qualified identity,
+lifecycle state, AC/HP/Hit Dice, movement/senses, immutable modifications,
+tool/payment provenance, and read-only Action/Reaction availability. A record
+whose exact owner, creature source, resolved identity, or modification receipt
+does not match the descriptor renders an explicit invalid/setup diagnostic; do
+not hide or name-adopt it.
+
+RHW creation UI must consume, never reproduce,
+`getFeatureCompanionCreationBoundary()` and `pCreateFeatureCompanion()`. If the
+live boundary has one tool, one payment, and zero required modification
+choices, the Manager may create directly. Otherwise use one atomic review
+modal containing the boundary's eligible focus references, free/spell/pact
+payments, exact versioned modification transaction, optional appearance, and a
+final review. Re-read the boundary with the completed payload before commit.
+Cancel and validation failure never save. Use `CharacterSheetModal` for focus
+trap/restoration and a polite live region for validation/result text.
+
+Do not route this flow through Battle Smith
+`completeFeatureCompanionSetup()`: Battle Smith's appearance/locomotion/Tools
+of the Trade setup remains a distinct persisted acquisition transaction.
+Likewise, R5a Manager status must not grow RHW command buttons or Play Mode
+execution. Those operation transactions remain R4b/R5b/R6 work.
+
 ## Source-qualified Spell Focus and Committed Cast Receipts
 
 Stored player/class/subclass spell attribution carries
