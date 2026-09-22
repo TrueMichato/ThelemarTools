@@ -284,27 +284,40 @@ payload, not a parallel feature ledger:
 
 Use `getEfaSpellStoringItemOptions()`,
 `commitEfaSpellStoringItemAtLongRest()`,
-`reconcileEfaSpellStoringItem()`, `prepareEfaSpellStoringItemUse()`, and
-`commitEfaSpellStoringItemUse()`. Reuse replaces prior storage and prunes only
-its exact current-turn receipts. Host removal, host identity replacement, or
-loss of exact EFA level/source ownership cleans storage. Missing catalogs,
-unsupported versions, and malformed owner/casting identities remain visible
-as stale repair states and are never guessed.
+`reconcileEfaSpellStoringItem()`, `prepareEfaSpellStoringItemUse()`,
+`reserveEfaSpellStoringItemUse()`,
+`releaseEfaSpellStoringItemUseReservation()`, and
+`commitEfaSpellStoringItemUse()`. The runtime-only reservation serializes the
+exact storage/host/holder while target/effect resolution is pending. It is
+released on cancellation or failure; the persisted use and turn receipt still
+commit only after the effect succeeds. Reuse replaces prior storage and prunes
+only its exact current-turn receipts. Host removal, host identity replacement,
+or loss of exact EFA level/source ownership cleans storage. Generated hosts
+must still resolve their full accepted focus reference: generated id, exact
+owner, catalog item, and creation receipt. Missing catalogs, unsupported
+versions, malformed owner/casting identities, and generated identity mismatch
+remain visible as stale repair states and are never guessed.
 
 The stored effect is projected as a generic `kind: "storedSpell"` item power.
 `CharacterSheetSpells.pUseEfaSpellStoringItem()` resolves the normal core spell
 effect with the snapshotted Artificer modifier/DC/attack, but does not publish
 a committed-class-cast receipt, run the focus gate, consume slots/components,
-end cast-sensitive states, or apply caster on-cast riders. The item use and
-turn receipt commit only after the effect succeeds; cancellation spends
-nothing, and a resource commit failure rolls back that exact receipt.
+end cast-sensitive states, or apply/consume caster-only damage and on-cast
+riders. The item use and turn receipt commit only after the effect succeeds;
+cancellation spends nothing, and a resource commit failure rolls back that
+exact receipt.
 
 In combat, the accepted stable-key turn ledger gates the exact
 storage/host/holder identity until that holder's next turn. Out of combat no
 turn receipt is created. The Inventory prompt requires an explicit acting
 holder; external holder identities own both their receipt and concentration,
-so replacing one holder's concentration does not clear another holder's
-entry.
+so replacing one holder's concentration does not clear another holder's entry
+or effects. Concentration-created states, companions, and temporary attacks can
+persist `effectOwnerId`/`effectHolderUid`; teardown matches the removed
+concentration entry's exact owner before falling back to legacy spell-name
+matching. Self-only effects used by an external holder are reported as an
+explicit external resolution and never mutate the Artificer's HP, conditions,
+or active states.
 
 **Operate-mode interaction brief.** Long Rest adds one optional fieldset with
 labelled native host/spell selects and an `aria-live` status. Inventory,

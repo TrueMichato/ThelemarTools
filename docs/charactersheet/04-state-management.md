@@ -589,17 +589,29 @@ rule with a versioned `item._spellStorage` descriptor containing:
 The state reconciler validates the descriptor after load and whenever the
 spell catalog, class levels, or host item changes. Host removal, host identity
 replacement, and loss of exact EFA level/source ownership clean the storage.
-An unavailable spell catalog, missing exact spell, unsupported storage
-version, or malformed owner/casting reference surfaces as stale instead of
-guessing a replacement. Saves without `_spellStorage` need no migration.
+Generated hosts additionally re-resolve the full accepted focus reference
+(generated id, exact owner, catalog item, and creation receipt), so a
+same-name replacement surfaces as stale. An unavailable spell catalog,
+missing exact spell, unsupported storage version, or malformed owner/casting
+reference also surfaces as stale instead of guessing a replacement. Saves
+without `_spellStorage` need no migration.
 
 The stored spell projects through the normal item-power API as
-`kind: "storedSpell"`. Its use is an effect-first transaction: the core spell
-effect resolves with the stored Artificer statistics, then the exact item use
-and in-combat holder turn receipt commit. Cancellation spends nothing. This is
-an item effect, not a class spell cast, so it does not publish committed-cast
-hooks, consume a slot/component, invoke the focus gate, or trigger
-cast-sensitive class riders.
+`kind: "storedSpell"`. Its use is an effect-first transaction with a
+runtime-only pre-effect reservation for the exact storage/host/holder. A
+concurrent duplicate returns `use-in-progress`; cancellation or effect failure
+releases the reservation. After the core effect resolves with the stored
+Artificer statistics, the exact item use and in-combat holder turn receipt
+commit. This is an item effect, not a class spell cast, so it does not publish
+committed-cast hooks, consume a slot/component, invoke the focus gate, or
+apply/consume cast-sensitive damage or on-cast riders.
+
+The acting holder is carried into targeting. Self-only stored effects used by
+an external holder return an explicit external-resolution descriptor and do
+not mutate this character. Concentration-created active states, companions,
+and temporary attacks may persist `effectOwnerId` and `effectHolderUid`;
+holder-scoped teardown removes only artifacts owned by the concentration entry
+being replaced. Older unowned effects retain spell-name fallback behavior.
 
 #### Opening equipment packs
 

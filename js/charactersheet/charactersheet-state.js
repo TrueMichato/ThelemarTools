@@ -39695,6 +39695,7 @@ class CharacterSheetState {
 			}
 			const reasons = (storage.repair?.reasons || [])
 				.filter(reason => ["unsupported-storage-version", "owner-identity-unresolved", "casting-reference-unresolved", "malformed-storage"].includes(reason));
+			if (!this.resolveSpellCastFocusReference(storage.host)) reasons.push("host-identity-unresolved");
 			if (!this._isEfaSpellStoringItemHostRow(wrapper, {requireHeld: false})) reasons.push("host-no-longer-eligible");
 			let exactSpell = null;
 			if ((this._allSpells || []).length) {
@@ -39838,13 +39839,85 @@ class CharacterSheetState {
 		};
 	}
 
-	commitEfaSpellStoringItemUse ({itemId, holder} = {}) {
+	_getEfaSpellStoringItemUseReservationStore () {
+		if (!(this._efaSpellStoringItemUseReservations instanceof Map)) this._efaSpellStoringItemUseReservations = new Map();
+		return this._efaSpellStoringItemUseReservations;
+	}
+
+	_getEfaSpellStoringItemUseReservationKey ({itemId, storageId, holderUid}) {
+		return `${storageId}:host:${itemId}:holder:${holderUid}`;
+	}
+
+	reserveEfaSpellStoringItemUse ({itemId, holder} = {}) {
 		const prepared = this.prepareEfaSpellStoringItemUse({itemId, holder});
 		if (!prepared.ok) return prepared;
+		const key = this._getEfaSpellStoringItemUseReservationKey({
+			itemId,
+			storageId: prepared.storage.storageId,
+			holderUid: prepared.holder.uid,
+		});
+		const reservations = this._getEfaSpellStoringItemUseReservationStore();
+		const existing = reservations.get(key);
+		if (existing) {
+			return {
+				ok: false,
+				committed: false,
+				reason: "use-in-progress",
+				itemId,
+				storage: prepared.storage,
+				holder: prepared.holder,
+				reservation: MiscUtil.copyFast(existing),
+			};
+		}
+		const reservation = {
+			id: `efa-spell-storage-use-${CryptUtil.uid()}`,
+			key,
+			itemId,
+			storageId: prepared.storage.storageId,
+			holderUid: prepared.holder.uid,
+			createdAt: Date.now(),
+		};
+		reservations.set(key, reservation);
+		return {...prepared, reservation: MiscUtil.copyFast(reservation)};
+	}
+
+	releaseEfaSpellStoringItemUseReservation ({reservationId} = {}) {
+		if (!reservationId) return {ok: false, released: false, reason: "reservation-required"};
+		const reservations = this._getEfaSpellStoringItemUseReservationStore();
+		for (const [key, reservation] of reservations.entries()) {
+			if (reservation.id !== reservationId) continue;
+			reservations.delete(key);
+			return {ok: true, released: true, reason: null, reservation: MiscUtil.copyFast(reservation)};
+		}
+		return {ok: false, released: false, reason: "reservation-unavailable"};
+	}
+
+	commitEfaSpellStoringItemUse ({itemId, holder, reservationId} = {}) {
+		const reservations = this._getEfaSpellStoringItemUseReservationStore();
+		const reservationEntry = [...reservations.entries()]
+			.find(([, reservation]) => reservation.id === reservationId);
+		if (!reservationEntry) return {ok: false, committed: false, reason: "use-not-reserved"};
+		const [reservationKey, reservation] = reservationEntry;
+		const releaseReservation = () => reservations.delete(reservationKey);
+		const prepared = this.prepareEfaSpellStoringItemUse({itemId, holder});
+		if (!prepared.ok) {
+			releaseReservation();
+			return prepared;
+		}
+		const expectedKey = this._getEfaSpellStoringItemUseReservationKey({
+			itemId,
+			storageId: prepared.storage.storageId,
+			holderUid: prepared.holder.uid,
+		});
+		if (reservation.key !== expectedKey) {
+			releaseReservation();
+			return {ok: false, committed: false, reason: "reservation-identity-mismatch"};
+		}
 		let turnReceipt = null;
 		if (this.isInCombat()) {
 			const committedReceipt = this.commitTurnReceipt(prepared.turnReceiptDescriptor);
 			if (!committedReceipt.ok) {
+				releaseReservation();
 				return {
 					ok: false,
 					committed: false,
@@ -39860,6 +39933,7 @@ class CharacterSheetState {
 		const liveStorage = wrapper?.item?._spellStorage;
 		if (!liveStorage || liveStorage.storageId !== prepared.storage.storageId || liveStorage.usesCurrent <= 0) {
 			const rollback = turnReceipt ? this.rollbackTurnReceipt(turnReceipt) : null;
+			releaseReservation();
 			return {ok: false, committed: false, reason: "resource-commit-failed", rollback, turnReceipt};
 		}
 		liveStorage.usesCurrent--;
@@ -39867,6 +39941,7 @@ class CharacterSheetState {
 			liveStorage.usesCurrent = 0;
 			liveStorage.repair = {status: "expired", reasons: ["uses-depleted"], lastCheckedReason: "use-committed"};
 		}
+		releaseReservation();
 		return {
 			ok: true,
 			committed: true,
@@ -46164,6 +46239,8 @@ class CharacterSheetState {
 	 * @param {string} [attack.sourceSpell] - Name of the spell that granted this attack
 	 * @param {string} [attack.sourceDuration] - How long it lasts: "concentration", "1 minute", etc.
 	 * @param {string} [attack.sourceComponent] - Name of the variant component
+	 * @param {string} [attack.effectOwnerId] - Exact concentration/effect transaction owner
+	 * @param {string} [attack.effectHolderUid] - Acting holder which owns the effect
 	 * @returns {string} The generated attack ID
 	 */
 	addTemporaryAttack (attack) {
@@ -46191,10 +46268,12 @@ class CharacterSheetState {
 	 * Useful when concentration is broken or spell ends.
 	 * @param {string} spellName
 	 */
-	removeTemporaryAttacksBySpell (spellName) {
+	removeTemporaryAttacksBySpell (spellName, {effectOwnerId = null} = {}) {
 		if (!this._data.temporaryAttacks) return;
 		this._data.temporaryAttacks = this._data.temporaryAttacks.filter(
-			a => a.sourceSpell?.toLowerCase() !== spellName?.toLowerCase(),
+			a => effectOwnerId
+				? a.effectOwnerId !== effectOwnerId
+				: a.sourceSpell?.toLowerCase() !== spellName?.toLowerCase(),
 		);
 	}
 
@@ -74557,6 +74636,8 @@ class CharacterSheetState {
 			if (options.movementOverride !== undefined) existing.movementOverride = options.movementOverride;
 			if (options.duration) existing.duration = options.duration;
 			if (options.temporalView !== undefined) existing.temporalView = MiscUtil.copyFast(options.temporalView);
+			if (options.effectOwnerId !== undefined) existing.effectOwnerId = options.effectOwnerId || null;
+			if (options.effectHolderUid !== undefined) existing.effectHolderUid = options.effectHolderUid || null;
 			// Re-parse duration on reactivation
 			const dur = options.duration || existing.duration;
 			existing.roundsRemaining = this._data.inCombat ? CharacterSheetState.parseDurationToRounds(dur) : null;
@@ -74607,6 +74688,8 @@ class CharacterSheetState {
 			actionBenefit: options.actionBenefit || null,
 			movementOverride: options.movementOverride || null,
 			temporalView: options.temporalView ? MiscUtil.copyFast(options.temporalView) : null,
+			effectOwnerId: options.effectOwnerId || null,
+			effectHolderUid: options.effectHolderUid || null,
 			// Self-imposed drawback conditions this state applies while active. Curated
 			// states declare them on their ACTIVE_STATE_TYPES entry; CUSTOM (generically
 			// detected) toggles carry them here instead, parsed from the feature text.
@@ -79272,6 +79355,7 @@ class CharacterSheetState {
 		if (!concentration) return;
 		const concSpellName = concentration.spellName;
 		const concCustomAbilityId = concentration.customAbilityId;
+		const effectOwnerId = concentration.effectOwnerId || null;
 		const shouldLingerSpellEffects = !!(concentration.lingersOnBreak && this._data.inCombat);
 
 		// A power that stops being concentrated on stops running. Enforced here rather
@@ -79294,14 +79378,14 @@ class CharacterSheetState {
 
 		// Dismiss concentration-linked companions (summons, etc.)
 		if (!shouldLingerSpellEffects) {
-			this.dismissConcentrationCompanions();
+			this.dismissConcentrationCompanions({effectOwnerId});
 		}
 
 		// Remove concentration-linked temporary attacks. Powers are excluded: temporary
 		// attacks are a spell mechanism (variant components), and a power only has a
 		// `spellName` at all because it is a display alias.
 		if (concentration.kind !== "power" && concSpellName && !shouldLingerSpellEffects) {
-			this.removeTemporaryAttacksBySpell(concSpellName);
+			this.removeTemporaryAttacksBySpell(concSpellName, {effectOwnerId});
 		}
 
 		// Remove any spell-effect active states that require concentration.
@@ -79312,7 +79396,9 @@ class CharacterSheetState {
 			s.isSpellEffect
 			&& (concentration.kind === "power"
 				? s.name === concentration.name
-				: (s.concentration || s.name === concSpellName)),
+				: effectOwnerId
+					? s.effectOwnerId === effectOwnerId
+					: s.name === concSpellName),
 		);
 		for (const state of concSpellStates) {
 			if (shouldLingerSpellEffects) {
@@ -83731,6 +83817,8 @@ class CharacterSheetState {
 	 * @param {string} [companionData.size] - Size category ("T","S","M","L","H","G")
 	 * @param {string} [companionData.creatureType] - Creature type (e.g., "beast", "construct")
 	 * @param {boolean} [companionData.concentrationLinked] - If true, dismissed when concentration breaks
+	 * @param {string} [companionData.effectOwnerId] - Exact concentration/effect transaction owner
+	 * @param {string} [companionData.effectHolderUid] - Acting holder which owns the effect
 	 * @param {string} [companionData.sourceFeatureId] - Feature that granted this companion
 	 * @param {number} [companionData.count] - Number of identical creatures (for conjure spells)
 	 * @param {Array<{current: number, max: number}>} [companionData.hpArray] - Individual HP tracking for grouped creatures
@@ -83874,6 +83962,8 @@ class CharacterSheetState {
 
 			// State tracking
 			concentrationLinked: companionData.concentrationLinked || false,
+			effectOwnerId: companionData.effectOwnerId || null,
+			effectHolderUid: companionData.effectHolderUid || null,
 			sourceFeatureId: companionData.sourceFeatureId || null,
 			active: companionData.active !== false,
 			conditions: [],
@@ -85038,10 +85128,10 @@ class CharacterSheetState {
 	 * Dismiss all concentration-linked companions (called when concentration breaks)
 	 * @returns {number} Number of companions dismissed
 	 */
-	dismissConcentrationCompanions () {
+	dismissConcentrationCompanions ({effectOwnerId = null} = {}) {
 		let count = 0;
-		this.getCompanions().forEach(c => {
-			if (c.concentrationLinked && c.active) {
+		(this._data.companions || []).forEach(c => {
+			if (c.concentrationLinked && c.active && (!effectOwnerId || c.effectOwnerId === effectOwnerId)) {
 				c.active = false;
 				count++;
 			}

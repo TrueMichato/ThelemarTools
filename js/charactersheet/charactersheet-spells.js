@@ -2460,14 +2460,19 @@ class CharacterSheetSpells {
 	}
 
 	async pUseEfaSpellStoringItem ({itemId, holder} = {}) {
-		const prepared = this._state.prepareEfaSpellStoringItemUse?.({itemId, holder});
-		if (!prepared?.ok) return prepared || {ok: false, committed: false, reason: "storage-unavailable"};
-		const storage = prepared.storage;
+		const reserved = this._state.reserveEfaSpellStoringItemUse?.({itemId, holder});
+		if (!reserved?.ok) return reserved || {ok: false, committed: false, reason: "storage-unavailable"};
+		const storage = reserved.storage;
+		const reservationId = reserved.reservation?.id;
+		const releaseReservation = () => this._state.releaseEfaSpellStoringItemUseReservation?.({reservationId});
 		const spellData = storage.spell?.data
 			|| this._allSpells.find(spell =>
 				spell.name?.toLowerCase() === storage.spell?.name?.toLowerCase()
 				&& spell.source?.toLowerCase() === storage.spell?.source?.toLowerCase());
-		if (!spellData) return {ok: false, committed: false, reason: "spell-identity-unresolved"};
+		if (!spellData) {
+			releaseReservation();
+			return {ok: false, committed: false, reason: "spell-identity-unresolved"};
+		}
 		const selfHolderUid = this._state.getEfaSpellStoringItemSelfHolder?.().uid;
 		const holderConcentrations = (this._state.getConcentrations?.() || [])
 			.filter(concentration => String(concentration?.holderUid || selfHolderUid) === String(holder.uid));
@@ -2479,20 +2484,35 @@ class CharacterSheetSpells {
 				textYes: "Use and replace concentration",
 				textNo: "Cancel",
 			}));
-			if (!confirmed) return {ok: false, committed: false, reason: "cancelled"};
+			if (!confirmed) {
+				releaseReservation();
+				return {ok: false, committed: false, reason: "cancelled"};
+			}
 		}
+		const effectOwnerId = `spell-storage:${storage.storageId}:holder:${holder.uid}`;
 		const spell = {
 			...MiscUtil.copyFast(spellData),
 			id: `stored-item:${storage.storageId}`,
 			level: storage.spell.level,
-			sourceItem: prepared.storage.host?.itemUid || "Spell-Storing Item",
+			sourceItem: storage.host?.itemUid || "Spell-Storing Item",
 			spellcastingAbility: storage.casting?.ability || "int",
 		};
 		const castMeta = {
-			sourceItem: prepared.storage.host?.itemUid || "Spell-Storing Item",
+			sourceItem: storage.host?.itemUid || "Spell-Storing Item",
 			castingStats: MiscUtil.copyFast(storage.casting || {}),
 			suppressCastRiders: true,
 			suppressComponentNotes: true,
+			targetingMeta: {
+				actingHolder: {
+					uid: holder.uid,
+					label: holder.label || holder.uid,
+					isSelf: String(holder.uid) === String(selfHolderUid),
+				},
+			},
+			effectOwner: {
+				id: effectOwnerId,
+				holderUid: holder.uid,
+			},
 			storedSpell: {
 				storageId: storage.storageId,
 				ownerClassUid: storage.ownerClassUid,
@@ -2502,9 +2522,18 @@ class CharacterSheetSpells {
 				holderLabel: holder.label || holder.uid,
 			},
 		};
-		const effect = await this._showCastResult(spell, storage.spell.level, false, false, castMeta);
-		if (effect?.cancelled) return {ok: false, committed: false, reason: "cancelled"};
-		const committed = this._state.commitEfaSpellStoringItemUse({itemId, holder});
+		let effect;
+		try {
+			effect = await this._showCastResult(spell, storage.spell.level, false, false, castMeta);
+		} catch (error) {
+			releaseReservation();
+			throw error;
+		}
+		if (effect?.cancelled) {
+			releaseReservation();
+			return {ok: false, committed: false, reason: "cancelled"};
+		}
+		const committed = this._state.commitEfaSpellStoringItemUse({itemId, holder, reservationId});
 		if (!committed?.ok) return committed;
 		if (requiresConcentration) {
 			this._state.addConcentration?.({
@@ -2518,10 +2547,15 @@ class CharacterSheetSpells {
 				holderLabel: holder.label || holder.uid,
 				storageId: storage.storageId,
 				hostInventoryItemId: itemId,
+				effectOwnerId,
+				effectHolderUid: holder.uid,
 			});
 			this._updateConcentrationUI?.();
 		}
-		return committed;
+		return {
+			...committed,
+			...(effect?.externalResolution ? {externalResolution: effect.externalResolution} : {}),
+		};
 	}
 
 	async pCastItemSpell (power, {deferCommit = false, decision = null} = {}) {
@@ -4943,6 +4977,7 @@ class CharacterSheetSpells {
 		let metamagicNotes = [];
 		let deliveredViaFamiliar = false;
 		let offerApplyToSelf = null;
+		let externalResolution = null;
 
 		// Roll history tracking for spell components
 		const _rollMeta = {attack: null, dc: null};
@@ -5093,12 +5128,23 @@ class CharacterSheetSpells {
 
 			// Determine if we should ask for a target
 			const selfTargetMode = CharacterSheetSpells.resolveSelfTargetingMode(targetInfo, effects);
+			const actingHolder = normalizedCastMeta.targetingMeta?.actingHolder || null;
+			const isExternalActingHolder = !!actingHolder && actingHolder.isSelf !== true;
 
 			// Apply-to-self is now a POST-cast, non-blocking affordance (see toast below)
 			// instead of a blocking pre-roll target prompt. Beneficial, non-self-only spells
 			// resolve immediately; the player opts into applying the effect to themselves via
 			// a bright button in the result toast (which rolls/applies the payload ONCE).
-			if (selfTargetMode === "offer") {
+			if (isExternalActingHolder && ["offer", "auto"].includes(selfTargetMode)) {
+				externalResolution = {
+					kind: "external-holder-effect",
+					holderUid: actingHolder.uid,
+					holderLabel: actingHolder.label || actingHolder.uid,
+					spellUid: `${spell.name}|${spell.source}`,
+					requiresManualApplication: true,
+				};
+				damageInfo = this._describeBeneficialEffects(effects);
+			} else if (selfTargetMode === "offer") {
 				const formula = this._getSpellHealingRollFormula(
 					spellData,
 					slotLevel,
@@ -5127,6 +5173,7 @@ class CharacterSheetSpells {
 					slotLevel,
 					rollReceipt,
 					castingStats: normalizedCastMeta.castingStats || null,
+					effectOwner: normalizedCastMeta.effectOwner || null,
 				};
 				// Informational only — do NOT pre-roll healing here (apply-to-self rolls once
 				// on click, so the applied amount always matches what is shown).
@@ -5141,11 +5188,14 @@ class CharacterSheetSpells {
 					{
 						committedRolls,
 						castingStats: normalizedCastMeta.castingStats || null,
+						effectOwner: normalizedCastMeta.effectOwner || null,
 					},
 				);
 			} else {
 				// Damage or other effects targeting enemies
-				const deferredFlatDamageRider = await this._pSelectDeferredFlatDamageRiderForSpell({spell, spellData});
+				const deferredFlatDamageRider = suppressCastRiders
+					? null
+					: await this._pSelectDeferredFlatDamageRiderForSpell({spell, spellData});
 				damageResult = this._rollSpellDamage(
 					spellData,
 					slotLevel,
@@ -5153,7 +5203,7 @@ class CharacterSheetSpells {
 					appliedMetamagic,
 					spell,
 					deferredFlatDamageRider,
-					{resolveAllRolls: shouldResolveAllDamageRolls},
+					{resolveAllRolls: shouldResolveAllDamageRolls, suppressCastRiders},
 				);
 				damageInfo = damageResult?.text || "";
 
@@ -5235,6 +5285,8 @@ class CharacterSheetSpells {
 						sourceSpell: spell.name,
 						sourceDuration: eff.attackDuration || "concentration",
 						sourceComponent: normalizedCastMeta.variantComponent.itemName,
+						effectOwnerId: normalizedCastMeta.effectOwner?.id || null,
+						effectHolderUid: normalizedCastMeta.effectOwner?.holderUid || null,
 					});
 				}
 			}
@@ -5294,6 +5346,9 @@ class CharacterSheetSpells {
 
 		if (effectsApplied.length > 0) {
 			toastContent += `<br><span class="text-success">✓ Applied: ${effectsApplied.join(", ")}</span>`;
+		}
+		if (externalResolution) {
+			toastContent += `<br><span class="text-info">Resolve ${spell.name} on ${externalResolution.holderLabel} externally; this sheet was not changed.</span>`;
 		}
 
 		if (metamagicNotes.length > 0) {
@@ -5384,6 +5439,7 @@ class CharacterSheetSpells {
 					{
 						rollReceipt: offerApplyToSelf.rollReceipt,
 						castingStats: offerApplyToSelf.castingStats,
+						effectOwner: offerApplyToSelf.effectOwner,
 					},
 				);
 				applyToSelfBtn.textContent = applied.length ? "✓ Applied to Self" : "✓ Done";
@@ -5417,8 +5473,24 @@ class CharacterSheetSpells {
 		// The slot level actually spent is passed through so upcast-scaled summons
 		// (Animate Dead's extra corpses, Conjure/Summon tiers) use the real level rather
 		// than the spell's base level.
-		await this._handleSpecialSpellTriggers(spell, slotLevel);
-		return {cancelled: false, rolls: committedRolls};
+		if (!externalResolution) {
+			const companionIdsBefore = new Set((this._state.getCompanions?.() || []).map(companion => companion.id));
+			await this._handleSpecialSpellTriggers(spell, slotLevel);
+			if (normalizedCastMeta.effectOwner?.id) {
+				for (const companion of this._state.getCompanions?.() || []) {
+					if (companionIdsBefore.has(companion.id) || !companion.concentrationLinked) continue;
+					companion.effectOwnerId = normalizedCastMeta.effectOwner.id;
+					companion.effectHolderUid = normalizedCastMeta.effectOwner.holderUid || null;
+				}
+			}
+		}
+		return {
+			cancelled: false,
+			rolls: committedRolls,
+			externalResolution,
+			effectsApplied,
+			damageResult,
+		};
 	}
 
 	/**
@@ -7071,7 +7143,12 @@ class CharacterSheetSpells {
 	/**
 	 * Apply spell effects to self and return list of applied effects
 	 */
-	async _applySpellEffectsToSelf (spell, spellData, effects, slotLevel, {committedRolls = null, rollReceipt = null, castingStats = null} = {}) {
+	async _applySpellEffectsToSelf (spell, spellData, effects, slotLevel, {
+		committedRolls = null,
+		rollReceipt = null,
+		castingStats = null,
+		effectOwner = null,
+	} = {}) {
 		const appliedEffects = [];
 		const castingAbility = castingStats?.ability
 			|| this._state.getSpellcastingAbilityForSpell?.(spell)
@@ -7178,6 +7255,8 @@ class CharacterSheetSpells {
 				concentration: effects.concentration || false,
 				duration: effects.duration,
 				grantsConditions: conditionsToApply, // Track which conditions this spell grants
+				effectOwnerId: effectOwner?.id || null,
+				effectHolderUid: effectOwner?.holderUid || null,
 			});
 		} else if ((effects.buffs?.length > 0 || effects.registryEffects?.length > 0 || effects.duration) && conditionsToApply.length === 0) {
 			// For buff spells that DON'T grant conditions, apply the parsed buff effects
@@ -7231,6 +7310,8 @@ class CharacterSheetSpells {
 				spellSource: spell.source || spellData?.source || Parser.SRC_XPHB,
 				concentration: effects.concentration || false,
 				duration: effects.duration,
+				effectOwnerId: effectOwner?.id || null,
+				effectHolderUid: effectOwner?.holderUid || null,
 			});
 
 			// Build description of applied effects
@@ -7463,7 +7544,15 @@ class CharacterSheetSpells {
 		};
 	}
 
-	_rollSpellDamage (spellData, slotLevel, baseLevel, appliedMetamagic = null, spell = null, deferredFlatDamageRider = null, {resolveAllRolls = false} = {}) {
+	_rollSpellDamage (
+		spellData,
+		slotLevel,
+		baseLevel,
+		appliedMetamagic = null,
+		spell = null,
+		deferredFlatDamageRider = null,
+		{resolveAllRolls = false, suppressCastRiders = false} = {},
+	) {
 		// Weapon-channel cantrips (Booming/Green-Flame Blade) cast on their own roll ONLY
 		// the secondary/movement damage; the on-hit damage rides the weapon attack instead.
 		const channel = this.getWeaponChannelCantripForCharacter(spell, spellData);
@@ -7471,7 +7560,7 @@ class CharacterSheetSpells {
 
 		// Check for cantrip scaling
 		if (spellData.scalingLevelDice) {
-			return this._rollCantripDamage(spellData, appliedMetamagic, spell);
+			return this._rollCantripDamage(spellData, appliedMetamagic, spell, {suppressCastRiders});
 		}
 
 		// Look for damage dice in spell entries
@@ -7514,7 +7603,8 @@ class CharacterSheetSpells {
 			const rollsToResolve = (resolveAllRolls || deferredFlatDamageRider) && damageRolls.length > 1 ? damageRolls : [primaryRoll];
 			let destructiveWrathApplied = false;
 			const resolvedRolls = rollsToResolve.map((roll, index) => {
-				const isDestructiveWrath = !isOvercharged
+				const isDestructiveWrath = !suppressCastRiders
+					&& !isOvercharged
 					&& !destructiveWrathApplied
 					&& this._state.canApplyPendingDamageMaximization?.(roll.damageType);
 				const detail = this._rollDamageDiceDetailed(roll.dice, {
@@ -7530,7 +7620,7 @@ class CharacterSheetSpells {
 					maximized: isOvercharged || isDestructiveWrath,
 				};
 			});
-			const resolvedDeferredRider = deferredFlatDamageRider
+			const resolvedDeferredRider = !suppressCastRiders && deferredFlatDamageRider
 				? this._state.consumeDeferredFlatDamageRider?.(deferredFlatDamageRider)
 				: null;
 			if (resolvedDeferredRider) {
@@ -7539,9 +7629,9 @@ class CharacterSheetSpells {
 				selected.total += resolvedDeferredRider.value;
 				selected.deferredFlatDamageRider = resolvedDeferredRider;
 			}
-			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const featureBonus = this._getCantripDamageBonus(spell, spellData);
-			const riderBonus = this._consumePendingSpellDamageBonus();
+			const spellDamageBonus = suppressCastRiders ? 0 : (this._state.getItemBonus?.("spellDamage") || 0);
+			const featureBonus = suppressCastRiders ? {bonus: 0, sources: []} : this._getCantripDamageBonus(spell, spellData);
+			const riderBonus = suppressCastRiders ? {bonus: 0, sources: []} : this._consumePendingSpellDamageBonus();
 			const total = resolvedRolls.reduce((sum, roll) => sum + roll.total, 0) + spellDamageBonus + featureBonus.bonus + riderBonus.bonus;
 			const globalBonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
 				+ [...featureBonus.sources, ...riderBonus.sources].map(s => ` + ${s.value} ${s.name}`).join("");
@@ -7549,7 +7639,7 @@ class CharacterSheetSpells {
 			const damageType = primaryResolved.damageType;
 			const diceLabel = primaryResolved.diceLabel;
 			const maximizedLabel = primaryResolved.maximized ? " maximized" : "";
-			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
+			const triggeredEffects = suppressCastRiders ? [] : (this._state.getTriggeredDamageEffects?.(damageType) || []);
 			const push = triggeredEffects.find(it => it.type === "forcedMovement");
 			const pushText = push ? `<br>Thunderbolt Strike: You may push a ${push.maxTargetSize} or smaller target up to ${push.distance} feet ${push.direction}.` : "";
 
@@ -7589,7 +7679,7 @@ class CharacterSheetSpells {
 	/**
 	 * @returns {*}
 	 */
-	_rollCantripDamage (spellData, appliedMetamagic = null, spell = null) {
+	_rollCantripDamage (spellData, appliedMetamagic = null, spell = null, {suppressCastRiders = false} = {}) {
 		const characterLevel = this._state.getTotalLevel();
 		const scaling = Array.isArray(spellData.scalingLevelDice)
 			? spellData.scalingLevelDice[0]
@@ -7610,17 +7700,19 @@ class CharacterSheetSpells {
 			const damageTypes = spellData.damageInflict || [];
 			const damageType = damageTypes[0] || "damage";
 			const isOvercharged = appliedMetamagic?.key === "overcharged";
-			const isDestructiveWrath = !isOvercharged && this._state.canApplyPendingDamageMaximization?.(damageType);
+			const isDestructiveWrath = !suppressCastRiders
+				&& !isOvercharged
+				&& this._state.canApplyPendingDamageMaximization?.(damageType);
 			const detail = this._rollDamageDiceDetailed(dice, {maximize: isOvercharged || isDestructiveWrath});
 			if (isDestructiveWrath) this._state.consumePendingDamageMaximization?.(damageType);
-			const spellDamageBonus = this._state.getItemBonus?.("spellDamage") || 0;
-			const featureBonus = this._getCantripDamageBonus(spell, spellData);
-			const riderBonus = this._consumePendingSpellDamageBonus();
+			const spellDamageBonus = suppressCastRiders ? 0 : (this._state.getItemBonus?.("spellDamage") || 0);
+			const featureBonus = suppressCastRiders ? {bonus: 0, sources: []} : this._getCantripDamageBonus(spell, spellData);
+			const riderBonus = suppressCastRiders ? {bonus: 0, sources: []} : this._consumePendingSpellDamageBonus();
 			const total = detail.total + spellDamageBonus + featureBonus.bonus + riderBonus.bonus;
 			const bonusStr = (spellDamageBonus ? ` + ${spellDamageBonus} item` : "")
 				+ [...featureBonus.sources, ...riderBonus.sources].map(s => ` + ${s.value} ${s.name}`).join("");
 			const maximizedLabel = (isOvercharged || isDestructiveWrath) ? " maximized" : "";
-			const triggeredEffects = this._state.getTriggeredDamageEffects?.(damageType) || [];
+			const triggeredEffects = suppressCastRiders ? [] : (this._state.getTriggeredDamageEffects?.(damageType) || []);
 			const push = triggeredEffects.find(it => it.type === "forcedMovement");
 			const pushText = push ? `<br>Thunderbolt Strike: You may push a ${push.maxTargetSize} or smaller target up to ${push.distance} feet ${push.direction}.` : "";
 

@@ -76,6 +76,55 @@ const SPELLS = [
 		duration: [{type: "instant"}],
 		classes: {fromClassList: [{name: "Artificer", source: "EFA"}]},
 	},
+	{
+		name: "False Life",
+		source: "XPHB",
+		level: 1,
+		school: "N",
+		time: [{number: 1, unit: "action"}],
+		range: {type: "point", distance: {type: "self"}},
+		components: {v: true, s: true},
+		duration: [{type: "timed", duration: {amount: 1, type: "hour"}}],
+		entries: ["You gain {@dice 2d4 + 4} Temporary Hit Points."],
+		classes: {fromClassList: [{name: "Artificer", source: "EFA"}]},
+	},
+	{
+		name: "Blur",
+		source: "PHB",
+		level: 2,
+		school: "I",
+		time: [{number: 1, unit: "action"}],
+		range: {type: "point", distance: {type: "self"}},
+		components: {v: true},
+		duration: [{type: "timed", concentration: true, duration: {amount: 1, type: "minute"}}],
+		entries: ["Attack rolls against you have disadvantage for the duration."],
+		classes: {fromClassList: [{name: "Artificer", source: "EFA"}]},
+	},
+	{
+		name: "Alter Self",
+		source: "PHB",
+		level: 2,
+		school: "T",
+		time: [{number: 1, unit: "action"}],
+		range: {type: "point", distance: {type: "self"}},
+		components: {v: true, s: true},
+		duration: [{type: "timed", concentration: true, duration: {amount: 1, type: "hour"}}],
+		entries: ["You assume a different form for the duration."],
+		classes: {fromClassList: [{name: "Artificer", source: "EFA"}]},
+	},
+	{
+		name: "Stored Bolt",
+		source: "EFA",
+		level: 1,
+		school: "V",
+		time: [{number: 1, unit: "action"}],
+		range: {type: "point", distance: {type: "feet", amount: 60}},
+		components: {v: true, s: true},
+		duration: [{type: "instant"}],
+		entries: ["One target takes {@damage 2d6} fire damage."],
+		damageInflict: ["fire"],
+		classes: {fromClassList: [{name: "Artificer", source: "EFA"}]},
+	},
 ];
 
 function makeState ({level = 11, source = "EFA"} = {}) {
@@ -120,6 +169,42 @@ function makeSpells (state, {cancelled = false} = {}) {
 	spells._showCastResult = jest.fn(async () => cancelled ? {cancelled: true} : {cancelled: false});
 	spells._updateConcentrationUI = jest.fn();
 	return spells;
+}
+
+function makeRealSpells (state) {
+	const spells = Object.create(Spells.prototype);
+	spells._state = state;
+	spells._allSpells = SPELLS;
+	spells._page = {
+		_saveCurrentCharacter: jest.fn(),
+		saveCharacter: jest.fn(),
+		_renderActiveStates: jest.fn(),
+		_renderHp: jest.fn(),
+		_renderCompanions: jest.fn(),
+		_combat: {renderCombatStates: jest.fn()},
+		rollD20: jest.fn(() => ({roll: 10})),
+		rollDice: jest.fn(() => 1),
+		pAnimateDiceSpec: jest.fn(),
+		pAnimateDamageDice: jest.fn(),
+	};
+	spells._updateConcentrationUI = jest.fn();
+	return spells;
+}
+
+function createReplicatedWeaponHost (state) {
+	const created = state.createGeneratedFeatureItem({
+		item: {name: "Longsword +1", source: "XDMG", type: "M", weapon: true, weaponCategory: "martial"},
+		owner: State.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+		metadata: {sourceFeatureUid: State.EFA_REPLICATE_MAGIC_ITEM_FEATURE_UID, temporary: true},
+		catalog: {
+			plan: {slotId: "plan-weapon", selection: {name: "+1 Weapon", source: "XDMG", planUid: "+1 Weapon|XDMG", itemUid: "+1 Weapon|XDMG"}},
+			resolvedItem: {name: "Longsword +1", source: "XDMG", itemUid: "Longsword +1|XDMG"},
+		},
+		creation: {order: 1, receiptId: "receipt-original", event: "long-rest", batchId: "batch-original"},
+		lifecycle: {version: State.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION, state: "active", callbacks: {}, metadata: {}},
+	});
+	state.setItemEquipped(created.itemId, true);
+	return created;
 }
 
 beforeAll(async () => {
@@ -331,6 +416,39 @@ describe("EFA Spell-Storing Item eligibility and storage", () => {
 		replacedHost.replaceItem("host-longsword", {name: "Longsword", source: "PHB", type: "M", weapon: true, weaponCategory: "martial"});
 		expect(replacedHost.getEfaSpellStoringItem()).toBeNull();
 	});
+
+	test.each([
+		["generated item id", wrapper => { wrapper.item._generatedItemId = "replacement-generated-id"; }],
+		["exact owner", wrapper => {
+			wrapper.item._generatedItemProvenance.owner = {
+				featureUid: "Other Feature|Artificer|EFA|2",
+				classUid: "Artificer|EFA",
+				subclassUid: null,
+				featureSource: "EFA",
+			};
+		}],
+		["catalog item", wrapper => { wrapper.item._generatedItemProvenance.catalog.resolvedItem.itemUid = "Other Longsword +1|XDMG"; }],
+		["creation receipt", wrapper => { wrapper.item._generatedItemProvenance.creation.receiptId = "replacement-receipt"; }],
+	])("marks a same-name generated replacement stale when its %s changes", (_label, mutate) => {
+		const state = makeState();
+		const created = createReplicatedWeaponHost(state);
+		expect(state.commitEfaSpellStoringItemAtLongRest({
+			hostItemId: created.itemId,
+			spellUid: "Cure Wounds|XPHB",
+		})).toMatchObject({ok: true, committed: true});
+		const wrapper = state._data.inventory.find(row => row.id === created.itemId);
+		mutate(wrapper);
+
+		expect(state.getEfaSpellStoringItem()).toMatchObject({
+			itemId: created.itemId,
+			storage: {
+				repair: {
+					status: "stale",
+					reasons: expect.arrayContaining(["host-identity-unresolved"]),
+				},
+			},
+		});
+	});
 });
 
 describe("EFA Spell-Storing Item use transaction", () => {
@@ -412,6 +530,113 @@ describe("EFA Spell-Storing Item use transaction", () => {
 		expect(result).toMatchObject({ok: false, committed: false, reason: "cancelled"});
 		expect(state.getEfaSpellStoringItem()).toMatchObject({storage: {usesCurrent: 8}});
 		expect(Object.keys(state.toJson().turnReceipts.receipts)).toEqual([]);
+		spells._showCastResult.mockResolvedValue({cancelled: false});
+		await expect(spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "creature:ally-1", label: "Ally"},
+		})).resolves.toMatchObject({ok: true, committed: true, usesCurrent: 7});
+	});
+
+	test.each(["False Life|XPHB", "Blur|PHB", "Alter Self|PHB"])(
+		"resolves external-holder self spell %s without mutating the Artificer",
+		async spellUid => {
+			const state = makeState();
+			state.commitEfaSpellStoringItemAtLongRest({hostItemId: "host-longsword", spellUid});
+			const spells = makeRealSpells(state);
+			const applySelf = jest.spyOn(spells, "_applySpellEffectsToSelf");
+			const before = {
+				hp: state.getHp(),
+				activeStates: state.getActiveStates(),
+				conditions: state.getConditions(),
+			};
+
+			const result = await spells.pUseEfaSpellStoringItem({
+				itemId: "host-longsword",
+				holder: {uid: "external:ally", label: "Ally"},
+			});
+
+			expect(applySelf).not.toHaveBeenCalled();
+			expect(state.getHp()).toEqual(before.hp);
+			expect(state.getActiveStates()).toEqual(before.activeStates);
+			expect(state.getConditions()).toEqual(before.conditions);
+			expect(result).toMatchObject({
+				ok: true,
+				committed: true,
+				externalResolution: expect.objectContaining({holderUid: "external:ally", spellUid}),
+			});
+		},
+	);
+
+	test("serializes simultaneous exact-holder use before resolving either effect", async () => {
+		const state = makeState();
+		state.startCombat();
+		state.commitEfaSpellStoringItemAtLongRest({
+			hostItemId: "host-longsword",
+			spellUid: "Cure Wounds|XPHB",
+		});
+		const spells = makeSpells(state);
+		let releaseFirst;
+		spells._showCastResult.mockImplementationOnce(() => new Promise(resolve => { releaseFirst = resolve; }));
+		const holder = {uid: "external:ally", label: "Ally"};
+
+		const first = spells.pUseEfaSpellStoringItem({itemId: "host-longsword", holder});
+		await Promise.resolve();
+		const second = spells.pUseEfaSpellStoringItem({itemId: "host-longsword", holder});
+
+		await expect(second).resolves.toMatchObject({ok: false, committed: false, reason: "use-in-progress"});
+		expect(spells._showCastResult).toHaveBeenCalledTimes(1);
+		releaseFirst({cancelled: false});
+		await expect(first).resolves.toMatchObject({ok: true, committed: true, usesCurrent: 7});
+		expect(state.getEfaSpellStoringItem()).toMatchObject({storage: {usesCurrent: 7}});
+	});
+
+	test("releases the pre-effect reservation when effect resolution throws", async () => {
+		const state = makeState();
+		state.commitEfaSpellStoringItemAtLongRest({
+			hostItemId: "host-longsword",
+			spellUid: "Cure Wounds|XPHB",
+		});
+		const spells = makeSpells(state);
+		const holder = {uid: "external:ally", label: "Ally"};
+		spells._showCastResult.mockRejectedValueOnce(new Error("targeting failed"));
+
+		await expect(spells.pUseEfaSpellStoringItem({itemId: "host-longsword", holder}))
+			.rejects.toThrow("targeting failed");
+		spells._showCastResult.mockResolvedValue({cancelled: false});
+		await expect(spells.pUseEfaSpellStoringItem({itemId: "host-longsword", holder}))
+			.resolves.toMatchObject({ok: true, committed: true, usesCurrent: 7});
+	});
+
+	test("stored spell damage neither applies nor consumes pending caster-only riders", async () => {
+		const state = makeState();
+		state.commitEfaSpellStoringItemAtLongRest({
+			hostItemId: "host-longsword",
+			spellUid: "Stored Bolt|EFA",
+		});
+		state.armPendingSpellDamageBonus({
+			sourceFeatureId: "Summers Defiant Blood|Sorcerer|TGTT",
+			sourceName: "Summer's Defiant Blood",
+			value: 4,
+		});
+		const spells = makeRealSpells(state);
+		let resolvedDamage = null;
+		const rollDamage = spells._rollSpellDamage.bind(spells);
+		jest.spyOn(spells, "_rollSpellDamage").mockImplementation((...args) => {
+			resolvedDamage = rollDamage(...args);
+			return resolvedDamage;
+		});
+
+		await expect(spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "character:character-artificer", label: "Ada"},
+		})).resolves.toMatchObject({ok: true, committed: true});
+
+		expect(resolvedDamage).toMatchObject({total: 2});
+		expect(resolvedDamage.text).not.toMatch(/Summer's Defiant Blood/);
+		expect(state.getPendingSpellDamageBonus()).toMatchObject({
+			sourceName: "Summer's Defiant Blood",
+			value: 4,
+		});
 	});
 
 	test("gates the exact holder once per combat turn but does not invent an out-of-combat lock", async () => {
@@ -503,6 +728,135 @@ describe("EFA Spell-Storing Item use transaction", () => {
 				holderUid: "external:ally-a",
 				storageId: expect.stringMatching(/^efa-spell-storage-/),
 			}),
+		]));
+	});
+
+	test("tags concentration-linked spell artifacts with the stored holder/storage owner", async () => {
+		const state = makeState();
+		state.commitEfaSpellStoringItemAtLongRest({hostItemId: "host-longsword", spellUid: "Faerie Fire|PHB"});
+		const spells = makeRealSpells(state);
+		let companionId = null;
+		jest.spyOn(spells, "_handleSpecialSpellTriggers").mockImplementation(async () => {
+			companionId = state.addCompanion({
+				name: "Stored Spell Summon",
+				type: State.COMPANION_TYPES.SUMMON,
+				concentrationLinked: true,
+			});
+		});
+		const holder = state.getEfaSpellStoringItemSelfHolder();
+
+		await expect(spells.pUseEfaSpellStoringItem({itemId: "host-longsword", holder}))
+			.resolves.toMatchObject({ok: true, committed: true});
+		const concentration = state.getConcentrations().find(entry => entry.storageId);
+		expect(concentration).toMatchObject({
+			holderUid: holder.uid,
+			effectOwnerId: expect.stringContaining("spell-storage:"),
+			effectHolderUid: holder.uid,
+		});
+		expect(state.getCompanion(companionId)).toMatchObject({
+			active: true,
+			effectOwnerId: concentration.effectOwnerId,
+			effectHolderUid: holder.uid,
+		});
+
+		state.addConcentration({
+			id: "spell:self:replacement",
+			kind: "spell",
+			name: "Replacement",
+			spellName: "Replacement",
+			holderUid: holder.uid,
+			effectOwnerId: "concentration:self:replacement",
+		});
+		expect(state.getCompanion(companionId)?.active).toBe(false);
+	});
+
+	test("tears down only the replaced holder's owned concentration effects", () => {
+		const state = makeState();
+		const selfHolder = state.getEfaSpellStoringItemSelfHolder();
+		const selfOwnerId = "concentration:self:bless";
+		const externalOwnerId = "concentration:external:faerie-fire";
+		const selfStateId = state.addActiveState("custom", {
+			name: "Bless",
+			isSpellEffect: true,
+			concentration: true,
+			effectOwnerId: selfOwnerId,
+		});
+		const externalStateId = state.addActiveState("custom", {
+			name: "Faerie Fire",
+			isSpellEffect: true,
+			concentration: true,
+			effectOwnerId: externalOwnerId,
+		});
+		const selfCompanionId = state.addCompanion({
+			name: "Self Summon",
+			type: State.COMPANION_TYPES.CUSTOM,
+			concentrationLinked: true,
+			effectOwnerId: selfOwnerId,
+		});
+		const externalCompanionId = state.addCompanion({
+			name: "External Summon",
+			type: State.COMPANION_TYPES.CUSTOM,
+			concentrationLinked: true,
+			effectOwnerId: externalOwnerId,
+		});
+		const selfAttackId = state.addTemporaryAttack({
+			name: "Self Attack",
+			damage: "1d6",
+			damageType: "radiant",
+			sourceSpell: "Bless",
+			effectOwnerId: selfOwnerId,
+		});
+		const externalAttackId = state.addTemporaryAttack({
+			name: "External Attack",
+			damage: "1d6",
+			damageType: "fire",
+			sourceSpell: "Faerie Fire",
+			effectOwnerId: externalOwnerId,
+		});
+		state.addConcentration({
+			id: "spell:self:bless",
+			kind: "spell",
+			name: "Bless",
+			spellName: "Bless",
+			holderUid: selfHolder.uid,
+			effectOwnerId: selfOwnerId,
+		});
+		state.addConcentration({
+			id: "spell:external:faerie-fire",
+			kind: "spell",
+			name: "Faerie Fire",
+			spellName: "Faerie Fire",
+			holderUid: "external:ally",
+			effectOwnerId: externalOwnerId,
+		});
+
+		state.addConcentration({
+			id: "spell:external:web",
+			kind: "spell",
+			name: "Web",
+			spellName: "Web",
+			holderUid: "external:ally",
+			effectOwnerId: "concentration:external:web",
+		});
+
+		expect(state.getActiveStates().some(entry => entry.id === selfStateId)).toBe(true);
+		expect(state.getActiveStates().some(entry => entry.id === externalStateId)).toBe(false);
+		expect(state.getCompanion(selfCompanionId)?.active).toBe(true);
+		expect(state.getCompanion(externalCompanionId)?.active).toBe(false);
+		expect(state.getTemporaryAttacks().some(entry => entry.id === selfAttackId)).toBe(true);
+		expect(state.getTemporaryAttacks().some(entry => entry.id === externalAttackId)).toBe(false);
+		expect(state.getConcentrations()).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "spell:self:bless", effectOwnerId: selfOwnerId}),
+			expect.objectContaining({id: "spell:external:web", holderUid: "external:ally"}),
+		]));
+		const restored = new State();
+		restored.loadFromJson(state.toJson());
+		expect(restored.getActiveStates()).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: selfStateId, effectOwnerId: selfOwnerId}),
+		]));
+		expect(restored.getConcentrations()).toEqual(expect.arrayContaining([
+			expect.objectContaining({id: "spell:self:bless", effectOwnerId: selfOwnerId}),
+			expect.objectContaining({id: "spell:external:web", effectOwnerId: "concentration:external:web"}),
 		]));
 	});
 
