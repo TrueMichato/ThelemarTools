@@ -146,6 +146,9 @@ while the owner remains dead use the same generic creation callback. Pending
 zero-HP intervention prompts are transient and are not exported or restored;
 only a currently actionable live prompt defers reconciliation. Legacy valid
 death-expiry mirrors migrate into one canonical expiry record without rerolling.
+The public `serialize()`/`CharacterSheetState.deserialize()` round trip delegates
+to the same `toJson()`/`loadFromJson()` path, so it cannot bypass cleanup,
+migration, or authoritative death reconciliation.
 
 Lifecycle days advance only through
 `advanceGeneratedFeatureItemLifecycleDays(positiveWholeDays)`. The transaction

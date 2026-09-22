@@ -447,6 +447,73 @@ describe("EFA Replicate Magic Item death expiry", () => {
 		expect(randomise).not.toHaveBeenCalled();
 	});
 
+	test("public serialize omits a pending zero-HP intervention", () => {
+		const state = makeState();
+		createGeneratedItem(state);
+		state.getFeatureCalculations = () => ({hasStrengthOfTheGrave: true});
+		state.addFeature({
+			name: "Strength of the Grave",
+			source: "XGE",
+			uses: {current: 1, max: 1, recharge: "long"},
+		});
+		state.takeDamage(40);
+		expect(state.getPendingZeroHpIntervention()).not.toBeNull();
+
+		expect(JSON.parse(state.serialize()).data._pendingZeroHpIntervention).toBeUndefined();
+	});
+
+	test("public deserialize clears a persisted pending intervention and finalizes dead expiry idempotently", () => {
+		randomise.mockReturnValue(4);
+		const state = makeState();
+		const created = createGeneratedItem(state);
+		state.getFeatureCalculations = () => ({hasStrengthOfTheGrave: true});
+		state.addFeature({
+			name: "Strength of the Grave",
+			source: "XGE",
+			uses: {current: 1, max: 1, recharge: "long"},
+		});
+		state.takeDamage(40);
+		const pending = MiscUtil.copyFast(state._data._pendingZeroHpIntervention);
+		const payload = JSON.parse(state.serialize());
+		payload.data._pendingZeroHpIntervention = pending;
+
+		const loaded = State.deserialize(JSON.stringify(payload));
+		expect(getExpiry(loaded, created.itemId)?.daysRemaining).toBe(4);
+		expect(loaded.toJson()._pendingZeroHpIntervention).toBeUndefined();
+		expect(randomise).toHaveBeenCalledTimes(1);
+
+		const loadedAgain = State.deserialize(loaded.serialize());
+		expect(getExpiry(loadedAgain, created.itemId)).toEqual(getExpiry(loaded, created.itemId));
+		expect(randomise).toHaveBeenCalledTimes(1);
+	});
+
+	test("public deserialize migrates a mirror-only countdown without rerolling", () => {
+		const state = makeState();
+		const created = createGeneratedItem(state);
+		const payload = JSON.parse(state.serialize());
+		payload.data.deathSaves.failures = 3;
+		payload.data.generatedFeatureItemLifecycle.deathTransition = {
+			version: 1,
+			isFinalizedDead: true,
+			receiptId: "persisted-death",
+		};
+		const lifecycle = payload.data.inventory.find(row => row.id === created.itemId).item._generatedItemProvenance.lifecycle;
+		lifecycle.expiryRecords = [];
+		lifecycle.deathExpiryDaysRemaining = 2;
+		lifecycle.deathExpiryAssignedReceiptId = "legacy-receipt";
+
+		const loaded = State.deserialize(JSON.stringify(payload));
+		expect(getExpiry(loaded, created.itemId)).toEqual({
+			version: 1,
+			policyId: "expire-after-1d4-days",
+			trigger: "death",
+			assignedReceiptId: "legacy-receipt",
+			roll: {formula: "1d4", result: 2},
+			daysRemaining: 2,
+		});
+		expect(randomise).not.toHaveBeenCalled();
+	});
+
 	test("quarantines irreparable expiry numerics without guessing or rerolling", () => {
 		const state = makeState();
 		const created = createGeneratedItem(state);

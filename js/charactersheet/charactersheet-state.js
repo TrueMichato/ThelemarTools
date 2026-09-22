@@ -90407,7 +90407,7 @@ class CharacterSheetState {
 	serialize () {
 		return JSON.stringify({
 			version: 1,
-			data: this._data,
+			data: this.toJson(),
 		});
 	}
 
@@ -90420,35 +90420,19 @@ class CharacterSheetState {
 		const parsed = JSON.parse(json);
 		const state = new CharacterSheetState();
 
-		// Handle version migrations if needed
 		if (parsed.version && parsed.data) {
-			Object.assign(state._data, parsed.data);
-		} else {
-			// Legacy format: direct data
-			// Handle basicInfo wrapper format
-			if (parsed.basicInfo) {
-				if (parsed.basicInfo.name) state._data.name = parsed.basicInfo.name;
-				if (parsed.basicInfo.race) state._data.race = parsed.basicInfo.race;
-				if (parsed.basicInfo.subrace) state._data.subrace = parsed.basicInfo.subrace;
-				if (parsed.basicInfo.background) state._data.background = parsed.basicInfo.background;
-			}
-			// Handle abilities wrapper format (direct values, not {base: value})
-			if (parsed.abilities) {
-				Object.keys(parsed.abilities).forEach(ability => {
-					if (state._data.abilities.hasOwnProperty(ability)) {
-						state._data.abilities[ability] = parsed.abilities[ability];
-					}
-				});
-			}
-			// Copy other recognized fields directly
-			const directFields = ["name", "race", "subrace", "background", "classes", "hp", "features", "inventory", "spellcasting"];
-			directFields.forEach(field => {
-				if (parsed[field] !== undefined && !parsed.basicInfo) {
-					state._data[field] = parsed[field];
-				}
-			});
+			state.loadFromJson(parsed);
+			return state;
 		}
 
+		const legacy = MiscUtil.copyFast(parsed);
+		if (legacy.basicInfo && typeof legacy.basicInfo === "object" && !Array.isArray(legacy.basicInfo)) {
+			for (const field of ["name", "race", "subrace", "background"]) {
+				if (legacy.basicInfo[field] != null) legacy[field] = legacy.basicInfo[field];
+			}
+			delete legacy.basicInfo;
+		}
+		state.loadFromJson(legacy);
 		return state;
 	}
 	// #endregion
