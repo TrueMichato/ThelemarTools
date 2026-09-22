@@ -239,6 +239,87 @@ const makeLevelUpSurface = pickerPromise => {
 	};
 };
 
+const makeMulticlassLevelUpSurface = pickerPromise => {
+	const state = new CharacterSheetState();
+	state.addClass({
+		name: "Fighter",
+		source: "PHB",
+		level: 5,
+		hitDice: {number: 1, faces: 10},
+	});
+	state.addClass({
+		name: ARTIFICER_CLASS.name,
+		source: ARTIFICER_CLASS.source,
+		level: 2,
+		hitDice: copy(ARTIFICER_CLASS.hd),
+		casterProgression: ARTIFICER_CLASS.casterProgression,
+		spellcastingAbility: ARTIFICER_CLASS.spellcastingAbility,
+		preparedSpellsProgression: copy(ARTIFICER_CLASS.preparedSpellsProgression),
+		cantripProgression: copy(ARTIFICER_CLASS.cantripProgression),
+		subclass: null,
+	});
+	for (let characterLevel = 1; characterLevel <= 5; characterLevel++) {
+		state.recordLevelChoice({
+			level: characterLevel,
+			class: {name: "Fighter", source: "PHB"},
+			classLevel: characterLevel,
+			choices: {},
+			complete: true,
+		});
+	}
+	for (let classLevel = 1; classLevel <= 2; classLevel++) {
+		state.recordLevelChoice({
+			level: 5 + classLevel,
+			class: {name: "Artificer", source: "EFA"},
+			classLevel,
+			choices: {},
+			complete: true,
+		});
+	}
+	state.addToolProficiency("Woodcarver's Tools");
+
+	const page = makeSurfacePage(state, pickerPromise);
+	const levelUp = Object.create(CharacterSheetLevelUp.prototype);
+	Object.assign(levelUp, {
+		_state: state,
+		_page: page,
+		_selectedFeatureSkillChoices: {},
+	});
+	return {
+		state,
+		page,
+		run: () => levelUp._applyLevelUp({
+			classEntry: state.getClasses().find(cls => cls.name === "Artificer" && cls.source === "EFA"),
+			newLevel: 3,
+			asiChoices: {},
+			selectedFeat: null,
+			selectedSubclass: ARTILLERIST,
+			selectedSubclassChoice: null,
+			selectedOptionalFeatures: {},
+			selectedCombatTraditions: null,
+			selectedWeaponMasteries: null,
+			selectedFeatureOptions: {},
+			selectedClassFeatProgression: [],
+			selectedExpertise: {},
+			selectedLanguages: {},
+			languageGrants: [],
+			forkedTongueLevelUpPick: null,
+			selectedScholarSkill: null,
+			selectedSpellbookSpells: [],
+			selectedSpellMasterySpells: [],
+			selectedSignatureSpells: [],
+			selectedKnownSpells: [],
+			selectedKnownCantrips: [],
+			selectedPreparedSpells: [],
+			selectedPreparedCantrips: [],
+			stagedSpellSwap: null,
+			newFeatures: [makeToolsFeature({isSubclassFeature: true, subclassName: ARTILLERIST.name})],
+			hpMethod: "average",
+			classData: ARTIFICER_CLASS,
+		}),
+	};
+};
+
 const makeQuickBuildSelections = () => ({
 	subclasses: {"Artificer_EFA": ARTILLERIST},
 	subclassChoices: {},
@@ -758,5 +839,79 @@ describe.each(SURFACES)("%s fixed proficiency fallback integration", (_surfaceNa
 
 		expectResolvedFallbackDecision(harness.state);
 		expect(harness.page.saveCharacter).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("multiclass fixed proficiency fallback acquisition provenance", () => {
+	let originalDelay;
+
+	beforeEach(() => {
+		originalDelay = globalThis.MiscUtil.pDelay;
+		globalThis.MiscUtil.pDelay = jest.fn(async () => {});
+	});
+
+	afterEach(() => {
+		if (originalDelay) globalThis.MiscUtil.pDelay = originalDelay;
+		else delete globalThis.MiscUtil.pDelay;
+	});
+
+	test("records Artificer 3 at character level 8 under the exact subclass parent", async () => {
+		const deferred = makeDeferred();
+		const harness = makeMulticlassLevelUpSurface(deferred.promise);
+		const operation = harness.run();
+		await flushAsyncWork();
+
+		const parentSemanticKey = CharacterSheetProgression.getSemanticKey({
+			className: "Artificer",
+			classSource: "EFA",
+			classLevel: 3,
+			type: "subclass",
+			sourceKey: "subclass",
+			slot: 0,
+		});
+		expect(harness.state.getTotalLevel()).toBe(8);
+		expect(harness.state.getFixedProficiencyFallbackTransaction(ARTILLERIST_UID)).toMatchObject({
+			characterLevel: 8,
+			sourceDecisionKey: parentSemanticKey,
+			status: "pending",
+		});
+		expect(harness.page._pPickFeatureChoice.mock.calls[0][0]).toMatchObject({
+			characterLevel: 8,
+			sourceDecisionKey: parentSemanticKey,
+			featureUid: ARTILLERIST_UID,
+		});
+
+		deferred.resolve("Smith's Tools");
+		await operation;
+
+		const levelEight = harness.state.getLevelHistory().find(entry => entry.level === 8);
+		const parentDecision = levelEight.decisions.find(decision => decision.semanticKey === parentSemanticKey);
+		const fallbackDecision = levelEight.decisions.find(decision =>
+			decision.provenance?.ownerUid === ARTILLERIST_UID);
+		expect(parentDecision).toMatchObject({
+			characterLevel: 8,
+			className: "Artificer",
+			classSource: "EFA",
+			classLevel: 3,
+			type: "subclass",
+			selection: {name: ARTILLERIST.name, source: ARTILLERIST.source},
+		});
+		expect(fallbackDecision).toMatchObject({
+			characterLevel: 8,
+			className: "Artificer",
+			classSource: "EFA",
+			classLevel: 3,
+			type: "nestedTool",
+			selection: "Smith's Tools",
+			parentSemanticKey,
+			rootSemanticKey: parentSemanticKey,
+			provenance: {
+				ownerUid: ARTILLERIST_UID,
+				acquisitionKey: ARTILLERIST_UID,
+				sourcePath: ARTILLERIST_UID,
+			},
+		});
+		expect(harness.state.getLevelHistory().find(entry => entry.level === 3).decisions
+			.filter(decision => decision.provenance?.ownerUid === ARTILLERIST_UID)).toHaveLength(0);
 	});
 });

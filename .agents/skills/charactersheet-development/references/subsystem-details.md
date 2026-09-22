@@ -196,6 +196,13 @@ proficiency, fallback catalog, acquisition mode (`fixed` or `fallback`), status
 (`pending` or `resolved`), selection, exact grant source, parent decision key,
 resolved decision key, feature ID, and acquisition character level.
 
+During Level Up/Quick Build, the class level is committed before its history row
+is appended. Acquisition therefore prefers an existing exact class-level history
+match (replay/catch-up), then uses the current total character level when that
+new row is not present yet. The source-qualified subclass parent semantic key is
+deterministic from the active exact class/subclass identity and does not require
+the history row to exist first.
+
 Acquisition snapshots `hasToolProficiency(fixedProficiency)` before prose or
 structured proficiency parsing. Fixed mode claims the fixed value immediately;
 fallback mode queues the existing `kind: "tool"` feature-choice modal. The

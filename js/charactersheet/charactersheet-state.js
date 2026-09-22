@@ -21593,12 +21593,7 @@ class CharacterSheetState {
 				&& normalize(candidate.subclass?.shortName || candidate.subclass?.name) === normalize(owner.subclassShortName || owner.subclassName)
 				&& normalize(candidate.subclass?.source) === normalize(owner.subclassSource),
 		);
-		const history = (this._data.levelHistory || []).find(entry =>
-			normalize(entry.class?.name) === normalize(owner.className)
-				&& normalize(entry.class?.source) === normalize(owner.classSource)
-				&& Number(entry.classLevel) === Number(owner.level),
-		);
-		if (!cls || !history) return null;
+		if (!cls) return null;
 		return CharacterSheetProgression.getSemanticKey({
 			className: owner.className,
 			classSource: owner.classSource,
@@ -22003,6 +21998,13 @@ class CharacterSheetState {
 			const byClassLevel = matching.find(entry => Number(entry.classLevel) === classLevel);
 			if (byClassLevel) return Number(byClassLevel.level) || classLevel;
 			if (matching[classLevel - 1]) return Number(matching[classLevel - 1].level) || classLevel;
+			const currentClass = (this._data.classes || []).find(entry =>
+				entry.name === className
+					&& (!classSource || entry.source === classSource));
+			if (Number(currentClass?.level) >= classLevel) {
+				const currentTotalLevel = this.getTotalLevel();
+				if (currentTotalLevel > 0) return currentTotalLevel;
+			}
 		}
 		return Number(choice?.level) || 0;
 	}
