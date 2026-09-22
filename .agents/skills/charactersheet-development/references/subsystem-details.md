@@ -139,14 +139,20 @@ raw pending zero-HP intervention defers finalization until
 `clearPendingZeroHpIntervention()` resolves success, failure, or decline.
 Every valid generated row whose lifecycle registers
 `onDeath: "expire-after-1d4-days"` receives one persisted roll for that
-finalized death receipt. Reconciliation, save/load, revival, and passive reads
-never reroll or reset a record; valid rows created while the owner remains
-dead use the same generic creation callback.
+finalized death receipt only when its exact owner, including `featureSource`,
+matches `EFA_REPLICATE_MAGIC_ITEM_OWNER`. Reconciliation, save/load, revival,
+and passive reads never reroll or reset a record; valid Replicate rows created
+while the owner remains dead use the same generic creation callback. Pending
+zero-HP intervention prompts are transient and are not exported or restored;
+only a currently actionable live prompt defers reconciliation. Legacy valid
+death-expiry mirrors migrate into one canonical expiry record without rerolling.
 
 Lifecycle days advance only through
 `advanceGeneratedFeatureItemLifecycleDays(positiveWholeDays)`. The transaction
 validates before mutation, decrements registered pending records, and removes
-zero-day rows through ordinary `removeItem` teardown. A long rest is not a
+zero-day exact-owner Replicate rows through ordinary `removeItem` teardown.
+Foreign generated-item owners are ignored even if malformed data copies the
+same callback IDs. A long rest is not a
 lifecycle day and never calls this API. The Inventory tab's **Generated
 Items** manager shows exact ownership, plan/resolved item, creation order,
 roll/days, and repair state; **Advance Day** requires confirmation and reports

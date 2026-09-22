@@ -12,6 +12,11 @@ const OTHER_OWNER = {
 	featureSource: "EFA",
 };
 
+const WRONG_SOURCE_OWNER = {
+	...State.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+	featureSource: "RHW",
+};
+
 function makeState () {
 	const state = new State();
 	state.addClass({name: "Artificer", source: "EFA", level: 2});
@@ -141,7 +146,8 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			source: "XGE",
 			uses: {current: 1, max: 1, recharge: "long"},
 		});
-		declined.takeDamage(40);
+		declined.takeDamage(20);
+		declined.setDeathSaveFailures(3);
 		expect(declined.getPendingZeroHpIntervention()).not.toBeNull();
 		expect(declined.isDead()).toBe(true);
 		expect(getExpiry(declined, declinedItem.itemId)).toBeNull();
@@ -156,7 +162,7 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			source: "XGE",
 			uses: {current: 1, max: 1, recharge: "long"},
 		});
-		saved.takeDamage(40);
+		saved.takeDamage(20);
 		expect(getExpiry(saved, savedItem.itemId)).toBeNull();
 		expect(saved.applyZeroHpIntervention("strengthOfTheGrave", {total: 99})).toMatchObject({
 			applied: true,
@@ -174,13 +180,56 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			source: "XGE",
 			uses: {current: 1, max: 1, recharge: "long"},
 		});
-		failed.takeDamage(40);
+		failed.takeDamage(20);
+		failed.setDeathSaveFailures(3);
 		expect(failed.applyZeroHpIntervention("strengthOfTheGrave", {total: 0})).toMatchObject({
 			applied: true,
 			success: false,
 		});
 		expect(getExpiry(failed, failedItem.itemId)?.daysRemaining).toBe(3);
 		expect(randomise).toHaveBeenCalledTimes(2);
+	});
+
+	test("finalizes a persisted massive-death trigger on load instead of restoring a stale intervention", () => {
+		randomise.mockReturnValue(4);
+		const state = makeState();
+		const created = createGeneratedItem(state);
+		state.getFeatureCalculations = () => ({hasStrengthOfTheGrave: true});
+		state.addFeature({
+			name: "Strength of the Grave",
+			source: "XGE",
+			uses: {current: 1, max: 1, recharge: "long"},
+		});
+		state.takeDamage(40);
+		expect(state.getPendingZeroHpIntervention()).not.toBeNull();
+		expect(getExpiry(state, created.itemId)).toBeNull();
+
+		const loaded = new State();
+		expect(loaded.loadFromJson(state.toJson())).not.toBe(false);
+		expect(getExpiry(loaded, created.itemId)?.daysRemaining).toBe(4);
+		expect(loaded.toJson()._pendingZeroHpIntervention).toBeUndefined();
+		expect(randomise).toHaveBeenCalledTimes(1);
+	});
+
+	test("does not let a healed stale intervention defer a later death", () => {
+		const state = makeState();
+		const created = createGeneratedItem(state);
+		state.getFeatureCalculations = () => ({hasStrengthOfTheGrave: true});
+		state.addFeature({
+			name: "Strength of the Grave",
+			source: "XGE",
+			uses: {current: 1, max: 1, recharge: "long"},
+		});
+		state.takeDamage(20);
+		expect(state.getPendingZeroHpIntervention()).not.toBeNull();
+
+		state.heal(5);
+		expect(state.getPendingZeroHpIntervention()).toBeNull();
+		state.setDeathSaveFailures(3);
+
+		expect(getExpiry(state, created.itemId)?.daysRemaining).toBe(3);
+		expect(state.toJson()._pendingZeroHpIntervention).toBeUndefined();
+		expect(randomise).toHaveBeenCalledTimes(1);
 	});
 
 	test("finalizes massive damage after its death flag is set when no eligible intervention remains", () => {
@@ -237,10 +286,39 @@ describe("EFA Replicate Magic Item death expiry", () => {
 
 		const replicate = createGeneratedItem(state);
 		const other = createGeneratedItem(state, {owner: OTHER_OWNER, name: "Experimental Elixir"});
+		const wrongSource = createGeneratedItem(state, {owner: WRONG_SOURCE_OWNER, name: "Wrong-Source Replicate"});
 
 		expect(getExpiry(state, replicate.itemId)?.daysRemaining).toBe(3);
-		expect(getExpiry(state, other.itemId)?.daysRemaining).toBe(3);
-		expect(randomise).toHaveBeenCalledTimes(2);
+		expect(getExpiry(state, other.itemId)).toBeNull();
+		expect(getExpiry(state, wrongSource.itemId)).toBeNull();
+		expect(randomise).toHaveBeenCalledTimes(1);
+	});
+
+	test("does not advance or remove persisted expiry records owned by another feature or source", () => {
+		const state = makeState();
+		const other = createGeneratedItem(state, {owner: OTHER_OWNER, name: "Experimental Elixir"});
+		const wrongSource = createGeneratedItem(state, {owner: WRONG_SOURCE_OWNER, name: "Wrong-Source Replicate"});
+		for (const itemId of [other.itemId, wrongSource.itemId]) {
+			const lifecycle = state.getInventory().find(row => row.id === itemId).item._generatedItemProvenance.lifecycle;
+			lifecycle.expiryRecords = [{
+				version: 1,
+				policyId: "expire-after-1d4-days",
+				trigger: "death",
+				assignedReceiptId: "foreign-receipt",
+				roll: {formula: "1d4", result: 1},
+				daysRemaining: 1,
+			}];
+			lifecycle.deathExpiryDaysRemaining = 1;
+			lifecycle.deathExpiryAssignedReceiptId = "foreign-receipt";
+		}
+
+		expect(state.advanceGeneratedFeatureItemLifecycleDays(1)).toMatchObject({
+			ok: true,
+			updated: [],
+			removed: [],
+		});
+		expect(getExpiry(state, other.itemId)?.daysRemaining).toBe(1);
+		expect(getExpiry(state, wrongSource.itemId)?.daysRemaining).toBe(1);
 	});
 
 	test("round-trips without rerolling and starts a dead legacy save exactly once", () => {
@@ -332,6 +410,39 @@ describe("EFA Replicate Magic Item death expiry", () => {
 		const savedAgain = loaded.toJson();
 		const loadedAgain = new State();
 		expect(loadedAgain.loadFromJson(savedAgain)).not.toBe(false);
+		expect(getExpiry(loadedAgain, created.itemId)).toEqual(getExpiry(loaded, created.itemId));
+		expect(randomise).not.toHaveBeenCalled();
+	});
+
+	test("migrates a valid legacy mirror-only countdown without rerolling", () => {
+		const state = makeState();
+		const created = createGeneratedItem(state);
+		const saved = state.toJson();
+		saved.deathSaves.failures = 3;
+		saved.generatedFeatureItemLifecycle.deathTransition = {
+			version: 1,
+			isFinalizedDead: true,
+			receiptId: "persisted-death",
+		};
+		const lifecycle = saved.inventory.find(row => row.id === created.itemId).item._generatedItemProvenance.lifecycle;
+		lifecycle.expiryRecords = [];
+		lifecycle.deathExpiryDaysRemaining = 2;
+		lifecycle.deathExpiryAssignedReceiptId = "legacy-receipt";
+
+		const loaded = new State();
+		expect(loaded.loadFromJson(saved)).not.toBe(false);
+		expect(getExpiry(loaded, created.itemId)).toEqual({
+			version: 1,
+			policyId: "expire-after-1d4-days",
+			trigger: "death",
+			assignedReceiptId: "legacy-receipt",
+			roll: {formula: "1d4", result: 2},
+			daysRemaining: 2,
+		});
+		expect(randomise).not.toHaveBeenCalled();
+
+		const loadedAgain = new State();
+		expect(loadedAgain.loadFromJson(loaded.toJson())).not.toBe(false);
 		expect(getExpiry(loadedAgain, created.itemId)).toEqual(getExpiry(loaded, created.itemId));
 		expect(randomise).not.toHaveBeenCalled();
 	});

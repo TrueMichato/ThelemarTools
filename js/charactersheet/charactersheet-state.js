@@ -5901,7 +5901,9 @@ class CharacterSheetState {
 			this.reconcileTargetEffects();
 		}
 		this._normalizeTempHpState();
-		return MiscUtil.copyFast(this._data);
+		const out = MiscUtil.copyFast(this._data);
+		delete out._pendingZeroHpIntervention;
+		return out;
 	}
 
 	// Alias for compatibility with export module
@@ -5934,6 +5936,7 @@ class CharacterSheetState {
 			&& !Array.isArray(data)
 			&& Object.hasOwn(data, "movementEconomyUsage");
 		const legacyChainedMovementUsage = data?.chainedMovementUsage;
+		delete this._data._pendingZeroHpIntervention;
 		this._migrateInventoryItemMetadata();
 
 		this._data.xp = Math.max(0, Math.floor(Number(this._data.xp) || 0));
@@ -13560,6 +13563,7 @@ class CharacterSheetState {
 	// #region HP
 	setCurrentHp (hp) {
 		this._data.hp.current = Math.max(0, Math.min(hp, this.getMaxHp()));
+		if (this._data.hp.current > 0) delete this._data._pendingZeroHpIntervention;
 		if (this._data.hp.current === 0) this._deactivateStatesForEndCondition({isIncapacitated: true});
 		this._updateBloodiedCondition();
 	}
@@ -14062,6 +14066,7 @@ class CharacterSheetState {
 
 		// Reset death saves when healing from 0 HP
 		if (wasAtZero && this._data.hp.current > 0) {
+			delete this._data._pendingZeroHpIntervention;
 			this.resetDeathSaves();
 		}
 
@@ -14966,6 +14971,7 @@ class CharacterSheetState {
 			if (options && Object.hasOwn(options, "tempHpOwner")) this._setTempHpPool(amount, options.tempHpOwner);
 			else this.setTempHp(amount);
 		}
+		if (this._data.hp.current > 0) delete this._data._pendingZeroHpIntervention;
 		if (this._data.hp.current === 0) this._deactivateStatesForEndCondition({isIncapacitated: true});
 		this._updateBloodiedCondition();
 	}
@@ -37177,6 +37183,11 @@ class CharacterSheetState {
 			.join("::");
 	}
 
+	static _isEfaReplicateMagicItemOwner (owner) {
+		return CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner) ===
+			CharacterSheetState._getGeneratedFeatureItemOwnerKey(CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER);
+	}
+
 	static _normalizeGeneratedFeatureItemCatalog (catalog) {
 		if (catalog == null) return null;
 		if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) return null;
@@ -37229,8 +37240,29 @@ class CharacterSheetState {
 				: null;
 		if (!callbacks) return null;
 		const expiryRecords = CharacterSheetState._normalizeGeneratedFeatureItemExpiryRecords(lifecycle.expiryRecords);
-		const deathRecord = expiryRecords.find(record => record.trigger === "death");
 		const rawDeathExpiryDaysRemaining = Number(lifecycle.deathExpiryDaysRemaining);
+		const rawDeathExpiryAssignedReceiptId = lifecycle.deathExpiryAssignedReceiptId == null
+			? ""
+			: String(lifecycle.deathExpiryAssignedReceiptId).trim();
+		let deathRecord = expiryRecords.find(record => record.trigger === "death");
+		if (
+			!deathRecord
+			&& callbacks.onDeath === "expire-after-1d4-days"
+			&& rawDeathExpiryAssignedReceiptId
+			&& Number.isSafeInteger(rawDeathExpiryDaysRemaining)
+			&& rawDeathExpiryDaysRemaining >= 0
+			&& rawDeathExpiryDaysRemaining <= 4
+		) {
+			deathRecord = {
+				version: CharacterSheetState.GENERATED_FEATURE_ITEM_EXPIRY_VERSION,
+				policyId: callbacks.onDeath,
+				trigger: "death",
+				assignedReceiptId: rawDeathExpiryAssignedReceiptId,
+				roll: {formula: "1d4", result: Math.max(1, rawDeathExpiryDaysRemaining)},
+				daysRemaining: rawDeathExpiryDaysRemaining,
+			};
+			expiryRecords.push(deathRecord);
+		}
 		const deathExpiryDaysRemaining = deathRecord
 			? deathRecord.daysRemaining
 			: lifecycle.deathExpiryDaysRemaining != null
@@ -37238,9 +37270,6 @@ class CharacterSheetState {
 			&& rawDeathExpiryDaysRemaining >= 0
 				? rawDeathExpiryDaysRemaining
 				: null;
-		const rawDeathExpiryAssignedReceiptId = lifecycle.deathExpiryAssignedReceiptId == null
-			? ""
-			: String(lifecycle.deathExpiryAssignedReceiptId).trim();
 		return {
 			version,
 			state,
@@ -37747,7 +37776,10 @@ class CharacterSheetState {
 
 	_assignGeneratedFeatureItemDeathExpiry (row, receiptId) {
 		const classification = this.classifyGeneratedFeatureItem(row);
-		if (classification.status !== "valid") return null;
+		if (
+			classification.status !== "valid"
+			|| !CharacterSheetState._isEfaReplicateMagicItemOwner(classification.owner)
+		) return null;
 		const lifecycle = row.item?._generatedItemProvenance?.lifecycle;
 		const policyId = lifecycle?.callbacks?.onDeath;
 		if (!policyId || policyId !== "expire-after-1d4-days") return null;
@@ -37775,12 +37807,16 @@ class CharacterSheetState {
 	_reconcileGeneratedFeatureItemRowForCurrentLifecycle (row) {
 		const transition = this._getGeneratedFeatureItemLifecycleState().deathTransition;
 		if (!transition.isFinalizedDead || !transition.receiptId || !this.isDead()) return null;
-		if (this._data._pendingZeroHpIntervention) return null;
+		if (this._hasActionablePendingZeroHpIntervention()) return null;
 		return this._assignGeneratedFeatureItemDeathExpiry(row, transition.receiptId);
 	}
 
+	_hasActionablePendingZeroHpIntervention () {
+		return !!this.getPendingZeroHpIntervention()?.interventions?.some(intervention => intervention.available);
+	}
+
 	reconcileGeneratedFeatureItemDeathTransition ({reason = "reconcile"} = {}) {
-		if (this._data._pendingZeroHpIntervention) {
+		if (this._hasActionablePendingZeroHpIntervention()) {
 			return {ok: true, code: "death-transition-deferred", reason, assigned: []};
 		}
 		const transition = this._getGeneratedFeatureItemLifecycleState().deathTransition;
@@ -37814,13 +37850,16 @@ class CharacterSheetState {
 		if (!Number.isSafeInteger(normalizedDays) || normalizedDays <= 0) {
 			return {ok: false, code: "invalid-lifecycle-days", daysAdvanced: 0, updated: [], removed: []};
 		}
-		const snapshot = this.toJson();
+		const snapshot = MiscUtil.copyFast(this._data);
 		const updated = [];
 		const toRemove = [];
 		try {
 			for (const row of this._data.inventory || []) {
 				const classification = this.classifyGeneratedFeatureItem(row);
-				if (classification.status !== "valid") continue;
+				if (
+					classification.status !== "valid"
+					|| !CharacterSheetState._isEfaReplicateMagicItemOwner(classification.owner)
+				) continue;
 				const lifecycle = row.item._generatedItemProvenance.lifecycle;
 				if (lifecycle?.callbacks?.onLifecycleDay !== "decrement-expiry") continue;
 				lifecycle.expiryRecords = CharacterSheetState._normalizeGeneratedFeatureItemExpiryRecords(lifecycle.expiryRecords);
