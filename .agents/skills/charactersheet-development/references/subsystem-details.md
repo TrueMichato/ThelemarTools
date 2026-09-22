@@ -672,14 +672,22 @@ constraints, targeting/effects, concentration, and committed-cast triggers. It
 commits the feature use and action before resolving the spell, then rolls both
 back when targeting is cancelled or resolution throws. This keeps feature casts
 distinct from spell slots while preserving the real spell's source, casting
-ability, duration, and concentration.
+ability, duration, and concentration. Feature casts and ordinary prepared/known
+spells share the same state action transaction, so an action spell blocks another
+action spell regardless of which route cast it. The Spells controller derives
+the transaction from the effective casting time (including Quickened Spell),
+leaves longer casting times untracked, and rolls the action back when targeting
+is cancelled or resolution throws.
 
 EFA Cartographer Mapping Magic is the first consumer. Its state is versioned in
 `cartographerMappingMagic`; Long Rest resets both limited casts, and full rest
 snapshot undo restores the prior uses/receipts. Portal Jump spends
 `Math.floor(liveSpeed / 2)` through `spendMovement()` with a structured
-destination receipt, so save/load and `resetTurnEconomy()` use the same movement
-ledger as every other movement feature.
+destination receipt during combat, so save/load and `resetTurnEconomy()` use the
+same movement ledger as every other movement feature. Positive Speed 1 has the
+authored zero-foot cost and succeeds without manufacturing a receipt. Outside
+combat, the same validation and structured result run without persisting a
+transient turn receipt.
 
 The exact EFA progression is data-authoritative: Mapping Magic, Portal Jump, and
 Adventurer's Atlas Positioning begin at Cartographer level 3. Illuminated
@@ -870,15 +878,21 @@ riders remain roll-time concerns and must not appear in the standing formula.
 `CharacterSheetState.actionEconomyUsage` tracks `{action, bonus, reaction}`
 consumption for state-owned callers such as Play Mode and feature interactions.
 Use `consumeActionType`, `restoreActionType`, and `resetActionEconomy`; combat's
-attack-count tracker remains separate.
+attack-count tracker remains separate. `commitActionEconomy` /
+`rollbackActionEconomy` provide the atomic receipt-shaped contract used by spell
+casting. Callers whose cost exists only within a turn pass
+`{trackOnlyInCombat: true}`; outside combat the cost is validated but not written,
+so save/load cannot strand an action between narrative interactions.
 
 `movementEconomyUsage` is the parallel persisted movement ledger. It stores
 source-tagged atomic receipts rather than a frozen allowance:
 
-- `spendMovement(amount, {source, scope?})` validates against live walking Speed
+- `spendMovement(amount, {source, scope?, trackOnlyInCombat?})` validates against live walking Speed
   and returns a receipt which can be refunded with `refundMovement` or
-  `rollbackMovement`.
-- `getMovementEconomyState({scope?})` recalculates total/remaining movement from
+  `rollbackMovement`. A zero-cost spend succeeds with `receipt: null`; a
+  combat-only spend outside combat likewise returns a validated result without
+  persisting a turn receipt.
+- `getMovementEconomyState({scope?, trackOnlyInCombat?})` recalculates total/remaining movement from
   `getSpeed("walk")` on every read, so conditions and temporary Speed modifiers
   immediately change the allowance without rewriting receipts.
 - `grantMovementAllowance` adds a Speed-relative allowance receipt. A scoped

@@ -32,6 +32,53 @@ describe("CharacterSheet movement economy", () => {
 		expect(state.getMovementEconomyState().receipts).toHaveLength(1);
 	});
 
+	it("can validate transient movement costs without persisting them outside combat", () => {
+		const first = state.spendMovement(15, {
+			source: "test:noncombat",
+			trackOnlyInCombat: true,
+		});
+		const second = state.spendMovement(15, {
+			source: "test:noncombat",
+			trackOnlyInCombat: true,
+		});
+
+		expect(first).toMatchObject({
+			ok: true,
+			receipt: null,
+			movement: {used: 0, remaining: 30},
+		});
+		expect(second).toMatchObject({
+			ok: true,
+			receipt: null,
+			movement: {used: 0, remaining: 30},
+		});
+		expect(state.getMovementEconomyState()).toMatchObject({used: 0, remaining: 30, receipts: []});
+	});
+
+	it("persists combat-only movement costs during combat and accepts zero without a fake receipt", () => {
+		state.startCombat();
+
+		const zero = state.spendMovement(0, {
+			source: "test:zero",
+			trackOnlyInCombat: true,
+		});
+		const spend = state.spendMovement(15, {
+			source: "test:combat-only",
+			trackOnlyInCombat: true,
+		});
+
+		expect(zero).toMatchObject({
+			ok: true,
+			receipt: null,
+			movement: {used: 0, remaining: 30},
+		});
+		expect(spend).toMatchObject({
+			ok: true,
+			receipt: {source: "test:combat-only", amount: 15},
+			movement: {used: 15, remaining: 15},
+		});
+	});
+
 	it("rejects insufficient movement without writing a receipt", () => {
 		expect(state.spendMovement(31, {source: "test:too-far"})).toEqual({
 			ok: false,

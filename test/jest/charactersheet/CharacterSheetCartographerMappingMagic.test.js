@@ -37,6 +37,17 @@ const FIND_THE_PATH_XPHB = {
 	duration: [{type: "timed", duration: {type: "day", amount: 1}, concentration: true}],
 	entries: ["You magically sense the most direct physical route to a fixed location."],
 };
+const FIRE_BOLT_XPHB = {
+	name: "Fire Bolt",
+	source: "XPHB",
+	level: 0,
+	school: "V",
+	time: [{number: 1, unit: "action"}],
+	range: {type: "point", distance: {type: "feet", amount: 120}},
+	components: {v: true, s: true},
+	duration: [{type: "instant"}],
+	entries: ["Make a ranged spell attack."],
+};
 
 function makeCartographer ({level = 15, source = "EFA", subclassSource = "EFA"} = {}) {
 	const state = new CharacterSheetState();
@@ -485,6 +496,7 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 
 		const actionSpent = makeCartographer({level: 3});
 		createSelfAtlas(actionSpent);
+		actionSpent.startCombat();
 		actionSpent.consumeActionType("action");
 		const {spells: spentSpells} = makeSpellsManager(actionSpent);
 		expect(await spentSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
@@ -504,6 +516,66 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 		}
 		expect(await exhaustedSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
 			.toMatchObject({ok: false, reason: "feature-spell-unavailable"});
+	});
+
+	test("does not strand the action ledger across repeated out-of-combat casts or save/load", async () => {
+		const state = makeCartographer({level: 3});
+		createSelfAtlas(state);
+		const {spells} = makeSpellsManager(state);
+
+		expect((await spells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID)).ok).toBe(true);
+		expect(state.isActionTypeAvailable("action")).toBe(true);
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		const {spells: loadedSpells} = makeSpellsManager(loaded);
+		expect((await loadedSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID)).ok).toBe(true);
+		expect(loaded.isActionTypeAvailable("action")).toBe(true);
+		expect(loaded.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(1);
+	});
+
+	test("shares the combat action ledger with ordinary spells in both cast orders", async () => {
+		const ordinaryFirst = makeCartographer({level: 3});
+		createSelfAtlas(ordinaryFirst);
+		ordinaryFirst.addSpell(FIRE_BOLT_XPHB);
+		ordinaryFirst.startCombat();
+		const {spells: ordinaryFirstSpells} = makeSpellsManager(ordinaryFirst, {
+			allSpells: [FAERIE_FIRE_XPHB, FIND_THE_PATH_XPHB, FIRE_BOLT_XPHB],
+		});
+		const fireBoltId = ordinaryFirst.getSpells().find(spell => spell.name === "Fire Bolt").id;
+
+		await ordinaryFirstSpells._castSpell(fireBoltId, {withMetamagic: false, decision: {skipComponentPrompt: true}});
+		expect(ordinaryFirst.isActionTypeAvailable("action")).toBe(false);
+		expect(await ordinaryFirstSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
+			.toMatchObject({ok: false, reason: "feature-spell-unavailable"});
+
+		ordinaryFirst.resetTurnEconomy();
+		expect((await ordinaryFirstSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID)).ok).toBe(true);
+		const callsAfterFeatureCast = ordinaryFirstSpells._showCastResult.mock.calls.length;
+		await ordinaryFirstSpells._castSpell(fireBoltId, {withMetamagic: false, decision: {skipComponentPrompt: true}});
+		expect(ordinaryFirstSpells._showCastResult).toHaveBeenCalledTimes(callsAfterFeatureCast);
+		expect(ordinaryFirst.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(2);
+	});
+
+	test("persists a combat action through save/load until Reset Turn", async () => {
+		const state = makeCartographer({level: 3});
+		createSelfAtlas(state);
+		state.startCombat();
+		const {spells} = makeSpellsManager(state);
+
+		expect((await spells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID)).ok).toBe(true);
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.isInCombat()).toBe(true);
+		expect(loaded.isActionTypeAvailable("action")).toBe(false);
+		expect(loaded.getCartographerMappingMagicSnapshot().illuminatedCartography).toMatchObject({
+			available: false,
+			reason: expect.stringMatching(/action is already used/i),
+		});
+
+		loaded.resetTurnEconomy();
+		expect(loaded.isActionTypeAvailable("action")).toBe(true);
+		expect(loaded.getCartographerMappingMagicSnapshot().illuminatedCartography.available).toBe(true);
 	});
 
 	test("casts Find the Path|XPHB at its real one-minute casting time with all source-stated components waived", async () => {
@@ -638,6 +710,76 @@ describe("EFA Cartographer — Portal Jump", () => {
 		expect(committed.destination).not.toHaveProperty("visible");
 	});
 
+	test("does not strand movement outside combat across repeated jumps or save/load", () => {
+		const state = makeCartographer({level: 3});
+		createSelfAtlas(state);
+		const jump = () => state.useCartographerPortalJump({
+			destinationMode: "direct",
+			confirmedVisible: true,
+			confirmedWithin10Feet: true,
+			confirmedUnoccupied: true,
+		});
+
+		expect(jump()).toMatchObject({ok: true, movementCost: 15, movementRemaining: 30, receipt: null});
+		expect(jump()).toMatchObject({ok: true, movementCost: 15, movementRemaining: 30, receipt: null});
+		expect(state.getMovementEconomyState()).toMatchObject({used: 0, remaining: 30, receipts: []});
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.useCartographerPortalJump({
+			destinationMode: "direct",
+			confirmedVisible: true,
+			confirmedWithin10Feet: true,
+			confirmedUnoccupied: true,
+		})).toMatchObject({ok: true, movementCost: 15, movementRemaining: 30, receipt: null});
+	});
+
+	test("allows positive Speed with a rounded-down zero cost and still rejects Speed 0", () => {
+		const speedOne = makeCartographer({level: 3});
+		createSelfAtlas(speedOne);
+		speedOne.setSpeed("walk", 1);
+		speedOne.startCombat();
+
+		expect(speedOne.useCartographerPortalJump({
+			destinationMode: "direct",
+			confirmedVisible: true,
+			confirmedWithin10Feet: true,
+			confirmedUnoccupied: true,
+		})).toMatchObject({
+			ok: true,
+			speedAtCommit: 1,
+			movementCost: 0,
+			movementRemaining: 1,
+			receipt: null,
+		});
+
+		const speedTwo = makeCartographer({level: 3});
+		createSelfAtlas(speedTwo);
+		speedTwo.setSpeed("walk", 2);
+		speedTwo.startCombat();
+		expect(speedTwo.useCartographerPortalJump({
+			destinationMode: "direct",
+			confirmedVisible: true,
+			confirmedWithin10Feet: true,
+			confirmedUnoccupied: true,
+		})).toMatchObject({
+			ok: true,
+			speedAtCommit: 2,
+			movementCost: 1,
+			movementRemaining: 1,
+			receipt: {amount: 1},
+		});
+
+		const speedZero = makeCartographer({level: 3});
+		createSelfAtlas(speedZero);
+		speedZero.setSpeed("walk", 0);
+		expect(speedZero.getCartographerPortalJumpState()).toMatchObject({
+			available: false,
+			movementCost: 0,
+			reason: expect.stringMatching(/Speed is 0/i),
+		});
+	});
+
 	test("fails transactionally for zero or insufficient movement, destroyed holders, and missing confirmation", () => {
 		const zero = makeCartographer({level: 3});
 		createSelfAtlas(zero);
@@ -648,6 +790,7 @@ describe("EFA Cartographer — Portal Jump", () => {
 
 		const insufficient = makeCartographer({level: 3});
 		createSelfAtlas(insufficient);
+		insufficient.startCombat();
 		insufficient.spendMovement(20, {source: "test:walk"});
 		expect(insufficient.getCartographerPortalJumpState()).toMatchObject({available: false, movementCost: 15, movementRemaining: 10});
 		expect(insufficient.useCartographerPortalJump({destinationMode: "direct"}).ok).toBe(false);
@@ -680,6 +823,7 @@ describe("EFA Cartographer — Portal Jump", () => {
 	test("persists the source receipt and structured destination through save/load", () => {
 		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
+		state.startCombat();
 		const result = state.useCartographerPortalJump({
 			destinationMode: "direct",
 			confirmedVisible: true,
@@ -699,6 +843,22 @@ describe("EFA Cartographer — Portal Jump", () => {
 				destination: {mode: "direct", visible: true, within10Feet: true, unoccupied: true},
 			}),
 		}));
+		expect(loaded.useCartographerPortalJump({
+			destinationMode: "direct",
+			confirmedVisible: true,
+			confirmedWithin10Feet: true,
+			confirmedUnoccupied: true,
+		})).toMatchObject({ok: true, movementRemaining: 0});
+		expect(loaded.getCartographerPortalJumpState()).toMatchObject({
+			available: false,
+			movementRemaining: 0,
+		});
+
+		loaded.resetTurnEconomy();
+		expect(loaded.getCartographerPortalJumpState()).toMatchObject({
+			available: true,
+			movementRemaining: 30,
+		});
 	});
 });
 

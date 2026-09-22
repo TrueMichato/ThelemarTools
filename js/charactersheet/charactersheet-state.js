@@ -7258,7 +7258,11 @@ class CharacterSheetState {
 			reason = `${definition.label} cannot be cast while incapacitated.`;
 		}
 		if (!reason && usesCurrent <= 0) reason = `${definition.label} is expended until the next Long Rest.`;
-		if (!reason && ["action", "bonus", "reaction"].includes(definition.economy.type) && !this.isActionTypeAvailable(definition.economy.type)) {
+		if (
+			!reason
+			&& ["action", "bonus", "reaction"].includes(definition.economy.type)
+			&& !this.isActionTypeAvailable(definition.economy.type, {trackOnlyInCombat: true})
+		) {
 			reason = `Your ${definition.economy.type} is already used this turn.`;
 		}
 		return {
@@ -7277,11 +7281,10 @@ class CharacterSheetState {
 			requiresAtlas: false,
 			requiresSelfMap: false,
 		});
-		const movement = this.getMovementEconomyState();
+		const movement = this.getMovementEconomyState({trackOnlyInCombat: true});
 		const movementCost = Math.floor(movement.speed / 2);
 		let reason = context.reason;
 		if (!reason && movement.speed <= 0) reason = "Portal Jump cannot be used while Speed is 0.";
-		if (!reason && movementCost <= 0) reason = "Portal Jump needs a positive movement cost.";
 		if (!reason && movement.remaining < movementCost) reason = `Portal Jump needs ${movementCost} feet of movement; ${movement.remaining} feet remain.`;
 		return CharacterSheetState._copyAndFreeze({
 			id: "portal-jump",
@@ -7361,14 +7364,16 @@ class CharacterSheetState {
 		const actionType = ["action", "bonus", "reaction"].includes(definition.economy.type)
 			? definition.economy.type
 			: null;
-		const actionConsumed = actionType ? this.consumeActionType(actionType) : false;
-		if (actionType && !actionConsumed) {
+		const actionEconomy = actionType
+			? this.commitActionEconomy(actionType, {trackOnlyInCombat: true})
+			: {ok: true, tracked: false};
+		if (!actionEconomy.ok) {
 			return CharacterSheetState._copyAndFreeze({ok: false, reason: "action-unavailable", error: `Your ${actionType} is already used this turn.`});
 		}
 
 		const mappingState = this._data.cartographerMappingMagic;
 		if ((Number(mappingState[definition.stateKey]) || 0) >= grant.usesMax) {
-			if (actionConsumed) this.restoreActionType(actionType);
+			this.rollbackActionEconomy(actionEconomy);
 			return CharacterSheetState._copyAndFreeze({ok: false, reason: "feature-spell-expended"});
 		}
 		mappingState[definition.stateKey] = (Number(mappingState[definition.stateKey]) || 0) + 1;
@@ -7379,7 +7384,7 @@ class CharacterSheetState {
 			sourceFeatureUid: definition.sourceFeatureUid,
 			spellUid: `${definition.spell.name}|${definition.spell.source}`.toLowerCase(),
 			actionType,
-			actionConsumed,
+			actionConsumed: actionEconomy.tracked,
 			createdAt: Date.now(),
 		};
 		mappingState.castReceipts = [...(mappingState.castReceipts || []), receipt].slice(-20);
@@ -7452,6 +7457,7 @@ class CharacterSheetState {
 		const spend = this.spendMovement(portal.movementCost, {
 			source: CharacterSheetState.CARTOGRAPHER_PORTAL_JUMP_SOURCE,
 			scope: "cartographer-portal-jump",
+			trackOnlyInCombat: true,
 			metadata: {
 				version: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_RECEIPT_VERSION,
 				sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_FEATURE_UID,
@@ -74932,14 +74938,15 @@ class CharacterSheetState {
 		this.resetMovementEconomy({round});
 	}
 
-	getMovementEconomyState ({scope = null} = {}) {
+	getMovementEconomyState ({scope = null, trackOnlyInCombat = false} = {}) {
 		this._syncMovementEconomyRound();
 		const normalizedScope = this._normalizeMovementEconomyScope(scope);
 		if (normalizedScope === undefined) return null;
 		const usage = this._data.movementEconomyUsage || this._getDefaultState().movementEconomyUsage;
 		const speedRaw = Number(this.getSpeed?.("walk"));
 		const speed = Number.isFinite(speedRaw) ? Math.max(0, speedRaw) : 0;
-		const receipts = usage.receipts || [];
+		const isTracking = !trackOnlyInCombat || this.isInCombat();
+		const receipts = isTracking ? (usage.receipts || []) : [];
 		const used = receipts
 			.filter(receipt => receipt.kind === "spend")
 			.reduce((total, receipt) => total + receipt.amount, 0);
@@ -74949,7 +74956,7 @@ class CharacterSheetState {
 			.reduce((total, receipt) => total + receipt.speedMultiplier, 1);
 		const allowance = Math.max(0, speed * allowanceMultiplier);
 		return {
-			round: usage.round ?? null,
+			round: isTracking ? (usage.round ?? null) : null,
 			scope: normalizedScope,
 			speed,
 			allowance,
@@ -74960,17 +74967,17 @@ class CharacterSheetState {
 		};
 	}
 
-	spendMovement (amount, {source, scope = null, receiptId = null, metadata = null} = {}) {
+	spendMovement (amount, {source, scope = null, receiptId = null, metadata = null, trackOnlyInCombat = false} = {}) {
 		const movementAmount = Number(amount);
 		const normalizedSource = typeof source === "string" ? source.trim() : "";
 		const normalizedScope = this._normalizeMovementEconomyScope(scope);
-		if (!Number.isFinite(movementAmount) || movementAmount <= 0 || !normalizedSource || normalizedScope === undefined) {
+		if (!Number.isFinite(movementAmount) || movementAmount < 0 || !normalizedSource || normalizedScope === undefined) {
 			return {ok: false, reason: "invalid-movement-spend"};
 		}
 		if (metadata != null && (typeof metadata !== "object" || Array.isArray(metadata))) {
 			return {ok: false, reason: "invalid-movement-spend"};
 		}
-		const movement = this.getMovementEconomyState({scope: normalizedScope});
+		const movement = this.getMovementEconomyState({scope: normalizedScope, trackOnlyInCombat});
 		if (movementAmount > movement.remaining) {
 			return {
 				ok: false,
@@ -74979,6 +74986,9 @@ class CharacterSheetState {
 				available: movement.remaining,
 				allowance: movement.allowance,
 			};
+		}
+		if (!movementAmount || (trackOnlyInCombat && !this.isInCombat())) {
+			return {ok: true, receipt: null, movement};
 		}
 
 		const id = typeof receiptId === "string" && receiptId.trim()
@@ -75092,7 +75102,10 @@ class CharacterSheetState {
 	 * operations. Combat's attack tracker remains separate, but bonus-action
 	 * consumers must all consult the same gate.
 	 */
-	getActionEconomyState () {
+	getActionEconomyState ({trackOnlyInCombat = false} = {}) {
+		if (trackOnlyInCombat && !this.isInCombat()) {
+			return {action: true, bonus: true, reaction: true};
+		}
 		const usage = this._data.actionEconomyUsage || {};
 		return {
 			action: !usage.action,
@@ -75101,18 +75114,35 @@ class CharacterSheetState {
 		};
 	}
 
-	isActionTypeAvailable (actionType) {
+	isActionTypeAvailable (actionType, {trackOnlyInCombat = false} = {}) {
 		if (!actionType || actionType === "free") return true;
-		return !!this.getActionEconomyState()[actionType];
+		return !!this.getActionEconomyState({trackOnlyInCombat})[actionType];
 	}
 
-	consumeActionType (actionType) {
+	consumeActionType (actionType, {trackOnlyInCombat = false} = {}) {
 		if (!actionType || actionType === "free") return true;
-		if (!this.isActionTypeAvailable(actionType)) return false;
+		if (trackOnlyInCombat && !this.isInCombat()) return true;
+		if (!this.isActionTypeAvailable(actionType, {trackOnlyInCombat})) return false;
 		if (!this._data.actionEconomyUsage) this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
 		if (!Object.hasOwn(this._data.actionEconomyUsage, actionType)) return false;
 		this._data.actionEconomyUsage[actionType] = true;
 		return true;
+	}
+
+	commitActionEconomy (actionType, {trackOnlyInCombat = false} = {}) {
+		const isTrackedType = ["action", "bonus", "reaction"].includes(actionType);
+		if (!isTrackedType) return {ok: true, actionType: actionType || null, tracked: false};
+		const tracked = !trackOnlyInCombat || this.isInCombat();
+		if (!this.consumeActionType(actionType, {trackOnlyInCombat})) {
+			return {ok: false, reason: "action-unavailable", actionType, tracked: false};
+		}
+		return {ok: true, actionType, tracked};
+	}
+
+	rollbackActionEconomy (receipt) {
+		if (!receipt?.ok) return false;
+		if (!receipt.tracked) return true;
+		return this.restoreActionType(receipt.actionType);
 	}
 
 	restoreActionType (actionType) {

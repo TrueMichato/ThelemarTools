@@ -2828,9 +2828,14 @@ class CharacterSheetSpells {
 				return;
 			}
 
+			const economyTransaction = this._commitSpellCastingEconomy({spellData, castMeta});
+			if (!economyTransaction.ok) return;
+			castMeta.castingEconomy = MiscUtil.copyFast(economyTransaction.economy);
+
 			if (weaponChannelChoice) {
 				const didChannel = await this._page._combat?.pChannelSpellFromCast?.(weaponChannelChoice);
 				if (!didChannel) {
+					this._rollbackSpellCastingEconomy(economyTransaction);
 					if (!this._page._combat?.pChannelSpellFromCast) {
 						JqueryUtil.doToast({type: "warning", content: "Combat is unavailable, so this weapon-channel spell could not be cast."});
 					}
@@ -2839,16 +2844,22 @@ class CharacterSheetSpells {
 			}
 
 			if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
+				this._rollbackSpellCastingEconomy(economyTransaction);
 				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 				return;
 			}
-			if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
 			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
-			const castResult = weaponChannelChoice
-				? null
-				: await this._showCastResult(spell, 0, false, false, castMeta);
+			let castResult = {cancelled: false};
+			try {
+				if (!weaponChannelChoice) castResult = await this._showCastResult(spell, 0, false, false, castMeta);
+			} catch (e) {
+				this._rollbackSpellCastingEconomy(economyTransaction);
+				this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
+				throw e;
+			}
 			if (castResult?.cancelled) {
+				this._rollbackSpellCastingEconomy(economyTransaction);
 				this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
 				return;
 			}
@@ -2861,6 +2872,7 @@ class CharacterSheetSpells {
 			// Set concentration for concentration cantrips (rare but possible)
 			const vcRemovesConc0 = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 			if (requiresConcentration && !vcRemovesConc0) {
+				if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
 				this._state.setConcentration?.({name: spell.name, level: 0, source: spell.source || spellData.source, appliedMetamagic: castMeta?.appliedMetamagic || null});
 				this._updateConcentrationUI();
 			}
@@ -2878,6 +2890,7 @@ class CharacterSheetSpells {
 					rolls: castResult?.rolls || [],
 				},
 			});
+			if (typeof document !== "undefined") this._page._combat?.renderCombatActionEconomy?.();
 			this._page.saveCharacter();
 			return receipt;
 		}
@@ -2920,11 +2933,6 @@ class CharacterSheetSpells {
 				// Variant spell component selection (ritual)
 				const variantComponentChoice = await this._resolveVariantComponentChoice({spell, spellData, decision});
 				if (variantComponentChoice?.cancelled) return;
-				if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
-					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
-					return;
-				}
-				if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 				const castMeta = this._getNormalizedCastMeta({
 					spell,
@@ -2939,16 +2947,27 @@ class CharacterSheetSpells {
 				const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
 				if (focusSelection.cancelled) return;
 				if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
+				const economyTransaction = this._commitSpellCastingEconomy({spellData, castMeta, isRitual: true});
+				if (!economyTransaction.ok) return;
+				castMeta.castingEconomy = MiscUtil.copyFast(economyTransaction.economy);
 				if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
+					this._rollbackSpellCastingEconomy(economyTransaction);
 					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 					return;
 				}
-				if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
 				if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 				// Ritual cast: no slot consumed
-				const castResult = await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
+				let castResult;
+				try {
+					castResult = await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
+				} catch (e) {
+					this._rollbackSpellCastingEconomy(economyTransaction);
+					this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
+					throw e;
+				}
 				if (castResult?.cancelled) {
+					this._rollbackSpellCastingEconomy(economyTransaction);
 					this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
 					return;
 				}
@@ -2960,6 +2979,7 @@ class CharacterSheetSpells {
 				await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: !!variantComponentChoice?.variantComponent});
 				const vcRemovesConcR = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 				if (requiresConcentration && !vcRemovesConcR) {
+					if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
 					this._state.setConcentration?.({name: spell.name, level: spell.level, source: spell.source || spellData.source, appliedMetamagic: castMeta?.appliedMetamagic || null});
 					this._updateConcentrationUI();
 				}
@@ -2978,6 +2998,7 @@ class CharacterSheetSpells {
 						rolls: castResult?.rolls || [],
 					},
 				});
+				if (typeof document !== "undefined") this._page._combat?.renderCombatActionEconomy?.();
 				this._page.saveCharacter();
 				return receipt;
 			}
@@ -3117,16 +3138,22 @@ class CharacterSheetSpells {
 			castMeta.gamblerCastResolution = gamblerCastResolution;
 		}
 		const deferGamblerCast = !!gamblerResolutionDecision.deferCast;
+		const economyTransaction = this._commitSpellCastingEconomy({spellData, castMeta});
+		if (!economyTransaction.ok) {
+			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+			return;
+		}
+		castMeta.castingEconomy = MiscUtil.copyFast(economyTransaction.economy);
 
 		// Resolve all cast-scoped Gambling Table decisions before spending any
 		// metamagic, consuming a component, or mutating a spell slot. Cancelling
 		// a pending choice must be a true no-op for the rest of the cast setup.
 		if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
+			this._rollbackSpellCastingEconomy(economyTransaction);
 			JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			return;
 		}
-		if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
 		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 		// Handle variant component slot modifications (noSlot / lowerSlot)
@@ -3163,12 +3190,14 @@ class CharacterSheetSpells {
 		// spell *slots*, not feature resources.
 		if (selectedSlot.isWizardCapstone) {
 			if (selectedSlot.capstoneType === "signature" && !this._state.useSignatureSpell?.(spell)) {
+				this._rollbackSpellCastingEconomy(economyTransaction);
 				JqueryUtil.doToast({type: "warning", content: `${spell.name}'s Signature Spell cast has already been used. Cast it with a spell slot instead.`});
 				return;
 			}
 		} else if (selectedSlot.isNoSlotResource) {
 			const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
 			if (!res || (res.current || 0) <= 0) {
+				this._rollbackSpellCastingEconomy(economyTransaction);
 				JqueryUtil.doToast({type: "warning", content: `No ${selectedSlot.resourceName || "resource"} charges remaining.`});
 				return;
 			}
@@ -3183,23 +3212,30 @@ class CharacterSheetSpells {
 		}
 
 		const effectiveSlotLevel = this._state.getDaemonologistEffectiveCastLevel?.(spell, selectedSlot.level) ?? selectedSlot.level;
-		const castResult = deferGamblerCast || gamblerCastResolution?.slotTransaction === "preserve"
-			? {cancelled: false}
-			: await this._showCastResult(
-				spell,
-				effectiveSlotLevel,
-				selectedSlot.isPact,
-				false,
-				{
-					...castMeta,
-					...(effectiveSlotLevel !== selectedSlot.level
-						? {daemonologistActualSlotLevel: selectedSlot.level, daemonologistImprovedSpell: true}
-						: {}),
-				},
-			);
+		let castResult;
+		try {
+			castResult = deferGamblerCast || gamblerCastResolution?.slotTransaction === "preserve"
+				? {cancelled: false}
+				: await this._showCastResult(
+					spell,
+					effectiveSlotLevel,
+					selectedSlot.isPact,
+					false,
+					{
+						...castMeta,
+						...(effectiveSlotLevel !== selectedSlot.level
+							? {daemonologistActualSlotLevel: selectedSlot.level, daemonologistImprovedSpell: true}
+							: {}),
+					},
+				);
+		} catch (e) {
+			this._rollbackSpellCastingEconomy(economyTransaction);
+			throw e;
+		}
 
 		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
+			this._rollbackSpellCastingEconomy(economyTransaction);
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
 			if (selectedSlot.isWizardCapstone) {
@@ -3280,6 +3316,7 @@ class CharacterSheetSpells {
 			if (gamblerCastResolution) this._state.commitGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			this.renderSlots();
 			this._page._renderQuickSpells();
+			if (typeof document !== "undefined") this._page._combat?.renderCombatActionEconomy?.();
 			this._page.saveCharacter();
 			return;
 		}
@@ -3287,6 +3324,7 @@ class CharacterSheetSpells {
 		// Set concentration if spell requires it
 		const vcRemovesConcN = castMeta.variantComponent?.effects?.some(e => e.type === "removeConcentration");
 		if (requiresConcentration && !vcRemovesConcN) {
+			if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
 			this._state.setConcentration?.({name: spell.name, level: selectedSlot.level, source: spell.source || spellData.source, appliedMetamagic: castMeta?.appliedMetamagic || null});
 			this._updateConcentrationUI();
 		}
@@ -3324,6 +3362,7 @@ class CharacterSheetSpells {
 			this._page._updateAllCalculations?.();
 			this._page._renderActiveStates?.();
 		}
+		if (typeof document !== "undefined") this._page._combat?.renderCombatActionEconomy?.();
 		this._page.saveCharacter();
 		return receipt;
 	}
@@ -4775,6 +4814,41 @@ class CharacterSheetSpells {
 			status: "resolved",
 			appliedToSelf: false,
 		}));
+	}
+
+	_getSpellCastingEconomy ({spellData = null, castMeta = null, isRitual = false} = {}) {
+		const time = spellData?.time?.[0] || null;
+		const number = Number(time?.number);
+		const unit = String(time?.unit || "").trim().toLowerCase();
+		const label = time
+			? `${Number.isFinite(number) ? number : ""} ${unit}`.trim()
+			: "Unspecified casting time";
+		if (isRitual) return {type: "casting-time", label: `Ritual (${label})`, tracked: false};
+		if (castMeta?.appliedMetamagic?.key === "quickened") {
+			return {type: "bonus", label: "1 bonus action", tracked: true};
+		}
+		if (number === 1 && ["action", "bonus", "reaction"].includes(unit)) {
+			return {type: unit, label, tracked: true};
+		}
+		return {type: "casting-time", label, tracked: false};
+	}
+
+	_commitSpellCastingEconomy ({spellData = null, castMeta = null, isRitual = false} = {}) {
+		const economy = this._getSpellCastingEconomy({spellData, castMeta, isRitual});
+		if (!economy.tracked || !this._state.commitActionEconomy) {
+			return {ok: true, economy, receipt: null};
+		}
+		const receipt = this._state.commitActionEconomy(economy.type, {trackOnlyInCombat: true});
+		if (!receipt?.ok) {
+			JqueryUtil.doToast({type: "warning", content: `Your ${economy.type} is already used this turn.`});
+			return {ok: false, economy, receipt: null};
+		}
+		return {ok: true, economy, receipt};
+	}
+
+	_rollbackSpellCastingEconomy (transaction) {
+		if (!transaction?.receipt) return true;
+		return this._state.rollbackActionEconomy?.(transaction.receipt) ?? true;
 	}
 
 	/**

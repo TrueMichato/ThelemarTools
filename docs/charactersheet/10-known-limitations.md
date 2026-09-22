@@ -29,7 +29,10 @@ partial still have explicitly deferred runtime mechanics.
   is exposed through an immutable integration snapshot. The Atlas card now owns
   Illuminated Cartography (`Faerie Fire|XPHB`, no slot/preparation, Intelligence,
   Intelligence-modifier uses per Long Rest, minimum 1) and Portal Jump
-  (live-Speed movement receipts) from level 3. Positioning is available to an
+  (live-Speed movement receipts in combat; validated without a persistent turn
+  ledger outside combat, including the legal zero-foot cost at Speed 1) from
+  level 3. Ordinary and feature-granted spells share action/bonus/reaction
+  casting-time transactions in combat. Positioning is available to an
   active self map holder from level 3 and confirms same-plane/range targeting
   while bypassing only sight and cover. Unerring Path remains level 15
   (`Find the Path|XPHB`, no slot/preparation/components, 1/Long Rest).
