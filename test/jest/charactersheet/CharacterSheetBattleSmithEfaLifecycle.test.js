@@ -508,6 +508,42 @@ describe("EFA Steel Defender legacy lifecycle migration", () => {
 });
 
 describe("non-alive Steel Defender recovery and operation isolation", () => {
+	test("keeps legacy generic active lifecycle companions operable and healable", () => {
+		const state = new CharacterSheetState();
+		const companionId = state.addCompanion({
+			name: "Legacy Feature Companion",
+			source: "HB",
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			hp: {max: 20, current: 5},
+			lifecycle: {status: "active"},
+		});
+
+		expect(state.healCompanion(companionId, 4)).toBe(4);
+		expect(state.getCompanion(companionId).hp.current).toBe(9);
+	});
+
+	test("does not resolve foreign feature-companion lifecycle policy through Steel Defender rules", () => {
+		const state = new CharacterSheetState();
+		const rules = globalThis.CharacterSheetCompanionRules;
+		const getDescriptor = jest.spyOn(rules, "getDescriptor");
+		const resolve = jest.spyOn(rules, "resolve");
+		const companion = {
+			name: "Reanimated Companion",
+			source: "RHW",
+			featureGrant: {uid: REANIMATOR_UID},
+			lifecycle: {status: "active"},
+		};
+
+		try {
+			expect(state._getFeatureCompanionLifecyclePolicy(companion)).toBeNull();
+			expect(getDescriptor).not.toHaveBeenCalled();
+			expect(resolve).not.toHaveBeenCalled();
+		} finally {
+			getDescriptor.mockRestore();
+			resolve.mockRestore();
+		}
+	});
+
 	test.each([
 		["dead", "companionDead"],
 		["revivalPending", "companionRevivalPending"],
