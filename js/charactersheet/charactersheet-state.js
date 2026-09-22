@@ -14727,7 +14727,7 @@ class CharacterSheetState {
 		return Math.max(1, Math.min(maxHp > 0 ? maxHp : hp, Math.floor(hp)));
 	}
 
-	_isZeroHpSelectionCandidateUnexpired (classification) {
+	_isGeneratedFeatureItemClassificationUnexpired (classification) {
 		const records = classification?.provenance?.lifecycle?.expiryRecords || [];
 		const currentMinute = this.getGameTimeMinutes();
 		return records.every(record => {
@@ -14755,7 +14755,7 @@ class CharacterSheetState {
 				const classification = this.classifyGeneratedFeatureItem(row);
 				if (classification.status !== "valid") return false;
 				if (cost.requireActiveLifecycle && classification.provenance?.lifecycle?.state !== "active") return false;
-				if (cost.requireUnexpired && !this._isZeroHpSelectionCandidateUnexpired(classification)) return false;
+				if (cost.requireUnexpired && !this._isGeneratedFeatureItemClassificationUnexpired(classification)) return false;
 				return rarities.has(String(row.item?.rarity || "").trim().toLowerCase());
 			})
 			.map(row => ({
@@ -48822,7 +48822,6 @@ class CharacterSheetState {
 			|| item.bonusSavingThrow
 			|| item.bonusSpellAttack
 			|| item.bonusSpellDamage
-			|| item._isGeneratedFeatureItem
 		);
 	}
 
@@ -48830,13 +48829,22 @@ class CharacterSheetState {
 	 * Attuned inventory rows which are still structurally valid magic items.
 	 */
 	getAttunedMagicItems () {
-		return (this._data.inventory || []).filter(row =>
-			!!row?.attuned
-			&& !!row?.id
-			&& !!row?.item?.name
-			&& !!row?.item?.source
-			&& this.isMagicItem(row),
-		);
+		return (this._data.inventory || []).filter(row => {
+			if (
+				!row?.attuned
+				|| !row?.id
+				|| !row?.item?.name
+				|| !row?.item?.source
+				|| !this.isMagicItem(row)
+			) return false;
+			if (!row.item._generatedItemProvenance) return true;
+
+			const classification = this.classifyGeneratedFeatureItem(row);
+			if (classification.status !== "valid") return false;
+			const lifecycleState = classification.provenance?.lifecycle?.state;
+			if (lifecycleState && lifecycleState !== "active") return false;
+			return this._isGeneratedFeatureItemClassificationUnexpired(classification);
+		});
 	}
 
 	/**

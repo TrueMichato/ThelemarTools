@@ -317,6 +317,30 @@ describe("Advanced Artifice and Magical Guidance short rests", () => {
 		expect(getFlash(state).current).toBe(resource.max);
 	});
 
+	it("does not treat mundane or inactive generated rows as valid magic-item attunements", () => {
+		const state = makeEfa(20);
+		const resource = getFlash(state);
+		const mundaneGenerated = addReplica(state, {
+			name: "Clockwork Trinket",
+			rarity: "none",
+			owner: State.EFA_TINKERS_MAGIC_OWNER,
+		});
+		state.setItemAttuned(mundaneGenerated, true);
+		state.setResourceCurrent(resource.id, 0);
+		state.onShortRest();
+		expect(getFlash(state).current).toBe(1);
+
+		const inactiveReplica = addReplica(state, {
+			name: "Inactive Replicate",
+			rarity: "uncommon",
+			lifecycleState: "unresolved",
+		});
+		state.setItemAttuned(inactiveReplica, true);
+		state.setResourceCurrent(resource.id, 0);
+		state.onShortRest();
+		expect(getFlash(state).current).toBe(1);
+	});
+
 	it("commits the real Short Rest UI exactly once, cancels without mutation, and undo restores spent uses", async () => {
 		const state = makeEfa(14);
 		state.setCurrentHp(50);

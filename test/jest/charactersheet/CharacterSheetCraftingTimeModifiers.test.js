@@ -686,6 +686,31 @@ describe("Character Sheet crafting-time modifiers", () => {
 		expect(result.sourceBreakdown.map(it => it.uid)).toEqual([potionModifier.owner.uid]);
 	});
 
+	it("supports a generic rarity filter without knowing the contributing class", () => {
+		const state = new CharacterSheetState();
+		const rarityModifier = {
+			id: "test-rarity-filter",
+			owner: {
+				kind: "feature",
+				name: "Generic Crafting Feature",
+				source: "TST",
+				uid: "Generic Crafting Feature|TST",
+			},
+			multiplier: 0.25,
+			filter: {rarities: ["common", "uncommon"]},
+		};
+		jest.spyOn(state, "getFeatureCalculations").mockReturnValue({craftingTimeModifiers: [rarityModifier]});
+
+		expect(calculate(state, {
+			recipe: {...ARMOR_RECIPE, rarity: "Uncommon"},
+			baseWorkweeks: 8,
+		}).effectiveWorkweeks).toBe(2);
+		expect(calculate(state, {
+			recipe: {...ARMOR_RECIPE, rarity: "rare"},
+			baseWorkweeks: 8,
+		}).effectiveWorkweeks).toBe(8);
+	});
+
 	it("composes matching descriptors in stable id order", () => {
 		const state = new CharacterSheetState();
 		const modifiers = [
