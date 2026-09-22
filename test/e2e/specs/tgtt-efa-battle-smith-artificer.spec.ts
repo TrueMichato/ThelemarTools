@@ -214,12 +214,13 @@ const BATTLE_SMITH_FEATURES_MATRIX: FeatureCheck[] = [
 				kind: "stateCall",
 				method: "getWeaponAbilityResolution",
 				args: [{
-					abilityMode: "str",
+					abilityMode: "dex",
 					sourceItem: {
 						name: "Sun Blade",
 						source: "XDMG",
 						type: "M|XPHB",
 						weaponCategory: "martial",
+						property: ["F"],
 						rarity: "rare",
 						bonusWeapon: "+2",
 					},
@@ -231,12 +232,13 @@ const BATTLE_SMITH_FEATURES_MATRIX: FeatureCheck[] = [
 				kind: "stateCall",
 				method: "getWeaponAbilityResolution",
 				args: [{
-					abilityMode: "str",
+					abilityMode: "dex",
 					sourceItem: {
 						name: "Sun Blade",
 						source: "XDMG",
 						type: "M|XPHB",
 						weaponCategory: "martial",
+						property: ["F"],
 						rarity: "rare",
 						bonusWeapon: "+2",
 					},
@@ -308,7 +310,7 @@ const BATTLE_SMITH_FEATURES_MATRIX: FeatureCheck[] = [
 			sourceQualifiedFeature("Steel Defender", 3),
 			{kind: "featureCalculation", property: "hasEfaSteelDefenderGrant", exact: true},
 			{kind: "featureCalculation", property: "efaSteelDefenderFeatureUid", exact: STEEL_DEFENDER_UID},
-			defenderProjection({level: 3, proficiencyBonus: 2, maxHp: 20}),
+			defenderProjection({proficiencyBonus: 2, level: 3, maxHp: 20}),
 		],
 	},
 	{
@@ -318,7 +320,7 @@ const BATTLE_SMITH_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			sourceQualifiedFeature("Steel Defender", 3),
-			defenderProjection({level: 5, proficiencyBonus: 3, maxHp: 30}),
+			defenderProjection({proficiencyBonus: 3, level: 5, maxHp: 30}),
 		],
 	},
 	{
@@ -328,7 +330,7 @@ const BATTLE_SMITH_FEATURES_MATRIX: FeatureCheck[] = [
 		kind: "passive",
 		effects: [
 			sourceQualifiedFeature("Steel Defender", 3),
-			defenderProjection({level: 11, proficiencyBonus: 4, maxHp: 60, expectArcaneJoltDice: "2d6"}),
+			defenderProjection({proficiencyBonus: 4, level: 11, maxHp: 60, expectArcaneJoltDice: "2d6"}),
 		],
 	},
 	{
@@ -339,8 +341,8 @@ const BATTLE_SMITH_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			sourceQualifiedFeature("Steel Defender", 3),
 			defenderProjection({
-				level: 17,
 				proficiencyBonus: 6,
+				level: 17,
 				maxHp: 90,
 				expectArcaneJoltDice: "4d6",
 				expectImprovedDefender: true,
@@ -354,8 +356,8 @@ const BATTLE_SMITH_FEATURES_MATRIX: FeatureCheck[] = [
 		effects: [
 			sourceQualifiedFeature("Steel Defender", 3),
 			defenderProjection({
-				level: 20,
 				proficiencyBonus: 6,
+				level: 20,
 				maxHp: 105,
 				expectArcaneJoltDice: "4d6",
 				expectImprovedDefender: true,
