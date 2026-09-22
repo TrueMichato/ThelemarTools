@@ -42,6 +42,9 @@ partial still have explicitly deferred runtime mechanics.
   Atlas — Safe Haven uses the generic zero-HP transaction for the Cartographer's
   own map and an explicit resolver for external holders; both destroy the exact
   map and return the `2 × Artificer level` HP result plus placement requirements.
+  The Cartographer is always a legal five-foot anchor, including when the
+  Cartographer's own map triggered and was consumed; other active map holders are
+  additional anchor choices.
   Cross-sheet mutation, coordinates, and DM Screen/Journey map geometry remain
   table/integration boundaries rather than simulated Character Sheet state.
 

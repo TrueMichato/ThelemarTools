@@ -7026,14 +7026,12 @@ class CharacterSheetState {
 		const anchors = [];
 		const selfHolder = atlas.holders.find(holder => holder.isSelf) || null;
 
-		if (!triggerHolder?.isSelf) {
-			anchors.push({
-				kind: "cartographer",
-				holderId: selfHolder?.id || null,
-				name: this.getCharacterName() || "Cartographer",
-				isActiveMapHolder: selfHolder?.status === "active",
-			});
-		}
+		anchors.push({
+			kind: "cartographer",
+			holderId: triggerHolder?.isSelf ? null : selfHolder?.id || null,
+			name: this.getCharacterName() || "Cartographer",
+			isActiveMapHolder: !triggerHolder?.isSelf && selfHolder?.status === "active",
+		});
 
 		for (const holder of atlas.holders) {
 			if (holder.id === triggerHolder?.id || holder.status !== "active" || holder.isSelf) continue;
@@ -14417,7 +14415,7 @@ class CharacterSheetState {
 					teleport: validation.teleport,
 				}),
 			},
-			description: "Destroy your active Atlas map to change your hit points to twice your Artificer level, then place yourself in an unoccupied space within 5 feet of another active map holder.",
+			description: "Destroy your active Atlas map to change your hit points to twice your Artificer level, then place yourself in an unoccupied space within 5 feet of the Cartographer or another active map holder.",
 		},
 	];
 

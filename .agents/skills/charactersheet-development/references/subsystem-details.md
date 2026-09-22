@@ -1083,7 +1083,12 @@ applies HP/death-save state, and builds the optional result. Any commit-phase
 exception or `{ok: false}` rolls the snapshot back and throws; callers must surface
 that error rather than treating it as a declined or successful intervention.
 
-
+Cartographer Safe Haven always includes the Cartographer (`you`) as a legal
+five-foot teleport anchor. If the Cartographer's own map triggered the
+intervention, the immutable placement result represents that anchor independently
+of the now-destroyed map (`holderId: null`, `isActiveMapHolder: false`); other
+active holders remain additional choices. External-holder resolution uses the
+same contract without mutating another sheet or inventing coordinates.
 
 Class and subclass calculations can append attack descriptors to
 `calculations.grantedAttacks`. `getFeatureGrantedAttacks()` marks them as
