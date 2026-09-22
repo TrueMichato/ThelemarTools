@@ -445,6 +445,27 @@ issue numbers stay stable.
 
 ## Resolved
 
+### CS-BUG-176 — EFA Artificer level-4 ASI was absent — FIXED
+
+**Status**: Fixed in `907ec2ce`.
+**Surfaced by**: the Cartographer comprehensive E2E matrix at Artificer level 4.
+
+**Symptom.** The level-up/Quick Build improvement step did not recognize the
+EFA Artificer's level-4 Ability Score Improvement. The canonical ASI placeholder
+was then filtered from ordinary feature ingestion, so no choice was applied and
+no ASI tracking feature appeared on the live sheet.
+
+**Root cause.** `getImprovementOpportunity()` read a packed class-feature UID's
+last field as its level. EFA refs include the optional feature-source field
+(`Ability Score Improvement|Artificer|EFA|4|EFA`), so the parser read `EFA`
+instead of canonical field 3 (`4`) and returned no opportunity.
+
+**Fix and guard.** Improvement detection now reads the canonical class-feature
+level field shared by the existing feature resolver. The regression test uses
+the authoritative EFA class data, proves the helper surfaces the level-4
+opportunity, applies the ASI through Quick Build's real shared apply method,
+and asserts both the ability increase and the source-qualified live feature.
+
 ### CS-BUG-108 — The level-up "Swap a Known Spell" list was empty for every known caster
 
 **Status**: Fixed.
