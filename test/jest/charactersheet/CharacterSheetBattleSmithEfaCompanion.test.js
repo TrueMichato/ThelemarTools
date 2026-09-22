@@ -143,6 +143,47 @@ describe("Battle Smith shared companion command policy", () => {
 		expect(getTurnReceipts(state)).toHaveLength(1);
 	});
 
+	test.each(["influence", "magic", "ready", "study", "utilize"])(
+		"commands the standard non-attack %s action through the shared atomic economy",
+		actionKey => {
+			const {state, companionId} = getState();
+			const result = state.commandCompanionAction({companionId, actionKey});
+
+			expect(result).toMatchObject({
+				ok: true,
+				operation: "action",
+				actionKey,
+				commandMethod: "bonusAction",
+				costs: {ownerAction: "bonus", companionAction: true},
+				receipts: {
+					companion: {
+						metadata: {
+							companionId,
+							operationUid: `${actionKey.charAt(0).toUpperCase()}${actionKey.slice(1)}|Steel Defender|EFA`,
+						},
+					},
+				},
+			});
+			expect(state.isActionTypeAvailable("bonus")).toBe(false);
+			expect(getTurnReceipts(state)).toHaveLength(1);
+		},
+	);
+
+	test("rolls back a newly supported command action when the owner Bonus Action fails late", () => {
+		const {state, companionId} = getState();
+		jest.spyOn(state, "consumeActionType").mockReturnValueOnce(false);
+		const result = state.commandCompanionAction({companionId, actionKey: "ready"});
+
+		expect(result).toMatchObject({
+			ok: false,
+			committed: false,
+			reason: "transactionRolledBack",
+			rollback: {companionReceipt: {ok: true, rolledBack: true}},
+		});
+		expect(getTurnReceipts(state)).toEqual([]);
+		expect(state.isActionTypeAvailable("bonus")).toBe(true);
+	});
+
 	test("offers the EFA level-5 Rend-only Attack replacement and consumes exactly one canonical attack", () => {
 		const {state, companionId} = getState({level: 5});
 		const replacement = getAttackReplacement();

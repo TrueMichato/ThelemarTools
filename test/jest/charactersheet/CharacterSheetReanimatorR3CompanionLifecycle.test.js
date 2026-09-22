@@ -682,15 +682,26 @@ describe("RHW Reanimator R3 lifecycle and rests", () => {
 		});
 	});
 
-	it("kills and removes the active companion on summoner death with one Death Burst", async () => {
+	it("resolves one Death Burst before removing the active companion on summoner death", async () => {
 		const state = makeState();
 		const created = await createCompanion(state);
 
-		const first = state.handleFeatureCompanionSummonerDeath(FEATURE_UID);
+		const first = state.handleFeatureCompanionSummonerDeath(FEATURE_UID, {
+			deathBurstResolutions: {
+				[created.companionId]: {
+					targets: [{id: "target", name: "Target", distanceFeet: 5, dexSaveTotal: 0}],
+					rolls: {damageDice: [1, 2]},
+				},
+			},
+		});
 		expect(first).toMatchObject({
 			ok: true,
 			committed: true,
 			deathBursts: [{damage: {dice: "2d4", type: "necrotic"}}],
+			deathBurstResults: [{
+				damage: {dieRolls: [1, 2], total: 3, type: "necrotic"},
+				targets: [{id: "target", damage: 3, manualApplication: true}],
+			}],
 			results: [{
 				companionId: created.companionId,
 				removed: true,
@@ -971,6 +982,24 @@ describe("RHW Reanimator R3 persistence, level sync, and source isolation", () =
 			executable: true,
 			activeCompanionIds: [],
 		});
+		const beforeRuntime = JSON.stringify(state.toJson());
+		for (const input of [
+			{actionKey: "dodge"},
+			{
+				actionKey: "dreadfulSwipe",
+				commandMethod: "bonusAction",
+				target: {name: "Target", size: "M"},
+				rangeConfirmed: true,
+				hitConfirmed: true,
+				rolls: {attackD20: 10, damageDice: [1]},
+			},
+		]) {
+			expect(state.commandCompanionAction({
+				companionId: legacyId,
+				...input,
+			})).toMatchObject({ok: false, committed: false, reason: "ownerMismatch"});
+			expect(JSON.stringify(state.toJson())).toBe(beforeRuntime);
+		}
 		expect(state.killFeatureOwnedCompanion(legacyId, {featureUid: FEATURE_UID}))
 			.toMatchObject({ok: false, committed: false, reason: "ownerMismatch"});
 		await expect(state.pDismissFeatureOwnedCompanion({

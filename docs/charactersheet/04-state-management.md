@@ -426,6 +426,12 @@ command method before any mutation. A later failure rolls back the exact
 receipt, owner Bonus Action or canonical Combat Attack replacement, resource,
 and HP snapshot. `resetTurnEconomy()` remains the only turn reset; changing or
 loading `combatRound` never releases a companion action/reaction.
+Registry-backed operations require the descriptor's canonical runtime owner
+and an exact source-qualified companion record; compact six-part or malformed
+collisions never reach the resolver. The generic non-attack action set is Dash,
+Disengage, Dodge, Help, Hide, Influence, Magic, Ready, Search, Study, and
+Utilize. Attack remains available only through an explicitly registered
+operation such as Force-Empowered Rend or Dreadful Swipe.
 
 EFA Force-Empowered Rend uses the rules registry's spell attack and
 `1d8 + 2 + INT` force damage. Repair can heal a modeled Construct atomically or
@@ -460,6 +466,11 @@ critical dice, Improved Reanimation, and manual Swipe riders. Dedicated
 source-safe State methods execute Lightning Absorption/damage-to-zero, one-shot
 Death Burst target results, Gaunt, Moist, Arcane Conduit origin plus stable
 per-generation turn receipt, and Life Transfer's Reaction/heal/death rollback.
+Summoner death prevalidates every required Death Burst result before mutation,
+then removes the companion only after that manual result is attached; omitted
+or invalid target/save/roll input leaves the companion byte-stable. Runtime
+range, save, damage, and trigger amounts accept only actual finite numbers, not
+numeric strings, booleans, arrays, objects, null, or blank values.
 
 All choice-dependent runtime rules resolve from the active companion's
 persisted R4a setup receipt. Arcane receipts use M1E `turnId`, survive

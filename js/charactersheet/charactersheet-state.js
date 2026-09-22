@@ -81569,15 +81569,74 @@ class CharacterSheetState {
 		if (!active.length) {
 			return {ok: true, committed: false, reason: "noActiveCompanion", featureUid, results: []};
 		}
-		const results = active.map(companion => this.killFeatureOwnedCompanion(companion.id, {
-			featureUid,
-			cause: "summonerDeath",
-			remove: true,
-			deathBurstResolution: deathBurstResolutions[companion.id] || null,
-		}));
+		const resolutions = CharacterSheetState._isCompanionSchemaObject(deathBurstResolutions)
+			? deathBurstResolutions
+			: {};
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
+		const descriptor = rules.getDescriptor(featureUid);
+		const triggersDeathBurst = descriptor?.lifecycle?.onSummonerDeath?.triggersDeathBurst === true;
+		const preflight = active.map(companion => {
+			const deathBurst = triggersDeathBurst ? this._getFeatureCompanionDeathBurst(companion) : null;
+			if (!deathBurst) return {ok: true, companionId: companion.id, resolution: null};
+			const resolution = resolutions[companion.id];
+			if (resolution == null) {
+				return {
+					ok: false,
+					committed: false,
+					companionId: companion.id,
+					reason: "deathBurstResolutionRequired",
+				};
+			}
+			const validation = this._validateRhwDeathBurstResolution(companion, resolution, {deathBurst});
+			if (!validation.ok) {
+				return {
+					ok: false,
+					committed: false,
+					companionId: companion.id,
+					reason: validation.reason,
+				};
+			}
+			return {ok: true, companionId: companion.id, resolution};
+		});
+		const preflightFailures = preflight.filter(result => !result.ok);
+		if (preflightFailures.length) {
+			return {
+				ok: false,
+				committed: false,
+				reason: preflightFailures[0].reason,
+				featureUid,
+				results: preflightFailures,
+				deathBursts: [],
+				deathBurstResults: [],
+			};
+		}
+
+		const dataSnapshot = MiscUtil.copyFast(this._data);
+		const results = [];
+		for (const companion of active) {
+			const resolution = preflight.find(result => result.companionId === companion.id)?.resolution || null;
+			const result = this.killFeatureOwnedCompanion(companion.id, {
+				featureUid,
+				cause: "summonerDeath",
+				remove: true,
+				deathBurstResolution: resolution,
+			});
+			results.push(result);
+			if (result.ok && result.committed) continue;
+			this._data = dataSnapshot;
+			return {
+				ok: false,
+				committed: false,
+				reason: "transactionRolledBack",
+				featureUid,
+				results,
+				deathBursts: [],
+				deathBurstResults: [],
+			};
+		}
 		return {
-			ok: results.every(result => result.ok),
-			committed: results.some(result => result.committed),
+			ok: true,
+			committed: true,
 			featureUid,
 			results,
 			deathBursts: results.map(result => result.deathBurst).filter(Boolean),
@@ -82061,13 +82120,19 @@ class CharacterSheetState {
 		const ownerUid = companion?.featureGrant?.uid || null;
 		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
 		const descriptor = ownerUid ? rules?.getDescriptor(ownerUid) : null;
-		const contextResult = ownerUid ? this._tryGetFeatureCompanionSummonerContext(ownerUid) : {ok: false};
+		const runtimeOwnerUid = CharacterSheetState._getFeatureCompanionDescriptorOwnerUid(descriptor);
+		const isExactRegistryRecord = !!descriptor
+			&& CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(runtimeOwnerUid)
+			&& CharacterSheetState._isExactFeatureCompanionRecord(companion, runtimeOwnerUid);
+		const contextResult = isExactRegistryRecord
+			? this._tryGetFeatureCompanionSummonerContext(runtimeOwnerUid)
+			: {ok: false};
 		let resolved = null;
 		let resolverError = null;
 		if (contextResult.ok) {
 			try {
 				resolved = rules.resolve(
-					ownerUid,
+					runtimeOwnerUid,
 					contextResult.context,
 					companion?.setup || null,
 					{deferSetupChoices: companion?.scaling?.deferSetupChoices === true},
@@ -82081,7 +82146,7 @@ class CharacterSheetState {
 			companionId,
 			operation: operationKey,
 			actionKey,
-			ownerUid,
+			ownerUid: runtimeOwnerUid || ownerUid,
 			sourceUid,
 			operationUid: null,
 			available: false,
@@ -82107,11 +82172,9 @@ class CharacterSheetState {
 
 		const fail = (reason, message) => ({...base, reason, message});
 		if (!companion) return fail("companionNotFound", "Companion not found.");
-		if (
-			ownerUid
-			&& CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(ownerUid)
-			&& !CharacterSheetState._isExactFeatureCompanionRecord(companion, ownerUid)
-		) return fail("ownerMismatch", "This companion does not match the exact source-qualified owner.");
+		if (descriptor && !isExactRegistryRecord) {
+			return fail("ownerMismatch", "This companion does not match the exact source-qualified owner.");
+		}
 		if (!ownerUid || !descriptor || !resolved || !sourceUid) {
 			return fail(
 				resolverError ? "resolverRejected" : "unsupportedCompanion",
@@ -82170,7 +82233,19 @@ class CharacterSheetState {
 				break;
 			case "action": {
 				const normalizedAction = String(actionKey || "").trim().toLowerCase();
-				const allowedActions = ["dash", "disengage", "dodge", "help", "hide", "search"];
+				const allowedActions = [
+					"dash",
+					"disengage",
+					"dodge",
+					"help",
+					"hide",
+					"influence",
+					"magic",
+					"ready",
+					"search",
+					"study",
+					"utilize",
+				];
 				if (!allowedActions.includes(normalizedAction)) {
 					return fail("invalidCompanionAction", "Choose a valid companion action.");
 				}
@@ -82343,9 +82418,7 @@ class CharacterSheetState {
 	}
 
 	static _getExplicitFiniteNumber (value) {
-		if (value == null || (typeof value === "string" && !value.trim())) return null;
-		const out = Number(value);
-		return Number.isFinite(out) ? out : null;
+		return typeof value === "number" && Number.isFinite(value) ? value : null;
 	}
 
 	static _getExactDiceRolls (dice, rolls, {critical = false} = {}) {
@@ -83056,10 +83129,10 @@ class CharacterSheetState {
 		if (featureUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER) {
 			return {ok: false, committed: false, reason: "invalidFeature"};
 		}
-		const requested = Number(amount);
-		if (!Number.isInteger(requested) || requested <= 0) {
+		if (typeof amount !== "number" || !Number.isInteger(amount) || amount <= 0) {
 			return {ok: false, committed: false, reason: "invalidAmount"};
 		}
+		const requested = amount;
 		const normalizedType = String(damageType || "").trim().toLowerCase();
 		const damageTypes = new Set([
 			"acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic",
@@ -83430,12 +83503,13 @@ class CharacterSheetState {
 		if ((Number(cls?.level) || 0) < 15) return {ok: false, committed: false, reason: "featureUnavailable"};
 		const runtime = this._getRhwReanimatedCompanionRuntime(companionId);
 		if (!runtime.ok) return {ok: false, committed: false, reason: runtime.reason};
+		const triggerDamageAmount = CharacterSheetState._getExplicitFiniteNumber(trigger?.damageAmount);
 		if (
 			trigger?.confirmed !== true
 			|| !String(trigger?.eventId || "").trim()
 			|| !["summoner", "companion"].includes(trigger?.target)
-			|| !Number.isFinite(Number(trigger?.damageAmount))
-			|| Number(trigger.damageAmount) <= 0
+			|| triggerDamageAmount == null
+			|| triggerDamageAmount <= 0
 			|| (trigger.target === "companion" && trigger.companionId !== companionId)
 		) return {ok: false, committed: false, reason: "invalidTrigger"};
 		if (!this.isActionTypeAvailable("reaction", {trackOnlyInCombat: true})) {

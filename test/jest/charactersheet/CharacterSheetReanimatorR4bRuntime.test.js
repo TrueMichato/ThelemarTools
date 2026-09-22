@@ -53,6 +53,7 @@ const SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
 const REFINED_UID = "Refined Reanimation|Artificer|EFA|Reanimator|RHW|15";
 const ARCANE_SOURCE_UID = "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW";
 const ARCANE_ACTION_UID = "arcane-conduit:damage-rider";
+const INVALID_EXPLICIT_NUMBERS = [null, "", "5", true, [], [5], {}];
 
 const copy = value => JSON.parse(JSON.stringify(value));
 
@@ -486,6 +487,30 @@ describe("RHW Reanimator R4b Death Burst and damage entry", () => {
 
 		const deathState = makeState({level: 9});
 		const created = await createCompanion(deathState, ["bloated", "gaunt"]);
+		const beforeUnresolved = JSON.stringify(deathState.toJson());
+		expect(deathState.handleFeatureCompanionSummonerDeath(COMPANION_OWNER_UID))
+			.toMatchObject({
+				ok: false,
+				committed: false,
+				reason: "deathBurstResolutionRequired",
+				results: [{companionId: created.companionId, reason: "deathBurstResolutionRequired"}],
+			});
+		expect(JSON.stringify(deathState.toJson())).toBe(beforeUnresolved);
+
+		expect(deathState.handleFeatureCompanionSummonerDeath(COMPANION_OWNER_UID, {
+			deathBurstResolutions: {
+				[created.companionId]: getDeathBurstResolution(9, {
+					targets: [{id: "far", name: "Far", distanceFeet: 11, dexSaveTotal: 1}],
+				}),
+			},
+		})).toMatchObject({
+			ok: false,
+			committed: false,
+			reason: "invalidTarget",
+			results: [{companionId: created.companionId, reason: "invalidTarget"}],
+		});
+		expect(JSON.stringify(deathState.toJson())).toBe(beforeUnresolved);
+
 		const result = deathState.handleFeatureCompanionSummonerDeath(COMPANION_OWNER_UID, {
 			deathBurstResolutions: {
 				[created.companionId]: getDeathBurstResolution(9),
@@ -591,6 +616,23 @@ describe("RHW Reanimator R4b Death Burst and damage entry", () => {
 		})).toMatchObject({ok: false, reason: "companionInactive"});
 		expect(JSON.stringify(state.toJson())).toBe(before);
 	});
+
+	it.each(INVALID_EXPLICIT_NUMBERS)(
+		"rejects non-number companion damage amount %p atomically",
+		async amount => {
+			const state = makeState({level: 3});
+			const created = await createCompanion(state, []);
+			const before = JSON.stringify(state.toJson());
+
+			expect(state.applyFeatureCompanionDamage({
+				featureUid: COMPANION_OWNER_UID,
+				companionId: created.companionId,
+				amount,
+				damageType: "fire",
+			})).toMatchObject({ok: false, committed: false, reason: "invalidAmount"});
+			expect(JSON.stringify(state.toJson())).toBe(before);
+		},
+	);
 });
 
 describe("RHW Reanimator R4b Gaunt, Moist, and Arcane Conduit", () => {
@@ -681,6 +723,61 @@ describe("RHW Reanimator R4b Gaunt, Moist, and Arcane Conduit", () => {
 			wisdomSaveTotal: 1,
 		})).toMatchObject({ok: false, reason: "modificationUnavailable"});
 	});
+
+	it.each(INVALID_EXPLICIT_NUMBERS)(
+		"rejects non-number range/save input %p across triggered and Arcane operations",
+		async invalidNumber => {
+			const state = makeState({level: 15});
+			const created = await createCompanion(state, ["arcaneConduit", "gaunt", "moist"]);
+			const before = JSON.stringify(state.toJson());
+			const target = {id: "target", name: "Target", chosen: true, startedTurn: true, isCreature: true};
+
+			expect(state.resolveRhwReanimatorGauntTrigger({
+				companionId: created.companionId,
+				target,
+				rangeFeet: invalidNumber,
+				wisdomSaveTotal: 10,
+			})).toMatchObject({ok: false, committed: false, reason: "targetOutOfRange"});
+			expect(state.resolveRhwReanimatorGauntTrigger({
+				companionId: created.companionId,
+				target,
+				rangeFeet: 5,
+				wisdomSaveTotal: invalidNumber,
+			})).toMatchObject({ok: false, committed: false, reason: "invalidSave"});
+			expect(state.resolveRhwReanimatorMoistTrigger({
+				companionId: created.companionId,
+				attacker: {id: "attacker", name: "Attacker", isCreature: true},
+				attackHit: true,
+				rangeFeet: invalidNumber,
+			})).toMatchObject({ok: false, committed: false, reason: "attackerOutOfRange"});
+			expect(state.applyRhwArcaneConduitDamageRider({
+				companionId: created.companionId,
+				spellCastReceipt: getSpellReceipt(),
+				selectedRollId: "damage:0",
+				companionDistanceFeet: invalidNumber,
+			})).toMatchObject({ok: false, committed: false, reason: "companionOutOfRange"});
+			expect(JSON.stringify(state.toJson())).toBe(before);
+
+			const deathState = makeState({level: 3});
+			const dead = await createCompanion(deathState, []);
+			expect(deathState.killFeatureOwnedCompanion(dead.companionId, {
+				featureUid: COMPANION_OWNER_UID,
+			})).toMatchObject({ok: true, committed: true});
+			const beforeDeathResolution = JSON.stringify(deathState.toJson());
+			for (const targets of [
+				[{id: "target", name: "Target", distanceFeet: invalidNumber, dexSaveTotal: 10}],
+				[{id: "target", name: "Target", distanceFeet: 5, dexSaveTotal: invalidNumber}],
+			]) {
+				expect(deathState.resolveFeatureCompanionDeathBurst({
+					featureUid: COMPANION_OWNER_UID,
+					companionId: dead.companionId,
+					targets,
+					rolls: {damageDice: [1, 2]},
+				})).toMatchObject({ok: false, committed: false, reason: "invalidTarget"});
+				expect(JSON.stringify(deathState.toJson())).toBe(beforeDeathResolution);
+			}
+		},
+	);
 
 	it("projects the alternate origin and applies one exact EFA damage-roll bonus per turn", async () => {
 		const state = makeState({level: 5, intelligence: 18});
@@ -1019,6 +1116,29 @@ describe("RHW Reanimator R4b Life Transfer, persistence, and Respec", () => {
 		});
 		expect(JSON.stringify(state.toJson())).toBe(beforeLoss);
 	});
+
+	it.each(INVALID_EXPLICIT_NUMBERS)(
+		"rejects non-number Life Transfer damage input %p atomically",
+		async damageAmount => {
+			const state = makeState({level: 15});
+			const created = await createCompanion(state, ["arcaneConduit", "gaunt", "moist"]);
+			const before = JSON.stringify(state.toJson());
+
+			expect(state.performRhwLifeTransfer({
+				featureUid: REFINED_UID,
+				classUid: CLASS_UID,
+				subclassUid: SUBCLASS_UID,
+				companionId: created.companionId,
+				trigger: {
+					eventId: "damage",
+					target: "summoner",
+					damageAmount,
+					confirmed: true,
+				},
+			})).toMatchObject({ok: false, committed: false, reason: "invalidTrigger"});
+			expect(JSON.stringify(state.toJson())).toBe(before);
+		},
+	);
 
 	it("rolls summoner HP, Reaction, companion lifecycle, and Death Burst back after a late kill failure", async () => {
 		const state = makeState({level: 15});

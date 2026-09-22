@@ -920,6 +920,11 @@ the owner's Bonus Action unless the exact summoner is Incapacitated. It never
 offers Battle Smith's Attack replacement. Swipe uses the exact EFA spell attack
 modifier, doubles only dice on a critical, and returns manual no-Opportunity-
 Attack and eligible Bloated-push riders.
+Registry-backed command execution first requires the descriptor's canonical
+seven-part runtime owner and an exact source-qualified record, so six-part or
+malformed collisions never reach the resolver. The shared non-attack action set
+is Dash, Disengage, Dodge, Help, Hide, Influence, Magic, Ready, Search, Study,
+and Utilize; Attack remains available only through a registered operation.
 
 RHW Reanimated Companion uses the same generic creation boundary but has no
 pending incomplete creature. `getFeatureCompanionCreationBoundary()` publishes
@@ -980,6 +985,11 @@ summoner Reaction only when combat action economy is tracked, heals by current
 post-trigger companion HP (including a valid zero actual heal at full HP), then
 kills the companion through the ordinary lifecycle. Its late failure restores
 summoner HP, Reaction state, companion HP/lifecycle, and Death Burst receipt.
+Summoner death prevalidates its required Death Burst resolution and removes the
+companion only after the result is attached; omitted or invalid inputs preserve
+the live state. Explicit range, save, damage, and trigger amounts must be actual
+finite numbers, never numeric strings, booleans, arrays, objects, null, or
+blank values.
 
 Generation-scoped receipts are pruned by exact projected keys on replacement,
 dismissal/removal, exact source loss, and Respec Apply. Six-part/malformed
