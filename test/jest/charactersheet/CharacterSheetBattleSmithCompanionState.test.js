@@ -7,6 +7,7 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const EFA_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA";
 const TCE_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
 const REANIMATOR_UID = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW";
+const UNREGISTERED_UID = "Clockwork Assistant|Artificer|EFA|Machinist|HB|3|HB";
 
 const getOwnerClass = (source, level) => ({
 	name: "Artificer",
@@ -477,7 +478,7 @@ describe("Feature-companion explicit failures", () => {
 			globalThis.CharacterSheetCompanionRules = original;
 		}
 
-		expect(() => state.resolveFeatureCompanionRules(REANIMATOR_UID, {
+		expect(() => state.resolveFeatureCompanionRules(UNREGISTERED_UID, {
 			artificerLevel: 3,
 			intelligenceModifier: 3,
 			proficiencyBonus: 2,
