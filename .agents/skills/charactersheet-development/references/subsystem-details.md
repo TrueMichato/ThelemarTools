@@ -1482,6 +1482,10 @@ Registry entries retain the legacy save/use fields and may additionally provide:
 
 - `availability`: callback or `{resolve}` descriptor returning
   `{available, unavailableReason?}`
+- `armWhenUnavailable`: defaults to `true` so legacy consumers can inspect why
+  an owned intervention is unavailable; set it to `false` for externally
+  resolved features such as an ally-only Cartographer Safe Haven, which must not
+  create an empty automatic prompt
 - `validation`: callback or `{validate}` descriptor returning
   `{valid, cancelled?, error?}` before commit
 - `consumption`: callback or `{consume}` descriptor for a custom state-owned cost;

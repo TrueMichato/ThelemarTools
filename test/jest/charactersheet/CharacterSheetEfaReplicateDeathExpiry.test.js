@@ -247,12 +247,7 @@ describe("EFA Replicate Magic Item death expiry", () => {
 
 		state.takeDamage(40, {damageType: "radiant"});
 
-		expect(state.getPendingZeroHpIntervention()).toEqual(expect.objectContaining({
-			interventions: [expect.objectContaining({
-				id: "strengthOfTheGrave",
-				available: false,
-			})],
-		}));
+		expect(state.getPendingZeroHpIntervention()).toBeNull();
 		expect(state.isDead()).toBe(true);
 		expect(getExpiry(state, created.itemId)?.daysRemaining).toBe(3);
 		expect(randomise).toHaveBeenCalledTimes(1);

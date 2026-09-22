@@ -14423,6 +14423,7 @@ class CharacterSheetState {
 			spendOn: "success",
 			usesMax: null,
 			recharge: null,
+			armWhenUnavailable: false,
 			availability: ({state}) => state.getAdventurersAtlasSafeHavenAvailability(),
 			validation: ({state}) => {
 				const availability = state.getAdventurersAtlasSafeHavenAvailability();
@@ -14596,6 +14597,7 @@ class CharacterSheetState {
 				usesRemaining,
 				usesMax: feature?.uses?.max ?? def.usesMax,
 				recharge: def.recharge,
+				armWhenUnavailable: def.armWhenUnavailable !== false,
 				available: !unavailableReason,
 				unavailableReason,
 			});
@@ -14611,7 +14613,7 @@ class CharacterSheetState {
 	 */
 	_armZeroHpIntervention ({damage, rawDamage, damageType, isCritical, hpBefore}) {
 		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical});
-		if (!candidates.length) return;
+		if (!candidates.some(candidate => candidate.available || candidate.armWhenUnavailable)) return;
 		this._data._pendingZeroHpIntervention = {
 			damage,
 			rawDamage,
