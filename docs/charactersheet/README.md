@@ -26,6 +26,7 @@ Welcome to the 5etools Character Sheet system documentation. This comprehensive 
 | [Ioun Stones](./20-ioun-stones.md) | MECIounStones and official-stone parity: attunement exemption, orbit/bond manager, item conditional modifiers, effect-implementation audit |
 | [Item Materials](./21-item-materials.md) | Thelemar item materials: the 72 `itemMaterial` entities, the six axes, the read-time projection, the damage die ladder, and the picker/custom-item/craft entry points |
 | [Beastheart](./22-beastheart.md) | MCDM Beastheart (`BST`): the companion-as-`_data.companions[]` decision, Ferocity on the companion record rather than in the resource pool, `ScaleClassSummonedCreature` reuse, derived pick counts, and all five Companion Bonds |
+| [EFA Alchemist](./24-efa-alchemist.md) | Planned full `Alchemist|EFA` support: exact-source identity, spell grants, Experimental Elixirs, crafting, save/respec ownership, Operate-mode UX, and acceptance criteria |
 
 ## System at a Glance
 
