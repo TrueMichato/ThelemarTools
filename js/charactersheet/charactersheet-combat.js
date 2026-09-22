@@ -1475,7 +1475,11 @@ class CharacterSheetCombat {
 		// Roll d20 with advantage/disadvantage support (state mode can be overridden by shift/ctrl keys)
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
 		this._pendingBattleMasterAttackAdvantage = false;
-		const total = rollResult.roll + totalBonus - exhaustionPenalty;
+		const stateDice = this._page._rollStateDiceBonuses?.(attackType) || null;
+		const stateDiceTotal = stateDice?.total || 0;
+		const flatRollModifier = totalBonus - exhaustionPenalty;
+		const rollModifier = flatRollModifier + stateDiceTotal;
+		const total = rollResult.roll + rollModifier;
 
 		// Check for crit/fumble
 		const critRange = this._state.getCriticalRange?.({attack}) || 20;
@@ -1530,12 +1534,13 @@ class CharacterSheetCombat {
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
-		const rollBreakdown = this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr);
+		const diceBonusStr = stateDice?.breakdownStr ? ` ${stateDice.breakdownStr}` : "";
+		const rollBreakdown = `${this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr)}${diceBonusStr}`;
 		void this._page.pAnimateD20?.(rollResult);
 		const resultEl = this._page.showDiceResult({
 			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${substitutionLabel}${localLabel}${extraBonusLabel}${featureModLabel}${externalItemLabel}${ammoLabel}${riderLabel}`,
 			roll: rollResult.roll,
-			modifier: totalBonus - exhaustionPenalty,
+			modifier: rollModifier,
 			total,
 			resultClass,
 			resultNote: resultNote,
@@ -1631,7 +1636,9 @@ class CharacterSheetCombat {
 			rollResult,
 			total,
 			totalBonus,
-			rollModifier: totalBonus - exhaustionPenalty,
+			flatRollModifier,
+			rollModifier,
+			stateDice,
 			rollFollowup,
 			isCrit: rollResult.roll >= critRange,
 			isNat20: rollResult.roll === 20,
@@ -1774,7 +1781,10 @@ class CharacterSheetCombat {
 		// Spell attacks ARE attacks: pass isAttack so the Thelemar Nat1/Nat20 ±5
 		// check/save rule does not leak into the breakdown.
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
-		const total = rollResult.roll + totalBonus - exhaustionPenalty;
+		const stateDice = this._page._rollStateDiceBonuses?.("attack:spell") || null;
+		const stateDiceTotal = stateDice?.total || 0;
+		const rollModifier = totalBonus - exhaustionPenalty + stateDiceTotal;
+		const total = rollResult.roll + rollModifier;
 
 		// "spell" kind: Champion Improved/Superior Critical never expands the crit
 		// range for spell attacks (RAW text is weapon/Unarmed Strike only) — see
@@ -1793,15 +1803,16 @@ class CharacterSheetCombat {
 		const stateEffectLabel = this._getStateEffectLabel(hasAdvantage, hasDisadvantage);
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
 		const exhaustionStr = exhaustionPenalty > 0 ? ` - ${exhaustionPenalty} (exhaustion)` : "";
+		const diceBonusStr = stateDice?.breakdownStr ? ` ${stateDice.breakdownStr}` : "";
 		void this._page.pAnimateD20?.(rollResult);
 		this._page.showDiceResult({
 			title: `Spell Attack${modeLabel}${stateEffectLabel}`,
 			roll: rollResult.roll,
-			modifier: totalBonus - exhaustionPenalty,
+			modifier: rollModifier,
 			total,
 			resultClass,
 			resultNote,
-			subtitle: this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr),
+			subtitle: `${this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr)}${diceBonusStr}`,
 		});
 	}
 
@@ -2464,7 +2475,9 @@ class CharacterSheetCombat {
 	 * @param {*} ctx Post-attack context from `_rollAttack`.
 	 */
 	async _pOfferFortuneIntervention (ctx) {
-		const rollModifier = ctx.rollModifier ?? ctx.totalBonus ?? 0;
+		const flatRollModifier = ctx.flatRollModifier ?? ctx.rollModifier ?? ctx.totalBonus ?? 0;
+		const rollModifier = ctx.rollModifier ?? flatRollModifier + (ctx.stateDice?.total || 0);
+		const diceBonusStr = ctx.stateDice?.breakdownStr ? ` ${ctx.stateDice.breakdownStr}` : "";
 		const result = await this._page._pMaybeApplyFortuneIntervention?.({
 			rollResult: ctx.rollResult,
 			effectiveRoll: ctx.rollResult.roll,
@@ -2478,6 +2491,7 @@ class CharacterSheetCombat {
 		const critRange = this._state.getCriticalRange?.({attack: ctx.attack}) || 20;
 		const newTotal = result.effectiveRoll + rollModifier;
 		const revisedRollResult = {...ctx.rollResult, roll: result.effectiveRoll};
+		const breakdown = `${this._page.formatD20Breakdown(revisedRollResult, flatRollModifier)}${diceBonusStr}`;
 		let resultClass = "";
 		let resultNote = "";
 		if (result.effectiveRoll >= critRange) {
@@ -2496,7 +2510,7 @@ class CharacterSheetCombat {
 			total: newTotal,
 			resultClass,
 			resultNote,
-			subtitle: this._page.formatD20Breakdown(revisedRollResult, rollModifier),
+			subtitle: breakdown,
 		});
 		ctx.total = newTotal;
 		ctx.rollResult = revisedRollResult;
@@ -2507,7 +2521,7 @@ class CharacterSheetCombat {
 			label: `${ctx.attack?.name || "Attack"} Attack`,
 			total: newTotal,
 			naturalRoll: result.effectiveRoll,
-			breakdown: this._page.formatD20Breakdown(revisedRollResult, rollModifier),
+			breakdown,
 			outcome: resultNote,
 		});
 

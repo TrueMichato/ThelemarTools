@@ -1752,6 +1752,18 @@ Hard-coded: Rage ↔ Bladesong. Enforced in `activateState()` — activating one
 - `"check:str:athletics"` → also checks `"check:str"` → also checks `"check"`
 - Returns sum of all matching `value` fields + resolved `abilityMod` fields
 
+Random roll bonuses and penalties use the parallel dice pipeline:
+
+- `CharacterSheetState.getRollBonusDice(rollType)` returns matching
+  `rollBonus`/`rollPenalty` descriptors without rolling them.
+- `CharacterSheetPage._rollStateDiceBonuses(rollType)` is the single dice
+  roller/formatter. Consumers add its `total` once and append its
+  source-labeled `breakdownStr`.
+- Main-sheet and dedicated Combat-tab attacks pass the concrete scoped attack
+  type (`attack:melee|ranged:<ability>`); the Combat quick spell attack passes
+  `attack:spell`. Stored, temporary, and active-state-granted Combat attacks all
+  share the same `_rollAttack` insertion point.
+
 ### Concentration Breaking Cascade
 
 When Rage (or any state with `breaksConcentration: true`) activates:

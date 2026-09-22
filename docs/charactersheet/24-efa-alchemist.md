@@ -319,11 +319,11 @@ versions, TCE/custom provenance, corrupted quantities, missing actions, and
 lost EFA source ownership. Action or item-removal failure restores the full
 pre-use state.
 
-Boldness already feeds the main Character Sheet attack and saving-throw roll
-pipeline through the generic active-state roll-dice query. The dedicated
-Combat-tab attack roller does not yet consume that generic dice query; wiring
-that UI consumer is explicitly deferred rather than reporting a bonus that it
-did not roll.
+Boldness feeds the main Character Sheet attack and saving-throw roll pipeline,
+the dedicated Combat-tab weapon/temporary/active-state attack roller, and the
+Combat quick spell-attack roll through the same generic active-state roll-dice
+query. Each Combat path rolls the `1d4` once, adds it to the displayed total,
+and labels the die and `Experimental Elixir: Boldness` source in the breakdown.
 
 Still deferred: the drinking/administering modal, inventory action controls,
 slot-funded creation UI, Long Rest production orchestration, and undo
