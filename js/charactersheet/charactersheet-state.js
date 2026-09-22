@@ -29705,6 +29705,10 @@ class CharacterSheetState {
 							multiplier: 0.5,
 							filter: {itemTypes: ["LA", "MA", "HA"]},
 						});
+						if (level >= 5) {
+							calculations.hasExtraAttack = true;
+							calculations.attacksPerAction = 2;
+						}
 					}
 
 					if (!isEfa && subclassName && level >= 3) {
