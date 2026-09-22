@@ -37085,6 +37085,12 @@ class CharacterSheetState {
 	static GENERATED_FEATURE_ITEM_PROVENANCE_VERSION = 1;
 	static GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION = 1;
 	static EFA_REPLICATE_MAGIC_ITEM_FEATURE_UID = "Replicate Magic Item|Artificer|EFA|2|EFA";
+	static EFA_REPLICATE_MAGIC_ITEM_OWNER = Object.freeze({
+		featureUid: "Replicate Magic Item|Artificer|EFA|2",
+		classUid: "Artificer|EFA",
+		subclassUid: null,
+		featureSource: "EFA",
+	});
 
 	static _normalizeGeneratedFeatureItemOwner (
 		owner,
