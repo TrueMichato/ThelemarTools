@@ -35193,7 +35193,7 @@ class CharacterSheetState {
 					}
 
 					const isLegacySubclass = (!isEfa && subclassSource === classSource)
-						|| (isEfa && subclassSource === "TCE");
+						|| (isEfa && subclassName === "alchemist" && subclassSource === "TCE");
 					if (isLegacySubclass && subclassName && level >= 3) {
 						switch (subclassName) {
 							case "alchemist": {
