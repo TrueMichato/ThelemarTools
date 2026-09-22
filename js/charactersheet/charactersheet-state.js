@@ -4613,6 +4613,7 @@ class CharacterSheetState {
 	static EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID = "Experimental Elixir|Artificer|EFA|Alchemist|EFA|3|EFA";
 	static EFA_EXPERIMENTAL_ELIXIR_METADATA_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_BATCH_PLAN_VERSION = 1;
+	static EFA_EXPERIMENTAL_ELIXIR_ACTIVE_EFFECT_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_OWNER = Object.freeze({
 		featureUid: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID,
 		featureSource: "EFA",
@@ -22236,6 +22237,257 @@ class CharacterSheetState {
 			.filter(row => this.classifyEfaExperimentalElixir(row).status === "valid");
 	}
 
+	static _getEfaExperimentalElixirEffectSourceFeatureId (effectKey) {
+		return `${CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID}::active-effect::${effectKey}`;
+	}
+
+	static _getEfaExperimentalElixirActiveStateEffects (metadata) {
+		switch (metadata?.effectKey) {
+			case "swiftness":
+				return [{type: "bonus", target: "speed:walk", value: metadata.value.amount, source: "Experimental Elixir"}];
+			case "resilience":
+				return [{type: "bonus", target: "ac", value: metadata.value.amount, source: "Experimental Elixir"}];
+			case "boldness":
+				return metadata.value.appliesTo.map(target => ({
+					type: "rollBonus",
+					target: target === "savingThrow" ? "save" : target,
+					dice: metadata.value.dice,
+					source: "Experimental Elixir",
+				}));
+			case "flight":
+				return [{type: "flySpeed", value: metadata.value.amount, source: "Experimental Elixir"}];
+			default:
+				return null;
+		}
+	}
+
+	static _getEfaExperimentalElixirDurationTracking (duration) {
+		const totalRounds = CharacterSheetState.parseDurationToRounds(duration);
+		if (!duration || !Number.isInteger(totalRounds) || totalRounds <= 0) return null;
+		return {
+			version: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_ACTIVE_EFFECT_VERSION,
+			amount: duration.amount,
+			unit: duration.unit,
+			totalRounds,
+			endsOnShortRest: !!duration.endsOnShortRest,
+			endsOnLongRest: !!duration.endsOnLongRest,
+			preserveRoundsAcrossCombat: true,
+		};
+	}
+
+	classifyEfaExperimentalElixirActiveEffect (state) {
+		const prefix = `${CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID}::active-effect::`;
+		const sourceFeatureId = String(state?.sourceFeatureId || "");
+		if (!sourceFeatureId.startsWith(prefix)) {
+			return {status: "ordinary", reason: "not-efa-experimental-elixir-active-effect"};
+		}
+		const effectKey = sourceFeatureId.slice(prefix.length);
+		const context = state?.sourceContext;
+		if (
+			state?.stateTypeId !== "custom"
+			|| !context
+			|| context.version !== CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_ACTIVE_EFFECT_VERSION
+			|| context.kind !== "efaExperimentalElixir"
+			|| !CharacterSheetState._isEfaExperimentalElixirOwnerLike(context.owner)
+		) {
+			return {status: "stale", reason: "invalid-efa-experimental-elixir-active-effect-source"};
+		}
+		const metadataValidation = CharacterSheetState._validateEfaExperimentalElixirMetadata(context.metadata);
+		if (
+			!metadataValidation.ok
+			|| context.metadata.effectKey !== effectKey
+			|| effectKey === "healing"
+		) {
+			return {status: "stale", reason: metadataValidation.reason || "invalid-efa-experimental-elixir-active-effect"};
+		}
+		const expectedEffects = CharacterSheetState._getEfaExperimentalElixirActiveStateEffects(context.metadata);
+		const expectedDurationTracking = CharacterSheetState._getEfaExperimentalElixirDurationTracking(context.metadata.duration);
+		if (
+			!expectedEffects
+			|| !expectedDurationTracking
+			|| !CharacterSheetState._isEfaExperimentalElixirSnapshotEqual(state.customEffects, expectedEffects)
+			|| !CharacterSheetState._isEfaExperimentalElixirSnapshotEqual(state.duration, context.metadata.duration)
+			|| !CharacterSheetState._isEfaExperimentalElixirSnapshotEqual(state.durationTracking, expectedDurationTracking)
+		) {
+			return {status: "stale", reason: "invalid-efa-experimental-elixir-active-effect-snapshot"};
+		}
+		return {
+			status: "valid",
+			reason: "supported-efa-experimental-elixir-active-effect",
+			effectKey,
+			metadata: MiscUtil.copyFast(context.metadata),
+			sourceContext: MiscUtil.copyFast(context),
+		};
+	}
+
+	getEfaExperimentalElixirActiveEffects ({activeOnly = true} = {}) {
+		return (this._data.activeStates || [])
+			.filter(state => !activeOnly || state.active)
+			.map(state => ({state, classification: this.classifyEfaExperimentalElixirActiveEffect(state)}))
+			.filter(({classification}) => classification.status === "valid")
+			.map(({state, classification}) => ({
+				...MiscUtil.copyFast(classification),
+				stateId: state.id,
+				active: !!state.active,
+				roundsRemaining: state.roundsRemaining,
+			}));
+	}
+
+	_resolveEfaExperimentalElixirHealing (metadata, healingRolls = null) {
+		const count = metadata?.healing?.diceCount;
+		const faces = metadata?.healing?.dieFaces;
+		if (!Number.isInteger(count) || count <= 0 || !Number.isInteger(faces) || faces <= 0) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-healing"};
+		}
+		let rolls;
+		if (healingRolls == null) {
+			rolls = Array.from({length: count}, () => (
+				typeof RollerUtil !== "undefined" && typeof RollerUtil.randomise === "function"
+					? RollerUtil.randomise(faces)
+					: Math.floor(Math.random() * faces) + 1
+			));
+		} else {
+			if (
+				!Array.isArray(healingRolls)
+				|| healingRolls.length !== count
+				|| !healingRolls.every(roll => Number.isInteger(roll) && roll >= 1 && roll <= faces)
+			) {
+				return {ok: false, code: "invalid-efa-experimental-elixir-healing-rolls"};
+			}
+			rolls = [...healingRolls];
+		}
+		const diceTotal = rolls.reduce((sum, roll) => sum + roll, 0);
+		const intelligenceModifier = this.getAbilityMod("int");
+		return {
+			ok: true,
+			formula: `${metadata.healing.dice} ${intelligenceModifier >= 0 ? "+" : "-"} ${Math.abs(intelligenceModifier)}`,
+			rolls,
+			diceTotal,
+			intelligenceModifier,
+			total: Math.max(0, diceTotal + intelligenceModifier),
+		};
+	}
+
+	_applyEfaExperimentalElixirTimedEffect (row, classification) {
+		const metadata = classification.metadata;
+		const customEffects = CharacterSheetState._getEfaExperimentalElixirActiveStateEffects(metadata);
+		const durationTracking = CharacterSheetState._getEfaExperimentalElixirDurationTracking(metadata.duration);
+		if (!customEffects || !durationTracking) return null;
+		const sourceFeatureId = CharacterSheetState._getEfaExperimentalElixirEffectSourceFeatureId(metadata.effectKey);
+		const stateId = this.activateState("custom", {
+			name: `Experimental Elixir: ${classification.reason === "supported-efa-experimental-elixir"
+				? Object.values(CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_EFFECTS).find(it => it.key === metadata.effectKey)?.label
+				: metadata.effectKey}`,
+			icon: "⚗️",
+			description: `A source-owned ${metadata.effectKey} effect from Experimental Elixir.`,
+			sourceFeatureId,
+			customEffects,
+			duration: MiscUtil.copyFast(metadata.duration),
+		});
+		const state = this._data.activeStates.find(it => it.id === stateId);
+		if (!state) return null;
+		state.sourceContext = {
+			version: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_ACTIVE_EFFECT_VERSION,
+			kind: "efaExperimentalElixir",
+			owner: MiscUtil.copyFast(CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER),
+			itemId: row.id,
+			generatedItemId: row.item?._generatedItemId || null,
+			metadata: MiscUtil.copyFast(metadata),
+		};
+		state.durationTracking = durationTracking;
+		state.roundsRemaining = durationTracking.totalRounds;
+		return {
+			stateId,
+			effectKey: metadata.effectKey,
+			roundsRemaining: state.roundsRemaining,
+			durationTracking: MiscUtil.copyFast(durationTracking),
+		};
+	}
+
+	consumeEfaExperimentalElixir ({
+		itemId,
+		target = "self",
+		cancelled = false,
+		healingRolls = null,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, code: "efa-experimental-elixir-consumption-cancelled"};
+		if (target !== "self") return {ok: false, committed: false, code: "unsupported-efa-experimental-elixir-target"};
+		if (!this._getEfaAlchemistClassEntry()) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-unavailable"};
+		}
+		const row = this._findInventoryRow(itemId);
+		if (!row) return {ok: false, committed: false, code: "efa-experimental-elixir-item-unavailable"};
+		const classification = this.classifyEfaExperimentalElixir(row);
+		if (classification.status !== "valid") {
+			return {
+				ok: false,
+				committed: false,
+				code: classification.status === "stale"
+					? "stale-efa-experimental-elixir"
+					: "invalid-efa-experimental-elixir-item",
+				reason: classification.reason,
+			};
+		}
+		if (row.quantity !== 1) {
+			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-item-quantity"};
+		}
+		const isActionTracked = this.isInCombat();
+		if (isActionTracked && !this.isActionTypeAvailable("bonus")) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-bonus-action-unavailable"};
+		}
+		const healing = classification.metadata.effectKey === "healing"
+			? this._resolveEfaExperimentalElixirHealing(classification.metadata, healingRolls)
+			: null;
+		if (healing && !healing.ok) return {...healing, committed: false};
+
+		const dataSnapshot = MiscUtil.copyFast(this._data);
+		try {
+			if (isActionTracked && !this.consumeActionType("bonus")) {
+				return {ok: false, committed: false, code: "efa-experimental-elixir-bonus-action-unavailable"};
+			}
+
+			let result;
+			if (healing) {
+				const hpBefore = this.getCurrentHp();
+				this.heal(healing.total, {supernatural: true});
+				const hpAfter = this.getCurrentHp();
+				result = {
+					type: "healing",
+					...healing,
+					hpBefore,
+					hpAfter,
+					healed: hpAfter - hpBefore,
+				};
+			} else {
+				const activeEffect = this._applyEfaExperimentalElixirTimedEffect(row, classification);
+				if (!activeEffect) throw new Error("efa-experimental-elixir-effect-application-failed");
+				result = {type: "timedEffect", ...activeEffect};
+			}
+
+			this.removeItem(row.id);
+			if (this._findInventoryRow(row.id)) throw new Error("efa-experimental-elixir-item-consumption-failed");
+			return {
+				ok: true,
+				committed: true,
+				code: "efa-experimental-elixir-consumed",
+				itemId: row.id,
+				actionType: "bonus",
+				actionConsumed: isActionTracked,
+				target: "self",
+				effectKey: classification.metadata.effectKey,
+				result,
+			};
+		} catch (error) {
+			this._data = dataSnapshot;
+			return {
+				ok: false,
+				committed: false,
+				code: "efa-experimental-elixir-consumption-failed",
+				error: error?.message || "Unable to consume Experimental Elixir.",
+			};
+		}
+	}
+
 	_removeEfaExperimentalElixirRows () {
 		const itemIds = this.getEfaExperimentalElixirRows().map(row => row.id);
 		itemIds.forEach(itemId => this.removeItem(itemId));
@@ -22293,11 +22545,24 @@ class CharacterSheetState {
 			.map(row => row.id);
 		const classEntry = this._getEfaAlchemistClassEntry();
 		const removedItemIds = classEntry ? [] : this._removeEfaExperimentalElixirRows();
+		const activeEffectCandidates = (this._data.activeStates || [])
+			.map(state => ({state, classification: this.classifyEfaExperimentalElixirActiveEffect(state)}))
+			.filter(({classification}) => classification.status !== "ordinary");
+		const staleEffectStateIds = activeEffectCandidates
+			.filter(({classification}) => classification.status === "stale")
+			.map(({state}) => state.id);
+		const removedEffectStateIds = activeEffectCandidates
+			.filter(({classification}) => !classEntry || classification.status === "stale")
+			.map(({state}) => state.id);
+		removedEffectStateIds.forEach(stateId => this.removeActiveState(stateId));
 		return {
 			cause,
 			activeItemIds: this.getEfaExperimentalElixirRows().map(row => row.id),
 			staleItemIds,
 			removedItemIds,
+			activeEffectStateIds: this.getEfaExperimentalElixirActiveEffects().map(effect => effect.stateId),
+			staleEffectStateIds,
+			removedEffectStateIds,
 		};
 	}
 
@@ -78268,7 +78533,7 @@ class CharacterSheetState {
 				state.active = false;
 				delete state.customEffects;
 			}
-			state.roundsRemaining = null;
+			if (!state.durationTracking?.preserveRoundsAcrossCombat) state.roundsRemaining = null;
 			state.activatedAtRound = null;
 		}
 	}
@@ -83066,6 +83331,15 @@ class CharacterSheetState {
 	 * @param {string} restType - "short" or "long"
 	 */
 	clearStatesOnRest (restType) {
+		const durationStates = [...(this._data.activeStates || [])].filter(state =>
+			state.active
+			&& (
+				(restType === "short" && state.durationTracking?.endsOnShortRest)
+				|| (restType === "long" && state.durationTracking?.endsOnLongRest)
+			),
+		);
+		for (const state of durationStates) this._deactivateStateInstance(state, {reason: `${restType} rest`});
+
 		// Rage ends on rest
 		this.deactivateState("rage");
 		this.deactivateState("crimsonRite");

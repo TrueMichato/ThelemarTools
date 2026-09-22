@@ -30,6 +30,16 @@ state must be saved, and what the player-facing controls must do.
 > coexists with independent grants. Alchemical Eruption is not part of this
 > milestone; Conjured Cauldron cast execution ships through the innate-grant
 > milestone above.
+>
+> **Experimental Elixir consumption milestone status:** exact-owner generated
+> vials can now be consumed on Self through one atomic state transaction.
+> Healing uses the creation-snapshotted dice plus the current Intelligence
+> modifier; Swiftness, Resilience, Boldness, and Flight use persisted
+> source-owned active states with deterministic duration/rest expiry. A
+> committed in-combat use spends the shared Bonus Action and vial together;
+> invalid, cancelled, stale, wrong-source, or failed commits spend nothing.
+> Player-facing controls, Other-target handoff, slot-funded creation UI, and
+> Long Rest production orchestration remain later milestones.
 
 > **Alchemical Eruption milestone status:** exact level-15 EFA Alchemist owners
 > now receive the optional post-commit `2d8` Force follow-up when a normalized
@@ -186,8 +196,17 @@ creation, Bonus Action consumption, and all five effects
 > **Core state milestone:** the exact-owner generated-vial contract, pure d6
 > batch planner, creation-time scaling snapshots, atomic batch replacement,
 > save/load reconciliation, and source-loss cleanup are implemented. Rest UI,
-> slot/action spending, consumption, active effects, and undo remain later
-> milestones.
+> slot-funded creation, player-facing controls, Other-target handoff, Long Rest
+> production orchestration, and undo remain later milestones.
+>
+> **Self-consumption state milestone:** the model transaction for exact
+> `Alchemist|Artificer|EFA|EFA` vials is implemented. It consumes the shared
+> Bonus Action only for an in-combat committed use, consumes the quantity-1
+> generated vial, and applies Healing or the creation-snapshotted timed effect
+> atomically. Outside combat it does not latch action economy. Save/load,
+> source-loss cleanup, same-effect refresh, round expiry, and Short/Long Rest
+> expiry use the shared inventory, action-economy, healing, and active-state
+> systems rather than parallel ledgers.
 
 ### 4.1 Long Rest batch
 
@@ -235,7 +254,9 @@ or ability changes do not mutate an effect already in progress.
 Consuming the same timed effect again refreshes/replaces its source-owned
 state; it does not stack a second identical bonus. One-hour-or-shorter states
 end on a Short or Long Rest. The eight-hour Resilience state ends on a Long
-Rest. Combat-round durations also participate in normal round expiry.
+Rest. Combat-round durations also participate in normal round expiry, and
+remaining rounds persist across leaving and re-entering combat rather than
+resetting from the original duration.
 
 ### 4.3 Creating one vial with a spell slot
 
@@ -260,6 +281,22 @@ Drinking or administering a vial costs one Bonus Action. The player chooses:
 
 Unlike the TCE rule, the other creature need not be incapacitated. Cancellation
 consumes neither the vial nor the Bonus Action.
+
+The state-level Self transaction now ships. It fails closed for unsupported
+targets, stale six-part ownership, unsupported metadata versions, TCE/custom
+provenance, corrupted quantities, missing actions, and lost EFA source
+ownership. Its timed state stores the exact consumed-vial provenance and
+creation snapshot, so later level changes cannot rewrite an active effect.
+
+Boldness already feeds the main Character Sheet attack and saving-throw roll
+pipeline through the generic active-state roll-dice query. The dedicated
+Combat-tab attack roller does not yet consume that generic dice query; wiring
+that UI consumer is explicitly deferred rather than reporting a bonus that it
+did not roll.
+
+Still deferred: the drinking/administering modal, inventory action controls,
+Other-target handoff receipt, slot-funded creation UI, Long Rest production
+orchestration, and undo presentation.
 
 ### 4.5 Generated-item ownership
 

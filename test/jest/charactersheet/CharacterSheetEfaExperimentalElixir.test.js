@@ -44,6 +44,19 @@ const commitBatch = (state, opts = {}) => {
 
 const getMetadata = row => row.item._generatedItemProvenance.metadata;
 
+const createVial = (state, effectKey, {
+	batchId = `batch-${effectKey}`,
+	spentSlotLevel = 1,
+} = {}) => {
+	const created = state.createEfaExperimentalElixirSpellSlotVial({
+		effectKey,
+		batchId,
+		spentSlotLevel,
+	});
+	expect(created.ok).toBe(true);
+	return created.itemId;
+};
+
 describe("EFA Experimental Elixir core lifecycle", () => {
 	test.each([
 		[2, 0],
@@ -116,6 +129,380 @@ describe("EFA Experimental Elixir core lifecycle", () => {
 		expect(makeState({subclassSource: "TCE"}).planEfaExperimentalElixirBatch({rolls: [1]})).toEqual({
 			ok: false,
 			code: "efa-experimental-elixir-unavailable",
+		});
+	});
+
+	describe("EFA Experimental Elixir self-consumption", () => {
+		test("atomically consumes an in-combat vial and Bonus Action while applying the snapshotted Swiftness effect", () => {
+			const state = makeState({level: 3});
+			const itemId = createVial(state, "swiftness");
+			const baseSpeed = state.getWalkSpeed();
+			state.startCombat();
+			const applySpy = jest.spyOn(state, "_applyEfaExperimentalElixirTimedEffect");
+
+			const consumed = state.consumeEfaExperimentalElixir({itemId, target: "self"});
+
+			expect(consumed).toMatchObject({
+				ok: true,
+				committed: true,
+				code: "efa-experimental-elixir-consumed",
+				itemId,
+				actionType: "bonus",
+				actionConsumed: true,
+				target: "self",
+				effectKey: "swiftness",
+				result: {
+					type: "timedEffect",
+					effectKey: "swiftness",
+					roundsRemaining: 600,
+					durationTracking: {
+						amount: 1,
+						unit: "hour",
+						totalRounds: 600,
+						endsOnShortRest: true,
+						endsOnLongRest: true,
+						preserveRoundsAcrossCombat: true,
+					},
+				},
+			});
+			expect(applySpy).toHaveBeenCalledTimes(1);
+			expect(state.getItems().some(item => item.id === itemId)).toBe(false);
+			expect(state.isActionTypeAvailable("bonus")).toBe(false);
+			expect(state.getWalkSpeed()).toBe(baseSpeed + 10);
+			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([
+				expect.objectContaining({
+					status: "valid",
+					effectKey: "swiftness",
+					active: true,
+					roundsRemaining: 600,
+					sourceContext: expect.objectContaining({
+						kind: "efaExperimentalElixir",
+						itemId,
+						owner: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER,
+						metadata: expect.objectContaining({
+							effectKey: "swiftness",
+							creationArtificerLevel: 3,
+							value: {kind: "walkingSpeedBonusFeet", amount: 10},
+						}),
+					}),
+				}),
+			]);
+		});
+
+		test("uses creation-snapshotted Healing dice with the current Intelligence modifier at consume time", () => {
+			const state = makeState({level: 3});
+			state.setAbilityBase("int", 10);
+			state.setMaxHp(50);
+			state.setCurrentHp(10);
+			const itemId = createVial(state, "healing");
+			state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 15;
+			state.setAbilityBase("int", 18);
+
+			const consumed = state.consumeEfaExperimentalElixir({
+				itemId,
+				target: "self",
+				healingRolls: [4, 5],
+			});
+
+			expect(consumed).toMatchObject({
+				ok: true,
+				committed: true,
+				actionConsumed: false,
+				effectKey: "healing",
+				result: {
+					type: "healing",
+					formula: "2d8 + 4",
+					rolls: [4, 5],
+					diceTotal: 9,
+					intelligenceModifier: 4,
+					total: 13,
+					hpBefore: 10,
+					hpAfter: 23,
+					healed: 13,
+				},
+			});
+			expect(state.getCurrentHp()).toBe(23);
+			expect(state.getItems().some(item => item.id === itemId)).toBe(false);
+			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([]);
+		});
+
+		test.each([
+			{
+				effectKey: "swiftness",
+				level: 9,
+				assertEffect: state => expect(state.getWalkSpeed()).toBe(45),
+			},
+			{
+				effectKey: "resilience",
+				level: 9,
+				assertEffect: state => expect(state.getAc()).toBe(11),
+			},
+			{
+				effectKey: "boldness",
+				level: 9,
+				assertEffect: state => {
+					expect(state.getRollBonusDiceFromStates("attack:melee:str")).toEqual([
+						expect.objectContaining({dice: "1d4", sign: 1, source: "Experimental Elixir: Boldness"}),
+					]);
+					expect(state.getRollBonusDiceFromStates("save:wis")).toEqual([
+						expect.objectContaining({dice: "1d4", sign: 1, source: "Experimental Elixir: Boldness"}),
+					]);
+					expect(state.getRollBonusDiceFromStates("check:wis")).toEqual([]);
+				},
+			},
+			{
+				effectKey: "flight",
+				level: 15,
+				assertEffect: state => expect(state.getSpeedByType("fly")).toBe(30),
+			},
+		])("applies the measurable $effectKey effect through the generic active-state consumers", ({effectKey, level, assertEffect}) => {
+			const state = makeState({level});
+			const itemId = createVial(state, effectKey);
+
+			expect(state.consumeEfaExperimentalElixir({itemId})).toMatchObject({
+				ok: true,
+				committed: true,
+				actionConsumed: false,
+				effectKey,
+			});
+			assertEffect(state);
+		});
+
+		test("refreshes the same source-owned timed effect instead of stacking it", () => {
+			const state = makeState({level: 3});
+			const firstItemId = createVial(state, "swiftness", {batchId: "first"});
+			const secondItemId = createVial(state, "swiftness", {batchId: "second"});
+
+			const first = state.consumeEfaExperimentalElixir({itemId: firstItemId});
+			const firstStateId = first.result.stateId;
+			const liveState = state._data.activeStates.find(activeState => activeState.id === firstStateId);
+			liveState.roundsRemaining = 7;
+			const second = state.consumeEfaExperimentalElixir({itemId: secondItemId});
+
+			expect(second.result.stateId).toBe(firstStateId);
+			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([
+				expect.objectContaining({
+					stateId: firstStateId,
+					effectKey: "swiftness",
+					roundsRemaining: 600,
+					sourceContext: expect.objectContaining({itemId: secondItemId}),
+				}),
+			]);
+			expect(state.getSpeedBonusFromStates("walk")).toBe(10);
+		});
+
+		test("does not latch a Bonus Action outside combat", () => {
+			const state = makeState();
+			const itemId = createVial(state, "resilience");
+
+			expect(state.consumeEfaExperimentalElixir({itemId})).toMatchObject({
+				ok: true,
+				committed: true,
+				actionConsumed: false,
+			});
+			expect(state.isActionTypeAvailable("bonus")).toBe(true);
+		});
+
+		test("cancellation, unsupported target, stale metadata, wrong provenance, and unavailable Bonus Action mutate nothing", () => {
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				const before = copy(state.toJson());
+				expect(state.consumeEfaExperimentalElixir({itemId, cancelled: true})).toEqual({
+					ok: false,
+					committed: false,
+					code: "efa-experimental-elixir-consumption-cancelled",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "flight");
+				const before = copy(state.toJson());
+				expect(state.consumeEfaExperimentalElixir({itemId, target: "other"})).toEqual({
+					ok: false,
+					committed: false,
+					code: "unsupported-efa-experimental-elixir-target",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "resilience");
+				const row = state.getInventory().find(item => item.id === itemId);
+				row.item._generatedItemProvenance.metadata.metadataSchemaVersion = 999;
+				const before = copy(state.toJson());
+				expect(state.consumeEfaExperimentalElixir({itemId})).toMatchObject({
+					ok: false,
+					committed: false,
+					code: "stale-efa-experimental-elixir",
+					reason: "unsupported-efa-experimental-elixir-metadata-version",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "boldness");
+				const row = state.getInventory().find(item => item.id === itemId);
+				const owner = row.item._generatedItemProvenance.owner;
+				owner.featureUid = owner.featureUid.split("|").slice(0, 6).join("|");
+				delete owner.featureSource;
+				const before = copy(state.toJson());
+				expect(state.consumeEfaExperimentalElixir({itemId})).toMatchObject({
+					ok: false,
+					committed: false,
+					code: "stale-efa-experimental-elixir",
+					reason: "legacy-subclass-feature-uid",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+			{
+				const state = makeState();
+				const wrongOwner = {
+					featureUid: "Experimental Elixir|Artificer|EFA|Alchemist|TCE|3|TCE",
+					featureSource: "TCE",
+					classUid: "Artificer|EFA",
+					subclassUid: "Alchemist|Artificer|EFA|TCE",
+				};
+				const wrong = state.createGeneratedFeatureItem({
+					item: {name: "Experimental Elixir (Healing)", source: "TCE", type: "P"},
+					owner: wrongOwner,
+					metadata: {metadataSchemaVersion: 1},
+				});
+				const before = copy(state.toJson());
+				expect(state.consumeEfaExperimentalElixir({itemId: wrong.itemId})).toMatchObject({
+					ok: false,
+					committed: false,
+					code: "invalid-efa-experimental-elixir-item",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+			{
+				const state = makeState();
+				const itemId = createVial(state, "swiftness");
+				state.startCombat();
+				state.consumeActionType("bonus");
+				const before = copy(state.toJson());
+				expect(state.consumeEfaExperimentalElixir({itemId})).toEqual({
+					ok: false,
+					committed: false,
+					code: "efa-experimental-elixir-bonus-action-unavailable",
+				});
+				expect(state.toJson()).toEqual(before);
+			}
+		});
+
+		test("rolls back item, action, and applied effect if the final item-consumption boundary fails", () => {
+			const state = makeState();
+			const itemId = createVial(state, "resilience");
+			state.startCombat();
+			const before = copy(state.toJson());
+			jest.spyOn(state, "removeItem").mockReturnValue(false);
+
+			expect(state.consumeEfaExperimentalElixir({itemId})).toMatchObject({
+				ok: false,
+				committed: false,
+				code: "efa-experimental-elixir-consumption-failed",
+				error: "efa-experimental-elixir-item-consumption-failed",
+			});
+			expect(state.toJson()).toEqual(before);
+			expect(state.isActionTypeAvailable("bonus")).toBe(true);
+			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([]);
+			expect(state.getItems().some(item => item.id === itemId)).toBe(true);
+		});
+
+		test("round-trips active effect ownership and reconciles idempotently", () => {
+			const state = makeState({level: 9});
+			const itemId = createVial(state, "flight", {batchId: "round-trip-effect"});
+			const consumed = state.consumeEfaExperimentalElixir({itemId});
+			const before = copy(state.toJson());
+			const restored = new CharacterSheetState();
+
+			expect(restored.loadFromJson(copy(before))).not.toBe(false);
+			expect(restored.getSpeedByType("fly")).toBe(20);
+			expect(restored.getEfaExperimentalElixirActiveEffects()).toEqual([
+				expect.objectContaining({
+					stateId: consumed.result.stateId,
+					effectKey: "flight",
+					roundsRemaining: 100,
+					sourceContext: expect.objectContaining({
+						itemId,
+						owner: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER,
+						metadata: expect.objectContaining({
+							batchId: "round-trip-effect",
+							creationArtificerLevel: 9,
+							value: {kind: "flySpeedFeet", amount: 20},
+						}),
+					}),
+				}),
+			]);
+			const first = restored.reconcileEfaExperimentalElixirs({cause: "active-effect-1"});
+			const afterFirst = copy(restored.toJson());
+			const second = restored.reconcileEfaExperimentalElixirs({cause: "active-effect-2"});
+			expect(first).toMatchObject({
+				activeEffectStateIds: [consumed.result.stateId],
+				staleEffectStateIds: [],
+				removedEffectStateIds: [],
+			});
+			expect(second).toMatchObject({
+				activeEffectStateIds: [consumed.result.stateId],
+				staleEffectStateIds: [],
+				removedEffectStateIds: [],
+			});
+			expect(restored.toJson()).toEqual(afterFirst);
+		});
+
+		test("cleans exact EFA effects on source loss without touching unrelated custom states", () => {
+			const state = makeState();
+			const itemId = createVial(state, "flight");
+			const consumed = state.consumeEfaExperimentalElixir({itemId});
+			const unrelatedId = state.addActiveState("custom", {
+				name: "Custom Flight",
+				sourceFeatureId: "custom-flight",
+				customEffects: [{type: "flySpeed", value: 60}],
+				duration: {amount: 10, unit: "minute"},
+			});
+
+			state.setSubclass("Artificer", getSubclass("TCE"));
+
+			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([]);
+			expect(state.getActiveState(consumed.result.stateId)).toBeNull();
+			expect(state.getActiveState(unrelatedId)).toMatchObject({active: true, name: "Custom Flight"});
+			expect(state.getSpeedByType("fly")).toBe(60);
+		});
+
+		test("preserves deterministic remaining duration across combat and expires through the normal round lifecycle", () => {
+			const state = makeState();
+			const itemId = createVial(state, "boldness");
+			state.startCombat();
+			const consumed = state.consumeEfaExperimentalElixir({itemId});
+			expect(consumed.result.roundsRemaining).toBe(10);
+
+			state.endCombat();
+			expect(state.getActiveState(consumed.result.stateId).roundsRemaining).toBe(10);
+			state.startCombat();
+			for (let i = 0; i < 9; i++) state.advanceRound();
+			expect(state.getActiveState(consumed.result.stateId)).toMatchObject({active: true, roundsRemaining: 1});
+			state.advanceRound();
+			expect(state.getActiveState(consumed.result.stateId)).toMatchObject({active: false, roundsRemaining: 0});
+			expect(state.getRollBonusDiceFromStates("save:dex")).toEqual([]);
+		});
+
+		test("ends one-hour effects on a Short Rest while eight-hour Resilience lasts until a Long Rest", () => {
+			const state = makeState({level: 15});
+			state.consumeEfaExperimentalElixir({itemId: createVial(state, "swiftness", {batchId: "rest-swift"})});
+			state.consumeEfaExperimentalElixir({itemId: createVial(state, "resilience", {batchId: "rest-resilience"})});
+			expect(state.getEfaExperimentalElixirActiveEffects().map(effect => effect.effectKey).sort())
+				.toEqual(["resilience", "swiftness"]);
+
+			state.onShortRest();
+			expect(state.getEfaExperimentalElixirActiveEffects().map(effect => effect.effectKey))
+				.toEqual(["resilience"]);
+			expect(state.getAc()).toBe(11);
+
+			state.onLongRest();
+			expect(state.getEfaExperimentalElixirActiveEffects()).toEqual([]);
+			expect(state.getAc()).toBe(10);
 		});
 	});
 

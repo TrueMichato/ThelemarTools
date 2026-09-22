@@ -1705,12 +1705,24 @@ Each state type defines:
     active: true,
     customEffects: null,          // Overrides stateType.effects if set
     roundsRemaining: 10,          // Decremented each round
+    sourceContext: null,           // Optional exact owner/provenance snapshot
+    durationTracking: null,        // Optional deterministic expiry policy
     grantsConditions: ["frightened"], // Conditions this state grants to targets
     isCondition: false,           // true = this state IS a condition
     isSpellEffect: false,         // true = from a spell (concentration-breakable)
     concentration: false,
 }
 ```
+
+Source-owned consumable effects can persist an exact `sourceContext` and a
+`durationTracking` object alongside the ordinary active-state fields. The EFA
+Experimental Elixir contract stores the consumed generated-item identity,
+exact seven-part EFA feature owner, immutable creation metadata, resolved total
+rounds, Short/Long Rest expiry flags, and whether remaining rounds survive a
+combat boundary. Reconciliation must fail closed and remove malformed or
+source-lost effects; valid inactive effects can remain as ordinary historical
+state rows. Rest cleanup reads the serialized duration policy, while normal
+round advancement remains the sole round-expiry mechanism.
 
 ### Mutual Exclusivity
 
