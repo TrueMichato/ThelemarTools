@@ -80,8 +80,9 @@ Drives the level-up wizard for L2+ (and multiclass entries).
 - `addKnownSpell(name)` / `addFirstAvailableKnownSpells(count)`.
 - `selectOptionalFeature(name)` / `selectFirstAvailableOptions()`.
 - **`autoFillAllSelections()` — the critical one.**  Optimised
-  state-stable polling sweep (per Phase 3): ASI stepper, counters, spell
-  picks, optional features.  Use after the spec sets explicit picks.
+  state-stable polling sweep (per Phase 3): required Replicate Magic
+  Item plans, ASI stepper, counters, spell picks, optional features.
+  Use after the spec sets explicit picks.
 - `resolvePendingFeatureChoices()` — drains stacked production feature-choice
   modals, including multi-tool picks. If the renderer owns the choice lock but
   no modal becomes observable, it uses the production fulfillment API as the

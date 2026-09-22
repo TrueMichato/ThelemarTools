@@ -188,6 +188,46 @@ class CharacterSheetClassUtils {
 		return parts.map(value => String(value ?? "").trim()).join("|");
 	}
 
+	/**
+	 * Parse feature-derived crafting-time modifiers without coupling the
+	 * crafting flow to a feature name.
+	 *
+	 * @param {*} feature
+	 * @returns {Array<{id: string, owner: {kind: string, name: string, source: string, uid: string}, multiplier: number, filter: {resultCategories: string[]}}>}
+	 */
+	static getCraftingTimeModifiers (feature) {
+		const text = this._getEntryStrings(feature?.entries).join(" ");
+		const out = [];
+		for (const match of text.matchAll(/when you (?:scribe|craft) (?:a|an) \{@item ([^|}]+)(?:\|([^}]+))?\}[\s\S]*?amount of time required to craft it is (halved|doubled)/gi)) {
+			const resultCategory = match[1].trim().toLowerCase() === "spell scroll"
+				? "spell-scroll"
+				: null;
+			if (!resultCategory) continue;
+
+			const ownerUid = this.getSourceAwareFeatureOwnerUid(feature);
+			if (!ownerUid || !feature?.source) continue;
+
+			const multiplier = match[3].toLowerCase() === "halved" ? 0.5 : 2;
+			out.push({
+				id: [
+					"feature-crafting-time",
+					ownerUid,
+					resultCategory,
+					multiplier,
+				].join("|").toLowerCase().replace(/[^a-z0-9|]+/g, "-"),
+				owner: {
+					kind: feature?.subclassShortName ? "subclassFeature" : feature?.className ? "classFeature" : "feature",
+					name: feature.name,
+					source: feature.source,
+					uid: ownerUid,
+				},
+				multiplier,
+				filter: {resultCategories: [resultCategory]},
+			});
+		}
+		return out;
+	}
+
 	static getRuntimeFeature (feature, state) {
 		return state?.getFeatures?.().find(it => this._isSameFeatureIdentity(feature, it)) || null;
 	}

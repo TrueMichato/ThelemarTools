@@ -443,13 +443,15 @@ contains `baselineWorkweeks`, `effectiveWorkweeks`, `multiplier`, and `sourceBre
 single value both crafting preview and outcome render.
 
 The calculation resolves its baseline in strict order: explicit caller `baseWorkweeks`, the
-existing value-derived formula when `recipe.value` is present, then the XDMG p. 221 **Magic Item
-Crafting Time and Cost** rarity table for value-less `item`/`potion` recipes. That table is
+existing value-derived formula when `recipe.value` is present, the XPHB p. 233 **Spell Scroll
+Costs** table for `SC` outputs with a structured `spellScrollLevel`, then the XDMG p. 221 **Magic
+Item Crafting Time and Cost** rarity table for value-less `item`/`potion` recipes. The scroll table
+uses 1/1/3/5/10/25/40/50/60/120 days for levels 0-9. The XDMG table is
 Common/Uncommon/Rare/Very Rare/Legendary = 1/2/10/25/50 workweeks; its non-scroll consumable
 footnote halves those values for the `potion` recipe category and one-use `A`/`AF`/`Oil`/`P` item
-types. `SC` Spell Scrolls, unsupported recipe categories, and unrecognized rarities return
-`{isSupported: false, reason}` so UI/tooling must surface the reason rather than hide the missing
-duration.
+types. `SC` outputs without a structured spell level, unsupported recipe categories, and
+unrecognized rarities return `{isSupported: false, reason}` so UI/tooling must surface the reason
+rather than hide the missing duration.
 
 The EFA Armorer's Tools of the Trade descriptor is source-gated to Artificer `EFA` + Armorer `EFA`
 at level 3 and filters on `LA`/`MA`/`HA`. `S` shields are deliberately separate. The EFA
@@ -462,6 +464,12 @@ Battle Smith `EFA` at level 3, is owned by
 `Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA`, and filters on `M`/`R`.
 `A`/`AF` ammunition remains on the XDMG non-scroll consumable baseline and does not receive the
 weapon-crafting multiplier.
+
+Feature prose of the form “When you scribe/craft a {@item Spell Scroll ...}, the amount of time
+required to craft it is halved/doubled” is parsed into a `spell-scroll` result-category descriptor.
+The EFA Cartographer's Tools of the Trade therefore halves the structured XPHB scroll baseline and
+publishes the exact owner `Tools of the Trade|Artificer|EFA|Cartographer|EFA|3|EFA`; removal or
+respec removes the descriptor immediately.
 
 ### Reading a subclass's progression table (do NOT hardcode)
 

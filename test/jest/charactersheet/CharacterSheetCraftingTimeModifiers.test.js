@@ -10,6 +10,14 @@ const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCrafting = globalThis.CharacterSheetCrafting;
 const CRAFTING_DATA = JSON.parse(fs.readFileSync("data/crafting.json", "utf8"));
 const CRAFTING_RECIPES = CRAFTING_DATA.craftingRecipe;
+const ARTIFICER_DATA = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
+const CARTOGRAPHER_TOOLS = ARTIFICER_DATA.subclassFeature.find(feature =>
+	feature.name === "Tools of the Trade"
+	&& feature.className === "Artificer"
+	&& feature.classSource === "EFA"
+	&& feature.subclassShortName === "Cartographer"
+	&& feature.subclassSource === "EFA",
+);
 
 if (!String.prototype.qq) {
 	Object.defineProperty(String.prototype, "qq", {
@@ -49,6 +57,15 @@ const REAL_UNCOMMON_POTION_RECIPE = CRAFTING_RECIPES.find(recipe =>
 );
 const REAL_DISH_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.recipeCategory === "dish");
 const REAL_MATERIAL = CRAFTING_DATA.craftingMaterial[0];
+const SPELL_SCROLL_RECIPE = {
+	name: "Spell Scroll (Level 1)",
+	source: "XDMG",
+	recipeCategory: "scroll",
+	itemUid: "spell scroll (level 1)|xdmg",
+	itemType: "SC",
+	ingredients: [],
+	entries: [],
+};
 
 const addEfaArmorer = (state, {level = 3, classSource = "EFA", subclassSource = "EFA", subclassName = "Armorer"} = {}) => {
 	state.addClass({
@@ -110,6 +127,26 @@ const addEfaAlchemist = (state, {classSource = "EFA", subclassSource = "EFA", fe
 	return state.getFeatures().find(feature => feature.name === "Tools of the Trade");
 };
 
+const addEfaCartographer = (state) => {
+	state.addClass({
+		name: "Artificer",
+		source: "EFA",
+		level: 3,
+		subclass: {
+			name: "Cartographer",
+			shortName: "Cartographer",
+			source: "EFA",
+			className: "Artificer",
+			classSource: "EFA",
+		},
+	});
+	state.addFeature(structuredClone(CARTOGRAPHER_TOOLS));
+	return state.getFeatures().find(feature =>
+		feature.name === "Tools of the Trade"
+		&& feature.subclassShortName === "Cartographer",
+	);
+};
+
 const calculate = (state, {
 	recipe = ARMOR_RECIPE,
 	item = {name: recipe.name, source: recipe.source, type: recipe.itemType},
@@ -157,6 +194,78 @@ describe("Character Sheet crafting-time modifiers", () => {
 
 		expect(result.effectiveWorkweeks).toBe(2);
 		expect(result.sourceBreakdown[0].name).toBe("Tools of the Trade");
+	});
+
+	describe("EFA Cartographer Spell Scroll crafting", () => {
+		it.each([
+			[0, 0.2, 0.1],
+			[1, 0.2, 0.1],
+			[2, 0.6, 0.3],
+			[3, 1, 0.5],
+			[4, 2, 1],
+			[5, 5, 2.5],
+			[6, 8, 4],
+			[7, 10, 5],
+			[8, 12, 6],
+			[9, 24, 12],
+		])("uses the XPHB level-%i baseline and halves it", (level, baselineWorkweeks, effectiveWorkweeks) => {
+			const state = new CharacterSheetState();
+			addEfaCartographer(state);
+			const item = {
+				name: `Spell Scroll (Level ${level})`,
+				source: "XDMG",
+				type: "SC",
+				spellScrollLevel: level,
+			};
+
+			expect(state.getCraftingTimeCalculation({
+				recipe: {...SPELL_SCROLL_RECIPE, name: item.name, spellScrollLevel: level},
+				item,
+			})).toMatchObject({
+				isSupported: true,
+				baselineWorkweeks,
+				effectiveWorkweeks,
+				multiplier: 0.5,
+				baselineSource: {
+					type: "xphb-spell-scroll",
+					source: "XPHB",
+					page: 233,
+					spellLevel: level,
+				},
+				sourceBreakdown: [{
+					name: "Tools of the Trade",
+					source: "EFA",
+					uid: "Tools of the Trade|Artificer|EFA|Cartographer|EFA|3|EFA",
+					multiplier: 0.5,
+				}],
+			});
+		});
+
+		it("requires structured Spell Scroll identity and removes the modifier with its feature", () => {
+			const state = new CharacterSheetState();
+			const feature = addEfaCartographer(state);
+			const item = {...SPELL_SCROLL_RECIPE, type: "SC", spellScrollLevel: 1};
+
+			expect(state.getCraftingTimeCalculation({
+				recipe: SPELL_SCROLL_RECIPE,
+				item: {name: "Protection Scroll", source: "DMG", type: "SC"},
+			})).toMatchObject({
+				isSupported: false,
+				reason: expect.stringContaining("lacks a structured spell level"),
+			});
+
+			state.removeFeature(feature.id);
+			expect(state.getCraftingTimeCalculation({
+				recipe: {...SPELL_SCROLL_RECIPE, spellScrollLevel: 1},
+				item,
+			})).toMatchObject({
+				isSupported: true,
+				baselineWorkweeks: 0.2,
+				effectiveWorkweeks: 0.2,
+				multiplier: 1,
+				sourceBreakdown: [],
+			});
+		});
 	});
 
 	describe("EFA Battle Smith weapon crafting", () => {

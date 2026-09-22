@@ -1,6 +1,61 @@
 import {Locator, Page, expect} from "@playwright/test";
 import {fillSpellPickers} from "./spellPickerFill";
 
+async function fillRequiredArtificerPlans (page: Page): Promise<void> {
+	const openPicker = page.locator(".charsheet__levelup-wizard button", {hasText: "Choose or Replace Plans"}).first();
+	if (!await openPicker.isVisible().catch(() => false)) return;
+
+	await openPicker.click();
+	const picker = page.locator(".charsheet__artificer-plan-picker");
+	await expect(picker).toBeVisible({timeout: 5000});
+
+	const count = picker.locator(".charsheet__artificer-plan-count");
+	const getCounts = async (): Promise<{selected: number; required: number}> => {
+		const text = (await count.textContent())?.trim() || "";
+		const match = text.match(/^(\d+)\/(\d+)\s+required plans selected$/i);
+		if (!match) throw new Error(`Replicate Magic Item plan picker exposed an unreadable required-count label: "${text}".`);
+		return {selected: Number(match[1]), required: Number(match[2])};
+	};
+
+	for (let pass = 0; pass < 50; pass++) {
+		const before = await getCounts();
+		if (before.selected >= before.required) break;
+
+		const opportunity = picker.locator(".charsheet__artificer-plan-opportunity:not(.complete)", {hasText: "Choose a plan"}).first();
+		if (!await opportunity.isVisible().catch(() => false)) {
+			throw new Error(
+				`Replicate Magic Item plan picker still needs ${before.required - before.selected} required selection(s), `
+				+ "but exposes no incomplete required plan opportunity.",
+			);
+		}
+		await opportunity.click();
+
+		const candidate = picker.locator(".charsheet__artificer-plan-result:not(:disabled)").first();
+		if (!await candidate.isVisible().catch(() => false)) {
+			throw new Error(
+				`Replicate Magic Item plan picker still needs ${before.required - before.selected} required selection(s), `
+				+ "but exposes no eligible plan candidate.",
+			);
+		}
+		await candidate.click();
+		await expect.poll(async () => (await getCounts()).selected, {
+			message: "Replicate Magic Item plan selection did not update the required-count ledger.",
+			timeout: 3000,
+		}).toBeGreaterThan(before.selected);
+	}
+
+	const completed = await getCounts();
+	if (completed.selected < completed.required) {
+		throw new Error(
+			`Replicate Magic Item plan auto-fill stopped at ${completed.selected}/${completed.required} required selections.`,
+		);
+	}
+
+	const pickerModal = page.locator(".ve-ui-modal__inner:visible").filter({has: picker}).last();
+	await pickerModal.locator("button", {hasText: "Review & Commit Plans"}).click();
+	await expect(picker).not.toBeVisible({timeout: 5000});
+}
+
 /**
  * Page Object Model for the Level-Up wizard modal
  * Provides methods to complete level-up choices
@@ -385,6 +440,11 @@ export class LevelUpPage {
 			for (const acc of accordions) acc.classList.add("expanded");
 		});
 		await this.page.waitForTimeout(300);
+
+		// Replicate Magic Item progression is edited in a nested modal rather
+		// than inline controls, so the generic counter/radio passes below
+		// cannot satisfy its required opportunities.
+		await fillRequiredArtificerPlans(this.page);
 
 		// A subclass whose data defines a persisted named branch (Divine
 		// Soul Affinity, and anything else `hasNamedSubclassChoice`

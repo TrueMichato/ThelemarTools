@@ -4674,7 +4674,8 @@ export class CharacterSheetPage {
 					must(!state.getPendingFeatureChoices().some((it: any) =>
 						it.featureName === "Tools of the Trade" && it.kind === "tool"),
 					"tool replacement choice was unresolved in-session");
-					must((state._data?.fulfilledFeatureToolChoices || []).includes("tools of the trade"),
+					const featureUid = (globalThis as any).CharacterSheetState.getSourceAwareFeatureUid(feature);
+					must(state.hasFulfilledFeatureToolChoice({featureUid}),
 						"Tools of the Trade was not recorded as fulfilled");
 
 					const classUtils: any = (globalThis as any).CharacterSheetClassUtils;

@@ -34393,6 +34393,11 @@ class CharacterSheetState {
 			calculations.hasExtraAttack ? 2 : 1,
 		);
 
+		for (const feature of this._data.features || []) {
+			const descriptors = CharacterSheetClassUtils.getCraftingTimeModifiers?.(feature) || [];
+			if (descriptors.length) (calculations.craftingTimeModifiers ||= []).push(...descriptors);
+		}
+
 		// =====================================================
 		// AGGREGATE ALL EFFECTS FROM CALCULATIONS
 		// This allows features to declare their effects in a
@@ -57085,6 +57090,23 @@ class CharacterSheetState {
 			legendary: 250,
 		}),
 	});
+	static _CRAFTING_TIME_XPHB_SCROLL = Object.freeze({
+		name: "Spell Scroll Costs",
+		source: "XPHB",
+		page: 233,
+		daysByLevel: Object.freeze({
+			0: 1,
+			1: 1,
+			2: 3,
+			3: 5,
+			4: 10,
+			5: 25,
+			6: 40,
+			7: 50,
+			8: 60,
+			9: 120,
+		}),
+	});
 	// Project the Character Sheet's one-use taxonomy into the XDMG rule, excluding SC because
 	// Spell Scrolls use their separate XPHB scribing table.
 	static _CRAFTING_TIME_CONSUMABLE_ITEM_TYPES = Object.freeze(["A", "AF", "OIL", "P"]);
@@ -57101,6 +57123,10 @@ class CharacterSheetState {
 		if (explicit) return explicit;
 
 		const itemType = `${item?.type ?? recipe?.itemType ?? ""}`.split("|")[0].trim().toUpperCase();
+		const spellScrollLevel = Number(item?.spellScrollLevel ?? recipe?.spellScrollLevel);
+		if (itemType === "SC"
+			&& Number.isInteger(spellScrollLevel)
+			&& this._CRAFTING_TIME_XPHB_SCROLL.daysByLevel[spellScrollLevel] != null) return "spell-scroll";
 		if (item?.shield || itemType === "S") return "shield";
 		if (item?.armor || ["LA", "MA", "HA"].includes(itemType)) return "armor";
 		if (item?.weapon || ["A", "M", "R"].includes(itemType)) return "weapon";
@@ -57154,11 +57180,37 @@ class CharacterSheetState {
 
 		const recipeCategory = `${recipe?.recipeCategory ?? ""}`.trim().toLowerCase();
 		const itemType = `${item?.type ?? recipe?.itemType ?? ""}`.split("|")[0].trim().toUpperCase();
+		const spellScrollLevel = item?.spellScrollLevel ?? recipe?.spellScrollLevel;
+		if (spellScrollLevel != null) {
+			const level = Number(spellScrollLevel);
+			const days = Number.isInteger(level)
+				? this._CRAFTING_TIME_XPHB_SCROLL.daysByLevel[level]
+				: null;
+			if (itemType !== "SC" || days == null) {
+				return {
+					isSupported: false,
+					reason: "Crafting time is unavailable because the Spell Scroll output has an invalid structured spell level.",
+				};
+			}
+			return {
+				isSupported: true,
+				baseWorkweeks: days / 5,
+				source: {
+					type: "xphb-spell-scroll",
+					name: this._CRAFTING_TIME_XPHB_SCROLL.name,
+					source: this._CRAFTING_TIME_XPHB_SCROLL.source,
+					page: this._CRAFTING_TIME_XPHB_SCROLL.page,
+					spellLevel: level,
+					days,
+				},
+			};
+		}
+
 		const isScroll = recipeCategory === "scroll" || itemType === "SC";
 		if (isScroll) {
 			return {
 				isSupported: false,
-				reason: "Crafting time is unavailable because Spell Scrolls use the separate XPHB scribing table.",
+				reason: "Crafting time is unavailable because Spell Scrolls use the separate XPHB scribing table, and this output lacks a structured spell level.",
 			};
 		}
 
