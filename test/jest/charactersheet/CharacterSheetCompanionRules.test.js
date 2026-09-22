@@ -51,7 +51,7 @@ describe("CharacterSheetCompanionRules", () => {
 				passivePerception: 10,
 			});
 			expect(resolved.actions.forceEmpoweredRend).toMatchObject({
-				attackType: "melee",
+				attackType: "meleeWeaponAttack",
 				attackBonus: context.spellAttackBonus,
 				damage: {dice: "1d8", flat: expected.rendFlat, type: "force"},
 			});
