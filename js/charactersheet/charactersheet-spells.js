@@ -2408,6 +2408,9 @@ class CharacterSheetSpells {
 			spell,
 			spellData,
 			focusReference: focusSelection.focusReference,
+			focusRequirement: focusSelection.requirement
+				? MiscUtil.copyFast(focusSelection.requirement)
+				: null,
 			cast: {
 				type: "item",
 				slotLevel,
@@ -2429,6 +2432,7 @@ class CharacterSheetSpells {
 			spell: pendingSpellCast.spell,
 			spellData: pendingSpellCast.spellData,
 			focusInventoryRow,
+			focusRequirement: pendingSpellCast.focusRequirement,
 			cast: pendingSpellCast.cast,
 		});
 	}
@@ -2644,6 +2648,7 @@ class CharacterSheetSpells {
 				spell,
 				spellData,
 				focusInventoryRow: focusSelection.focusInventoryRow,
+				focusRequirement: focusSelection.requirement,
 				cast: {
 					type: "cantrip",
 					slotLevel: 0,
@@ -2741,6 +2746,7 @@ class CharacterSheetSpells {
 					spell,
 					spellData,
 					focusInventoryRow: focusSelection.focusInventoryRow,
+					focusRequirement: focusSelection.requirement,
 					cast: {
 						type: "ritual",
 						slotLevel: spell.level,
@@ -3074,6 +3080,7 @@ class CharacterSheetSpells {
 				spell,
 				spellData,
 				focusInventoryRow: focusSelection.focusInventoryRow,
+				focusRequirement: focusSelection.requirement,
 				cast: {
 					type: selectedSlot.isNoSlotResource
 						? "noSlotResource"
@@ -8611,6 +8618,7 @@ class CharacterSheetSpells {
 				spell,
 				spellData,
 				focusInventoryRow: focusSelection.focusInventoryRow,
+				focusRequirement: focusSelection.requirement,
 				cast: {
 					type: "innate",
 					slotLevel: spell.level || 0,
@@ -8633,6 +8641,7 @@ class CharacterSheetSpells {
 			spell,
 			spellData,
 			focusInventoryRow: focusSelection.focusInventoryRow,
+			focusRequirement: focusSelection.requirement,
 			cast: {
 				type: "innate",
 				slotLevel: spell.level || 0,

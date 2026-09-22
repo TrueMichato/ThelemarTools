@@ -262,6 +262,7 @@ source-qualified focus requirement:
 spellcastingFocusRequirement: {
     required: true,
     ruleId: "feature-focus-rule",
+    sourceFeatureUid: "Feature Name|Class Name|Class Source|Level|Feature Source",
     filter: {
         itemUids: ["Alchemist's Supplies|XPHB"],
         requiresProficiency: true,
@@ -274,10 +275,43 @@ spellcastingFocusRequirement: {
 }
 ```
 
+`getSpellCastFocusRequirement(spell, castMeta)` is the public normalization API.
+It returns a serializable descriptor with exact `ruleId`, `sourceFeatureUid`,
+`classUid`, `castingClass`, `addsMaterialComponent`, normalized `filter`, and
+`ui`. `sourceFeatureUid` is optional only for backward compatibility; if a
+caller supplies it, it must be source-qualified (contain `|`) or the focus gate
+has no eligible rows. New rules must always supply the exact owner UID.
+
+The normalized filter supports these OR-composed selectors:
+
+```javascript
+filter: {
+    inventoryItemIds: ["stable-live-wrapper-id"],
+    itemUids: ["Alchemist's Supplies|XPHB"],
+    itemNames: ["Alchemist's Supplies"],
+    itemTypes: ["AT"],
+    weapon: {
+        category: "any",
+        requiresProficiency: true,
+    },
+    requiresProficiency: true,
+}
+```
+
+Every candidate is resolved from the live inventory and must still be equipped
+with positive quantity. `inventoryItemIds` is for an explicitly authorized
+stable wrapper (for example, a feature-owned item); it is not a snapshot of all
+currently eligible inventory. `weapon.category: "any"` accepts only a real
+weapon which passes the canonical `_isWeaponProficient(item)` resolver.
+Top-level `requiresProficiency` retains its existing tool-proficiency meaning
+for the exact ID/UID/name/type selectors; it is never used to decide weapon
+proficiency.
+
 The override is evaluated before the material-component waiver, so a feature
 can waive ordinary Material components while still requiring its named focus.
-The inventory filter matches exact `name|source` UIDs; the wrapper must be
-equipped and have positive quantity. `requiresProficiency` defaults to false.
+The ordinary EFA rule is owned by
+`Spellcasting|Artificer|EFA|1|EFA` and continues to accept equipped,
+proficient Thieves' Tools, Tinker's Tools, and Artisan's Tools.
 
 Callers select from the live wrappers returned by
 `getEligibleSpellCastFocusInventoryRows(requirement)` before any slot,
@@ -307,24 +341,45 @@ const receipt = await state.pPublishCommittedSpellCast({
     spell,
     spellData,
     focusInventoryRow,
+    focusRequirement,
     cast: {type, slotLevel, resourceId, itemInventoryId, itemUid},
 });
 ```
 
-The serializable receipt contains `receiptVersion`, `receiptId`, `ok`,
-`committed`, `castingClassUid`, `castingSubclassUid`, `spellEntryId`,
-`spellUid`, `spell`, `castType`, `slotLevel`, `cast`,
-`focusInventoryItemId`, `focusItemUid`, `focus`, `followUps`, and
-`followUpFailed`. It never stores a DOM node or live data object. A saved
-receipt can re-resolve its live focus after export/import with
+The pre-cost selection result's normalized `focusRequirement` must be passed
+unchanged to `pPublishCommittedSpellCast`. Publication normalizes it again and
+revalidates the selected live wrapper after all core costs commit.
+
+The serializable receipt remains `receiptVersion: 1` and additively exposes
+the exact rule owner at all stable consumer surfaces:
+
+```javascript
+{
+    ruleId,
+    sourceFeatureUid,
+    focusRule: {ruleId, sourceFeatureUid} | null,
+    cast: {
+        // existing cast fields...
+        ruleId,
+        sourceFeatureUid,
+    },
+}
+```
+
+The full receipt also contains `receiptId`, `ok`, `committed`,
+`castingClassUid`, `castingSubclassUid`, `spellEntryId`, `spellUid`, `spell`,
+`castType`, `slotLevel`, `focusInventoryItemId`, `focusItemUid`, `focus`,
+`followUps`, and `followUpFailed`. It never stores a DOM node or live data
+object. A saved receipt can re-resolve its live focus after export/import with
 `resolveCommittedSpellCastReceiptFocus(receipt)`, which verifies both wrapper
 id and item UID.
 
 Hooks are runtime-only and keyed by exact class UID (or `"*"`). A cancelled,
 blocked, refunded, or source-ambiguous cast publishes no receipt. A committed,
 exactly attributed EFA cast with waived components publishes a receipt with
-null focus identity unless an explicit focus override selected a legal live
-wrapper. Hook errors are captured in `followUps`; they leave
+null focus identity and null focus-rule ownership unless an explicit focus
+override selected a legal live wrapper. Hook errors are captured in
+`followUps`; they leave
 `ok: true, committed: true`, set `followUpFailed: true`, and never roll back the
 valid cast.
 ## Active States / Toggle Abilities

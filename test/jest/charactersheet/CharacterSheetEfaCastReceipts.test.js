@@ -37,6 +37,25 @@ const WAIVED_MATERIAL_SPELL = {
 		},
 	},
 };
+const WEAPON_FOCUS_RULE_ID = "test-proficient-weapon-focus";
+const WEAPON_FOCUS_SOURCE_FEATURE_UID = "Weapon Focus Contract|Artificer|EFA|3|EFA";
+
+function getWeaponFocusRequirement ({
+	sourceFeatureUid = WEAPON_FOCUS_SOURCE_FEATURE_UID,
+	filter = null,
+} = {}) {
+	return {
+		required: true,
+		ruleId: WEAPON_FOCUS_RULE_ID,
+		sourceFeatureUid,
+		filter: filter || {
+			weapon: {
+				category: "any",
+				requiresProficiency: true,
+			},
+		},
+	};
+}
 
 function makeState ({source = "EFA", subclass = null} = {}) {
 	const state = new CharacterSheetState();
@@ -63,6 +82,32 @@ function addTool (state, {
 	});
 	state.setItemEquipped(id, equipped);
 	if (proficient) state.addToolProficiency(name);
+	return state.getInventory().find(row => row.id === id);
+}
+
+function addWeapon (state, {
+	id,
+	name = "Longsword",
+	source = "XPHB",
+	type = "M",
+	weapon = true,
+	weaponCategory = "martial",
+	quantity = 1,
+	equipped = true,
+	proficient = true,
+} = {}) {
+	state.addItem({
+		id,
+		name,
+		source,
+		type,
+		weapon,
+		weaponCategory,
+		quantity,
+		equipped,
+		_isCustom: true,
+	});
+	if (proficient) state.addWeaponProficiency(name);
 	return state.getInventory().find(row => row.id === id);
 }
 
@@ -131,7 +176,11 @@ describe("EFA source-aware casting ownership", () => {
 		})).toEqual(expect.objectContaining({uid: "Artificer|EFA"}));
 		expect(state.getSpellCastFocusRequirement({
 			sourceClass: {name: "Artificer", source: "EFA"},
-		})).toEqual(expect.objectContaining({classUid: "Artificer|EFA"}));
+		})).toEqual(expect.objectContaining({
+			classUid: "Artificer|EFA",
+			ruleId: "efa-artificer-tools-required",
+			sourceFeatureUid: "Spellcasting|Artificer|EFA|1|EFA",
+		}));
 
 		expect(tceState.resolveSpellCastingClassIdentity({
 			sourceClass: "Artificer",
@@ -170,6 +219,158 @@ describe("EFA source-aware casting ownership", () => {
 			subclassUid: "Reanimator|RHW",
 		}));
 		expect(state.getSpellCastFocusRequirement(grant)).not.toBeNull();
+	});
+});
+
+describe("Structured spell-focus filters", () => {
+	it("commits a waived-material cast through a live proficient weapon with exact rule ownership", async () => {
+		const state = makeState();
+		const weapon = addWeapon(state, {id: "weapon-focus"});
+		state.addItem({id: "feature-source", name: "Weapon Focus Feature", source: "EFA", _isCustom: true});
+		const spells = makeSpellsManager(state, [WAIVED_MATERIAL_SPELL]);
+		const consumer = jest.fn();
+		state.registerCommittedSpellCastHook("Artificer|EFA", consumer, {hookId: "weapon-focus-consumer"});
+
+		const receipt = await spells.pCastItemSpell({
+			id: "weapon-focus-cast",
+			itemId: "feature-source",
+			itemName: "Weapon Focus Feature",
+			spellName: WAIVED_MATERIAL_SPELL.name,
+			spellSource: "XPHB",
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+			ignoresMaterialComponents: true,
+			spellcastingFocusRequirement: getWeaponFocusRequirement(),
+		}, {decision: {focusInventoryItemId: weapon.id}});
+
+		expect(receipt).toEqual(expect.objectContaining({
+			ok: true,
+			committed: true,
+			castingClassUid: "Artificer|EFA",
+			ruleId: WEAPON_FOCUS_RULE_ID,
+			sourceFeatureUid: WEAPON_FOCUS_SOURCE_FEATURE_UID,
+			focusRule: {
+				ruleId: WEAPON_FOCUS_RULE_ID,
+				sourceFeatureUid: WEAPON_FOCUS_SOURCE_FEATURE_UID,
+			},
+			focusInventoryItemId: "weapon-focus",
+			focusItemUid: "Longsword|XPHB",
+			cast: expect.objectContaining({
+				ruleId: WEAPON_FOCUS_RULE_ID,
+				sourceFeatureUid: WEAPON_FOCUS_SOURCE_FEATURE_UID,
+			}),
+		}));
+		expect(spells._showCastResult).toHaveBeenCalledWith(
+			expect.any(Object),
+			1,
+			false,
+			false,
+			expect.objectContaining({
+				ignoresMaterialComponents: true,
+				spellcastingFocus: expect.objectContaining({inventoryItemId: "weapon-focus"}),
+			}),
+		);
+		expect(consumer).toHaveBeenCalledWith(receipt);
+	});
+
+	it.each([
+		["unproficient weapon", {proficient: false}],
+		["unequipped weapon", {equipped: false}],
+		["zero-quantity weapon", {quantity: 0}],
+		["non-weapon item", {type: "G", weapon: false, weaponCategory: null}],
+	])("rejects a %s before the cast transaction", async (_label, weaponOverrides) => {
+		const state = makeState();
+		const candidate = addWeapon(state, {
+			id: "invalid-focus",
+			...weaponOverrides,
+		});
+		const spells = makeSpellsManager(state, [WAIVED_MATERIAL_SPELL]);
+		const consumer = jest.fn();
+		state.registerCommittedSpellCastHook("Artificer|EFA", consumer);
+
+		const result = await spells.pCastItemSpell({
+			id: "invalid-weapon-focus",
+			itemId: "feature-source",
+			itemName: "Weapon Focus Feature",
+			spellName: WAIVED_MATERIAL_SPELL.name,
+			spellSource: "XPHB",
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+			ignoresMaterialComponents: true,
+			spellcastingFocusRequirement: getWeaponFocusRequirement(),
+		}, {decision: {focusInventoryItemId: candidate?.id || "invalid-focus"}});
+
+		expect(result).toBe(false);
+		expect(spells._showCastResult).not.toHaveBeenCalled();
+		expect(consumer).not.toHaveBeenCalled();
+	});
+
+	it("preserves exact authorized wrapper IDs through commit without applying weapon or tool proficiency semantics", async () => {
+		const state = makeState();
+		state.addItem({
+			id: "authorized-wrapper",
+			name: "Arcane Armor",
+			source: "EFA",
+			type: "HA",
+			quantity: 1,
+			equipped: true,
+			_isCustom: true,
+		});
+		const spells = makeSpellsManager(state, [WAIVED_MATERIAL_SPELL]);
+
+		const staged = await spells.pCastItemSpell({
+			id: "authorized-wrapper-focus",
+			itemId: "feature-source",
+			itemName: "Authorized Wrapper Feature",
+			spellName: WAIVED_MATERIAL_SPELL.name,
+			spellSource: "XPHB",
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+			ignoresMaterialComponents: true,
+			spellcastingFocusRequirement: getWeaponFocusRequirement({
+				filter: {inventoryItemIds: ["authorized-wrapper"]},
+			}),
+		}, {
+			deferCommit: true,
+			decision: {focusInventoryItemId: "authorized-wrapper"},
+		});
+		delete staged.pendingSpellCast.spell.spellcastingFocusRequirement;
+		const receipt = await spells.pCommitPendingSpellCast(staged.pendingSpellCast);
+
+		expect(receipt).toEqual(expect.objectContaining({
+			committed: true,
+			ruleId: WEAPON_FOCUS_RULE_ID,
+			sourceFeatureUid: WEAPON_FOCUS_SOURCE_FEATURE_UID,
+			focusInventoryItemId: "authorized-wrapper",
+			focusItemUid: "Arcane Armor|EFA",
+			focusRule: {
+				ruleId: WEAPON_FOCUS_RULE_ID,
+				sourceFeatureUid: WEAPON_FOCUS_SOURCE_FEATURE_UID,
+			},
+		}));
+	});
+
+	it("rejects a name-only source feature owner instead of publishing ambiguous attribution", async () => {
+		const state = makeState();
+		addWeapon(state, {id: "weapon-focus"});
+		const spells = makeSpellsManager(state, [WAIVED_MATERIAL_SPELL]);
+
+		const result = await spells.pCastItemSpell({
+			id: "source-unsafe-focus",
+			itemId: "feature-source",
+			itemName: "Weapon Focus Feature",
+			spellName: WAIVED_MATERIAL_SPELL.name,
+			spellSource: "XPHB",
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+			ignoresMaterialComponents: true,
+			spellcastingFocusRequirement: getWeaponFocusRequirement({
+				sourceFeatureUid: "Weapon Focus Contract",
+			}),
+		}, {decision: {focusInventoryItemId: "weapon-focus"}});
+
+		expect(result).toBe(false);
+		expect(spells._showCastResult).not.toHaveBeenCalled();
 	});
 });
 
@@ -246,6 +447,8 @@ describe("EFA committed cast receipts", () => {
 		expect(receipt).toEqual(expect.objectContaining({
 			committed: true,
 			castingClassUid: "Artificer|EFA",
+			ruleId: "efa-artificer-tools-required",
+			sourceFeatureUid: "Spellcasting|Artificer|EFA|1|EFA",
 			spellEntryId: spell.id,
 			spellUid: "Mending|XPHB",
 			castType: "cantrip",
@@ -364,6 +567,9 @@ describe("EFA committed cast receipts", () => {
 			committed: true,
 			castingClassUid: "Artificer|EFA",
 			castType: "item",
+			ruleId: null,
+			sourceFeatureUid: null,
+			focusRule: null,
 			focusInventoryItemId: null,
 			focusItemUid: null,
 			focus: null,
@@ -554,6 +760,7 @@ describe("EFA committed cast receipts", () => {
 			spell,
 			spellData: CURE_WOUNDS,
 			focusInventoryRow: tool,
+			focusRequirement: state.getSpellCastFocusRequirement(spell),
 			cast: {type: "slot", slotLevel: 1, focusInventoryItemId: "stable-tool"},
 		});
 		const serializedReceipt = JSON.parse(JSON.stringify(receipt));
@@ -567,6 +774,10 @@ describe("EFA committed cast receipts", () => {
 		expect(loaded.resolveCommittedSpellCastReceiptFocus(serializedReceipt)).toEqual(expect.objectContaining({
 			id: "stable-tool",
 			item: expect.objectContaining({name: "Tinker's Tools", source: "PHB"}),
+		}));
+		expect(serializedReceipt).toEqual(expect.objectContaining({
+			ruleId: "efa-artificer-tools-required",
+			sourceFeatureUid: "Spellcasting|Artificer|EFA|1|EFA",
 		}));
 	});
 
@@ -583,12 +794,15 @@ describe("EFA committed cast receipts", () => {
 			spell,
 			spellData: CURE_WOUNDS,
 			focusInventoryRow: tool,
+			focusRequirement: state.getSpellCastFocusRequirement(spell),
 			cast: {type: "slot", slotLevel: 1, focusInventoryItemId: "stable-tool"},
 		});
 
 		expect(receipt).toEqual(expect.objectContaining({
 			committed: true,
 			ok: true,
+			ruleId: "efa-artificer-tools-required",
+			sourceFeatureUid: "Spellcasting|Artificer|EFA|1|EFA",
 			followUpFailed: true,
 			followUps: [
 				{hookId: "good", ok: true, value: "ok"},

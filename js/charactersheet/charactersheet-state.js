@@ -4347,6 +4347,7 @@ globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 class CharacterSheetState {
 	static EFA_ARTIFICER_CLASS_UID = "Artificer|EFA";
 	static EFA_FLASH_OF_GENIUS_UID = "Flash of Genius|Artificer|EFA";
+	static EFA_SPELLCASTING_FEATURE_UID = "Spellcasting|Artificer|EFA|1|EFA";
 	static EFA_SPELLCASTING_TOOLS_RULE_ID = "efa-artificer-tools-required";
 	static EFA_BATTLE_SMITH_SUBCLASS_UID = "Battle Smith|Artificer|EFA|EFA";
 	static EFA_BATTLE_SMITH_FEATURE_UIDS = Object.freeze({
@@ -39636,6 +39637,15 @@ class CharacterSheetState {
 		return !!it.weaponCategory && baseType !== "R" && !it.range;
 	}
 
+	_isWeaponItem (it) {
+		if (!it) return false;
+		const baseType = typeof it.type === "string" ? it.type.split("|")[0].toUpperCase() : "";
+		return it.weapon === true
+			|| baseType === "WEAPON"
+			|| ["M", "R", "MW", "RW"].includes(baseType)
+			|| !!it.weaponCategory;
+	}
+
 	/**
 	 * Determine whether the character has a usable spellcasting focus / component
 	 * pouch — or a feature that substitutes one — for casting spells whose material
@@ -39755,37 +39765,65 @@ class CharacterSheetState {
 		));
 	}
 
-	_getExplicitSpellCastFocusRequirement ({spell, castMeta, castingClass}) {
-		const raw = [castMeta, spell]
-			.map(value => value?.spellcastingFocusRequirement)
-			.find(requirement => requirement?.required === true);
-		if (!raw) return null;
+	_normalizeExplicitSpellCastFocusRequirement ({raw, castingClass}) {
+		if (!raw?.required || !castingClass) return null;
+		if (
+			raw.classUid
+			&& String(raw.classUid).toLowerCase() !== castingClass.uid.toLowerCase()
+		) return null;
 
-		const rawItemUids = Array.isArray(raw.filter?.itemUids)
-			? raw.filter.itemUids
-			: [];
-		const itemUids = [...new Set(
-			rawItemUids
-				.map(uid => String(uid || "").trim())
-				.filter(uid => {
-					const parts = uid.split("|");
-					return parts.length === 2 && parts.every(Boolean);
-				}),
+		const normalizeList = values => [...new Set(
+			(Array.isArray(values) ? values : [])
+				.map(value => String(value || "").trim())
+				.filter(Boolean),
 		)];
-		const itemNames = itemUids.map(uid => uid.split("|")[0]);
-		const itemLabel = itemNames.length
-			? itemNames.join(", ")
+		const inventoryItemIds = normalizeList(raw.filter?.inventoryItemIds);
+		const itemUids = normalizeList(raw.filter?.itemUids)
+			.filter(uid => {
+				const parts = uid.split("|");
+				return parts.length === 2 && parts.every(Boolean);
+			});
+		const itemNames = normalizeList(raw.filter?.itemNames);
+		const itemTypes = normalizeList(raw.filter?.itemTypes)
+			.map(type => type.toUpperCase());
+		const weapon = raw.filter?.weapon
+			&& typeof raw.filter.weapon === "object"
+			&& String(raw.filter.weapon.category || "").toLowerCase() === "any"
+			? {
+				category: "any",
+				requiresProficiency: true,
+			}
+			: null;
+		const rawSourceFeatureUid = String(raw.sourceFeatureUid || "").trim();
+		const hasInvalidSourceFeatureUid = raw.sourceFeatureUid != null
+			&& !!rawSourceFeatureUid
+			&& !rawSourceFeatureUid.includes("|");
+		const sourceFeatureUid = rawSourceFeatureUid.includes("|")
+			? rawSourceFeatureUid
+			: null;
+		const itemLabels = [
+			...itemUids.map(uid => uid.split("|")[0]),
+			...itemNames,
+			...(weapon ? ["a proficient weapon"] : []),
+		];
+		const itemLabel = itemLabels.length
+			? itemLabels.join(", ")
 			: "the configured spellcasting focus";
 
 		return {
-			ruleId: String(raw.ruleId || "explicit-spellcasting-focus"),
+			required: true,
+			hasInvalidSourceFeatureUid,
+			ruleId: String(raw.ruleId || "explicit-spellcasting-focus").trim() || "explicit-spellcasting-focus",
+			sourceFeatureUid,
 			classUid: castingClass.uid,
 			castingClass,
 			addsMaterialComponent: raw.addsMaterialComponent === true,
 			filter: {
+				inventoryItemIds,
 				itemUids,
-				itemNames: [],
-				itemTypes: [],
+				itemNames,
+				itemTypes,
+				weapon,
 				requiresProficiency: raw.filter?.requiresProficiency === true,
 			},
 			ui: {
@@ -39796,11 +39834,18 @@ class CharacterSheetState {
 		};
 	}
 
+	_getExplicitSpellCastFocusRequirement ({spell, castMeta, castingClass}) {
+		const raw = [castMeta, spell]
+			.map(value => value?.spellcastingFocusRequirement)
+			.find(requirement => requirement?.required === true);
+		return this._normalizeExplicitSpellCastFocusRequirement({raw, castingClass});
+	}
+
 	/**
 	 * Resolve any extra focus rule contributed by the exact casting class.
 	 * @param {*} spell
 	 * @param {*} [castMeta]
-	 * @returns {{ruleId: string, classUid: string, castingClass: *, addsMaterialComponent: boolean, filter: *, ui: *}|null}
+	 * @returns {{required: true, ruleId: string, sourceFeatureUid: string|null, classUid: string, castingClass: *, addsMaterialComponent: boolean, filter: *, ui: *}|null}
 	 */
 	getSpellCastFocusRequirement (spell, castMeta = null) {
 		const castingClass = this.resolveSpellCastingClassIdentity(spell);
@@ -39816,7 +39861,9 @@ class CharacterSheetState {
 			? [arcaneArmorStatus.boundItemId]
 			: [];
 		return {
+			required: true,
 			ruleId: CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID,
+			sourceFeatureUid: CharacterSheetState.EFA_SPELLCASTING_FEATURE_UID,
 			classUid: castingClass.uid,
 			castingClass,
 			addsMaterialComponent: true,
@@ -39825,6 +39872,7 @@ class CharacterSheetState {
 				itemUids: [],
 				itemNames: ["Thieves' Tools", "Tinker's Tools"],
 				itemTypes: ["AT"],
+				weapon: null,
 				requiresProficiency: true,
 			},
 			ui: {
@@ -39848,11 +39896,15 @@ class CharacterSheetState {
 	 */
 	getEligibleSpellCastFocusInventoryRows (requirement) {
 		if (!requirement?.filter) return [];
-		const inventoryItemIds = new Set(requirement.filter.inventoryItemIds || []);
+		if (requirement.hasInvalidSourceFeatureUid) return [];
+		const inventoryItemIds = new Set((requirement.filter.inventoryItemIds || []).map(id => String(id)));
 		const itemUids = new Set((requirement.filter.itemUids || []).map(uid => String(uid).toLowerCase()));
 		const itemNames = new Set((requirement.filter.itemNames || []).map(name => CharacterSheetState.normalizeToolKey(name)));
 		const itemTypes = new Set((requirement.filter.itemTypes || []).map(type => String(type).toUpperCase()));
-		if (!inventoryItemIds.size && !itemUids.size && !itemNames.size && !itemTypes.size) return [];
+		const weaponFilter = requirement.filter.weapon?.category === "any"
+			? requirement.filter.weapon
+			: null;
+		if (!inventoryItemIds.size && !itemUids.size && !itemNames.size && !itemTypes.size && !weaponFilter) return [];
 		return (this._data.inventory || []).filter(wrapper => {
 			if (!wrapper?.id || !wrapper.equipped || Number(wrapper.quantity ?? 1) <= 0) return false;
 			const item = wrapper.item;
@@ -39861,11 +39913,16 @@ class CharacterSheetState {
 			const normalizedName = CharacterSheetState.normalizeToolKey(item.name);
 			const baseType = String(item.type || "").split("|")[0].toUpperCase();
 			const itemUid = `${item.name}|${item.source}`.toLowerCase();
-			const isEligibleEntity = itemUids.has(itemUid)
+			const isExplicitlyAuthorized = inventoryItemIds.has(wrapper.id)
+				|| itemUids.has(itemUid)
 				|| itemNames.has(normalizedName)
 				|| itemTypes.has(baseType);
-			if (!isEligibleEntity) return false;
-			return !requirement.filter.requiresProficiency || this.hasToolProficiency(item.name);
+			const isAuthorizedEntityUsable = isExplicitlyAuthorized
+				&& (!requirement.filter.requiresProficiency || this.hasToolProficiency(item.name));
+			const isWeaponUsable = !!weaponFilter
+				&& this._isWeaponItem(item)
+				&& this._isWeaponProficient(item);
+			return isAuthorizedEntityUsable || isWeaponUsable;
 		});
 	}
 
@@ -44627,21 +44684,31 @@ class CharacterSheetState {
 	/**
 	 * Publish a stable receipt after a spell cast has fully committed.
 	 *
-	 * The caller must invoke this only after cancellation/refund handling. Source
-	 * attribution and the selected focus are revalidated here so subscribers never
-	 * need to repeat EFA focus legality.
+	 * The caller must invoke this only after cancellation/refund handling and pass
+	 * the normalized pre-cost focusRequirement. Source attribution and the selected
+	 * focus are revalidated here so subscribers never repeat focus legality.
 	 * @param {*} input
 	 * @returns {Promise<*|null>} Receipt, or null when exact ownership cannot be proven.
 	 */
-	async pPublishCommittedSpellCast ({spell, spellData = null, focusInventoryRow = null, cast = {}} = {}) {
+	async pPublishCommittedSpellCast ({
+		spell,
+		spellData = null,
+		focusInventoryRow = null,
+		focusRequirement = null,
+		cast = {},
+	} = {}) {
 		const castingClass = this.resolveSpellCastingClassIdentity(spell);
 		if (!castingClass) return null;
 
-		const focusRequirement = this.getSpellCastFocusRequirement(spell, cast);
+		const normalizedFocusRequirement = focusRequirement
+			? this._normalizeExplicitSpellCastFocusRequirement({raw: focusRequirement, castingClass})
+			: this.getSpellCastFocusRequirement(spell, cast);
+		if (focusRequirement && !normalizedFocusRequirement) return null;
+		if (normalizedFocusRequirement?.hasInvalidSourceFeatureUid) return null;
 
 		let focus = null;
-		if (focusRequirement) {
-			const legalRows = this.getEligibleSpellCastFocusInventoryRows(focusRequirement);
+		if (normalizedFocusRequirement) {
+			const legalRows = this.getEligibleSpellCastFocusInventoryRows(normalizedFocusRequirement);
 			const selectedId = focusInventoryRow?.id || cast?.focusInventoryItemId || null;
 			const selectedRow = legalRows.find(row => row.id === selectedId) || null;
 			if (!selectedRow) return null;
@@ -44663,7 +44730,15 @@ class CharacterSheetState {
 			itemInventoryId: cast?.itemInventoryId || null,
 			itemUid: cast?.itemUid || null,
 			innateSpellId: cast?.innateSpellId || null,
+			ruleId: normalizedFocusRequirement?.ruleId || null,
+			sourceFeatureUid: normalizedFocusRequirement?.sourceFeatureUid || null,
 		};
+		const focusRule = normalizedFocusRequirement
+			? {
+				ruleId: normalizedFocusRequirement.ruleId,
+				sourceFeatureUid: normalizedFocusRequirement.sourceFeatureUid,
+			}
+			: null;
 
 		const receipt = {
 			receiptVersion: 1,
@@ -44682,6 +44757,9 @@ class CharacterSheetState {
 			castType: castDescriptor.type,
 			slotLevel: castDescriptor.slotLevel,
 			cast: castDescriptor,
+			ruleId: focusRule?.ruleId || null,
+			sourceFeatureUid: focusRule?.sourceFeatureUid || null,
+			focusRule,
 			focusInventoryItemId: focus?.inventoryItemId || null,
 			focusItemUid: focus?.itemUid || null,
 			focus,
