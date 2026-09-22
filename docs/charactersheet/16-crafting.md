@@ -74,7 +74,9 @@ recipe name.
 Generated recipes preserve the output's existing 5etools `itemType`. Armor is exactly `LA`, `MA`,
 or `HA`; shields remain `S`, so they do not become armor merely because both contribute AC. A
 resolved catalog item can provide the same context, and an explicit result category supports future
-non-item crafting surfaces.
+non-item crafting surfaces. The generated catalog also carries a compact authoritative `resultItem`
+projection, which the lazy Character Sheet loader installs in `CharacterSheetPage.getItems()` so
+type-sensitive modifiers use the shipped item type even when the full item catalog is not loaded.
 
 `Tools of the Trade|Artificer|EFA|Armorer|EFA|3|EFA` contributes a `0.5` multiplier for armor at
 Artificer 3+. The class and subclass sources must both be `EFA`; the TCE Armorer's same-named

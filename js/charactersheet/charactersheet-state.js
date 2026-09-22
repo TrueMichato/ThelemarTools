@@ -8498,6 +8498,27 @@ class CharacterSheetState {
 		for (const feature of this._data.features || []) {
 			if (!CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature(feature)) continue;
 			feature._sourceAwareFeatureUid ||= CharacterSheetState._getSourceAwareSubclassFeatureUid(feature);
+			if (!feature.sourceDecisionKey) {
+				const cls = this._data.classes?.find(it =>
+					it.name === "Artificer"
+						&& it.source === "EFA"
+						&& it.subclass?.name === "Artillerist"
+						&& it.subclass?.source === "EFA");
+				const history = this._data.levelHistory?.find(entry =>
+					entry.class?.name === "Artificer"
+						&& entry.class?.source === "EFA"
+						&& Number(entry.classLevel) === Number(feature.level));
+				if (cls && history) {
+					feature.sourceDecisionKey = CharacterSheetProgression.getSemanticKey({
+						className: "Artificer",
+						classSource: "EFA",
+						classLevel: feature.level,
+						type: "subclass",
+						sourceKey: "subclass",
+						slot: 0,
+					});
+				}
+			}
 			if (typeof feature._requiresArtisanToolReplacement === "boolean") continue;
 			feature._requiresArtisanToolReplacement = this.hasToolProficiency("Woodcarver's Tools");
 		}

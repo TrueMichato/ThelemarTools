@@ -120,8 +120,17 @@ class CharacterSheetCrafting {
 			|| null;
 	}
 
+	static _CRAFTING_WORKWEEKS_BY_RARITY = {
+		common: 1,
+		uncommon: 2,
+		rare: 10,
+		"very rare": 25,
+		legendary: 50,
+	};
+
 	/**
-	 * Calculate the existing Complete Crafter workweek estimate, applying any
+	 * Calculate crafting workweeks from an authored copper-piece value, falling
+	 * back to the XDMG rarity baseline for value-less magic items, then apply any
 	 * reusable character-state crafting-time multiplier to the resolved item.
 	 * @param {*} recipe
 	 * @param {{state?: *, items?: Array<*>}} [opts]
@@ -130,8 +139,13 @@ class CharacterSheetCrafting {
 	static getCraftingWorkweeks (recipe, {state = null, items = []} = {}) {
 		const item = CharacterSheetCrafting._resolveRecipeItem(recipe, items);
 		const value = recipe?.value ?? item?.value;
-		if (value == null) return null;
-		const baseWorkweeks = Math.max(1, Math.round(value / 100 / 50));
+		let baseWorkweeks = value == null
+			? CharacterSheetCrafting._CRAFTING_WORKWEEKS_BY_RARITY[
+				String(recipe?.rarity || item?.rarity || "").toLowerCase()
+			] ?? null
+			: Math.max(1, Math.round(value / 100 / 50));
+		if (baseWorkweeks == null) return null;
+		if (recipe?.recipeCategory === "potion") baseWorkweeks /= 2;
 		const multiplier = state?.getCraftingTimeMultiplier?.({item}) ?? 1;
 		return baseWorkweeks * multiplier;
 	}

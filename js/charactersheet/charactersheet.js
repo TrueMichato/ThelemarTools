@@ -21600,6 +21600,7 @@ class CharacterSheetPage {
 			try {
 				const json = await DataUtil.loadJSON(`${Renderer.get().baseUrl}data/crafting.json`);
 				this._state.setCraftingCatalog(this.constructor._getCraftingCatalogWithBrew(json, this._craftingMaterialsBrewData));
+				this._installCraftingResultItems(this._state.getCraftingCatalog());
 				return this._state.getCraftingCatalog();
 			} catch (e) {
 				// Non-fatal: the crafting surfaces show an empty state rather than breaking the sheet
@@ -21624,6 +21625,31 @@ class CharacterSheetPage {
 			...brewByMaterialKey.values(),
 		];
 		return out;
+	}
+
+	_installCraftingResultItems (catalog) {
+		const existing = new Set((this._itemsData || [])
+			.map(item => `${String(item.name || "").toLowerCase()}|${String(item.source || "").toLowerCase()}`));
+		for (const recipe of catalog?.recipes || []) {
+			const [uidName, uidSource] = String(recipe.itemUid || "").split("|");
+			const name = recipe.name || uidName;
+			const source = recipe.source || uidSource;
+			const key = `${String(name || "").toLowerCase()}|${String(source || "").toLowerCase()}`;
+			if (!name || !source || existing.has(key)) continue;
+			const resultItem = recipe.resultItem || {};
+			this._itemsData.push({
+				...MiscUtil.copyFast(resultItem),
+				name,
+				source,
+				page: recipe.page,
+				entries: recipe.entries || [],
+				rarity: recipe.rarity || resultItem.rarity || "unknown",
+				...(recipe.reqAttune ? {reqAttune: recipe.reqAttune} : {}),
+				_isCraftedItem: true,
+				_isCraftingCatalogItem: true,
+			});
+			existing.add(key);
+		}
 	}
 
 	/** Whether crafting surfaces should be offered at all. */
