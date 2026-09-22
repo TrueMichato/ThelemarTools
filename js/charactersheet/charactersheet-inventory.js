@@ -313,6 +313,10 @@ class CharacterSheetInventory {
 				});
 				return;
 			}
+			if (e.target.closest("#charsheet-btn-efa-tinkers-magic")) {
+				this.pShowEfaArtificerTinker({operation: "tinkersMagic"});
+				return;
+			}
 
 			// --- Item row action buttons (delegated, dynamic) ---
 			const _getItemId = (target) => target.closest(".charsheet__item")?.dataset.itemId;
@@ -393,6 +397,21 @@ class CharacterSheetInventory {
 			if (e.target.closest(".charsheet__item-recharge")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._pRechargeItemCharges(itemId);
+				return;
+			}
+			if (e.target.closest(".charsheet__item-efa-charge")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this.pShowEfaArtificerTinker({operation: "charge", itemId});
+				return;
+			}
+			if (e.target.closest(".charsheet__item-efa-drain")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this.pShowEfaArtificerTinker({operation: "drain", itemId});
+				return;
+			}
+			if (e.target.closest(".charsheet__item-efa-transmute")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) this.pShowEfaArtificerTinker({operation: "transmute", itemId});
 				return;
 			}
 			if (e.target.closest(".charsheet__item-cast-healing")) {
@@ -547,6 +566,283 @@ class CharacterSheetInventory {
 				this._renderItemList();
 			}
 		});
+	}
+
+	_getEfaArtificerTinkerUiError (preview) {
+		const messages = {
+			"action-economy-unavailable": "That action has already been used this turn.",
+			"tinkers-magic-tools-required": "Equip Tinker's Tools (XPHB) and be proficient with them.",
+			"tinkers-magic-uses-spent": "No Tinker's Magic uses remain until you finish a Long Rest.",
+			"charge-slot-unavailable": "Choose a spell slot that is still available.",
+			"charge-target-full": "That item is already at its maximum charges.",
+			"charge-target-has-no-charges": "That replicated item has no charge pool to restore.",
+			"drain-already-used": "Drain Magic Item has already been used since your last Long Rest.",
+			"invalid-drain-rarity": "Drain Magic Item requires a Common, Uncommon, or Rare replicated item.",
+			"transmute-already-used": "Transmute Magic Item has already been used since your last Long Rest.",
+			"transmute-same-plan": "Choose a different known Replicate Magic Item plan.",
+			"transmute-same-item": "Choose a plan that resolves to a different item.",
+			"transmute-attunement-requirements-failed": "The replacement cannot preserve this item's attunement because its requirements are not met.",
+			"transmute-capacity-exceeded": "The replacement does not fit your current replicated-item capacity.",
+			"missing-replicate-item": "That replicated item is no longer in your inventory.",
+			"invalid-replicate-item": "That item is not an active item created by your exact Replicate Magic Item feature.",
+		};
+		return messages[preview?.code] || preview?.message || "This Magic Item Tinker transaction is not currently available.";
+	}
+
+	_getEfaArtificerTinkerSuccessMessage (result) {
+		if (result.operation === "tinkersMagic") return `${result.created.itemUid.split("|")[0]} created with Tinker's Magic.`;
+		if (result.operation === "charge") {
+			return `Restored ${result.charge.restored} charge${result.charge.restored === 1 ? "" : "s"} by spending a level ${result.charge.paidSlotLevel} spell slot.`;
+		}
+		if (result.operation === "drain") {
+			return `Drained the replicated item and gained one temporary level ${result.drain.slotLevel} spell slot.`;
+		}
+		return `Transmuted the replicated item into ${result.transmute.toItemUid.split("|")[0]}.`;
+	}
+
+	async pShowEfaArtificerTinker ({operation = "tinkersMagic", itemId = null} = {}) {
+		const titles = {
+			tinkersMagic: "Tinker's Magic",
+			charge: "Charge Magic Item",
+			drain: "Drain Magic Item",
+			transmute: "Transmute Magic Item",
+		};
+		if (!titles[operation]) return null;
+
+		let resolvedResult = null;
+		let isSettled = false;
+		let resolveResult;
+		const resultPromise = new Promise(resolve => { resolveResult = resolve; });
+		const settle = () => {
+			if (isSettled) return;
+			isSettled = true;
+			resolveResult(resolvedResult);
+		};
+		const {eleModalInner, eleModalFooter, doClose} = await CharacterSheetModal.pGetShow({
+			title: titles[operation],
+			isMinHeight0: true,
+			isWidth100: true,
+			isMaxWidth640p: true,
+			cbClose: settle,
+		});
+
+		const root = e_({tag: "div", clazz: "cs-efa-tinker"});
+		const intro = e_({tag: "p", clazz: "cs-efa-tinker__intro"});
+		intro.textContent = operation === "tinkersMagic"
+			? "Create one published mundane item. Each creation is a distinct temporary inventory row and disappears when you finish a Long Rest."
+			: operation === "charge"
+				? "Spend one available spell slot of level 1 or higher. The item regains charges equal to the paid slot level, up to its maximum."
+				: operation === "drain"
+					? "Destroy one replicated item to gain a temporary spell slot until your next Long Rest. Common items grant level 1; Uncommon or Rare items grant level 2."
+					: "Replace one replicated item with a different item resolved from another currently known plan. Its ownership and lifecycle order are preserved.";
+		root.append(intro);
+
+		const fields = e_({tag: "div", clazz: "cs-efa-tinker__fields"});
+		const feedback = e_({tag: "div", clazz: "cs-efa-tinker__feedback"});
+		feedback.setAttribute("role", "status");
+		feedback.setAttribute("aria-live", "polite");
+		root.append(fields, feedback);
+		eleModalInner.append(root);
+
+		const selects = {};
+		const addSelect = ({key, label, options = []}) => {
+			const field = e_({tag: "div", clazz: "cs-efa-tinker__field"});
+			const labelEle = e_({tag: "label", clazz: "cs-efa-tinker__label"});
+			const select = e_({tag: "select", clazz: "ve-form-control cs-efa-tinker__select"});
+			const selectId = `cs-efa-tinker-${operation}-${key}`;
+			labelEle.setAttribute("for", selectId);
+			labelEle.textContent = label;
+			select.id = selectId;
+			const setOptions = entries => {
+				select.innerHTML = "";
+				for (const entry of entries) {
+					const option = e_({tag: "option"});
+					option.value = entry.value;
+					option.textContent = entry.label;
+					select.append(option);
+				}
+				select.value = entries[0]?.value || "";
+			};
+			setOptions(options);
+			field.append(labelEle, select);
+			fields.append(field);
+			selects[key] = {select, setOptions};
+			return select;
+		};
+
+		const getOptions = () => this._state.getEfaArtificerTinkerOptions();
+		const getReplicateEntries = () => getOptions().magicItemTinker.replicateItems.map(item => ({
+			value: item.itemId,
+			label: `${item.name} (${String(item.rarity || "unknown").replace(/^\w/, ch => ch.toUpperCase())})`,
+		}));
+		if (operation === "tinkersMagic") {
+			addSelect({
+				key: "item",
+				label: "Mundane item",
+				options: getOptions().tinkersMagic.items
+					.filter(option => option.ok)
+					.map(option => ({value: option.itemUid, label: option.name})),
+			});
+		} else if (!itemId) {
+			addSelect({key: "target", label: "Replicated item", options: getReplicateEntries()});
+		}
+		if (operation === "charge") {
+			addSelect({
+				key: "slot",
+				label: "Spell slot to spend",
+				options: Array.from({length: 9}, (_, ix) => ix + 1)
+					.filter(level => this._state.getSpellSlotsCurrent(level) > 0)
+					.map(level => ({
+						value: String(level),
+						label: `Level ${level} (${this._state.getSpellSlotsCurrent(level)} available)`,
+					})),
+			});
+		}
+		if (operation === "transmute") {
+			addSelect({key: "plan", label: "Different known plan"});
+			addSelect({key: "resolved", label: "Replacement item"});
+		}
+
+		const getTargetItemId = () => itemId || selects.target?.select.value || "";
+		const getTargetPlanOptions = () => {
+			const target = getOptions().magicItemTinker.replicateItems.find(item => item.itemId === getTargetItemId());
+			const currentSlotId = String(target?.plan?.slotId || "");
+			return this._state.getEfaReplicateMagicItemProductionOptions().plans
+				.filter(plan => plan.ok && String(plan.plan?.slotId || "") !== currentSlotId);
+		};
+		const updateTransmuteResolved = () => {
+			if (operation !== "transmute") return;
+			const plan = getTargetPlanOptions().find(option => String(option.plan.slotId) === selects.plan.select.value);
+			selects.resolved.setOptions((plan?.options || []).map(option => ({
+				value: option.itemUid,
+				label: option.name,
+			})));
+		};
+		const updateTransmutePlans = () => {
+			if (operation !== "transmute") return;
+			selects.plan.setOptions(getTargetPlanOptions().map(plan => ({
+				value: String(plan.plan.slotId),
+				label: plan.plan.selection.displayName || plan.plan.selection.name,
+			})));
+			updateTransmuteResolved();
+		};
+
+		const getRequest = () => {
+			if (operation === "tinkersMagic") return {operation, itemUid: selects.item?.select.value || ""};
+			if (operation === "charge") {
+				return {
+					operation,
+					itemId: getTargetItemId(),
+					slotLevel: Number(selects.slot?.select.value),
+				};
+			}
+			if (operation === "drain") return {operation, itemId: getTargetItemId()};
+			return {
+				operation,
+				itemId: getTargetItemId(),
+				targetPlanSlotId: selects.plan?.select.value || "",
+				resolvedItemUid: selects.resolved?.select.value || "",
+			};
+		};
+
+		const btnConfirm = e_({tag: "button", clazz: `ve-btn ${["drain", "transmute"].includes(operation) ? "ve-btn-warning" : "ve-btn-primary"}`});
+		btnConfirm.type = "button";
+		btnConfirm.textContent = operation === "tinkersMagic"
+			? "Create Item"
+			: operation === "charge"
+				? "Spend Slot and Charge"
+				: operation === "drain"
+					? "Destroy and Drain"
+					: "Replace Item";
+		const btnCancel = e_({tag: "button", clazz: "ve-btn ve-btn-default"});
+		btnCancel.type = "button";
+		btnCancel.textContent = "Cancel";
+		const footer = eleModalFooter || e_({tag: "div", clazz: "cs-efa-tinker__footer"});
+		footer.append(btnCancel, btnConfirm);
+		if (!eleModalFooter) root.append(footer);
+
+		let currentPreview = null;
+		const renderPreview = () => {
+			currentPreview = this._state.previewEfaArtificerTinkerTransaction(getRequest());
+			btnConfirm.disabled = !currentPreview.ok;
+			feedback.classList.toggle("cs-efa-tinker__feedback--error", !currentPreview.ok);
+			if (!currentPreview.ok) {
+				feedback.textContent = this._getEfaArtificerTinkerUiError(currentPreview);
+				return;
+			}
+			if (operation === "tinkersMagic") {
+				feedback.textContent = `Create ${currentPreview.item.name}. ${currentPreview.uses.remaining} of ${currentPreview.uses.max} uses remain before this creation.`;
+			} else if (operation === "charge") {
+				feedback.textContent = `Spend one level ${currentPreview.charge.paidSlotLevel} slot to restore ${currentPreview.charge.restored} charge${currentPreview.charge.restored === 1 ? "" : "s"} (${currentPreview.charge.previous} to ${currentPreview.charge.next} of ${currentPreview.charge.max}).`;
+			} else if (operation === "drain") {
+				feedback.textContent = `Destroy this ${currentPreview.drain.rarity} item and gain one temporary level ${currentPreview.drain.slotLevel} spell slot.`;
+			} else {
+				feedback.textContent = `Replace ${currentPreview.transmute.fromItemUid.split("|")[0]} with ${currentPreview.transmute.toItemUid.split("|")[0]}.`;
+			}
+		};
+
+		for (const {select} of Object.values(selects)) {
+			select.addEventListener("change", () => {
+				if (select === selects.target?.select) updateTransmutePlans();
+				if (select === selects.plan?.select) updateTransmuteResolved();
+				renderPreview();
+			});
+		}
+		updateTransmutePlans();
+		renderPreview();
+
+		let isCommitting = false;
+		btnCancel.addEventListener("click", () => doClose(false));
+		btnConfirm.addEventListener("click", async () => {
+			if (isCommitting) return;
+			isCommitting = true;
+			btnConfirm.disabled = true;
+			btnCancel.disabled = true;
+			const result = this._state.commitEfaArtificerTinkerTransaction(currentPreview?.request || getRequest());
+			if (!result.ok) {
+				isCommitting = false;
+				currentPreview = result;
+				feedback.classList.add("cs-efa-tinker__feedback--error");
+				feedback.textContent = this._getEfaArtificerTinkerUiError(result);
+				btnConfirm.disabled = true;
+				btnCancel.disabled = false;
+				return;
+			}
+			resolvedResult = result;
+			JqueryUtil.doToast({type: "success", content: this._getEfaArtificerTinkerSuccessMessage(result)});
+			try {
+				await this._page.saveCharacter?.();
+			} catch (error) {
+				feedback.classList.add("cs-efa-tinker__feedback--error");
+				feedback.textContent = "The operation committed, but the character could not be saved. Close this dialog and save the character again.";
+				btnCancel.disabled = false;
+				JqueryUtil.doToast({type: "danger", content: `Magic Item Tinker save failed: ${error.message}`});
+				this._page.renderCharacter?.();
+				return;
+			}
+			doClose(true);
+			this._page.renderCharacter?.();
+		});
+
+		CharacterSheetModal.focusFirst?.(eleModalInner, {preferSelector: "select, button"});
+		return resultPromise;
+	}
+
+	_renderEfaArtificerTinkerToolbar () {
+		const button = document.getElementById("charsheet-btn-efa-tinkers-magic");
+		if (!button) return;
+		const options = this._state.getEfaArtificerTinkerOptions();
+		const isVisible = options.classLevel >= 1;
+		button.style.display = isVisible ? "" : "none";
+		if (!isVisible) return;
+		const actionAvailable = !this._state.isInCombat() || this._state.isActionTypeAvailable("action");
+		button.disabled = !options.tinkersMagic.available || !actionAvailable;
+		button.title = !actionAvailable
+			? "Your Action has already been used this turn."
+			: options.tinkersMagic.unavailableReason || "Create a published mundane item with Tinker's Magic.";
+		button.setAttribute("aria-label", `Tinker's Magic, ${options.tinkersMagic.uses.remaining} of ${options.tinkersMagic.uses.max} uses remaining`);
+		const usesLabel = button.querySelector(".charsheet__efa-tinker-toolbar-uses");
+		if (usesLabel) usesLabel.textContent = `${options.tinkersMagic.uses.remaining}/${options.tinkersMagic.uses.max}`;
 	}
 
 	/**
@@ -7570,6 +7866,30 @@ class CharacterSheetInventory {
 		const spellStorage = item._spellStorage || null;
 		const spellStorageExpired = spellStorage?.repair?.status === "expired";
 		const spellStorageRepair = spellStorage?.repair?.status && !["active", "expired"].includes(spellStorage.repair.status);
+		const efaTinkerOptions = this._state.getEfaArtificerTinkerOptions?.() || null;
+		const efaReplicateItem = efaTinkerOptions?.magicItemTinker?.replicateItems
+			.find(candidate => candidate.itemId === item.id) || null;
+		const efaBonusActionAvailable = !this._state.isInCombat?.() || this._state.isActionTypeAvailable?.("bonus");
+		const efaActionAvailable = !this._state.isInCombat?.() || this._state.isActionTypeAvailable?.("action");
+		const efaChargeSlotsAvailable = Array.from({length: 9}, (_, ix) => ix + 1)
+			.some(level => this._state.getSpellSlotsCurrent?.(level) > 0);
+		const efaCanCharge = !!efaReplicateItem
+			&& Number(efaReplicateItem.chargesMax) > 0
+			&& Number(efaReplicateItem.chargesCurrent) < Number(efaReplicateItem.chargesMax)
+			&& efaChargeSlotsAvailable
+			&& efaBonusActionAvailable;
+		const efaDrainRarityValid = ["common", "uncommon", "rare"].includes(String(efaReplicateItem?.rarity || "").toLowerCase());
+		const efaCanDrain = !!efaReplicateItem
+			&& !!efaTinkerOptions?.magicItemTinker?.drainAvailable
+			&& efaDrainRarityValid
+			&& efaBonusActionAvailable;
+		const efaCurrentPlanSlotId = String(efaReplicateItem?.plan?.slotId || "");
+		const efaHasAlternatePlan = !!efaReplicateItem
+			&& this._state.getEfaArtificerPlans().some(plan => String(plan.slotId) !== efaCurrentPlanSlotId);
+		const efaCanTransmute = !!efaReplicateItem
+			&& !!efaTinkerOptions?.magicItemTinker?.transmuteAvailable
+			&& efaHasAlternatePlan
+			&& efaActionAvailable;
 
 		const itemNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
@@ -7717,6 +8037,19 @@ class CharacterSheetInventory {
 						${canRecharge ? `
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-recharge" title="Recharge (${rechargeFormula.replace(/"/g, "&quot;")})" ${(item.chargesCurrent ?? item.charges) >= item.charges ? "disabled" : ""}>
 								<span class="glyphicon glyphicon-refresh"></span> ${rechargeFormula}
+							</button>
+						` : ""}
+						${efaReplicateItem ? `
+							${Number(efaReplicateItem.chargesMax) > 0 ? `
+								<button type="button" class="ve-btn ve-btn-xs ve-btn-info charsheet__item-efa-charge" title="${efaCanCharge ? "Spend a spell slot to restore charges" : "Requires missing charges, an available level 1+ spell slot, and an unused Bonus Action in combat"}" ${efaCanCharge ? "" : "disabled"}>
+									Charge
+								</button>
+							` : ""}
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-warning charsheet__item-efa-drain" title="${efaCanDrain ? "Destroy this item to gain a temporary spell slot" : "Requires a Common, Uncommon, or Rare item, an unused Drain, and an unused Bonus Action in combat"}" ${efaCanDrain ? "" : "disabled"}>
+								Drain
+							</button>
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__item-efa-transmute" title="${efaCanTransmute ? "Replace this item from another known plan" : "Requires another known plan, an unused Transmute, and an unused Action in combat"}" ${efaCanTransmute ? "" : "disabled"}>
+								Transmute
 							</button>
 						` : ""}
 						${hasSpellward ? `
@@ -8008,6 +8341,7 @@ class CharacterSheetInventory {
 
 	render () {
 		this._renderItemList();
+		this._renderEfaArtificerTinkerToolbar();
 		this._renderCurrency();
 		this._initCurrencyInputs();
 		this._updateEncumbrance();

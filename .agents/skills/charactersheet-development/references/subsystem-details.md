@@ -13,6 +13,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Custom Abilities (data structure, effect routing, reapply on load)
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
 - Generated Feature Items and EFA Replicate Magic Item
+- EFA Tinker's Magic and Magic Item Tinker
 - Stable-Key Per-Turn Receipts
 - Committed Feature Uses and EFA Flash of Genius
 - RHW Reanimator R2a State and Ownership
@@ -368,6 +369,102 @@ Combat, and Play Mode reuse the item-power surfaces and show host, spell, uses,
 DC/attack, repair/depleted state, and the disabled reason. The holder picker is
 keyboard-native and requires a stable external name/ID instead of silently
 assigning the Artificer. Existing single-column modal flow remains mobile-safe.
+
+## EFA Tinker's Magic and Magic Item Tinker
+
+The bounded base-Artificer M4 surface is owned by exact `Artificer|EFA` level
+gates: Tinker's Magic at level 1 and Magic Item Tinker at level 6. Mending
+remains part of normal spell progression. Feature calculations expose
+`hasTinkersMagic`, `tinkersMagicUses`, and `hasMagicItemTinker`; Tinker's Magic
+uses are the Intelligence modifier, minimum 1.
+
+All four operations use one preview/commit transaction surface:
+
+```javascript
+state.getEfaArtificerTinkerOptions();
+state.previewEfaArtificerTinkerTransaction(request);
+state.commitEfaArtificerTinkerTransaction(request);
+state.reconcileEfaArtificerTinker({reason?});
+```
+
+Requests are versioned, source-qualified, and contain only stable state
+identities:
+
+```javascript
+{version: 1, operation: "tinkersMagic", itemUid}
+{version: 1, operation: "charge", itemId, slotLevel}
+{version: 1, operation: "drain", itemId}
+{version: 1, operation: "transmute", itemId, targetPlanSlotId, resolvedItemUid}
+```
+
+Preview is pure. Commit snapshots the complete character state, consumes an
+Action or Bonus Action only while combat is active, performs the normal item
+and spell-slot mutations, and restores the snapshot plus item effects on any
+failure. Cancellation, stale identity, catalog resolution failure, unavailable
+action economy, capacity failure, attunement failure, and item-creation failure
+therefore spend nothing. Out-of-combat use never leaves a persistent Action or
+Bonus Action lock.
+
+Tinker's Magic resolves only the exact published 31-item `XPHB` list and
+requires an equipped exact `Tinker's Tools|XPHB` row accepted by the existing
+spell-focus/proficiency pipeline. Every creation uses
+`createGeneratedFeatureItem` with exact owner
+`Tinker's Magic|Artificer|EFA|1` / `Artificer|EFA` /
+`featureSource: "EFA"`. Rows remain distinct, use normal inventory teardown,
+and carry lifecycle callbacks `onLongRest: "remove"` and
+`onOwnerRemoved: "remove"`.
+
+Magic Item Tinker accepts only active generated rows whose owner exactly
+matches base EFA Replicate Magic Item:
+
+- **Charge** spends one available level-1-or-higher slot and restores exactly
+  the paid slot level, clamped to the item's maximum. It never calls the
+  item's random `rechargeItemCharges` path.
+- **Drain** destroys the item through `removeItem`; Common creates one
+  temporary level-1 slot, while Uncommon or Rare creates one temporary level-2
+  slot. Other rarities fail before mutation. The slot uses the normal named
+  modifier path with exact source feature
+  `Magic Item Tinker|Artificer|EFA|6|EFA`, decision key
+  `efa-magic-item-tinker:drain`, and `sourceType:
+  "classFeatureTransaction"` so ordinary class-effect rebuilds do not delete a
+  valid committed transaction.
+- **Transmute** replaces the target with a different resolved item from another
+  currently known Replicate plan. It preserves exact owner, plan metadata,
+  creation order/receipt/batch, lifecycle, extensions, equipment, and valid
+  attunement while assigning fresh inventory/generated-item identities. Same
+  plan and same resolved item are rejected.
+
+Persisted state is additive and defaults safely for older saves:
+
+```javascript
+efaArtificerTinker: {
+    version: 1,
+    tinkersMagicUsesSpent: 0,
+    drainUsed: false,
+    transmuteUsed: false,
+    drainSlotLevel: null, // 1 | 2 | null
+}
+```
+
+Load normalization clamps use counts, booleans, and Drain slot level.
+Reconciliation removes Tinker's rows only on exact EFA class/source loss,
+removes forged, duplicate, disabled, mismatched, or under-level Drain
+modifiers, rebases stale persisted slot totals even when the modifier is
+missing, and never claims other generated owners or modifiers. Removing an
+already-expended temporary slot does not spend a normal class slot. A
+committed long rest removes all exact-owner Tinker's rows, refills its use
+pool, removes the Drain slot, and resets Drain/Transmute use state.
+
+**Operate-mode interaction brief.** Players need quick, exact table-time
+operations rather than a second inventory manager. Inventory exposes one
+level-gated Tinker's Magic toolbar action and compact Charge/Drain/Transmute
+buttons only on exact live Replicate rows; Combat Actions mirrors the same four
+operations. Both surfaces delegate to one protected modal and the same state
+transactions. Native labelled selects, explicit disabled reasons, confirmation
+copy, `role="status"`/`aria-live="polite"` feedback, focus restoration, Escape,
+and an auto-fit single-column layout preserve keyboard and mobile use.
+Anti-goals are subclass mechanics, Spell-Storing Item, levels 10/14/18/20,
+random recharge, a parallel item ledger, or broad state refactors.
 
 ## Stable-Key Per-Turn Receipts
 

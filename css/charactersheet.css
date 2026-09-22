@@ -8398,6 +8398,68 @@ body[data-font="readable"] {
 	border-top: 1px dashed var(--cs-border, rgba(99, 102, 241, 0.1));
 }
 
+.cs-efa-tinker {
+	display: grid;
+	gap: var(--cs-space-md, 0.75rem);
+	color: var(--cs-text-primary);
+}
+
+.cs-efa-tinker__intro {
+	max-width: 70ch;
+	margin: 0;
+	color: var(--cs-text-secondary);
+	line-height: 1.55;
+}
+
+.cs-efa-tinker__fields {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+	gap: var(--cs-space-md, 0.75rem);
+}
+
+.cs-efa-tinker__field {
+	display: grid;
+	gap: var(--cs-space-xs, 0.25rem);
+	min-width: 0;
+}
+
+.cs-efa-tinker__label {
+	font-weight: 600;
+	color: var(--cs-text-primary);
+}
+
+.cs-efa-tinker__select {
+	width: 100%;
+	min-height: 2.5rem;
+}
+
+.cs-efa-tinker__feedback {
+	padding: var(--cs-space-sm, 0.5rem) var(--cs-space-md, 0.75rem);
+	border: 1px solid var(--cs-border-control, var(--cs-border));
+	border-radius: var(--cs-radius, 4px);
+	background: var(--cs-bg-base);
+	color: var(--cs-text-secondary);
+	line-height: 1.45;
+}
+
+.cs-efa-tinker__feedback--error {
+	border-color: var(--cs-danger);
+	background: var(--cs-danger-light);
+	color: var(--cs-danger-text, var(--cs-danger));
+}
+
+.cs-efa-tinker__footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__item-efa-charge,
+.charsheet__item-efa-drain,
+.charsheet__item-efa-transmute {
+	font-weight: 600;
+}
+
 .charsheet__item-row {
 	display: flex;
 	align-items: center;

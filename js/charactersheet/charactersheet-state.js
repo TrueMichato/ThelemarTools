@@ -4424,6 +4424,49 @@ class CharacterSheetState {
 		half: Object.freeze({rank: 1, acBonus: 2, dexSaveBonus: 2, label: "Half Cover"}),
 		threeQuarters: Object.freeze({rank: 2, acBonus: 5, dexSaveBonus: 5, label: "Three-Quarters Cover"}),
 	});
+	static EFA_TINKERS_MAGIC_FEATURE_UID = "Tinker's Magic|Artificer|EFA|1|EFA";
+	static EFA_MAGIC_ITEM_TINKER_FEATURE_UID = "Magic Item Tinker|Artificer|EFA|6|EFA";
+	static EFA_MAGIC_ITEM_TINKER_DRAIN_MODIFIER_NAME = "Magic Item Tinker: Drain Magic Item";
+	static EFA_MAGIC_ITEM_TINKER_DRAIN_DECISION_KEY = "efa-magic-item-tinker:drain";
+	static EFA_TINKERS_MAGIC_OWNER = Object.freeze({
+		featureUid: "Tinker's Magic|Artificer|EFA|1",
+		classUid: "Artificer|EFA",
+		subclassUid: null,
+		featureSource: "EFA",
+	});
+	static EFA_TINKERS_MAGIC_ITEM_UIDS = Object.freeze([
+		"Ball Bearings|XPHB",
+		"Basket|XPHB",
+		"Bedroll|XPHB",
+		"Bell|XPHB",
+		"Blanket|XPHB",
+		"Block and Tackle|XPHB",
+		"Glass Bottle|XPHB",
+		"Bucket|XPHB",
+		"Caltrops|XPHB",
+		"Candle|XPHB",
+		"Crowbar|XPHB",
+		"Flask|XPHB",
+		"Grappling Hook|XPHB",
+		"Hunting Trap|XPHB",
+		"Jug|XPHB",
+		"Lamp|XPHB",
+		"Manacles|XPHB",
+		"Net|XPHB",
+		"Oil|XPHB",
+		"Paper|XPHB",
+		"Parchment|XPHB",
+		"Pole|XPHB",
+		"Pouch|XPHB",
+		"Rope|XPHB",
+		"Sack|XPHB",
+		"Shovel|XPHB",
+		"Iron Spikes|XPHB",
+		"String|XPHB",
+		"Tinderbox|XPHB",
+		"Torch|XPHB",
+		"Vial|XPHB",
+	]);
 
 	static _getEmptyAdventurersAtlas () {
 		return {
@@ -4776,6 +4819,7 @@ class CharacterSheetState {
 		this._migrateInventoryItemMetadata();
 		this._migrateGeneratedFeatureItemProvenance();
 		this.reconcileEfaReplicateMagicItems({reason: "catalog-loaded"});
+		this.reconcileEfaArtificerTinker({reason: "catalog-loaded"});
 	}
 
 	/**
@@ -5480,6 +5524,13 @@ class CharacterSheetState {
 				},
 			},
 			currency: {cp: 0, sp: 0, ep: 0, gp: 0, pp: 0},
+			efaArtificerTinker: {
+				version: 1,
+				tinkersMagicUsesSpent: 0,
+				drainUsed: false,
+				transmuteUsed: false,
+				drainSlotLevel: null,
+			},
 
 			// Ioun Stone bonds in progress — {itemId: daysElapsed}. An Ioun bond takes 7
 			// consecutive days (shortened 1 day per orbiting stone, min 3), so it can't ride the
@@ -5998,6 +6049,21 @@ class CharacterSheetState {
 		this._data.spellcasting = {...this._getDefaultState().spellcasting, ...this._data.spellcasting};
 		if (!Array.isArray(this._data.spellcasting.gamblerPendingCastResolutions)) this._data.spellcasting.gamblerPendingCastResolutions = [];
 		if (!Array.isArray(this._data.spellcasting.gamblerCastHistory)) this._data.spellcasting.gamblerCastHistory = [];
+		const efaTinkerDefault = this._getDefaultState().efaArtificerTinker;
+		const efaTinkerRaw = this._data.efaArtificerTinker;
+		this._data.efaArtificerTinker = {
+			...efaTinkerDefault,
+			...(efaTinkerRaw && typeof efaTinkerRaw === "object" && !Array.isArray(efaTinkerRaw) ? efaTinkerRaw : {}),
+			version: 1,
+		};
+		this._data.efaArtificerTinker.tinkersMagicUsesSpent = Math.max(
+			0,
+			Math.floor(Number(this._data.efaArtificerTinker.tinkersMagicUsesSpent) || 0),
+		);
+		this._data.efaArtificerTinker.drainUsed = !!this._data.efaArtificerTinker.drainUsed;
+		this._data.efaArtificerTinker.transmuteUsed = !!this._data.efaArtificerTinker.transmuteUsed;
+		const drainSlotLevel = Number(this._data.efaArtificerTinker.drainSlotLevel);
+		this._data.efaArtificerTinker.drainSlotLevel = [1, 2].includes(drainSlotLevel) ? drainSlotLevel : null;
 		const hadActionEconomyUsage = !!this._data.actionEconomyUsage && typeof this._data.actionEconomyUsage === "object";
 		const legacyBonusActionAvailable = this._data.actionEconomy?.bonusActionAvailable;
 		delete this._data.actionEconomy;
@@ -6521,6 +6587,7 @@ class CharacterSheetState {
 		this._migrateGeneratedFeatureItemProvenance();
 		this._migrateGeneratedFeatureItemExpiryMinutes();
 		this.reconcileEfaReplicateMagicItems({reason: "load"});
+		this.reconcileEfaArtificerTinker({reason: "load"});
 		this._normalizeGeneratedFeatureItemLifecycleState();
 		this.reconcileGeneratedFeatureItemDeathTransition({reason: "load"});
 		this.reconcileEfaSpellStoringItem({reason: "load"});
@@ -10618,6 +10685,7 @@ class CharacterSheetState {
 		this._reconcileClassSummonsAfterOwnerChange();
 		this.reconcileEfaReplicateMagicItems({reason: "class-removed"});
 		this.reconcileEfaSpellStoringItem({reason: "class-removed"});
+		this.reconcileEfaArtificerTinker({reason: "class-removed"});
 	}
 
 	/**
@@ -11070,6 +11138,7 @@ class CharacterSheetState {
 		this._syncAdventurersAtlasEligibility();
 		this.reconcileEfaReplicateMagicItems({reason: "level-removed"});
 		this.reconcileEfaSpellStoringItem({reason: "level-removed"});
+		this.reconcileEfaArtificerTinker({reason: "level-removed"});
 
 		return {success: true, removed: removedInfo};
 	}
@@ -11737,6 +11806,7 @@ class CharacterSheetState {
 			});
 		}
 		this.reconcileEfaReplicateMagicItems({reason: "progression-manifest-committed"});
+		this.reconcileEfaArtificerTinker({reason: "progression-manifest-committed"});
 	}
 
 	_normalizeStoredSkillState () {
@@ -33189,6 +33259,8 @@ class CharacterSheetState {
 
 					if (isEfa) {
 						calculations.hasEfaArtificerSpellcasting = level >= 1;
+						calculations.hasTinkersMagic = level >= 1;
+						calculations.tinkersMagicUses = Math.max(1, intMod);
 						calculations.hasReplicateMagicItem = level >= 2;
 						calculations.artificerPlansKnown = CharacterSheetClassUtils.getEfaArtificerPlansKnown(level);
 						calculations.artificerCreatedMagicItemsMax = CharacterSheetClassUtils.getEfaArtificerCreatedMagicItemsMax(level);
@@ -38517,7 +38589,7 @@ class CharacterSheetState {
 		return CharacterSheetItemUtils.getCanonicalItemKinds(item)[0] || "wondrous";
 	}
 
-	_getEfaReplicateMagicItemClassLevel () {
+	_getEfaArtificerClassLevel () {
 		return Number(this._data.classes?.find(cls =>
 			String(cls?.name || "").toLowerCase() === "artificer"
 			&& String(cls?.source || "").toUpperCase() === "EFA",
@@ -38544,6 +38616,607 @@ class CharacterSheetState {
 				extensionKind: "armor-replication",
 			},
 		})];
+	}
+
+	_getEfaReplicateMagicItemClassLevel () {
+		return this._getEfaArtificerClassLevel();
+	}
+
+	_getEfaTinkersMagicFocusRequirement () {
+		return {
+			required: true,
+			ruleId: "efa-tinkers-magic-tools-required",
+			sourceFeatureUid: CharacterSheetState.EFA_TINKERS_MAGIC_FEATURE_UID,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			filter: {
+				inventoryItemIds: [],
+				itemUids: ["Tinker's Tools|XPHB"],
+				itemNames: [],
+				itemTypes: [],
+				weapon: null,
+				generatedFeature: null,
+				requiresProficiency: true,
+			},
+		};
+	}
+
+	_getEfaTinkerOperationActionType (operation) {
+		if (operation === "tinkersMagic" || operation === "transmute") return "action";
+		if (operation === "charge" || operation === "drain") return "bonus";
+		return null;
+	}
+
+	_getEfaTinkersMagicCatalogOptions () {
+		return CharacterSheetState.EFA_TINKERS_MAGIC_ITEM_UIDS.map(itemUid => {
+			const [name, source] = itemUid.split("|");
+			const matches = this._getExactCatalogItems({name, source});
+			return {
+				itemUid,
+				name,
+				source,
+				ok: matches.length === 1,
+				code: matches.length === 1
+					? "resolved-tinkers-magic-item"
+					: matches.length
+						? "ambiguous-tinkers-magic-item"
+						: "missing-tinkers-magic-item",
+				item: matches.length === 1 ? MiscUtil.copyFast(matches[0]) : null,
+			};
+		});
+	}
+
+	_getEfaReplicateRowForTinker (itemId) {
+		const row = (this._data.inventory || []).find(entry => entry.id === itemId);
+		if (!row) return {ok: false, code: "missing-replicate-item", row: null, classification: null};
+		const classification = this.classifyGeneratedFeatureItem(row);
+		if (
+			classification.status !== "valid"
+			|| classification.ownerKey !== CharacterSheetState._getGeneratedFeatureItemOwnerKey(CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER)
+			|| classification.provenance?.lifecycle?.state !== "active"
+		) {
+			return {ok: false, code: "invalid-replicate-item", row, classification};
+		}
+		return {ok: true, code: "resolved-replicate-item", row, classification};
+	}
+
+	_getEfaMagicItemTinkerDrainModifiers () {
+		return (this._data.namedModifiers || []).filter(modifier =>
+			modifier?.sourceFeatureId === CharacterSheetState.EFA_MAGIC_ITEM_TINKER_FEATURE_UID
+			&& modifier?.sourceDecisionKey === CharacterSheetState.EFA_MAGIC_ITEM_TINKER_DRAIN_DECISION_KEY,
+		);
+	}
+
+	_clearEfaMagicItemTinkerDrainSlot () {
+		const modifiers = this._getEfaMagicItemTinkerDrainModifiers();
+		const modifierIds = new Set(modifiers.map(modifier => modifier.id));
+		const markerLevel = [1, 2].includes(Number(this._data.efaArtificerTinker?.drainSlotLevel))
+			? Number(this._data.efaArtificerTinker.drainSlotLevel)
+			: null;
+		const affectedLevels = new Set(markerLevel ? [markerLevel] : []);
+		const currentByLevel = {};
+		if (modifierIds.size) {
+			const removedByLevel = {};
+			for (const modifier of modifiers) {
+				const match = /^spellSlots:([1-9])$/.exec(modifier.type || "");
+				if (!match) continue;
+				const level = Number(match[1]);
+				affectedLevels.add(level);
+				removedByLevel[level] = (removedByLevel[level] || 0) + Math.max(0, Number(modifier.value) || 0);
+			}
+			this._data.namedModifiers = (this._data.namedModifiers || []).filter(modifier => !modifierIds.has(modifier.id));
+			this._recalculateCustomModifiers();
+			if (!(this._data.classes || []).length) {
+				for (const [levelRaw, removed] of Object.entries(removedByLevel)) {
+					const level = Number(levelRaw);
+					const slots = this._data.spellcasting.spellSlots[level];
+					if (!slots || removed <= 0) continue;
+					const previousCurrent = Math.max(0, Number(slots.current) || 0);
+					slots.max = Math.max(0, Number(slots.max || 0) - removed);
+					slots.current = Math.min(previousCurrent, slots.max);
+					if (!slots.max) delete this._data.spellcasting.spellSlots[level];
+				}
+			}
+		}
+		for (const level of affectedLevels) {
+			currentByLevel[level] = Math.max(
+				0,
+				Number(this._data.spellcasting.spellSlots[level]?.current) || 0,
+			);
+		}
+		if ((this._data.classes || []).length && (
+			modifierIds.size
+			|| markerLevel
+			|| this._data.efaArtificerTinker?.drainUsed
+		)) {
+			this.calculateSpellSlots();
+			for (const level of affectedLevels) {
+				const slots = this._data.spellcasting.spellSlots[level];
+				if (!slots) continue;
+				slots.current = Math.min(currentByLevel[level] ?? slots.current, slots.max);
+			}
+		}
+		this._data.efaArtificerTinker.drainSlotLevel = null;
+		return modifierIds.size;
+	}
+
+	reconcileEfaArtificerTinker ({reason = "reconcile"} = {}) {
+		const classLevel = this._getEfaArtificerClassLevel();
+		const removedItems = classLevel >= 1
+			? []
+			: this.removeGeneratedFeatureItemsByOwner(CharacterSheetState.EFA_TINKERS_MAGIC_OWNER);
+
+		if (classLevel < 1) this._data.efaArtificerTinker.tinkersMagicUsesSpent = 0;
+
+		const drainSlotLevel = Number(this._data.efaArtificerTinker.drainSlotLevel);
+		const drainModifiers = this._getEfaMagicItemTinkerDrainModifiers();
+		const validDrainModifiers = drainModifiers.filter(modifier =>
+			modifier.enabled !== false
+			&& modifier.type === `spellSlots:${drainSlotLevel}`
+			&& Number(modifier.value) === 1,
+		);
+		const hasValidDrainState = classLevel >= 6
+			&& this._data.efaArtificerTinker.drainUsed
+			&& [1, 2].includes(drainSlotLevel)
+			&& validDrainModifiers.length === 1
+			&& drainModifiers.length === 1;
+		if (!hasValidDrainState) {
+			this._clearEfaMagicItemTinkerDrainSlot();
+			this._data.efaArtificerTinker.drainUsed = false;
+		} else {
+			this.calculateSpellSlots();
+		}
+
+		if (classLevel < 6) this._data.efaArtificerTinker.transmuteUsed = false;
+
+		return {
+			reason,
+			classLevel,
+			removedItems,
+			drainSlotLevel: hasValidDrainState ? drainSlotLevel : null,
+		};
+	}
+
+	getEfaArtificerTinkerOptions () {
+		const classLevel = this._getEfaArtificerClassLevel();
+		const tinkersMagicMax = Math.max(1, this.getAbilityMod("int"));
+		const tinkersMagicSpent = Math.min(
+			tinkersMagicMax,
+			Math.max(0, Number(this._data.efaArtificerTinker?.tinkersMagicUsesSpent) || 0),
+		);
+		const tinkersMagicItems = this._getEfaTinkersMagicCatalogOptions();
+		const eligibleTools = this.getEligibleSpellCastFocusInventoryRows(this._getEfaTinkersMagicFocusRequirement());
+		const replicateItems = this.getGeneratedFeatureItemRows(CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER)
+			.map(row => ({
+				itemId: row.id,
+				generatedItemId: row.item?._generatedItemId,
+				name: row.item?.name,
+				source: row.item?.source,
+				rarity: row.item?.rarity || "none",
+				chargesCurrent: row.item?.chargesCurrent ?? row.item?.charges ?? null,
+				chargesMax: row.item?.charges ?? null,
+				plan: this.classifyGeneratedFeatureItem(row).provenance?.catalog?.plan || null,
+				resolvedItem: this.classifyGeneratedFeatureItem(row).provenance?.catalog?.resolvedItem || null,
+			}));
+		return {
+			classLevel,
+			tinkersMagic: {
+				available: classLevel >= 1 && !!eligibleTools.length && tinkersMagicSpent < tinkersMagicMax,
+				itemUids: [...CharacterSheetState.EFA_TINKERS_MAGIC_ITEM_UIDS],
+				items: tinkersMagicItems,
+				eligibleToolItemIds: eligibleTools.map(row => row.id),
+				uses: {remaining: tinkersMagicMax - tinkersMagicSpent, max: tinkersMagicMax},
+				unavailableReason: classLevel < 1
+					? "Tinker's Magic is not available."
+					: !eligibleTools.length
+						? "Equip Tinker's Tools (XPHB) and be proficient with them."
+						: tinkersMagicSpent >= tinkersMagicMax
+							? "No Tinker's Magic uses remain."
+							: null,
+			},
+			magicItemTinker: {
+				available: classLevel >= 6,
+				drainAvailable: classLevel >= 6 && !this._data.efaArtificerTinker?.drainUsed,
+				transmuteAvailable: classLevel >= 6 && !this._data.efaArtificerTinker?.transmuteUsed,
+				replicateItems,
+			},
+		};
+	}
+
+	previewEfaArtificerTinkerTransaction (request = {}) {
+		const operation = String(request.operation || "");
+		const actionType = this._getEfaTinkerOperationActionType(operation);
+		if (!actionType) return {ok: false, code: "unknown-efa-tinker-operation", operation};
+		if (this.isInCombat() && !this.isActionTypeAvailable(actionType)) {
+			return {ok: false, code: "action-economy-unavailable", operation, actionType};
+		}
+		const options = this.getEfaArtificerTinkerOptions();
+
+		if (operation === "tinkersMagic") {
+			if (options.classLevel < 1) return {ok: false, code: "tinkers-magic-unavailable", operation, actionType};
+			if (!options.tinkersMagic.eligibleToolItemIds.length) {
+				return {ok: false, code: "tinkers-magic-tools-required", operation, actionType};
+			}
+			if (options.tinkersMagic.uses.remaining < 1) {
+				return {ok: false, code: "tinkers-magic-uses-spent", operation, actionType};
+			}
+			const itemUid = String(request.itemUid || "");
+			const itemOption = options.tinkersMagic.items.find(option => option.itemUid === itemUid);
+			if (!itemOption) return {ok: false, code: "invalid-tinkers-magic-item", operation, actionType};
+			if (!itemOption.ok) return {ok: false, code: itemOption.code, operation, actionType};
+			return {
+				ok: true,
+				code: "efa-tinker-preview-ready",
+				operation,
+				actionType,
+				item: itemOption,
+				uses: options.tinkersMagic.uses,
+				request: {
+					version: 1,
+					operation,
+					itemUid,
+				},
+			};
+		}
+
+		if (options.classLevel < 6) return {ok: false, code: "magic-item-tinker-unavailable", operation, actionType};
+		if (operation === "charge") {
+			const target = this._getEfaReplicateRowForTinker(String(request.itemId || ""));
+			if (!target.ok) return {ok: false, code: target.code, operation, actionType};
+			const slotLevel = Number(request.slotLevel);
+			if (!Number.isSafeInteger(slotLevel) || slotLevel < 1 || slotLevel > 9) {
+				return {ok: false, code: "invalid-charge-slot-level", operation, actionType};
+			}
+			if (this.getSpellSlotsCurrent(slotLevel) < 1) {
+				return {ok: false, code: "charge-slot-unavailable", operation, actionType};
+			}
+			const max = Number(target.row.item?.charges);
+			const previous = Number(target.row.item?.chargesCurrent ?? max);
+			if (!Number.isFinite(max) || max < 1) return {ok: false, code: "charge-target-has-no-charges", operation, actionType};
+			if (!Number.isFinite(previous) || previous >= max) {
+				return {ok: false, code: "charge-target-full", operation, actionType};
+			}
+			const restored = Math.min(slotLevel, max - previous);
+			return {
+				ok: true,
+				code: "efa-tinker-preview-ready",
+				operation,
+				actionType,
+				itemId: target.row.id,
+				charge: {
+					previous,
+					paidSlotLevel: slotLevel,
+					restored,
+					next: previous + restored,
+					max,
+				},
+				request: {
+					version: 1,
+					operation,
+					itemId: target.row.id,
+					slotLevel,
+				},
+			};
+		}
+
+		if (operation === "drain") {
+			if (!options.magicItemTinker.drainAvailable) {
+				return {ok: false, code: "drain-already-used", operation, actionType};
+			}
+			const target = this._getEfaReplicateRowForTinker(String(request.itemId || ""));
+			if (!target.ok) return {ok: false, code: target.code, operation, actionType};
+			const rarity = String(target.row.item?.rarity || "").trim().toLowerCase();
+			const slotLevel = rarity === "common"
+				? 1
+				: ["uncommon", "rare"].includes(rarity)
+					? 2
+					: null;
+			if (!slotLevel) return {ok: false, code: "invalid-drain-rarity", operation, actionType};
+			return {
+				ok: true,
+				code: "efa-tinker-preview-ready",
+				operation,
+				actionType,
+				itemId: target.row.id,
+				drain: {rarity, slotLevel},
+				request: {
+					version: 1,
+					operation,
+					itemId: target.row.id,
+				},
+			};
+		}
+
+		if (operation === "transmute") {
+			if (!options.magicItemTinker.transmuteAvailable) {
+				return {ok: false, code: "transmute-already-used", operation, actionType};
+			}
+			const target = this._getEfaReplicateRowForTinker(String(request.itemId || ""));
+			if (!target.ok) return {ok: false, code: target.code, operation, actionType};
+			const currentCatalog = target.classification.provenance?.catalog;
+			const targetPlanSlotId = String(request.targetPlanSlotId || "");
+			const targetPlan = this.getEfaArtificerPlans().find(plan => String(plan.slotId) === targetPlanSlotId);
+			if (!targetPlan) return {ok: false, code: "unknown-transmute-plan", operation, actionType};
+
+			const currentSelection = currentCatalog?.plan?.selection || {};
+			const targetSelection = targetPlan.selection || {};
+			const currentPlanUid = String(
+				currentSelection.planUid
+				|| currentSelection.itemUid
+				|| `${currentSelection.name}|${currentSelection.source}`,
+			).toLowerCase();
+			const targetPlanUid = String(
+				targetSelection.planUid
+				|| targetSelection.itemUid
+				|| `${targetSelection.name}|${targetSelection.source}`,
+			).toLowerCase();
+			if (
+				String(currentCatalog?.plan?.slotId || "") === targetPlanSlotId
+				|| (currentPlanUid && currentPlanUid === targetPlanUid)
+			) {
+				return {ok: false, code: "transmute-same-plan", operation, actionType};
+			}
+
+			const planResolution = this._resolveEfaReplicateMagicItemPlanOptions(targetPlan);
+			if (!planResolution.ok) return {ok: false, code: planResolution.code, operation, actionType};
+			const requestedItemUid = request.resolvedItemUid == null
+				? null
+				: String(request.resolvedItemUid).toLowerCase();
+			const matches = requestedItemUid
+				? planResolution.options.filter(option => option.itemUid.toLowerCase() === requestedItemUid)
+				: planResolution.options;
+			if (matches.length !== 1) {
+				return {
+					ok: false,
+					code: matches.length ? "ambiguous-resolved-catalog-item" : "missing-resolved-catalog-item",
+					operation,
+					actionType,
+				};
+			}
+			const resolvedItem = matches[0];
+			const fromItemUid = String(
+				currentCatalog?.resolvedItem?.itemUid
+					|| `${target.row.item?.name}|${target.row.item?.source}`,
+			);
+			if (fromItemUid.toLowerCase() === resolvedItem.itemUid.toLowerCase()) {
+				return {ok: false, code: "transmute-same-item", operation, actionType};
+			}
+
+			const shouldAttune = !!target.row.attuned && resolvedItem.requiresAttunement;
+			if (shouldAttune) {
+				const requirements = this.meetsAttunementRequirements(resolvedItem.item);
+				if (!requirements.canAttune) {
+					return {
+						ok: false,
+						code: "transmute-attunement-requirements-failed",
+						operation,
+						actionType,
+						reasons: requirements.reasons,
+					};
+				}
+			}
+
+			const replacementCatalog = {
+				plan: {
+					slotId: targetPlan.slotId,
+					acquisitionLevel: targetPlan.acquisitionLevel,
+					lineage: targetPlan.lineage,
+					selection: targetPlan.selection,
+				},
+				resolvedItem: {
+					itemUid: resolvedItem.itemUid,
+					name: resolvedItem.name,
+					source: resolvedItem.source,
+					variantName: resolvedItem.variantName,
+					baseItem: resolvedItem.baseItem,
+					category: resolvedItem.category,
+				},
+			};
+			const replacementProvenance = {
+				...target.classification.provenance,
+				catalog: replacementCatalog,
+			};
+			const projectedRow = {
+				...target.row,
+				item: {
+					...resolvedItem.item,
+					_isCustom: true,
+					_isGeneratedFeatureItem: true,
+					_generatedItemId: target.classification.generatedItemId,
+					_generatedItemProvenance: replacementProvenance,
+				},
+				attuned: shouldAttune,
+			};
+			const projectedRows = this.getGeneratedFeatureItemRows(CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER)
+				.map(row => row.id === target.row.id ? projectedRow : row);
+			const capacity = this.getGeneratedFeatureItemCapacitySnapshot({
+				owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+				rows: projectedRows,
+				descriptors: this.getEfaReplicateMagicItemLifecycleDescriptors(),
+			});
+			if (!capacity.fits) {
+				return {ok: false, code: "transmute-capacity-exceeded", operation, actionType, capacity};
+			}
+
+			return {
+				ok: true,
+				code: "efa-tinker-preview-ready",
+				operation,
+				actionType,
+				itemId: target.row.id,
+				transmute: {
+					fromItemUid,
+					toItemUid: resolvedItem.itemUid,
+					plan: replacementCatalog.plan,
+					resolvedItem,
+					catalog: replacementCatalog,
+					metadata: target.classification.provenance.metadata,
+					creation: target.classification.provenance.creation,
+					lifecycle: target.classification.provenance.lifecycle,
+					extensions: target.classification.provenance.extensions,
+					equipped: !!target.row.equipped,
+					attuned: shouldAttune,
+				},
+				request: {
+					version: 1,
+					operation,
+					itemId: target.row.id,
+					targetPlanSlotId,
+					resolvedItemUid: resolvedItem.itemUid,
+				},
+			};
+		}
+
+		return {ok: false, code: "unsupported-efa-tinker-operation", operation, actionType};
+	}
+
+	commitEfaArtificerTinkerTransaction (request = {}) {
+		const preview = this.previewEfaArtificerTinkerTransaction(request);
+		if (!preview.ok) return preview;
+		const snapshot = this.toJson();
+		try {
+			if (this.isInCombat() && !this.consumeActionType(preview.actionType)) {
+				throw new Error("action-economy-unavailable");
+			}
+
+			if (preview.operation === "tinkersMagic") {
+				this._data.efaArtificerTinker.tinkersMagicUsesSpent++;
+				const result = this.createGeneratedFeatureItem({
+					item: preview.item.item,
+					owner: CharacterSheetState.EFA_TINKERS_MAGIC_OWNER,
+					metadata: {
+						sourceFeatureUid: CharacterSheetState.EFA_TINKERS_MAGIC_FEATURE_UID,
+						temporary: true,
+					},
+					catalog: {
+						plan: {
+							slotId: null,
+							acquisitionLevel: 1,
+							lineage: null,
+							selection: {
+								name: preview.item.name,
+								displayName: preview.item.name,
+								source: preview.item.source,
+								planUid: preview.item.itemUid,
+								itemUid: preview.item.itemUid,
+							},
+						},
+						resolvedItem: {
+							itemUid: preview.item.itemUid,
+							name: preview.item.name,
+							source: preview.item.source,
+						},
+					},
+					lifecycle: {
+						version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+						state: "active",
+						deathExpiryDaysRemaining: null,
+						deathExpiryAssignedReceiptId: null,
+						callbacks: {
+							onLongRest: "remove",
+							onOwnerRemoved: "remove",
+						},
+						metadata: {},
+					},
+				});
+				if (!result.ok) throw new Error(result.code);
+				return {
+					ok: true,
+					code: "efa-tinker-committed",
+					operation: preview.operation,
+					created: {
+						itemId: result.itemId,
+						generatedItemId: result.generatedItemId,
+						itemUid: preview.item.itemUid,
+					},
+					uses: this.getEfaArtificerTinkerOptions().tinkersMagic.uses,
+				};
+			}
+
+			if (preview.operation === "charge") {
+				if (!this.useSpellSlot(preview.charge.paidSlotLevel)) throw new Error("charge-slot-unavailable");
+				const target = this._getEfaReplicateRowForTinker(preview.itemId);
+				if (!target.ok) throw new Error(target.code);
+				target.row.item.chargesCurrent = preview.charge.next;
+				return {
+					ok: true,
+					code: "efa-tinker-committed",
+					operation: preview.operation,
+					itemId: preview.itemId,
+					charge: preview.charge,
+				};
+			}
+
+			if (preview.operation === "drain") {
+				const target = this._getEfaReplicateRowForTinker(preview.itemId);
+				if (!target.ok) throw new Error(target.code);
+				this.removeItem(preview.itemId);
+				if (this._findInventoryRow(preview.itemId)) throw new Error("drain-item-removal-failed");
+				const modifierId = this.addNamedModifier({
+					name: CharacterSheetState.EFA_MAGIC_ITEM_TINKER_DRAIN_MODIFIER_NAME,
+					type: `spellSlots:${preview.drain.slotLevel}`,
+					value: 1,
+					note: "Temporary spell slot from Drain Magic Item.",
+					sourceFeatureId: CharacterSheetState.EFA_MAGIC_ITEM_TINKER_FEATURE_UID,
+					sourceType: "classFeatureTransaction",
+					sourceDecisionKey: CharacterSheetState.EFA_MAGIC_ITEM_TINKER_DRAIN_DECISION_KEY,
+				});
+				if (!modifierId) throw new Error("drain-slot-modifier-failed");
+				this._data.efaArtificerTinker.drainUsed = true;
+				this._data.efaArtificerTinker.drainSlotLevel = preview.drain.slotLevel;
+				this.calculateSpellSlots();
+				return {
+					ok: true,
+					code: "efa-tinker-committed",
+					operation: preview.operation,
+					itemId: preview.itemId,
+					drain: preview.drain,
+					modifierId,
+				};
+			}
+
+			if (preview.operation === "transmute") {
+				const target = this._getEfaReplicateRowForTinker(preview.itemId);
+				if (!target.ok) throw new Error(target.code);
+				this.removeItem(preview.itemId);
+				if (this._findInventoryRow(preview.itemId)) throw new Error("transmute-item-removal-failed");
+				const result = this.createGeneratedFeatureItem({
+					item: preview.transmute.resolvedItem.item,
+					owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+					metadata: preview.transmute.metadata,
+					catalog: preview.transmute.catalog,
+					creation: preview.transmute.creation,
+					lifecycle: preview.transmute.lifecycle,
+					extensions: preview.transmute.extensions,
+					equipped: preview.transmute.equipped,
+					attuned: preview.transmute.attuned,
+				});
+				if (!result.ok) throw new Error(result.code);
+				this._data.efaArtificerTinker.transmuteUsed = true;
+				return {
+					ok: true,
+					code: "efa-tinker-committed",
+					operation: preview.operation,
+					transmute: {
+						itemId: result.itemId,
+						generatedItemId: result.generatedItemId,
+						fromItemUid: preview.transmute.fromItemUid,
+						toItemUid: preview.transmute.toItemUid,
+						plan: preview.transmute.plan,
+					},
+				};
+			}
+
+			throw new Error("unsupported-efa-tinker-operation");
+		} catch (error) {
+			this._data = snapshot;
+			this._reapplyItemEffects();
+			return {
+				ok: false,
+				code: "efa-tinker-rolled-back",
+				operation: preview.operation,
+				message: error.message,
+			};
+		}
 	}
 
 	getEfaReplicateMagicItemLifecycleDescriptors ({extensions = []} = {}) {
@@ -90474,6 +91147,14 @@ class CharacterSheetState {
 		// College of Creation constructs are far shorter-lived than a long rest
 		// (proficiency-bonus hours for items, 1 hour for a Dancing Item).
 		this._clearCreationBardConstructs();
+
+		// Tinker's Magic creations vanish and its Intelligence-based use pool refills
+		// only when the long rest actually commits through this state transition.
+		this.removeGeneratedFeatureItemsByOwner(CharacterSheetState.EFA_TINKERS_MAGIC_OWNER);
+		this._data.efaArtificerTinker.tinkersMagicUsesSpent = 0;
+		this._clearEfaMagicItemTinkerDrainSlot();
+		this._data.efaArtificerTinker.drainUsed = false;
+		this._data.efaArtificerTinker.transmuteUsed = false;
 
 		// Lunar Sorcery: free lunar casts return, the shed moonlight goes out, and the
 		// phase becomes re-choosable for free.

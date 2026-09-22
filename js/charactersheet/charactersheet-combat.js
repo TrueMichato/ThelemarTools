@@ -8695,6 +8695,112 @@ class CharacterSheetCombat {
 	 * Render combat actions - race/class/feat abilities that use action economy
 	 * (e.g., Aggressive, Charge, Ram, Breath Weapon, Relentless Endurance, etc.)
 	 */
+	_renderEfaArtificerTinkerActions (container) {
+		const options = this._state.getEfaArtificerTinkerOptions?.();
+		if (!options || options.classLevel < 1) return 0;
+
+		const actionAvailable = !this._state.isInCombat() || this._state.isActionTypeAvailable("action");
+		const bonusAvailable = !this._state.isInCombat() || this._state.isActionTypeAvailable("bonus");
+		const hasChargeSlot = Array.from({length: 9}, (_, ix) => ix + 1)
+			.some(level => this._state.getSpellSlotsCurrent(level) > 0);
+		const chargedTargets = options.magicItemTinker.replicateItems.filter(item =>
+			Number(item.chargesMax) > 0 && Number(item.chargesCurrent) < Number(item.chargesMax),
+		);
+		const drainTargets = options.magicItemTinker.replicateItems.filter(item =>
+			["common", "uncommon", "rare"].includes(String(item.rarity || "").toLowerCase()),
+		);
+		const knownPlanCount = this._state.getEfaArtificerPlans?.().length || 0;
+
+		const rows = [{
+			name: "Tinker's Magic",
+			description: `${options.tinkersMagic.uses.remaining}/${options.tinkersMagic.uses.max} uses`,
+			actionKind: "action",
+			actionLabel: "Magic Action",
+			buttonLabel: "Create Item",
+			operation: "tinkersMagic",
+			disabled: !options.tinkersMagic.available || !actionAvailable,
+			title: !actionAvailable ? "Your Action has already been used this turn." : options.tinkersMagic.unavailableReason,
+		}];
+		if (options.classLevel >= 6) {
+			rows.push(
+				{
+					name: "Charge Magic Item",
+					description: "Spend one level 1+ spell slot; restore exactly that slot level in charges.",
+					actionKind: "bonus",
+					actionLabel: "Bonus Action",
+					buttonLabel: "Charge",
+					operation: "charge",
+					disabled: !chargedTargets.length || !hasChargeSlot || !bonusAvailable,
+					title: !bonusAvailable
+						? "Your Bonus Action has already been used this turn."
+						: !chargedTargets.length
+							? "No replicated charged item is missing charges."
+							: !hasChargeSlot
+								? "No level 1 or higher spell slot is available."
+								: null,
+				},
+				{
+					name: "Drain Magic Item",
+					description: options.magicItemTinker.drainAvailable ? "Destroy a replicated item to gain a temporary spell slot." : "Used until your next Long Rest.",
+					actionKind: "bonus",
+					actionLabel: "Bonus Action",
+					buttonLabel: "Drain",
+					operation: "drain",
+					disabled: !options.magicItemTinker.drainAvailable || !drainTargets.length || !bonusAvailable,
+					title: !bonusAvailable
+						? "Your Bonus Action has already been used this turn."
+						: !options.magicItemTinker.drainAvailable
+							? "Drain Magic Item has already been used since your last Long Rest."
+							: !drainTargets.length
+								? "No Common, Uncommon, or Rare replicated item is available."
+								: null,
+				},
+				{
+					name: "Transmute Magic Item",
+					description: options.magicItemTinker.transmuteAvailable ? "Replace a replicated item from another known plan." : "Used until your next Long Rest.",
+					actionKind: "action",
+					actionLabel: "Magic Action",
+					buttonLabel: "Transmute",
+					operation: "transmute",
+					disabled: !options.magicItemTinker.transmuteAvailable
+						|| !options.magicItemTinker.replicateItems.length
+						|| knownPlanCount < 2
+						|| !actionAvailable,
+					title: !actionAvailable
+						? "Your Action has already been used this turn."
+						: !options.magicItemTinker.transmuteAvailable
+							? "Transmute Magic Item has already been used since your last Long Rest."
+							: knownPlanCount < 2
+								? "Learn another Replicate Magic Item plan before transmuting."
+								: null,
+				},
+			);
+		}
+
+		for (const rowData of rows) {
+			const row = e_({outer: `
+				<div class="charsheet__combat-action-item charsheet__combat-action-item--efa-tinker">
+					<div class="charsheet__combat-action-header">
+						<span class="glyphicon glyphicon-wrench charsheet__combat-action-icon" aria-hidden="true"></span>
+						<span class="charsheet__combat-action-name">${rowData.name}</span>
+						<span class="badge badge-secondary">Artificer</span>
+						${csCombatActionChip(rowData.actionKind, {labelOverride: rowData.actionLabel})}
+						<span class="ve-small ve-muted">${rowData.description}</span>
+					</div>
+				</div>
+			`});
+			const button = e_({tag: "button", clazz: "ve-btn ve-btn-xs ve-btn-primary"});
+			button.type = "button";
+			button.textContent = rowData.buttonLabel;
+			button.disabled = rowData.disabled;
+			if (rowData.title) button.title = rowData.title;
+			button.addEventListener("click", () => this._page?._inventory?.pShowEfaArtificerTinker?.({operation: rowData.operation}));
+			row.append(button);
+			container.append(row);
+		}
+		return rows.length;
+	}
+
 	renderCombatActions () {
 		const container = document.getElementById("charsheet-combat-actions");
 		const section = document.getElementById("charsheet-combat-actions-section");
@@ -8858,15 +8964,17 @@ class CharacterSheetCombat {
 		// Get limited-use custom abilities
 		const customAbilities = this._state.getCustomAbilities?.() || [];
 		const limitedAbilities = customAbilities.filter(a => a.mode === "limited");
+		const hasEfaArtificerTinker = (this._state.getEfaArtificerTinkerOptions?.().classLevel || 0) >= 1;
 
 		// Hide section if no combat actions or custom abilities
-		if (!combatActions.length && !limitedAbilities.length) {
+		if (!combatActions.length && !limitedAbilities.length && !hasEfaArtificerTinker) {
 			section.style.display = "none";
 			return;
 		}
 
 		section.style.display = "";
 		container.innerHTML = "";
+		this._renderEfaArtificerTinkerActions(container);
 
 		// Render class/race/feat actions first
 		for (const feature of combatActions) {

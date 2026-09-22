@@ -846,6 +846,54 @@ Remaining Armorer work is limited to dedicated NPC/PDF export coverage and E2E
 coverage. Level-9 Armor Replication uses the shared source-qualified
 plan-extension and constrained generated-item-capacity contracts; it does not
 add an Armorer-specific persisted ledger.
+#### EFA Tinker's Magic and Magic Item Tinker
+
+Base `Artificer|EFA` item operations reuse ordinary inventory rows and the generated-item
+provenance system. They do not maintain a parallel feature ledger. The state API is:
+
+```javascript
+getEfaArtificerTinkerOptions();
+previewEfaArtificerTinkerTransaction(request);
+commitEfaArtificerTinkerTransaction(request);
+reconcileEfaArtificerTinker({reason});
+```
+
+Tinker's Magic creates distinct generated rows owned by
+`Tinker's Magic|Artificer|EFA|1` with independent `featureSource: "EFA"`.
+It resolves one exact item from the published 31-item `XPHB` list and uses the
+existing exact focus/proficiency pipeline for equipped `Tinker's Tools|XPHB`.
+Charge, Drain, and Transmute target only active rows owned by the exact
+`Replicate Magic Item|Artificer|EFA|2` owner.
+
+Every operation is previewed before commit. Commit snapshots `_data`, consumes
+combat action economy only when combat is active, mutates through normal APIs,
+and restores the snapshot on failure. Charge uses `useSpellSlot()` and writes a
+deterministic clamped `chargesCurrent`; Drain uses `removeItem()` plus an exact
+named `spellSlots:<level>` modifier; Transmute uses normal remove/create paths
+while preserving the old row's plan-independent provenance and lifecycle
+ordering. Container spill, item-effect teardown, capacity, attunement, and
+save/export behavior therefore stay shared with the rest of Inventory.
+
+The only additional persisted record is:
+
+```javascript
+efaArtificerTinker: {
+    version: 1,
+    tinkersMagicUsesSpent: 0,
+    drainUsed: false,
+    transmuteUsed: false,
+    drainSlotLevel: null,
+}
+```
+
+Older saves receive these defaults during load. Normalization rejects invalid
+Drain levels; reconciliation removes invalid or source-lost exact M4 state
+without touching unrelated items or modifiers. It recalculates a stale slot
+maximum even when the exact Drain modifier is missing, and an expended
+temporary slot is removed before ordinary class-slot expenditure is preserved.
+A committed long rest removes all exact-owner Tinker's creations, refills its
+Intelligence-based use pool, removes the temporary Drain slot, and resets
+Drain/Transmute use state.
 
 ### Active States & Conditions
 
