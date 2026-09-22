@@ -7236,6 +7236,10 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.companions)) return;
 		for (const c of this._data.companions) {
 			if (!c) continue;
+			// Generated ownership is an envelope-first classification. Never rewrite
+			// its type here; reconciliation must reject malformed compact records
+			// explicitly instead of converting them into generic custom companions.
+			if (CharacterSheetState._isGeneratedClassSummonRecord(c)) continue;
 			if (typeof c.type !== "string" || c.type.trim() === "") {
 				const {type, origin} = CharacterSheetState._normalizeCompanionType(c.type, c.origin);
 				c.type = type;
@@ -76292,8 +76296,7 @@ class CharacterSheetState {
 	static EFA_ELDRITCH_CANNON_MOBILITY = Object.freeze(["legs", "wheels"]);
 
 	static _isGeneratedClassSummonRecord (record) {
-		return record?.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
-			&& !!record.generatedClassSummon;
+		return !!record?.generatedClassSummon;
 	}
 
 	static _isSameClassSummonUid (a, b) {
@@ -76437,6 +76440,17 @@ class CharacterSheetState {
 				ok: false,
 				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
 				details: {metadataMissing: true},
+			};
+		}
+		if (record.type !== CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {
+					typeInvalid: true,
+					expectedType: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+					actualType: record.type ?? null,
+				},
 			};
 		}
 

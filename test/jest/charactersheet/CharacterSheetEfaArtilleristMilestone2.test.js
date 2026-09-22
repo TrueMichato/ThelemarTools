@@ -417,6 +417,92 @@ describe("EFA cannon reconciliation", () => {
 		]);
 	});
 
+	test.each([
+		["missing", undefined, null],
+		["incorrect", "custom", "custom"],
+	])("treats a generated record with %s type as compact before load reconciliation retires it", (label, recordType, expectedActualType) => {
+		const saved = makeState().toJson();
+		const malformed = makeRawCannon({id: `malformed-${label}`});
+		if (recordType === undefined) delete malformed.type;
+		else malformed.type = recordType;
+		saved.companions.push(malformed);
+
+		const restored = new CharacterSheetState();
+		restored.setClassSummonTemplateCatalog(objectData);
+		const reconcileClassSummons = restored.reconcileClassSummons.bind(restored);
+		let beforeReconcile = null;
+		restored.reconcileClassSummons = () => {
+			const previousDocument = globalThis.document;
+			const list = {innerHTML: ""};
+			globalThis.document = {
+				getElementById: id => id === "charsheet-companions-list" ? list : null,
+			};
+			const page = Object.create(CharacterSheetPage.prototype);
+			page._state = restored;
+			page._ensureBeastheartCompanionBonded = jest.fn();
+			page._renderCompanionButtons = jest.fn();
+			page._renderCompanionsOverviewIndicator = jest.fn();
+
+			let renderError = null;
+			try {
+				page._renderCompanions();
+			} catch (error) {
+				renderError = error;
+			} finally {
+				globalThis.document = previousDocument;
+			}
+
+			beforeReconcile = {
+				rawType: restored._data.companions.find(it => it.id === malformed.id)?.type,
+				companionIds: restored.getCompanions().map(it => it.id),
+				activeCompanionIds: restored.getActiveCompanions().map(it => it.id),
+				direct: restored.getCompanion(malformed.id),
+				conditions: restored.getCompanionConditions(malformed.id),
+				initiative: restored.getCompanionInitiative(malformed.id),
+				damage: restored.damageCompanion(malformed.id, 5),
+				removed: restored.removeCompanion(malformed.id),
+				renderError,
+				renderHtml: list.innerHTML,
+			};
+			return reconcileClassSummons();
+		};
+
+		restored.loadFromJson(saved);
+
+		expect(beforeReconcile).toMatchObject({
+			rawType: recordType,
+			companionIds: [],
+			activeCompanionIds: [],
+			direct: null,
+			conditions: [],
+			initiative: 0,
+			damage: {
+				remaining: 0,
+				tempAbsorbed: 0,
+				hpLost: 0,
+				droppedToZero: false,
+			},
+			removed: false,
+			renderError: null,
+		});
+		expect(beforeReconcile.renderHtml).toContain("No active companions");
+		expect(beforeReconcile.renderHtml).not.toContain("Eldritch Cannon");
+		expect(restored.getLastClassSummonReconciliationResults()).toEqual([
+			expect.objectContaining({
+				instanceId: malformed.id,
+				action: "retired",
+				reason: "invalidState",
+				details: {
+					typeInvalid: true,
+					expectedType: "class_summon",
+					actualType: expectedActualType,
+				},
+			}),
+		]);
+		expect(restored.toJson().companions).toEqual([]);
+		expect(restored.getCompanions()).toEqual([]);
+	});
+
 	test("retires missing owners and stale slot 1 below level 15 while preserving slot 0", () => {
 		const noOwner = new CharacterSheetState();
 		noOwner.setClassSummonTemplateCatalog(objectData);
