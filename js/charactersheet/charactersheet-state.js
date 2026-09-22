@@ -23298,14 +23298,24 @@ class CharacterSheetState {
 			|| (isFixedProficiencyFallback && !choice.options.length)) return false;
 		if (!this._data.pendingFeatureChoices) this._data.pendingFeatureChoices = [];
 
-		const sig = this._featureChoiceSignature(choice);
-		const exists = this._data.pendingFeatureChoices.some(c => this._featureChoiceSignature(c) === sig);
-		if (exists) return false;
-
 		const feature = this._data.features?.find(feature =>
 			(choice.featureId && feature.id === choice.featureId)
 			|| (!choice.featureId && feature.name === choice.featureName));
 		const characterLevel = choice.characterLevel ?? feature?.characterLevel ?? null;
+		const sig = this._featureChoiceSignature(choice);
+		const existing = this._data.pendingFeatureChoices.find(c => this._featureChoiceSignature(c) === sig);
+		if (existing) {
+			if (existing.characterLevel == null && characterLevel != null) existing.characterLevel = characterLevel;
+			if (isFixedProficiencyFallback) {
+				existing.featureUid = choice.featureUid;
+				existing.fixedProficiencyFallbackOwnerUid = choice.fixedProficiencyFallbackOwnerUid;
+				existing.sourceDecisionKey = choice.sourceDecisionKey || existing.sourceDecisionKey;
+				existing.acquisitionKey = choice.acquisitionKey || choice.featureUid;
+				existing.sourcePath = choice.sourcePath || choice.featureUid;
+			}
+			return false;
+		}
+
 		this._data.pendingFeatureChoices.push({
 			id: CryptUtil.uid(),
 			featureName: choice.featureName,
