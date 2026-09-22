@@ -1382,57 +1382,252 @@ class CharacterSheetPdf {
 		const companions = this._state.getCompanions?.() || [];
 		if (!companions.length) return "";
 
-		const blocks = companions.map(comp => {
-			const name = this._esc(comp.name || "Companion");
-			const type = this._esc(comp.creatureType || "creature");
-			const size = this._esc(comp.size || "M");
-			const ac = comp.ac ?? "—";
-			const hpMax = comp.hp?.max ?? "—";
-			const hpCurrent = comp.hp?.current ?? hpMax;
-
-			// Abilities
-			const abilityRow = ABILITIES.map(ab => {
-				const score = comp.abilities?.[ab] ?? 10;
-				const mod = Math.floor((score - 10) / 2);
-				return `<td>${score} (${this._fmtMod(mod)})</td>`;
-			}).join("");
-
-			// Speed
-			const speeds = comp.speed || {};
-			const speedParts = [];
-			if (speeds.walk) speedParts.push(`${speeds.walk} ft.`);
-			if (speeds.fly) speedParts.push(`fly ${speeds.fly} ft.`);
-			if (speeds.swim) speedParts.push(`swim ${speeds.swim} ft.`);
-			if (speeds.climb) speedParts.push(`climb ${speeds.climb} ft.`);
-			if (speeds.burrow) speedParts.push(`burrow ${speeds.burrow} ft.`);
-			const speedStr = speedParts.join(", ") || "30 ft.";
-
-			// Traits/Actions — entries may be strings or nested objects
-			const traitText = (entry) => this._esc(entry.description || this._flattenEntries(entry.entries) || "");
-			const traits = (comp.traits || []).map(t => `<div class="pdf-comp__trait"><strong>${this._esc(t.name || "")}</strong> ${traitText(t)}</div>`).join("");
-			const actions = (comp.actions || []).map(a => `<div class="pdf-comp__trait"><strong>${this._esc(a.name || "")}</strong> ${traitText(a)}</div>`).join("");
-
-			return `<div class="pdf-companion">
-				<div class="pdf-companion__header">
-					<span class="pdf-companion__name">${name}</span>
-					<span class="pdf-companion__type">${size} ${type}</span>
-				</div>
-				<div class="pdf-companion__stats">
-					<div><strong>AC</strong> ${ac} &nbsp; <strong>HP</strong> ${hpCurrent}/${hpMax} &nbsp; <strong>Speed</strong> ${speedStr}</div>
-				</div>
-				<table class="pdf-table pdf-table--comp-abilities">
-					<thead><tr><th>STR</th><th>DEX</th><th>CON</th><th>INT</th><th>WIS</th><th>CHA</th></tr></thead>
-					<tbody><tr>${abilityRow}</tr></tbody>
-				</table>
-				${traits ? `<div class="pdf-comp__section"><strong>Traits</strong>${traits}</div>` : ""}
-				${actions ? `<div class="pdf-comp__section"><strong>Actions</strong>${actions}</div>` : ""}
-			</div>`;
-		}).join("\n");
+		const blocks = companions
+			.map(companion => this._renderCompanionBlock(this._getCompanionPdfPresentation(companion)))
+			.join("\n");
 
 		return `<div class="pdf-section pdf-section--companions">
 			<h3 class="pdf-section__title">Companions</h3>
 			${blocks}
 		</div>`;
+	}
+
+	_getCompanionPdfPresentation (companion) {
+		const efaResolved = this._getExactEfaSteelDefenderResolution(companion);
+		if (efaResolved) return this._getEfaSteelDefenderPdfPresentation(companion, efaResolved);
+
+		return {
+			kind: "generic",
+			name: companion.name || "Companion",
+			identity: null,
+			type: companion.creatureType || "creature",
+			size: Array.isArray(companion.size) ? companion.size.join("/") : (companion.size || "M"),
+			ac: companion.ac ?? "—",
+			hpMax: companion.hp?.max ?? "—",
+			hpCurrent: companion.hp?.current ?? companion.hp?.max ?? "—",
+			speed: this._getCompanionSpeedString(companion),
+			abilities: companion.abilities || {},
+			metaRows: [],
+			resourceRows: [],
+			notes: [],
+			traits: companion.traits || [],
+			actions: companion.actions || [],
+			reactions: companion.reactions || [],
+		};
+	}
+
+	_getExactEfaSteelDefenderResolution (companion) {
+		const exactOwnerUid = this._state.constructor?.EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER;
+		const normalizedOwnerUid = String(exactOwnerUid || "").toLowerCase();
+		if (
+			!normalizedOwnerUid
+			|| String(companion?.featureGrant?.uid || "").toLowerCase() !== normalizedOwnerUid
+			|| String(companion?.scaling?.featureUid || "").toLowerCase() !== normalizedOwnerUid
+			|| companion?.scaling?.kind !== "featureCompanion"
+		) return null;
+
+		const resolved = companion.scaling?.resolved;
+		if (
+			String(resolved?.identity?.source || "").toUpperCase() !== "EFA"
+			|| String(resolved?.identity?.companionUid || "").toLowerCase() !== "steel defender|efa"
+		) return null;
+		return resolved;
+	}
+
+	_getEfaSteelDefenderPdfPresentation (companion, resolved) {
+		const statistics = resolved.statistics || {};
+		const saveAbilities = Object.keys(statistics.savingThrows || {});
+		const skillNames = statistics.proficiencyPolicy?.abilityChecks === "all"
+			? SKILLS.map(skill => skill.name)
+			: Object.keys(statistics.skills || {});
+		const saves = saveAbilities
+			.map(ability => `${ABILITY_ABBR[ability] || ability.toUpperCase()} ${this._fmtMod(this._state.getCompanionSaveMod?.(companion.id, ability) ?? statistics.savingThrows[ability])}`)
+			.join(", ");
+		const skills = skillNames
+			.map(skill => `${skill} ${this._fmtMod(this._state.getCompanionSkillMod?.(companion.id, skill) ?? 0)}`)
+			.join(", ");
+		const senses = [
+			...(companion.senses || []),
+			companion.passive != null ? `passive Perception ${companion.passive}` : null,
+		].filter(Boolean).join(", ");
+		const immunities = (companion.immunities || statistics.damageImmunities || []).join(", ");
+		const conditionImmunities = (companion.conditionImmunities || statistics.conditionImmunities || []).join(", ");
+		const repairUses = companion.uses?.repair || {};
+		const hitDice = companion.hitDice || {};
+		const rend = resolved.actions?.forceEmpoweredRend;
+		const repair = resolved.actions?.repair;
+		const deflect = resolved.reactions?.deflectAttack;
+		const arcaneJolt = resolved.arcaneJolt?.available ? this._state.getEfaArcaneJoltStatus?.() : null;
+
+		const setupRows = [];
+		if (companion.setup?.appearance) setupRows.push(["Appearance", companion.setup.appearance]);
+		if (companion.setup?.locomotion) {
+			setupRows.push(["Body", companion.setup.locomotion === "fourLegs" ? "Four legs" : "Two legs"]);
+		}
+
+		const resourceRows = [];
+		if (hitDice.max != null) resourceRows.push(["Hit Dice", `${hitDice.current ?? 0}/${hitDice.max} ${hitDice.die || ""}`.trim()]);
+		if (repairUses.max != null) resourceRows.push(["Repair", `${repairUses.current ?? 0}/${repairUses.max} uses; Long Rest recharge`]);
+		if (arcaneJolt?.resource) {
+			resourceRows.push([
+				"Arcane Jolt",
+				`${arcaneJolt.resource.current}/${arcaneJolt.resource.max} uses; ${arcaneJolt.damageDice || resolved.arcaneJolt.damage?.dice} force damage or healing; healing recipient within ${arcaneJolt.healingRangeFeet || resolved.arcaneJolt.healing?.rangeFeet} ft. of the target; once per turn; Long Rest recharge`,
+			]);
+		}
+
+		const actions = [];
+		if (rend) {
+			actions.push({
+				name: rend.name,
+				description: `Melee Weapon Attack: ${this._fmtMod(rend.attackBonus)} to hit, reach ${rend.reachFeet} ft., one target. Hit: ${this._formatCompanionDice(rend.damage)} ${rend.damage.type} damage.`,
+			});
+		}
+		if (repair) {
+			actions.push({
+				name: repair.name,
+				description: `Restores ${this._formatCompanionDice(repair.healing)} HP to itself, a Construct, or an object within ${repair.rangeFeet} ft.; ${repairUses.current ?? 0}/${repairUses.max ?? repair.uses?.max ?? 0} uses remaining.`,
+			});
+		}
+
+		const reactions = [];
+		if (deflect) {
+			const improved = deflect.improvedDamage
+				? ` Improved Deflection: the attacker takes ${this._formatCompanionDice(deflect.improvedDamage)} ${deflect.improvedDamage.type} damage.`
+				: "";
+			reactions.push({
+				name: deflect.name,
+				description: `When a visible attacker within ${deflect.rangeFeet} ft. attacks a creature other than the defender, the attack roll has ${deflect.effect?.attackRollMode || "disadvantage"}.${improved}`,
+			});
+		}
+
+		return {
+			kind: "efa-steel-defender",
+			name: companion.customName || resolved.identity.name,
+			identity: `${resolved.identity.name} • ${resolved.identity.source}`,
+			type: statistics.creatureType || companion.creatureType || "construct",
+			size: Array.isArray(statistics.size) ? statistics.size.join("/") : (companion.size || "M"),
+			ac: companion.ac ?? statistics.ac ?? "—",
+			hpMax: companion.hp?.max ?? statistics.maxHp ?? "—",
+			hpCurrent: companion.hp?.current ?? companion.hp?.max ?? statistics.maxHp ?? "—",
+			speed: this._getCompanionSpeedString(companion),
+			abilities: statistics.abilityScores || companion.abilities || {},
+			metaRows: [
+				...setupRows,
+				["Saving Throws", saves],
+				["Skills", skills],
+				["Senses", senses],
+				["Damage Immunities", immunities],
+				["Condition Immunities", conditionImmunities],
+				["Languages", this._getEfaSteelDefenderLanguages(resolved)],
+			].filter(([, value]) => value),
+			resourceRows,
+			notes: this._getFeatureCompanionCommandNotes(resolved.commandPolicy),
+			traits: companion.traits || [],
+			actions,
+			reactions,
+		};
+	}
+
+	_renderCompanionBlock (presentation) {
+		const abilityRow = ABILITIES.map(ability => {
+			const score = Number(presentation.abilities?.[ability] ?? 10);
+			const modifier = Math.floor((score - 10) / 2);
+			return `<td>${score} (${this._fmtMod(modifier)})</td>`;
+		}).join("");
+		const renderRows = (rows, className) => rows.length
+			? `<div class="${className}">${rows.map(([label, value]) => `<div><strong>${this._esc(label)}</strong> ${this._esc(value)}</div>`).join("")}</div>`
+			: "";
+		const renderEntries = entries => (entries || [])
+			.map(entry => `<div class="pdf-comp__trait"><strong>${this._esc(entry?.name || "")}</strong> ${this._esc(this._getCompanionEntryText(entry))}</div>`)
+			.join("");
+		const traits = renderEntries(presentation.traits);
+		const actions = renderEntries(presentation.actions);
+		const reactions = renderEntries(presentation.reactions);
+		const notes = presentation.notes?.length
+			? `<div class="pdf-comp__notes"><strong>Command &amp; Action Economy</strong><ul>${presentation.notes.map(note => `<li>${this._esc(note)}</li>`).join("")}</ul></div>`
+			: "";
+
+		return `<div class="pdf-companion${presentation.kind === "efa-steel-defender" ? " pdf-companion--efa-steel-defender" : ""}">
+				<div class="pdf-companion__header">
+					<div>
+						<span class="pdf-companion__name">${this._esc(presentation.name)}</span>
+						${presentation.identity ? `<span class="pdf-companion__identity">${this._esc(presentation.identity)}</span>` : ""}
+					</div>
+					<span class="pdf-companion__type">${this._esc(presentation.size)} ${this._esc(presentation.type)}</span>
+				</div>
+				<div class="pdf-companion__stats">
+					<div><strong>AC</strong> ${this._esc(presentation.ac)} &nbsp; <strong>HP</strong> ${this._esc(presentation.hpCurrent)}/${this._esc(presentation.hpMax)} &nbsp; <strong>Speed</strong> ${this._esc(presentation.speed)}</div>
+				</div>
+				<table class="pdf-table pdf-table--comp-abilities">
+					<thead><tr><th>STR</th><th>DEX</th><th>CON</th><th>INT</th><th>WIS</th><th>CHA</th></tr></thead>
+					<tbody><tr>${abilityRow}</tr></tbody>
+				</table>
+				${renderRows(presentation.metaRows, "pdf-comp__details")}
+				${renderRows(presentation.resourceRows, "pdf-comp__resources")}
+				${notes}
+				${traits ? `<div class="pdf-comp__section"><strong>Traits</strong>${traits}</div>` : ""}
+				${actions ? `<div class="pdf-comp__section"><strong>Actions</strong>${actions}</div>` : ""}
+				${reactions ? `<div class="pdf-comp__section pdf-comp__section--reactions"><strong>Reactions</strong>${reactions}</div>` : ""}
+			</div>`;
+	}
+
+	_getCompanionEntryText (entry) {
+		if (typeof entry === "string") return entry;
+		if (!entry || typeof entry !== "object") return "";
+		if (typeof entry.description === "string") return entry.description;
+		return this._flattenEntries(entry.entries);
+	}
+
+	_getCompanionSpeedString (companion) {
+		const speeds = companion?.speed || {};
+		const speedParts = [];
+		if (speeds.walk) speedParts.push(`${speeds.walk} ft.`);
+		for (const speedType of ["fly", "swim", "climb", "burrow"]) {
+			if (speeds[speedType]) speedParts.push(`${speedType} ${speeds[speedType]} ft.`);
+		}
+		return speedParts.join(", ") || "—";
+	}
+
+	_formatCompanionDice (value) {
+		const dice = String(value?.dice || "0");
+		const flat = Number(value?.flat) || 0;
+		return `${dice}${flat ? ` ${flat >= 0 ? "+" : "-"} ${Math.abs(flat)}` : ""}`;
+	}
+
+	_getEfaSteelDefenderLanguages (resolved) {
+		const languages = resolved.statistics?.languages || {};
+		let understood = "the languages you know";
+		if (languages.understands === "summonerKnownLanguages") {
+			const known = this._state.getLanguages?.() || [];
+			if (known.length) understood = known.join(", ");
+		}
+		return `Understands ${understood}${languages.canSpeak === false ? "; can't speak" : ""}`;
+	}
+
+	_getFeatureCompanionCommandNotes (commandPolicy) {
+		if (!commandPolicy) return [];
+		const notes = [];
+		if (commandPolicy.turnTiming === "duringSummonerTurn") notes.push("Acts during your turn.");
+		if (commandPolicy.movement === "autonomous" || commandPolicy.reaction === "autonomous") {
+			const autonomous = [
+				commandPolicy.movement === "autonomous" ? "move" : null,
+				commandPolicy.reaction === "autonomous" ? "use its reaction" : null,
+			].filter(Boolean).join(" and ");
+			notes.push(`Can ${autonomous} on its own.`);
+		}
+		if (commandPolicy.defaultAction) {
+			notes.push(`Without a command, its action is ${String(commandPolicy.defaultAction).toTitleCase?.() || commandPolicy.defaultAction}.`);
+		}
+		for (const method of commandPolicy.commandMethods || []) {
+			if (method.cost === "bonusAction") notes.push("Your Bonus Action can command it to take another action.");
+			if (method.cost === "replaceOneAttack" && method.permits === "forceEmpoweredRend") {
+				notes.push("You can forgo one Attack-action attack to command Force-Empowered Rend.");
+			}
+		}
+		if (commandPolicy.whileSummonerIncapacitated?.actsAutonomously) {
+			notes.push("While you are incapacitated, it acts on its own without the Dodge-only restriction.");
+		}
+		return notes;
 	}
 
 	// endregion
@@ -2631,6 +2826,14 @@ word-break: break-word;
 	color: #58180d;
 }
 
+.pdf-companion__identity {
+	display: block;
+	margin-top: 1px;
+	font-size: 7pt;
+	font-weight: 600;
+	opacity: 0.75;
+}
+
 .pdf-companion__type {
 	font-size: 7.5pt;
 	font-style: italic;
@@ -2645,6 +2848,34 @@ word-break: break-word;
 .pdf-comp__section {
 	margin-top: 4px;
 	font-size: 7.5pt;
+}
+
+.pdf-comp__details,
+.pdf-comp__resources,
+.pdf-comp__notes {
+	margin-top: 4px;
+	padding-top: 3px;
+	border-top: 0.5px solid #e0d5b7;
+	font-size: 7.5pt;
+}
+
+.pdf-comp__details > div,
+.pdf-comp__resources > div {
+	margin-bottom: 2px;
+}
+
+.pdf-comp__notes ul {
+	margin: 2px 0 0 16px;
+	padding: 0;
+}
+
+.pdf-comp__notes li {
+	margin-bottom: 1px;
+}
+
+.pdf-comp__section--reactions {
+	border-top: 0.5px solid #e0d5b7;
+	padding-top: 3px;
 }
 
 .pdf-comp__trait {

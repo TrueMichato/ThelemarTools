@@ -442,8 +442,15 @@ to the companion operation result or duplicate the companion receipt store.
 Battle Ready weapon substitution uses the shared item classifier and attack
 identity described in `06-combat-system.md`.
 
-Death/revival/replacement transitions, PDF/export, and E2E remain outside this
-milestone.
+The print/PDF renderer recognizes the exact source-qualified EFA owner and reads
+the reconciled `scaling.resolved` overlay plus public State APIs. It presents the
+chosen name/appearance/body shape, resolved statistics, saves/skills, defenses,
+Hit Dice, Repair, actions, reactions, command policy, Arcane Jolt tracker, and
+Improved Deflection without copying companion formulas or persisted derived
+values. TCE, RHW, name-only, and generic companions stay on the generic PDF path.
+
+Death/revival/replacement transitions and E2E remain outside this milestone.
+The PDF does not infer or display lifecycle state that State does not model.
 
 The Reanimated Companion R4a boundary is creation/setup and persisted derived
 state only. It does not execute command/default Dodge/Bonus Action behavior,
