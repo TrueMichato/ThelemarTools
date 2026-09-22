@@ -167,6 +167,16 @@ class CharacterSheetClassUtils {
 			&& Number(feature?.level) === 3;
 	}
 
+	static isExactEfaExperimentalElixir (feature) {
+		return `${feature?.name || ""}`.toLowerCase() === "experimental elixir"
+			&& `${feature?.source || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.className || ""}`.toLowerCase() === "artificer"
+			&& `${feature?.classSource || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.subclassShortName || feature?.subclassName || ""}`.toLowerCase() === "alchemist"
+			&& `${feature?.subclassSource || ""}`.toUpperCase() === "EFA"
+			&& Number(feature?.level) === 3;
+	}
+
 	static _isSameFeatureIdentity (a, b) {
 		const norm = value => `${value || ""}`.trim().toLowerCase();
 		return norm(a?.name) === norm(b?.name)

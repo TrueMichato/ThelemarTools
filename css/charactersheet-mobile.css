@@ -2424,6 +2424,34 @@
 		color: var(--cs-warning);
 		font-weight: 600;
 	}
+
+	.charsheet__efa-elixir-create,
+	.charsheet__efa-elixir-consume,
+	.charsheet__efa-elixir-modal-actions,
+	.charsheet__efa-elixir-modal-actions > button {
+		width: 100%;
+	}
+
+	.charsheet__efa-elixir-modal-actions {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.charsheet__efa-elixir-rest-roll {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.charsheet__efa-elixir-choice {
+		grid-template-columns: auto minmax(0, 1fr);
+	}
+
+	.charsheet__efa-elixir-field .form-control,
+	.charsheet__efa-elixir-rest .form-control,
+	.charsheet__efa-elixir-handoff {
+		width: 100%;
+		min-width: 0;
+		font-size: max(1rem, var(--cs-text-base, 1rem));
+	}
 }
 
 @media (pointer: coarse) {

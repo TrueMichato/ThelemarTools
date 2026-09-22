@@ -3,6 +3,7 @@
  * Handles items, equipment, currency, and encumbrance
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetEfaExperimentalElixirUi} from "./charactersheet-efa-experimental-elixir-ui.js";
 import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
@@ -455,6 +456,17 @@ class CharacterSheetInventory {
 			if (e.target.closest(".charsheet__item-use")) {
 				const itemId = _getItemId(e.target);
 				if (itemId) this._useConsumable(itemId);
+				return;
+			}
+			if (e.target.closest(".charsheet__efa-elixir-consume")) {
+				const itemId = _getItemId(e.target);
+				if (itemId) {
+					CharacterSheetEfaExperimentalElixirUi.pShowConsumeModal({
+						state: this._state,
+						page: this._page,
+						itemId,
+					});
+				}
 				return;
 			}
 			if (e.target.closest(".charsheet__item-artifact-config")) {
@@ -7765,6 +7777,9 @@ class CharacterSheetInventory {
 	}
 
 	_renderItemRow (item) {
+		const efaExperimentalElixir = this._state.classifyEfaExperimentalElixir?.(item);
+		const isEfaExperimentalElixir = ["valid", "stale"].includes(efaExperimentalElixir?.status);
+		const efaExperimentalElixirMetadata = efaExperimentalElixir?.metadata;
 		const typeTag = this._getItemTypeTagFromStoredType(item.type);
 		const canEquip = CharacterSheetInventory.canEquipItem(item);
 		const hasAttunementGemstone = item.socketedGemstones?.some(gem => CharacterSheetUpgrades?.getGemstoneDescriptor?.(gem)?.requiresAttunement);
@@ -7809,7 +7824,7 @@ class CharacterSheetInventory {
 		// which meant a `"P|DMG"` potion, a lowercase type, a poison, or anything name-matched was
 		// listed on the Consumables tab and then offered no way to consume it — the same strictness
 		// already fixed in the *dispatch* path but left behind here.
-		const isConsumable = this._isConsumable(item);
+		const isConsumable = !isEfaExperimentalElixir && this._isConsumable(item);
 		const isArtifact = item.rarity === "artifact";
 		const artifactNeedsConfig = isArtifact && item.artifactProperties?.hasRequirements && !this._state.isArtifactFullyConfigured(item.id);
 		const hasSpellward = !!(item.spellImmunitySlots?.count);
@@ -7860,6 +7875,9 @@ class CharacterSheetInventory {
 				generatedClassification.status === "valid"
 				&& generatedProvenance?.lifecycle?.state === "unresolved"
 			);
+		const generatedRepairReason = efaExperimentalElixir?.status === "stale"
+			? `Experimental Elixir: ${CharacterSheetEfaExperimentalElixirUi.formatRepairReason(efaExperimentalElixir.reason)}.`
+			: "Generated-item provenance or catalog resolution needs repair.";
 		const generatedFeatureLabel = generatedProvenance?.metadata?.sourceFeatureUid
 			? String(generatedProvenance.metadata.sourceFeatureUid).split("|")[0]
 			: "Generated feature item";
@@ -7945,7 +7963,7 @@ class CharacterSheetInventory {
 							${generatedProvenance ? `<span class="badge badge-warning ve-small" title="Temporary item created by ${generatedFeatureLabel.replace(/"/g, "&quot;")}${generatedFeatureSource ? ` (${generatedFeatureSource.replace(/"/g, "&quot;")})` : ""}">⌛ Temporary</span>` : ""}
 							${generatedPlan ? `<span class="badge badge-info ve-small" title="Known plan: ${String(generatedPlan.name || generatedPlan.displayName || "").replace(/"/g, "&quot;")} (${String(generatedPlan.source || "").replace(/"/g, "&quot;")})">Plan: ${String(generatedPlan.displayName || generatedPlan.name || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>` : ""}
 							${generatedOrder ? `<span class="ve-muted ve-small" title="Stable generated-item creation order">Created #${generatedOrder}</span>` : ""}
-							${generatedRepairRequired ? `<span class="badge badge-danger ve-small" title="Generated-item provenance or catalog resolution needs repair. The item remains in inventory; edit, delete, or restore its exact catalog source.">Repair required</span>` : ""}
+							${generatedRepairRequired ? `<span class="badge badge-danger ve-small" title="${generatedRepairReason.replace(/"/g, "&quot;")} The item remains in inventory; use the shared generated-item edit/delete/restore controls.">Repair required</span>` : ""}
 							${spellStorage ? `<span class="badge ${spellStorageRepair || spellStorageExpired ? "badge-danger" : "badge-info"} ve-small" title="${spellStorageRepair ? `Spell storage needs repair: ${(spellStorage.repair?.reasons || []).join(", ") || "unresolved identity"}` : spellStorageExpired ? `Spell-Storing Item: ${spellStorage.spell.name} has no uses remaining` : `Spell-Storing Item: ${spellStorage.spell.name} (${spellStorage.usesCurrent}/${spellStorage.usesMax} uses)`}">${spellStorageRepair ? "Storage repair required" : spellStorageExpired ? "Storage depleted" : `Stored: ${String(spellStorage.spell.name || "Spell").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`}</span>` : ""}
 							${isVariantComponent ? `<span class="badge badge-info ve-small" title="Variant Spell Component — can enhance matching spells when cast">🧪 Component</span>` : ""}
 							${isArtifact ? `<span class="badge badge-danger ve-small" title="Artifact">⚗️ Artifact</span>` : item.rarity && !["none", "unknown", "unknown (magic)", "varies"].includes(item.rarity.toLowerCase()) ? `<span class="badge badge-info ve-small">${item.rarity.toTitleCase()}</span>` : ""}
@@ -7964,6 +7982,13 @@ class CharacterSheetInventory {
 	}</span>` : ""}
 						${item.regeneration ? `<span class="ve-small text-success" title="${(item.regeneration.condition || item.regeneration.note || "Start of turn").replace(/"/g, "&quot;")}">♥ Regen ${item.regeneration.value ?? item.regeneration.amount ?? item.regeneration.hp}/turn</span>` : ""}
 						${propertiesStr ? `<span class="ve-small ve-muted" title="Properties">${propertiesStr}</span>` : ""}
+						${efaExperimentalElixir?.status === "valid" ? `
+							<span class="ve-small charsheet__efa-elixir-item-status">
+								<strong>${CharacterSheetEfaExperimentalElixirUi.getEffectLabel(efaExperimentalElixirMetadata.effectKey)}</strong>
+								${CharacterSheetEfaExperimentalElixirUi.formatMetadataEffect(efaExperimentalElixirMetadata, this._state)}
+								${CharacterSheetEfaExperimentalElixirUi.formatOrigin(efaExperimentalElixirMetadata)}
+							</span>
+						` : ""}
 						${masteryStr ? `<span class="ve-small text-info" title="Mastery">⚔ ${masteryStr}</span>` : ""}
 						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
 						${packProvenanceName ? `<span class="ve-small ve-muted" title="${item._fromPack.replace(/"/g, "&quot;")}">From ${packProvenanceName}</span>` : ""}
@@ -8100,6 +8125,11 @@ class CharacterSheetInventory {
 						${isConsumable ? `
 							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__item-use" title="Use ${item.name}">
 								<span class="glyphicon glyphicon-play"></span> Use
+							</button>
+						` : ""}
+						${efaExperimentalElixir?.status === "valid" ? `
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-primary charsheet__efa-elixir-consume" data-efa-elixir-consume="${item.id}" title="Drink this vial or administer it to a creature within 5 feet">
+								Drink / Administer
 							</button>
 						` : ""}
 						${isArtifact ? `

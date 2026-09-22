@@ -57563,47 +57563,60 @@ class CharacterSheetState {
 	}
 
 	recoverResources (rechargeType) {
+		const recoveredFeatureIds = new Set();
 		this._data.resources.forEach(r => {
+			let current = null;
 			if (rechargeType === "short" && r.shortRestRecovery) {
-				r.current = Math.min(r.max, r.current + r.shortRestRecovery);
+				current = Math.min(r.max, r.current + r.shortRestRecovery);
 			} else if (r.recharge === rechargeType || (rechargeType === "long" && r.recharge === "short")) {
-				r.current = r.max;
-				if (rechargeType === "long" && r.featureUid === CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature) {
-					r.metadata = {
-						...(r.metadata || {}),
-						efaGiantStature: {
-							version: 1,
-							spentUses: 0,
-						},
-					};
-				}
-				if (rechargeType === "long" && this._isEfaPerfectedArmorResource(r)) {
-					r.metadata = {
-						...(r.metadata || {}),
-						efaPerfectedArmor: {
-							...(r.metadata?.efaPerfectedArmor || {}),
-							version: 1,
-							spentUses: 0,
-						},
-					};
-				}
-				if (this._isEfaArcaneJoltResource(r)) r.spentUses = 0;
+				current = r.max;
 			}
-			if (this._isEfaArcaneJoltResource(r)) this._syncEfaArcaneJoltFeatureUses(r);
+			if (current == null) return;
+			if (r.id) this.setResourceCurrent(r.id, current);
+			else r.current = current;
+			if (rechargeType === "long" && r.featureUid === CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature) {
+				r.metadata = {
+					...(r.metadata || {}),
+					efaGiantStature: {
+						version: 1,
+						spentUses: 0,
+					},
+				};
+			}
+			if (rechargeType === "long" && this._isEfaPerfectedArmorResource(r)) {
+				r.metadata = {
+					...(r.metadata || {}),
+					efaPerfectedArmor: {
+						...(r.metadata?.efaPerfectedArmor || {}),
+						version: 1,
+						spentUses: 0,
+					},
+				};
+			}
+			if (this._isEfaArcaneJoltResource(r)) {
+				r.spentUses = 0;
+				this._syncEfaArcaneJoltFeatureUses(r);
+			}
+			if (r.featureId) recoveredFeatureIds.add(r.featureId);
+		});
+		return recoveredFeatureIds;
+	}
+
+	recoverFeatureUses (rechargeType, {recoveredFeatureIds = null} = {}) {
+		(this._data.features || []).forEach(feature => {
+			if (!feature.uses) return;
+			if (recoveredFeatureIds?.has(feature.id)) return;
+			if (rechargeType === "short" && feature.uses.shortRestRecovery) {
+				feature.uses.current = Math.min(feature.uses.max, feature.uses.current + feature.uses.shortRestRecovery);
+			} else if (
+				feature.uses.recharge === rechargeType
+				|| (rechargeType === "long" && feature.uses.recharge === "short")
+			) {
+				feature.uses.current = feature.uses.max;
+			}
 		});
 
-		// Also recover feature uses directly
-		this._data.features.forEach(f => {
-			if (f.uses) {
-				if (rechargeType === "short" && f.uses.shortRestRecovery) {
-					f.uses.current = Math.min(f.uses.max, f.uses.current + f.uses.shortRestRecovery);
-				} else if (f.uses.recharge === rechargeType || (rechargeType === "long" && f.uses.recharge === "short")) {
-					f.uses.current = f.uses.max;
-				}
-			}
-		});
-
-		// And feat uses
+		// Feat use pools are not mirrored by class resources.
 		this._data.feats?.forEach(f => {
 			if (f.uses) {
 				if (f.uses.recharge === rechargeType || (rechargeType === "long" && f.uses.recharge === "short")) {
@@ -92682,7 +92695,8 @@ class CharacterSheetState {
 		this.resetTurnEconomy({round: null});
 
 		// Recover short rest resources (includes Ki/Focus Points)
-		this.recoverResources("short");
+		const recoveredFeatureIds = this.recoverResources("short");
+		this.recoverFeatureUses("short", {recoveredFeatureIds});
 		this.restoreEfaFlashOfGeniusOnShortRest();
 		this.recoverGemstoneResources("short");
 
@@ -92746,10 +92760,23 @@ class CharacterSheetState {
 			this._data.spellcasting.pactSlots.current = this._data.spellcasting.pactSlots.max;
 		}
 
-		// Recover all resources
-		this.recoverResources("long");
-		this.recoverResources("dawn");
+		// Recover all resources and source feature use pools
+		const recoveredFeatureIds = new Set([
+			...this.recoverResources("long"),
+			...this.recoverResources("dawn"),
+		]);
+		this.recoverFeatureUses("long", {recoveredFeatureIds});
 		this.recoverGemstoneResources("long");
+		this.restoreItemPowerUses("long");
+		this.restorePrimalFocus?.();
+		this.restoreArcaneShot?.();
+		this.restoreSeals?.();
+		this.resetSuperiorInterdict?.();
+		this.restoreInfernalConduit?.();
+		this.restoreSecondWind?.();
+		this.restoreActionSurge?.();
+		this.restoreIndomitable?.();
+		this.restoreFocusPool?.();
 
 		// Recover Mystic Arcanum (Warlock)
 		this.resetMysticArcanum();
@@ -92758,8 +92785,10 @@ class CharacterSheetState {
 		this.restoreInnateSpells("long");
 		this.restoreSignatureSpells();
 
-		// Reduce exhaustion by 1 level (if any) - applies to both 2014 and 2024 rules
-		if (this._data.exhaustion > 0) {
+		// Reduce exhaustion by 1 level (if any) - applies to both 2014 and 2024 rules.
+		// The Long Rest modal exposes this as an existing optional choice, so callers can
+		// suppress only this one recovery while keeping the canonical rest transaction.
+		if (options.reduceExhaustion !== false && this._data.exhaustion > 0) {
 			this._data.exhaustion = Math.max(0, this._data.exhaustion - 1);
 		}
 
@@ -92778,10 +92807,10 @@ class CharacterSheetState {
 		this.restoreStamina();
 
 		// Recharge magic items at dawn
-		this._rechargeItems("dawn");
+		const rechargedItems = this._rechargeItems("dawn");
 
 		// Recharge magic items that recharge on long rest
-		this._rechargeItems("restLong");
+		rechargedItems.push(...this._rechargeItems("restLong"));
 
 		// Reset resource restoration items (Dragonhide Belt, Bloodwell Vial, etc.)
 		this.resetResourceRestorations();
@@ -92809,7 +92838,7 @@ class CharacterSheetState {
 		// Wicked Witch: Granny's Gifts is re-chosen on every long rest, and Coven
 		// Calling's duplicates plus the Fly, My Pretty ride do not survive a rest.
 		this._resetWickedWitchOnLongRest();
-		return {...timeReceipt, efaCannonExpiry};
+		return {...timeReceipt, efaCannonExpiry, rechargedItems};
 	}
 
 	applyEfaArtificerTinkerLongRestTransition () {

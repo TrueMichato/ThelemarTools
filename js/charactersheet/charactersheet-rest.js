@@ -6,6 +6,7 @@
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
 import {CharacterSheetProgression} from "./charactersheet-progression.js";
+import {CharacterSheetEfaExperimentalElixirUi} from "./charactersheet-efa-experimental-elixir-ui.js";
 
 // Project globals — typed via globalThis cast for TypeScript checkJs
 const {e_, ee} = /** @type {*} */ (globalThis);
@@ -766,22 +767,147 @@ class CharacterSheetRest {
 		return this._state.prepareEfaExperimentalElixirLongRestDraft(opts);
 	}
 
-	commitEfaExperimentalElixirLongRestDraft ({
-		draft,
-		cancelled = false,
-		restOptions = {},
-	} = {}) {
-		if (cancelled) {
-			return {
-				ok: false,
-				committed: false,
-				restCommitted: false,
-				code: "long-rest-cancelled",
-			};
-		}
+	_createEfaExperimentalElixirLongRestSection ({onChange = null} = {}) {
+		const batchSize = this._state.getEfaExperimentalElixirBatchSize?.() || 0;
+		if (!batchSize) return null;
 
-		const validated = this._state.validateEfaExperimentalElixirLongRestDraft(draft);
-		if (!validated.ok) return {...validated, committed: false, restCommitted: false};
+		const suppliesRows = this._state.getEfaExperimentalElixirSuppliesRows?.() || [];
+		const hasSupplies = suppliesRows.length > 0;
+		const existingCount = this._state.getEfaExperimentalElixirRows?.().length || 0;
+		const classLevel = this._state._getEfaAlchemistClassEntry?.()?.level || 0;
+		const radioName = `efa-elixir-rest-${CryptUtil.uid()}`;
+		const section = e_({outer: `<section class="charsheet__rest-section charsheet__efa-elixir-rest" aria-labelledby="${radioName}-title">
+			<div class="charsheet__rest-section-title" id="${radioName}-title">Experimental Elixir</div>
+			<p class="mb-2">Finishing this rest expires ${existingCount} supported vial${existingCount === 1 ? "" : "s"} from the prior batch and replaces them with this choice.</p>
+			${hasSupplies
+		? `<fieldset class="charsheet__efa-elixir-fieldset" aria-describedby="${radioName}-help">
+					<legend>Long Rest batch</legend>
+					<label class="charsheet__efa-elixir-inline-choice"><input type="radio" name="${radioName}" value="produce"> Produce ${batchSize} vials</label>
+					<label class="charsheet__efa-elixir-inline-choice"><input type="radio" name="${radioName}" value="decline" checked> Decline production</label>
+				</fieldset>
+				<p class="ve-muted ve-small" id="${radioName}-help">Production rolls ${batchSize}d6 once. Every rolled 6 requires an explicit effect choice.</p>`
+		: `<p class="charsheet__efa-elixir-alert">Production unavailable. Equip Alchemist's Supplies (XPHB) and be proficient with them. The rest can still finish and will replace the supported batch with no new vials.</p>`}
+			<div class="charsheet__efa-elixir-rest-rolls" data-efa-elixir-rest-rolls></div>
+			<div class="charsheet__efa-elixir-live" role="status" aria-live="polite" aria-atomic="true" data-efa-elixir-rest-live></div>
+		</section>`});
+		const rollsWrp = section.querySelector("[data-efa-elixir-rest-rolls]");
+		const live = section.querySelector("[data-efa-elixir-rest-live]");
+		let decision = "decline";
+		let rolls = null;
+		let row6Selects = [];
+
+		const rollD6 = () => typeof RollerUtil !== "undefined" && typeof RollerUtil.randomise === "function"
+			? RollerUtil.randomise(6)
+			: Math.floor(Math.random() * 6) + 1;
+		const getRow6Choices = () => row6Selects.map(select => Number(select.value)).filter(Boolean);
+		const clearLive = () => {
+			if (!live) return;
+			live.textContent = "";
+			live.classList.remove("charsheet__efa-elixir-live--error");
+		};
+		const renderRolls = () => {
+			if (!rollsWrp) return;
+			rollsWrp.innerHTML = "";
+			row6Selects = [];
+			if (decision !== "produce") {
+				rolls = null;
+				return;
+			}
+			if (!rolls) rolls = Array.from({length: batchSize}, rollD6);
+			rolls.forEach((roll, ix) => {
+				const row = e_({outer: `<div class="charsheet__efa-elixir-rest-roll">
+					<span class="charsheet__efa-elixir-roll-value" aria-label="Vial ${ix + 1} rolled ${roll}">Vial ${ix + 1}: <strong>${roll}</strong></span>
+				</div>`});
+				if (roll === 6) {
+					const selectId = `${radioName}-choice-${ix}`;
+					const label = e_({outer: `<label for="${selectId}">Rolled 6 - choose the vial ${ix + 1} effect</label>`});
+					const select = e_({tag: "select", id: selectId, clazz: "form-control input-sm"});
+					select.append(e_({tag: "option", val: "", txt: "Choose an effect"}));
+					CharacterSheetEfaExperimentalElixirUi.getEffectEntries().forEach((effect, effectIx) => {
+						const snapshot = CharacterSheetState.getEfaExperimentalElixirEffectSnapshot(effect.key, classLevel);
+						select.append(e_({
+							tag: "option",
+							val: `${effectIx + 1}`,
+							txt: `${effect.label} - ${CharacterSheetEfaExperimentalElixirUi.formatEffectSnapshot(effect.key, snapshot, {
+								intelligenceModifier: effect.key === "healing" ? this._state.getAbilityMod?.("int") : null,
+							})}`,
+						}));
+					});
+					select.addEventListener("change", () => {
+						clearLive();
+						onChange?.();
+					});
+					row.append(label, select);
+					row6Selects.push(select);
+				} else {
+					const effect = CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_EFFECTS[roll];
+					const snapshot = CharacterSheetState.getEfaExperimentalElixirEffectSnapshot(effect.key, classLevel);
+					row.append(e_({
+						tag: "span",
+						clazz: "ve-small",
+						txt: `${effect.label}: ${CharacterSheetEfaExperimentalElixirUi.formatEffectSnapshot(effect.key, snapshot, {
+							intelligenceModifier: effect.key === "healing" ? this._state.getAbilityMod?.("int") : null,
+						})}`,
+					}));
+				}
+				rollsWrp.append(row);
+			});
+		};
+		const getPreparedDraft = () => {
+			if (!hasSupplies || decision === "decline") {
+				return this._state.prepareEfaExperimentalElixirLongRestDraft({decision: "decline"});
+			}
+			if (!rolls || row6Selects.some(select => !select.value)) {
+				return {ok: false, code: "invalid-efa-experimental-elixir-plan"};
+			}
+			const plan = this._state.planEfaExperimentalElixirBatch({
+				rolls,
+				row6Choices: getRow6Choices(),
+			});
+			if (!plan.ok) return plan;
+			return this._state.prepareEfaExperimentalElixirLongRestDraft({
+				decision: "produce",
+				plan: plan.plan,
+			});
+		};
+
+		section.querySelectorAll(`input[name="${radioName}"]`).forEach(radio => {
+			radio.addEventListener("change", () => {
+				decision = radio.value;
+				clearLive();
+				renderRolls();
+				onChange?.();
+			});
+		});
+
+		return {
+			element: section,
+			getPreparedDraft,
+			isValid: () => getPreparedDraft().ok,
+			focusFirstInvalid: () => {
+				const unresolved = row6Selects.find(select => !select.value);
+				unresolved?.focus();
+				if (live) {
+					live.classList.add("charsheet__efa-elixir-live--error");
+					live.textContent = "Choose an effect for every vial that rolled a 6.";
+				}
+			},
+			getDecision: () => decision,
+			getRolls: () => rolls ? [...rolls] : null,
+		};
+	}
+
+	_commitLongRestTransaction ({
+		restOptions = {},
+		experimentalElixirDraft = null,
+		applyModalChoices = null,
+	} = {}) {
+		const validatedElixir = experimentalElixirDraft == null
+			? null
+			: this._state.validateEfaExperimentalElixirLongRestDraft(experimentalElixirDraft);
+		if (validatedElixir && !validatedElixir.ok) {
+			return {...validatedElixir, committed: false, restCommitted: false};
+		}
 
 		const snapshot = this._captureRestSnapshot("long");
 		if (!snapshot) {
@@ -794,9 +920,23 @@ class CharacterSheetRest {
 		}
 
 		try {
-			this._state.onLongRest(restOptions);
-			const experimentalElixir = this._state.commitEfaExperimentalElixirLongRestDraft(validated.draft);
-			if (!experimentalElixir.ok) {
+			const restResult = this._state.onLongRest(restOptions) || {};
+			const modalChoices = applyModalChoices?.() || {ok: true};
+			if (modalChoices.ok === false) {
+				this._state.loadFromJson(snapshot.json);
+				if (this._page) this._page._lastRestSnapshot = null;
+				return {
+					...modalChoices,
+					committed: false,
+					restCommitted: false,
+					rolledBack: true,
+				};
+			}
+
+			const experimentalElixir = validatedElixir
+				? this._state.commitEfaExperimentalElixirLongRestDraft(validatedElixir.draft)
+				: null;
+			if (experimentalElixir && !experimentalElixir.ok) {
 				this._state.loadFromJson(snapshot.json);
 				if (this._page) this._page._lastRestSnapshot = null;
 				return {
@@ -814,6 +954,8 @@ class CharacterSheetRest {
 				committed: true,
 				restCommitted: true,
 				restType: "long",
+				restResult,
+				modalChoices,
 				experimentalElixir,
 			};
 		} catch (error) {
@@ -828,6 +970,26 @@ class CharacterSheetRest {
 				rolledBack: true,
 			};
 		}
+	}
+
+	commitEfaExperimentalElixirLongRestDraft ({
+		draft,
+		cancelled = false,
+		restOptions = {},
+	} = {}) {
+		if (cancelled) {
+			return {
+				ok: false,
+				committed: false,
+				restCommitted: false,
+				code: "long-rest-cancelled",
+			};
+		}
+
+		return this._commitLongRestTransaction({
+			restOptions,
+			experimentalElixirDraft: draft,
+		});
 	}
 
 	async _showLongRestDialog ({focusAdventurersAtlas = false} = {}) {
@@ -1059,12 +1221,18 @@ class CharacterSheetRest {
 		if (spellStoringItemChoice) modalInner.append(spellStoringItemChoice.section);
 		const steelDefenderReplacement = this._buildEfaSteelDefenderReplacementSection();
 		if (steelDefenderReplacement) modalInner.append(steelDefenderReplacement.section);
+		let syncValidity = () => {};
+		const experimentalElixir = this._createEfaExperimentalElixirLongRestSection({
+			onChange: () => syncValidity(),
+		});
+		if (experimentalElixir) modalInner.append(experimentalElixir.element);
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
-		const syncValidity = () => {
+		syncValidity = () => {
 			btnConfirm.disabled = !!(
 				(temporalMasteryAge && !temporalMasteryAge.isValid())
 				|| (adventurersAtlas && !adventurersAtlas.isValid())
+				|| (experimentalElixir && !experimentalElixir.isValid())
 			);
 		};
 		temporalMasteryAge?.onChange(syncValidity);
@@ -1074,6 +1242,11 @@ class CharacterSheetRest {
 			if (temporalMasteryAge && !temporalMasteryAge.isValid()) return;
 			if (adventurersAtlas && !adventurersAtlas.isValid()) {
 				adventurersAtlas.focusFirstInvalid();
+				return;
+			}
+			const preparedElixir = experimentalElixir?.getPreparedDraft() || null;
+			if (preparedElixir && !preparedElixir.ok) {
+				experimentalElixir.focusFirstInvalid();
 				return;
 			}
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
@@ -1206,6 +1379,15 @@ class CharacterSheetRest {
 				const spellStoringItemResult = this._commitEfaSpellStoringItemChoice(spellStoringItemChoice);
 				const steelDefenderReplacementResult = this._commitEfaSteelDefenderReplacement(steelDefenderReplacement);
 				const efaCannonExpiry = this._state.expireEfaEldritchCannonsForRest?.({minutes: 480});
+				const experimentalElixirResult = preparedElixir
+					? this._state.commitEfaExperimentalElixirLongRestDraft(preparedElixir.draft)
+					: null;
+				if (experimentalElixirResult && !experimentalElixirResult.ok) {
+					throw new Error(CharacterSheetEfaExperimentalElixirUi.getErrorMessage(
+						experimentalElixirResult.code,
+						experimentalElixirResult.error,
+					));
+				}
 
 				// Save changes
 				let saveResult;
@@ -1253,6 +1435,9 @@ class CharacterSheetRest {
 				if (atlasResult.changed) message += ` Adventurer's Atlas ${atlasResult.atlas.generation > 1 ? "recreated" : "created"}.`;
 				message += armorModelFeedback.successSuffix;
 				if (efaCannonExpiry?.count) message += ` ${efaCannonExpiry.count} Eldritch Cannon${efaCannonExpiry.count === 1 ? "" : "s"} expired.`;
+				if (experimentalElixirResult) {
+					message += ` Experimental Elixir: ${experimentalElixirResult.expiredItemIds.length} expired, ${experimentalElixirResult.createdItemIds.length} created.`;
+				}
 
 				JqueryUtil.doToast({
 					type: "success",

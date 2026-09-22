@@ -3,6 +3,7 @@
  * Handles class features, racial traits, feats, and other abilities
  */
 import {CharacterSheetModal} from "./charactersheet-modal.js";
+import {CharacterSheetEfaExperimentalElixirUi} from "./charactersheet-efa-experimental-elixir-ui.js";
 import * as FilterPickerHelpers from "./charactersheet-filter-picker-helpers.js";
 
 const {e_, ee} = /** @type {*} */ (globalThis);
@@ -2274,6 +2275,10 @@ class CharacterSheetFeatures {
 
 	_renderFeature (feature) {
 		const isExpanded = this._expandedFeatures.has(feature.id);
+		const isEfaExperimentalElixir = CharacterSheetClassUtils.isExactEfaExperimentalElixir(feature);
+		const efaExperimentalElixirUi = isEfaExperimentalElixir
+			? CharacterSheetEfaExperimentalElixirUi.renderFeatureStatusHtml(this._state)
+			: null;
 		const hasUses = feature.uses && feature.uses.max > 0;
 		// (R21) Classified limited-use abilities (e.g. Healing Hands, Guided Strike, Forked
 		// Tongue) get a working Use button here even when they carry no `uses` pool of their
@@ -2593,7 +2598,9 @@ class CharacterSheetFeatures {
 					${derivedEffectBadge}
 					${provenanceBadge}
 					${intransigentBadge}
+					${efaExperimentalElixirUi?.headerHtml || ""}
 					<div class="charsheet__feature-actions">
+						${efaExperimentalElixirUi?.actionHtml || ""}
 						${featureUtility ? `<button class="ve-btn ve-btn-xs ve-btn-info charsheet__feature-utility" data-utility="${featureUtility}">${featureUtilityLabel}</button>` : ""}
 						${showUseBtn ? `<button class="ve-btn ve-btn-xs ve-btn-primary charsheet__feature-use" title="${isAbility ? "Use this ability" : "Use Feature"}">Use</button>` : ""}
 						<button class="ve-btn ve-btn-xs ${this._state.getFeatureNote?.(feature.id) ? "ve-btn-warning" : "ve-btn-default"} charsheet__feature-note" title="${this._state.getFeatureNote?.(feature.id) ? "Edit Note" : "Add Note"}">
@@ -2604,6 +2611,7 @@ class CharacterSheetFeatures {
 						</button>
 					</div>
 				</div>
+				${efaExperimentalElixirUi ? `<div class="charsheet__efa-elixir-feature-status">${efaExperimentalElixirUi.reasonHtml}</div>` : ""}
 				<div class="charsheet__feature-body" style="display: ${isExpanded ? "block" : "none"};">
 					${wizardCapstoneHtml}
 					${primalFocusHtml}
@@ -2617,6 +2625,13 @@ class CharacterSheetFeatures {
 		featureEl.querySelector(".charsheet__feature-utility")?.addEventListener("click", evt => {
 			evt.stopPropagation();
 			if (featureUtility === "magicalAging") this._page?._pResolveMagicalAging?.(feature);
+		});
+		featureEl.querySelector(".charsheet__efa-elixir-create")?.addEventListener("click", evt => {
+			evt.stopPropagation();
+			CharacterSheetEfaExperimentalElixirUi.pShowCreateModal({
+				state: this._state,
+				page: this._page,
+			});
 		});
 
 		// Add Primal Focus switch button handlers

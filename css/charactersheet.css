@@ -103,7 +103,7 @@
 	justify-content: center;
 	min-width: 5rem;
 	padding: 0.375rem 0.625rem;
-	border-radius: var(--cs-radius-sm, 6px);
+	border-radius: var(--cs-radius-sm);
 	background: var(--cs-bg-surface, var(--rgb-bg-alt));
 }
 
@@ -29280,4 +29280,186 @@ color: var(--cs-text-primary, #f1f5f9);
 
 .charsheet__gambler-open-receipts {
 	min-height: 44px;
+}
+
+/* EFA Experimental Elixir — dense Operate-mode status and transaction surfaces. */
+.charsheet__efa-elixir-badge,
+.charsheet__efa-elixir-repair {
+	display: inline-flex;
+	align-items: center;
+	min-height: 1.5rem;
+	padding: 0 var(--cs-space-xs, 0.375rem);
+	border: 1px solid var(--cs-border);
+	border-radius: var(--cs-radius-sm, 6px);
+	color: var(--cs-text-secondary, inherit);
+	font-size: var(--cs-text-xs, 0.75rem);
+	line-height: 1.2;
+}
+
+.charsheet__efa-elixir-repair {
+	border-color: var(--cs-warning);
+	color: var(--cs-warning);
+}
+
+.charsheet__efa-elixir-feature-status {
+	padding: var(--cs-space-xs, 0.375rem) var(--cs-space-md, 0.75rem);
+	border-top: 1px solid var(--cs-border);
+	color: var(--cs-text-secondary, inherit);
+}
+
+.charsheet__efa-elixir-reason {
+	margin: 0;
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.charsheet__efa-elixir-item-status {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-xs, 0.375rem);
+	align-items: baseline;
+}
+
+.charsheet__efa-elixir-item-status > span + span {
+	padding-left: var(--cs-space-xs, 0.375rem);
+	border-left: 1px solid var(--cs-border);
+}
+
+.charsheet__efa-elixir-modal {
+	display: grid;
+	gap: var(--cs-space-md, 0.75rem);
+	max-width: 46rem;
+	color: var(--cs-text-primary, inherit);
+}
+
+.charsheet__efa-elixir-fieldset {
+	display: grid;
+	gap: var(--cs-space-xs, 0.375rem);
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.charsheet__efa-elixir-fieldset > legend,
+.charsheet__efa-elixir-field > label,
+.charsheet__efa-elixir-live > label {
+	margin-bottom: var(--cs-space-xs, 0.375rem);
+	font-weight: 600;
+}
+
+.charsheet__efa-elixir-choice-list {
+	display: grid;
+	gap: 0;
+	border-top: 1px solid var(--cs-border);
+}
+
+.charsheet__efa-elixir-choice {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: var(--cs-space-sm, 0.5rem);
+	align-items: start;
+	min-height: 44px;
+	padding: var(--cs-space-sm, 0.5rem) 0;
+	border-bottom: 1px solid var(--cs-border);
+	cursor: pointer;
+}
+
+.charsheet__efa-elixir-choice > span {
+	display: grid;
+	gap: var(--cs-space-xs, 0.375rem);
+}
+
+.charsheet__efa-elixir-choice input,
+.charsheet__efa-elixir-inline-choice input,
+.charsheet__efa-elixir-check input {
+	width: 1.125rem;
+	height: 1.125rem;
+	margin-top: 0.125rem;
+}
+
+.charsheet__efa-elixir-inline-choice,
+.charsheet__efa-elixir-check {
+	display: inline-flex;
+	gap: var(--cs-space-xs, 0.375rem);
+	align-items: flex-start;
+	min-height: 44px;
+	padding: var(--cs-space-xs, 0.375rem) var(--cs-space-sm, 0.5rem);
+	cursor: pointer;
+}
+
+.charsheet__efa-elixir-field {
+	display: grid;
+	gap: var(--cs-space-xs, 0.375rem);
+}
+
+.charsheet__efa-elixir-field .form-control,
+.charsheet__efa-elixir-rest .form-control {
+	min-height: 44px;
+	font-size: var(--cs-text-base, 1rem);
+}
+
+.charsheet__efa-elixir-summary {
+	display: grid;
+	gap: var(--cs-space-xs, 0.375rem);
+	padding-bottom: var(--cs-space-sm, 0.5rem);
+	border-bottom: 1px solid var(--cs-border);
+}
+
+.charsheet__efa-elixir-other {
+	display: grid;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__efa-elixir-other[hidden] {
+	display: none;
+}
+
+.charsheet__efa-elixir-modal-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding-top: var(--cs-space-sm, 0.5rem);
+	border-top: 1px solid var(--cs-border);
+}
+
+.charsheet__efa-elixir-modal-actions > button {
+	min-height: 44px;
+}
+
+.charsheet__efa-elixir-alert,
+.charsheet__efa-elixir-live--error {
+	color: var(--cs-danger);
+	font-weight: 600;
+}
+
+.charsheet__efa-elixir-live {
+	display: grid;
+	gap: var(--cs-space-sm, 0.5rem);
+	min-height: 1.5rem;
+}
+
+.charsheet__efa-elixir-handoff {
+	min-height: 12rem;
+	resize: vertical;
+	font-family: var(--cs-font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.charsheet__efa-elixir-rest-rolls {
+	display: grid;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__efa-elixir-rest-roll {
+	display: grid;
+	grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+	gap: var(--cs-space-sm, 0.5rem);
+	align-items: center;
+	padding: var(--cs-space-xs, 0.375rem) 0;
+	border-bottom: 1px solid var(--cs-border);
+}
+
+.charsheet__efa-elixir-rest-roll > label {
+	margin: 0;
 }
