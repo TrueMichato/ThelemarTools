@@ -14448,9 +14448,9 @@ class CharacterSheetState {
 		// Apply remaining damage to current HP
 		this._data.hp.current = Math.max(0, this._data.hp.current - damage);
 
-		// Check for massive damage death before arming any "drop to N instead" offer. These
-		// interventions all require that the character was not killed outright, and a stale
-		// pending offer from an earlier drop must not survive a later lethal hit.
+		// Check for massive damage death before arming any "drop to N instead" offer. Most
+		// interventions disappear when the character is killed outright; definitions can opt
+		// into a disabled surface when their rules need to explain why they cannot be used.
 		const overkill = startingHp - damage;
 		const isKilledOutright = maxHp > 0 && overkill <= -maxHp;
 
@@ -14470,12 +14470,18 @@ class CharacterSheetState {
 			// applied here: a Strength-of-the-Grave-style feature is a CHOICE (it costs a
 			// once-per-long-rest use on a success), so the caller decides via
 			// `getPendingZeroHpIntervention()` / `applyZeroHpIntervention()`.
-			if (!isKilledOutright) this._armZeroHpIntervention({damage, rawDamage, damageType, isCritical, hpBefore: startingHp});
-		}
-
-		if (isKilledOutright) {
-			this._data.massiveDamageDeath = true;
-			this.clearPendingZeroHpIntervention();
+			if (isKilledOutright) {
+				this._data.massiveDamageDeath = true;
+				delete this._data._pendingZeroHpIntervention;
+			}
+			this._armZeroHpIntervention({
+				damage,
+				rawDamage,
+				damageType,
+				isCritical,
+				hpBefore: startingHp,
+				isKilledOutright,
+			});
 		}
 
 		// Update bloodied condition based on new HP
@@ -14656,6 +14662,7 @@ class CharacterSheetState {
 			usesMax: null,
 			recharge: null,
 			requiresNonOutrightDeath: true,
+			surfaceWhenKilledOutright: true,
 			hpOnSuccess: {perSelection: 20},
 			selectionCost: {
 				type: "inventoryRows",
@@ -14895,6 +14902,7 @@ class CharacterSheetState {
 				usesMax: feature?.uses?.max ?? def.usesMax,
 				recharge: def.recharge,
 				armWhenUnavailable: def.armWhenUnavailable !== false,
+				surfaceWhenKilledOutright: !!def.surfaceWhenKilledOutright,
 				available: !unavailableReason,
 				unavailableReason,
 			});
@@ -14908,9 +14916,12 @@ class CharacterSheetState {
 	 * {@link ZERO_HP_INTERVENTIONS}.
 	 * @private
 	 */
-	_armZeroHpIntervention ({damage, rawDamage, damageType, isCritical, hpBefore}) {
+	_armZeroHpIntervention ({damage, rawDamage, damageType, isCritical, hpBefore, isKilledOutright = false}) {
 		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical});
-		if (!candidates.some(candidate => candidate.available || candidate.armWhenUnavailable)) return;
+		const actionableCandidates = isKilledOutright
+			? candidates.filter(candidate => candidate.surfaceWhenKilledOutright)
+			: candidates;
+		if (!actionableCandidates.some(candidate => candidate.available || candidate.armWhenUnavailable)) return;
 		this._data._pendingZeroHpIntervention = {
 			damage,
 			rawDamage,
