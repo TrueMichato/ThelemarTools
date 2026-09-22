@@ -173,6 +173,7 @@ describe("pending tool picker canonical multi-select contract", () => {
 	test("canonicalizes tool options instead of constructing object-shaped selections", () => {
 		expect(method).toMatch(/CharacterSheetClassUtils\.getCanonicalToolChoiceValue\s*\(/);
 		expect(method).toMatch(/finalize\(value\)/);
+		expect(method).toMatch(/const values = \[\.\.\.selected\]\.map/);
 		expect(method).not.toMatch(/finalize\(isSkill \? opt : \{name: opt\.name/);
 	});
 

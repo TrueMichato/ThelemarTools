@@ -34874,7 +34874,6 @@ class CharacterSheetState {
 							calculations.efaAlchemicalSavantBonus = Math.max(1, intMod);
 						}
 					}
-
 					if (
 						isEfa
 						&& level >= 3
@@ -34964,7 +34963,9 @@ class CharacterSheetState {
 						}
 					}
 
-					if (!isEfa && subclassName && subclassSource === classSource && level >= 3) {
+					const isLegacySubclass = !isEfa
+						|| subclassSource === "TCE";
+					if (isLegacySubclass && subclassName && level >= 3) {
 						switch (subclassName) {
 							case "alchemist": {
 								// Experimental Elixir count: 1 at 3, 2 at 6, 3 at 15
