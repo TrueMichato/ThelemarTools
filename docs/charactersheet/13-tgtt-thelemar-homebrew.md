@@ -24,6 +24,35 @@ This document catalogs all Thelemar homebrew content implemented in the characte
 
 **Total TGTT Tests**: 737 passing
 
+### EFA Armorer level-3 armor models
+
+The EFA Armorer is source-qualified as `Artificer|EFA` plus `Armorer|EFA`.
+TCE or mixed-source collisions never activate these mechanics. The chosen
+Dreadnaught, Guardian, or Infiltrator model remains in structured feature-choice
+state, while the active worn Arcane Armor remains bound to its inventory wrapper
+ID. Generated model weapons use stable `_efaArmorerWeaponId` identities, so
+renaming or customizing a row does not break its attacks and a same-named weapon
+cannot impersonate it.
+
+- **Dreadnaught:** Force Demolisher offers a structured push/pull result only
+  after an eligible hit against a smaller creature. Giant Stature is a real
+  Bonus Action, lasts 1 minute, grants +5-foot reach, becomes Large when room
+  allows, has Intelligence-modifier uses (minimum 1), and recharges only on a
+  Long Rest.
+- **Guardian:** Thunder Pulse records an owner-tagged target effect until the
+  start of the Armorer's next turn. Defensive Field is an unlimited,
+  Bloodied-only Bonus Action granting temporary HP equal to EFA Artificer level;
+  cleanup removes only temp HP still owned by that feature.
+- **Infiltrator:** Lightning Launcher can add `1d6` Lightning damage once on
+  each owner turn. Its gate uses the shared exact turn-receipt API rather than a
+  model-specific counter or Combat's older round map.
+
+Model powers use the existing armor item-power and Combat surfaces. Doffing,
+model/source loss, death, respec, rest, combat reset, save/load, and migration
+all reconcile through the same binding/resource/active-state/target-effect
+paths. The three model child entities are suppressed from generic activation so
+their prose cannot create duplicate inert custom toggles.
+
 ### Gambler Rogue lifecycle
 
 The TGTT Gambler is source-qualified as `Rogue|TGTT` plus

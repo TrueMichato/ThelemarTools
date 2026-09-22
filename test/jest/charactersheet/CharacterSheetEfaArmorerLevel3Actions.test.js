@@ -5,9 +5,11 @@ import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-upgrades.js";
 import "../../../js/charactersheet/charactersheet-inventory.js";
+import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetInventory = globalThis.CharacterSheetInventory;
+const CharacterSheetCombat = globalThis.CharacterSheetCombat;
 const ITEMS = JSON.parse(fs.readFileSync("data/items-base.json", "utf8")).baseitem;
 const ARTIFICER_DATA = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
 
@@ -166,8 +168,23 @@ function makeInventoryConsumer (state) {
 	return inventory;
 }
 
+function makeCombatConsumer (state) {
+	const combat = Object.create(CharacterSheetCombat.prototype);
+	combat._state = state;
+	combat._page = {};
+	combat._lastRiderRoundUsed = {};
+	combat._weaponRiderEnabled = {};
+	return combat;
+}
+
 describe("EFA Armorer level-3 calculation contracts", () => {
 	it("emits exact stable attack selectors for each active model and isolates TCE/mixed-source builds", () => {
+		expect(CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT).toEqual({
+			key: "subclassFeature:Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA:action:lightning-launcher-extra-damage",
+			ownerUid: "subclass:Armorer|EFA|Artificer|EFA",
+			sourceUid: "subclassFeature:Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA",
+			actionUid: "lightning-launcher-extra-damage",
+		});
 		const dread = buildState({model: "Dreadnaught"}).state.getFeatureCalculations();
 		expect(dread.attackOnHitOptions).toContainEqual(expect.objectContaining({
 			id: "efa-armorer-force-demolisher-movement",
@@ -178,6 +195,7 @@ describe("EFA Armorer level-3 calculation contracts", () => {
 		expect(guardian.attackOnHitOptions).toContainEqual(expect.objectContaining({
 			id: "efa-armorer-thunder-pulse-disadvantage",
 			attackIds: [MODEL_IDS.Guardian],
+			allowTrackOnly: false,
 		}));
 
 		const infiltrator = buildState({model: "Infiltrator"}).state.getFeatureCalculations();
@@ -187,6 +205,7 @@ describe("EFA Armorer level-3 calculation contracts", () => {
 			damageType: "lightning",
 			perTurn: true,
 			attackIds: [MODEL_IDS.Infiltrator],
+			turnReceipt: CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT,
 		}));
 
 		for (const sources of [
@@ -203,6 +222,232 @@ describe("EFA Armorer level-3 calculation contracts", () => {
 			}));
 			expect(state.getResource("Giant Stature")).toBeNull();
 		}
+	});
+
+	it("suppresses only exact seven-part EFA Armorer model wrappers from generic activation", () => {
+		const dreadnaught = ARTIFICER_DATA.subclassFeature.find(feature =>
+			feature.name === "Dreadnaught"
+			&& feature.source === "EFA"
+			&& feature.classSource === "EFA"
+			&& feature.subclassSource === "EFA"
+			&& feature.level === 3);
+		const canonical = {
+			...copy(dreadnaught),
+			description: CharacterSheetState._featureTextFromEntries(dreadnaught),
+		};
+		expect(CharacterSheetState.isEfaArmorerModelFeature(canonical)).toBe(true);
+		expect(CharacterSheetState.detectActivatableFeature(canonical)).toBeNull();
+
+		const lookalike = {
+			...canonical,
+			name: "Siege Growth",
+			source: "HB",
+			className: "Fighter",
+			classSource: "PHB",
+			subclassShortName: "Siege Knight",
+			subclassSource: "HB",
+		};
+		expect(CharacterSheetState.isEfaArmorerModelFeature(lookalike)).toBe(false);
+		expect(CharacterSheetState.detectActivatableFeature(lookalike)).not.toBeNull();
+	});
+});
+
+describe("EFA Armorer Combat integration", () => {
+	it("matches only exact stable generated attack identities, not editable names or shared source labels", () => {
+		const dread = buildState({model: "Dreadnaught"}).state;
+		const dreadCombat = makeCombatConsumer(dread);
+		const renamedDreadAttack = {
+			id: MODEL_IDS.Dreadnaught,
+			name: "My Customized Demolisher",
+			sourceFeature: "Renamed Armor Model",
+		};
+		expect(dreadCombat._getEligibleOnHitOptions(renamedDreadAttack)).toEqual([
+			expect.objectContaining({id: "efa-armorer-force-demolisher-movement"}),
+		]);
+		expect(dreadCombat._getEligibleOnHitOptions({
+			id: "different-generated-weapon",
+			name: "Force Demolisher",
+			sourceFeature: "Armor Model",
+		})).toEqual([]);
+
+		const infiltrator = buildState({model: "Infiltrator"}).state;
+		const infiltratorCombat = makeCombatConsumer(infiltrator);
+		const rider = infiltrator.getFeatureCalculations().weaponDamageRiders
+			.find(it => it.id === "efa-armorer-lightning-launcher-extra-damage");
+		expect(infiltratorCombat._isWeaponDamageRiderEligible(rider, {
+			id: MODEL_IDS.Infiltrator,
+			name: "Storm Needle",
+			sourceFeature: "Renamed Armor Model",
+		})).toBe(true);
+		expect(infiltratorCombat._isWeaponDamageRiderEligible(rider, {
+			id: "same-label-collision",
+			name: "Lightning Launcher",
+			sourceFeature: "Armor Model",
+		})).toBe(false);
+	});
+
+	it("never uses a disallowed Thunder Pulse option as the shared track-only base", () => {
+		const combat = makeCombatConsumer({});
+		const options = [
+			{
+				id: "thunder-pulse",
+				name: "Thunder Pulse",
+				targetAware: true,
+				allowTrackOnly: false,
+				targetEffect: {source: "efa-armorer-thunder-pulse", effect: "attack-disadvantage-other-targets"},
+			},
+			{
+				id: "generic-target",
+				name: "Generic Target",
+				targetAware: true,
+				targetEffect: {source: "generic-target-source", effect: "mark"},
+			},
+		];
+		expect(combat._getTrackOnlyOnHitOption(options)).toMatchObject({
+			id: "target-only",
+			name: "Track target only",
+			targetEffect: {source: "generic-target-source", effect: "target"},
+		});
+		expect(combat._getTrackOnlyOnHitOption([options[0]])).toBeNull();
+	});
+
+	it("uses only the Base M1E turn-receipt contract for Lightning Launcher", () => {
+		const {state} = buildState({model: "Infiltrator"});
+		const combat = makeCombatConsumer(state);
+		const rider = state.getFeatureCalculations().weaponDamageRiders
+			.find(it => it.id === "efa-armorer-lightning-launcher-extra-damage");
+		let liveReceipt = null;
+		state.queryTurnReceipt = jest.fn(key => ({
+			ok: true,
+			used: !!liveReceipt,
+			key,
+			turnId: 7,
+			receipt: liveReceipt,
+		}));
+		state.commitTurnReceipt = jest.fn(descriptor => {
+			if (liveReceipt) return {ok: false, committed: false, duplicate: true, reason: "alreadyUsed", receipt: liveReceipt};
+			liveReceipt = {...descriptor, receiptId: "receipt-1", turnId: 7};
+			return {ok: true, committed: true, duplicate: false, reason: null, receipt: copy(liveReceipt)};
+		});
+		state.rollbackTurnReceipt = jest.fn(receipt => {
+			const matches = receipt?.receiptId === liveReceipt?.receiptId;
+			if (matches) liveReceipt = null;
+			return {ok: matches, rolledBack: matches};
+		});
+
+		expect(combat._isRiderAvailableThisTurn(rider)).toBe(true);
+		const committed = combat._markRiderUsedThisTurn(rider, {attackId: MODEL_IDS.Infiltrator});
+		expect(committed).toMatchObject({ok: true, committed: true});
+		expect(state.commitTurnReceipt).toHaveBeenCalledWith({
+			...CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT,
+			metadata: {attackId: MODEL_IDS.Infiltrator},
+		});
+		expect(combat._isRiderAvailableThisTurn(rider)).toBe(false);
+		expect(combat._markRiderUsedThisTurn(rider)).toMatchObject({
+			ok: false,
+			committed: false,
+			reason: "alreadyUsed",
+		});
+		expect(combat._lastRiderRoundUsed).toEqual({});
+		expect(state.rollbackTurnReceipt(committed.receipt)).toMatchObject({ok: true, rolledBack: true});
+		expect(combat._isRiderAvailableThisTurn(rider)).toBe(true);
+	});
+
+	it("does not spend a legacy once-per-round rider when damage dice resolution throws", async () => {
+		const combat = makeCombatConsumer({
+			getAttacks: () => [{
+				id: "legacy-attack",
+				name: "Legacy Attack",
+				damage: "1d8",
+				damageType: "slashing",
+				abilityMod: "str",
+				sourceItem: {id: "legacy-item"},
+			}],
+			getWeaponAbilityMod: () => 3,
+			getNamedModifiersByType: () => [],
+			getItemWeaponScopedDamageContributions: () => [],
+			getFeatureCalculations: () => ({
+				weaponDamageRiders: [{
+					id: "legacy-rider",
+					name: "Legacy Rider",
+					dice: "1d6",
+					damageType: "fire",
+					perTurn: true,
+				}],
+			}),
+			isInCombat: () => true,
+			getCombatRound: () => 4,
+		});
+		combat._weaponRiderEnabled = {"legacy-rider": true};
+		combat._page = {
+			showDiceResult: jest.fn(),
+			pAnimateDamageDice: jest.fn(),
+		};
+		combat._parseDamage = jest.fn(dice => {
+			if (dice === "1d6") throw new Error("rider dice failed");
+			return {total: 5, sides: 8, rolls: [5]};
+		});
+		combat._canApplySneakAttack = () => false;
+		combat._resolveChannelRiderDamage = () => ({
+			channelSpell: null,
+			channelSpellRoll: null,
+			channelSpellDamage: 0,
+			riderMatched: false,
+		});
+		combat._promptUseCombatMethod = async () => null;
+
+		await expect(combat._rollDamage("legacy-attack", false)).rejects.toThrow("rider dice failed");
+		expect(combat._lastRiderRoundUsed).toEqual({});
+	});
+
+	it("does not double-consume a Bonus Action already committed by an armor item power", async () => {
+		const combat = makeCombatConsumer({});
+		combat._isActionTypeAvailable = jest.fn(() => true);
+		combat._consumeActionType = jest.fn();
+		combat.renderCombatItemPowers = jest.fn();
+		combat.renderCombatActionEconomy = jest.fn();
+		combat._page = {
+			_inventory: {
+				_pInvokeItemPower: jest.fn(async () => ({ok: true, committed: true, actionConsumed: true})),
+			},
+		};
+		await expect(combat._pInvokeCombatItemPower({
+			id: "giant-stature",
+			itemId: "armor-1",
+			isAvailable: true,
+			actionType: "bonus",
+			chargesCost: 0,
+			chargesCostMax: 0,
+		})).resolves.toBe(true);
+		expect(combat._page._inventory._pInvokeItemPower).toHaveBeenCalledWith(
+			"armor-1",
+			"giant-stature",
+			{returnResult: true},
+		);
+		expect(combat._consumeActionType).not.toHaveBeenCalled();
+	});
+
+	it("prunes Lightning Launcher receipts only after exact model or Armorer source teardown", () => {
+		const {state} = buildState({model: "Infiltrator"});
+		state.pruneTurnReceipts = jest.fn(() => ({ok: true, pruned: 1}));
+		state.reconcileEfaArmorerState({cause: "control"});
+		expect(state.pruneTurnReceipts).not.toHaveBeenCalled();
+
+		setCanonicalModel(state, "Guardian");
+		expect(state.pruneTurnReceipts).toHaveBeenCalledWith({
+			ownerUid: CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT.ownerUid,
+			sourceUid: CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT.sourceUid,
+			actionUid: CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT.actionUid,
+		});
+		state.pruneTurnReceipts.mockClear();
+
+		state._data.classes[0].subclass.source = "TCE";
+		state.reconcileEfaArmorerState({cause: "source-loss"});
+		expect(state.pruneTurnReceipts).toHaveBeenCalledWith({
+			ownerUid: CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT.ownerUid,
+			sourceUid: CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT.sourceUid,
+			actionUid: CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT.actionUid,
+		});
 	});
 });
 
@@ -345,6 +590,45 @@ describe("Dreadnaught level-3 mechanics", () => {
 		expect(state.getResource("Giant Stature")).toMatchObject({current: 3, max: 5});
 		state.setAbilityBase("int", 14);
 		expect(state.getResource("Giant Stature")).toMatchObject({current: 0, max: 2});
+		state.setAbilityBase("int", 20);
+		expect(state.getResource("Giant Stature")).toMatchObject({current: 3, max: 5});
+	});
+
+	it("durably preserves total Giant Stature spend across a capped maximum and clears it only on Long Rest", async () => {
+		const {state} = buildState({model: "Dreadnaught"});
+		state.setAbilityBase("int", 20);
+		for (let i = 0; i < 4; ++i) {
+			expect(await state.activateEfaGiantStature()).toMatchObject({ok: true});
+			state.deactivateState("giantStature");
+		}
+		expect(state.getResource("Giant Stature")).toMatchObject({
+			current: 1,
+			max: 5,
+			metadata: {efaGiantStature: {version: 1, spentUses: 4}},
+		});
+
+		state.setAbilityBase("int", 14);
+		expect(state.getResource("Giant Stature")).toMatchObject({
+			current: 0,
+			max: 2,
+			metadata: {efaGiantStature: {spentUses: 4}},
+		});
+		state.setAbilityBase("int", 20);
+		expect(state.getResource("Giant Stature")).toMatchObject({current: 1, max: 5});
+
+		const restored = new CharacterSheetState();
+		expect(restored.loadFromJson(copy(state.toJson()))).not.toBe(false);
+		expect(restored.getResource("Giant Stature")).toMatchObject({
+			current: 1,
+			max: 5,
+			metadata: {efaGiantStature: {spentUses: 4}},
+		});
+		restored.recoverResources("long");
+		expect(restored.getResource("Giant Stature")).toMatchObject({
+			current: 5,
+			max: 5,
+			metadata: {efaGiantStature: {spentUses: 0}},
+		});
 	});
 
 	it("awaits the real Inventory invocation and commits the explicit insufficient-room choice", async () => {
@@ -386,6 +670,32 @@ describe("Dreadnaught level-3 mechanics", () => {
 		expect(state.getResource("Giant Stature").current).toBe(resourceBefore - 1);
 		expect(state.isActionTypeAvailable("bonus")).toBe(false);
 		activation.mockRestore();
+	});
+
+	it("renders a committed Giant Stature follow-up failure as warning feedback", async () => {
+		const {state, armor} = buildState({model: "Dreadnaught"});
+		state.startCombat();
+		const inventory = makeInventoryConsumer(state);
+		const prompt = jest.spyOn(InputUiUtil, "pGetUserEnum").mockResolvedValue("Become Large");
+		const activation = jest.spyOn(state, "activateState").mockReturnValue(null);
+		const toast = jest.spyOn(JqueryUtil, "doToast");
+		const before = state.getResource("Giant Stature").current;
+
+		const result = await inventory._pInvokeItemPower(
+			armor.id,
+			getModelPower(state, armor, "giant-stature").id,
+			{returnResult: true},
+		);
+
+		expect(result).toMatchObject({ok: true, committed: true, followUpFailed: true});
+		expect(state.getResource("Giant Stature").current).toBe(before - 1);
+		expect(toast).toHaveBeenCalledWith(expect.objectContaining({
+			type: "warning",
+			content: expect.stringContaining("follow-up failed"),
+		}));
+		prompt.mockRestore();
+		activation.mockRestore();
+		toast.mockRestore();
 	});
 });
 

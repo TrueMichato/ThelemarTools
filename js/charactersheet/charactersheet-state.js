@@ -32927,6 +32927,7 @@ class CharacterSheetState {
 										name: "Thunder Pulse",
 										attackIds: [status.model.id],
 										targetAware: true,
+										allowTrackOnly: false,
 										targetEffect: {
 											source: "efa-armorer-thunder-pulse",
 											effect: "attack-disadvantage-other-targets",
@@ -32947,6 +32948,7 @@ class CharacterSheetState {
 										damageType: "lightning",
 										perTurn: true,
 										attackIds: [status.model.id],
+										turnReceipt: CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT,
 										condition: "once on each of your turns when this attack hits",
 										note: "once per turn",
 									});
@@ -51324,6 +51326,15 @@ class CharacterSheetState {
 				r.current = Math.min(r.max, r.current + r.shortRestRecovery);
 			} else if (r.recharge === rechargeType || (rechargeType === "long" && r.recharge === "short")) {
 				r.current = r.max;
+				if (rechargeType === "long" && r.featureUid === CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature) {
+					r.metadata = {
+						...(r.metadata || {}),
+						efaGiantStature: {
+							version: 1,
+							spentUses: 0,
+						},
+					};
+				}
 			}
 		});
 
@@ -68568,6 +68579,24 @@ class CharacterSheetState {
 		return nRefs > 0;
 	}
 
+	static isEfaArmorerModelFeature (feature) {
+		if (!feature) return false;
+		const uid = [
+			feature.name,
+			feature.className,
+			feature.classSource,
+			feature.subclassShortName || feature.subclassName,
+			feature.subclassSource,
+			feature.level,
+			feature.source,
+		].map(part => String(part ?? "").trim().toLowerCase()).join("|");
+		return new Set([
+			"dreadnaught|artificer|efa|armorer|efa|3|efa",
+			"guardian|artificer|efa|armorer|efa|3|efa",
+			"infiltrator|artificer|efa|armorer|efa|3|efa",
+		]).has(uid);
+	}
+
 	/**
 	 * Build activation info for a single Jester's Act (TGTT Bard, optional feature type "JA").
 	 *
@@ -68818,6 +68847,9 @@ class CharacterSheetState {
 		// (CS-BUG-051) Pure "here are the options you gained" wrappers are never independently
 		// activatable — their children carry the mechanics and their own rows.
 		if (CharacterSheetState.isReferenceWrapperFeature(feature)) return null;
+		// Model child entities are choice wrappers. Their actions live on the bound
+		// Arcane Armor item and in Combat, never in the generic custom-toggle path.
+		if (CharacterSheetState.isEfaArmorerModelFeature(feature)) return null;
 		// (CS-BUG-163) A constellation form (Bee / Roc / Aurochs / …) DESCRIBES one
 		// option of "Zodiac Form: Month"; it is never independently activatable.
 		// Activation is owned by the parent feature, which carries
@@ -73340,6 +73372,13 @@ class CharacterSheetState {
 
 	static EFA_GIANT_STATURE_RESOURCE_NAME = "Giant Stature";
 
+	static EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT = Object.freeze({
+		key: "subclassFeature:Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA:action:lightning-launcher-extra-damage",
+		ownerUid: "subclass:Armorer|EFA|Artificer|EFA",
+		sourceUid: "subclassFeature:Infiltrator|Artificer|EFA|Armorer|EFA|3|EFA",
+		actionUid: "lightning-launcher-extra-damage",
+	});
+
 	_ensureEfaGiantStatureResource () {
 		const featureUid = CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature;
 		const isOwned = resource =>
@@ -73355,7 +73394,14 @@ class CharacterSheetState {
 
 		const desiredMax = Math.max(1, this.getAbilityMod("int"));
 		const spent = tracked.length
-			? Math.max(...tracked.map(resource => Math.max(0, (Number(resource.max) || 0) - Math.min(Number(resource.current) || 0, Number(resource.max) || 0))))
+			? Math.max(...tracked.map(resource => {
+				const priorMax = Math.max(0, Number(resource.max) || 0);
+				const observedSpent = Math.max(0, priorMax - Math.min(Number(resource.current) || 0, priorMax));
+				const persistedSpent = Number(resource.metadata?.efaGiantStature?.spentUses);
+				return Number.isFinite(persistedSpent)
+					? Math.max(observedSpent, Math.max(0, Math.floor(persistedSpent)))
+					: observedSpent;
+			}))
 			: 0;
 		let resource = tracked[0] || null;
 		if (!resource) {
@@ -73375,6 +73421,13 @@ class CharacterSheetState {
 		resource.featureUid = featureUid;
 		resource.classUid = CharacterSheetState.EFA_ARTIFICER_CLASS_UID;
 		resource.source = "EFA";
+		resource.metadata = {
+			...(resource.metadata || {}),
+			efaGiantStature: {
+				version: 1,
+				spentUses: spent,
+			},
+		};
 		this._data.resources = (this._data.resources || []).filter(candidate => candidate === resource || !isOwned(candidate));
 		return resource;
 	}
@@ -73428,6 +73481,7 @@ class CharacterSheetState {
 			},
 		});
 		if (!committed.ok) return committed;
+		this._ensureEfaGiantStatureResource();
 
 		const stateId = this.activateState("giantStature", {
 			name: "Giant Stature",
@@ -74183,6 +74237,14 @@ class CharacterSheetState {
 			if (!liveStatus.active || liveStatus.model?.name !== "Guardian" || this.isDead()) {
 				this.clearOwnedTempHp(CharacterSheetState.EFA_ARMORER_FEATURE_OWNERS.defensiveField);
 				this.clearTargetEffects("efa-armorer-thunder-pulse");
+			}
+			if ((!armorer || model?.name !== "Infiltrator") && typeof this.pruneTurnReceipts === "function") {
+				const receipt = CharacterSheetState.EFA_LIGHTNING_LAUNCHER_TURN_RECEIPT;
+				this.pruneTurnReceipts({
+					ownerUid: receipt.ownerUid,
+					sourceUid: receipt.sourceUid,
+					actionUid: receipt.actionUid,
+				});
 			}
 			return {...this._getEfaArcaneArmorStatusSnapshot(), cause};
 		} finally {

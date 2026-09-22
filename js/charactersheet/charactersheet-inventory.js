@@ -5681,7 +5681,7 @@ class CharacterSheetInventory {
 		return confirmed;
 	}
 
-	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null} = {}) {
+	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null, returnResult = false} = {}) {
 		const power = this._state.getItemPower?.(itemId, powerId);
 		let pendingSpellCast = null;
 		let efaArmorer = null;
@@ -5741,7 +5741,7 @@ class CharacterSheetInventory {
 			? result.isActive ? "Activated" : "Deactivated"
 			: result.power.kind === "spell" ? "Cast" : "Invoked";
 		JqueryUtil.doToast({
-			type: "success",
+			type: result.followUpFailed ? "warning" : "success",
 			content: result.message || `${verb} ${result.power.name} from ${result.power.itemName}${chargeText}.`,
 		});
 		closeModal?.();
@@ -5759,10 +5759,10 @@ class CharacterSheetInventory {
 		if (pendingSpellCast) {
 			const receipt = await this._page?._spells?.pCommitPendingSpellCast?.(pendingSpellCast);
 			this._page?._saveCurrentCharacter?.();
-			return receipt || true;
+			return receipt || (returnResult ? result : true);
 		}
 		this._page?._saveCurrentCharacter?.();
-		return true;
+		return returnResult ? result : true;
 	}
 
 	async _showItemPowersModal (itemId) {

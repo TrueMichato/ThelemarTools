@@ -2127,11 +2127,30 @@ class CharacterSheetCombat {
 		const options = this._state.getFeatureCalculations?.()?.attackOnHitOptions || [];
 		const sourceFeature = (attack.sourceFeature || "").trim().toLowerCase();
 		return options.filter(opt => {
-			if (opt?.attackSourceFeature && opt.attackSourceFeature.toLowerCase() !== sourceFeature) return false;
+			if (!this._doesAttackMatchExactIds(opt?.attackIds || opt?.attackId, attack)) return false;
+			if (!opt?.attackIds && !opt?.attackId && opt?.attackSourceFeature && opt.attackSourceFeature.toLowerCase() !== sourceFeature) return false;
 			const requiredStates = opt?.requiresStates || (opt?.requiresState ? [opt.requiresState] : []);
 			if (requiredStates.some(requiredId => !this._state.isStateTypeActive?.(requiredId))) return false;
 			return true;
 		});
+	}
+
+	_getAttackExactIds (attack) {
+		return new Set([
+			attack?.id,
+			attack?._efaArmorerWeaponId,
+			attack?.sourceItem?._efaArmorerWeaponId,
+			attack?.sourceItem?._generatedItemId,
+		].filter(Boolean).map(id => String(id)));
+	}
+
+	_doesAttackMatchExactIds (selector, attack) {
+		const required = (Array.isArray(selector) ? selector : selector ? [selector] : [])
+			.map(id => String(id))
+			.filter(Boolean);
+		if (!required.length) return true;
+		const attackIds = this._getAttackExactIds(attack);
+		return required.some(id => attackIds.has(id));
 	}
 
 	/**
@@ -2173,6 +2192,10 @@ class CharacterSheetCombat {
 
 		const opt = options[picked];
 		if (!opt) return;
+		if (opt.resolutionKind === "forcedMovement") {
+			await this._pOfferForcedMovementOnHit(ctx, opt);
+			return;
+		}
 		if (opt.targetAware && opt.targetEffect?.source) {
 			await this._pOfferTargetEffect({...ctx, focusTrigger}, opt);
 			return;
@@ -2185,6 +2208,62 @@ class CharacterSheetCombat {
 			parts.push(`Recurring: ${opt.recurringDamage.amount} ${opt.recurringDamage.type || ""} damage at the ${opt.recurringDamage.when || "start of each of its turns"}.`);
 		}
 		JqueryUtil.doToast({type: "success", content: `${opt.name}: ${parts.join(" ")}`});
+	}
+
+	_getTrackOnlyOnHitOption (options) {
+		const base = (options || []).find(it =>
+			it.targetAware
+			&& it.targetEffect?.source
+			&& it.allowTrackOnly !== false);
+		return base ? {
+			...base,
+			id: "target-only",
+			name: "Track target only",
+			targetEffect: {...base.targetEffect, effect: "target"},
+		} : null;
+	}
+
+	async _pOfferForcedMovementOnHit (ctx, opt) {
+		const targetSize = await InputUiUtil.pGetUserEnum({
+			title: `${opt.name} — Target Size`,
+			values: ["tiny", "small", "medium", "large", "huge", "gargantuan"],
+			fnDisplay: value => value.toTitleCase(),
+			isResolveItem: true,
+		});
+		if (targetSize == null || typeof targetSize === "symbol") return;
+		const direction = await InputUiUtil.pGetUserEnum({
+			title: `${opt.name} — Direction`,
+			values: ["push", "pull"],
+			fnDisplay: value => value === "push" ? "Push away" : "Pull toward",
+			isResolveItem: true,
+		});
+		if (direction == null || typeof direction === "symbol") return;
+		const distance = await InputUiUtil.pGetUserNumber({
+			title: `${opt.name} — Distance`,
+			inputMode: "numeric",
+			min: 1,
+			max: Number(opt.distanceMax) || 10,
+			int: true,
+			default: Number(opt.distanceMax) || 10,
+		});
+		if (distance == null) return;
+		const result = this._state.resolveEfaForceDemolisherHitRider?.({
+			attackId: ctx.attack?.id,
+			hit: true,
+			targetSize,
+			direction,
+			distance,
+		});
+		if (!result?.applied) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: result?.reason === "target-not-smaller"
+					? `Force Demolisher requires a target at least one size smaller than you (${result.ownerSize}).`
+					: "Force Demolisher is no longer eligible for this hit.",
+			});
+			return;
+		}
+		JqueryUtil.doToast({type: "success", content: result.message});
 	}
 
 	/**
@@ -3714,13 +3793,25 @@ class CharacterSheetCombat {
 				// Most riders are once-per-turn; some (e.g. Terrorizing Force) apply on EVERY
 				// hit (rider.perTurn === false) and are never marked used.
 				const oncePerTurn = rider.perTurn !== false;
-				if (oncePerTurn && !this._isRiderAvailableThisTurn(rider.id)) continue;
-				const riderRoll = rollTypedDamage(rider.dice, rider.damageType || weaponDamageType);
+				if (oncePerTurn && !this._isRiderAvailableThisTurn(rider)) continue;
+				const useCommit = oncePerTurn && rider.turnReceipt
+					? this._markRiderUsedThisTurn(rider, {attackId: attack.id})
+					: null;
+				if (oncePerTurn && rider.turnReceipt && !useCommit?.committed) continue;
+				let riderRoll;
+				try {
+					riderRoll = rollTypedDamage(rider.dice, rider.damageType || weaponDamageType);
+				} catch (error) {
+					if (useCommit?.receipt && typeof this._state?.rollbackTurnReceipt === "function") {
+						this._state.rollbackTurnReceipt(useCommit.receipt);
+					}
+					throw error;
+				}
 				riderDamageTotal += riderRoll.total;
 				riderParts.push({name: rider.name, dice: rider.dice, total: riderRoll.total, type: rider.damageType});
 				riderRollsForAnim.push(riderRoll);
 				usedRiderIds.push(rider.id);
-				if (oncePerTurn) this._markRiderUsedThisTurn(rider.id);
+				if (oncePerTurn && !rider.turnReceipt) this._markRiderUsedThisTurn(rider);
 			}
 
 			if (juggernautTarget === "construct") {
@@ -4170,18 +4261,40 @@ class CharacterSheetCombat {
 		this._lastSneakAttackRoundUsed = round;
 	}
 
-	_isRiderAvailableThisTurn (riderId) {
+	_isRiderAvailableThisTurn (riderOrId) {
+		const rider = typeof riderOrId === "object" ? riderOrId : null;
+		const riderId = rider?.id || riderOrId;
+		if (rider?.turnReceipt) {
+			if (typeof this._state?.queryTurnReceipt !== "function") return false;
+			const query = this._state.queryTurnReceipt(rider.turnReceipt.key);
+			return !!query?.ok && !query.used;
+		}
 		if (!this._state?.isInCombat?.()) return true;
 		const round = this._state.getCombatRound?.() || 0;
 		if (!round) return true;
 		return this._lastRiderRoundUsed[riderId] !== round;
 	}
 
-	_markRiderUsedThisTurn (riderId) {
-		if (!this._state?.isInCombat?.()) return;
+	_markRiderUsedThisTurn (riderOrId, {attackId = null} = {}) {
+		const rider = typeof riderOrId === "object" ? riderOrId : null;
+		const riderId = rider?.id || riderOrId;
+		if (rider?.turnReceipt) {
+			if (typeof this._state?.commitTurnReceipt !== "function") {
+				return {ok: false, committed: false, reason: "turnReceiptApiUnavailable", receipt: null};
+			}
+			return this._state.commitTurnReceipt({
+				...rider.turnReceipt,
+				metadata: {
+					...(rider.turnReceipt.metadata || {}),
+					...(attackId ? {attackId} : {}),
+				},
+			});
+		}
+		if (!this._state?.isInCombat?.()) return {ok: true, committed: true, receipt: null};
 		const round = this._state.getCombatRound?.() || 0;
 		if (!round) return;
 		this._lastRiderRoundUsed[riderId] = round;
+		return {ok: true, committed: true, receipt: null};
 	}
 
 	_isSneakAttackContextDisadvantaged (attackId) {
@@ -4416,7 +4529,9 @@ class CharacterSheetCombat {
 	}
 
 	_isWeaponDamageRiderEligible (rider, attack) {
-		return !rider?.attackSourceFeature
+		if (!this._doesAttackMatchExactIds(rider?.attackIds || rider?.attackId, attack)) return false;
+		return !!(rider?.attackIds || rider?.attackId)
+			|| !rider?.attackSourceFeature
 			|| (attack?.sourceFeature || "").toLowerCase() === rider.attackSourceFeature.toLowerCase();
 	}
 
@@ -8485,9 +8600,9 @@ class CharacterSheetCombat {
 			await this._page?._inventory?._showItemPowersModal?.(power.itemId);
 			return false;
 		}
-		const used = await this._page?._inventory?._pInvokeItemPower?.(power.itemId, power.id);
+		const used = await this._page?._inventory?._pInvokeItemPower?.(power.itemId, power.id, {returnResult: true});
 		if (!used) return false;
-		if (actionType) this._consumeActionType(actionType);
+		if (actionType && !used?.actionConsumed) this._consumeActionType(actionType);
 		this.renderCombatItemPowers();
 		this.renderCombatActionEconomy();
 		return true;
@@ -11971,13 +12086,14 @@ class CharacterSheetCombat {
 
 		for (const rider of riders) {
 			const oncePerTurn = rider.perTurn !== false;
-			const isSpent = oncePerTurn && !this._isRiderAvailableThisTurn(rider.id);
+			const isSpent = oncePerTurn && !this._isRiderAvailableThisTurn(rider);
 			if (isSpent && this._weaponRiderEnabled[rider.id]) this._weaponRiderEnabled[rider.id] = false;
 			// StateToggle vocabulary — default ON / OFF / USED (colour + icon + text).
 			const toggleState = isSpent ? "used" : this._weaponRiderEnabled[rider.id] ? "on" : "off";
-			const ariaState = isSpent ? "already used this round" : this._weaponRiderEnabled[rider.id] ? "armed" : "off";
+			const cadence = rider.turnReceipt ? "turn" : "round";
+			const ariaState = isSpent ? `already used this ${cadence}` : this._weaponRiderEnabled[rider.id] ? "armed" : "off";
 			const title = isSpent
-				? `${rider.name} already used this round`
+				? `${rider.name} already used this ${cadence}`
 				: this._weaponRiderEnabled[rider.id]
 					? `Click to disable ${rider.name} for next damage roll`
 					: `Click to enable ${rider.name} for next damage roll`;
@@ -12012,8 +12128,8 @@ class CharacterSheetCombat {
 			`});
 
 			row.querySelector(".charsheet__weapon-rider-toggle")?.addEventListener("click", () => {
-				if (rider.perTurn !== false && !this._isRiderAvailableThisTurn(rider.id)) {
-					JqueryUtil.doToast({type: "warning", content: `${rider.name} has already been used this round.`});
+				if (rider.perTurn !== false && !this._isRiderAvailableThisTurn(rider)) {
+					JqueryUtil.doToast({type: "warning", content: `${rider.name} has already been used this ${cadence}.`});
 					return;
 				}
 				this._weaponRiderEnabled[rider.id] = !this._weaponRiderEnabled[rider.id];

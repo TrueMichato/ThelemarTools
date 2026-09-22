@@ -1383,6 +1383,39 @@ death, source loss, or ambiguous model evidence unregisters them immediately.
 This is why armor-imposed Stealth disadvantage cancels Dampening Field instead
 of being removed.
 
+Level-3 model actions remain exact-source and exact-attack mechanics:
+
+- Force Demolisher post-hit movement resolves only from
+  `efa-armorer:dreadnaught:force-demolisher`, verifies the target is at least one
+  size smaller, and returns a structured push/pull receipt without storing a
+  fabricated target position.
+- Giant Stature is a Bonus Action item power with a Long Rest resource equal to
+  the Intelligence modifier (minimum 1). Its active state always grants +5-foot
+  reach and grants only the size steps needed to reach Large when room allows.
+  The action/resource/state transaction revalidates model and wrapper binding;
+  lifecycle reconciliation removes an invalid state without refunding a valid
+  committed use. The resource's `metadata.efaGiantStature.spentUses` preserves
+  total spend across temporary Intelligence-maximum reductions and resets only
+  when the Long Rest restores the pool.
+- Thunder Pulse uses the generic owner-tagged target-effect store. Re-hitting
+  the same target refreshes its disadvantage-against-others effect until the
+  start of the Armorer owner's next turn.
+- Defensive Field is an unlimited Bloodied-only Bonus Action. It grants owned
+  temporary HP equal to exact EFA Artificer level; doff/model/source/death
+  cleanup removes it only while that feature still owns the current temp HP.
+- Lightning Launcher's optional `1d6` Lightning rider uses the shared
+  `queryTurnReceipt` / `commitTurnReceipt` / `rollbackTurnReceipt` /
+  `pruneTurnReceipts` contract. Never route it through Combat's legacy
+  round-keyed `_lastRiderRoundUsed` map.
+
+Combat selectors must match `attackIds` against stable attack/generated-item
+metadata before considering legacy `attackSourceFeature` labels. Editable names
+and another weapon carrying the same display source must not qualify. The
+canonical Dreadnaught/Guardian/Infiltrator level-3 subclass-feature entities are
+structured model choices, so `detectActivatableFeature()` suppresses only their
+exact seven-part EFA UIDs; their real actions stay on the armor row and Combat
+hooks rather than appearing as inert generic toggles.
+
 Arcane Armor lifecycle controls are synthetic `itemPowers`, not parallel state:
 the real armor row exposes `Transform` as a Magic action and `Don` / `Doff` as
 Utilize actions. Use distinct stable power IDs per transition so a stale Doff
