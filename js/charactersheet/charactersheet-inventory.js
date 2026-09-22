@@ -307,6 +307,12 @@ class CharacterSheetInventory {
 				this._page._crafting?.pShowCraftWorkbench();
 				return;
 			}
+			if (e.target.closest("#charsheet-btn-manage-generated-items")) {
+				this._pShowGeneratedItemManagement({
+					focusRestoreTarget: e.target.closest("#charsheet-btn-manage-generated-items"),
+				});
+				return;
+			}
 
 			// --- Item row action buttons (delegated, dynamic) ---
 			const _getItemId = (target) => target.closest(".charsheet__item")?.dataset.itemId;
@@ -610,6 +616,135 @@ class CharacterSheetInventory {
 
 	async _showItemPicker () {
 		await this._pShowItemPickerModal();
+	}
+
+	static _escapeGeneratedItemText (value) {
+		return String(value ?? "")
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#39;");
+	}
+
+	_getGeneratedItemManagementHtml (rows = this._state.getGeneratedFeatureItemManagementRows()) {
+		const escape = CharacterSheetInventory._escapeGeneratedItemText;
+		const pendingCount = rows.filter(row => row.expiryRecords?.some(record =>
+			Number.isSafeInteger(record.daysRemaining)
+				&& record.daysRemaining > 0,
+		)).length;
+		const cards = rows.map(row => {
+			const provenance = row.classification?.provenance;
+			const owner = provenance?.owner;
+			const sourceFeature = owner?.featureUid
+				? owner.featureUid.split("|")[0]
+				: "Unknown source feature";
+			const source = owner?.featureSource || "Unknown source";
+			const plan = row.plan?.displayName || row.plan?.name || "No recorded plan";
+			const resolved = row.resolvedItem?.name
+				? `${row.resolvedItem.name}${row.resolvedItem.source ? ` (${row.resolvedItem.source})` : ""}`
+				: "No resolved catalog item";
+			const order = row.creation?.order ? `#${row.creation.order}` : "Unknown";
+			const expiry = row.expiryRecords?.find(record => record.trigger === "death") || null;
+			const expiryText = expiry?.repairRequired
+				? "Invalid persisted expiry values; exact repair is required"
+				: expiry
+					? `Rolled ${expiry.roll?.formula || "1d4"} = ${expiry.roll?.result}; ${expiry.daysRemaining} ${expiry.daysRemaining === 1 ? "day" : "days"} remaining`
+					: "Not pending";
+			const status = row.repairRequired
+				? `Repair required: ${row.issues.join(", ")}`
+				: "Lifecycle metadata valid";
+			const repairReason = row.repairRequired
+				? "Automatic repair is disabled because exact source identity must be restored without guessing."
+				: "No repair is required.";
+			return `<article class="charsheet__generated-item-card${row.repairRequired ? " charsheet__generated-item-card--repair" : ""}" data-item-id="${escape(row.itemId)}">
+				<div class="charsheet__generated-item-card-heading">
+					<div>
+						<h3 class="charsheet__generated-item-name">${escape(row.name)}</h3>
+						<div class="ve-muted ve-small">${escape(sourceFeature)} · ${escape(source)}</div>
+					</div>
+					<span class="badge ${row.repairRequired ? "badge-danger" : "badge-success"}">${escape(status)}</span>
+				</div>
+				<dl class="charsheet__generated-item-facts">
+					<div><dt>Known plan</dt><dd>${escape(plan)}</dd></div>
+					<div><dt>Resolved item</dt><dd>${escape(resolved)}</dd></div>
+					<div><dt>Creation order</dt><dd>${escape(order)}</dd></div>
+					<div><dt>Death expiry</dt><dd>${escape(expiryText)}</dd></div>
+				</dl>
+				<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__generated-item-repair" disabled aria-disabled="true" title="${escape(repairReason)}">
+					${row.repairRequired ? "Repair requires exact source" : "No repair needed"}
+				</button>
+			</article>`;
+		}).join("");
+		const disabledReason = pendingCount
+			? ""
+			: "No generated items have a pending lifecycle countdown.";
+		return `<section class="charsheet__generated-item-manager" aria-label="Generated item lifecycle management">
+			<p class="ve-muted">Review generated-item ownership and expiry here. <strong>Long rests do not advance lifecycle days.</strong></p>
+			<div class="charsheet__generated-item-actions">
+				<button type="button" class="ve-btn ve-btn-primary" data-action="advance-generated-item-day" ${pendingCount ? "" : `disabled aria-disabled="true" title="${escape(disabledReason)}"`}>
+					Advance Day
+				</button>
+				<span class="ve-small ve-muted">${pendingCount ? `${pendingCount} pending ${pendingCount === 1 ? "countdown" : "countdowns"}` : escape(disabledReason)}</span>
+			</div>
+			<div class="charsheet__generated-item-feedback" role="status" aria-live="polite" aria-atomic="true"></div>
+			<div class="charsheet__generated-item-list">
+				${cards || `<div class="charsheet__generated-item-empty ve-muted">No supported generated items are present.</div>`}
+			</div>
+		</section>`;
+	}
+
+	async _pAdvanceGeneratedItemLifecycleDaysFromUi (days = 1) {
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: days === 1 ? "Advance generated-item lifecycle by one day?" : `Advance generated-item lifecycle by ${days} days?`,
+			htmlDescription: `<p>This advances explicit generated-item countdowns only. Long rests do not advance these days.</p><p>Items reaching zero days are removed through normal inventory cleanup.</p>`,
+			textYes: days === 1 ? "Advance day" : `Advance ${days} days`,
+			textNo: "Cancel",
+		});
+		if (!confirmed) {
+			return {
+				ok: false,
+				code: "lifecycle-day-advance-cancelled",
+				message: "No lifecycle days were advanced.",
+			};
+		}
+		const result = this._state.advanceGeneratedFeatureItemLifecycleDays(days);
+		if (!result.ok) return {...result, message: result.message || "Lifecycle days could not be advanced."};
+		this._renderItemList();
+		this._renderEquippedItems();
+		this._renderAttunedItems();
+		this._updateArmorClass();
+		this._page.saveCharacter();
+		return {
+			...result,
+			message: `${result.daysAdvanced} ${result.daysAdvanced === 1 ? "day" : "days"} advanced. ${result.removed.length} expired ${result.removed.length === 1 ? "item was" : "items were"} removed.`,
+		};
+	}
+
+	async _pShowGeneratedItemManagement ({focusRestoreTarget = null} = {}) {
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Generated Items",
+			isMinHeight0: true,
+			isWidth100: true,
+			focusRestoreTarget,
+		});
+		const render = (feedback = "", {isFocus = false} = {}) => {
+			modalInner.innerHTML = this._getGeneratedItemManagementHtml();
+			const liveRegion = modalInner.querySelector(".charsheet__generated-item-feedback");
+			if (liveRegion) liveRegion.textContent = feedback;
+			const advance = modalInner.querySelector("[data-action=advance-generated-item-day]");
+			advance?.addEventListener("click", async () => {
+				advance.disabled = true;
+				const result = await this._pAdvanceGeneratedItemLifecycleDaysFromUi(1);
+				render(result.message || "", {isFocus: true});
+			});
+			const close = e_({tag: "button", clazz: "ve-btn ve-btn-default mt-3", text: "Close"});
+			close.addEventListener("click", () => doClose(true));
+			modalInner.querySelector(".charsheet__generated-item-manager")?.append(close);
+			if (isFocus) CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-action=advance-generated-item-day]:not([disabled])"});
+		};
+		render();
+		CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-action=advance-generated-item-day]:not([disabled])"});
 	}
 
 	async _pShowItemPickerModal (opts = {}) {

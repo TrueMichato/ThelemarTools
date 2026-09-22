@@ -486,6 +486,16 @@ void globalThis;
  *   state: "active"|"unresolved",
  *   deathExpiryDaysRemaining: number|null,
  *   deathExpiryAssignedReceiptId: string|null,
+ *   expiryRecords: Array<{
+ *     version: 1,
+ *     policyId: string,
+ *     trigger: string,
+ *     assignedReceiptId: string,
+ *     roll: {formula: string, result: number|null},
+ *     daysRemaining: number|null,
+ *     repairRequired?: boolean,
+ *     repairReason?: string
+ *   }>,
  *   callbacks: Object<string, string>,
  *   metadata: Object<string, *>
  * }} lifecycle

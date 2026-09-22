@@ -1,4 +1,7 @@
 import "./setup.js";
+import {jest} from "@jest/globals";
+import fs from "node:fs";
+import path from "node:path";
 
 if (!String.prototype.escapeQuotes) {
 	String.prototype.escapeQuotes = function () {
@@ -133,5 +136,72 @@ describe("EFA Replicate Magic Item inventory status", () => {
 		});
 		expect(state.getGeneratedFeatureItemManagementRows()).toEqual([]);
 		expect(html).not.toContain("Repair required");
+	});
+
+	test("renders an accessible responsive lifecycle-management surface with explicit expiry details", () => {
+		const state = new State();
+		globalThis.RollerUtil.randomise = () => 2;
+		const created = state.createGeneratedFeatureItem({
+			item: {name: "Bag of Holding", source: "XDMG", type: "W"},
+			owner: State.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+			catalog: {
+				plan: {selection: {name: "Bag of Holding", source: "XDMG"}},
+				resolvedItem: {name: "Bag of Holding", source: "XDMG"},
+			},
+			creation: {order: 4, receiptId: "created", event: "test", batchId: null},
+			lifecycle: {
+				version: State.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION,
+				state: "active",
+				callbacks: {onDeath: "expire-after-1d4-days", onLifecycleDay: "decrement-expiry"},
+				metadata: {},
+			},
+		});
+		state.setDeathSaveFailures(3);
+		const html = makeInventory(state)._getGeneratedItemManagementHtml();
+		const css = fs.readFileSync(path.resolve(process.cwd(), "css/charactersheet.css"), "utf8");
+
+		expect(created.ok).toBe(true);
+		expect(html).toContain("aria-label=\"Generated item lifecycle management\"");
+		expect(html).toContain("role=\"status\"");
+		expect(html).toContain("aria-live=\"polite\"");
+		expect(html).toContain("Long rests do not advance lifecycle days");
+		expect(html).toContain("Replicate Magic Item");
+		expect(html).toContain("Known plan");
+		expect(html).toContain("Resolved item");
+		expect(html).toContain("Creation order");
+		expect(html).toContain("#4");
+		expect(html).toContain("Rolled 1d4 = 2; 2 days remaining");
+		expect(html).toContain("data-action=\"advance-generated-item-day\"");
+		expect(css).toMatch(/@media \(max-width: 700px\)[\s\S]*?\.charsheet__generated-item-facts\s*\{[\s\S]*?grid-template-columns: 1fr;/);
+		expect(css).toContain(".ve-night-mode .charsheet__generated-item-card");
+		delete globalThis.RollerUtil.randomise;
+	});
+
+	test("cancels lifecycle-day advancement without mutation and reports confirmed results", async () => {
+		const state = new State();
+		const inventory = makeInventory(state);
+		const advance = jest.spyOn(state, "advanceGeneratedFeatureItemLifecycleDays")
+			.mockReturnValue({ok: true, daysAdvanced: 1, updated: [], removed: []});
+		globalThis.InputUiUtil.pGetUserBoolean = jest.fn()
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true);
+		inventory._renderItemList = jest.fn();
+		inventory._renderEquippedItems = jest.fn();
+		inventory._renderAttunedItems = jest.fn();
+		inventory._updateArmorClass = jest.fn();
+		inventory._page.saveCharacter = jest.fn();
+
+		expect(await inventory._pAdvanceGeneratedItemLifecycleDaysFromUi(1)).toMatchObject({
+			ok: false,
+			code: "lifecycle-day-advance-cancelled",
+		});
+		expect(advance).not.toHaveBeenCalled();
+
+		expect(await inventory._pAdvanceGeneratedItemLifecycleDaysFromUi(1)).toMatchObject({
+			ok: true,
+			message: expect.stringContaining("1 day advanced"),
+		});
+		expect(advance).toHaveBeenCalledWith(1);
+		expect(inventory._page.saveCharacter).toHaveBeenCalledTimes(1);
 	});
 });

@@ -5441,6 +5441,14 @@ class CharacterSheetState {
 				// Inventory wrapper identity is authoritative. Names and AC snapshots are not.
 				arcaneArmorItemId: null,
 			},
+			generatedFeatureItemLifecycle: {
+				version: 1,
+				deathTransition: {
+					version: 1,
+					isFinalizedDead: false,
+					receiptId: null,
+				},
+			},
 			currency: {cp: 0, sp: 0, ep: 0, gp: 0, pp: 0},
 
 			// Ioun Stone bonds in progress — {itemId: daysElapsed}. An Ioun bond takes 7
@@ -6459,6 +6467,8 @@ class CharacterSheetState {
 		this.reconcileEfaArmorerState({cause: "load"});
 		this._migrateGeneratedFeatureItemProvenance();
 		this.reconcileEfaReplicateMagicItems({reason: "load"});
+		this._normalizeGeneratedFeatureItemLifecycleState();
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "load"});
 		this._ensureFeatRegistryResources();
 		this._endBladesongForInvalidEquipment();
 		this._migrateLegacyTurnReceipts();
@@ -14286,6 +14296,7 @@ class CharacterSheetState {
 		this._updateBloodiedCondition();
 		this.reconcileEfaArmorerState({cause: "damage"});
 		this._syncCharacterDeathConsequences();
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "damage"});
 
 		return true;
 	}
@@ -14595,7 +14606,7 @@ class CharacterSheetState {
 	 */
 	_armZeroHpIntervention ({damage, rawDamage, damageType, isCritical, hpBefore}) {
 		const candidates = this.getZeroHpInterventions({damage, damageType, isCritical});
-		if (!candidates.length) return;
+		if (!candidates.some(candidate => candidate.available)) return;
 		this._data._pendingZeroHpIntervention = {
 			damage,
 			rawDamage,
@@ -14642,6 +14653,7 @@ class CharacterSheetState {
 	/** Discard the armed 0-HP trigger (declined, or resolved some other way). */
 	clearPendingZeroHpIntervention () {
 		delete this._data._pendingZeroHpIntervention;
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "zero-hp-intervention-finalized"});
 	}
 
 	/**
@@ -15229,6 +15241,7 @@ class CharacterSheetState {
 		}
 		this.reconcileEfaArmorerState({cause: "death-saves"});
 		this._syncCharacterDeathConsequences();
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "death-saves-set"});
 	}
 
 	/**
@@ -15244,6 +15257,7 @@ class CharacterSheetState {
 		}
 		this.reconcileEfaArmorerState({cause: "death-save"});
 		this._syncCharacterDeathConsequences();
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "death-save-made"});
 
 		return {
 			successes: this._data.deathSaves.successes,
@@ -15254,7 +15268,7 @@ class CharacterSheetState {
 	}
 
 	resetDeathSaves () {
-		this._data.deathSaves = {successes: 0, failures: 0};
+		this.setDeathSaves({successes: 0, failures: 0});
 	}
 
 	/**
@@ -15273,6 +15287,7 @@ class CharacterSheetState {
 		this._data.deathSaves.failures = Math.min(3, this._data.deathSaves.failures + count);
 		this.reconcileEfaArmorerState({cause: "death-save-failure"});
 		this._syncCharacterDeathConsequences();
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "death-save-failure-added"});
 	}
 
 	/**
@@ -15307,6 +15322,7 @@ class CharacterSheetState {
 		this._data.deathSaves.failures = Math.min(3, Math.max(0, count));
 		this.reconcileEfaArmorerState({cause: "death-save-failures"});
 		this._syncCharacterDeathConsequences();
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "death-save-failures-set"});
 	}
 
 	/**
@@ -37084,6 +37100,8 @@ class CharacterSheetState {
 	// #region Inventory
 	static GENERATED_FEATURE_ITEM_PROVENANCE_VERSION = 1;
 	static GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION = 1;
+	static GENERATED_FEATURE_ITEM_EXPIRY_VERSION = 1;
+	static GENERATED_FEATURE_ITEM_LIFECYCLE_STATE_VERSION = 1;
 	static EFA_REPLICATE_MAGIC_ITEM_FEATURE_UID = "Replicate Magic Item|Artificer|EFA|2|EFA";
 	static EFA_REPLICATE_MAGIC_ITEM_OWNER = Object.freeze({
 		featureUid: "Replicate Magic Item|Artificer|EFA|2",
@@ -37204,31 +37222,95 @@ class CharacterSheetState {
 		if (!Number.isSafeInteger(version) || version !== CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION) return null;
 		const state = lifecycle.state == null ? "active" : String(lifecycle.state);
 		if (!["active", "unresolved"].includes(state)) return null;
-		const deathExpiryDaysRemaining = lifecycle.deathExpiryDaysRemaining == null
-			? null
-			: Number(lifecycle.deathExpiryDaysRemaining);
-		if (
-			deathExpiryDaysRemaining != null
-			&& (!Number.isSafeInteger(deathExpiryDaysRemaining) || deathExpiryDaysRemaining < 0)
-		) return null;
 		const callbacks = lifecycle.callbacks == null
 			? {}
 			: lifecycle.callbacks && typeof lifecycle.callbacks === "object" && !Array.isArray(lifecycle.callbacks)
 				? MiscUtil.copyFast(lifecycle.callbacks)
 				: null;
 		if (!callbacks) return null;
+		const expiryRecords = CharacterSheetState._normalizeGeneratedFeatureItemExpiryRecords(lifecycle.expiryRecords);
+		const deathRecord = expiryRecords.find(record => record.trigger === "death");
+		const rawDeathExpiryDaysRemaining = Number(lifecycle.deathExpiryDaysRemaining);
+		const deathExpiryDaysRemaining = deathRecord
+			? deathRecord.daysRemaining
+			: lifecycle.deathExpiryDaysRemaining != null
+			&& Number.isSafeInteger(rawDeathExpiryDaysRemaining)
+			&& rawDeathExpiryDaysRemaining >= 0
+				? rawDeathExpiryDaysRemaining
+				: null;
+		const rawDeathExpiryAssignedReceiptId = lifecycle.deathExpiryAssignedReceiptId == null
+			? ""
+			: String(lifecycle.deathExpiryAssignedReceiptId).trim();
 		return {
 			version,
 			state,
 			deathExpiryDaysRemaining,
-			deathExpiryAssignedReceiptId: lifecycle.deathExpiryAssignedReceiptId == null
-				? null
-				: String(lifecycle.deathExpiryAssignedReceiptId),
+			deathExpiryAssignedReceiptId: deathRecord?.assignedReceiptId || rawDeathExpiryAssignedReceiptId || null,
+			expiryRecords,
 			callbacks,
 			metadata: lifecycle.metadata && typeof lifecycle.metadata === "object" && !Array.isArray(lifecycle.metadata)
 				? MiscUtil.copyFast(lifecycle.metadata)
 				: {},
 		};
+	}
+
+	static _normalizeGeneratedFeatureItemExpiryRecords (records) {
+		if (!Array.isArray(records)) return [];
+		const out = new Map();
+		const qualityByKey = new Map();
+		for (const raw of records) {
+			if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+			const policyId = String(raw.policyId || "").trim();
+			const trigger = String(raw.trigger || "").trim();
+			const assignedReceiptId = String(raw.assignedReceiptId || "").trim();
+			if (!policyId || !trigger || !assignedReceiptId) continue;
+			const hasResult = raw.roll?.result != null && Number.isFinite(Number(raw.roll.result));
+			const hasDays = raw.daysRemaining != null && Number.isFinite(Number(raw.daysRemaining));
+			const quality = Number(hasResult) + Number(hasDays);
+			const key = `${trigger.toLowerCase()}::${policyId.toLowerCase()}`;
+			const normalized = !hasResult && !hasDays
+				? {
+					version: CharacterSheetState.GENERATED_FEATURE_ITEM_EXPIRY_VERSION,
+					policyId,
+					trigger,
+					assignedReceiptId,
+					roll: {formula: "1d4", result: null},
+					daysRemaining: null,
+					repairRequired: true,
+					repairReason: "invalid-expiry-numeric",
+				}
+				: (() => {
+					const result = hasResult
+						? Math.max(1, Math.min(4, Math.floor(Number(raw.roll.result))))
+						: Math.max(1, Math.min(4, Math.floor(Number(raw.daysRemaining))));
+					const daysRemaining = hasDays
+						? Math.max(0, Math.min(result, Math.floor(Number(raw.daysRemaining))))
+						: result;
+					return {
+						version: CharacterSheetState.GENERATED_FEATURE_ITEM_EXPIRY_VERSION,
+						policyId,
+						trigger,
+						assignedReceiptId,
+						roll: {formula: "1d4", result},
+						daysRemaining,
+					};
+				})();
+			const existing = out.get(key);
+			const existingQuality = qualityByKey.get(key) ?? -1;
+			if (
+				!existing
+				|| quality > existingQuality
+				|| (
+					quality === existingQuality
+					&& !normalized.repairRequired
+					&& normalized.daysRemaining < existing.daysRemaining
+				)
+			) {
+				out.set(key, normalized);
+				qualityByKey.set(key, quality);
+			}
+		}
+		return [...out.values()];
 	}
 
 	static _normalizeGeneratedFeatureItemProvenance (provenance) {
@@ -37499,6 +37581,7 @@ class CharacterSheetState {
 				state: "active",
 				deathExpiryDaysRemaining: null,
 				deathExpiryAssignedReceiptId: null,
+				expiryRecords: [],
 				callbacks: {},
 				metadata: {},
 			}
@@ -37548,6 +37631,7 @@ class CharacterSheetState {
 
 		const wrapper = this._findInventoryRow(itemId);
 		if (!wrapper) return {ok: false, code: "generated-item-add-failed"};
+		this._reconcileGeneratedFeatureItemRowForCurrentLifecycle(wrapper);
 		return {
 			ok: true,
 			code: "generated-item-created",
@@ -37610,15 +37694,173 @@ class CharacterSheetState {
 					&& classification.provenance?.lifecycle?.state === "unresolved"
 					&& !issues.length
 				) issues.push("unresolved-lifecycle");
+				if (
+					classification.status === "valid"
+					&& classification.provenance?.lifecycle?.expiryRecords?.some(record => record.repairRequired)
+				) issues.push("invalid-expiry-numeric");
 				return {
 					itemId: row.id,
 					name: row.item?.name || "Generated Item",
+					sourceFeature: classification.provenance?.owner?.featureUid || null,
+					plan: classification.provenance?.catalog?.plan?.selection || null,
+					resolvedItem: classification.provenance?.catalog?.resolvedItem || null,
+					creation: classification.provenance?.creation || null,
+					expiryRecords: classification.provenance?.lifecycle?.expiryRecords || [],
 					classification,
 					issues,
 					repairRequired: !!issues.length,
 				};
 			})
 			.filter(Boolean);
+	}
+
+	_normalizeGeneratedFeatureItemLifecycleState () {
+		const raw = this._data.generatedFeatureItemLifecycle;
+		const transition = raw && typeof raw === "object" && !Array.isArray(raw)
+			? raw.deathTransition
+			: null;
+		this._data.generatedFeatureItemLifecycle = {
+			version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_STATE_VERSION,
+			deathTransition: {
+				version: CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_STATE_VERSION,
+				isFinalizedDead: !!transition?.isFinalizedDead,
+				receiptId: transition?.receiptId == null ? null : String(transition.receiptId),
+			},
+		};
+		return this._data.generatedFeatureItemLifecycle;
+	}
+
+	_getGeneratedFeatureItemLifecycleState () {
+		const state = this._data.generatedFeatureItemLifecycle;
+		if (
+			state?.version === CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_STATE_VERSION
+			&& state.deathTransition?.version === CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_STATE_VERSION
+		) return state;
+		return this._normalizeGeneratedFeatureItemLifecycleState();
+	}
+
+	_rollGeneratedFeatureItemExpiryDays () {
+		return typeof RollerUtil !== "undefined" && typeof RollerUtil.randomise === "function"
+			? RollerUtil.randomise(4)
+			: Math.floor(Math.random() * 4) + 1;
+	}
+
+	_assignGeneratedFeatureItemDeathExpiry (row, receiptId) {
+		const classification = this.classifyGeneratedFeatureItem(row);
+		if (classification.status !== "valid") return null;
+		const lifecycle = row.item?._generatedItemProvenance?.lifecycle;
+		const policyId = lifecycle?.callbacks?.onDeath;
+		if (!policyId || policyId !== "expire-after-1d4-days") return null;
+		lifecycle.expiryRecords = CharacterSheetState._normalizeGeneratedFeatureItemExpiryRecords(lifecycle.expiryRecords);
+		const existing = lifecycle.expiryRecords.find(record =>
+			record.trigger === "death"
+			&& record.policyId === policyId,
+		);
+		if (existing) return existing;
+		const result = this._rollGeneratedFeatureItemExpiryDays();
+		const record = {
+			version: CharacterSheetState.GENERATED_FEATURE_ITEM_EXPIRY_VERSION,
+			policyId,
+			trigger: "death",
+			assignedReceiptId: receiptId,
+			roll: {formula: "1d4", result},
+			daysRemaining: result,
+		};
+		lifecycle.expiryRecords.push(record);
+		lifecycle.deathExpiryDaysRemaining = result;
+		lifecycle.deathExpiryAssignedReceiptId = receiptId;
+		return record;
+	}
+
+	_reconcileGeneratedFeatureItemRowForCurrentLifecycle (row) {
+		const transition = this._getGeneratedFeatureItemLifecycleState().deathTransition;
+		if (!transition.isFinalizedDead || !transition.receiptId || !this.isDead()) return null;
+		if (this._data._pendingZeroHpIntervention) return null;
+		return this._assignGeneratedFeatureItemDeathExpiry(row, transition.receiptId);
+	}
+
+	reconcileGeneratedFeatureItemDeathTransition ({reason = "reconcile"} = {}) {
+		if (this._data._pendingZeroHpIntervention) {
+			return {ok: true, code: "death-transition-deferred", reason, assigned: []};
+		}
+		const transition = this._getGeneratedFeatureItemLifecycleState().deathTransition;
+		const dead = this.isDead();
+		if (!dead) {
+			transition.isFinalizedDead = false;
+			return {ok: true, code: "death-transition-alive", reason, assigned: []};
+		}
+		if (!transition.isFinalizedDead || !transition.receiptId) {
+			transition.isFinalizedDead = true;
+			transition.receiptId = CryptUtil.uid();
+		}
+		const assigned = [];
+		for (const row of this._data.inventory || []) {
+			const before = row.item?._generatedItemProvenance?.lifecycle?.expiryRecords?.length || 0;
+			const record = this._assignGeneratedFeatureItemDeathExpiry(row, transition.receiptId);
+			const after = row.item?._generatedItemProvenance?.lifecycle?.expiryRecords?.length || 0;
+			if (record && after > before) assigned.push({itemId: row.id, record: MiscUtil.copyFast(record)});
+		}
+		return {
+			ok: true,
+			code: assigned.length ? "death-transition-finalized" : "death-transition-already-finalized",
+			reason,
+			receiptId: transition.receiptId,
+			assigned,
+		};
+	}
+
+	advanceGeneratedFeatureItemLifecycleDays (days) {
+		const normalizedDays = Number(days);
+		if (!Number.isSafeInteger(normalizedDays) || normalizedDays <= 0) {
+			return {ok: false, code: "invalid-lifecycle-days", daysAdvanced: 0, updated: [], removed: []};
+		}
+		const snapshot = this.toJson();
+		const updated = [];
+		const toRemove = [];
+		try {
+			for (const row of this._data.inventory || []) {
+				const classification = this.classifyGeneratedFeatureItem(row);
+				if (classification.status !== "valid") continue;
+				const lifecycle = row.item._generatedItemProvenance.lifecycle;
+				if (lifecycle?.callbacks?.onLifecycleDay !== "decrement-expiry") continue;
+				lifecycle.expiryRecords = CharacterSheetState._normalizeGeneratedFeatureItemExpiryRecords(lifecycle.expiryRecords);
+				const records = lifecycle.expiryRecords.filter(record =>
+					Number.isSafeInteger(record.daysRemaining)
+					&& record.daysRemaining >= 0,
+				);
+				if (!records.length) continue;
+				for (const record of records) record.daysRemaining = Math.max(0, record.daysRemaining - normalizedDays);
+				const deathRecord = records.find(record => record.trigger === "death");
+				if (deathRecord) lifecycle.deathExpiryDaysRemaining = deathRecord.daysRemaining;
+				if (records.some(record => record.daysRemaining === 0)) {
+					toRemove.push({itemId: row.id, name: row.item?.name || "Generated Item"});
+				} else {
+					updated.push({
+						itemId: row.id,
+						daysRemaining: Math.min(...records.map(record => record.daysRemaining)),
+					});
+				}
+			}
+			for (const row of toRemove) this.removeItem(row.itemId);
+		} catch (error) {
+			this._data = snapshot;
+			this._reapplyItemEffects();
+			return {
+				ok: false,
+				code: "lifecycle-day-advance-rolled-back",
+				message: error.message,
+				daysAdvanced: 0,
+				updated: [],
+				removed: [],
+			};
+		}
+		return {
+			ok: true,
+			code: "lifecycle-days-advanced",
+			daysAdvanced: normalizedDays,
+			updated,
+			removed: toRemove,
+		};
 	}
 
 	_getExactCatalogItems ({name, source} = {}) {
@@ -37952,6 +38194,7 @@ class CharacterSheetState {
 							state: "active",
 							deathExpiryDaysRemaining: null,
 							deathExpiryAssignedReceiptId: null,
+							expiryRecords: [],
 							callbacks: descriptors[0].lifecycleCallbacks,
 							metadata: {},
 						},
@@ -38031,6 +38274,7 @@ class CharacterSheetState {
 						state: "active",
 						deathExpiryDaysRemaining: null,
 						deathExpiryAssignedReceiptId: null,
+						expiryRecords: [],
 						callbacks: descriptors[0].lifecycleCallbacks,
 						metadata: {},
 					},
@@ -38171,11 +38415,15 @@ class CharacterSheetState {
 					state: "active",
 					deathExpiryDaysRemaining: null,
 					deathExpiryAssignedReceiptId: null,
+					expiryRecords: [],
 					callbacks: isEfaReplicate
 						? this.getEfaReplicateMagicItemLifecycleDescriptors()[0].lifecycleCallbacks
 						: {},
 					metadata: {},
 				};
+			} else if (provenance.lifecycle.version === CharacterSheetState.GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION) {
+				const normalized = CharacterSheetState._normalizeGeneratedFeatureItemLifecycle(provenance.lifecycle);
+				if (normalized) provenance.lifecycle = normalized;
 			}
 			if (!Array.isArray(provenance.extensions)) provenance.extensions = [];
 			if (!provenance.metadata || typeof provenance.metadata !== "object" || Array.isArray(provenance.metadata)) provenance.metadata = {};
@@ -46218,6 +46466,7 @@ class CharacterSheetState {
 		this._data.exhaustion = Math.max(0, Math.min(max, level));
 		this.reconcileEfaArmorerState({cause: "exhaustion"});
 		this._syncCharacterDeathConsequences();
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "exhaustion-set"});
 	}
 
 	addExhaustion (amount = 1) {
@@ -46225,10 +46474,12 @@ class CharacterSheetState {
 		this._data.exhaustion = Math.min(max, (this._data.exhaustion || 0) + amount);
 		this.reconcileEfaArmorerState({cause: "exhaustion"});
 		this._syncCharacterDeathConsequences();
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "exhaustion-added"});
 	}
 
 	removeExhaustion (amount = 1) {
 		this._data.exhaustion = Math.max(0, (this._data.exhaustion || 0) - amount);
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "exhaustion-removed"});
 	}
 	// #endregion
 
@@ -46287,6 +46538,7 @@ class CharacterSheetState {
 			this._data.exhaustion = max;
 		}
 		this.reconcileEfaArmorerState({cause: "exhaustion-rules"});
+		this.reconcileGeneratedFeatureItemDeathTransition({reason: "exhaustion-rules-changed"});
 	}
 
 	/**

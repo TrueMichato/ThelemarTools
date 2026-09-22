@@ -65,6 +65,8 @@ state.classifyGeneratedFeatureItem(itemOrWrapper);
 state.getGeneratedFeatureItemRows(owner);
 state.removeGeneratedFeatureItemsByOwner(owner);
 state.getGeneratedFeatureItemManagementRows();
+state.reconcileGeneratedFeatureItemDeathTransition({reason?});
+state.advanceGeneratedFeatureItemLifecycleDays(days);
 ```
 
 Every generated row is custom, quantity 1, and has a unique wrapper id and
@@ -89,8 +91,19 @@ The persisted `_generatedItemProvenance` shape is:
     lifecycle: {
         version: 1,
         state: "active" | "unresolved",
-        deathExpiryDaysRemaining: null,
-        deathExpiryAssignedReceiptId: null,
+        // Backward-compatible mirrors of the death record below.
+        deathExpiryDaysRemaining: null | number,
+        deathExpiryAssignedReceiptId: null | string,
+        expiryRecords: [{
+            version: 1,
+            policyId: "expire-after-1d4-days",
+            trigger: "death",
+            assignedReceiptId,
+            roll: {formula: "1d4", result: number | null},
+            daysRemaining: number | null,
+            repairRequired?,
+            repairReason?,
+        }],
         callbacks: {},
         metadata: {},
     },
@@ -106,6 +119,38 @@ exact `featureSource` (including six-part subclass feature UIDs), and missing/am
 catalog identities stay in inventory and surface through
 `getGeneratedFeatureItemManagementRows()` plus the inventory's **Repair
 required** badge.
+
+Death transition state is persisted once per character:
+
+```javascript
+generatedFeatureItemLifecycle: {
+    version: 1,
+    deathTransition: {
+        version: 1,
+        isFinalizedDead,
+        receiptId,
+    },
+}
+```
+
+Only authoritative mutations reconcile that marker. Passive `isDead()`,
+`getHp()`, rendering, serialization, and management getters remain pure. A
+raw pending zero-HP intervention defers finalization until
+`clearPendingZeroHpIntervention()` resolves success, failure, or decline.
+Every valid generated row whose lifecycle registers
+`onDeath: "expire-after-1d4-days"` receives one persisted roll for that
+finalized death receipt. Reconciliation, save/load, revival, and passive reads
+never reroll or reset a record; valid rows created while the owner remains
+dead use the same generic creation callback.
+
+Lifecycle days advance only through
+`advanceGeneratedFeatureItemLifecycleDays(positiveWholeDays)`. The transaction
+validates before mutation, decrements registered pending records, and removes
+zero-day rows through ordinary `removeItem` teardown. A long rest is not a
+lifecycle day and never calls this API. The Inventory tab's **Generated
+Items** manager shows exact ownership, plan/resolved item, creation order,
+roll/days, and repair state; **Advance Day** requires confirmation and reports
+the result through an ARIA live region.
 
 EFA Replicate Magic Item uses exact owner
 `Replicate Magic Item|Artificer|EFA|2` / `Artificer|EFA`, with required,

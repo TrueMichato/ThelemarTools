@@ -15128,6 +15128,93 @@ body.has-quickbuild-overlay .toast__container {
 	}
 }
 
+.charsheet__generated-item-manager {
+	display: grid;
+	gap: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__generated-item-actions,
+.charsheet__generated-item-card-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__generated-item-feedback {
+	min-height: 1.25rem;
+	color: var(--cs-success, #047857);
+	font-weight: 600;
+}
+
+.charsheet__generated-item-list {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+	gap: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__generated-item-card {
+	display: grid;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding: var(--cs-space-md, 0.75rem);
+	background: var(--cs-bg-base, rgb(0 0 0 / 6%));
+	border: 1px solid var(--cs-border, rgb(99 102 241 / 18%));
+	border-radius: var(--cs-radius-md, 10px);
+}
+
+.charsheet__generated-item-card--repair {
+	border-color: var(--cs-danger, #b91c1c);
+}
+
+.charsheet__generated-item-name {
+	margin: 0;
+	font-size: 1rem;
+}
+
+.charsheet__generated-item-facts {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--cs-space-sm, 0.5rem);
+	margin: 0;
+}
+
+.charsheet__generated-item-facts > div {
+	min-width: 0;
+}
+
+.charsheet__generated-item-facts dt {
+	color: var(--cs-text-muted, #6b7280);
+	font-size: 0.75rem;
+	font-weight: 700;
+	text-transform: uppercase;
+}
+
+.charsheet__generated-item-facts dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.ve-night-mode .charsheet__generated-item-card {
+	background: rgb(255 255 255 / 4%);
+}
+
+@media (width <= 700px) {
+	.charsheet__generated-item-actions,
+	.charsheet__generated-item-card-heading {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__generated-item-actions .ve-btn,
+	.charsheet__generated-item-repair {
+		width: 100%;
+	}
+
+	.charsheet__generated-item-facts {
+		grid-template-columns: 1fr;
+	}
+}
+
 /* Combat Tab Resources and States */
 /* Resources flow into a responsive grid so the section stays short and every
    resource (plus the full-width Sneak Attack / weapon-rider blocks appended
