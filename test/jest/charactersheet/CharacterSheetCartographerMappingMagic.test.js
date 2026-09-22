@@ -114,17 +114,17 @@ afterEach(() => jest.restoreAllMocks());
 
 describe("EFA Cartographer — Mapping Magic", () => {
 	test("exposes the exact Illuminated Cartography feature-spell grant from an active self-held Atlas", () => {
-		const state = makeCartographer({level: 5});
+		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
 
 		const snapshot = state.getCartographerMappingMagicSnapshot();
 
 		expect(snapshot).toMatchObject({
-			version: 1,
+			version: 2,
 			illuminatedCartography: {
 				available: true,
-				usesCurrent: 1,
-				usesMax: 1,
+				usesCurrent: 3,
+				usesMax: 3,
 				recharge: "long",
 				spell: {name: "Faerie Fire", source: "XPHB", castLevel: 1},
 				castingAbility: "int",
@@ -137,26 +137,51 @@ describe("EFA Cartographer — Mapping Magic", () => {
 });
 
 describe("EFA Cartographer — Mapping Magic eligibility and teardown", () => {
-	test("uses the delegated level gates without leaking to same-label foreign sources", () => {
-		const level4 = makeCartographer({level: 4});
-		createSelfAtlas(level4);
-		expect(level4.getCartographerMappingMagicSnapshot().illuminatedCartography.available).toBe(false);
-
-		const level8 = makeCartographer({level: 8});
-		createSelfAtlas(level8);
-		expect(level8.getCartographerMappingMagicSnapshot()).toMatchObject({
-			illuminatedCartography: {available: true},
+	test("uses the authored level 3 gates without leaking or duplicating grants", () => {
+		const level2 = makeCartographer({level: 2});
+		expect(level2.getCartographerMappingMagicSnapshot()).toMatchObject({
+			illuminatedCartography: {available: false},
 			portalJump: {available: false},
 			positioning: {available: false},
 			unerringPath: {available: false},
 		});
+		const level2Calculations = level2.getFeatureCalculations();
+		expect(level2Calculations.hasAdventurersAtlas).toBeFalsy();
+		expect(level2Calculations.hasIlluminatedCartography).toBeFalsy();
+		expect(level2Calculations.hasPortalJump).toBeFalsy();
+		expect(level2Calculations.hasAdventurersAtlasPositioning).toBeFalsy();
 
-		const level9 = makeCartographer({level: 9});
-		createSelfAtlas(level9);
-		expect(level9.getCartographerMappingMagicSnapshot()).toMatchObject({
+		for (const level of [3, 5, 9]) {
+			const state = makeCartographer({level});
+			createSelfAtlas(state);
+			const snapshot = state.getCartographerMappingMagicSnapshot();
+			expect(snapshot).toMatchObject({
+				illuminatedCartography: {available: true},
+				portalJump: {available: true},
+				positioning: {available: true},
+				unerringPath: {available: false},
+			});
+			expect(snapshot.featureSpellGrants.map(grant => grant.id)).toEqual([
+				CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID,
+				CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID,
+			]);
+			const calculations = state.getFeatureCalculations();
+			expect(calculations).toMatchObject({
+				hasAdventurersAtlas: true,
+				hasIlluminatedCartography: true,
+				illuminatedCartographyUses: 3,
+				hasPortalJump: true,
+				hasAdventurersAtlasPositioning: true,
+			});
+			expect(!!calculations.hasGuidedPrecision).toBe(level >= 5);
+		}
+
+		const level15 = makeCartographer({level: 15});
+		createSelfAtlas(level15);
+		expect(level15.getCartographerMappingMagicSnapshot()).toMatchObject({
 			portalJump: {available: true},
 			positioning: {available: true},
-			unerringPath: {available: false},
+			unerringPath: {available: true},
 		});
 
 		for (const foreign of [
@@ -173,16 +198,29 @@ describe("EFA Cartographer — Mapping Magic eligibility and teardown", () => {
 		}
 	});
 
-	test("requires an active self map and tears every current-sheet grant down on Atlas loss", () => {
+	test("limits Atlas-dependent benefits to active holders without disabling Mapping Magic", () => {
 		const noAtlas = makeCartographer();
-		expect(noAtlas.getCartographerMappingMagicSnapshot().illuminatedCartography.reason).toMatch(/create an Adventurer's Atlas/i);
+		expect(noAtlas.getCartographerMappingMagicSnapshot()).toMatchObject({
+			activeSelfMap: false,
+			illuminatedCartography: {available: true},
+			portalJump: {available: true, destinations: {holder: {holders: []}}},
+			positioning: {available: false},
+			unerringPath: {available: false},
+		});
+		expect(noAtlas.useCartographerPortalJump({
+			destinationMode: "direct",
+			confirmedVisible: true,
+			confirmedWithin10Feet: true,
+			confirmedUnoccupied: true,
+		})).toMatchObject({ok: true, destination: {mode: "direct"}});
+		expect(noAtlas.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID).ok).toBe(true);
 
 		const allyOnly = makeCartographer();
 		expect(allyOnly.createAdventurersAtlas([ALLY, ALLY_TWO], {isHoldingTools: true}).ok).toBe(true);
 		expect(allyOnly.getCartographerMappingMagicSnapshot()).toMatchObject({
 			activeSelfMap: false,
-			illuminatedCartography: {available: false},
-			portalJump: {available: false},
+			illuminatedCartography: {available: true},
+			portalJump: {available: true, destinations: {holder: {holders: [{name: "Thorn"}, {name: "Vey"}]}}},
 			positioning: {available: false},
 			unerringPath: {available: false},
 		});
@@ -191,18 +229,30 @@ describe("EFA Cartographer — Mapping Magic eligibility and teardown", () => {
 		const atlas = createSelfAtlas(destroyed);
 		const selfHolder = atlas.holders.find(holder => holder.isSelf);
 		expect(destroyed.destroyAdventurersAtlasHolder(selfHolder.id).ok).toBe(true);
-		expect(destroyed.getCartographerMappingMagicSnapshot().activeSelfMap).toBe(false);
+		expect(destroyed.getCartographerMappingMagicSnapshot()).toMatchObject({
+			activeSelfMap: false,
+			illuminatedCartography: {available: true},
+			portalJump: {available: true},
+			positioning: {available: false},
+			unerringPath: {available: false},
+		});
 		expect(destroyed.getTargetingExceptionDescriptors()).toEqual([]);
 
 		const invalidated = makeCartographer();
 		createSelfAtlas(invalidated);
 		invalidated.invalidateAdventurersAtlas("test");
-		expect(invalidated.getCartographerMappingMagicSnapshot().illuminatedCartography.available).toBe(false);
+		expect(invalidated.getCartographerMappingMagicSnapshot()).toMatchObject({
+			illuminatedCartography: {available: true},
+			portalJump: {available: true, destinations: {holder: {holders: []}}},
+			positioning: {available: false},
+			unerringPath: {available: false},
+		});
 	});
 
 	test("tears down by exact class lifecycle and death, and blocks feature casting while incapacitated", () => {
 		const lowered = makeCartographer();
 		createSelfAtlas(lowered);
+		expect(lowered.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID).ok).toBe(true);
 		lowered.addClass({
 			name: "Artificer",
 			source: "EFA",
@@ -210,11 +260,24 @@ describe("EFA Cartographer — Mapping Magic eligibility and teardown", () => {
 			subclass: {name: "Cartographer", source: "EFA"},
 		});
 		expect(lowered.getCartographerMappingMagicSnapshot().illuminatedCartography.available).toBe(false);
+		expect(lowered.toJson().cartographerMappingMagic).toEqual({
+			version: 2,
+			illuminatedCartographyUses: 0,
+			unerringPathUses: 0,
+			castReceipts: [],
+		});
 
 		const swapped = makeCartographer();
 		createSelfAtlas(swapped);
+		expect(swapped.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID).ok).toBe(true);
 		swapped.setSubclass("Artificer", {name: "Armorer", source: "EFA"});
 		expect(swapped.getCartographerMappingMagicSnapshot().activeSelfMap).toBe(false);
+		expect(swapped.toJson().cartographerMappingMagic).toEqual({
+			version: 2,
+			illuminatedCartographyUses: 0,
+			unerringPathUses: 0,
+			castReceipts: [],
+		});
 
 		const dead = makeCartographer();
 		createSelfAtlas(dead);
@@ -227,6 +290,94 @@ describe("EFA Cartographer — Mapping Magic eligibility and teardown", () => {
 		expect(incapacitated.getCartographerMappingMagicSnapshot()).toMatchObject({
 			illuminatedCartography: {available: false, reason: expect.stringMatching(/incapacitated/i)},
 			unerringPath: {available: false, reason: expect.stringMatching(/incapacitated/i)},
+		});
+	});
+
+	test("tears down only Unerring Path when dropping below its level 15 gate", () => {
+		const state = makeCartographer({level: 15});
+		createSelfAtlas(state);
+		expect(state.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID).ok).toBe(true);
+		expect(state.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID).ok).toBe(true);
+
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 14,
+			subclass: {name: "Cartographer", source: "EFA"},
+		});
+		expect(state.getCartographerMappingMagicSnapshot()).toMatchObject({
+			illuminatedCartography: {usesCurrent: 2, usesMax: 3},
+			unerringPath: {available: false, usesCurrent: 1},
+			castReceipts: [expect.objectContaining({
+				grantId: CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID,
+			})],
+		});
+		expect(state.toJson().cartographerMappingMagic).toMatchObject({
+			illuminatedCartographyUses: 1,
+			unerringPathUses: 0,
+		});
+
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 15,
+			subclass: {name: "Cartographer", source: "EFA"},
+		});
+		expect(state.getCartographerMappingMagicSnapshot()).toMatchObject({
+			illuminatedCartography: {usesCurrent: 2, usesMax: 3},
+			unerringPath: {available: true, usesCurrent: 1},
+		});
+	});
+
+	test.each([
+		[8, 1],
+		[10, 1],
+		[14, 2],
+		[20, 5],
+	])("derives Illuminated Cartography uses from INT %i with minimum one", (intelligence, usesMax) => {
+		const state = makeCartographer({level: 3});
+		state.setAbilityBase("int", intelligence);
+		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography).toMatchObject({
+			available: true,
+			usesCurrent: usesMax,
+			usesMax,
+		});
+	});
+
+	test("preserves expended uses when Intelligence rises and falls", () => {
+		const state = makeCartographer({level: 3});
+		state.setAbilityBase("int", 20);
+		for (let i = 0; i < 3; ++i) {
+			expect(state.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID).ok).toBe(true);
+			state.resetTurnEconomy();
+		}
+		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography).toMatchObject({
+			usesCurrent: 2,
+			usesMax: 5,
+		});
+		expect(state.toJson().cartographerMappingMagic.illuminatedCartographyUses).toBe(3);
+
+		state.setAbilityBase("int", 14);
+		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography).toMatchObject({
+			available: false,
+			usesCurrent: 0,
+			usesMax: 2,
+		});
+		expect(state.toJson().cartographerMappingMagic.illuminatedCartographyUses).toBe(3);
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.getCartographerMappingMagicSnapshot().illuminatedCartography).toMatchObject({
+			available: false,
+			usesCurrent: 0,
+			usesMax: 2,
+		});
+		expect(loaded.toJson().cartographerMappingMagic.illuminatedCartographyUses).toBe(3);
+
+		loaded.setAbilityBase("int", 20);
+		expect(loaded.getCartographerMappingMagicSnapshot().illuminatedCartography).toMatchObject({
+			usesCurrent: 2,
+			usesMax: 5,
 		});
 	});
 });
@@ -260,7 +411,7 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 			}),
 		);
 		expect(state.getSpellSlots()).toEqual(slotsBefore);
-		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(0);
+		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(2);
 		expect(state.isActionTypeAvailable("action")).toBe(false);
 		expect(state.getConcentration()).toMatchObject({spellName: "Faerie Fire", spellSource: "XPHB"});
 		expect(state.getDamageConcentrationProtection()).toMatchObject({spellUid: "faerie fire|xphb"});
@@ -269,7 +420,7 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 	});
 
 	test("rolls back the feature use and action when canonical spell resolution is cancelled", async () => {
-		const state = makeCartographer({level: 5});
+		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
 		state.startCombat();
 		state.setConcentration({name: "Bless", source: "XPHB", level: 1});
@@ -278,14 +429,14 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 		const result = await spells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID);
 
 		expect(result).toMatchObject({ok: false, cancelled: true, reason: "cast-cancelled"});
-		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(1);
+		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(3);
 		expect(state.isActionTypeAvailable("action")).toBe(true);
 		expect(state.getConcentration()).toMatchObject({spellName: "Bless"});
 		expect(state.toJson().cartographerMappingMagic.castReceipts).toEqual([]);
 	});
 
 	test("rolls back the feature use and action when canonical spell resolution throws", async () => {
-		const state = makeCartographer({level: 5});
+		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
 		state.startCombat();
 		const {spells} = makeSpellsManager(state);
@@ -294,13 +445,13 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 		await expect(spells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
 			.rejects.toThrow("target resolver failed");
 
-		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(1);
+		expect(state.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(3);
 		expect(state.isActionTypeAvailable("action")).toBe(true);
 		expect(state.toJson().cartographerMappingMagic.castReceipts).toEqual([]);
 	});
 
 	test("spends nothing when concentration replacement is declined or casting constraints fail", async () => {
-		const declined = makeCartographer({level: 5});
+		const declined = makeCartographer({level: 3});
 		createSelfAtlas(declined);
 		declined.startCombat();
 		declined.setConcentration({name: "Bless", source: "XPHB", level: 1});
@@ -308,47 +459,49 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 		const {spells: declinedSpells} = makeSpellsManager(declined);
 		expect(await declinedSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
 			.toMatchObject({ok: false, cancelled: true, reason: "concentration-cancelled"});
-		expect(declined.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(1);
+		expect(declined.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(3);
 		expect(declined.isActionTypeAvailable("action")).toBe(true);
 		expect(declinedSpells._showCastResult).not.toHaveBeenCalled();
 
-		const constrained = makeCartographer({level: 5});
+		const constrained = makeCartographer({level: 3});
 		createSelfAtlas(constrained);
 		constrained.startCombat();
 		const {spells: constrainedSpells} = makeSpellsManager(constrained, {constraintsPass: false});
 		expect(await constrainedSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
 			.toMatchObject({ok: false, cancelled: true, reason: "casting-constraint"});
-		expect(constrained.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(1);
+		expect(constrained.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(3);
 		expect(constrained.isActionTypeAvailable("action")).toBe(true);
 	});
 
 	test("rejects PHB Faerie Fire, unavailable actions, unrelated spells, and repeat casts without fallback slots", async () => {
-		const phbOnly = makeCartographer({level: 5});
+		const phbOnly = makeCartographer({level: 3});
 		createSelfAtlas(phbOnly);
 		const {spells: phbSpells} = makeSpellsManager(phbOnly, {
 			allSpells: [{...FAERIE_FIRE_XPHB, source: "PHB"}],
 		});
 		expect(await phbSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
 			.toMatchObject({ok: false, reason: "spell-data-unavailable"});
-		expect(phbOnly.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(1);
+		expect(phbOnly.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(3);
 
-		const actionSpent = makeCartographer({level: 5});
+		const actionSpent = makeCartographer({level: 3});
 		createSelfAtlas(actionSpent);
 		actionSpent.consumeActionType("action");
 		const {spells: spentSpells} = makeSpellsManager(actionSpent);
 		expect(await spentSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
 			.toMatchObject({ok: false, reason: "feature-spell-unavailable"});
 
-		const unrelated = makeCartographer({level: 5});
+		const unrelated = makeCartographer({level: 3});
 		createSelfAtlas(unrelated);
 		const {spells: unrelatedSpells} = makeSpellsManager(unrelated);
 		expect(await unrelatedSpells.pCastFeatureSpellGrant("fireball|xphb")).toMatchObject({ok: false});
 
-		const exhausted = makeCartographer({level: 5});
+		const exhausted = makeCartographer({level: 3});
 		createSelfAtlas(exhausted);
 		const {spells: exhaustedSpells} = makeSpellsManager(exhausted);
-		expect((await exhaustedSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID)).ok).toBe(true);
-		exhausted.resetTurnEconomy();
+		for (let i = 0; i < 3; ++i) {
+			expect((await exhaustedSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID)).ok).toBe(true);
+			exhausted.resetTurnEconomy();
+		}
 		expect(await exhaustedSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
 			.toMatchObject({ok: false, reason: "feature-spell-unavailable"});
 	});
@@ -398,14 +551,14 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 		expect(await unerringSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID))
 			.toMatchObject({ok: true});
 
-		const illuminated = makeCartographer({level: 5});
+		const illuminated = makeCartographer({level: 3});
 		createSelfAtlas(illuminated);
 		illuminated.addCondition({name: "Silenced", source: "HB"});
 		const {spells: illuminatedSpells} = makeSpellsManager(illuminated, {useRealConstraints: true});
 
 		expect(await illuminatedSpells.pCastFeatureSpellGrant(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID))
 			.toMatchObject({ok: false, cancelled: true, reason: "casting-constraint"});
-		expect(illuminated.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(1);
+		expect(illuminated.getCartographerMappingMagicSnapshot().illuminatedCartography.usesCurrent).toBe(3);
 
 		const armorBlocked = makeCartographer({level: 15});
 		createSelfAtlas(armorBlocked);
@@ -420,7 +573,7 @@ describe("EFA Cartographer — feature-granted spell transactions", () => {
 
 describe("EFA Cartographer — Portal Jump", () => {
 	test("spends floor(live Speed / 2) through the canonical receipt API and resets next turn", () => {
-		const state = makeCartographer({level: 9});
+		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
 		state.setSpeed("walk", 35);
 		state.startCombat();
@@ -451,7 +604,7 @@ describe("EFA Cartographer — Portal Jump", () => {
 	});
 
 	test("supports the external-holder destination without inventing sight or geometry", () => {
-		const state = makeCartographer({level: 9});
+		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
 		const holder = state.getCartographerPortalJumpState().destinations.holder.holders[0];
 
@@ -486,21 +639,21 @@ describe("EFA Cartographer — Portal Jump", () => {
 	});
 
 	test("fails transactionally for zero or insufficient movement, destroyed holders, and missing confirmation", () => {
-		const zero = makeCartographer({level: 9});
+		const zero = makeCartographer({level: 3});
 		createSelfAtlas(zero);
 		zero.setSpeed("walk", 0);
 		expect(zero.getCartographerPortalJumpState()).toMatchObject({available: false, movementCost: 0, reason: expect.stringMatching(/Speed is 0/i)});
 		expect(zero.useCartographerPortalJump({destinationMode: "direct"}).ok).toBe(false);
 		expect(zero.getMovementEconomyState().receipts).toEqual([]);
 
-		const insufficient = makeCartographer({level: 9});
+		const insufficient = makeCartographer({level: 3});
 		createSelfAtlas(insufficient);
 		insufficient.spendMovement(20, {source: "test:walk"});
 		expect(insufficient.getCartographerPortalJumpState()).toMatchObject({available: false, movementCost: 15, movementRemaining: 10});
 		expect(insufficient.useCartographerPortalJump({destinationMode: "direct"}).ok).toBe(false);
 		expect(insufficient.getMovementEconomyState().used).toBe(20);
 
-		const missing = makeCartographer({level: 9});
+		const missing = makeCartographer({level: 3});
 		createSelfAtlas(missing);
 		expect(missing.useCartographerPortalJump({
 			destinationMode: "direct",
@@ -510,7 +663,7 @@ describe("EFA Cartographer — Portal Jump", () => {
 		})).toMatchObject({ok: false, reason: "portal-jump-confirmation-required"});
 		expect(missing.getMovementEconomyState().used).toBe(0);
 
-		const destroyed = makeCartographer({level: 9});
+		const destroyed = makeCartographer({level: 3});
 		const atlas = createSelfAtlas(destroyed);
 		const ally = atlas.holders.find(holder => !holder.isSelf);
 		destroyed.destroyAdventurersAtlasHolder(ally.id);
@@ -525,7 +678,7 @@ describe("EFA Cartographer — Portal Jump", () => {
 	});
 
 	test("persists the source receipt and structured destination through save/load", () => {
-		const state = makeCartographer({level: 9});
+		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
 		const result = state.useCartographerPortalJump({
 			destinationMode: "direct",
@@ -551,7 +704,7 @@ describe("EFA Cartographer — Portal Jump", () => {
 
 describe("EFA Cartographer — Positioning targeting exception", () => {
 	test("exposes an immutable exact-source descriptor that bypasses only sight and cover", () => {
-		const state = makeCartographer({level: 9});
+		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
 
 		const [descriptor] = state.getTargetingExceptionDescriptors();
@@ -568,7 +721,7 @@ describe("EFA Cartographer — Positioning targeting exception", () => {
 	});
 
 	test("requires same-plane, range, eligibility, and an active external holder while preserving range", () => {
-		const state = makeCartographer({level: 9});
+		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
 		const descriptor = state.getTargetingExceptionDescriptors()[0];
 		const holder = descriptor.holders[0];
@@ -636,7 +789,7 @@ describe("EFA Cartographer — Mapping Magic Operate-mode adapters", () => {
 
 		expect(model.mappingMagic).toMatchObject({
 			activeSelfMap: true,
-			illuminatedCartography: {available: true, usesCurrent: 1},
+			illuminatedCartography: {available: true, usesCurrent: 3, usesMax: 3},
 			portalJump: {available: true, movementCost: 15},
 			positioning: {available: true, holders: [{name: "Thorn"}]},
 			unerringPath: {available: true, usesCurrent: 1},
@@ -688,7 +841,8 @@ describe("EFA Cartographer — Mapping Magic persistence and rests", () => {
 		const loaded = new CharacterSheetState();
 		loaded.loadFromJson(state.toJson());
 		expect(loaded.getCartographerMappingMagicSnapshot()).toMatchObject({
-			illuminatedCartography: {usesCurrent: 0},
+			version: 2,
+			illuminatedCartography: {usesCurrent: 2, usesMax: 3},
 			unerringPath: {usesCurrent: 1},
 			castReceipts: [expect.objectContaining({
 				grantId: CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID,
@@ -701,10 +855,30 @@ describe("EFA Cartographer — Mapping Magic persistence and rests", () => {
 		const migrated = new CharacterSheetState();
 		migrated.loadFromJson(oldSave);
 		expect(migrated.toJson().cartographerMappingMagic).toEqual({
-			version: 1,
+			version: 2,
 			illuminatedCartographyUses: 0,
 			unerringPathUses: 0,
 			castReceipts: [],
+		});
+
+		const versionOneSave = state.toJson();
+		versionOneSave.cartographerMappingMagic = {
+			version: 1,
+			illuminatedCartographyUses: 1,
+			unerringPathUses: 0,
+			castReceipts: [],
+		};
+		const versionOneMigrated = new CharacterSheetState();
+		versionOneMigrated.loadFromJson(versionOneSave);
+		expect(versionOneMigrated.toJson().cartographerMappingMagic).toEqual({
+			version: 2,
+			illuminatedCartographyUses: 1,
+			unerringPathUses: 0,
+			castReceipts: [],
+		});
+		expect(versionOneMigrated.getCartographerMappingMagicSnapshot().illuminatedCartography).toMatchObject({
+			usesCurrent: 2,
+			usesMax: 3,
 		});
 	});
 
@@ -713,19 +887,30 @@ describe("EFA Cartographer — Mapping Magic persistence and rests", () => {
 		createSelfAtlas(state);
 		const malformedUses = state.toJson();
 		malformedUses.cartographerMappingMagic = {
-			version: 1,
-			illuminatedCartographyUses: 2,
+			version: 2,
+			illuminatedCartographyUses: 101,
 			unerringPathUses: -1,
 			castReceipts: [],
 		};
 		const rejected = new CharacterSheetState();
 		rejected.loadFromJson(malformedUses);
 		expect(rejected.toJson().cartographerMappingMagic).toEqual({
-			version: 1,
+			version: 2,
 			illuminatedCartographyUses: 0,
 			unerringPathUses: 0,
 			castReceipts: [],
 		});
+
+		const invalidLegacy = state.toJson();
+		invalidLegacy.cartographerMappingMagic = {
+			version: 1,
+			illuminatedCartographyUses: 2,
+			unerringPathUses: 0,
+			castReceipts: [],
+		};
+		const rejectedLegacy = new CharacterSheetState();
+		rejectedLegacy.loadFromJson(invalidLegacy);
+		expect(rejectedLegacy.toJson().cartographerMappingMagic.illuminatedCartographyUses).toBe(0);
 
 		expect(state.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID).ok).toBe(true);
 		const malformedReceipts = state.toJson();
@@ -743,7 +928,10 @@ describe("EFA Cartographer — Mapping Magic persistence and rests", () => {
 	test("Long Rest recharges both uses and rest undo restores the expended snapshot", () => {
 		const state = makeCartographer({level: 15});
 		createSelfAtlas(state);
-		state.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID);
+		for (let i = 0; i < 3; ++i) {
+			expect(state.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID).ok).toBe(true);
+			state.resetTurnEconomy();
+		}
 		state.commitFeatureSpellCast(CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID);
 		expect(state.getCartographerMappingMagicSnapshot()).toMatchObject({
 			illuminatedCartography: {usesCurrent: 0},
@@ -754,7 +942,7 @@ describe("EFA Cartographer — Mapping Magic persistence and rests", () => {
 		rest._captureRestSnapshot("long");
 		state.restoreCartographerMappingMagicUses();
 		expect(state.getCartographerMappingMagicSnapshot()).toMatchObject({
-			illuminatedCartography: {usesCurrent: 1},
+			illuminatedCartography: {usesCurrent: 3},
 			unerringPath: {usesCurrent: 1},
 			castReceipts: [],
 		});
@@ -766,7 +954,7 @@ describe("EFA Cartographer — Mapping Magic persistence and rests", () => {
 
 		state.onLongRest();
 		expect(state.getCartographerMappingMagicSnapshot()).toMatchObject({
-			illuminatedCartography: {usesCurrent: 1, available: true},
+			illuminatedCartography: {usesCurrent: 3, available: true},
 			unerringPath: {usesCurrent: 1},
 		});
 		expect(state.isActionTypeAvailable("action")).toBe(true);

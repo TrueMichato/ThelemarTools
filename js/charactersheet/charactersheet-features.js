@@ -1681,8 +1681,8 @@ class CharacterSheetFeatures {
 			appendAction({
 				id: "illuminated-cartography",
 				title: "Illuminated Cartography",
-				meta: `${illuminatedCartography.usesCurrent}/${illuminatedCartography.usesMax} use · Long Rest`,
-				detail: "Cast Faerie Fire|XPHB with Intelligence as an action. No preparation or spell slot.",
+				meta: `${illuminatedCartography.usesCurrent}/${illuminatedCartography.usesMax} ${illuminatedCartography.usesMax === 1 ? "use" : "uses"} · Long Rest`,
+				detail: "Cast Faerie Fire|XPHB with Intelligence as an action. Uses equal your Intelligence modifier (minimum 1); no preparation or spell slot.",
 				available: illuminatedCartography.available,
 				reason: illuminatedCartography.reason,
 				buttonLabel: "Cast Faerie Fire",
@@ -1711,7 +1711,7 @@ class CharacterSheetFeatures {
 			appendAction({
 				id: "unerring-path",
 				title: "Unerring Path",
-				meta: `${unerringPath.usesCurrent}/${unerringPath.usesMax} use · Long Rest`,
+				meta: `${unerringPath.usesCurrent}/${unerringPath.usesMax} ${unerringPath.usesMax === 1 ? "use" : "uses"} · Long Rest`,
 				detail: "Cast Find the Path|XPHB with Intelligence. No preparation, slot, or components; casting time remains 1 minute.",
 				available: unerringPath.available,
 				reason: unerringPath.reason,

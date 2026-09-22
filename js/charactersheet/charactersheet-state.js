@@ -4389,8 +4389,9 @@ class CharacterSheetState {
 	static ADVENTURERS_ATLAS_INITIATIVE_DIE = "1d4";
 	static ADVENTURERS_ATLAS_HOLDER_STATUSES = new Set(["active", "destroyed"]);
 	static _adventurersAtlasHolderIdSeq = 0;
-	static CARTOGRAPHER_MAPPING_MAGIC_VERSION = 1;
+	static CARTOGRAPHER_MAPPING_MAGIC_VERSION = 2;
 	static CARTOGRAPHER_MAPPING_MAGIC_RECEIPT_VERSION = 1;
+	static CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_MAX_TRACKED_USES = 100;
 	static CARTOGRAPHER_MAPPING_MAGIC_FEATURE_UID = "Mapping Magic|Artificer|EFA|Cartographer|EFA|3|EFA";
 	static CARTOGRAPHER_ATLAS_FEATURE_UID = "Adventurer's Atlas|Artificer|EFA|Cartographer|EFA|3|EFA";
 	static CARTOGRAPHER_SUPERIOR_ATLAS_FEATURE_UID = "Superior Atlas|Artificer|EFA|Cartographer|EFA|15|EFA";
@@ -6408,13 +6409,16 @@ class CharacterSheetState {
 	_normalizeCartographerMappingMagicState (rawState) {
 		const getEmpty = () => CharacterSheetState._getEmptyCartographerMappingMagic();
 		if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) return getEmpty();
-		if (rawState.version !== CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_VERSION) return getEmpty();
+		if (![1, CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_VERSION].includes(rawState.version)) return getEmpty();
 		const illuminatedCartographyUses = Number(rawState.illuminatedCartographyUses);
 		const unerringPathUses = Number(rawState.unerringPathUses);
+		const illuminatedCartographyUseCeiling = rawState.version === 1
+			? 1
+			: CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_MAX_TRACKED_USES;
 		if (
 			!Number.isInteger(illuminatedCartographyUses)
 			|| illuminatedCartographyUses < 0
-			|| illuminatedCartographyUses > 1
+			|| illuminatedCartographyUses > illuminatedCartographyUseCeiling
 			|| !Number.isInteger(unerringPathUses)
 			|| unerringPathUses < 0
 			|| unerringPathUses > 1
@@ -7180,14 +7184,17 @@ class CharacterSheetState {
 				id: CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID,
 				label: "Illuminated Cartography",
 				sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_FEATURE_UID,
-				minLevel: 5,
+				minLevel: 3,
 				stateKey: "illuminatedCartographyUses",
+				usesFormula: {type: "ability-modifier", ability: "int", minimum: 1},
 				spell: {name: "Faerie Fire", source: "XPHB", castLevel: 1},
 				castingAbility: "int",
 				economy: {type: "action"},
 				requiresPreparation: false,
 				expendsSpellSlot: false,
 				componentWaivers: [],
+				requiresAtlas: false,
+				requiresSelfMap: false,
 			},
 			{
 				id: CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID,
@@ -7195,6 +7202,7 @@ class CharacterSheetState {
 				sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_SUPERIOR_ATLAS_FEATURE_UID,
 				minLevel: 15,
 				stateKey: "unerringPathUses",
+				usesFormula: {type: "fixed", value: 1},
 				spell: {name: "Find the Path", source: "XPHB", castLevel: 6},
 				castingAbility: "int",
 				economy: {type: "casting-time", label: "1 minute", tracked: false},
@@ -7205,25 +7213,45 @@ class CharacterSheetState {
 		];
 	}
 
-	_getCartographerOperationalContext ({minLevel = 3, requiresSelfMap = true} = {}) {
+	_getCartographerOperationalContext ({minLevel = 3, requiresAtlas = true, requiresSelfMap = true} = {}) {
 		const classEntry = this._getEfaCartographerClassEntry({minLevel});
 		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
-		const activeSelfHolder = atlas.holders.find(holder => holder.isSelf && holder.status === "active") || null;
-		const externalHolders = atlas.holders.filter(holder => !holder.isSelf && holder.status === "active");
+		const isAtlasUsable = this.hasAdventurersAtlasFeature()
+			&& !this.isDead()
+			&& !!atlas.generation
+			&& !atlas.invalidatedReason;
+		const activeSelfHolder = isAtlasUsable
+			? atlas.holders.find(holder => holder.isSelf && holder.status === "active") || null
+			: null;
+		const externalHolders = isAtlasUsable
+			? atlas.holders.filter(holder => !holder.isSelf && holder.status === "active")
+			: [];
 		let reason = null;
 		if (!classEntry) reason = `Requires Cartographer|EFA level ${minLevel}.`;
 		else if (this.isDead()) reason = "The Adventurer's Atlas ends when its creator dies.";
-		else if (!atlas.generation) reason = "Create an Adventurer's Atlas during a Long Rest.";
-		else if (atlas.invalidatedReason) reason = "The Adventurer's Atlas is invalidated.";
-		else if (requiresSelfMap && !activeSelfHolder) reason = "Requires an active self-held Adventurer's Atlas map.";
-		return {classEntry, atlas, activeSelfHolder, externalHolders, reason};
+		else if (requiresAtlas && !atlas.generation) reason = "Create an Adventurer's Atlas during a Long Rest.";
+		else if (requiresAtlas && atlas.invalidatedReason) reason = "The Adventurer's Atlas is invalidated.";
+		else if (requiresAtlas && requiresSelfMap && !activeSelfHolder) reason = "Requires an active self-held Adventurer's Atlas map.";
+		return {classEntry, atlas, isAtlasUsable, activeSelfHolder, externalHolders, reason};
+	}
+
+	_getCartographerFeatureSpellGrantUsesMax (definition) {
+		const formula = definition?.usesFormula;
+		if (formula?.type === "ability-modifier") {
+			return Math.max(Number(formula.minimum) || 0, this.getAbilityMod(formula.ability));
+		}
+		return Math.max(1, Number(formula?.value) || 1);
 	}
 
 	_getCartographerFeatureSpellGrantSnapshot (definition) {
-		const context = this._getCartographerOperationalContext({minLevel: definition.minLevel});
+		const context = this._getCartographerOperationalContext({
+			minLevel: definition.minLevel,
+			requiresAtlas: definition.requiresAtlas !== false,
+			requiresSelfMap: definition.requiresSelfMap !== false,
+		});
 		const state = this._data.cartographerMappingMagic || CharacterSheetState._getEmptyCartographerMappingMagic();
 		const usesSpent = Number(state[definition.stateKey]) || 0;
-		const usesMax = 1;
+		const usesMax = this._getCartographerFeatureSpellGrantUsesMax(definition);
 		const usesCurrent = Math.max(0, usesMax - usesSpent);
 		let reason = context.reason;
 		if (!reason && this.isIncapacitated()) {
@@ -7244,7 +7272,11 @@ class CharacterSheetState {
 	}
 
 	getCartographerPortalJumpState () {
-		const context = this._getCartographerOperationalContext({minLevel: 9});
+		const context = this._getCartographerOperationalContext({
+			minLevel: 3,
+			requiresAtlas: false,
+			requiresSelfMap: false,
+		});
 		const movement = this.getMovementEconomyState();
 		const movementCost = Math.floor(movement.speed / 2);
 		let reason = context.reason;
@@ -7278,7 +7310,7 @@ class CharacterSheetState {
 	}
 
 	_getCartographerPositioningSnapshot () {
-		const context = this._getCartographerOperationalContext({minLevel: 9});
+		const context = this._getCartographerOperationalContext({minLevel: 3});
 		return {
 			id: CharacterSheetState.CARTOGRAPHER_POSITIONING_DESCRIPTOR_ID,
 			label: "Positioning",
@@ -7335,11 +7367,11 @@ class CharacterSheetState {
 		}
 
 		const mappingState = this._data.cartographerMappingMagic;
-		if ((Number(mappingState[definition.stateKey]) || 0) >= 1) {
+		if ((Number(mappingState[definition.stateKey]) || 0) >= grant.usesMax) {
 			if (actionConsumed) this.restoreActionType(actionType);
 			return CharacterSheetState._copyAndFreeze({ok: false, reason: "feature-spell-expended"});
 		}
-		mappingState[definition.stateKey] = 1;
+		mappingState[definition.stateKey] = (Number(mappingState[definition.stateKey]) || 0) + 1;
 		const receipt = {
 			version: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_RECEIPT_VERSION,
 			id: `feature-spell:${CryptUtil.uid()}`,
@@ -7487,8 +7519,29 @@ class CharacterSheetState {
 
 	_syncAdventurersAtlasEligibility () {
 		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
-		if (!atlas.generation || atlas.invalidatedReason || this.hasAdventurersAtlasFeature()) return false;
-		return this.invalidateAdventurersAtlas("subclass-removed").changed;
+		const hasFeature = this.hasAdventurersAtlasFeature();
+		let changed = false;
+		if (!hasFeature) {
+			const mappingState = this._data.cartographerMappingMagic || CharacterSheetState._getEmptyCartographerMappingMagic();
+			changed = !!(
+				mappingState.illuminatedCartographyUses
+				|| mappingState.unerringPathUses
+				|| mappingState.castReceipts?.length
+			);
+			this._data.cartographerMappingMagic = CharacterSheetState._getEmptyCartographerMappingMagic();
+		} else if (!this._getEfaCartographerClassEntry({minLevel: 15})) {
+			const mappingState = this._data.cartographerMappingMagic || CharacterSheetState._getEmptyCartographerMappingMagic();
+			const retainedReceipts = (mappingState.castReceipts || [])
+				.filter(receipt => receipt.grantId !== CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID);
+			changed = changed
+				|| !!mappingState.unerringPathUses
+				|| retainedReceipts.length !== (mappingState.castReceipts || []).length;
+			mappingState.unerringPathUses = 0;
+			mappingState.castReceipts = retainedReceipts;
+			this._data.cartographerMappingMagic = mappingState;
+		}
+		if (!atlas.generation || atlas.invalidatedReason || hasFeature) return changed;
+		return this.invalidateAdventurersAtlas("subclass-removed").changed || changed;
 	}
 
 	_syncCharacterDeathConsequences () {
@@ -32852,8 +32905,11 @@ class CharacterSheetState {
 						calculations.hasAdventurersAtlas = true;
 						calculations.adventurersAtlasCapacity = Math.max(2, 1 + intMod);
 						calculations.hasAdventurersAtlasAwareness = true;
+						calculations.hasIlluminatedCartography = true;
+						calculations.illuminatedCartographyUses = Math.max(1, intMod);
+						calculations.hasPortalJump = true;
+						calculations.hasAdventurersAtlasPositioning = true;
 						if (level >= 5) {
-							calculations.hasIlluminatedCartography = true;
 							calculations.hasGuidedPrecision = true;
 							calculations.guidedPrecisionSourceFeatureUid = CharacterSheetState.GUIDED_PRECISION_FEATURE_UID;
 						}
@@ -32861,8 +32917,6 @@ class CharacterSheetState {
 							calculations.hasIngeniousMovement = true;
 							calculations.ingeniousMovementRange = CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET;
 							calculations.ingeniousMovementSourceFeatureUid = CharacterSheetState.INGENIOUS_MOVEMENT_FEATURE_UID;
-							calculations.hasPortalJump = true;
-							calculations.hasAdventurersAtlasPositioning = true;
 						}
 						if (level >= 15) {
 							calculations.hasSuperiorAtlasSafeHaven = true;

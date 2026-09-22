@@ -669,6 +669,12 @@ snapshot undo restores the prior uses/receipts. Portal Jump spends
 destination receipt, so save/load and `resetTurnEconomy()` use the same movement
 ledger as every other movement feature.
 
+The exact EFA progression is data-authoritative: Mapping Magic, Portal Jump, and
+Adventurer's Atlas Positioning begin at Cartographer level 3. Illuminated
+Cartography tracks expended casts against the current Intelligence modifier
+(minimum 1), preserving the expended count across ability changes so lowering
+and later restoring Intelligence never refreshes uses without a Long Rest.
+
 Targeting rules which waive only selected requirements use
 `getTargetingExceptionDescriptors()` / `resolveTargetingException()`. Positioning
 requires an active self-held Atlas map plus explicit same-plane, normal-range,
