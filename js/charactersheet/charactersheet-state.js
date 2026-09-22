@@ -14483,6 +14483,10 @@ class CharacterSheetState {
 				isKilledOutright,
 			});
 		}
+		if (isKilledOutright && !this._data.massiveDamageDeath) {
+			this._data.massiveDamageDeath = true;
+			delete this._data._pendingZeroHpIntervention;
+		}
 
 		// Update bloodied condition based on new HP
 		this._updateBloodiedCondition();
@@ -14717,10 +14721,10 @@ class CharacterSheetState {
 			}
 			hp = Number(resolved.hp ?? resolved.flat ?? 0);
 			if (resolved.perSelection) {
-				const selectionCount = transaction.selectionCount
-					?? transaction.validation?.selectedCount
-					?? transaction.options?.selectedItemIds?.length
-					?? 0;
+				const selectionCount = transaction.selectionCount ??
+					transaction.validation?.selectedCount ??
+					transaction.options?.selectedItemIds?.length ??
+					0;
 				hp += (Number(resolved.perSelection) || 0) * Math.max(0, Math.floor(selectionCount));
 			}
 			if (resolved.abilityMod) hp += this.getAbilityMod(resolved.abilityMod);
@@ -48810,30 +48814,6 @@ class CharacterSheetState {
 	 */
 	getAttunedItems () {
 		return this._data.inventory.filter(i => i.attuned);
-	}
-
-	/**
-	 * Whether an item payload has a supported magic-item signal.
-	 *
-	 * Kept at the state layer so feature rules do not depend on Inventory UI categorisation.
-	 * A row being marked `attuned` is not itself proof that a mundane/custom item is magical.
-	 */
-	isMagicItem (itemOrRow) {
-		const item = itemOrRow?.item || itemOrRow;
-		if (!item || typeof item !== "object" || Array.isArray(item)) return false;
-		const rarity = String(item.rarity || "").trim().toLowerCase();
-		if (rarity && !["none", "unknown", "varies"].includes(rarity)) return true;
-		return !!(
-			item.requiresAttunement
-			|| item.reqAttune
-			|| item.wondrous
-			|| item.bonusWeapon
-			|| item.bonusWeaponDamage
-			|| item.bonusAc
-			|| item.bonusSavingThrow
-			|| item.bonusSpellAttack
-			|| item.bonusSpellDamage
-		);
 	}
 
 	/**

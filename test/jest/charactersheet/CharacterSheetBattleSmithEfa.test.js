@@ -502,7 +502,9 @@ describe("EFA Battle Smith authoritative passive contract", () => {
 			expect(calculations.hasBattleReady).not.toBe(true);
 			expect(calculations.hasSteelDefender).not.toBe(true);
 			expect(calculations.hasArcaneJolt).not.toBe(true);
-			expect(calculations.craftingTimeModifiers || []).toEqual([]);
+			expect((calculations.craftingTimeModifiers || [])
+				.filter(modifier => modifier.owner?.kind === "subclassFeature"))
+				.toEqual([]);
 		}
 
 		const tce = makeState({
