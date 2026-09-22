@@ -794,7 +794,7 @@ export class CharacterSheetPlayMode {
 			nextBtn.replaceChildren(document.createTextNode("Next Round "), this._icon("chevron"));
 			nextBtn.setAttribute("aria-label", `Advance to round ${combatRound + 1}`);
 			nextBtn.addEventListener("click", () => {
-				const expired = this._state.advanceRound?.() || [];
+				const expired = this._page.advanceCombatRound?.() || [];
 				this._page._combat?._resolveHybridBloodlustAtTurnStart?.();
 				if (expired.length > 0) {
 					const names = expired.map(e => e.name || "Effect").join(", ");
@@ -811,7 +811,7 @@ export class CharacterSheetPlayMode {
 			endBtn.textContent = "End Combat";
 			endBtn.setAttribute("aria-label", "End combat encounter");
 			endBtn.addEventListener("click", () => {
-				this._state.endCombat?.();
+				this._page.endCombat?.();
 				this._logActivity("flag", "Combat ended");
 				this._renderStatusBar();
 			});
@@ -820,7 +820,7 @@ export class CharacterSheetPlayMode {
 			this._setIconLabel(startBtn, "attack", " Start Combat");
 			startBtn.setAttribute("aria-label", "Start combat encounter");
 			startBtn.addEventListener("click", () => {
-				this._state.startCombat?.();
+				this._page.startCombat?.();
 				this._page._combat?._resolveHybridBloodlustAtTurnStart?.();
 				this._logActivity("attack", "Combat started");
 				this._logTurnStartEffects();
@@ -1654,7 +1654,8 @@ export class CharacterSheetPlayMode {
 		this._setIconLabel(reset, "refresh", " Reset turn");
 		this._makeClickable(reset, "Reset turn (restore all actions)", () => {
 			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
-			if (this._state.resetTurnEconomy) this._state.resetTurnEconomy();
+			if (this._page.resetTurnEconomy) this._page.resetTurnEconomy();
+			else if (this._state.resetTurnEconomy) this._state.resetTurnEconomy();
 			else {
 				this._state.resetActionEconomy?.();
 				this._state.resetMovementEconomy?.();
@@ -2585,6 +2586,15 @@ export class CharacterSheetPlayMode {
 		this._elDrawer?.removeAttribute("aria-labelledby");
 	}
 
+	_refreshOpenDrawer (type = this._openDrawer) {
+		if (!type || this._openDrawer !== type || !this._elDrawer) return false;
+		const content = this._elDrawer.querySelector(".pm-drawer__content");
+		if (!content) return false;
+		content.innerHTML = "";
+		this._renderDrawerContent(type, content);
+		return true;
+	}
+
 	_renderDrawerContent (type, container) {
 		switch (type) {
 			case "spells": this._renderSpellsDrawer(container); break;
@@ -3180,6 +3190,10 @@ export class CharacterSheetPlayMode {
 				else if (pct <= 50) hpBarFill.classList.add("pm-companion__hp-bar-fill--bloodied");
 			}
 
+			if (comp.featureGrant?.uid && comp.scaling?.resolved) {
+				this._renderFeatureCompanionOperations(card, comp);
+			}
+
 			// ── Stats row ───────────────────────────────────────────
 			const stats = this._ce("div", "pm-passives", card);
 			if (comp.ac) {
@@ -3284,6 +3298,69 @@ export class CharacterSheetPlayMode {
 				});
 			}
 		});
+	}
+
+	_renderFeatureCompanionOperations (card, companion) {
+		const rend = this._page.getCompanionOperationAvailability?.(companion.id, "forceEmpoweredRend");
+		const repair = this._page.getCompanionOperationAvailability?.(companion.id, "repair");
+		const deflect = this._page.getCompanionOperationAvailability?.(companion.id, "deflectAttack");
+		if (!rend || !repair || !deflect) return;
+
+		const header = this._ce("div", "pm-card__header", card);
+		const title = this._ce("span", "pm-card__badge", header);
+		title.textContent = "Operate";
+
+		const status = this._ce("div", "pm-feature__desc", card);
+		status.style.display = "block";
+		status.textContent = `${rend.status.actionAvailable ? "Action ready" : "Action used"} • ${deflect.status.reactionAvailable ? "Reaction ready" : "Reaction used"} • default Dodge`;
+
+		const costs = this._ce("div", "pm-feature__desc", card);
+		costs.style.display = "block";
+		costs.textContent = rend.commandMethods.length
+			? rend.commandMethods
+				.map(method => `${method.label}: ${method.available ? "available" : method.reason}`)
+				.join(" • ")
+			: rend.message;
+
+		const controls = this._ce("div", "pm-companion__controls", card);
+		const specs = [
+			{operation: "forceEmpoweredRend", label: "Rend", availability: rend},
+			{operation: "repair", label: `Repair ${companion.uses?.repair?.current || 0}/${companion.uses?.repair?.max || 0}`, availability: repair},
+			{operation: "deflectAttack", label: "Deflect", availability: deflect},
+		];
+		specs.forEach(spec => {
+			const btn = this._ce("button", "pm-companion__ctrl-btn", controls);
+			btn.textContent = spec.label;
+			btn.disabled = !spec.availability.available;
+			btn.title = spec.availability.message || (
+				spec.operation === "repair"
+					? "Confirm a visible Construct or object within 5 feet."
+					: spec.operation === "deflectAttack"
+						? "Confirm a visible attacker within 5 feet and a protected creature other than the defender."
+						: "5-foot melee weapon attack using your spell attack bonus."
+			);
+			btn.addEventListener("click", async () => {
+				const result = await this._page.pUseCompanionOperation?.({
+					companionId: companion.id,
+					operation: spec.operation,
+				});
+				if (result?.committed) this._refreshOpenDrawer("companions");
+			});
+		});
+
+		const resources = this._ce("div", "pm-feature__desc", card);
+		resources.style.display = "block";
+		resources.textContent = `Hit Dice ${companion.hitDice?.current || 0}/${companion.hitDice?.max || 0} ${companion.hitDice?.die || "d8"} • spend during Short Rest`;
+
+		const reasons = specs
+			.filter(spec => !spec.availability.available)
+			.map(spec => `${spec.label}: ${spec.availability.message}`);
+		if (reasons.length) {
+			const reason = this._ce("div", "pm-feature__desc", card);
+			reason.style.display = "block";
+			reason.setAttribute("role", "status");
+			reason.textContent = reasons.join(" ");
+		}
 	}
 
 	/** D7: Delegate to existing companion/summon pickers, or show add-custom fallback */

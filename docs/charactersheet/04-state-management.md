@@ -284,7 +284,9 @@ Whole-owner helpers (`getFeatureOwnedCompanions`,
 `deactivateFeatureOwnedCompanions`, `removeFeatureOwnedCompanions`, and
 `rebindFeatureOwnedCompanion`) compare the normalized full source-qualified UID.
 They must not use `type`, display name, or subclass name, so EFA, TCE, and future
-Reanimator companions can coexist safely.
+Reanimator companions can coexist safely. Deactivation, removal, and compatible
+rebind also release only the affected companion's exact action/reaction receipt
+keys, so a same-owner sibling is never refunded.
 
 Reanimated Companion creation and lifecycle use the stricter canonical runtime
 owner `Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW`. The six-part
@@ -367,9 +369,35 @@ by Builder, Level Up, Quick Build, load, and Respec. For the EFA Battle Smith it
 copying any companion formula. `CharacterSheetCompanionRules` remains the sole
 formula authority.
 
-The setup milestone still does not spend Repair/Hit Dice, implement command
-economy/default Dodge, transition death/revival/replacement state, apply rest
-policies, run Arcane Jolt, or implement Battle Ready attack substitution.
+In-play operations use one State transaction from both desktop and Play Mode:
+
+```javascript
+state.getCompanionOperationAvailability(companionId, operation, options);
+state.performCompanionOperation(payload);
+state.commandCompanionAction(options);
+state.useCompanionRepair(options);
+state.useCompanionReaction(options);
+state.spendCompanionHitDie(options);
+```
+
+The transaction preflights the exact feature owner, companion state, target and
+range acknowledgement, resources, companion action/reaction receipt, and owner
+command method before any mutation. A later failure rolls back the exact
+receipt, owner Bonus Action or canonical Combat Attack replacement, resource,
+and HP snapshot. `resetTurnEconomy()` remains the only turn reset; changing or
+loading `combatRound` never releases a companion action/reaction.
+
+EFA Force-Empowered Rend uses the rules registry's spell attack and
+`1d8 + 2 + INT` force damage. Repair can heal a modeled Construct atomically or
+return a manual-application amount for a confirmed external Construct/object.
+Deflect Attack consumes only the defender Reaction and gains its registry-owned
+level-15 retaliation. Companion Hit Dice are d8s with the companion
+Constitution modifier, staged by the existing Short Rest dialog, and never
+touch player Hit Dice. A long rest restores EFA Repair and half companion Hit
+Dice (rounded up) without healing or resurrecting the defender.
+
+Death/revival/replacement transitions, Arcane Jolt, Battle Ready weapon
+substitution, PDF/export, and E2E remain outside this milestone.
 
 The Reanimated Companion R3 boundary is state/lifecycle only. It does not apply
 Strange/Macabre/Superior modification choices, Improved Reanimation,

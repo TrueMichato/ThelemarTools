@@ -6759,9 +6759,31 @@ class CharacterSheetPage {
 			const initiativeMod = this._state.getCompanionInitiative?.(companion.id) || 0;
 			const initiativeStr = initiativeMod >= 0 ? `+${initiativeMod}` : `${initiativeMod}`;
 
-			// Check action economy state
-			const usedAction = companion.usedAction || false;
-			const usedReaction = companion.usedReaction || false;
+			const isFeatureOperationCompanion = !!companion.featureGrant?.uid && !!companion.scaling?.resolved;
+			const dodgeAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "dodge"})
+				: null;
+			const rendAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "forceEmpoweredRend")
+				: null;
+			const repairAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "repair")
+				: null;
+			const deflectAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "deflectAttack")
+				: null;
+			const otherActionAvailability = isFeatureOperationCompanion
+				? this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "help"})
+				: null;
+
+			// Registry-backed companions use persisted turn receipts, not legacy flags.
+			const usedAction = isFeatureOperationCompanion
+				? !dodgeAvailability?.status?.actionAvailable
+				: companion.usedAction || false;
+			const usedReaction = isFeatureOperationCompanion
+				? !deflectAvailability?.status?.reactionAvailable
+				: companion.usedReaction || false;
+			const otherActionsDisabled = usedAction || (isFeatureOperationCompanion && !otherActionAvailability?.available);
 
 			// Get all attack actions from the companion's stat block
 			const attackActions = companion.actions?.filter(a =>
@@ -6769,7 +6791,7 @@ class CharacterSheetPage {
 			) || [];
 
 			// Build attack buttons HTML for all attacks
-			const attackButtonsHtml = attackActions.map(action => {
+			const attackButtonsHtml = isFeatureOperationCompanion ? "" : attackActions.map(action => {
 				const entry = action.entries?.find(e => typeof e === "string") || "";
 				const hitMatch = entry.match(/\{@hit\s*(-?\d+)\}/);
 				const attackBonus = hitMatch ? parseInt(hitMatch[1]) : 0;
@@ -6780,6 +6802,44 @@ class CharacterSheetPage {
 			}).join("");
 
 			const ferocityHtml = this._getCompanionFerocityHtml(companion);
+			const featureOperationHtml = isFeatureOperationCompanion ? (() => {
+				const repair = companion.uses?.repair || {current: 0, max: 0};
+				const hitDice = companion.hitDice || {die: "d8", current: 0, max: 0};
+				const commandStatus = rendAvailability?.commandMethods
+					?.map(method => `${method.label}: ${method.available ? "available" : method.reason}`)
+					.join(" • ") || "No command method available.";
+				const disabledReasons = [
+					!rendAvailability?.available ? `Rend: ${rendAvailability?.message}` : null,
+					!repairAvailability?.available ? `Repair: ${repairAvailability?.message}` : null,
+					!deflectAvailability?.available ? `Deflect: ${deflectAvailability?.message}` : null,
+					!otherActionAvailability?.available ? `Other actions: ${otherActionAvailability?.message}` : null,
+				].filter(Boolean);
+				return `
+					<div class="mb-2" style="padding: 10px; border: 1px solid rgba(var(--rgb-bg-text), 0.12); border-radius: 8px;">
+						<div class="ve-small mb-1"><strong>Steel Defender operations</strong> — uncommanded action: Dodge; movement and reaction are autonomous.</div>
+						<div class="ve-muted ve-small mb-2">${commandStatus}</div>
+						<div class="ve-flex mb-2" style="gap: 6px; flex-wrap: wrap;">
+							<button class="ve-btn ve-btn-xs ve-btn-danger btn-feature-companion-operation" data-operation="forceEmpoweredRend"
+								${rendAvailability?.available ? "" : "disabled"} title="${rendAvailability?.message || "5-foot melee weapon attack using your spell attack bonus."}">
+								⚔️ Rend
+							</button>
+							<button class="ve-btn ve-btn-xs ve-btn-success btn-feature-companion-operation" data-operation="repair"
+								${repairAvailability?.available ? "" : "disabled"} title="${repairAvailability?.message || "Visible Construct or object within 5 feet; confirm range manually."}">
+								<span class="glyphicon glyphicon-heart"></span> Repair ${repair.current}/${repair.max}
+							</button>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-feature-companion-operation" data-operation="deflectAttack"
+								${deflectAvailability?.available ? "" : "disabled"} title="${deflectAvailability?.message || "Visible attacker within 5 feet; protects a different creature."}">
+								↩ Deflect
+							</button>
+						</div>
+						<div class="ve-small">
+							<strong>Hit Dice:</strong> ${hitDice.current}/${hitDice.max}${hitDice.die ? ` ${hitDice.die}` : ""}
+							<span class="ve-muted">— spend during Short Rest.</span>
+						</div>
+						${disabledReasons.length ? `<div class="ve-muted ve-small mt-1" role="status">${disabledReasons.join(" ")}</div>` : ""}
+					</div>
+				`;
+			})() : "";
 
 			const card = e_({outer: `
 				<div class="charsheet__companion-card" data-companion-id="${companion.id}" style="
@@ -6854,6 +6914,7 @@ class CharacterSheetPage {
 					</div>
 
 					${ferocityHtml}
+					${featureOperationHtml}
 
 					<!-- Senses -->
 					<div class="ve-muted ve-small mb-2" style="padding: 0 4px;">
@@ -6898,22 +6959,22 @@ class CharacterSheetPage {
 							</span>
 						</div>
 						<div class="ve-flex" style="gap: 6px; flex-wrap: wrap;">
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="help" title="Give an ally advantage on their next attack or ability check" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="help" title="Give an ally advantage on their next attack or ability check" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🤝 Help
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dash" title="Double your speed for this turn" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dash" title="Double your speed for this turn" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								💨 Dash
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="disengage" title="Your movement doesn't provoke opportunity attacks" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="disengage" title="Your movement doesn't provoke opportunity attacks" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🏃 Disengage
 							</button>
 							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dodge" title="Attacks against you have disadvantage; DEX saves have advantage" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🛡️ Dodge
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="hide" title="Make a Stealth check to become hidden" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="hide" title="Make a Stealth check to become hidden" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🫥 Hide
 							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="search" title="Make a Perception or Investigation check to find something" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="search" title="Make a Perception or Investigation check to find something" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
 								🔎 Search
 							</button>
 						</div>
@@ -7050,9 +7111,24 @@ class CharacterSheetPage {
 			});
 
 			// Action buttons
-			card.querySelectorAll(".btn-companion-action").forEach(el => el.addEventListener("click", (evt) => {
+			card.querySelectorAll(".btn-companion-action").forEach(el => el.addEventListener("click", async (evt) => {
 				const action = evt.currentTarget.dataset.action;
+				if (isFeatureOperationCompanion) {
+					await this.pUseCompanionOperation({
+						companionId: companion.id,
+						operation: "action",
+						actionKey: action,
+					});
+					return;
+				}
 				this._useCompanionAction(companion, action);
+			}));
+
+			card.querySelectorAll(".btn-feature-companion-operation").forEach(el => el.addEventListener("click", async evt => {
+				await this.pUseCompanionOperation({
+					companionId: companion.id,
+					operation: evt.currentTarget.dataset.operation,
+				});
 			}));
 
 			// Attack roll buttons
@@ -22032,6 +22108,251 @@ class CharacterSheetPage {
 	getConditionsData () { return this._conditionsData; }
 	getState () { return this._state; }
 	openAdventurersAtlasLongRest () { return this._rest?.openAdventurersAtlasLongRest?.(); }
+	resetTurnEconomy () {
+		this._state.resetTurnEconomy();
+		this._combat?.resetTurnAttackUsage?.();
+	}
+
+	startCombat () {
+		this._state.startCombat();
+		this._combat?.resetTurnAttackUsage?.();
+	}
+
+	advanceCombatRound () {
+		const expired = this._state.advanceRound();
+		this._combat?.resetTurnAttackUsage?.();
+		return expired;
+	}
+
+	endCombat () {
+		this._state.endCombat();
+		this._combat?.resetTurnAttackUsage?.();
+	}
+
+	_getCompanionAttackReplacementBridge () {
+		const availability = this._combat?.getAttackActionReplacementAvailability?.() || {
+			available: false,
+			reason: "The Attack-action tracker is unavailable.",
+		};
+		return {
+			availability,
+			adapter: {
+				consume: options => this._combat?.consumeAttackActionReplacement?.(options) || {
+					ok: false,
+					reason: "attackReplacementUnavailable",
+				},
+				rollback: receipt => this._combat?.rollbackAttackActionReplacement?.(receipt) || {
+					ok: false,
+					reason: "attackReplacementRollbackUnavailable",
+				},
+			},
+		};
+	}
+
+	getCompanionOperationAvailability (companionId, operation, options = {}) {
+		const attackBridge = this._getCompanionAttackReplacementBridge();
+		return this._state.getCompanionOperationAvailability(companionId, operation, {
+			...options,
+			attackReplacement: attackBridge.availability,
+		});
+	}
+
+	async _pGetCompanionCommandMethod (availability, commandMethod = null) {
+		if (commandMethod) return commandMethod;
+		if (availability.availableCommandMethods.length === 1) return availability.availableCommandMethods[0].id;
+		if (!availability.availableCommandMethods.length) return null;
+		return InputUiUtil.pGetUserEnum({
+			title: "Command Steel Defender",
+			htmlDescription: "Choose the owner cost before committing the defender action.",
+			values: availability.availableCommandMethods.map(it => it.id),
+			fnDisplay: id => availability.availableCommandMethods.find(it => it.id === id)?.label || id,
+			isResolveItem: true,
+		});
+	}
+
+	async _pGetCompanionRepairTarget () {
+		const modeledTargets = (this._state.getCompanions?.() || [])
+			.filter(companion => String(companion.creatureType || "").toLowerCase() === "construct")
+			.map(companion => ({
+				id: `companion:${companion.id}`,
+				label: `${companion.customName || companion.name} (${companion.hp.current}/${companion.hp.max} HP)`,
+				target: {companionId: companion.id, confirmed: true},
+			}));
+		const options = [
+			...modeledTargets,
+			{id: "external:construct", label: "External Construct (manual HP)", target: {external: true, kind: "construct", confirmed: true}},
+			{id: "external:object", label: "External object (manual HP)", target: {external: true, kind: "object", confirmed: true}},
+		];
+		const selectedId = await InputUiUtil.pGetUserEnum({
+			title: "Repair Target",
+			htmlDescription: "Repair can affect the defender, another Construct, or an object it can see within 5 feet.",
+			values: options.map(it => it.id),
+			fnDisplay: id => options.find(it => it.id === id)?.label || id,
+			isResolveItem: true,
+		});
+		if (!selectedId) return null;
+		const selected = options.find(it => it.id === selectedId);
+		if (!selected?.target?.external) return selected?.target || null;
+		const name = await InputUiUtil.pGetUserString({title: "External target name", default: ""});
+		if (!String(name || "").trim()) return null;
+		return {...selected.target, name: String(name).trim()};
+	}
+
+	async pUseCompanionOperation ({
+		companionId,
+		operation,
+		actionKey = null,
+		commandMethod = null,
+	} = {}) {
+		const initialAvailability = this.getCompanionOperationAvailability(companionId, operation, {actionKey});
+		if (!initialAvailability.available) {
+			JqueryUtil.doToast({type: "warning", content: initialAvailability.message || "That companion operation is unavailable."});
+			return this._state.performCompanionOperation({
+				companionId,
+				operation,
+				actionKey,
+				attackReplacement: this._getCompanionAttackReplacementBridge().availability,
+			});
+		}
+
+		const selectedCommandMethod = await this._pGetCompanionCommandMethod(initialAvailability, commandMethod);
+		if (initialAvailability.availableCommandMethods.length && !selectedCommandMethod) {
+			return this._state.performCompanionOperation({companionId, operation, actionKey, cancelled: true});
+		}
+
+		const bridge = this._getCompanionAttackReplacementBridge();
+		const payload = {
+			companionId,
+			operation,
+			actionKey,
+			commandMethod: selectedCommandMethod,
+			attackReplacement: bridge.availability,
+			attackReplacementAdapter: bridge.adapter,
+			target: null,
+			rangeConfirmed: false,
+			attackerVisibleConfirmed: false,
+			hitConfirmed: false,
+			rolls: {},
+		};
+
+		if (operation === "forceEmpoweredRend" || operation === "rend") {
+			const targetName = await InputUiUtil.pGetUserString({title: "Force-Empowered Rend target", default: ""});
+			if (!String(targetName || "").trim()) payload.cancelled = true;
+			else {
+				payload.target = {name: String(targetName).trim()};
+				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Rend Range",
+					htmlDescription: "Confirm the target is within the defender's 5-foot reach.",
+					textYes: "Within 5 feet",
+					textNo: "Cancel",
+				});
+				if (!payload.rangeConfirmed) payload.cancelled = true;
+			}
+			if (!payload.cancelled) {
+				payload.rolls.attackD20 = this.rollDice(1, 20);
+				const outcome = await InputUiUtil.pGetUserEnum({
+					title: `Rend attack total: ${payload.rolls.attackD20 + initialAvailability.rules.action.attackBonus}`,
+					htmlDescription: "Confirm whether the attack hit before committing the defender action.",
+					values: ["hit", "miss", "cancel"],
+					fnDisplay: value => ({hit: "Hit — roll damage", miss: "Miss", cancel: "Cancel without spending"})[value],
+					isResolveItem: true,
+				});
+				if (!outcome || outcome === "cancel") payload.cancelled = true;
+				else {
+					payload.hitConfirmed = outcome === "hit";
+					if (payload.hitConfirmed) {
+						payload.rolls.damageDie = this.rollDice(payload.rolls.attackD20 === 20 ? 2 : 1, 8);
+					}
+				}
+			}
+		} else if (operation === "repair") {
+			payload.target = await this._pGetCompanionRepairTarget();
+			if (!payload.target) payload.cancelled = true;
+			else {
+				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Repair Target",
+					htmlDescription: "Confirm the defender can see the Construct or object within 5 feet.",
+					textYes: "Target confirmed",
+					textNo: "Cancel",
+				});
+				if (!payload.rangeConfirmed) payload.cancelled = true;
+			}
+			if (!payload.cancelled) payload.rolls.healingDice = this.rollDice(2, 8);
+		} else if (operation === "deflectAttack" || operation === "deflect") {
+			const attackerName = await InputUiUtil.pGetUserString({title: "Visible attacker name", default: ""});
+			const protectedTargetName = attackerName
+				? await InputUiUtil.pGetUserString({title: "Protected creature (not the defender)", default: ""})
+				: null;
+			if (!String(attackerName || "").trim() || !String(protectedTargetName || "").trim()) payload.cancelled = true;
+			else {
+				payload.target = {
+					attackerName: String(attackerName).trim(),
+					protectedTargetName: String(protectedTargetName).trim(),
+					protectedTargetIsCompanion: false,
+				};
+				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
+					title: "Confirm Deflect Attack Trigger",
+					htmlDescription: "Confirm the visible attacker is within 5 feet of the defender and hit a different creature.",
+					textYes: "Trigger confirmed",
+					textNo: "Cancel",
+				});
+				payload.attackerVisibleConfirmed = payload.rangeConfirmed;
+				if (!payload.rangeConfirmed) payload.cancelled = true;
+			}
+			if (!payload.cancelled && initialAvailability.rules.reaction?.improvedDamage) {
+				payload.rolls.retaliationDie = this.rollDice(1, 4);
+			}
+		}
+
+		const result = this._state.performCompanionOperation(payload);
+		this._showCompanionOperationResult(result);
+		if (result.committed) {
+			await this.saveCharacter();
+			this._renderCompanions();
+			if (this._state.getViewMode?.() === "play") this._playMode?.render();
+		}
+		return result;
+	}
+
+	_showCompanionOperationResult (result) {
+		if (!result?.ok) {
+			if (result?.reason !== "cancelled") {
+				JqueryUtil.doToast({type: "danger", content: result?.message || "Companion operation failed."});
+			}
+			return;
+		}
+		const companion = this._state.getCompanion(result.companionId);
+		const name = companion?.customName || companion?.name || "Companion";
+		let activity = `${name}: ${result.operation}`;
+		if (result.rolls?.attack) {
+			const attack = result.rolls.attack;
+			this._showDiceResult(
+				`${name} — Force-Empowered Rend`,
+				attack.total,
+				`d20 (${attack.d20}) + ${attack.bonus}`,
+				attack.critical ? "critical" : attack.fumble ? "fumble" : "",
+				result.rolls.damage ? `${result.rolls.damage.total} force damage` : "Miss",
+			);
+			activity = `${name} used Rend (${attack.total} to hit${result.rolls.damage ? `, ${result.rolls.damage.total} force` : ", miss"})`;
+		} else if (result.operation === "repair") {
+			const healing = result.rolls.healing.total;
+			const target = result.target?.external ? `${result.target.name} (manual)` : this._state.getCompanion(result.hp?.companionId)?.customName || this._state.getCompanion(result.hp?.companionId)?.name;
+			JqueryUtil.doToast({type: "success", content: `${name} repairs ${target || "the target"} for ${healing} HP.`});
+			activity = `${name} used Repair for ${healing} HP${result.hp?.manualApplication ? " (manual target)" : ""}`;
+		} else if (result.operation === "deflectAttack") {
+			const retaliation = result.rolls.retaliation;
+			JqueryUtil.doToast({
+				type: "info",
+				content: `Deflect Attack: resolve the triggering attack with disadvantage.${retaliation ? ` ${retaliation.total} force damage to the attacker.` : ""}`,
+			});
+			activity = `${name} used Deflect Attack${retaliation ? ` (${retaliation.total} force)` : ""}`;
+		} else {
+			JqueryUtil.doToast({type: "success", content: `${name} used ${result.actionKey || result.operation}.`});
+			activity = `${name} used ${result.actionKey || result.operation}`;
+		}
+		this._playMode?._logActivity?.("companion", activity);
+	}
+
 	hasCurrentCharacter () { return !!this._currentCharacterId; }
 	getLevelUpHelper () { return this._levelUp; }
 

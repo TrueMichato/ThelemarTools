@@ -78321,6 +78321,674 @@ class CharacterSheetState {
 		return companion;
 	}
 
+	_getFeatureCompanionTurnReceiptDescriptor (companion, usageType) {
+		const ownerUid = companion?.featureGrant?.uid || null;
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+		const descriptor = ownerUid ? rules?.getDescriptor(ownerUid) : null;
+		const sourceUid = descriptor?.identity?.companionUid || companion?.scaling?.resolved?.identity?.companionUid || null;
+		if (!companion?.id || !ownerUid || !sourceUid || !["action", "reaction"].includes(usageType)) return null;
+		const label = usageType === "reaction" ? "Companion Reaction" : "Companion Action";
+		return {
+			key: `feature-companion:${ownerUid.toLowerCase()}:${sourceUid.toLowerCase()}:${companion.id}:${usageType}`,
+			ownerUid,
+			sourceUid,
+			actionUid: `${label}|${sourceUid}|${companion.id}`,
+		};
+	}
+
+	_pruneFeatureCompanionTurnReceipts (companion, {ownerUid = null} = {}) {
+		if (!companion) return 0;
+		const featureUid = ownerUid || companion.featureGrant?.uid || null;
+		if (!featureUid) return 0;
+		let count = 0;
+		for (const usageType of ["action", "reaction"]) {
+			const descriptor = this._getFeatureCompanionTurnReceiptDescriptor(companion, usageType);
+			if (!descriptor || descriptor.ownerUid.toLowerCase() !== featureUid.toLowerCase()) continue;
+			count += this.pruneTurnReceipts({
+				ownerUid: descriptor.ownerUid,
+				sourceUid: descriptor.sourceUid,
+				actionUid: descriptor.actionUid,
+			}).count;
+		}
+		return count;
+	}
+
+	_getFeatureCompanionOperationBase (companionId, operation, {
+		actionKey = null,
+		attackReplacement = null,
+		commandMethod = null,
+	} = {}) {
+		const companion = this.getCompanion(companionId);
+		const operationKey = operation === "rend"
+			? "forceEmpoweredRend"
+			: operation === "deflect"
+				? "deflectAttack"
+				: operation;
+		const ownerUid = companion?.featureGrant?.uid || null;
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+		const descriptor = ownerUid ? rules?.getDescriptor(ownerUid) : null;
+		const contextResult = ownerUid ? this._tryGetFeatureCompanionSummonerContext(ownerUid) : {ok: false};
+		const resolved = contextResult.ok ? rules.resolve(ownerUid, contextResult.context) : null;
+		const sourceUid = descriptor?.identity?.companionUid || null;
+		const base = {
+			companionId,
+			operation: operationKey,
+			actionKey,
+			ownerUid,
+			sourceUid,
+			operationUid: null,
+			available: false,
+			reason: null,
+			message: null,
+			companion,
+			descriptor,
+			resolved,
+			receipt: null,
+			commandMethods: [],
+			availableCommandMethods: [],
+			selectedCommandMethod: commandMethod,
+			requiresCommandChoice: false,
+			defaultAction: resolved?.commandPolicy?.defaultAction || null,
+			status: {
+				actionAvailable: false,
+				reactionAvailable: false,
+				repairUses: companion?.uses?.repair ? {...companion.uses.repair} : null,
+				hitDice: companion?.hitDice ? {...companion.hitDice} : null,
+			},
+		};
+
+		const fail = (reason, message) => ({...base, reason, message});
+		if (!companion) return fail("companionNotFound", "Companion not found.");
+		if (!ownerUid || !descriptor || !resolved || !sourceUid) {
+			return fail("unsupportedCompanion", "This companion has no source-qualified operation rules.");
+		}
+
+		const actionReceipt = this._getFeatureCompanionTurnReceiptDescriptor(companion, "action");
+		const reactionReceipt = this._getFeatureCompanionTurnReceiptDescriptor(companion, "reaction");
+		const actionAvailable = actionReceipt ? !this.queryTurnReceipt(actionReceipt.key).used : false;
+		const reactionAvailable = reactionReceipt ? !this.queryTurnReceipt(reactionReceipt.key).used : false;
+		base.status.actionAvailable = actionAvailable;
+		base.status.reactionAvailable = reactionAvailable;
+		if (companion.active === false || companion.lifecycle?.status === "vanished") {
+			return fail("companionInactive", "This companion is inactive.");
+		}
+		if ((Number(companion.hp?.current) || 0) <= 0) {
+			return fail("companionAtZeroHp", "A companion at 0 HP cannot act or spend Hit Dice.");
+		}
+
+		let operationRule = null;
+		let requiresAction = false;
+		let requiresReaction = false;
+		let requiresCommand = false;
+		switch (operationKey) {
+			case "forceEmpoweredRend":
+				operationRule = resolved.actions?.forceEmpoweredRend || null;
+				requiresAction = true;
+				requiresCommand = true;
+				break;
+			case "repair":
+				operationRule = resolved.actions?.repair || null;
+				requiresAction = true;
+				requiresCommand = true;
+				break;
+			case "deflectAttack":
+				operationRule = resolved.reactions?.deflectAttack || null;
+				requiresReaction = true;
+				break;
+			case "hitDie":
+				operationRule = {
+					name: "Companion Hit Die",
+					die: companion.hitDice?.die || resolved.statistics?.hitDice?.die || null,
+				};
+				break;
+			case "action": {
+				const normalizedAction = String(actionKey || "").trim().toLowerCase();
+				const allowedActions = ["dash", "disengage", "dodge", "help", "hide", "search"];
+				if (!allowedActions.includes(normalizedAction)) {
+					return fail("invalidCompanionAction", "Choose a valid companion action.");
+				}
+				operationRule = {name: normalizedAction.charAt(0).toUpperCase() + normalizedAction.slice(1), key: normalizedAction};
+				requiresAction = true;
+				requiresCommand = normalizedAction !== "dodge";
+				break;
+			}
+			default:
+				return fail("unknownOperation", "Unknown companion operation.");
+		}
+		if (!operationRule) return fail("operationUnavailable", "This companion does not have that operation.");
+
+		base.operationUid = `${operationRule.name}|${sourceUid}`;
+		if (requiresAction) {
+			base.receipt = actionReceipt;
+			if (!actionAvailable) return fail("companionActionSpent", "The companion has already used its action this turn.");
+		}
+		if (requiresReaction) {
+			base.receipt = reactionReceipt;
+			if (!reactionAvailable) return fail("companionReactionSpent", "The companion has already used its reaction this turn.");
+		}
+		if (operationKey === "repair" && (Number(companion.uses?.repair?.current) || 0) <= 0) {
+			return fail("repairUsesSpent", "Repair has no uses remaining.");
+		}
+		if (operationKey === "hitDie") {
+			if ((Number(companion.hp?.current) || 0) >= (Number(companion.hp?.max) || 0)) {
+				return fail("companionAtFullHp", "This companion is already at full HP.");
+			}
+			if ((Number(companion.hitDice?.current) || 0) <= 0) {
+				return fail("companionHitDiceSpent", "This companion has no Hit Dice remaining.");
+			}
+		}
+
+		if (requiresCommand) {
+			if (this.isIncapacitated()) {
+				base.commandMethods.push({
+					id: "incapacitatedFree",
+					label: "Acts freely (owner incapacitated)",
+					available: true,
+					cost: null,
+				});
+			} else {
+				for (const method of resolved.commandPolicy?.commandMethods || []) {
+					if (method.cost === "bonusAction") {
+						const available = this.isActionTypeAvailable("bonus");
+						base.commandMethods.push({
+							id: "bonusAction",
+							label: "Command with Bonus Action",
+							available,
+							cost: "bonus",
+							reason: available ? null : "Bonus Action already used.",
+						});
+						continue;
+					}
+					const isLegalRendReplacement = operationKey === "forceEmpoweredRend"
+						&& method.permits === "forceEmpoweredRend";
+					if (method.cost === "replaceOneAttack") {
+						base.commandMethods.push({
+							id: "replaceOneAttack",
+							label: "Replace one Attack-action attack",
+							available: isLegalRendReplacement && !!attackReplacement?.available,
+							cost: "replaceOneAttack",
+							reason: !isLegalRendReplacement
+								? "Only Force-Empowered Rend can replace an attack."
+								: attackReplacement?.reason || null,
+						});
+					}
+				}
+			}
+		} else if (operationKey === "action" && String(actionKey).toLowerCase() === "dodge") {
+			base.commandMethods.push({
+				id: "defaultDodge",
+				label: "Default Dodge",
+				available: true,
+				cost: null,
+			});
+		}
+
+		base.availableCommandMethods = base.commandMethods.filter(it => it.available);
+		base.requiresCommandChoice = base.availableCommandMethods.length > 1;
+		if (requiresCommand && !base.availableCommandMethods.length) {
+			const reasons = base.commandMethods.map(it => it.reason).filter(Boolean);
+			return fail(
+				"noCommandMethodAvailable",
+				reasons.length
+					? `No legal command method is available: ${reasons.join(" ")}`
+					: "No legal command method is available.",
+			);
+		}
+		if (commandMethod) {
+			const selected = base.commandMethods.find(it => it.id === commandMethod);
+			if (!selected) return fail("invalidCommandMethod", "That command method is not legal for this operation.");
+			if (!selected.available) return fail("commandMethodUnavailable", selected.reason || "That command method is unavailable.");
+		}
+
+		base.available = true;
+		return base;
+	}
+
+	getCompanionOperationAvailability (companionId, operation, options = {}) {
+		const out = this._getFeatureCompanionOperationBase(companionId, operation, options);
+		return {
+			companionId: out.companionId,
+			operation: out.operation,
+			actionKey: out.actionKey,
+			ownerUid: out.ownerUid,
+			sourceUid: out.sourceUid,
+			operationUid: out.operationUid,
+			available: out.available,
+			reason: out.reason,
+			message: out.message,
+			receipt: out.receipt ? {...out.receipt} : null,
+			commandMethods: out.commandMethods.map(it => ({...it})),
+			availableCommandMethods: out.availableCommandMethods.map(it => ({...it})),
+			selectedCommandMethod: out.selectedCommandMethod,
+			requiresCommandChoice: out.requiresCommandChoice,
+			defaultAction: out.defaultAction,
+			status: MiscUtil.copyFast(out.status),
+			rules: out.resolved ? MiscUtil.copyFast({
+				commandPolicy: out.resolved.commandPolicy,
+				action: out.operation === "forceEmpoweredRend"
+					? out.resolved.actions?.forceEmpoweredRend
+					: out.operation === "repair"
+						? out.resolved.actions?.repair
+						: null,
+				reaction: out.operation === "deflectAttack"
+					? out.resolved.reactions?.deflectAttack
+					: null,
+			}) : null,
+		};
+	}
+
+	_getCompanionOperationFailure (availability, reason, message, rollback = null, error = null) {
+		return {
+			ok: false,
+			committed: false,
+			operation: availability?.operation || null,
+			companionId: availability?.companionId || null,
+			ownerUid: availability?.ownerUid || null,
+			sourceUid: availability?.sourceUid || null,
+			operationUid: availability?.operationUid || null,
+			reason,
+			message,
+			costs: null,
+			receipts: null,
+			rolls: null,
+			target: null,
+			hp: null,
+			rollback,
+			error: error ? String(error?.message || error) : null,
+		};
+	}
+
+	performCompanionOperation ({
+		companionId,
+		operation,
+		actionKey = null,
+		commandMethod = null,
+		cancelled = false,
+		attackReplacement = null,
+		attackReplacementAdapter = null,
+		target = null,
+		rangeConfirmed = false,
+		attackerVisibleConfirmed = false,
+		hitConfirmed = false,
+		rolls = {},
+	} = {}) {
+		const availability = this._getFeatureCompanionOperationBase(companionId, operation, {
+			actionKey,
+			attackReplacement,
+			commandMethod,
+		});
+		if (cancelled) {
+			return this._getCompanionOperationFailure(availability, "cancelled", "Operation cancelled before any resources were spent.");
+		}
+		if (!availability.available) {
+			return this._getCompanionOperationFailure(
+				availability,
+				availability.reason || "operationUnavailable",
+				availability.message || "The operation is unavailable.",
+			);
+		}
+
+		let selectedCommandMethod = commandMethod;
+		if (!selectedCommandMethod && availability.availableCommandMethods.length === 1) {
+			selectedCommandMethod = availability.availableCommandMethods[0].id;
+		}
+		if (!selectedCommandMethod && availability.availableCommandMethods.length > 1) {
+			return this._getCompanionOperationFailure(
+				availability,
+				"commandMethodRequired",
+				"Choose whether to spend the Bonus Action or replace one remaining Attack-action attack.",
+			);
+		}
+
+		const companion = availability.companion;
+		const resolved = availability.resolved;
+		const targetCompanion = target?.companionId ? this.getCompanion(target.companionId) : null;
+		if (availability.operation === "forceEmpoweredRend") {
+			if (!target?.name?.trim()) {
+				return this._getCompanionOperationFailure(availability, "targetRequired", "Choose a Rend target.");
+			}
+			if (!rangeConfirmed) {
+				return this._getCompanionOperationFailure(availability, "rangeNotConfirmed", "Confirm that the target is within 5 feet.");
+			}
+			if (!Number.isFinite(rolls.attackD20) || rolls.attackD20 < 1 || rolls.attackD20 > 20) {
+				return this._getCompanionOperationFailure(availability, "invalidAttackRoll", "A valid d20 attack roll is required.");
+			}
+			if (hitConfirmed && (!Number.isFinite(rolls.damageDie) || rolls.damageDie < 1)) {
+				return this._getCompanionOperationFailure(availability, "invalidDamageRoll", "A valid Rend damage roll is required.");
+			}
+		}
+		if (availability.operation === "repair") {
+			const isExternalTarget = target?.external === true;
+			if (!target?.confirmed || !rangeConfirmed) {
+				return this._getCompanionOperationFailure(
+					availability,
+					"repairTargetUnconfirmed",
+					"Choose a target and confirm the target and 5-foot range before using Repair.",
+				);
+			}
+			if (isExternalTarget) {
+				const externalKind = String(target?.kind || "").toLowerCase();
+				if (!target?.name?.trim() || !["construct", "object"].includes(externalKind)) {
+					return this._getCompanionOperationFailure(
+						availability,
+						"invalidRepairTarget",
+						"An external Repair target must be a confirmed Construct or object.",
+					);
+				}
+			} else {
+				if (!targetCompanion || String(targetCompanion.creatureType || "").toLowerCase() !== "construct") {
+					return this._getCompanionOperationFailure(availability, "invalidRepairTarget", "Repair can target only a Construct or object.");
+				}
+				if ((Number(targetCompanion.hp?.current) || 0) <= 0) {
+					return this._getCompanionOperationFailure(availability, "repairTargetAtZeroHp", "Repair cannot target a modeled construct at 0 HP.");
+				}
+				if ((Number(targetCompanion.hp?.current) || 0) >= (Number(targetCompanion.hp?.max) || 0)) {
+					return this._getCompanionOperationFailure(availability, "repairTargetAtFullHp", "That construct is already at full HP.");
+				}
+			}
+			if (!Number.isFinite(rolls.healingDice) || rolls.healingDice < 2) {
+				return this._getCompanionOperationFailure(availability, "invalidRepairRoll", "A valid 2d8 Repair roll is required.");
+			}
+		}
+		if (availability.operation === "deflectAttack") {
+			const protectedTargetName = target?.protectedTargetName?.trim();
+			const companionNames = [companion.name, companion.customName].filter(Boolean).map(it => it.toLowerCase());
+			if (!target?.attackerName?.trim() || !protectedTargetName) {
+				return this._getCompanionOperationFailure(availability, "deflectTriggerRequired", "Name the attacker and protected target.");
+			}
+			if (companionNames.includes(protectedTargetName.toLowerCase()) || target?.protectedTargetIsCompanion) {
+				return this._getCompanionOperationFailure(availability, "invalidDeflectTarget", "Deflect Attack must protect a creature other than the defender.");
+			}
+			if (!rangeConfirmed || !attackerVisibleConfirmed) {
+				return this._getCompanionOperationFailure(
+					availability,
+					"deflectTriggerUnconfirmed",
+					"Confirm that the visible attacker is within 5 feet of the defender.",
+				);
+			}
+			const retaliation = resolved.reactions?.deflectAttack?.improvedDamage;
+			if (retaliation && (!Number.isFinite(rolls.retaliationDie) || rolls.retaliationDie < 1)) {
+				return this._getCompanionOperationFailure(availability, "invalidRetaliationRoll", "A valid Deflect Attack retaliation roll is required.");
+			}
+		}
+		if (availability.operation === "hitDie") {
+			if (target?.companionId && target.companionId !== companionId) {
+				return this._getCompanionOperationFailure(availability, "invalidHitDieTarget", "A companion can spend only its own Hit Dice.");
+			}
+			if (!target?.confirmed) {
+				return this._getCompanionOperationFailure(availability, "hitDieUnconfirmed", "Confirm the companion Hit Die spend.");
+			}
+			if (!Number.isFinite(rolls.hitDie) || rolls.hitDie < 1) {
+				return this._getCompanionOperationFailure(availability, "invalidHitDieRoll", "A valid companion Hit Die roll is required.");
+			}
+		}
+
+		const selectedMethod = availability.commandMethods.find(it => it.id === selectedCommandMethod) || null;
+		if (selectedMethod && !selectedMethod.available) {
+			return this._getCompanionOperationFailure(
+				availability,
+				"commandMethodUnavailable",
+				selectedMethod.reason || "That command method is unavailable.",
+			);
+		}
+
+		const rollback = {
+			companionReceipt: null,
+			ownerAction: null,
+			attackReplacement: null,
+			resource: null,
+			hp: null,
+		};
+		let turnReceipt = null;
+		let ownerActionConsumed = null;
+		let attackReplacementReceipt = null;
+		let resourceSnapshot = null;
+		let hpSnapshot = null;
+
+		const doRollback = () => {
+			if (hpSnapshot) {
+				const rollbackTarget = this.getCompanion(hpSnapshot.companionId);
+				if (rollbackTarget) {
+					rollbackTarget.hp = {...rollbackTarget.hp, ...hpSnapshot.hp};
+					rollback.hp = {ok: true, companionId: hpSnapshot.companionId, hp: {...rollbackTarget.hp}};
+				} else rollback.hp = {ok: false, reason: "rollbackTargetMissing"};
+			}
+			if (resourceSnapshot) {
+				const rollbackCompanion = this.getCompanion(resourceSnapshot.companionId);
+				if (rollbackCompanion && resourceSnapshot.type === "repair") {
+					rollbackCompanion.uses.repair.current = resourceSnapshot.current;
+					rollback.resource = {ok: true, type: "repair", current: resourceSnapshot.current};
+				} else if (rollbackCompanion && resourceSnapshot.type === "hitDie") {
+					rollbackCompanion.hitDice.current = resourceSnapshot.current;
+					rollback.resource = {ok: true, type: "hitDie", current: resourceSnapshot.current};
+				} else rollback.resource = {ok: false, reason: "rollbackResourceMissing"};
+			}
+			if (attackReplacementReceipt) {
+				rollback.attackReplacement = attackReplacementAdapter?.rollback?.(attackReplacementReceipt)
+					|| {ok: false, reason: "attackReplacementRollbackUnavailable"};
+			}
+			if (ownerActionConsumed) {
+				rollback.ownerAction = {
+					ok: this.restoreActionType(ownerActionConsumed),
+					actionType: ownerActionConsumed,
+				};
+			}
+			if (turnReceipt) {
+				rollback.companionReceipt = this.rollbackTurnReceipt(turnReceipt);
+			}
+			return rollback;
+		};
+
+		try {
+			if (availability.receipt) {
+				const turnReceiptResult = this.commitTurnReceipt({
+					...availability.receipt,
+					metadata: {
+						companionId,
+						operationUid: availability.operationUid,
+						commandMethod: selectedCommandMethod,
+					},
+				});
+				if (!turnReceiptResult.committed || !turnReceiptResult.receipt) {
+					throw new Error("Companion turn receipt could not be committed.");
+				}
+				turnReceipt = turnReceiptResult.receipt;
+			}
+			if (selectedMethod?.cost === "bonus") {
+				if (!this.consumeActionType("bonus")) throw new Error("Owner Bonus Action could not be consumed.");
+				ownerActionConsumed = "bonus";
+			}
+			if (selectedMethod?.cost === "replaceOneAttack") {
+				if (availability.operation !== "forceEmpoweredRend") {
+					throw new Error("Only Force-Empowered Rend can replace an Attack-action attack.");
+				}
+				const replacement = attackReplacementAdapter?.consume?.({replacementUid: availability.operationUid});
+				if (!replacement?.ok || !replacement.receipt) throw new Error("Attack replacement could not be consumed.");
+				attackReplacementReceipt = replacement.receipt;
+			}
+
+			let resultRolls = {};
+			const resultTarget = target ? MiscUtil.copyFast(target) : null;
+			let hp = null;
+			if (availability.operation === "forceEmpoweredRend") {
+				const attackRule = resolved.actions.forceEmpoweredRend;
+				const damageRule = resolved.actions.forceEmpoweredRend.damage;
+				const critical = rolls.attackD20 === 20;
+				resultRolls = {
+					attack: {
+						d20: rolls.attackD20,
+						bonus: attackRule.attackBonus,
+						total: rolls.attackD20 + attackRule.attackBonus,
+						critical,
+						fumble: rolls.attackD20 === 1,
+						hitConfirmed: !!hitConfirmed,
+						range: attackRule.reachFeet,
+						type: attackRule.attackType,
+					},
+					damage: hitConfirmed
+						? {
+							dieRoll: rolls.damageDie,
+							flat: damageRule.flat,
+							total: rolls.damageDie + damageRule.flat,
+							dice: critical ? damageRule.dice.replace(/^1d/, "2d") : damageRule.dice,
+							type: damageRule.type,
+						}
+						: null,
+				};
+			}
+			if (availability.operation === "repair") {
+				resourceSnapshot = {
+					type: "repair",
+					companionId,
+					current: companion.uses.repair.current,
+				};
+				companion.uses.repair.current--;
+				const healingRule = resolved.actions.repair.healing;
+				const requested = rolls.healingDice + healingRule.flat;
+				if (target.external === true) {
+					hp = {
+						companionId: null,
+						external: true,
+						manualApplication: true,
+						before: null,
+						after: null,
+						max: null,
+						requested,
+						actual: null,
+					};
+				} else {
+					hpSnapshot = {
+						companionId: targetCompanion.id,
+						hp: {...targetCompanion.hp},
+					};
+					const before = targetCompanion.hp.current;
+					const actual = this.healCompanion(targetCompanion.id, requested);
+					if (actual <= 0) throw new Error("Repair healing could not be applied.");
+					hp = {
+						companionId: targetCompanion.id,
+						before,
+						after: targetCompanion.hp.current,
+						max: targetCompanion.hp.max,
+						requested,
+						actual,
+					};
+				}
+				resultRolls = {
+					healing: {
+						dieRoll: rolls.healingDice,
+						flat: healingRule.flat,
+						total: requested,
+						dice: healingRule.dice,
+					},
+				};
+			}
+			if (availability.operation === "deflectAttack") {
+				const retaliation = resolved.reactions.deflectAttack.improvedDamage;
+				resultRolls = {
+					disadvantage: {
+						applies: true,
+						manualResolution: true,
+						trigger: resolved.reactions.deflectAttack.trigger,
+						restriction: resolved.reactions.deflectAttack.targetRestriction,
+					},
+					retaliation: retaliation
+						? {
+							dieRoll: rolls.retaliationDie,
+							flat: retaliation.flat,
+							total: rolls.retaliationDie + retaliation.flat,
+							dice: retaliation.dice,
+							type: retaliation.type,
+						}
+						: null,
+				};
+			}
+			if (availability.operation === "hitDie") {
+				resourceSnapshot = {
+					type: "hitDie",
+					companionId,
+					current: companion.hitDice.current,
+				};
+				companion.hitDice.current--;
+				const constitutionModifier = this.getCompanionAbilityMod(companionId, "con");
+				const requested = Math.max(1, rolls.hitDie + constitutionModifier);
+				hpSnapshot = {companionId, hp: {...companion.hp}};
+				const before = companion.hp.current;
+				const actual = this.healCompanion(companionId, requested);
+				if (actual <= 0) throw new Error("Companion Hit Die healing could not be applied.");
+				hp = {
+					companionId,
+					before,
+					after: companion.hp.current,
+					max: companion.hp.max,
+					requested,
+					actual,
+				};
+				resultRolls = {
+					healing: {
+						dieRoll: rolls.hitDie,
+						flat: constitutionModifier,
+						total: requested,
+						dice: companion.hitDice.die,
+					},
+				};
+			}
+
+			return {
+				ok: true,
+				committed: true,
+				operation: availability.operation,
+				actionKey,
+				companionId,
+				ownerUid: availability.ownerUid,
+				sourceUid: availability.sourceUid,
+				operationUid: availability.operationUid,
+				commandMethod: selectedCommandMethod,
+				costs: {
+					ownerAction: selectedMethod?.cost || null,
+					companionAction: availability.receipt?.actionUid?.startsWith("Companion Action|") || false,
+					companionReaction: availability.receipt?.actionUid?.startsWith("Companion Reaction|") || false,
+					repairUses: availability.operation === "repair" ? 1 : 0,
+					hitDice: availability.operation === "hitDie" ? 1 : 0,
+				},
+				receipts: {
+					companion: turnReceipt,
+					attackReplacement: attackReplacementReceipt,
+				},
+				rolls: resultRolls,
+				target: resultTarget,
+				hp,
+				rollback: null,
+				error: null,
+			};
+		} catch (error) {
+			return this._getCompanionOperationFailure(
+				availability,
+				"transactionRolledBack",
+				"The companion operation failed and every committed mutation was rolled back.",
+				doRollback(),
+				error,
+			);
+		}
+	}
+
+	commandCompanionAction (options = {}) {
+		const operation = options.actionKey === "forceEmpoweredRend" ? "forceEmpoweredRend" : "action";
+		return this.performCompanionOperation({...options, operation});
+	}
+
+	useCompanionRepair (options = {}) {
+		return this.performCompanionOperation({...options, operation: "repair"});
+	}
+
+	useCompanionReaction (options = {}) {
+		const operation = options.reactionKey === "deflectAttack" ? "deflectAttack" : options.reactionKey;
+		return this.performCompanionOperation({...options, operation});
+	}
+
+	spendCompanionHitDie (options = {}) {
+		return this.performCompanionOperation({...options, operation: "hitDie"});
+	}
+
 	getFeatureOwnedCompanions (featureUid) {
 		const ownerKey = CharacterSheetState._getFeatureCompanionOwnerKey(featureUid);
 		if (!ownerKey) throw new TypeError("A complete source-qualified feature UID is required.");
@@ -78330,8 +78998,10 @@ class CharacterSheetState {
 	}
 
 	removeFeatureOwnedCompanions (featureUid) {
-		const ownedIds = new Set(this.getFeatureOwnedCompanions(featureUid).map(companion => companion.id));
+		const owned = this.getFeatureOwnedCompanions(featureUid);
+		const ownedIds = new Set(owned.map(companion => companion.id));
 		if (!ownedIds.size) return 0;
+		for (const companion of owned) this._pruneFeatureCompanionTurnReceipts(companion, {ownerUid: featureUid});
 		const before = this._data.companions.length;
 		this._data.companions = this._data.companions.filter(companion => !ownedIds.has(companion.id));
 		return before - this._data.companions.length;
@@ -78340,6 +79010,7 @@ class CharacterSheetState {
 	deactivateFeatureOwnedCompanions (featureUid, {status = "inactive"} = {}) {
 		const companions = this.getFeatureOwnedCompanions(featureUid);
 		for (const companion of companions) {
+			this._pruneFeatureCompanionTurnReceipts(companion, {ownerUid: featureUid});
 			companion.active = false;
 			companion.lifecycle = {
 				...(CharacterSheetState._isCompanionSchemaObject(companion.lifecycle) ? companion.lifecycle : {}),
@@ -78363,6 +79034,7 @@ class CharacterSheetState {
 		if (!descriptor) throw new RangeError(`No feature companion descriptor is registered for "${toFeatureUid}".`);
 		const context = summonerContext || this.getFeatureCompanionSummonerContext(toFeatureUid);
 		this.resolveFeatureCompanionRules(toFeatureUid, context);
+		this._pruneFeatureCompanionTurnReceipts(companion, {ownerUid: fromFeatureUid});
 		companion.featureGrant = {
 			...(companion.featureGrant || {}),
 			...CharacterSheetState._getFeatureCompanionOwnerMetadata(toFeatureUid, descriptor),
@@ -78769,6 +79441,7 @@ class CharacterSheetState {
 				const stored = this._getFeatureCompanionSetupRecordRaw(primaryEligible);
 				stored.companionId = companion.id;
 				for (const duplicate of this.getFeatureOwnedCompanions(primaryEligible).filter(candidate => candidate.id !== companion.id)) {
+					this._pruneFeatureCompanionTurnReceipts(duplicate, {ownerUid: primaryEligible});
 					duplicate.active = false;
 					duplicate.lifecycle = {
 						...(duplicate.lifecycle || {}),
@@ -82575,7 +83248,9 @@ class CharacterSheetState {
 
 	/**
 	 * Handle companions during rest.
-	 * - Long rest: Restore all companion HP, clear conditions
+	 * - Long rest: Restore generic companion HP and clear conditions
+	 * - Registry-backed feature companions recover only descriptor-owned resources
+	 *   and Hit Dice; they are never implicitly healed or resurrected.
 	 * - Short rest: Only clear temp conditions
 	 * @param {string} restType - "short" or "long"
 	 */
@@ -82600,8 +83275,22 @@ class CharacterSheetState {
 			this.endCompanionCombat(companion.id);
 
 			if (restType === "long") {
-				// Full heal on long rest
-				companion.hp.current = companion.hp.max;
+				const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+				const featureUid = companion.featureGrant?.uid || null;
+				const descriptor = featureUid ? rules?.getDescriptor(featureUid) : null;
+				if (descriptor) {
+					const repair = companion.uses?.repair;
+					if (repair?.recharge === "longRest") repair.current = repair.max;
+					if (companion.hitDice?.max > 0) {
+						const recovered = Math.max(1, Math.ceil(companion.hitDice.max / 2));
+						companion.hitDice.current = Math.min(
+							companion.hitDice.max,
+							(Number(companion.hitDice.current) || 0) + recovered,
+						);
+					}
+				} else {
+					companion.hp.current = companion.hp.max;
+				}
 				companion.hp.temp = 0;
 				companion.conditions = [];
 				companion.exhaustion = Math.max(0, companion.exhaustion - 1);

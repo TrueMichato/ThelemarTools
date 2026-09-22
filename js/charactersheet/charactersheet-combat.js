@@ -350,7 +350,13 @@ class CharacterSheetCombat {
 		this._weaponRiderEnabled = {}; // riderId -> bool: include this weapon damage rider in next damage roll
 		this._lastRiderRoundUsed = {}; // riderId -> combat round: per-rider once-per-turn bookkeeping
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
-		this._turnAttackUsage = {hasAttackAction: false, attackActionFeatureIds: new Set()};
+		this._turnAttackUsage = {
+			hasAttackAction: false,
+			attackActionCount: 0,
+			attackActionFeatureIds: new Set(),
+			lastAttack: null,
+			replacements: new Map(),
+		};
 		this._handOfHarmUsedThisTurn = false;
 		this._relentlessUsedThisTurn = false;
 		this._pendingBattleMasterDamage = null;
@@ -4354,11 +4360,21 @@ class CharacterSheetCombat {
 
 	_resetTurnActionUsage () {
 		this._turnActionUsage = {action: false, bonus: false, reaction: false};
-		this._turnAttackUsage = {hasAttackAction: false, attackActionCount: 0, attackActionFeatureIds: new Set()};
+		this.resetTurnAttackUsage();
 		this._handOfHarmUsedThisTurn = false;
 		this._relentlessUsedThisTurn = false;
 		this._pendingBattleMasterDamage = null;
 		this._pendingBattleMasterAttackAdvantage = false;
+	}
+
+	resetTurnAttackUsage () {
+		this._turnAttackUsage = {
+			hasAttackAction: false,
+			attackActionCount: 0,
+			attackActionFeatureIds: new Set(),
+			lastAttack: null,
+			replacements: new Map(),
+		};
 	}
 
 	canUseBattleMasterAction (actionType) {
@@ -4476,11 +4492,91 @@ class CharacterSheetCombat {
 		if (!this._turnAttackUsage) this._resetTurnActionUsage();
 		if (!this._isAttackActionRoll(attack)) return;
 		this._turnAttackUsage.hasAttackAction = true;
+		if (!Number.isFinite(this._turnAttackUsage.attackActionCount)) this._turnAttackUsage.attackActionCount = 0;
 		this._turnAttackUsage.attackActionCount++;
+		this._turnAttackUsage.lastAttack = attack;
 		const id = attack?.isFeatureAttack
 			? (attack.sourceFeature || attack.name || "").trim().toLowerCase()
 			: "__other__";
 		if (id) this._turnAttackUsage.attackActionFeatureIds.add(id);
+	}
+
+	/**
+	 * Expose the canonical Attack-action budget for operations which replace one
+	 * remaining attack. Callers must not maintain a parallel attack counter.
+	 */
+	getAttackActionReplacementAvailability () {
+		if (!this._state?.isInCombat?.()) {
+			return {
+				available: false,
+				hasAttackAction: false,
+				used: 0,
+				allowance: 0,
+				remaining: 0,
+				reason: "Attack replacement is available only during combat.",
+			};
+		}
+		const used = Number.isFinite(this._turnAttackUsage?.attackActionCount)
+			? this._turnAttackUsage.attackActionCount
+			: 0;
+		const allowance = this._getAttackActionAllowance(this._turnAttackUsage?.lastAttack);
+		const remaining = Math.max(0, allowance - used);
+		const hasAttackAction = !!this._turnAttackUsage?.hasAttackAction;
+		return {
+			available: hasAttackAction && remaining > 0,
+			hasAttackAction,
+			used,
+			allowance,
+			remaining,
+			reason: !hasAttackAction
+				? "Start the Attack action before replacing one of its attacks."
+				: remaining <= 0
+					? "No attacks remain in the current Attack action."
+					: null,
+		};
+	}
+
+	consumeAttackActionReplacement ({replacementUid} = {}) {
+		const availability = this.getAttackActionReplacementAvailability();
+		if (!replacementUid || !availability.available) {
+			return {
+				ok: false,
+				reason: !replacementUid ? "missingReplacementUid" : "attackReplacementUnavailable",
+				availability,
+			};
+		}
+
+		const receipt = {
+			id: `attack-replacement-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+			replacementUid,
+			previousCount: availability.used,
+			nextCount: availability.used + 1,
+		};
+		this._turnAttackUsage.attackActionCount = receipt.nextCount;
+		this._turnAttackUsage.replacements.set(receipt.id, receipt);
+		return {
+			ok: true,
+			receipt: {...receipt},
+			availability: this.getAttackActionReplacementAvailability(),
+		};
+	}
+
+	rollbackAttackActionReplacement (receipt) {
+		const stored = receipt?.id ? this._turnAttackUsage?.replacements?.get(receipt.id) : null;
+		if (!stored || stored.replacementUid !== receipt.replacementUid) {
+			return {ok: false, reason: "replacementReceiptNotFound"};
+		}
+		if (this._turnAttackUsage.attackActionCount !== stored.nextCount) {
+			return {
+				ok: false,
+				reason: "attackBudgetChanged",
+				expectedCount: stored.nextCount,
+				actualCount: this._turnAttackUsage.attackActionCount,
+			};
+		}
+		this._turnAttackUsage.attackActionCount = stored.previousCount;
+		this._turnAttackUsage.replacements.delete(stored.id);
+		return {ok: true, restoredCount: stored.previousCount};
 	}
 
 	_isAttackActionRoll (attack) {

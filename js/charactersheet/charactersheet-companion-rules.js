@@ -79,7 +79,7 @@ const COMPANION_RULES = deepFreeze({
 			forceEmpoweredRend: {
 				name: "Force-Empowered Rend",
 				actionType: "action",
-				attackType: "melee",
+				attackType: "meleeWeaponAttack",
 				attackBonusFormula: "spellAttackBonus",
 				reachFeet: 5,
 				damage: {

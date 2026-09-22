@@ -119,6 +119,11 @@ Guided Precision's shared receipt preserves the authored “once per turn”
 ceiling while allowing a qualifying reaction on another creature's turn in the
 same round. Save/load preserves the current turn and receipt. Removing the
 exact EFA Cartographer source prunes the receipt.
+- Registry-backed feature companions, with separate
+  `Companion Action|<source-qualified companion UID>|<stable companion ID>` and
+  matching Reaction receipts. The stable ID lets teardown use exact
+  owner/source/action pruning without refunding a sibling; the defender
+  reaction never consumes the summoner's Reaction.
 
 Load migration is idempotent. A current-round legacy `resourceTurnUsage`
 entry becomes a receipt only when it represented the live combat turn; stale
@@ -414,6 +419,59 @@ by Tools of the Trade. Nickname is optional and absent when blank. Compatible
 EFA/TCE owner changes use `rebindFeatureOwnedCompanion()`; loss of the exact
 grant deactivates with lifecycle status `vanished`. Never infer setup across a
 same-label source, and never claim mixed-source Reanimator companions.
+
+## Feature-Companion Operations
+
+Desktop and Play Mode use `CharacterSheetPage.pUseCompanionOperation()`, which
+supplies prompts/rolls and delegates one prepared payload to
+`CharacterSheetState.performCompanionOperation()`. Focused State wrappers are:
+
+```javascript
+state.commandCompanionAction(options);
+state.useCompanionRepair(options);
+state.useCompanionReaction(options);
+state.spendCompanionHitDie(options);
+```
+
+Availability is queried through
+`getCompanionOperationAvailability(companionId, operation, options)`. Its
+command methods come only from `CharacterSheetCompanionRules`: the defender's
+default action is Dodge, normal non-default commands spend the owner's Bonus
+Action, an incapacitated owner imposes no owner cost, and the EFA level-5
+Attack replacement appears only for Force-Empowered Rend. Combat exposes
+`getAttackActionReplacementAvailability()`,
+`consumeAttackActionReplacement()`, and
+`rollbackAttackActionReplacement()` over its existing Attack-action tracker;
+there is no second attack counter.
+
+`performCompanionOperation()` preflights ownership, active/alive state, target
+and 5-foot acknowledgements, uses/Hit Dice, exact companion receipt, and owner
+command cost before mutation. Success returns the structured family:
+
+```javascript
+{
+    ok, committed, operation, actionKey, companionId,
+    ownerUid, sourceUid, operationUid, commandMethod,
+    costs, receipts, rolls, target, hp,
+    rollback: null,
+    error: null,
+}
+```
+
+Failure returns the same identity with `committed: false`, a stable `reason`
+and player-facing `message`. A late failure rolls back the exact companion
+receipt, owner Bonus Action or Combat replacement receipt, resource current,
+and HP snapshot, and publishes each rollback outcome under `rollback`.
+
+Rend uses the resolved spell attack bonus, 5-foot melee-weapon reach, and exact
+source damage formula. Repair can mutate a modeled Construct's HP or return a
+manual-application result for a confirmed external Construct/object; neither
+path spends before target/range confirmation. Deflect commits only the
+companion Reaction and returns manual disadvantage resolution plus the EFA
+level-15 force retaliation roll when present. Companion Hit Dice use the
+companion Constitution modifier and never touch player Hit Dice. Long rest
+restores descriptor-owned `longRest` Repair uses and half the companion Hit
+Dice (rounded up) without healing or resurrecting the feature companion.
 
 ## Source-qualified Spell Focus and Committed Cast Receipts
 

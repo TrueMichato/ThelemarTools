@@ -577,7 +577,13 @@ Public State contracts:
 - `getFeatureOwnedCompanions`, `deactivateFeatureOwnedCompanions`,
   `removeFeatureOwnedCompanions`, and `rebindFeatureOwnedCompanion` compare the
   normalized full source-qualified feature UID. Never replace this with a
-  `type`, display-name, or subclass-name lookup.
+  `type`, display-name, or subclass-name lookup. Teardown and compatible rebind
+  also release only that companion's exact action/reaction receipt keys.
+- `getCompanionOperationAvailability()` and `performCompanionOperation()` are
+  the shared desktop/Play Mode transaction boundary for companion actions,
+  reactions, Repair, and Hit Dice. Focused wrappers (`commandCompanionAction`,
+  `useCompanionRepair`, `useCompanionReaction`, and
+  `spendCompanionHitDie`) delegate to the same coordinator.
 - `migrateLegacyFeatureCompanions()` has a narrow Steel Defender recognition
   adapter but dispatches through the same registry/reconciler. It requires exact
   defender source/type/statblock identity plus exact class/subclass source,
@@ -590,9 +596,8 @@ The resolved JSON-safe rules result lives under
 legacy proficiency projections. Unknown future feature descriptors remain
 persisted and untouched until their registry entry exists.
 
-Acquisition/setup UI, Respec wiring, companion rendering, action economy,
-Repair/Hit Dice transactions, lifecycle transitions, rest effects, Arcane Jolt,
-and E2E coverage are later milestones.
+Lifecycle transitions/revival/replacement, Arcane Jolt, Battle Ready weapon
+substitution, PDF/export, and E2E coverage remain later milestones.
 
 ## Key Integration Points
 

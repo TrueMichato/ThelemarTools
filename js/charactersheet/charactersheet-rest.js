@@ -43,6 +43,12 @@ class CharacterSheetRest {
 		const maxHp = this._state.getHp().max;
 		const hitDice = this._state.getHitDice();
 		const availableHitDice = hitDice.filter(hd => hd.current > 0);
+		const companionHitDieTargets = (this._state.getCompanions?.() || []).filter(companion =>
+			companion.featureGrant?.uid
+			&& companion.hitDice?.current > 0
+			&& companion.hp?.current > 0
+			&& companion.hp.current < companion.hp.max,
+		);
 		const conditions = this._state.getConditionNames?.() || [];
 		const isConcentrating = this._state.isConcentrating?.();
 		const concentration = this._state.getConcentration?.();
@@ -57,7 +63,7 @@ class CharacterSheetRest {
 		const canMemorizeSpell = !!(memorizeCandidates && memorizeCandidates.prepared.length && memorizeCandidates.spellbook.length);
 		const canRetuneEfaArmorModel = !!this._state.getEfaArmorerModel?.();
 
-		if (currentHp >= maxHp && !availableHitDice.length && !conditions.length && !isConcentrating && !canReduceExhaustion && !canMemorizeSpell && !canRetuneEfaArmorModel) {
+		if (currentHp >= maxHp && !availableHitDice.length && !companionHitDieTargets.length && !conditions.length && !isConcentrating && !canReduceExhaustion && !canMemorizeSpell && !canRetuneEfaArmorModel) {
 			JqueryUtil.doToast({type: "info", content: "You're already at full health with no hit dice to spend."});
 			return;
 		}
@@ -71,6 +77,7 @@ class CharacterSheetRest {
 		let totalHealing = 0;
 		// Track spent dice by type
 		const spentDice = {};
+		const pendingCompanionHitDice = [];
 
 		const eleTotalHealing = e_({tag: "span", clazz: "charsheet__rest-healing-value", txt: "0"});
 
@@ -88,6 +95,14 @@ class CharacterSheetRest {
 				<div class="charsheet__rest-section-title">🎲 Available Hit Dice</div>
 				<div id="short-rest-hit-dice-container"></div>
 			</div>
+
+			${companionHitDieTargets.length ? `
+			<div class="charsheet__rest-section">
+				<div class="charsheet__rest-section-title">🤖 Companion Hit Dice</div>
+				<p class="ve-muted ve-small mb-2">These d8s heal only their companion and never spend your Hit Dice.</p>
+				<div id="short-rest-companion-hit-dice-container"></div>
+			</div>
+			` : ""}
 			
 			<div class="charsheet__rest-healing-display">
 				<span class="charsheet__rest-healing-icon">💚</span>
@@ -131,6 +146,50 @@ class CharacterSheetRest {
 					${cb}
 					<span>⚠️ Remove: ${condition}</span>
 				</label>`.appendTo(condContainer);
+			});
+		}
+
+		if (companionHitDieTargets.length) {
+			const companionHdContainer = e_({ele: modalInner}).find("#short-rest-companion-hit-dice-container");
+			companionHitDieTargets.forEach(companion => {
+				let remaining = companion.hitDice.current;
+				let projectedHp = companion.hp.current;
+				const dieSides = Number(String(companion.hitDice.die || "d8").replace(/^d/i, "")) || 8;
+				const constitutionModifier = this._state.getCompanionAbilityMod(companion.id, "con");
+				const eleRemaining = e_({tag: "span", txt: `${remaining}`});
+				const eleProjectedHp = e_({tag: "span", txt: `${projectedHp}/${companion.hp.max} HP`});
+				const btn = e_({tag: "button", clazz: "ve-btn ve-btn-sm ve-btn-primary", txt: `🎲 Roll ${companion.hitDice.die || "d8"}`});
+
+				btn.onClick(() => {
+					if (remaining <= 0 || projectedHp >= companion.hp.max) return;
+					const roll = this._page.rollDice(1, dieSides);
+					const requested = Math.max(1, roll + constitutionModifier);
+					const actual = Math.min(requested, companion.hp.max - projectedHp);
+					pendingCompanionHitDice.push({companionId: companion.id, roll});
+					projectedHp += actual;
+					remaining--;
+					eleRemaining.txt(`${remaining}`);
+					eleProjectedHp.txt(`${projectedHp}/${companion.hp.max} HP`);
+					if (remaining <= 0 || projectedHp >= companion.hp.max) btn.disabled = true;
+					JqueryUtil.doToast({
+						type: "success",
+						content: `${companion.customName || companion.name}: ${companion.hitDice.die || "d8"} (${roll}) + CON (${constitutionModifier >= 0 ? "+" : ""}${constitutionModifier}) = ${actual} HP`,
+					});
+					this._page._rollHistory?.addRoll({
+						title: `${companion.customName || companion.name} Hit Die`,
+						total: actual,
+						breakdown: `${companion.hitDice.die || "d8"} (${roll}) + CON (${constitutionModifier >= 0 ? "+" : ""}${constitutionModifier})`,
+					});
+				});
+
+				ee`<div class="charsheet__hit-die-row">
+					<div class="charsheet__hit-die-info">
+						<span class="charsheet__hit-die-class">${companion.customName || companion.name}:</span>
+						<span class="charsheet__hit-die-die">${companion.hitDice.die || "d8"}</span>
+					</div>
+					<span class="charsheet__hit-die-remaining">${eleRemaining} / ${companion.hitDice.max} remaining • ${eleProjectedHp}</span>
+					${btn}
+				</div>`.appendTo(companionHdContainer);
 			});
 		}
 
@@ -386,6 +445,22 @@ class CharacterSheetRest {
 				this._state.heal(totalHealing);
 			}
 
+			let companionHealing = 0;
+			for (const pending of pendingCompanionHitDice) {
+				const result = this._state.spendCompanionHitDie({
+					companionId: pending.companionId,
+					target: {companionId: pending.companionId, confirmed: true},
+					rolls: {hitDie: pending.roll},
+				});
+				if (result.ok) companionHealing += result.hp.actual;
+				else {
+					JqueryUtil.doToast({
+						type: "warning",
+						content: result.message || "A queued companion Hit Die could not be committed.",
+					});
+				}
+			}
+
 			// Material rest bonuses land AFTER the dice healing and are reported separately,
 			// so the log distinguishes "you rolled well" from "the pearl paid out".
 			const bonusHealing = this._applyRestBonusHealing({
@@ -451,6 +526,7 @@ class CharacterSheetRest {
 
 			let message = `😴 Short rest complete!`;
 			if (totalHealing > 0) message += ` Recovered ${totalHealing} HP.`;
+			if (companionHealing > 0) message += ` Companions recovered ${companionHealing} HP.`;
 			if (bonusHealing > 0) message += ` Materials added ${bonusHealing} HP.`;
 			if (slotsRecovered > 0) message += ` Recovered ${slotsRecovered} spell slot(s) via ${slotRecoveryFeatureName}.`;
 			if (spRecovered > 0) message += ` Recovered ${spRecovered} sorcery point(s).`;
