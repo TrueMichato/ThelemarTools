@@ -8867,17 +8867,21 @@ class CharacterSheetCombat {
 			if (activatableAbility) {
 				const handled = await this._page._pUseFeatureAbility(feature);
 				if (handled) {
+					const isAtomicTransaction = typeof handled === "object" && Object.hasOwn(handled, "committed");
+					const isCommitted = !isAtomicTransaction || handled.committed;
 					// Structured interactions own an atomic choose/validate/commit flow in
 					// CharacterSheetPage. Do not consume their action a second time here,
 					// and do not charge a cancelled modal.
-					if (!activatableAbility.activationInfo?.interactionKind) this._consumeActionType(actionType);
-					this.renderCombatActions();
-					this.renderCombatResources();
-					this._page._renderFeatures?.();
-					this._page._renderResources?.();
-					this._page._saveCurrentCharacter?.();
+					if (isCommitted) {
+						if (!isAtomicTransaction && !activatableAbility.activationInfo?.interactionKind) this._consumeActionType(actionType);
+						this.renderCombatActions();
+						this.renderCombatResources();
+						this._page._renderFeatures?.();
+						this._page._renderResources?.();
+						this._page._saveCurrentCharacter?.();
+					}
 				}
-				return;
+				return handled;
 			}
 
 			if (feature.uses && feature.uses.current <= 0) {

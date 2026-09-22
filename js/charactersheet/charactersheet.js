@@ -12854,7 +12854,7 @@ class CharacterSheetPage {
 	 * consumption, or for an interdict boon: spend a seal + activate its named buff state),
 	 * and refreshes the features area so its use badge stays current.
 	 * @param {object} feature
-	 * @returns {Promise<boolean>} true if handled as an ability
+	 * @returns {Promise<boolean|object>} true if handled as an ability, or its atomic activation result
 	 */
 	async _pUseFeatureAbility (feature) {
 		const af = this._getActivatableAbilityForFeature(feature);
@@ -12864,9 +12864,9 @@ class CharacterSheetPage {
 		if (af.isActive && CharacterSheetState.isInterdictBoonEntry(af)) return true;
 		const stateType = af.activationInfo?.stateType || CharacterSheetState.ACTIVE_STATE_TYPES[af.stateTypeId];
 		const resourceCost = af.resource?.cost ?? af.activationInfo?.resourceCost ?? stateType?.resourceCost ?? 1;
-		await this._activateFeatureState(af.feature, af.stateTypeId, stateType, af.resource, resourceCost, af.activationInfo);
+		const activationResult = await this._activateFeatureState(af.feature, af.stateTypeId, stateType, af.resource, resourceCost, af.activationInfo);
 		this._features?.render?.();
-		return true;
+		return activationResult == null ? true : activationResult;
 	}
 
 	/**

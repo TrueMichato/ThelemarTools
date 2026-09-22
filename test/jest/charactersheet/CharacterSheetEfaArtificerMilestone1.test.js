@@ -4,9 +4,11 @@ import {jest} from "@jest/globals";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-combat.js";
 import {CharacterSheetRest} from "../../../js/charactersheet/charactersheet-rest.js";
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const CharacterSheetCombat = globalThis.CharacterSheetCombat;
 const CharacterSheetState = globalThis.CharacterSheetState;
 let CharacterSheetPage;
 
@@ -372,6 +374,75 @@ describe("EFA Flash of Genius committed use", () => {
 			enumSpy.mockRestore();
 			boolSpy.mockRestore();
 		}
+	});
+
+	it("does not spend the combat Reaction when Flash is cancelled from the Combat action card", async () => {
+		const state = makeArtificer({level: 7});
+		state.startCombat();
+		const page = makePage(state);
+		const feature = state.getFeatures().find(it => it.name === "Flash of Genius");
+		const resource = getFlashResource(state);
+		const usesBefore = resource.current;
+		const consumeActionType = jest.spyOn(state, "consumeActionType");
+		const cancelled = {ok: false, committed: false, reason: "cancelled", featureUid: FLASH_UID, classUid: CLASS_UID};
+		page._getActivatableAbilityForFeature = jest.fn(() => ({
+			feature,
+			stateTypeId: "custom",
+			resource,
+			activationInfo: {activationAction: "reaction", interactionMode: "limited"},
+		}));
+		page._activateFeatureState = jest.fn(async () => cancelled);
+
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._state = state;
+		combat._page = page;
+		combat.renderCombatActions = jest.fn();
+		combat.renderCombatResources = jest.fn();
+
+		const result = await combat._useCombatAction(feature);
+
+		expect(result).toBe(cancelled);
+		expect(state.isActionTypeAvailable("reaction")).toBe(true);
+		expect(getFlashResource(state).current).toBe(usesBefore);
+		expect(consumeActionType).not.toHaveBeenCalled();
+		expect(combat.renderCombatActions).not.toHaveBeenCalled();
+		expect(page._saveCurrentCharacter).not.toHaveBeenCalled();
+	});
+
+	it("spends the combat Reaction and Flash use exactly once from the Combat action card", async () => {
+		const state = makeArtificer({level: 7});
+		state.startCombat();
+		const page = makePage(state);
+		const feature = state.getFeatures().find(it => it.name === "Flash of Genius");
+		const resource = getFlashResource(state);
+		const consumeActionType = jest.spyOn(state, "consumeActionType");
+		page._getActivatableAbilityForFeature = jest.fn(() => ({
+			feature,
+			stateTypeId: "custom",
+			resource,
+			activationInfo: {activationAction: "reaction", interactionMode: "limited"},
+		}));
+		page._activateFeatureState = jest.fn(async () => state.pUseFlashOfGenius({
+			rollType: "abilityCheck",
+			isFailed: true,
+			targetType: "self",
+		}));
+
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._state = state;
+		combat._page = page;
+		combat.renderCombatActions = jest.fn();
+		combat.renderCombatResources = jest.fn();
+
+		const result = await combat._useCombatAction(feature);
+
+		expect(result).toEqual(expect.objectContaining({ok: true, committed: true, remainingUses: 3}));
+		expect(consumeActionType).toHaveBeenCalledTimes(1);
+		expect(consumeActionType).toHaveBeenCalledWith("reaction");
+		expect(state.isActionTypeAvailable("reaction")).toBe(false);
+		expect(getFlashResource(state).current).toBe(3);
+		expect(combat.renderCombatActions).toHaveBeenCalledTimes(1);
+		expect(page._saveCurrentCharacter).toHaveBeenCalledTimes(1);
 	});
 
 	it.each([
