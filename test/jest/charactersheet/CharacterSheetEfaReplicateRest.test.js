@@ -16,6 +16,7 @@ beforeAll(async () => {
 		const element = originalE(opts);
 		element._attrs = {};
 		element.setAttribute = (name, value) => { element._attrs[name] = String(value); };
+		if (opts?.click) element._handlers.click = opts.click;
 		createdElements.push(element);
 		return element;
 	};
@@ -376,6 +377,89 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 		expect(state.getCurrentHp()).toBe(5);
 		expect(page._lastRestSnapshot).toBe(previousSnapshot);
 		expect(rest._showUndoRestAffordance).toHaveBeenCalledWith("short");
+	});
+
+	test("the actual Finish Long Rest handler applies the M4 Tinker cleanup transition", async () => {
+		const state = new State();
+		state.addClass({name: "Artificer", source: "EFA", level: 6});
+		state.setMaxHp(20);
+		state.setCurrentHp(5);
+		const created = state.createGeneratedFeatureItem({
+			item: {name: "Basket", source: "XPHB", type: "G", rarity: "none"},
+			owner: State.EFA_TINKERS_MAGIC_OWNER,
+			metadata: {sourceFeatureUid: State.EFA_TINKERS_MAGIC_FEATURE_UID, temporary: true},
+		});
+		expect(created.ok).toBe(true);
+		state._data.efaArtificerTinker = {
+			version: 1,
+			tinkersMagicUsesSpent: 2,
+			drainUsed: true,
+			transmuteUsed: true,
+			drainSlotLevel: 1,
+			drainSlotAvailable: true,
+		};
+		state.addNamedModifier({
+			name: State.EFA_MAGIC_ITEM_TINKER_DRAIN_MODIFIER_NAME,
+			type: "spellSlots:1",
+			value: 1,
+			sourceFeatureId: State.EFA_MAGIC_ITEM_TINKER_FEATURE_UID,
+			sourceType: "classFeatureTransaction",
+			sourceDecisionKey: State.EFA_MAGIC_ITEM_TINKER_DRAIN_DECISION_KEY,
+		});
+		state.calculateSpellSlots();
+		expect(state.getBonusSpellSlotsForLevel(1)).toBe(1);
+		mockProductionOptions(state);
+		jest.spyOn(state, "commitEfaReplicateMagicItemsAtLongRest")
+			.mockReturnValue({ok: true, code: "replicate-production-skipped", resolved: []});
+		const {rest} = makeRest(state);
+		const modalInner = globalThis.e_({tag: "div"});
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({
+			eleModalInner: modalInner,
+			doClose: jest.fn(),
+		});
+
+		await rest._showLongRestDialog();
+		createdElements.find(element => element.textContent === "🌙 Finish Long Rest").click();
+
+		expect(state.getGeneratedFeatureItemRows(State.EFA_TINKERS_MAGIC_OWNER)).toEqual([]);
+		expect(state.getBonusSpellSlotsForLevel(1)).toBe(0);
+		expect(state.toJson().efaArtificerTinker).toEqual({
+			version: 1,
+			tinkersMagicUsesSpent: 0,
+			drainUsed: false,
+			transmuteUsed: false,
+			drainSlotLevel: null,
+			drainSlotAvailable: false,
+		});
+		const after = state.toJson();
+		state.applyEfaArtificerTinkerLongRestTransition();
+		expect(state.toJson()).toEqual(after);
+	});
+
+	test("cancelling the actual Long Rest dialog leaves M4 Tinker state untouched", async () => {
+		const state = new State();
+		state.addClass({name: "Artificer", source: "EFA", level: 6});
+		state._data.efaArtificerTinker = {
+			version: 1,
+			tinkersMagicUsesSpent: 2,
+			drainUsed: false,
+			transmuteUsed: true,
+			drainSlotLevel: null,
+			drainSlotAvailable: false,
+		};
+		mockProductionOptions(state);
+		const before = state.toJson();
+		const {rest, page} = makeRest(state);
+		const modalInner = globalThis.e_({tag: "div"});
+		const doClose = jest.fn();
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: modalInner, doClose});
+
+		await rest._showLongRestDialog();
+		createdElements.find(element => element.textContent === "Cancel").click();
+
+		expect(state.toJson()).toEqual(before);
+		expect(page.saveCharacter).not.toHaveBeenCalled();
+		expect(doClose).toHaveBeenCalledWith(false);
 	});
 
 	test("opening and cancelling a short rest is non-mutating, while Finish Short Rest commits 60 minutes", async () => {

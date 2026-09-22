@@ -574,6 +574,7 @@ class CharacterSheetInventory {
 			"tinkers-magic-tools-required": "Equip Tinker's Tools (XPHB) and be proficient with them.",
 			"tinkers-magic-uses-spent": "No Tinker's Magic uses remain until you finish a Long Rest.",
 			"charge-slot-unavailable": "Choose a spell slot that is still available.",
+			"charge-slot-pool-required": "Choose whether to spend the ordinary or Pact Magic slot at this level.",
 			"charge-target-full": "That item is already at its maximum charges.",
 			"charge-target-has-no-charges": "That replicated item has no charge pool to restore.",
 			"drain-already-used": "Drain Magic Item has already been used since your last Long Rest.",
@@ -582,6 +583,7 @@ class CharacterSheetInventory {
 			"transmute-same-plan": "Choose a different known Replicate Magic Item plan.",
 			"transmute-same-item": "Choose a plan that resolves to a different item.",
 			"transmute-attunement-requirements-failed": "The replacement cannot preserve this item's attunement because its requirements are not met.",
+			"transmute-attunement-cap-reached": "The replacement would exceed your available attunement slots.",
 			"transmute-capacity-exceeded": "The replacement does not fit your current replicated-item capacity.",
 			"missing-replicate-item": "That replicated item is no longer in your inventory.",
 			"invalid-replicate-item": "That item is not an active item created by your exact Replicate Magic Item feature.",
@@ -690,12 +692,10 @@ class CharacterSheetInventory {
 			addSelect({
 				key: "slot",
 				label: "Spell slot to spend",
-				options: Array.from({length: 9}, (_, ix) => ix + 1)
-					.filter(level => this._state.getSpellSlotsCurrent(level) > 0)
-					.map(level => ({
-						value: String(level),
-						label: `Level ${level} (${this._state.getSpellSlotsCurrent(level)} available)`,
-					})),
+				options: getOptions().magicItemTinker.chargeSlots.map(slot => ({
+					value: `${slot.pool}:${slot.level}`,
+					label: `${slot.pool === "pact" ? "Pact Magic" : "Ordinary"} level ${slot.level} (${slot.current} available)`,
+				})),
 			});
 		}
 		if (operation === "transmute") {
@@ -730,10 +730,12 @@ class CharacterSheetInventory {
 		const getRequest = () => {
 			if (operation === "tinkersMagic") return {operation, itemUid: selects.item?.select.value || ""};
 			if (operation === "charge") {
+				const [slotPool, slotLevel] = String(selects.slot?.select.value || "").split(":");
 				return {
 					operation,
 					itemId: getTargetItemId(),
-					slotLevel: Number(selects.slot?.select.value),
+					slotLevel: Number(slotLevel),
+					slotPool,
 				};
 			}
 			if (operation === "drain") return {operation, itemId: getTargetItemId()};
@@ -773,7 +775,8 @@ class CharacterSheetInventory {
 			if (operation === "tinkersMagic") {
 				feedback.textContent = `Create ${currentPreview.item.name}. ${currentPreview.uses.remaining} of ${currentPreview.uses.max} uses remain before this creation.`;
 			} else if (operation === "charge") {
-				feedback.textContent = `Spend one level ${currentPreview.charge.paidSlotLevel} slot to restore ${currentPreview.charge.restored} charge${currentPreview.charge.restored === 1 ? "" : "s"} (${currentPreview.charge.previous} to ${currentPreview.charge.next} of ${currentPreview.charge.max}).`;
+				const poolLabel = currentPreview.charge.paidSlotPool === "pact" ? "Pact Magic" : "ordinary";
+				feedback.textContent = `Spend one ${poolLabel} level ${currentPreview.charge.paidSlotLevel} slot to restore ${currentPreview.charge.restored} charge${currentPreview.charge.restored === 1 ? "" : "s"} (${currentPreview.charge.previous} to ${currentPreview.charge.next} of ${currentPreview.charge.max}).`;
 			} else if (operation === "drain") {
 				feedback.textContent = `Destroy this ${currentPreview.drain.rarity} item and gain one temporary level ${currentPreview.drain.slotLevel} spell slot.`;
 			} else {

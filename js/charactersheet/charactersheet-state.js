@@ -5530,6 +5530,7 @@ class CharacterSheetState {
 				drainUsed: false,
 				transmuteUsed: false,
 				drainSlotLevel: null,
+				drainSlotAvailable: false,
 			},
 
 			// Ioun Stone bonds in progress — {itemId: daysElapsed}. An Ioun bond takes 7
@@ -6064,6 +6065,7 @@ class CharacterSheetState {
 		this._data.efaArtificerTinker.transmuteUsed = !!this._data.efaArtificerTinker.transmuteUsed;
 		const drainSlotLevel = Number(this._data.efaArtificerTinker.drainSlotLevel);
 		this._data.efaArtificerTinker.drainSlotLevel = [1, 2].includes(drainSlotLevel) ? drainSlotLevel : null;
+		this._data.efaArtificerTinker.drainSlotAvailable = !!this._data.efaArtificerTinker.drainSlotAvailable;
 		const hadActionEconomyUsage = !!this._data.actionEconomyUsage && typeof this._data.actionEconomyUsage === "object";
 		const legacyBonusActionAvailable = this._data.actionEconomy?.bonusActionAvailable;
 		delete this._data.actionEconomy;
@@ -20601,7 +20603,16 @@ class CharacterSheetState {
 
 	setSpellSlotCurrent (level, current) {
 		if (this._data.spellcasting.spellSlots[level]) {
-			this._data.spellcasting.spellSlots[level].current = Math.max(0, Math.min(current, this._data.spellcasting.spellSlots[level].max));
+			const slot = this._data.spellcasting.spellSlots[level];
+			const next = Math.max(0, Math.min(current, slot.max));
+			if (
+				next < slot.current
+				&& this._data.efaArtificerTinker?.drainSlotAvailable
+				&& Number(this._data.efaArtificerTinker.drainSlotLevel) === Number(level)
+			) {
+				this._data.efaArtificerTinker.drainSlotAvailable = false;
+			}
+			slot.current = next;
 		}
 	}
 
@@ -20609,6 +20620,12 @@ class CharacterSheetState {
 		const slot = this._data.spellcasting.spellSlots[level];
 		if (slot && slot.current > 0) {
 			slot.current--;
+			if (
+				this._data.efaArtificerTinker?.drainSlotAvailable
+				&& Number(this._data.efaArtificerTinker.drainSlotLevel) === Number(level)
+			) {
+				this._data.efaArtificerTinker.drainSlotAvailable = false;
+			}
 			return true;
 		}
 		return false;
@@ -38693,9 +38710,8 @@ class CharacterSheetState {
 			? Number(this._data.efaArtificerTinker.drainSlotLevel)
 			: null;
 		const affectedLevels = new Set(markerLevel ? [markerLevel] : []);
-		const currentByLevel = {};
+		const removedByLevel = {};
 		if (modifierIds.size) {
-			const removedByLevel = {};
 			for (const modifier of modifiers) {
 				const match = /^spellSlots:([1-9])$/.exec(modifier.type || "");
 				if (!match) continue;
@@ -38705,24 +38721,19 @@ class CharacterSheetState {
 			}
 			this._data.namedModifiers = (this._data.namedModifiers || []).filter(modifier => !modifierIds.has(modifier.id));
 			this._recalculateCustomModifiers();
-			if (!(this._data.classes || []).length) {
-				for (const [levelRaw, removed] of Object.entries(removedByLevel)) {
-					const level = Number(levelRaw);
-					const slots = this._data.spellcasting.spellSlots[level];
-					if (!slots || removed <= 0) continue;
-					const previousCurrent = Math.max(0, Number(slots.current) || 0);
-					slots.max = Math.max(0, Number(slots.max || 0) - removed);
-					slots.current = Math.min(previousCurrent, slots.max);
-					if (!slots.max) delete this._data.spellcasting.spellSlots[level];
-				}
-			}
 		}
+		const currentByLevel = {};
 		for (const level of affectedLevels) {
 			currentByLevel[level] = Math.max(
 				0,
 				Number(this._data.spellcasting.spellSlots[level]?.current) || 0,
 			);
 		}
+		const removeAvailableSlot = !!(
+			this._data.efaArtificerTinker?.drainSlotAvailable
+			&& markerLevel
+			&& removedByLevel[markerLevel] > 0
+		);
 		if ((this._data.classes || []).length && (
 			modifierIds.size
 			|| markerLevel
@@ -38732,10 +38743,28 @@ class CharacterSheetState {
 			for (const level of affectedLevels) {
 				const slots = this._data.spellcasting.spellSlots[level];
 				if (!slots) continue;
-				slots.current = Math.min(currentByLevel[level] ?? slots.current, slots.max);
+				const desiredCurrent = Math.max(
+					0,
+					(currentByLevel[level] ?? slots.current) - (removeAvailableSlot && level === markerLevel ? 1 : 0),
+				);
+				slots.current = Math.min(desiredCurrent, slots.max);
+			}
+		} else {
+			for (const [levelRaw, removed] of Object.entries(removedByLevel)) {
+				const level = Number(levelRaw);
+				const slots = this._data.spellcasting.spellSlots[level];
+				if (!slots || removed <= 0) continue;
+				slots.max = Math.max(0, Number(slots.max || 0) - removed);
+				const desiredCurrent = Math.max(
+					0,
+					(currentByLevel[level] ?? slots.current) - (removeAvailableSlot && level === markerLevel ? 1 : 0),
+				);
+				slots.current = Math.min(desiredCurrent, slots.max);
+				if (!slots.max) delete this._data.spellcasting.spellSlots[level];
 			}
 		}
 		this._data.efaArtificerTinker.drainSlotLevel = null;
+		this._data.efaArtificerTinker.drainSlotAvailable = false;
 		return modifierIds.size;
 	}
 
@@ -38797,6 +38826,27 @@ class CharacterSheetState {
 				plan: this.classifyGeneratedFeatureItem(row).provenance?.catalog?.plan || null,
 				resolvedItem: this.classifyGeneratedFeatureItem(row).provenance?.catalog?.resolvedItem || null,
 			}));
+		const chargeSlots = [];
+		for (let level = 1; level <= 9; level++) {
+			const current = this.getSpellSlotsCurrent(level);
+			if (current > 0) {
+				chargeSlots.push({
+					pool: "ordinary",
+					level,
+					current,
+					max: this.getSpellSlotsMax(level),
+				});
+			}
+		}
+		const pactSlots = this.getPactSlots();
+		if (pactSlots.current > 0 && pactSlots.level >= 1) {
+			chargeSlots.push({
+				pool: "pact",
+				level: pactSlots.level,
+				current: pactSlots.current,
+				max: pactSlots.max,
+			});
+		}
 		return {
 			classLevel,
 			tinkersMagic: {
@@ -38815,6 +38865,7 @@ class CharacterSheetState {
 			},
 			magicItemTinker: {
 				available: classLevel >= 6,
+				chargeSlots,
 				drainAvailable: classLevel >= 6 && !this._data.efaArtificerTinker?.drainUsed,
 				transmuteAvailable: classLevel >= 6 && !this._data.efaArtificerTinker?.transmuteUsed,
 				replicateItems,
@@ -38866,9 +38917,20 @@ class CharacterSheetState {
 			if (!Number.isSafeInteger(slotLevel) || slotLevel < 1 || slotLevel > 9) {
 				return {ok: false, code: "invalid-charge-slot-level", operation, actionType};
 			}
-			if (this.getSpellSlotsCurrent(slotLevel) < 1) {
+			const requestedPool = request.slotPool == null ? null : String(request.slotPool);
+			if (requestedPool && !["ordinary", "pact"].includes(requestedPool)) {
+				return {ok: false, code: "invalid-charge-slot-pool", operation, actionType};
+			}
+			const availablePools = options.magicItemTinker.chargeSlots
+				.filter(slot => slot.level === slotLevel)
+				.map(slot => slot.pool);
+			if (!availablePools.length || (requestedPool && !availablePools.includes(requestedPool))) {
 				return {ok: false, code: "charge-slot-unavailable", operation, actionType};
 			}
+			if (!requestedPool && availablePools.length > 1) {
+				return {ok: false, code: "charge-slot-pool-required", operation, actionType};
+			}
+			const slotPool = requestedPool || availablePools[0];
 			const max = Number(target.row.item?.charges);
 			const previous = Number(target.row.item?.chargesCurrent ?? max);
 			if (!Number.isFinite(max) || max < 1) return {ok: false, code: "charge-target-has-no-charges", operation, actionType};
@@ -38885,6 +38947,7 @@ class CharacterSheetState {
 				charge: {
 					previous,
 					paidSlotLevel: slotLevel,
+					paidSlotPool: slotPool,
 					restored,
 					next: previous + restored,
 					max,
@@ -38894,6 +38957,7 @@ class CharacterSheetState {
 					operation,
 					itemId: target.row.id,
 					slotLevel,
+					slotPool,
 				},
 			};
 		}
@@ -38991,6 +39055,21 @@ class CharacterSheetState {
 						operation,
 						actionType,
 						reasons: requirements.reasons,
+					};
+				}
+				const originalConsumesSlot = !this.isAttunementExempt(target.row.item);
+				const replacementConsumesSlot = !this.isAttunementExempt(resolvedItem.item);
+				const projectedAttunedCount = this.getAttunedCount()
+					- (originalConsumesSlot ? 1 : 0)
+					+ (replacementConsumesSlot ? 1 : 0);
+				if (projectedAttunedCount > this.getMaxAttunement()) {
+					return {
+						ok: false,
+						code: "transmute-attunement-cap-reached",
+						operation,
+						actionType,
+						projectedAttunedCount,
+						maxAttunement: this.getMaxAttunement(),
 					};
 				}
 			}
@@ -39133,7 +39212,10 @@ class CharacterSheetState {
 			}
 
 			if (preview.operation === "charge") {
-				if (!this.useSpellSlot(preview.charge.paidSlotLevel)) throw new Error("charge-slot-unavailable");
+				const didSpend = preview.charge.paidSlotPool === "pact"
+					? this.usePactSlot()
+					: this.useSpellSlot(preview.charge.paidSlotLevel);
+				if (!didSpend) throw new Error("charge-slot-unavailable");
 				const target = this._getEfaReplicateRowForTinker(preview.itemId);
 				if (!target.ok) throw new Error(target.code);
 				target.row.item.chargesCurrent = preview.charge.next;
@@ -39164,6 +39246,7 @@ class CharacterSheetState {
 				this._data.efaArtificerTinker.drainUsed = true;
 				this._data.efaArtificerTinker.drainSlotLevel = preview.drain.slotLevel;
 				this.calculateSpellSlots();
+				this._data.efaArtificerTinker.drainSlotAvailable = true;
 				return {
 					ok: true,
 					code: "efa-tinker-committed",
@@ -39188,9 +39271,12 @@ class CharacterSheetState {
 					lifecycle: preview.transmute.lifecycle,
 					extensions: preview.transmute.extensions,
 					equipped: preview.transmute.equipped,
-					attuned: preview.transmute.attuned,
+					attuned: false,
 				});
 				if (!result.ok) throw new Error(result.code);
+				if (preview.transmute.attuned && !this.attune(result.itemId)) {
+					throw new Error("transmute-attunement-failed");
+				}
 				this._data.efaArtificerTinker.transmuteUsed = true;
 				return {
 					ok: true,
@@ -91148,13 +91234,7 @@ class CharacterSheetState {
 		// (proficiency-bonus hours for items, 1 hour for a Dancing Item).
 		this._clearCreationBardConstructs();
 
-		// Tinker's Magic creations vanish and its Intelligence-based use pool refills
-		// only when the long rest actually commits through this state transition.
-		this.removeGeneratedFeatureItemsByOwner(CharacterSheetState.EFA_TINKERS_MAGIC_OWNER);
-		this._data.efaArtificerTinker.tinkersMagicUsesSpent = 0;
-		this._clearEfaMagicItemTinkerDrainSlot();
-		this._data.efaArtificerTinker.drainUsed = false;
-		this._data.efaArtificerTinker.transmuteUsed = false;
+		this.applyEfaArtificerTinkerLongRestTransition();
 
 		// Lunar Sorcery: free lunar casts return, the shed moonlight goes out, and the
 		// phase becomes re-choosable for free.
@@ -91168,6 +91248,15 @@ class CharacterSheetState {
 		// Calling's duplicates plus the Fly, My Pretty ride do not survive a rest.
 		this._resetWickedWitchOnLongRest();
 		return {...timeReceipt, efaCannonExpiry};
+	}
+
+	applyEfaArtificerTinkerLongRestTransition () {
+		const removedItems = this.removeGeneratedFeatureItemsByOwner(CharacterSheetState.EFA_TINKERS_MAGIC_OWNER);
+		this._data.efaArtificerTinker.tinkersMagicUsesSpent = 0;
+		const removedDrainModifiers = this._clearEfaMagicItemTinkerDrainSlot();
+		this._data.efaArtificerTinker.drainUsed = false;
+		this._data.efaArtificerTinker.transmuteUsed = false;
+		return {removedItems, removedDrainModifiers};
 	}
 
 	/**

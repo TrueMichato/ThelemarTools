@@ -385,6 +385,7 @@ state.getEfaArtificerTinkerOptions();
 state.previewEfaArtificerTinkerTransaction(request);
 state.commitEfaArtificerTinkerTransaction(request);
 state.reconcileEfaArtificerTinker({reason?});
+state.applyEfaArtificerTinkerLongRestTransition();
 ```
 
 Requests are versioned, source-qualified, and contain only stable state
@@ -392,7 +393,7 @@ identities:
 
 ```javascript
 {version: 1, operation: "tinkersMagic", itemUid}
-{version: 1, operation: "charge", itemId, slotLevel}
+{version: 1, operation: "charge", itemId, slotLevel, slotPool: "ordinary" | "pact"}
 {version: 1, operation: "drain", itemId}
 {version: 1, operation: "transmute", itemId, targetPlanSlotId, resolvedItemUid}
 ```
@@ -417,9 +418,11 @@ and carry lifecycle callbacks `onLongRest: "remove"` and
 Magic Item Tinker accepts only active generated rows whose owner exactly
 matches base EFA Replicate Magic Item:
 
-- **Charge** spends one available level-1-or-higher slot and restores exactly
-  the paid slot level, clamped to the item's maximum. It never calls the
-  item's random `rechargeItemCharges` path.
+- **Charge** spends one available ordinary or Pact Magic slot of level 1 or
+  higher and restores exactly the paid slot level, clamped to the item's
+  maximum. The selected pool is explicit when both pools exist at the same
+  level, and commit dispatches through `useSpellSlot()` or `usePactSlot()`. It
+  never calls the item's random `rechargeItemCharges` path.
 - **Drain** destroys the item through `removeItem`; Common creates one
   temporary level-1 slot, while Uncommon or Rare creates one temporary level-2
   slot. Other rarities fail before mutation. The slot uses the normal named
@@ -432,7 +435,10 @@ matches base EFA Replicate Magic Item:
   currently known Replicate plan. It preserves exact owner, plan metadata,
   creation order/receipt/batch, lifecycle, extensions, equipment, and valid
   attunement while assigning fresh inventory/generated-item identities. Same
-  plan and same resolved item are rejected.
+  plan and same resolved item are rejected. Attunement preflight projects
+  slot-exempt and slot-consuming items separately; commit creates the
+  replacement unattuned, then uses normal `attune()` after teardown so any
+  attunement failure rolls back the complete transaction.
 
 Persisted state is additive and defaults safely for older saves:
 
@@ -443,26 +449,34 @@ efaArtificerTinker: {
     drainUsed: false,
     transmuteUsed: false,
     drainSlotLevel: null, // 1 | 2 | null
+    drainSlotAvailable: false,
 }
 ```
 
-Load normalization clamps use counts, booleans, and Drain slot level.
+Load normalization clamps use counts, booleans, Drain slot level, and the
+temporary-slot availability marker.
 Reconciliation removes Tinker's rows only on exact EFA class/source loss,
 removes forged, duplicate, disabled, mismatched, or under-level Drain
 modifiers, rebases stale persisted slot totals even when the modifier is
-missing, and never claims other generated owners or modifiers. Removing an
-already-expended temporary slot does not spend a normal class slot. A
-committed long rest removes all exact-owner Tinker's rows, refills its use
-pool, removes the Drain slot, and resets Drain/Transmute use state.
+missing, and never claims other generated owners or modifiers. The availability
+marker is consumed by canonical ordinary-slot decrements: cleanup subtracts the
+temporary current slot only while it is still available, preserving both the
+unspent `2/4 -> 3/5 -> 2/4` case and the already-spent `4/5 -> 4/4` case.
+`applyEfaArtificerTinkerLongRestTransition()` is idempotent and is called by
+both `state.onLongRest()` and the active Finish Long Rest controller after its
+undo snapshot. A committed long rest therefore removes all exact-owner
+Tinker's rows, refills its use pool, removes the Drain slot, and resets
+Drain/Transmute use state through either entry point.
 
 **Operate-mode interaction brief.** Players need quick, exact table-time
 operations rather than a second inventory manager. Inventory exposes one
 level-gated Tinker's Magic toolbar action and compact Charge/Drain/Transmute
 buttons only on exact live Replicate rows; Combat Actions mirrors the same four
 operations. Both surfaces delegate to one protected modal and the same state
-transactions. Native labelled selects, explicit disabled reasons, confirmation
-copy, `role="status"`/`aria-live="polite"` feedback, focus restoration, Escape,
-and an auto-fit single-column layout preserve keyboard and mobile use.
+transactions. Charge labels ordinary and Pact Magic pools separately. Native
+labelled selects, explicit disabled reasons, confirmation copy,
+`role="status"`/`aria-live="polite"` feedback, focus restoration, Escape, and
+an auto-fit single-column layout preserve keyboard and mobile use.
 Anti-goals are subclass mechanics, Spell-Storing Item, levels 10/14/18/20,
 random recharge, a parallel item ledger, or broad state refactors.
 

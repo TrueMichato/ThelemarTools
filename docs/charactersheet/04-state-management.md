@@ -856,6 +856,7 @@ getEfaArtificerTinkerOptions();
 previewEfaArtificerTinkerTransaction(request);
 commitEfaArtificerTinkerTransaction(request);
 reconcileEfaArtificerTinker({reason});
+applyEfaArtificerTinkerLongRestTransition();
 ```
 
 Tinker's Magic creates distinct generated rows owned by
@@ -867,11 +868,14 @@ Charge, Drain, and Transmute target only active rows owned by the exact
 
 Every operation is previewed before commit. Commit snapshots `_data`, consumes
 combat action economy only when combat is active, mutates through normal APIs,
-and restores the snapshot on failure. Charge uses `useSpellSlot()` and writes a
-deterministic clamped `chargesCurrent`; Drain uses `removeItem()` plus an exact
-named `spellSlots:<level>` modifier; Transmute uses normal remove/create paths
-while preserving the old row's plan-independent provenance and lifecycle
-ordering. Container spill, item-effect teardown, capacity, attunement, and
+and restores the snapshot on failure. Charge carries an explicit
+`slotPool: "ordinary" | "pact"` whenever ordinary and Pact Magic slots share a
+level, dispatches through `useSpellSlot()` or `usePactSlot()`, and writes a
+deterministic clamped `chargesCurrent`. Drain uses `removeItem()` plus an exact
+named `spellSlots:<level>` modifier. Transmute uses normal remove/create paths,
+projects slot-exempt attunement correctly, creates the replacement unattuned,
+and then calls normal `attune()` so an attunement failure rolls back the entire
+transaction. Container spill, item-effect teardown, capacity, attunement, and
 save/export behavior therefore stay shared with the rest of Inventory.
 
 The only additional persisted record is:
@@ -883,17 +887,22 @@ efaArtificerTinker: {
     drainUsed: false,
     transmuteUsed: false,
     drainSlotLevel: null,
+    drainSlotAvailable: false,
 }
 ```
 
 Older saves receive these defaults during load. Normalization rejects invalid
 Drain levels; reconciliation removes invalid or source-lost exact M4 state
 without touching unrelated items or modifiers. It recalculates a stale slot
-maximum even when the exact Drain modifier is missing, and an expended
-temporary slot is removed before ordinary class-slot expenditure is preserved.
-A committed long rest removes all exact-owner Tinker's creations, refills its
+maximum even when the exact Drain modifier is missing. The availability marker
+tracks whether the temporary current slot remains: source/rest cleanup subtracts
+it only while unspent, while an expended temporary slot preserves ordinary
+class-slot current. The idempotent
+`applyEfaArtificerTinkerLongRestTransition()` runs from both `onLongRest()` and
+the active Finish Long Rest controller after its undo snapshot. A committed
+long rest therefore removes all exact-owner Tinker's creations, refills its
 Intelligence-based use pool, removes the temporary Drain slot, and resets
-Drain/Transmute use state.
+Drain/Transmute use state through either entry point.
 
 ### Active States & Conditions
 

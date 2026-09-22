@@ -1033,6 +1033,7 @@ class CharacterSheetRest {
 				if (!timeReceipt?.ok) {
 					throw new Error(`Could not finish the long rest: ${timeReceipt?.message || timeReceipt?.code || "time advancement failed"}.`);
 				}
+				this._state.applyEfaArtificerTinkerLongRestTransition?.();
 				this._state.resetTurnEconomy?.({round: null});
 
 				// Full HP recovery

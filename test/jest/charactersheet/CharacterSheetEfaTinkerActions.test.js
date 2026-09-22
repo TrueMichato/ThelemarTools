@@ -311,6 +311,80 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		expect(randomRecharge).not.toHaveBeenCalled();
 	});
 
+	test("Charge supports explicit Pact Magic slots and requires a pool choice when levels overlap", () => {
+		const {state} = buildState();
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		state.setItemCharges(replica.itemId, 0);
+		state.addClass({name: "Warlock", source: "XPHB", level: 1});
+		state.setSpellSlotCurrent(1, 0);
+		state.setPactSlots({level: 1, current: 1, max: 1});
+
+		const pactOnly = state.previewEfaArtificerTinkerTransaction({
+			operation: "charge",
+			itemId: replica.itemId,
+			slotLevel: 1,
+			slotPool: "pact",
+		});
+		expect(pactOnly).toMatchObject({
+			ok: true,
+			charge: {paidSlotLevel: 1, paidSlotPool: "pact", restored: 1},
+		});
+		expect(state.commitEfaArtificerTinkerTransaction(pactOnly.request).ok).toBe(true);
+		expect(state.getPactSlots().current).toBe(0);
+		expect(state.getSpellSlotsCurrent(1)).toBe(0);
+
+		state.setItemCharges(replica.itemId, 0);
+		state.setSpellSlotCurrent(1, 1);
+		state.setPactSlots({level: 1, current: 1, max: 1});
+		expect(state.previewEfaArtificerTinkerTransaction({
+			operation: "charge",
+			itemId: replica.itemId,
+			slotLevel: 1,
+		})).toMatchObject({ok: false, code: "charge-slot-pool-required"});
+		const ordinary = state.previewEfaArtificerTinkerTransaction({
+			operation: "charge",
+			itemId: replica.itemId,
+			slotLevel: 1,
+			slotPool: "ordinary",
+		});
+		expect(ordinary).toMatchObject({ok: true, charge: {paidSlotPool: "ordinary"}});
+		expect(state.previewEfaArtificerTinkerTransaction({
+			operation: "charge",
+			itemId: replica.itemId,
+			slotLevel: 1,
+			slotPool: "pact",
+		})).toMatchObject({ok: true, charge: {paidSlotPool: "pact"}});
+		expect(state.commitEfaArtificerTinkerTransaction(ordinary.request).ok).toBe(true);
+		expect(state.getSpellSlotsCurrent(1)).toBe(0);
+		expect(state.getPactSlots().current).toBe(1);
+	});
+
+	test("a failed Charge after spending a Pact slot rolls the whole transaction back", () => {
+		const {state} = buildState();
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		state.setItemCharges(replica.itemId, 0);
+		state.addClass({name: "Warlock", source: "XPHB", level: 1});
+		state.setSpellSlotCurrent(1, 0);
+		state.setPactSlots({level: 1, current: 1, max: 1});
+		const resolveTarget = state._getEfaReplicateRowForTinker.bind(state);
+		jest.spyOn(state, "_getEfaReplicateRowForTinker")
+			.mockImplementationOnce(resolveTarget)
+			.mockReturnValueOnce({ok: false, code: "synthetic-charge-target-failure"});
+		const before = state.toJson();
+
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "charge",
+			itemId: replica.itemId,
+			slotLevel: 1,
+			slotPool: "pact",
+		})).toMatchObject({
+			ok: false,
+			code: "efa-tinker-rolled-back",
+			message: "synthetic-charge-target-failure",
+		});
+		expect(state.toJson()).toEqual(before);
+	});
+
 	test("requires exact equipped, proficient Tinker's Tools and keeps failed creation pre-cost", () => {
 		const {state, toolsId} = buildState({level: 1});
 		state.startCombat();
@@ -426,12 +500,14 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		loaded.loadFromJson(state.toJson());
 		expect(loaded.getSpellSlotsMax(2)).toBe(maxBefore + 1);
 		expect(loaded.getEfaArtificerTinkerOptions().magicItemTinker.drainAvailable).toBe(false);
+		expect(loaded.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
 
 		loaded.onLongRest();
 		expect(loaded.getSpellSlotsMax(2)).toBe(maxBefore);
 		expect(loaded.getSpellSlotsCurrent(2)).toBe(maxBefore);
 		expect(loaded.getBonusSpellSlotsForLevel(2)).toBe(0);
 		expect(loaded.getEfaArtificerTinkerOptions().magicItemTinker.drainAvailable).toBe(true);
+		expect(loaded.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
 	});
 
 	test("Drain blocks unsupported rarity and leaves item, slot, use, and Bonus Action untouched", () => {
@@ -575,6 +651,56 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		capacity.mockRestore();
 	});
 
+	test("Transmute rejects an attuned slot-exempt item becoming slot-consuming at the attunement cap", () => {
+		const {state} = buildState();
+		state._data._classFeatureAttunementSlots = 5;
+		for (let i = 0; i < 5; i++) {
+			state.addItem({
+				id: `attuned-control-${i}`,
+				name: `Attuned Control ${i}`,
+				source: "TST",
+				type: "W",
+				requiresAttunement: true,
+			}, 1, false, true);
+		}
+		const original = createReplica(state, "Silver Cog|TST");
+		const originalRow = state.getInventory().find(row => row.id === original.itemId);
+		originalRow.item.requiresAttunement = true;
+		originalRow.item.entries = ["This attunement doesn't count against the number of magic items to which you can be attuned."];
+		originalRow.attuned = true;
+		state.setItemCatalog(CATALOG_ITEMS.map(item =>
+			item.name === "Bag of Holding" && item.source === "XDMG"
+				? {...item, requiresAttunement: true}
+				: item,
+		));
+		expect(state.getAttunedCount()).toBe(5);
+		const targetPlan = getPlan(state, "Bag of Holding|XDMG");
+		const request = {
+			operation: "transmute",
+			itemId: original.itemId,
+			targetPlanSlotId: targetPlan.slotId,
+			resolvedItemUid: "Bag of Holding|XDMG",
+		};
+		const before = state.toJson();
+
+		expect(state.previewEfaArtificerTinkerTransaction(request)).toMatchObject({
+			ok: false,
+			code: "transmute-attunement-cap-reached",
+		});
+		expect(state.toJson()).toEqual(before);
+
+		state.removeItem("attuned-control-0");
+		const attune = jest.spyOn(state, "attune").mockReturnValue(false);
+		const beforeCommit = state.toJson();
+		expect(state.commitEfaArtificerTinkerTransaction(request)).toMatchObject({
+			ok: false,
+			code: "efa-tinker-rolled-back",
+			message: "transmute-attunement-failed",
+		});
+		expect(state.toJson()).toEqual(beforeCommit);
+		attune.mockRestore();
+	});
+
 	test("load repair drops a forged Drain marker that has no exact-source slot modifier", () => {
 		const {state} = buildState();
 		const saved = state.toJson();
@@ -631,7 +757,7 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 			operation: "drain",
 			itemId: replica.itemId,
 		}).ok).toBe(true);
-		expect(state.useSpellSlot(1)).toBe(true);
+		state.setSpellSlotCurrent(1, state.getSpellSlotsCurrent(1) - 1);
 		expect(state.getSpellSlotsCurrent(1)).toBe(baseMax);
 
 		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
@@ -639,6 +765,23 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 
 		expect(state.getSpellSlotsMax(1)).toBe(baseMax);
 		expect(state.getSpellSlotsCurrent(1)).toBe(baseMax);
+		expect(state.getBonusSpellSlotsForLevel(1)).toBe(0);
+	});
+
+	test("removing an unspent Drain slot does not refund an ordinary spell slot", () => {
+		const {state} = buildState();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 3}});
+
+		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
+		state.reconcileEfaArtificerTinker({reason: "test-unspent-level-loss"});
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
 		expect(state.getBonusSpellSlotsForLevel(1)).toBe(0);
 	});
 
@@ -678,6 +821,7 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 			drainUsed: false,
 			transmuteUsed: false,
 			drainSlotLevel: null,
+			drainSlotAvailable: false,
 		});
 	});
 
@@ -729,6 +873,47 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		expect(state.toJson()).toEqual(before);
 		expect(page.saveCharacter).not.toHaveBeenCalled();
 		expect(page.renderCharacter).not.toHaveBeenCalled();
+		modal.mockRestore();
+	});
+
+	test("the Charge modal distinguishes ordinary and Pact Magic slots at the same level", async () => {
+		const {state} = buildState();
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		state.setItemCharges(replica.itemId, 0);
+		state.addClass({name: "Warlock", source: "XPHB", level: 1});
+		state.setPactSlots({level: 1, current: 1, max: 1});
+		const {inventory} = makeInventory(state);
+		let closeModal;
+		let modalInner;
+		const modal = jest.spyOn(globalThis.CharacterSheetModal, "pGetShow").mockImplementation(async opts => {
+			closeModal = opts.cbClose;
+			modalInner = globalThis.e_({tag: "div"});
+			return {
+				eleModalInner: modalInner,
+				eleModalFooter: globalThis.e_({tag: "div"}),
+				doClose: value => opts.cbClose(value),
+			};
+		});
+
+		const pending = inventory.pShowEfaArtificerTinker({operation: "charge", itemId: replica.itemId});
+		await Promise.resolve();
+		await Promise.resolve();
+		const findById = (node, id) => {
+			if (node?.id === id) return node;
+			for (const child of node?.children || []) {
+				const found = findById(child, id);
+				if (found) return found;
+			}
+			return null;
+		};
+		const slotSelect = findById(modalInner, "cs-efa-tinker-charge-slot");
+		expect(slotSelect.children.map(option => option.textContent)).toEqual(expect.arrayContaining([
+			"Ordinary level 1 (4 available)",
+			"Pact Magic level 1 (1 available)",
+		]));
+
+		closeModal(false);
+		await expect(pending).resolves.toBeNull();
 		modal.mockRestore();
 	});
 
