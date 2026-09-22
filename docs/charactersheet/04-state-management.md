@@ -310,6 +310,47 @@ stack identity: children from the same pack can merge, but they never merge into
 or a stack from a different pack. Special custom entries remain separate under the existing
 `_isCustom` no-merge rule. Inventory rows surface the marker as a `From Pack Name` hint.
 
+#### Wrapper-ID equipment bindings
+
+Persistent mechanics that bind to a particular inventory row store the wrapper
+`id`; they do not store the editable item name and do not infer identity from
+derived equipment snapshots such as `_data.ac.armor`.
+
+EFA Armorer's Arcane Armor binding is stored as:
+
+```javascript
+efaArmorer: {
+    arcaneArmorItemId: "inventory-wrapper-id" // or null
+}
+```
+
+The public state surface is:
+
+- `getEfaArmorerModel()` — resolves the exact EFA model from structured
+  `chosenSubfeatures` and level-history/canonical decision evidence.
+- `getEfaArcaneArmorEligibleItems()` — returns equipped LA/MA/HA wrappers after
+  source-aware Smith's Tools checks.
+- `getEfaArcaneArmorBinding()` — returns the currently bound inventory row, or
+  `null`.
+- `getEfaArcaneArmorBindingStatus()` — reports active/suspended state and
+  explicit reasons.
+- `bindEfaArcaneArmor(id)` / `clearEfaArcaneArmorBinding()` — explicit result
+  objects; invalid binds return an error code and message.
+- `reconcileEfaArmorerState()` — the single mutation/load/death reconciliation
+  path.
+
+Doffing keeps the binding but suspends its mechanics. Equipping another body
+armor, removing the wrapper, replacing it with a non-armor item, losing the exact
+EFA subclass/model, or dying clears the binding. The three generated model
+weapons use permanent `_efaArmorerWeaponId` values and retain their independent
+wrapper IDs and customization across model switches/save-load. Only the selected
+model row can expose an attack or item effect while the binding is active.
+
+This binding milestone intentionally does not implement model damage, range,
+Intelligence substitution, riders, target/resource tracking, rest-switching UI,
+Perfected Armor, or Armor Replication. Those mechanics must extend the stable
+rows rather than replace them.
+
 ### Active States & Conditions
 
 ```javascript

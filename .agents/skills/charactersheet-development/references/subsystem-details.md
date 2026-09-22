@@ -722,6 +722,22 @@ path. If the equipment persists while its attack is conditional, put
 hide the attack rather than deleting and recreating the inventory row. TGTT
 Chained Fury's Spectral Chains are the reference implementation.
 
+When a feature owns several mutually exclusive generated rows, give each row a
+dedicated permanent metadata identity in addition to `_generatedItemId`. EFA
+Armorer uses `_efaArmorerWeaponId` for Force Demolisher, Thunder Pulse, and
+Lightning Launcher. All three wrappers survive model switches and preserve
+player edits; `getItemAttackId()` gives the active row the same deterministic ID
+in both the state-granted and Combat auto-weapon paths. The inactive wrappers
+remain equipped inventory artifacts but `isItemAttackAvailable()` and the item
+effect/proficiency activation gate must agree that they are mechanically inert.
+
+Persist equipment bindings by inventory wrapper `id`, never by display name or a
+derived AC snapshot. EFA Arcane Armor stores
+`efaArmorer.arcaneArmorItemId` and routes bind, clear, load, equipment mutation,
+death, and source-loss handling through `reconcileEfaArmorerState()`. Doffing
+preserves the wrapper binding in a suspended status; another equipped body armor,
+a missing/non-armor bound row, exact source/model loss, or death clears it.
+
 ### Usable adventuring gear
 
 `getUsableGear()` is the canonical read API for type-`G` items whose entries declare an

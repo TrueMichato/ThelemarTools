@@ -5112,6 +5112,10 @@ class CharacterSheetState {
 
 			// Inventory
 			inventory: [], // [{item, quantity, equipped, attuned}]
+			efaArmorer: {
+				// Inventory wrapper identity is authoritative. Names and AC snapshots are not.
+				arcaneArmorItemId: null,
+			},
 			currency: {cp: 0, sp: 0, ep: 0, gp: 0, pp: 0},
 
 			// Ioun Stone bonds in progress — {itemId: daysElapsed}. An Ioun bond takes 7
@@ -5873,6 +5877,7 @@ class CharacterSheetState {
 		this._migrateRightOnTimeModifiers();
 		this._migrateAmbiguousBlessedStrikes();
 		this._migrateEfaArmorerArmorModelChoice();
+		this._migrateEfaArmorerBinding();
 
 		// Drop duplicate feature-sourced named modifiers. `addFeat` runs both the
 		// data-declared and the registry pipelines, and until the guard was hoisted
@@ -6078,6 +6083,7 @@ class CharacterSheetState {
 		// explicit `weapon:true` flag) both categorise as weapons and generate an attack.
 		// Idempotent; only ever sets a missing/false flag to true.
 		this._migrateInventoryItemWeaponFlag();
+		this.reconcileEfaArmorerState({cause: "load"});
 		this._ensureFeatRegistryResources();
 		this._endBladesongForInvalidEquipment();
 		this._migrateEfaFlashOfGeniusResource();
@@ -7253,6 +7259,26 @@ class CharacterSheetState {
 			&& !history.decisions.some(item => item.required && item.status !== "resolved");
 		history.timestamp = Date.now();
 		this._data.migrationFlags.efaArmorerArmorModelChoiceV1 = true;
+	}
+
+	/**
+	 * Normalize the persisted Arcane Armor binding without inferring it from an AC
+	 * snapshot or editable item name. Early local builds used the two top-level aliases;
+	 * adopt them only when they already contain an inventory wrapper id.
+	 */
+	_migrateEfaArmorerBinding () {
+		const current = this._data.efaArmorer;
+		const legacyId = this._data.efaArmorerArcaneArmorItemId
+			|| this._data.arcaneArmorItemId
+			|| null;
+		this._data.efaArmorer = {
+			...(current && typeof current === "object" ? current : {}),
+			arcaneArmorItemId: typeof current?.arcaneArmorItemId === "string" && current.arcaneArmorItemId
+				? current.arcaneArmorItemId
+				: (typeof legacyId === "string" && legacyId ? legacyId : null),
+		};
+		delete this._data.efaArmorerArcaneArmorItemId;
+		delete this._data.arcaneArmorItemId;
 	}
 
 	_migrateModifiers () {
@@ -12154,6 +12180,7 @@ class CharacterSheetState {
 
 		// Update bloodied condition based on new HP
 		this._updateBloodiedCondition();
+		this.reconcileEfaArmorerState({cause: "damage"});
 
 		return true;
 	}
@@ -13045,6 +13072,7 @@ class CharacterSheetState {
 			this._data.deathSaves.successes = Math.min(3, Math.max(0, successesOrObj));
 			this._data.deathSaves.failures = Math.min(3, Math.max(0, failures));
 		}
+		this.reconcileEfaArmorerState({cause: "death-saves"});
 	}
 
 	/**
@@ -13058,6 +13086,7 @@ class CharacterSheetState {
 		} else {
 			this._data.deathSaves.failures = Math.min(3, this._data.deathSaves.failures + 1);
 		}
+		this.reconcileEfaArmorerState({cause: "death-save"});
 
 		return {
 			successes: this._data.deathSaves.successes,
@@ -13085,6 +13114,7 @@ class CharacterSheetState {
 	 */
 	addDeathSaveFailure (count = 1) {
 		this._data.deathSaves.failures = Math.min(3, this._data.deathSaves.failures + count);
+		this.reconcileEfaArmorerState({cause: "death-save-failure"});
 	}
 
 	/**
@@ -13117,6 +13147,7 @@ class CharacterSheetState {
 	 */
 	setDeathSaveFailures (count) {
 		this._data.deathSaves.failures = Math.min(3, Math.max(0, count));
+		this.reconcileEfaArmorerState({cause: "death-save-failures"});
 	}
 
 	/**
@@ -22317,6 +22348,7 @@ class CharacterSheetState {
 	 */
 	getFeatureCalculations () {
 		this._reconcileChainedFuryChainItem();
+		this.reconcileEfaArmorerState({cause: "feature-calculation"});
 		const classes = this._data.classes || [];
 		const profBonus = this.getProficiencyBonus();
 		const exhaustionPenalty = this._getExhaustionDcPenalty();
@@ -36279,6 +36311,7 @@ class CharacterSheetState {
 		if (_addedAmmoItem && this._isAmmunitionItem(_addedAmmoItem) && this.getEquippedQuiver()) {
 			this.autoPlaceAmmunitionInQuiver();
 		}
+		this.reconcileEfaArmorerState({cause: "add-item"});
 	}
 
 	/**
@@ -36864,6 +36897,7 @@ class CharacterSheetState {
 
 		// An equipped upgraded armor/shield leaving inventory must drop its conditional modifiers.
 		this._recalculateEquipmentModifiers();
+		this.reconcileEfaArmorerState({cause: "remove-item", itemId});
 	}
 
 	/**
@@ -36896,6 +36930,15 @@ class CharacterSheetState {
 		if (!itemProps.storedSpells) itemProps.storedSpells = wrapper.item?.storedSpells || [];
 		if (!itemProps.appliedUpgrades) itemProps.appliedUpgrades = wrapper.item?.appliedUpgrades || [];
 		if (!itemProps.socketedGemstones) itemProps.socketedGemstones = wrapper.item?.socketedGemstones || [];
+		if (wrapper.item?._efaArmorerWeaponId) {
+			itemProps._efaArmorerWeaponId = wrapper.item._efaArmorerWeaponId;
+			itemProps._generatedItemId = wrapper.item._generatedItemId || wrapper.item._efaArmorerWeaponId;
+			itemProps._isGeneratedFeatureItem = true;
+			itemProps._generatedItemProvenance = {
+				...(wrapper.item._generatedItemProvenance || {}),
+				...(itemProps._generatedItemProvenance || {}),
+			};
+		}
 
 		// Derive shield/armor flags from raw type codes when not explicitly set
 		const _typeBase = itemProps.type?.split("|")[0];
@@ -36925,6 +36968,7 @@ class CharacterSheetState {
 		if (wrapper.equipped) this.syncEquippedAcState();
 		// Replacing an equipped armor/shield payload may change its upgrades.
 		this._recalculateEquipmentModifiers();
+		this.reconcileEfaArmorerState({cause: "replace-item", itemId});
 		return true;
 	}
 
@@ -36969,6 +37013,7 @@ class CharacterSheetState {
 				}
 			}
 			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
+			this.reconcileEfaArmorerState({cause: equipped ? "equip-item" : "unequip-item", itemId});
 		}
 	}
 
@@ -36987,6 +37032,7 @@ class CharacterSheetState {
 			// Refresh derived armor/shield-upgrade conditional modifiers.
 			this.syncEquippedAcState();
 			this._recalculateEquipmentModifiers();
+			this.reconcileEfaArmorerState({cause: "equip-item", itemId});
 
 			return true;
 		}
@@ -37018,6 +37064,7 @@ class CharacterSheetState {
 			// Refresh derived armor/shield-upgrade conditional modifiers (now unequipped).
 			this.syncEquippedAcState();
 			this._recalculateEquipmentModifiers();
+			this.reconcileEfaArmorerState({cause: "unequip-item", itemId});
 			return true;
 		}
 		return false;
@@ -40377,7 +40424,7 @@ class CharacterSheetState {
 		const sourceFeature = weapon.sourceFeature || weapon._generatedItemProvenance?.sourceFeature || null;
 
 		return {
-			id: `auto_${weapon.id}`,
+			id: this.getItemAttackId?.(weapon) || `auto_${weapon.id}`,
 			name: overrides.name ?? weapon.name,
 			source: weapon.source,
 			isMelee: overrides.isMelee ?? !isRanged,
@@ -41308,11 +41355,13 @@ class CharacterSheetState {
 	setExhaustion (level) {
 		const max = this.getMaxExhaustion();
 		this._data.exhaustion = Math.max(0, Math.min(max, level));
+		this.reconcileEfaArmorerState({cause: "exhaustion"});
 	}
 
 	addExhaustion (amount = 1) {
 		const max = this.getMaxExhaustion();
 		this._data.exhaustion = Math.min(max, (this._data.exhaustion || 0) + amount);
+		this.reconcileEfaArmorerState({cause: "exhaustion"});
 	}
 
 	removeExhaustion (amount = 1) {
@@ -41374,6 +41423,7 @@ class CharacterSheetState {
 		if (this._data.exhaustion > max) {
 			this._data.exhaustion = max;
 		}
+		this.reconcileEfaArmorerState({cause: "exhaustion-rules"});
 	}
 
 	/**
@@ -56726,6 +56776,8 @@ class CharacterSheetState {
 	 */
 	_isItemProficienciesActive (item) {
 		if (!item?.equipped) return false;
+		const efaWeaponId = item?._efaArmorerWeaponId || item?.item?._efaArmorerWeaponId;
+		if (efaWeaponId && !this._isEfaArmorerModelWeaponActive(item)) return false;
 		// requiresAttunement can be on item wrapper or nested item data
 		const requiresAttunement = item.requiresAttunement || item.item?.requiresAttunement;
 		if (requiresAttunement && !item.attuned) return false;
@@ -68216,12 +68268,433 @@ class CharacterSheetState {
 		};
 	}
 
+	/** Stable logical identities for the three generated EFA Armor Model weapons. */
+	static EFA_ARMORER_MODEL_WEAPONS = [
+		{
+			model: "Dreadnaught",
+			id: "efa-armorer:dreadnaught:force-demolisher",
+			name: "Force Demolisher",
+			type: "M",
+			isMelee: true,
+		},
+		{
+			model: "Guardian",
+			id: "efa-armorer:guardian:thunder-pulse",
+			name: "Thunder Pulse",
+			type: "M",
+			isMelee: true,
+		},
+		{
+			model: "Infiltrator",
+			id: "efa-armorer:infiltrator:lightning-launcher",
+			name: "Lightning Launcher",
+			type: "R",
+			isMelee: false,
+		},
+	];
+
+	_getEfaArmorerClass () {
+		const eq = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").toLowerCase();
+		return (this._data.classes || []).find(cls =>
+			eq(cls.name, "Artificer")
+			&& eq(cls.source, "EFA")
+			&& Number(cls.level) >= 3
+			&& eq(cls.subclass?.shortName || cls.subclass?.name, "Armorer")
+			&& eq(cls.subclass?.source, "EFA")
+			&& (cls.subclass?.className == null || eq(cls.subclass.className, "Artificer"))
+			&& (cls.subclass?.classSource == null || eq(cls.subclass.classSource, "EFA"))) || null;
+	}
+
+	/**
+	 * Resolve the canonical EFA Armor Model without persisting a parallel choice.
+	 * Exact evidence may come from the structured chosen-subfeature ledger or the
+	 * level-3 progression choice/replay/decision records. Conflicting evidence is
+	 * treated as unresolved rather than guessed.
+	 * @returns {{name: string, source: "EFA", id: string}|null}
+	 */
+	getEfaArmorerModel () {
+		if (!this._getEfaArmorerClass()) return null;
+		const defs = CharacterSheetState.EFA_ARMORER_MODEL_WEAPONS;
+		const byName = new Map(defs.map(def => [def.model.toLowerCase(), def]));
+		const byRef = new Map(defs.map(def => [
+			`${def.model}|Artificer|EFA|Armorer|EFA|3|EFA`.toLowerCase(),
+			def,
+		]));
+		const eq = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").toLowerCase();
+		const found = [];
+		const add = entity => {
+			if (!entity) return;
+			const byExactRef = byRef.get(String(entity.ref || entity.subclassFeature || "").toLowerCase());
+			if (byExactRef) {
+				found.push(byExactRef);
+				return;
+			}
+			const def = byName.get(String(entity.choice || entity.name || "").toLowerCase());
+			if (!def || !eq(entity.source, "EFA")) return;
+			found.push(def);
+		};
+
+		(this._data.chosenSubfeatures || [])
+			.filter(record =>
+				eq(record.parent, "Armor Model")
+				&& eq(record.parentSource, "EFA")
+				&& eq(record.parentClass, "Artificer")
+				&& eq(record.parentClassSource, "EFA")
+				&& Number(record.level) === 3)
+			.forEach(add);
+
+		(this._data.levelHistory || [])
+			.filter(entry =>
+				eq(entry.class?.name, "Artificer")
+				&& eq(entry.class?.source, "EFA")
+				&& Number(entry.classLevel) === 3)
+			.forEach(entry => {
+				(entry.choices?.featureChoices || [])
+					.filter(choice => eq(choice.featureName, "Armor Model"))
+					.forEach(add);
+				(entry.choices?.replayData?.featureChoices || [])
+					.filter(choice =>
+						eq(choice.parentFeature, "Armor Model")
+						&& eq(choice.className, "Artificer")
+						&& eq(choice.classSource, "EFA")
+						&& eq(choice.subclassShortName, "Armorer")
+						&& eq(choice.subclassSource, "EFA")
+						&& Number(choice.level) === 3)
+					.forEach(add);
+				(entry.decisions || [])
+					.filter(decision =>
+						decision.type === "featureChoice"
+						&& eq(decision.sourceKey || decision.label, "Armor Model")
+						&& decision.status === "resolved")
+					.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : [decision.selection])
+					.forEach(add);
+			});
+
+		const unique = [...new Map(found.map(def => [def.id, def])).values()];
+		if (unique.length !== 1) return null;
+		return {name: unique[0].model, source: "EFA", id: unique[0].id};
+	}
+
+	_getEfaArmorerWeaponDefinition (item) {
+		const itemData = item?.item || item;
+		const id = itemData?._efaArmorerWeaponId;
+		return CharacterSheetState.EFA_ARMORER_MODEL_WEAPONS.find(def => def.id === id) || null;
+	}
+
+	_isEfaBodyArmor (item) {
+		const itemData = item?.item || item;
+		const type = String(itemData?.typeCode || itemData?.type || "").split("|")[0].toUpperCase();
+		return ["LA", "MA", "HA"].includes(type);
+	}
+
+	_flattenEfaInventoryWrapper (wrapper) {
+		if (!wrapper) return null;
+		return {
+			...(wrapper.item || {}),
+			id: wrapper.id,
+			quantity: wrapper.quantity,
+			equipped: wrapper.equipped,
+			attuned: wrapper.attuned,
+			starred: wrapper.starred,
+			note: wrapper.note,
+		};
+	}
+
+	_hasEfaSmithsToolsItem () {
+		return this._data.inventory.some(wrapper => {
+			const item = wrapper.item || {};
+			const type = String(item.typeCode || item.type || "").split("|")[0].toUpperCase();
+			return item.name === "Smith's Tools"
+				&& ["PHB", "XPHB"].includes(item.source)
+				&& type === "AT";
+		});
+	}
+
+	_getEfaArcaneArmorStatusSnapshot () {
+		this._data.efaArmorer ||= {arcaneArmorItemId: null};
+		const armorer = this._getEfaArmorerClass();
+		const model = this.getEfaArmorerModel();
+		const boundItemId = this._data.efaArmorer.arcaneArmorItemId || null;
+		const boundWrapper = boundItemId ? this._findInventoryRow(boundItemId) : null;
+		const reasons = [];
+		if (!armorer) reasons.push("efa-armorer-unavailable");
+		else if (!model) reasons.push("armor-model-unresolved");
+		if (this.isDead()) reasons.push("character-dead");
+		if (boundItemId) {
+			if (!boundWrapper) reasons.push("bound-row-missing");
+			else if (!this._isEfaBodyArmor(boundWrapper)) reasons.push("bound-row-not-body-armor");
+			else if (!boundWrapper.equipped) reasons.push("bound-armor-not-equipped");
+			if (!this.hasToolProficiency("Smith's Tools")) reasons.push("missing-smiths-tools-proficiency");
+			if (!this._hasEfaSmithsToolsItem()) reasons.push("missing-smiths-tools-item");
+			if (boundWrapper && (this._data.inventory || []).some(wrapper =>
+				wrapper.id !== boundItemId
+				&& wrapper.equipped
+				&& this._isEfaBodyArmor(wrapper))) reasons.push("other-armor-equipped");
+		} else reasons.push("not-bound");
+
+		const active = !!boundItemId && reasons.length === 0;
+		return {
+			available: !!armorer && !!model && !this.isDead(),
+			model,
+			boundItemId,
+			boundItem: this._flattenEfaInventoryWrapper(boundWrapper),
+			active,
+			suspended: !!boundItemId && !active,
+			reasons,
+		};
+	}
+
+	getEfaArcaneArmorBindingStatus () {
+		this.reconcileEfaArmorerState({cause: "status-query"});
+		return this._getEfaArcaneArmorStatusSnapshot();
+	}
+
+	getEfaArcaneArmorBinding () {
+		const status = this.getEfaArcaneArmorBindingStatus();
+		return status.boundItem;
+	}
+
+	getEfaArcaneArmorEligibleItems () {
+		this.reconcileEfaArmorerState({cause: "eligibility-query"});
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		if (!status.available) return [];
+		if (!this.hasToolProficiency("Smith's Tools") || !this._hasEfaSmithsToolsItem()) return [];
+		return (this._data.inventory || [])
+			.filter(wrapper =>
+				wrapper.equipped
+				&& this._isEfaBodyArmor(wrapper)
+				&& !(this._data.inventory || []).some(other =>
+					other.id !== wrapper.id
+						&& other.equipped
+						&& this._isEfaBodyArmor(other)))
+			.map(wrapper => this._flattenEfaInventoryWrapper(wrapper));
+	}
+
+	_getEfaBindingError (code, message) {
+		return {
+			ok: false,
+			code,
+			message,
+			status: this._getEfaArcaneArmorStatusSnapshot(),
+		};
+	}
+
+	bindEfaArcaneArmor (itemId) {
+		this.reconcileEfaArmorerState({cause: "bind-request"});
+		if (!this._getEfaArmorerClass() || !this.getEfaArmorerModel()) {
+			return this._getEfaBindingError("efa-armorer-unavailable", "An exact Artificer|EFA Armorer model at level 3 is required.");
+		}
+		if (this.isDead()) return this._getEfaBindingError("character-dead", "A dead character cannot bind Arcane Armor.");
+		const wrapper = this._findInventoryRow(itemId);
+		if (!wrapper) return this._getEfaBindingError("inventory-row-not-found", `No inventory row exists for id "${itemId}".`);
+		if (!this._isEfaBodyArmor(wrapper)) return this._getEfaBindingError("not-body-armor", "Arcane Armor requires light, medium, or heavy body armor; shields are not eligible.");
+		if (!wrapper.equipped) return this._getEfaBindingError("armor-not-equipped", "The armor must be equipped before it can be bound.");
+		if (!this.hasToolProficiency("Smith's Tools")) {
+			return this._getEfaBindingError("missing-smiths-tools-proficiency", "Smith's Tools proficiency is required.");
+		}
+		if (!this._hasEfaSmithsToolsItem()) {
+			return this._getEfaBindingError("missing-smiths-tools-item", "A canonical Smith's Tools item from PHB or XPHB is required in inventory.");
+		}
+		if ((this._data.inventory || []).some(other =>
+			other.id !== itemId
+				&& other.equipped
+				&& this._isEfaBodyArmor(other))) {
+			return this._getEfaBindingError("other-armor-equipped", "Unequip every other body armor before binding Arcane Armor.");
+		}
+
+		const changed = this._data.efaArmorer.arcaneArmorItemId !== itemId;
+		this._data.efaArmorer.arcaneArmorItemId = itemId;
+		this.reconcileEfaArmorerState({cause: "bind", itemId});
+		return {ok: true, changed, status: this._getEfaArcaneArmorStatusSnapshot()};
+	}
+
+	clearEfaArcaneArmorBinding ({reason = "manual"} = {}) {
+		this._data.efaArmorer ||= {arcaneArmorItemId: null};
+		const changed = !!this._data.efaArmorer.arcaneArmorItemId;
+		this._data.efaArmorer.arcaneArmorItemId = null;
+		this.reconcileEfaArmorerState({cause: reason});
+		return {ok: true, changed, status: this._getEfaArcaneArmorStatusSnapshot()};
+	}
+
+	_removeEfaArmorerGeneratedRows () {
+		const removedIds = new Set();
+		for (const wrapper of this._data.inventory || []) {
+			if (!this._getEfaArmorerWeaponDefinition(wrapper)) continue;
+			this._removeItemProficiencies(wrapper.id);
+			this._unregisterItemEffects(wrapper.id);
+			removedIds.add(wrapper.id);
+		}
+		if (removedIds.size) {
+			this._data.inventory = this._data.inventory.filter(wrapper => !removedIds.has(wrapper.id));
+			this._efaArmorerGeneratedActivationSignature = null;
+			this._recalculateItemBonuses();
+		}
+	}
+
+	_reconcileEfaArmorerGeneratedRows ({armorer, model}) {
+		if (!armorer) {
+			this._removeEfaArmorerGeneratedRows();
+			return;
+		}
+		if (!model) return;
+
+		for (const def of CharacterSheetState.EFA_ARMORER_MODEL_WEAPONS) {
+			const matches = (this._data.inventory || []).filter(wrapper =>
+				(wrapper.item?._efaArmorerWeaponId || wrapper.item?._generatedItemId) === def.id);
+			let keeper = matches[0] || null;
+			for (const duplicate of matches.slice(1)) {
+				this._removeItemProficiencies(duplicate.id);
+				this._unregisterItemEffects(duplicate.id);
+				this._data.inventory = this._data.inventory.filter(wrapper => wrapper.id !== duplicate.id);
+			}
+			if (!keeper) {
+				this.addItem({
+					name: def.name,
+					source: "EFA",
+					type: def.type,
+					weapon: true,
+					weaponCategory: "simple",
+					isMelee: def.isMelee,
+					sourceFeature: "Armor Model",
+					_isCustom: true,
+					_isGeneratedFeatureItem: true,
+					_generatedItemId: def.id,
+					_efaArmorerWeaponId: def.id,
+					_generatedItemProvenance: {
+						sourceType: "subclassFeature",
+						sourceFeature: "Armor Model",
+						source: "EFA",
+						className: "Artificer",
+						classSource: "EFA",
+						subclassShortName: "Armorer",
+						subclassSource: "EFA",
+						level: 3,
+					},
+				}, 1, true, false);
+				keeper = (this._data.inventory || []).find(wrapper => wrapper.item?._efaArmorerWeaponId === def.id) || null;
+			}
+			if (!keeper) continue;
+			keeper.item._efaArmorerWeaponId = def.id;
+			keeper.item._generatedItemId = def.id;
+			keeper.item._isGeneratedFeatureItem = true;
+			keeper.item._generatedItemProvenance = {
+				...(keeper.item._generatedItemProvenance || {}),
+				sourceType: "subclassFeature",
+				sourceFeature: "Armor Model",
+				source: "EFA",
+				className: "Artificer",
+				classSource: "EFA",
+				subclassShortName: "Armorer",
+				subclassSource: "EFA",
+				level: 3,
+			};
+			if (keeper.item.weapon === undefined) keeper.item.weapon = true;
+			if (!keeper.item.type) keeper.item.type = def.type;
+		}
+	}
+
+	_reconcileEfaArmorerGeneratedActivation () {
+		const rows = (this._data.inventory || []).filter(wrapper => this._getEfaArmorerWeaponDefinition(wrapper));
+		if (!rows.length) {
+			this._efaArmorerGeneratedActivationSignature = null;
+			return;
+		}
+		const active = rows.find(wrapper => this._isEfaArmorerModelWeaponActive(wrapper)) || null;
+		const signature = JSON.stringify({
+			activeId: active?.id || null,
+			rows: rows.map(wrapper => ({
+				id: wrapper.id,
+				equipped: !!wrapper.equipped,
+				attuned: !!wrapper.attuned,
+				effects: wrapper.item?.effects || [],
+				entries: wrapper.item?.entries || [],
+			})),
+		});
+		if (signature === this._efaArmorerGeneratedActivationSignature) return;
+		this._efaArmorerGeneratedActivationSignature = signature;
+		for (const wrapper of rows) {
+			this._removeItemProficiencies(wrapper.id);
+			this._unregisterItemEffects(wrapper.id);
+		}
+		if (active) {
+			this._applyItemProficiencies(active.id);
+			this._registerItemEffects(active);
+		}
+		this._recalculateItemBonuses();
+	}
+
+	/**
+	 * Single Arcane Armor/generated-model reconciliation path. Doffing preserves the
+	 * wrapper binding; only source/model/death/row/armor/other-equipped-armor invalidation
+	 * clears it.
+	 * @param {object} [opts]
+	 * @param {string} [opts.cause]
+	 * @returns {object}
+	 */
+	reconcileEfaArmorerState ({cause = "unknown"} = {}) {
+		if (this._isReconcilingEfaArmorer) return this._getEfaArcaneArmorStatusSnapshot();
+		this._isReconcilingEfaArmorer = true;
+		try {
+			this._migrateEfaArmorerBinding();
+			const armorer = this._getEfaArmorerClass();
+			const model = this.getEfaArmorerModel();
+			this._reconcileEfaArmorerGeneratedRows({armorer, model});
+
+			const boundId = this._data.efaArmorer.arcaneArmorItemId;
+			if (boundId) {
+				const bound = this._findInventoryRow(boundId);
+				const invalid = !armorer
+					|| !model
+					|| this.isDead()
+					|| !bound
+					|| !this._isEfaBodyArmor(bound)
+					|| (this._data.inventory || []).some(wrapper =>
+						wrapper.id !== boundId
+						&& wrapper.equipped
+						&& this._isEfaBodyArmor(wrapper));
+				if (invalid) this._data.efaArmorer.arcaneArmorItemId = null;
+			}
+
+			this._reconcileEfaArmorerGeneratedActivation();
+			return {...this._getEfaArcaneArmorStatusSnapshot(), cause};
+		} finally {
+			this._isReconcilingEfaArmorer = false;
+		}
+	}
+
+	_isEfaArmorerModelWeaponActive (item) {
+		const def = this._getEfaArmorerWeaponDefinition(item);
+		if (!def) return true;
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		return status.active && status.model?.id === def.id;
+	}
+
+	getItemAttackId (item) {
+		return item?._efaArmorerWeaponId || `auto_${item?.id}`;
+	}
+
+	_getEfaArmorerModelAttack () {
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		if (!status.active || !status.model) return null;
+		const def = CharacterSheetState.EFA_ARMORER_MODEL_WEAPONS.find(it => it.id === status.model.id);
+		if (!def) return null;
+		return this._resolveGeneratedFeatureItemAttack({
+			id: def.id,
+			name: def.name,
+			generatedItemId: def.id,
+			_efaArmorerWeaponId: def.id,
+			isMelee: def.isMelee,
+			sourceFeature: "Armor Model",
+			actionType: "action",
+		});
+	}
+
 	/**
 	 * Resolve always-available attacks granted by class/subclass calculations.
 	 * @returns {Array<object>}
 	 */
 	getFeatureGrantedAttacks () {
-		return (this.getFeatureCalculations().grantedAttacks || [])
+		const attacks = (this.getFeatureCalculations().grantedAttacks || [])
 			.filter(attack => {
 				const requirements = attack.requiresStates || (attack.requiresState ? [attack.requiresState] : []);
 				return requirements.every(requiredId => this.isStateTypeActive(requiredId));
@@ -68233,9 +68706,13 @@ class CharacterSheetState {
 					isFeatureAttack: true,
 				})
 			.filter(Boolean);
+		const efaArmorerAttack = this._getEfaArmorerModelAttack();
+		if (efaArmorerAttack && !attacks.some(attack => attack.id === efaArmorerAttack.id)) attacks.push(efaArmorerAttack);
+		return attacks;
 	}
 
 	isItemAttackAvailable (item) {
+		if (this._getEfaArmorerWeaponDefinition(item) && !this._isEfaArmorerModelWeaponActive(item)) return false;
 		const requirements = item?.requiresStates || (item?.requiresState ? [item.requiresState] : []);
 		return requirements.every(requiredId => this.isStateTypeActive(requiredId));
 	}
@@ -68260,7 +68737,7 @@ class CharacterSheetState {
 
 		return {
 			...attack,
-			id: `auto_${item.id}`,
+			id: this.getItemAttackId(item),
 			name: overrides.name ?? item.name ?? attack.name,
 			isMelee: overrides.isMelee ?? !isRanged,
 			abilityMod: overrides.abilityMod ?? (isAlwaysThrown ? (hasFinesse ? "finesse" : "str") : isRanged ? "dex" : hasFinesse ? "finesse" : "str"),
