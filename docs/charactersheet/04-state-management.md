@@ -573,6 +573,34 @@ projected stats (`dmg1: "1d10"`, `penetration: 2`, …). Use `getItemRaw(id)` wh
 unprojected item — for example when previewing a *different* material. See
 [21-item-materials.md](./21-item-materials.md).
 
+#### Host-bound feature storage
+
+Feature-owned item state belongs on the exact inventory item when the item's
+identity is part of the mechanic. EFA Artificer Spell-Storing Item follows this
+rule with a versioned `item._spellStorage` descriptor containing:
+
+- exact wrapper and source-qualified item identities;
+- exact source-qualified spell identity plus copied spell data;
+- the owning `Artificer|EFA` class identity and snapshotted Intelligence
+  modifier, proficiency bonus, spell save DC, and spell attack bonus;
+- current/maximum uses; and
+- repair metadata (`active`, `stale`, or `expired`).
+
+The state reconciler validates the descriptor after load and whenever the
+spell catalog, class levels, or host item changes. Host removal, host identity
+replacement, and loss of exact EFA level/source ownership clean the storage.
+An unavailable spell catalog, missing exact spell, unsupported storage
+version, or malformed owner/casting reference surfaces as stale instead of
+guessing a replacement. Saves without `_spellStorage` need no migration.
+
+The stored spell projects through the normal item-power API as
+`kind: "storedSpell"`. Its use is an effect-first transaction: the core spell
+effect resolves with the stored Artificer statistics, then the exact item use
+and in-combat holder turn receipt commit. Cancellation spends nothing. This is
+an item effect, not a class spell cast, so it does not publish committed-cast
+hooks, consume a slot/component, invoke the focus gate, or trigger
+cast-sensitive class riders.
+
 #### Opening equipment packs
 
 Catalog equipment packs expose a non-empty `packContents` array. The Inventory module resolves

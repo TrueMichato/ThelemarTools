@@ -1474,13 +1474,13 @@ export class CharacterSheetPlayMode {
 				meta.textContent = power.chargesCost
 					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
 					: power.usesMax
-						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses`
+						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses${power.spellSaveDc ? ` · DC ${power.spellSaveDc}` : ""}${power.spellAttackBonus != null ? ` · ${power.spellAttackBonus >= 0 ? "+" : ""}${power.spellAttackBonus} attack` : ""}`
 						: `${power.itemName}${power.isReferenceOnly ? " · rules reference" : ""}`;
 				if (power.isReferenceOnly) {
 					CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);
 					continue;
 				}
-				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : "Invoke"} ${power.name}`, async () => {
+				this._makeClickable(row, power.unavailableReason || `${power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke"} ${power.name}`, async () => {
 					if (power.chargesCostMax > power.chargesCost) {
 						await this._page._inventory?._showItemPowersModal?.(power.itemId);
 						return;
@@ -1492,7 +1492,7 @@ export class CharacterSheetPlayMode {
 						const current = this._state.getActionEconomyState?.();
 						this._actionEconomy[group.key] = current ? current[group.key] : false;
 					}
-					this._logActivity("feature", `${power.kind === "spell" ? "Cast" : "Invoked"} ${power.name} from ${power.itemName}`);
+					this._logActivity("feature", `${power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Used" : "Invoked"} ${power.name} from ${power.itemName}`);
 					this._renderActionsHub();
 				});
 				CharacterSheetClassUtils.applyItemPowerPreview?.(row, power);

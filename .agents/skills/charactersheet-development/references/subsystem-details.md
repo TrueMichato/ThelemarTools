@@ -245,6 +245,74 @@ follow-up milestone; passive death/HP reads must remain mutation-free, and a
 pending zero-HP intervention must defer any future death finalization until
 the intervention is cleared.
 
+## EFA Spell-Storing Item
+
+Exact `Artificer|EFA` level 11+ characters can commit one Spell-Storing Item
+choice at the end of a long rest. The selection is optional: a blank,
+incomplete, cancelled, or unresolved selection leaves the existing storage
+unchanged while the rest still completes. Host choices are live held Simple or
+Martial weapons plus rows accepted by the existing EFA focus resolver,
+including active Replicate-generated Wands and Weapons. Spell choices are
+exact source-qualified EFA Artificer level 1-3 spells with an Action casting
+time and no consumed Material component; preparation is irrelevant.
+
+Storage is a versioned `_spellStorage` descriptor on the exact host item
+payload, not a parallel feature ledger:
+
+```javascript
+{
+    version: 1,
+    storageId,
+    featureUid: "Spell-Storing Item|Artificer|EFA|11|EFA",
+    ownerClassUid: "Artificer|EFA",
+    host: {inventoryItemId, itemUid, generatedFeatureItem?},
+    spell: {uid, name, source, level, data},
+    casting: {
+        owner: {characterId, name, classUid: "Artificer|EFA"},
+        ability: "int",
+        abilityMod,
+        proficiencyBonus,
+        saveDc,
+        attackBonus,
+    },
+    usesMax,
+    usesCurrent,
+    createdAt,
+    repair: {status: "active" | "stale" | "expired", reasons, lastCheckedReason},
+}
+```
+
+Use `getEfaSpellStoringItemOptions()`,
+`commitEfaSpellStoringItemAtLongRest()`,
+`reconcileEfaSpellStoringItem()`, `prepareEfaSpellStoringItemUse()`, and
+`commitEfaSpellStoringItemUse()`. Reuse replaces prior storage and prunes only
+its exact current-turn receipts. Host removal, host identity replacement, or
+loss of exact EFA level/source ownership cleans storage. Missing catalogs,
+unsupported versions, and malformed owner/casting identities remain visible
+as stale repair states and are never guessed.
+
+The stored effect is projected as a generic `kind: "storedSpell"` item power.
+`CharacterSheetSpells.pUseEfaSpellStoringItem()` resolves the normal core spell
+effect with the snapshotted Artificer modifier/DC/attack, but does not publish
+a committed-class-cast receipt, run the focus gate, consume slots/components,
+end cast-sensitive states, or apply caster on-cast riders. The item use and
+turn receipt commit only after the effect succeeds; cancellation spends
+nothing, and a resource commit failure rolls back that exact receipt.
+
+In combat, the accepted stable-key turn ledger gates the exact
+storage/host/holder identity until that holder's next turn. Out of combat no
+turn receipt is created. The Inventory prompt requires an explicit acting
+holder; external holder identities own both their receipt and concentration,
+so replacing one holder's concentration does not clear another holder's
+entry.
+
+**Operate-mode interaction brief.** Long Rest adds one optional fieldset with
+labelled native host/spell selects and an `aria-live` status. Inventory,
+Combat, and Play Mode reuse the item-power surfaces and show host, spell, uses,
+DC/attack, repair/depleted state, and the disabled reason. The holder picker is
+keyboard-native and requires a stable external name/ID instead of silently
+assigning the Artificer. Existing single-column modal flow remains mobile-safe.
+
 ## Stable-Key Per-Turn Receipts
 
 Once-per-turn mechanics that need to work across multiple routes use the

@@ -321,7 +321,7 @@ describe("Structured spell-focus filters", () => {
 			id: "authorized-wrapper",
 			name: "Arcane Armor",
 			source: "EFA",
-			type: "HA",
+			type: "G",
 			quantity: 1,
 			equipped: true,
 			_isCustom: true,

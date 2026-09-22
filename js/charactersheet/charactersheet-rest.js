@@ -953,6 +953,8 @@ class CharacterSheetRest {
 		if (adventurersAtlas) modalInner.append(adventurersAtlas.section);
 		const replicateMagicItemProduction = this._buildEfaReplicateMagicItemProductionSection();
 		if (replicateMagicItemProduction) modalInner.append(replicateMagicItemProduction.section);
+		const spellStoringItemChoice = this._buildEfaSpellStoringItemSection();
+		if (spellStoringItemChoice) modalInner.append(spellStoringItemChoice.section);
 
 		const btnConfirm = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "🌙 Finish Long Rest"});
 		const syncValidity = () => {
@@ -1080,6 +1082,7 @@ class CharacterSheetRest {
 			const armorModelOutcome = armorModelSwitch?.apply() || null;
 			const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
 			const replicateMagicItemResult = this._commitEfaReplicateMagicItemProduction(replicateMagicItemProduction);
+			const spellStoringItemResult = this._commitEfaSpellStoringItemChoice(spellStoringItemChoice);
 
 			// Save changes
 			this._page.saveCharacter();
@@ -1111,6 +1114,11 @@ class CharacterSheetRest {
 				&& replicateMagicItemProduction?.getRequest().selections.length
 			) {
 				message += ` Replicate Magic Item made no inventory changes: ${replicateMagicItemResult.message || "the production choices could not be resolved"}.`;
+			}
+			if (spellStoringItemResult?.committed) {
+				message += ` Stored ${spellStoringItemResult.storage.spell.name} in ${spellStoringItemResult.storage.host.name}.`;
+			} else if (spellStoringItemResult && !spellStoringItemResult.ok) {
+				message += " Spell-Storing Item was unchanged because the selected host or spell could not be resolved.";
 			}
 			if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
 			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
@@ -1380,6 +1388,90 @@ class CharacterSheetRest {
 				queueMicrotask(() => (rows[0]?.input || cbIncludeSelf).focus());
 			},
 		};
+	}
+
+	_buildEfaSpellStoringItemSection () {
+		const options = this._state.getEfaSpellStoringItemOptions?.();
+		if (!options?.available) return null;
+		const current = this._state.getEfaSpellStoringItem?.();
+		const section = e_({tag: "fieldset", clazz: "charsheet__rest-section charsheet__spell-storage-rest"});
+		const title = e_({tag: "legend", clazz: "charsheet__rest-section-title", txt: "Spell-Storing Item — Optional"});
+		const summary = e_({
+			tag: "p",
+			clazz: "ve-muted ve-small mb-2",
+			txt: current
+				? `Currently storing ${current.storage.spell.name} in ${current.item?.name || current.storage.host.name}. Leave both choices blank to keep it unchanged.`
+				: "Choose one held eligible item and one exact EFA Artificer spell. Leave both choices blank to skip this feature.",
+		});
+		const hostId = `efa-spell-storage-host-${CryptUtil.uid()}`;
+		const spellId = `efa-spell-storage-spell-${CryptUtil.uid()}`;
+		const hostSelect = e_({tag: "select", clazz: "form-control input-sm"});
+		hostSelect.id = hostId;
+		hostSelect.setAttribute("aria-describedby", `${hostId}-help`);
+		hostSelect.append(e_({tag: "option", value: "", txt: "Keep current storage unchanged"}));
+		for (const host of options.hosts) hostSelect.append(e_({tag: "option", value: host.itemId, txt: `${host.name} (${host.source})`}));
+		const spellSelect = e_({tag: "select", clazz: "form-control input-sm"});
+		spellSelect.id = spellId;
+		spellSelect.setAttribute("aria-describedby", `${spellId}-help`);
+		spellSelect.append(e_({tag: "option", value: "", txt: "Keep current storage unchanged"}));
+		for (const spell of options.spells) spellSelect.append(e_({tag: "option", value: spell.spellUid, txt: `${spell.name} (${spell.source}) — level ${spell.level}`}));
+		const hostLabel = e_({tag: "label", clazz: "ve-flex-col mb-2"});
+		hostLabel.htmlFor = hostId;
+		hostLabel.append(
+			e_({tag: "span", clazz: "ve-bold", txt: "Held host item"}),
+			hostSelect,
+			e_({tag: "span", id: `${hostId}-help`, clazz: "ve-muted ve-small", txt: "Simple or Martial weapon, proficient Artificer's Tools, or an eligible active replicated Wand or Weapon."}),
+		);
+		const spellLabel = e_({tag: "label", clazz: "ve-flex-col mb-2"});
+		spellLabel.htmlFor = spellId;
+		spellLabel.append(
+			e_({tag: "span", clazz: "ve-bold", txt: "Stored spell"}),
+			spellSelect,
+			e_({tag: "span", id: `${spellId}-help`, clazz: "ve-muted ve-small", txt: "Level 1–3, one Action, on the exact EFA Artificer list, with no consumed Material component. Preparation is not required."}),
+		);
+		const status = e_({tag: "div", clazz: "ve-small charsheet__spell-storage-rest-status"});
+		status.setAttribute("role", "status");
+		status.setAttribute("aria-live", "polite");
+		const getRequest = () => {
+			const hostItemId = String(hostSelect.value || "");
+			const spellUid = String(spellSelect.value || "");
+			if (!hostItemId && !spellUid) return null;
+			if (!hostItemId || !spellUid) return null;
+			if (!options.hosts.some(host => host.itemId === hostItemId)) return null;
+			if (!options.spells.some(spell => spell.spellUid === spellUid)) return null;
+			return {hostItemId, spellUid};
+		};
+		const renderStatus = () => {
+			const hostItemId = String(hostSelect.value || "");
+			const spellUid = String(spellSelect.value || "");
+			status.classList.remove("text-warning", "text-success");
+			if (!hostItemId && !spellUid) {
+				status.textContent = current ? "Current storage will remain unchanged." : "No spell will be stored.";
+				return;
+			}
+			if (!getRequest()) {
+				status.textContent = "Choose both a host and a spell. The long rest will still finish, and current storage will remain unchanged.";
+				status.classList.add("text-warning");
+				return;
+			}
+			const host = options.hosts.find(it => it.itemId === hostItemId);
+			const spell = options.spells.find(it => it.spellUid === spellUid);
+			status.textContent = `${spell.name} will be stored in ${host.name} with ${Math.max(2, 2 * this._state.getAbilityMod("int"))} uses.`;
+			status.classList.add("text-success");
+		};
+		hostSelect.addEventListener("change", renderStatus);
+		spellSelect.addEventListener("change", renderStatus);
+		section.append(title, summary, hostLabel, spellLabel, status);
+		renderStatus();
+		return {section, hostSelect, spellSelect, status, getRequest};
+	}
+
+	_commitEfaSpellStoringItemChoice (choice) {
+		if (!choice) return null;
+		const request = choice.getRequest();
+		if (!request) return {ok: true, committed: false, reason: "selection-skipped"};
+		return this._state.commitEfaSpellStoringItemAtLongRest?.(request)
+			|| {ok: false, committed: false, reason: "storage-unavailable"};
 	}
 
 	_buildEfaReplicateMagicItemProductionSection () {

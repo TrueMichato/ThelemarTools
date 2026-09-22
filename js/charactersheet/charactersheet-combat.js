@@ -9384,7 +9384,7 @@ class CharacterSheetCombat {
 				const meta = power.chargesCost
 					? `${power.itemName} · ${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"} · ${power.chargesCurrent}/${power.chargesMax}`
 					: power.usesMax
-						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses`
+						? `${power.itemName} · ${power.usesCurrent}/${power.usesMax} uses${power.spellSaveDc ? ` · DC ${power.spellSaveDc}` : ""}${power.spellAttackBonus != null ? ` · ${power.spellAttackBonus >= 0 ? "+" : ""}${power.spellAttackBonus} attack` : ""}`
 						: `${power.itemName}${power.isReferenceOnly ? " · rules reference" : ""}`;
 				body.append(e_({tag: "div", clazz: "cs-combat-item-power__meta", txt: meta}));
 				if (power.isReferenceOnly) {
@@ -9398,7 +9398,7 @@ class CharacterSheetCombat {
 					clazz: "ve-btn ve-btn-xs ve-btn-primary",
 					txt: power.isToggle
 						? (power.isActive ? "Deactivate" : "Activate")
-						: power.invokeLabel || (power.kind === "spell" ? "Cast" : "Invoke"),
+						: power.invokeLabel || (power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke"),
 				});
 				use.disabled = !power.isAvailable || !actionAvailable;
 				use.title = power.unavailableReason || (!actionAvailable ? `${labels[type]} already used this turn.` : `${use.textContent} ${power.name}`);

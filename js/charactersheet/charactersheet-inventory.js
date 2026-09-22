@@ -5810,10 +5810,67 @@ class CharacterSheetInventory {
 		return confirmed;
 	}
 
-	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null, returnResult = false} = {}) {
+	async _pGetSpellStoringItemHolder (power) {
+		const self = this._state.getEfaSpellStoringItemSelfHolder?.();
+		if (!self) return null;
+		const external = {uid: "__external__", label: "Another creature", kind: "external"};
+		const picked = await InputUiUtil.pGetUserEnum(/** @type {*} */ ({
+			title: `${power.name} — Acting Holder`,
+			values: [self, external],
+			isResolveItem: true,
+			isAllowNull: true,
+			fnDisplay: (holder, ix) => (ix === -1 || !holder)
+				? "Cancel"
+				: holder.uid === external.uid
+					? "Another creature — enter an explicit identity"
+					: `${holder.label} — this character`,
+		}));
+		if (!picked || typeof picked === "symbol") return null;
+		if (picked.uid !== external.uid) return picked;
+		const label = await InputUiUtil.pGetUserString(/** @type {*} */ ({
+			title: `${power.name} — External Holder`,
+			default: "",
+			htmlDescription: "Enter the creature's name or stable table ID. This exact identity owns concentration and the once-per-turn receipt.",
+		}));
+		const normalizedLabel = String(label || "").trim();
+		if (!normalizedLabel) return null;
+		return {
+			uid: `external:${normalizedLabel.toLowerCase().replace(/\s+/g, "-")}`,
+			label: normalizedLabel,
+			kind: "external",
+		};
+	}
+
+	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null, returnResult = false, holder = null} = {}) {
 		const power = this._state.getItemPower?.(itemId, powerId);
 		let pendingSpellCast = null;
 		let efaArmorer = null;
+		if (power?.kind === "storedSpell") {
+			const actingHolder = holder || await this._pGetSpellStoringItemHolder(power);
+			if (!actingHolder) return false;
+			const storedResult = await this._page?._spells?.pUseEfaSpellStoringItem?.({itemId, holder: actingHolder});
+			if (!storedResult?.ok) {
+				const message = storedResult?.reason === "alreadyUsed"
+					? `${actingHolder.label} already used this exact stored spell this turn.`
+					: storedResult?.reason === "cancelled"
+						? null
+						: storedResult?.reason || "That stored spell cannot be used.";
+				if (message) JqueryUtil.doToast({type: "warning", content: message});
+				return false;
+			}
+			JqueryUtil.doToast({
+				type: "success",
+				content: `Used ${power.name} from ${power.itemName} as ${actingHolder.label} (${storedResult.usesCurrent}/${storedResult.usesMax} uses remaining).`,
+			});
+			closeModal?.();
+			this._updateItemBonuses(this._state.getItems());
+			this._renderItemList();
+			this._page?._combat?.renderCombatItemPowers?.();
+			this._page?._combat?.renderCombatActionEconomy?.();
+			this._page?._playMode?._renderActionsHub?.();
+			this._page?._saveCurrentCharacter?.();
+			return storedResult;
+		}
 		const selectedChargesCost = chargesCost == null ? power?.chargesCost : Number(chargesCost);
 		if (power?.chargesCostMax && (
 			selectedChargesCost < power.chargesCost
@@ -5936,6 +5993,8 @@ class CharacterSheetInventory {
 				if (power.chargesCost) metaParts.push(`${power.chargesCost} charge${power.chargesCost === 1 ? "" : "s"}`);
 				if (power.usesMax) metaParts.push(`${power.usesCurrent}/${power.usesMax} uses`);
 				if (power.castLevel) metaParts.push(`level ${power.castLevel}`);
+				if (power.spellSaveDc) metaParts.push(`DC ${power.spellSaveDc}`);
+				if (power.spellAttackBonus != null) metaParts.push(`${power.spellAttackBonus >= 0 ? "+" : ""}${power.spellAttackBonus} attack`);
 				if (power.isDestructive) metaParts.push("destroys item");
 				if (power.isReferenceOnly) metaParts.push("rules reference");
 				if (metaParts.length) body.append(e_({tag: "div", clazz: "charsheet__item-power-meta", text: metaParts.join(" · ")}));
@@ -5958,10 +6017,10 @@ class CharacterSheetInventory {
 				const use = e_({
 					tag: "button",
 					clazz: `ve-btn ve-btn-sm ${power.isDestructive ? "ve-btn-danger" : "ve-btn-primary"}`,
-					text: power.invokeLabel || (power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : "Invoke"),
+					text: power.invokeLabel || (power.isToggle ? (power.isActive ? "Deactivate" : "Activate") : power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke"),
 				});
 				use.disabled = !power.isAvailable;
-				use.title = power.unavailableReason || `${power.invokeLabel || (power.kind === "spell" ? "Cast" : "Invoke")} ${power.name}`;
+				use.title = power.unavailableReason || `${power.invokeLabel || (power.kind === "spell" ? "Cast" : power.kind === "storedSpell" ? "Use" : "Invoke")} ${power.name}`;
 				use.addEventListener("click", () => this._pInvokeItemPower(itemId, power.id, {
 					closeModal: () => doClose(true),
 					chargesCost: chargeChoice ? parseInt(chargeChoice.value, 10) : null,
@@ -7372,6 +7431,9 @@ class CharacterSheetInventory {
 		const generatedFeatureSource = generatedProvenance?.metadata?.sourceFeatureUid
 			? String(generatedProvenance.metadata.sourceFeatureUid).split("|").at(-1)
 			: null;
+		const spellStorage = item._spellStorage || null;
+		const spellStorageExpired = spellStorage?.repair?.status === "expired";
+		const spellStorageRepair = spellStorage?.repair?.status && !["active", "expired"].includes(spellStorage.repair.status);
 
 		const itemNameHtml = CharacterSheetClassUtils.buildItemHoverNameHtml(item);
 
@@ -7426,6 +7488,7 @@ class CharacterSheetInventory {
 							${generatedPlan ? `<span class="badge badge-info ve-small" title="Known plan: ${String(generatedPlan.name || generatedPlan.displayName || "").replace(/"/g, "&quot;")} (${String(generatedPlan.source || "").replace(/"/g, "&quot;")})">Plan: ${String(generatedPlan.displayName || generatedPlan.name || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>` : ""}
 							${generatedOrder ? `<span class="ve-muted ve-small" title="Stable generated-item creation order">Created #${generatedOrder}</span>` : ""}
 							${generatedRepairRequired ? `<span class="badge badge-danger ve-small" title="Generated-item provenance or catalog resolution needs repair. The item remains in inventory; edit, delete, or restore its exact catalog source.">Repair required</span>` : ""}
+							${spellStorage ? `<span class="badge ${spellStorageRepair || spellStorageExpired ? "badge-danger" : "badge-info"} ve-small" title="${spellStorageRepair ? `Spell storage needs repair: ${(spellStorage.repair?.reasons || []).join(", ") || "unresolved identity"}` : spellStorageExpired ? `Spell-Storing Item: ${spellStorage.spell.name} has no uses remaining` : `Spell-Storing Item: ${spellStorage.spell.name} (${spellStorage.usesCurrent}/${spellStorage.usesMax} uses)`}">${spellStorageRepair ? "Storage repair required" : spellStorageExpired ? "Storage depleted" : `Stored: ${String(spellStorage.spell.name || "Spell").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`}</span>` : ""}
 							${isVariantComponent ? `<span class="badge badge-info ve-small" title="Variant Spell Component — can enhance matching spells when cast">🧪 Component</span>` : ""}
 							${isArtifact ? `<span class="badge badge-danger ve-small" title="Artifact">⚗️ Artifact</span>` : item.rarity && !["none", "unknown", "unknown (magic)", "varies"].includes(item.rarity.toLowerCase()) ? `<span class="badge badge-info ve-small">${item.rarity.toTitleCase()}</span>` : ""}
 							${item.weight ? `<span class="ve-muted ve-small">${(item.weight * item.quantity).toFixed(1)} lb.</span>` : ""}
@@ -7447,6 +7510,7 @@ class CharacterSheetInventory {
 						${vcSpellLabels.length ? `<span class="ve-small" style="color: #8b5cf6; font-style: italic;" title="Enhances these spells when used as a variant component">🧫 ${vcSpellLabels.join(", ")}</span>` : ""}
 						${packProvenanceName ? `<span class="ve-small ve-muted" title="${item._fromPack.replace(/"/g, "&quot;")}">From ${packProvenanceName}</span>` : ""}
 						${hasCharges ? `<span class="ve-small charsheet__item-charges" title="${rechargeTooltip}${item.chargeName ? ` — ${item.chargeName}` : ""}">${item.chargeName ? `${item.chargeName}:` : "Charges:"} <strong>${item.chargesCurrent ?? item.charges}</strong>/${item.charges}</span>` : ""}
+						${spellStorage ? `<span class="ve-small ${spellStorageRepair ? "text-danger" : "text-info"}" title="Stored-spell casting statistics">Spell storage: <strong>${spellStorage.usesCurrent}/${spellStorage.usesMax}</strong> uses · DC ${spellStorage.casting?.saveDc ?? "—"} · ${(spellStorage.casting?.attackBonus ?? 0) >= 0 ? "+" : ""}${spellStorage.casting?.attackBonus ?? "—"} attack</span>` : ""}
 						${hasSpellward ? `<span class="ve-small" title="${spellwardLabel}">🛡 ${spellwardLabel}: <strong>${spellwardCount}</strong>/${spellwardMax}${spellwardCount ? ` (${(item.chosenSpellImmunities || []).map(s => typeof s === "string" ? s : s.name).filter(Boolean).join(", ")})` : ""}</span>` : ""}
 						${inlinePrimaryPower ? `
 							<span class="ve-small charsheet__item-inline-power-status charsheet__item-inline-power-status--${inlinePrimaryPower.statusTone}" title="${(inlinePrimaryPower.statusDescription || inlinePrimaryPower.statusLabel).replace(/"/g, "&quot;")}">

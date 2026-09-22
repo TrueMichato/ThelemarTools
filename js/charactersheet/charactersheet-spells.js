@@ -2459,6 +2459,71 @@ class CharacterSheetSpells {
 		return `${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
 	}
 
+	async pUseEfaSpellStoringItem ({itemId, holder} = {}) {
+		const prepared = this._state.prepareEfaSpellStoringItemUse?.({itemId, holder});
+		if (!prepared?.ok) return prepared || {ok: false, committed: false, reason: "storage-unavailable"};
+		const storage = prepared.storage;
+		const spellData = storage.spell?.data
+			|| this._allSpells.find(spell =>
+				spell.name?.toLowerCase() === storage.spell?.name?.toLowerCase()
+				&& spell.source?.toLowerCase() === storage.spell?.source?.toLowerCase());
+		if (!spellData) return {ok: false, committed: false, reason: "spell-identity-unresolved"};
+		const selfHolderUid = this._state.getEfaSpellStoringItemSelfHolder?.().uid;
+		const holderConcentrations = (this._state.getConcentrations?.() || [])
+			.filter(concentration => String(concentration?.holderUid || selfHolderUid) === String(holder.uid));
+		const requiresConcentration = spellData.duration?.some?.(duration => duration.concentration);
+		if (requiresConcentration && holderConcentrations.length) {
+			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: "Replace Holder Concentration?",
+				htmlDescription: `<strong>${holder.label || holder.uid}</strong> is already concentrating on <strong>${holderConcentrations[0].spellName || holderConcentrations[0].name || "an effect"}</strong>. Using <strong>${storage.spell.name}</strong> will end that holder's concentration.`,
+				textYes: "Use and replace concentration",
+				textNo: "Cancel",
+			}));
+			if (!confirmed) return {ok: false, committed: false, reason: "cancelled"};
+		}
+		const spell = {
+			...MiscUtil.copyFast(spellData),
+			id: `stored-item:${storage.storageId}`,
+			level: storage.spell.level,
+			sourceItem: prepared.storage.host?.itemUid || "Spell-Storing Item",
+			spellcastingAbility: storage.casting?.ability || "int",
+		};
+		const castMeta = {
+			sourceItem: prepared.storage.host?.itemUid || "Spell-Storing Item",
+			castingStats: MiscUtil.copyFast(storage.casting || {}),
+			suppressCastRiders: true,
+			suppressComponentNotes: true,
+			storedSpell: {
+				storageId: storage.storageId,
+				ownerClassUid: storage.ownerClassUid,
+				hostInventoryItemId: itemId,
+				hostItemUid: storage.host?.itemUid || null,
+				holderUid: holder.uid,
+				holderLabel: holder.label || holder.uid,
+			},
+		};
+		const effect = await this._showCastResult(spell, storage.spell.level, false, false, castMeta);
+		if (effect?.cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		const committed = this._state.commitEfaSpellStoringItemUse({itemId, holder});
+		if (!committed?.ok) return committed;
+		if (requiresConcentration) {
+			this._state.addConcentration?.({
+				id: `spell-storage:${storage.storageId}:${holder.uid}`,
+				kind: "spell",
+				name: storage.spell.name,
+				spellName: storage.spell.name,
+				spellLevel: storage.spell.level,
+				spellSource: storage.spell.source,
+				holderUid: holder.uid,
+				holderLabel: holder.label || holder.uid,
+				storageId: storage.storageId,
+				hostInventoryItemId: itemId,
+			});
+			this._updateConcentrationUI?.();
+		}
+		return committed;
+	}
+
 	async pCastItemSpell (power, {deferCommit = false, decision = null} = {}) {
 		const spellData = this._allSpells.find(spell =>
 			spell.name?.toLowerCase() === power?.spellName?.toLowerCase()
@@ -4756,7 +4821,7 @@ class CharacterSheetSpells {
 		}
 	}
 
-	_getSpellHealingRollFormula (spellData, slotLevel, baseLevel, abilityOverride = null) {
+	_getSpellHealingRollFormula (spellData, slotLevel, baseLevel, abilityOverride = null, abilityModOverride = null) {
 		const entries = JSON.stringify(spellData?.entries || []);
 		const entriesLower = entries.toLowerCase();
 		const isHealing = (entriesLower.includes("regain") && entriesLower.includes("hit point"))
@@ -4784,7 +4849,9 @@ class CharacterSheetSpells {
 		}
 
 		const healingAbility = abilityOverride || this._state.getSpellcastingAbility() || "int";
-		const modifier = this._state.getAbilityMod(healingAbility);
+		const modifier = Number.isFinite(abilityModOverride)
+			? abilityModOverride
+			: this._state.getAbilityMod(healingAbility);
 		return {
 			dice,
 			modifier,
@@ -4861,7 +4928,8 @@ class CharacterSheetSpells {
 		// Check for spell attack or save DC
 		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source);
 		const normalizedCastMeta = this._getNormalizedCastMeta({spell, spellData, slotLevel, castMeta});
-		const appliedMetamagic = normalizedCastMeta.appliedMetamagic || null;
+		const suppressCastRiders = normalizedCastMeta.suppressCastRiders === true;
+		const appliedMetamagic = suppressCastRiders ? null : normalizedCastMeta.appliedMetamagic || null;
 		const committedRolls = [];
 		const shouldResolveAllDamageRolls = this._state.canPrepareEfaAlchemicalSavantRolls?.({
 			spell,
@@ -4885,7 +4953,7 @@ class CharacterSheetSpells {
 
 			const isTouchSpell = normalizedCastMeta.rangeMeta?.effectiveDistanceType === "touch"
 				|| spellData.range?.distance?.type === "touch";
-			if (isTouchSpell) {
+			if (isTouchSpell && !suppressCastRiders) {
 				const activeFamiliar = this._state.getCompanionsByType?.(CharacterSheetState.COMPANION_TYPES.FAMILIAR)
 					?.find(f => f.active !== false);
 
@@ -4917,11 +4985,12 @@ class CharacterSheetSpells {
 			// Cleric spell on the same character uses its own class ability.
 			const calcs = this._state.getFeatureCalculations?.();
 			const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true;
-			const isGamblerCast = isGamblerSpell && calcs?.hasGamblerSpellcasting;
+			const isGamblerCast = !suppressCastRiders && isGamblerSpell && calcs?.hasGamblerSpellcasting;
 			let spellcastingMod;
 			let gamblerModRoll = null;
 			// Route to the casting class's ability for this specific spell.
-			const castingAbility = this._state.getSpellcastingAbilityForSpell?.(spell)
+			const castingAbility = normalizedCastMeta.castingStats?.ability
+				|| this._state.getSpellcastingAbilityForSpell?.(spell)
 				|| this._state.getSpellcastingAbility()
 				|| "int";
 			if (isGamblerCast && calcs.gamblerModifierDice) {
@@ -4933,13 +5002,17 @@ class CharacterSheetSpells {
 				)?.total ?? Renderer.dice.parseRandomise2(calcs.gamblerModifierDice);
 				gamblerModRoll = suppliedRoll || {total: rollTotal, dice: calcs.gamblerModifierDice};
 				spellcastingMod = rollTotal;
+			} else if (Number.isFinite(normalizedCastMeta.castingStats?.abilityMod)) {
+				spellcastingMod = normalizedCastMeta.castingStats.abilityMod;
 			} else {
 				spellcastingMod = this._state.getAbilityMod(castingAbility);
 			}
 
 			// Check if spell attack
 			if (spellData.entries?.some(e => typeof e === "string" && e.toLowerCase().includes("spell attack"))) {
-				const attackBonus = spellcastingMod + profBonus;
+				const attackBonus = Number.isFinite(normalizedCastMeta.castingStats?.attackBonus)
+					? normalizedCastMeta.castingStats.attackBonus
+					: spellcastingMod + profBonus;
 				const aimedBonus = appliedMetamagic?.key === "aimed"
 					? this._rollMetamagicAimedBonus()
 					: null;
@@ -4962,8 +5035,8 @@ class CharacterSheetSpells {
 					: initialRoll;
 				// Animate the spell-attack d20 (lands on the resolved roll).
 				await this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: [finalRoll]}]});
-				const criticalRange = this._state.getCriticalRange?.({kind: "spell"}) || 20;
-				if (finalRoll >= criticalRange) await this._pApplyTriggeredFeatCriticalHit({spell, spellData});
+				const criticalRange = suppressCastRiders ? 20 : this._state.getCriticalRange?.({kind: "spell"}) || 20;
+				if (!suppressCastRiders && finalRoll >= criticalRange) await this._pApplyTriggeredFeatCriticalHit({spell, spellData});
 				const aimedText = aimedBonus ? ` + ${aimedBonus.total} aimed` : "";
 				const seekingText = normalizedCastMeta.attackMeta?.seekingRerollUsed
 					? ` <span class="ve-muted">(rerolled from ${normalizedCastMeta.attackMeta.originalRoll})</span>`
@@ -4980,10 +5053,12 @@ class CharacterSheetSpells {
 				// The Spells-tab card printed 18 while pressing Cast on that same card printed 15.
 				// Route through the one shared chokepoint rather than maintaining a rival formula;
 				// the Gambler die substitutes for the ability modifier only.
-				let saveDC = this._state.getSpellSaveDcForAbility(
-					castingAbility,
-					gamblerModRoll ? {abilityModOverride: spellcastingMod} : undefined,
-				);
+				let saveDC = Number.isFinite(normalizedCastMeta.castingStats?.saveDc)
+					? normalizedCastMeta.castingStats.saveDc
+					: this._state.getSpellSaveDcForAbility(
+						castingAbility,
+						gamblerModRoll ? {abilityModOverride: spellcastingMod} : undefined,
+					);
 				// Residual of everything the chokepoint adds beyond the three terms named in the
 				// breakdown. Derived by subtraction so a bonus added there shows up here without
 				// this call site being taught about it.
@@ -5000,7 +5075,7 @@ class CharacterSheetSpells {
 					saveNote = "; first target rolls at disadvantage";
 				} else if (vcSaveDisadv) {
 					saveNote = "; target saves at disadvantage (🧪)";
-				} else if (this._state.getCoronaOfLightSaveDisadvantage?.(spellData)) {
+				} else if (!suppressCastRiders && this._state.getCoronaOfLightSaveDisadvantage?.(spellData)) {
 					saveNote = "; enemies in Corona of Light's bright light save at disadvantage";
 				}
 				const gamblerDcNote = gamblerModRoll ? ` <span class="ve-muted">(🎲 ${gamblerModRoll.dice}: ${gamblerModRoll.total})</span>` : "";
@@ -5024,7 +5099,13 @@ class CharacterSheetSpells {
 			// resolve immediately; the player opts into applying the effect to themselves via
 			// a bright button in the result toast (which rolls/applies the payload ONCE).
 			if (selfTargetMode === "offer") {
-				const formula = this._getSpellHealingRollFormula(spellData, slotLevel, spell.level, castingAbility);
+				const formula = this._getSpellHealingRollFormula(
+					spellData,
+					slotLevel,
+					spell.level,
+					castingAbility,
+					normalizedCastMeta.castingStats?.abilityMod,
+				);
 				const rollReceipt = formula
 					? {
 						rollId: "healing:0",
@@ -5039,13 +5120,29 @@ class CharacterSheetSpells {
 					}
 					: null;
 				if (rollReceipt) committedRolls.push(rollReceipt);
-				offerApplyToSelf = {spell, spellData, effects, slotLevel, rollReceipt};
+				offerApplyToSelf = {
+					spell,
+					spellData,
+					effects,
+					slotLevel,
+					rollReceipt,
+					castingStats: normalizedCastMeta.castingStats || null,
+				};
 				// Informational only — do NOT pre-roll healing here (apply-to-self rolls once
 				// on click, so the applied amount always matches what is shown).
 				damageInfo = this._describeBeneficialEffects(effects);
 			} else if (selfTargetMode === "auto") {
 				// Self-only spells automatically target self
-				effectsApplied = await this._applySpellEffectsToSelf(spell, spellData, effects, slotLevel, {committedRolls});
+				effectsApplied = await this._applySpellEffectsToSelf(
+					spell,
+					spellData,
+					effects,
+					slotLevel,
+					{
+						committedRolls,
+						castingStats: normalizedCastMeta.castingStats || null,
+					},
+				);
 			} else {
 				// Damage or other effects targeting enemies
 				const deferredFlatDamageRider = await this._pSelectDeferredFlatDamageRiderForSpell({spell, spellData});
@@ -5062,19 +5159,24 @@ class CharacterSheetSpells {
 
 				// Roll healing if spell heals but targets others by default (like Mass Cure Wounds)
 				if (!damageInfo) {
-					const healAbility = this._state.getSpellcastingAbilityForSpell?.(spell) || this._state.getSpellcastingAbility() || "int";
-					const healingResult = this._rollSpellHealingResult(spellData, slotLevel, spell.level, healAbility);
+					const healingResult = this._rollSpellHealingResult(
+						spellData,
+						slotLevel,
+						spell.level,
+						castingAbility,
+						spellcastingMod,
+					);
 					damageInfo = healingResult?.text || "";
 					if (healingResult) committedRolls.push(healingResult.roll);
 				}
 			}
 
 			// Apply tuned passive metamagic effects
-			const tunedPassiveNotes = this._getTunedPassiveNotes({spellData, damageResult});
+			const tunedPassiveNotes = suppressCastRiders ? [] : this._getTunedPassiveNotes({spellData, damageResult});
 			metamagicNotes.push(...tunedPassiveNotes);
 
 			// Transmuted Spell: prompt to change damage type
-			if (damageResult?.damageType && this._state.isMetamagicTuned?.("transmuted")) {
+			if (!suppressCastRiders && damageResult?.damageType && this._state.isMetamagicTuned?.("transmuted")) {
 				const transmutedResult = await this._pMaybeApplyTransmutedDamage(damageResult, {rollLabel: `${spell.name} Damage`});
 				if (transmutedResult) {
 					metamagicNotes.push(`Transmuted Spell changed ${transmutedResult.originalDamageType} → ${transmutedResult.damageType} damage`);
@@ -5084,7 +5186,7 @@ class CharacterSheetSpells {
 			}
 
 			// Empowered Spell: prompt to reroll damage dice
-			if (damageResult?.dice && this._state.isMetamagicTuned?.("empowered")) {
+			if (!suppressCastRiders && damageResult?.dice && this._state.isMetamagicTuned?.("empowered")) {
 				const empoweredResult = await this._pMaybeApplyEmpoweredReroll(damageResult, {rollLabel: `${spell.name} Damage`});
 				if (empoweredResult) {
 					metamagicNotes.push(`Empowered Spell rerolled ${empoweredResult.rerolledCount} damage ${empoweredResult.rerolledCount === 1 ? "die" : "dice"} (${empoweredResult.originalTotal} → ${empoweredResult.total})`);
@@ -5093,7 +5195,7 @@ class CharacterSheetSpells {
 				}
 			}
 
-			if (damageResult?.total != null) {
+			if (!suppressCastRiders && damageResult?.total != null) {
 				damageResult = await this._pApplyTriggeredFeatDamageToSpellResult({damageResult, spell, spellData});
 				damageInfo = damageResult.text;
 			}
@@ -5174,7 +5276,7 @@ class CharacterSheetSpells {
 
 		// Detail the spellcasting focus (or component pouch / substitution) used to
 		// satisfy a no-cost material component.
-		const focusNote = normalizedCastMeta.componentWaivers?.includes("m")
+		const focusNote = normalizedCastMeta.suppressComponentNotes || normalizedCastMeta.componentWaivers?.includes("m")
 			? null
 			: this._getSpellFocusNote(spell, spellData, {
 				variantUsed: !!normalizedCastMeta.variantComponent,
@@ -5221,7 +5323,7 @@ class CharacterSheetSpells {
 
 		// Gambler's Folly is resolved before slot consumption so the same receipt
 		// drives the wager, modifier, table result, and slot transaction.
-		const gamblerResolution = normalizedCastMeta.gamblerCastResolution;
+		const gamblerResolution = suppressCastRiders ? null : normalizedCastMeta.gamblerCastResolution;
 		const gamblerFollyResult = gamblerResolution
 			? {
 				roll: gamblerResolution.bet.roll,
@@ -5229,7 +5331,7 @@ class CharacterSheetSpells {
 				won: gamblerResolution.bet.won,
 				html: `<br><hr class="hr-1"><span class="text-warning">\u{1F3B2} <b>Gambler's Folly:</b></span><br>Bet Roll: <b>${gamblerResolution.bet.roll}</b> on d${gamblerResolution.bet.die} ${gamblerResolution.bet.won ? "<span class=\"text-success\"><b>Won!</b> \u2713</span>" : `<span class="text-danger"><b>Lost!</b> Roll d100 on Gambling Table</span><br><span class="text-info">\u{1F3B0} <b>d100:</b> ${gamblerResolution.tableRoll?.roll ?? "pending"}</span><br>${gamblerResolution.descriptor?.text || ""}`}`,
 			}
-			: await this._handleGamblerFolly(spell, slotLevel);
+			: suppressCastRiders ? null : await this._handleGamblerFolly(spell, slotLevel);
 		let hasGamblerFolly = false;
 		if (gamblerFollyResult) {
 			toastContent += gamblerFollyResult.html;
@@ -5279,7 +5381,10 @@ class CharacterSheetSpells {
 					offerApplyToSelf.spellData,
 					offerApplyToSelf.effects,
 					offerApplyToSelf.slotLevel,
-					{rollReceipt: offerApplyToSelf.rollReceipt},
+					{
+						rollReceipt: offerApplyToSelf.rollReceipt,
+						castingStats: offerApplyToSelf.castingStats,
+					},
 				);
 				applyToSelfBtn.textContent = applied.length ? "✓ Applied to Self" : "✓ Done";
 				this._page._renderActiveStates?.();
@@ -6966,14 +7071,20 @@ class CharacterSheetSpells {
 	/**
 	 * Apply spell effects to self and return list of applied effects
 	 */
-	async _applySpellEffectsToSelf (spell, spellData, effects, slotLevel, {committedRolls = null, rollReceipt = null} = {}) {
+	async _applySpellEffectsToSelf (spell, spellData, effects, slotLevel, {committedRolls = null, rollReceipt = null, castingStats = null} = {}) {
 		const appliedEffects = [];
-		const castingAbility = this._state.getSpellcastingAbilityForSpell?.(spell) || this._state.getSpellcastingAbility() || "int";
-		const spellcastingMod = this._state.getAbilityMod(castingAbility);
+		const castingAbility = castingStats?.ability
+			|| this._state.getSpellcastingAbilityForSpell?.(spell)
+			|| this._state.getSpellcastingAbility()
+			|| "int";
 
 		// Apply healing
 		if (effects.healing) {
 			const healingResult = CharacterSheetState.calculateSpellHealing(spellData, slotLevel || spell.level, this._state, castingAbility);
+			if (Number.isFinite(castingStats?.abilityMod) && Number.isFinite(healingResult.modifier)) {
+				healingResult.total += castingStats.abilityMod - healingResult.modifier;
+				healingResult.modifier = castingStats.abilityMod;
+			}
 			const originalTotal = healingResult.total || 0;
 			const savant = rollReceipt?.alchemicalSavant;
 			const savantBonus = savant?.armed ? Number(savant.bonus) || 0 : 0;
@@ -7957,8 +8068,8 @@ class CharacterSheetSpells {
 		return aoeMatch ? Number(aoeMatch[1]) : 0;
 	}
 
-	_rollSpellHealingResult (spellData, slotLevel, baseLevel, abilityOverride = null) {
-		const formula = this._getSpellHealingRollFormula(spellData, slotLevel, baseLevel, abilityOverride);
+	_rollSpellHealingResult (spellData, slotLevel, baseLevel, abilityOverride = null, abilityModOverride = null) {
+		const formula = this._getSpellHealingRollFormula(spellData, slotLevel, baseLevel, abilityOverride, abilityModOverride);
 		if (!formula) return null;
 		try {
 			const diceTotal = Renderer.dice.parseRandomise2(formula.dice);
@@ -7983,8 +8094,8 @@ class CharacterSheetSpells {
 		}
 	}
 
-	_rollSpellHealing (spellData, slotLevel, baseLevel, abilityOverride = null) {
-		return this._rollSpellHealingResult(spellData, slotLevel, baseLevel, abilityOverride)?.text || "";
+	_rollSpellHealing (spellData, slotLevel, baseLevel, abilityOverride = null, abilityModOverride = null) {
+		return this._rollSpellHealingResult(spellData, slotLevel, baseLevel, abilityOverride, abilityModOverride)?.text || "";
 	}
 
 	/**

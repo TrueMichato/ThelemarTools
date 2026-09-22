@@ -4377,6 +4377,8 @@ class CharacterSheetState {
 	static EFA_ALCHEMICAL_SAVANT_FOCUS_UID = "Alchemist's Supplies|XPHB";
 	static EFA_ALCHEMICAL_SAVANT_DAMAGE_TYPES = new Set(["acid", "fire", "poison"]);
 	static EFA_SPELLCASTING_TOOLS_RULE_ID = "efa-artificer-tools-required";
+	static EFA_SPELL_STORING_ITEM_FEATURE_UID = "Spell-Storing Item|Artificer|EFA|11|EFA";
+	static EFA_SPELL_STORING_ITEM_VERSION = 1;
 	static EFA_BATTLE_READY_FOCUS_RULE_ID = "efa-battle-ready-tools-or-proficient-weapon";
 	static EFA_BATTLE_SMITH_SUBCLASS_UID = "Battle Smith|Artificer|EFA|EFA";
 	static EFA_STEEL_DEFENDER_UID = "Steel Defender|EFA";
@@ -4739,6 +4741,7 @@ class CharacterSheetState {
 	 */
 	setSpellData (allSpells) {
 		this._allSpells = Array.isArray(allSpells) ? allSpells : [];
+		this.reconcileEfaSpellStoringItem({reason: "spell-catalog-loaded"});
 	}
 
 	/**
@@ -6472,6 +6475,7 @@ class CharacterSheetState {
 		this.reconcileEfaReplicateMagicItems({reason: "load"});
 		this._normalizeGeneratedFeatureItemLifecycleState();
 		this.reconcileGeneratedFeatureItemDeathTransition({reason: "load"});
+		this.reconcileEfaSpellStoringItem({reason: "load"});
 		this._ensureFeatRegistryResources();
 		this._endBladesongForInvalidEquipment();
 		this._migrateLegacyTurnReceipts();
@@ -10562,6 +10566,7 @@ class CharacterSheetState {
 		this._syncAdventurersAtlasEligibility();
 		this._reconcileClassSummonsAfterOwnerChange();
 		this.reconcileEfaReplicateMagicItems({reason: "class-removed"});
+		this.reconcileEfaSpellStoringItem({reason: "class-removed"});
 	}
 
 	/**
@@ -11013,6 +11018,7 @@ class CharacterSheetState {
 		}
 		this._syncAdventurersAtlasEligibility();
 		this.reconcileEfaReplicateMagicItems({reason: "level-removed"});
+		this.reconcileEfaSpellStoringItem({reason: "level-removed"});
 
 		return {success: true, removed: removedInfo};
 	}
@@ -39491,6 +39497,389 @@ class CharacterSheetState {
 		return expected > 0 && (item.selectedAbilityChoices || []).length === expected;
 	}
 
+	_getEfaSpellStoringItemClassLevel () {
+		const cls = (this._data.classes || []).find(it =>
+			String(it?.name || "").toLowerCase() === "artificer"
+			&& String(it?.source || "").toUpperCase() === "EFA");
+		return Math.max(0, Number(cls?.level) || 0);
+	}
+
+	_isExactEfaArtificerSpell (spell) {
+		if (!spell || ![1, 2, 3].includes(Number(spell.level))) return false;
+		if (!CharacterSheetClassUtils.spellHasActionCastingTime(spell)) return false;
+		const material = spell.components?.m;
+		if (material && typeof material === "object" && material.consume) return false;
+		const getClasses = prop => {
+			try {
+				const resolved = Renderer.spell.getCombinedClasses(spell, prop);
+				if (Array.isArray(resolved)) return resolved;
+			} catch (e) { /* Fall through to hydrated raw spell data. */ }
+			return Array.isArray(spell.classes?.[prop]) ? spell.classes[prop] : [];
+		};
+		return ["fromClassList", "fromClassListVariant"].some(prop =>
+			getClasses(prop).some(cls =>
+				String(cls?.name || "").toLowerCase() === "artificer"
+				&& String(cls?.source || "").toUpperCase() === "EFA"));
+	}
+
+	_getEfaSpellStoringItemFocusRequirement () {
+		return this.getSpellCastFocusRequirement({
+			name: "Spell-Storing Item Host",
+			source: "EFA",
+			components: {m: true},
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+		});
+	}
+
+	_isEfaSpellStoringItemHostRow (wrapper, {requireHeld = true} = {}) {
+		if (!wrapper?.id || !wrapper.item?.name || !wrapper.item?.source || Number(wrapper.quantity ?? 1) <= 0) return false;
+		if (requireHeld && !wrapper.equipped) return false;
+		const category = String(wrapper.item.weaponCategory || "").toLowerCase();
+		if (this._isWeaponItem(wrapper.item) && ["simple", "martial"].includes(category)) return true;
+		const requirement = this._getEfaSpellStoringItemFocusRequirement();
+		return this.getEligibleSpellCastFocusInventoryRows(requirement, {includeUnequipped: !requireHeld})
+			.some(row => row.id === wrapper.id);
+	}
+
+	getEfaSpellStoringItemOptions () {
+		const classLevel = this._getEfaSpellStoringItemClassLevel();
+		if (classLevel < 11) {
+			return {
+				available: false,
+				reason: "ineligible",
+				classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+				classLevel,
+				hosts: [],
+				spells: [],
+			};
+		}
+		const hosts = (this._data.inventory || [])
+			.filter(wrapper => this._isEfaSpellStoringItemHostRow(wrapper))
+			.map(wrapper => ({
+				itemId: wrapper.id,
+				itemUid: `${wrapper.item.name}|${wrapper.item.source}`,
+				name: wrapper.item.name,
+				source: wrapper.item.source,
+				generatedFeatureItem: this.getSpellCastFocusReference(wrapper)?.generatedFeatureItem || null,
+			}))
+			.sort((a, b) => a.name.localeCompare(b.name, undefined, {sensitivity: "base"}) || a.source.localeCompare(b.source, undefined, {sensitivity: "base"}));
+		const spells = (this._allSpells || [])
+			.filter(spell => this._isExactEfaArtificerSpell(spell))
+			.map(spell => ({
+				spellUid: `${spell.name}|${spell.source}`,
+				name: spell.name,
+				source: spell.source,
+				level: spell.level,
+				data: MiscUtil.copyFast(spell),
+			}))
+			.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, undefined, {sensitivity: "base"}) || a.source.localeCompare(b.source, undefined, {sensitivity: "base"}));
+		return {
+			available: true,
+			reason: null,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			classLevel,
+			hosts,
+			spells,
+		};
+	}
+
+	_pruneEfaSpellStoringItemTurnReceipts (storage) {
+		const sourceUid = `efa-spell-storage:${storage?.storageId || ""}:host:${storage?.host?.inventoryItemId || ""}`;
+		const actionUid = "use-stored-spell";
+		const matching = Object.values(this._getTurnReceiptStore().receipts)
+			.filter(receipt => receipt.sourceUid === sourceUid && receipt.actionUid === actionUid);
+		for (const receipt of matching) {
+			this.pruneTurnReceipts({
+				ownerUid: receipt.ownerUid,
+				sourceUid,
+				actionUid,
+			});
+		}
+	}
+
+	_clearEfaSpellStoringItems ({exceptItemId = null} = {}) {
+		let cleared = 0;
+		for (const wrapper of this._data.inventory || []) {
+			if (wrapper.id === exceptItemId || !wrapper.item?._spellStorage) continue;
+			this._pruneEfaSpellStoringItemTurnReceipts(wrapper.item._spellStorage);
+			delete wrapper.item._spellStorage;
+			cleared++;
+		}
+		return cleared;
+	}
+
+	_normalizeEfaSpellStoringItemStorage (wrapper) {
+		const raw = wrapper?.item?._spellStorage;
+		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+		const structuralReasons = [];
+		const rawVersion = Number(raw.version);
+		if (rawVersion !== CharacterSheetState.EFA_SPELL_STORING_ITEM_VERSION) structuralReasons.push("unsupported-storage-version");
+		if (raw.featureUid !== CharacterSheetState.EFA_SPELL_STORING_ITEM_FEATURE_UID || raw.ownerClassUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) {
+			structuralReasons.push("owner-identity-unresolved");
+		}
+		const itemUid = wrapper.item?.name && wrapper.item?.source ? `${wrapper.item.name}|${wrapper.item.source}` : "";
+		const spellName = String(raw.spell?.name || raw.spell?.data?.name || "").trim();
+		const spellSource = String(raw.spell?.source || raw.spell?.data?.source || "").trim().toUpperCase();
+		const spellLevel = Number(raw.spell?.level ?? raw.spell?.data?.level);
+		const casting = raw.casting && typeof raw.casting === "object"
+			? MiscUtil.copyFast(raw.casting)
+			: {};
+		if (
+			String(casting.ability || "").toLowerCase() !== "int"
+			|| !Number.isFinite(casting.abilityMod)
+			|| !Number.isFinite(casting.proficiencyBonus)
+			|| !Number.isFinite(casting.saveDc)
+			|| !Number.isFinite(casting.attackBonus)
+			|| casting.owner?.classUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+		) structuralReasons.push("casting-reference-unresolved");
+		const storage = {
+			version: Number.isFinite(rawVersion) ? rawVersion : 0,
+			storageId: String(raw.storageId || "").trim(),
+			featureUid: CharacterSheetState.EFA_SPELL_STORING_ITEM_FEATURE_UID,
+			ownerClassUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			host: {
+				...(raw.host && typeof raw.host === "object" ? MiscUtil.copyFast(raw.host) : {}),
+				inventoryItemId: String(raw.host?.inventoryItemId || wrapper.id || "").trim(),
+				itemUid: String(raw.host?.itemUid || itemUid).trim(),
+			},
+			spell: {
+				uid: String(raw.spell?.uid || (spellName && spellSource ? `${spellName}|${spellSource}` : "")).trim(),
+				name: spellName,
+				source: spellSource,
+				level: spellLevel,
+				data: raw.spell?.data && typeof raw.spell.data === "object"
+					? MiscUtil.copyFast(raw.spell.data)
+					: null,
+			},
+			casting,
+			usesCurrent: Math.max(0, Math.floor(Number(raw.usesCurrent) || 0)),
+			usesMax: Math.max(0, Math.floor(Number(raw.usesMax) || 0)),
+			createdAt: Number(raw.createdAt) || Date.now(),
+			repair: {
+				status: structuralReasons.length ? "stale" : String(raw.repair?.status || "stale"),
+				reasons: structuralReasons,
+				lastCheckedReason: String(raw.repair?.lastCheckedReason || "normalize"),
+			},
+		};
+		if (!storage.storageId || !storage.host.inventoryItemId || !storage.host.itemUid || !storage.spell.uid || !storage.spell.name || !storage.spell.source || ![1, 2, 3].includes(storage.spell.level)) {
+			storage.repair = {
+				status: "stale",
+				reasons: [...new Set([...storage.repair.reasons, "malformed-storage"])],
+				lastCheckedReason: "normalize",
+			};
+		}
+		wrapper.item._spellStorage = storage;
+		return storage;
+	}
+
+	reconcileEfaSpellStoringItem ({reason = "reconcile"} = {}) {
+		if (this._getEfaSpellStoringItemClassLevel() < 11) {
+			return {
+				ok: true,
+				status: "cleared",
+				reason: "owner-ineligible",
+				cleared: this._clearEfaSpellStoringItems(),
+			};
+		}
+		const rows = [];
+		for (const wrapper of this._data.inventory || []) {
+			if (!wrapper.item?._spellStorage) continue;
+			const storage = this._normalizeEfaSpellStoringItemStorage(wrapper);
+			if (!storage) continue;
+			const currentItemUid = wrapper.item?.name && wrapper.item?.source ? `${wrapper.item.name}|${wrapper.item.source}` : "";
+			if (storage.host.inventoryItemId !== wrapper.id || storage.host.itemUid !== currentItemUid) {
+				this._pruneEfaSpellStoringItemTurnReceipts(storage);
+				delete wrapper.item._spellStorage;
+				continue;
+			}
+			const reasons = (storage.repair?.reasons || [])
+				.filter(reason => ["unsupported-storage-version", "owner-identity-unresolved", "casting-reference-unresolved", "malformed-storage"].includes(reason));
+			if (!this._isEfaSpellStoringItemHostRow(wrapper, {requireHeld: false})) reasons.push("host-no-longer-eligible");
+			let exactSpell = null;
+			if ((this._allSpells || []).length) {
+				exactSpell = this._allSpells.find(spell =>
+					String(spell?.name || "").toLowerCase() === storage.spell.name.toLowerCase()
+					&& String(spell?.source || "").toUpperCase() === storage.spell.source);
+				if (!exactSpell) reasons.push("spell-identity-unresolved");
+				else if (!this._isExactEfaArtificerSpell(exactSpell)) reasons.push("spell-no-longer-eligible");
+			} else reasons.push("spell-catalog-unavailable");
+			if (exactSpell) storage.spell.data = MiscUtil.copyFast(exactSpell);
+			if (storage.usesCurrent <= 0) reasons.push("uses-depleted");
+			storage.repair = {
+				status: reasons.includes("uses-depleted") && reasons.length === 1
+					? "expired"
+					: reasons.length ? "stale" : "active",
+				reasons,
+				lastCheckedReason: reason,
+			};
+			rows.push({itemId: wrapper.id, wrapper, storage});
+		}
+		return {ok: true, status: rows.some(row => row.storage.repair.status === "active") ? "active" : rows.length ? "stale" : "empty", reason, rows};
+	}
+
+	getEfaSpellStoringItem () {
+		const reconciliation = this.reconcileEfaSpellStoringItem({reason: "read"});
+		const row = reconciliation.rows?.[0];
+		if (!row) return null;
+		return {
+			itemId: row.itemId,
+			item: this.getItemRaw(row.itemId),
+			storage: MiscUtil.copyFast(row.storage),
+		};
+	}
+
+	getEfaSpellStoringItemSelfHolder () {
+		const id = String(this.getId?.() || "").trim();
+		const name = String(this.getName?.() || "").trim() || "This character";
+		return {
+			uid: `character:${id || name.toLowerCase().replace(/\s+/g, "-")}`,
+			label: name,
+			kind: "character",
+			characterId: id || null,
+		};
+	}
+
+	commitEfaSpellStoringItemAtLongRest ({hostItemId, spellUid} = {}) {
+		if (!hostItemId || !spellUid) return {ok: true, committed: false, reason: "selection-skipped", storage: this.getEfaSpellStoringItem()?.storage || null};
+		const options = this.getEfaSpellStoringItemOptions();
+		if (!options.available) return {ok: false, committed: false, reason: options.reason, storage: null};
+		const host = options.hosts.find(it => it.itemId === hostItemId);
+		const spell = options.spells.find(it => it.spellUid.toLowerCase() === String(spellUid).toLowerCase());
+		if (!host) return {ok: false, committed: false, reason: "host-ineligible", storage: null};
+		if (!spell) return {ok: false, committed: false, reason: "spell-ineligible", storage: null};
+		const wrapper = this._findInventoryRow(host.itemId);
+		if (!wrapper?.item) return {ok: false, committed: false, reason: "host-unresolved", storage: null};
+		this._clearEfaSpellStoringItems({exceptItemId: wrapper.id});
+		if (wrapper.item._spellStorage) this._pruneEfaSpellStoringItemTurnReceipts(wrapper.item._spellStorage);
+		const abilityMod = this.getAbilityMod("int");
+		const storage = {
+			version: CharacterSheetState.EFA_SPELL_STORING_ITEM_VERSION,
+			storageId: `efa-spell-storage-${CryptUtil.uid()}`,
+			featureUid: CharacterSheetState.EFA_SPELL_STORING_ITEM_FEATURE_UID,
+			ownerClassUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			host: this.getSpellCastFocusReference(wrapper),
+			spell: {
+				uid: spell.spellUid,
+				name: spell.name,
+				source: spell.source,
+				level: spell.level,
+				data: MiscUtil.copyFast(spell.data),
+			},
+			casting: {
+				owner: {
+					characterId: this.getId?.() || null,
+					name: this.getName?.() || null,
+					classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+				},
+				ability: "int",
+				abilityMod,
+				proficiencyBonus: this.getProficiencyBonus(),
+				saveDc: this.getSpellSaveDcForAbility("int"),
+				attackBonus: this.getSpellAttackBonusForAbility("int"),
+			},
+			usesMax: Math.max(2, 2 * abilityMod),
+			usesCurrent: Math.max(2, 2 * abilityMod),
+			createdAt: Date.now(),
+			repair: {status: "active", reasons: [], lastCheckedReason: "long-rest"},
+		};
+		wrapper.item._spellStorage = storage;
+		return {ok: true, committed: true, reason: null, itemId: wrapper.id, storage: MiscUtil.copyFast(storage)};
+	}
+
+	_getEfaSpellStoringItemTurnReceiptDescriptor ({itemId, storage, holder}) {
+		const holderUid = String(holder?.uid || "").trim();
+		const sourceUid = `efa-spell-storage:${storage.storageId}:host:${itemId}`;
+		return {
+			key: `${sourceUid}:holder:${holderUid}:action:use-stored-spell`,
+			ownerUid: holderUid,
+			sourceUid,
+			actionUid: "use-stored-spell",
+			metadata: {
+				featureUid: CharacterSheetState.EFA_SPELL_STORING_ITEM_FEATURE_UID,
+				hostItemUid: storage.host.itemUid,
+				spellUid: storage.spell.uid,
+				holderLabel: String(holder?.label || "").trim() || holderUid,
+			},
+		};
+	}
+
+	prepareEfaSpellStoringItemUse ({itemId, holder} = {}) {
+		const holderUid = String(holder?.uid || "").trim();
+		if (!holderUid) return {ok: false, committed: false, reason: "holder-required"};
+		const current = this.getEfaSpellStoringItem();
+		if (!current || current.itemId !== itemId) return {ok: false, committed: false, reason: "storage-unavailable"};
+		const wrapper = this._findInventoryRow(itemId);
+		if (!wrapper?.equipped || !this._isEfaSpellStoringItemHostRow(wrapper)) return {ok: false, committed: false, reason: "host-not-held"};
+		if (current.storage.repair.status !== "active") return {ok: false, committed: false, reason: current.storage.repair.reasons[0] || "storage-stale"};
+		if (current.storage.usesCurrent <= 0) return {ok: false, committed: false, reason: "uses-depleted"};
+		const turnReceiptDescriptor = this._getEfaSpellStoringItemTurnReceiptDescriptor({itemId, storage: current.storage, holder});
+		if (this.isInCombat()) {
+			const turnState = this.queryTurnReceipt(turnReceiptDescriptor.key);
+			if (turnState.used) {
+				return {
+					ok: false,
+					committed: false,
+					reason: "alreadyUsed",
+					storage: current.storage,
+					holder: MiscUtil.copyFast(holder),
+					turnReceipt: turnState.receipt,
+				};
+			}
+		}
+		return {
+			ok: true,
+			committed: false,
+			reason: null,
+			itemId,
+			storage: current.storage,
+			holder: MiscUtil.copyFast(holder),
+			turnReceiptDescriptor,
+		};
+	}
+
+	commitEfaSpellStoringItemUse ({itemId, holder} = {}) {
+		const prepared = this.prepareEfaSpellStoringItemUse({itemId, holder});
+		if (!prepared.ok) return prepared;
+		let turnReceipt = null;
+		if (this.isInCombat()) {
+			const committedReceipt = this.commitTurnReceipt(prepared.turnReceiptDescriptor);
+			if (!committedReceipt.ok) {
+				return {
+					ok: false,
+					committed: false,
+					reason: committedReceipt.reason,
+					storage: prepared.storage,
+					holder: prepared.holder,
+					turnReceipt: committedReceipt.receipt,
+				};
+			}
+			turnReceipt = committedReceipt.receipt;
+		}
+		const wrapper = this._findInventoryRow(itemId);
+		const liveStorage = wrapper?.item?._spellStorage;
+		if (!liveStorage || liveStorage.storageId !== prepared.storage.storageId || liveStorage.usesCurrent <= 0) {
+			const rollback = turnReceipt ? this.rollbackTurnReceipt(turnReceipt) : null;
+			return {ok: false, committed: false, reason: "resource-commit-failed", rollback, turnReceipt};
+		}
+		liveStorage.usesCurrent--;
+		if (liveStorage.usesCurrent <= 0) {
+			liveStorage.usesCurrent = 0;
+			liveStorage.repair = {status: "expired", reasons: ["uses-depleted"], lastCheckedReason: "use-committed"};
+		}
+		return {
+			ok: true,
+			committed: true,
+			reason: null,
+			itemId,
+			storageId: liveStorage.storageId,
+			usesCurrent: liveStorage.usesCurrent,
+			usesMax: liveStorage.usesMax,
+			holder: prepared.holder,
+			turnReceipt,
+		};
+	}
+
 	static getItemGrantedLanguages (item) {
 		if (!item?.grantsLanguage) return [];
 		if (item.selectedLanguage) return [item.selectedLanguage];
@@ -39938,8 +40327,49 @@ class CharacterSheetState {
 	 */
 	getItemPowers ({activeOnly = false} = {}) {
 		const out = [];
+		this.reconcileEfaSpellStoringItem({reason: "item-power-read"});
 		const usableFingerprints = new Set(this.getUsableGear().map(activation => `${activation.itemId}|${activation.activationFingerprint}`));
 		for (const item of this.getItems()) {
+			const storedSpell = item._spellStorage;
+			if (storedSpell) {
+				const wrapper = this._findInventoryRow(item.id);
+				const isHeld = !!wrapper?.equipped && this._isEfaSpellStoringItemHostRow(wrapper);
+				const repairReasons = storedSpell.repair?.reasons || [];
+				const unavailableReason = storedSpell.repair?.status === "expired" || storedSpell.usesCurrent <= 0
+					? `${storedSpell.spell?.name || "Stored spell"} has no uses remaining.`
+					: storedSpell.repair?.status !== "active"
+						? `Repair required: ${repairReasons.join(", ") || "stored identity is unresolved"}.`
+						: !isHeld
+							? "Hold this item to use its stored spell."
+							: null;
+				out.push({
+					id: `efa-spell-storage:${storedSpell.storageId}`,
+					name: storedSpell.spell?.name || "Stored Spell",
+					kind: "storedSpell",
+					actionType: "action",
+					description: `Produce the effect of ${storedSpell.spell?.name || "the stored spell"} using the Artificer's stored casting statistics.`,
+					itemId: item.id,
+					itemName: item.name,
+					itemSource: item.source,
+					itemHoverData: item,
+					requiresEquipped: true,
+					storageId: storedSpell.storageId,
+					spellName: storedSpell.spell?.name || "",
+					spellSource: storedSpell.spell?.source || "",
+					castLevel: storedSpell.spell?.level || 0,
+					usesCurrent: storedSpell.usesCurrent,
+					usesMax: storedSpell.usesMax,
+					usageType: "limited",
+					spellSaveDc: storedSpell.casting?.saveDc ?? null,
+					spellAttackBonus: storedSpell.casting?.attackBonus ?? null,
+					holderRequired: true,
+					repair: MiscUtil.copyFast(storedSpell.repair || {}),
+					isReferenceOnly: false,
+					isActive: isHeld,
+					isAvailable: !unavailableReason,
+					unavailableReason,
+				});
+			}
 			for (const power of item.itemPowers || []) {
 				if (power.activationFingerprint && usableFingerprints.has(`${item.id}|${power.activationFingerprint}`)) continue;
 				const requiresEquipped = power.requiresEquipped !== false;
@@ -40145,6 +40575,7 @@ class CharacterSheetState {
 		if (!power.isAvailable) return {ok: false, reason: power.unavailableReason};
 		if (power.efaArcaneArmorAction) return this._invokeEfaArcaneArmorItemPower(power);
 		if (power.efaArcaneArmorModelAction) return this._invokeEfaArcaneArmorModelItemPower(power, efaArmorer);
+		if (power.kind === "storedSpell") return {ok: false, reason: "Resolve the stored spell effect before committing its use.", requiresEffectCommit: true, power};
 		if (power.gemstonePower) {
 			const found = this._findGemstoneByInstanceId(power.gemInstanceId);
 			if (!found) return {ok: false, reason: "Gemstone not found."};
@@ -41594,6 +42025,8 @@ class CharacterSheetState {
 		const removedItem = this._findInventoryRow(itemId);
 		const isChainedFuryChain = removedItem?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
 			|| removedItem?.item?._isChainedFuryChain;
+		const removedStorage = removedItem?.item?._spellStorage;
+		if (removedStorage) this._pruneEfaSpellStoringItemTurnReceipts(removedStorage);
 		// Remove any effects/modifiers this item contributed BEFORE it leaves the inventory
 		// (defensive-trait cleanup needs to read the item's effects[] while it is still present).
 		this._unregisterItemEffects(itemId);
@@ -41657,6 +42090,7 @@ class CharacterSheetState {
 		// Preserve complex-feature containers carried by the old payload when not re-supplied
 		if (!itemProps.containedItems) itemProps.containedItems = wrapper.item?.containedItems || [];
 		if (!itemProps.storedSpells) itemProps.storedSpells = wrapper.item?.storedSpells || [];
+		if (!itemProps._spellStorage && wrapper.item?._spellStorage) itemProps._spellStorage = wrapper.item._spellStorage;
 		if (!itemProps.appliedUpgrades) itemProps.appliedUpgrades = wrapper.item?.appliedUpgrades || [];
 		if (!itemProps.socketedGemstones) itemProps.socketedGemstones = wrapper.item?.socketedGemstones || [];
 		const generatedClassification = this.classifyGeneratedFeatureItem(wrapper);
@@ -41704,6 +42138,7 @@ class CharacterSheetState {
 		// Replacing an equipped armor/shield payload may change its upgrades.
 		this._recalculateEquipmentModifiers();
 		this.reconcileEfaArmorerState({cause: "replace-item", itemId});
+		this.reconcileEfaSpellStoringItem({reason: "host-replaced"});
 		return true;
 	}
 
@@ -42767,9 +43202,10 @@ class CharacterSheetState {
 	/**
 	 * Return live inventory wrappers eligible for a resolved spell-cast focus rule.
 	 * @param {*} requirement
+	 * @param {{includeUnequipped?: boolean}} [opts]
 	 * @returns {Array<*>}
 	 */
-	getEligibleSpellCastFocusInventoryRows (requirement) {
+	getEligibleSpellCastFocusInventoryRows (requirement, {includeUnequipped = false} = {}) {
 		if (!requirement?.filter) return [];
 		if (requirement.hasInvalidSourceFeatureUid) return [];
 		const inventoryItemIds = new Set((requirement.filter.inventoryItemIds || []).map(id => String(id)));
@@ -42786,7 +43222,7 @@ class CharacterSheetState {
 		const generatedLifecycleStates = new Set((generatedFeature?.lifecycleStates || []).map(state => String(state).toLowerCase()));
 		if (!inventoryItemIds.size && !itemUids.size && !itemNames.size && !itemTypes.size && !weaponFilter && !generatedOwnerKey) return [];
 		return (this._data.inventory || []).filter(wrapper => {
-			if (!wrapper?.id || !wrapper.equipped || Number(wrapper.quantity ?? 1) <= 0) return false;
+			if (!wrapper?.id || (!includeUnequipped && !wrapper.equipped) || Number(wrapper.quantity ?? 1) <= 0) return false;
 			const item = wrapper.item;
 			if (!item?.name || !item.source) return false;
 			if (inventoryItemIds.has(wrapper.id)) return true;
@@ -78735,11 +79171,15 @@ class CharacterSheetState {
 		const list = this.getConcentrations();
 		const kind = entry?.kind === "power" ? "power" : (entry?.kind || "spell");
 		const name = entry?.name || entry?.spellName || "unknown";
+		const selfHolderUid = this.getEfaSpellStoringItemSelfHolder().uid;
+		const holderUid = String(entry?.holderUid || selfHolderUid);
+		const belongsToHolder = concentration => String(concentration?.holderUid || selfHolderUid) === holderUid;
 		const record = {
 			startedAt: Date.now(),
 			...entry,
 			kind,
 			name,
+			holderUid,
 			// Every pre-existing concentration display reads `.spellName`, so a power
 			// would otherwise render as "Unknown" in the seven places that predate powers
 			// existing. Aliased for powers ONLY: a custom ability's `spellName` is
@@ -78759,18 +79199,18 @@ class CharacterSheetState {
 		};
 
 		// Re-manifesting / re-casting the same thing replaces its own entry.
-		drop(list.find(c => String(c.id).toLowerCase() === String(record.id).toLowerCase()));
+		drop(list.find(c => belongsToHolder(c) && String(c.id).toLowerCase() === String(record.id).toLowerCase()));
 
 		if (kind === "power") {
 			// A power can never share concentration with a spell.
-			[...list].filter(c => c.kind !== "power").forEach(drop);
+			[...list].filter(c => belongsToHolder(c) && c.kind !== "power").forEach(drop);
 			const max = Math.max(1, this.getPowerConcentrationMax() || 1);
-			while (list.filter(c => c.kind === "power").length >= max) {
-				const named = replaceId ? list.find(c => c.kind === "power" && String(c.id).toLowerCase() === String(replaceId).toLowerCase()) : null;
-				drop(named || list.find(c => c.kind === "power"));
+			while (list.filter(c => belongsToHolder(c) && c.kind === "power").length >= max) {
+				const named = replaceId ? list.find(c => belongsToHolder(c) && c.kind === "power" && String(c.id).toLowerCase() === String(replaceId).toLowerCase()) : null;
+				drop(named || list.find(c => belongsToHolder(c) && c.kind === "power"));
 			}
 		} else {
-			[...list].forEach(drop);
+			[...list].filter(belongsToHolder).forEach(drop);
 		}
 
 		list.push(record);
