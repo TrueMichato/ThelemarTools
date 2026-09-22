@@ -914,6 +914,66 @@ export type EffectCheck = _EffectCommon & (
 		excludedOwnerUids?: string[];
 		checks: ProjectionExpectation[];
 	}
+	| {
+		kind: "toolProficiencies";
+		includes: string[];
+		feature?: {
+			name: string;
+			source: string;
+			className: string;
+			classSource: string;
+			subclassName?: string;
+			subclassSource?: string;
+			level: number;
+		};
+		excludedFeatureSources?: string[];
+		conditionalGrantKey?: string;
+	}
+	| {
+		kind: "preparedSpellGrants";
+		sourceFeature: string;
+		className: string;
+		classSource: string;
+		subclassName: string;
+		subclassSource: string;
+		grants: Array<{level: number; name: string; source: string}>;
+		expectPreparedAllowanceFilled?: boolean;
+	}
+	| {
+		kind: "craftingTimeCalculation";
+		recipeCategory: string;
+		rarity: string;
+		expectValueAbsent?: boolean;
+		baselineWorkweeks: number;
+		effectiveWorkweeks: number;
+		multiplier: number;
+		sourceUid: string;
+	}
+	| {
+		kind: "sourceQualifiedRoundTrip";
+		className: string;
+		classSource: string;
+		subclassName: string;
+		subclassSource: string;
+		featureUids: Array<{level: number; uid: string}>;
+		spellGrants?: Array<{level: number; name: string; source: string}>;
+		spellGrantSourceFeature?: string;
+		incompatibleSubclassSources?: string[];
+	}
+	| {kind: "efaArtificerPlans"}
+	| {kind: "efaExperimentalElixirUi"}
+	| {
+		kind: "sourceQualifiedInnateSpellFlow";
+		spellName: string;
+		spellSource: string;
+		ownerUid: string;
+		classUid: string;
+		sourceFeatureUid: string;
+		expectedMax: number | "abilityMod";
+		expectedSlotLevel: number;
+		ability?: AblKey;
+	}
+	| {kind: "efaAlchemistCastFollowUp"; probe: "savant" | "eruption"}
 
 	// === Toggle: snapshot before, activate, snapshot diff, deactivate ===
 	| {kind: "togglePlusAc"; whenActive: number | "abilityMod"; ability?: AblKey; floor?: number}
@@ -2047,6 +2107,30 @@ async function _runPassiveOrRollEffect (
 			if (count < e.min) throw new Error(`cantrip count ${count} < ${e.min}`);
 			return;
 		}
+		case "toolProficiencies":
+			await charSheet.probeToolProficiencies(e);
+			return;
+		case "preparedSpellGrants":
+			await charSheet.probePreparedSpellGrants({...e, currentLevel: currentLevel ?? 0});
+			return;
+		case "craftingTimeCalculation":
+			await charSheet.probeCraftingTimeCalculation(e);
+			return;
+		case "sourceQualifiedRoundTrip":
+			await charSheet.probeSourceQualifiedRoundTrip({...e, currentLevel: currentLevel ?? 0});
+			return;
+		case "efaArtificerPlans":
+			await charSheet.probeEfaArtificerPlans();
+			return;
+		case "efaExperimentalElixirUi":
+			await charSheet.probeEfaExperimentalElixirUi();
+			return;
+		case "sourceQualifiedInnateSpellFlow":
+			await charSheet.probeSourceQualifiedInnateSpellFlow(e);
+			return;
+		case "efaAlchemistCastFollowUp":
+			await charSheet.probeEfaAlchemistCastFollowUp(e.probe);
+			return;
 		case "rollAbilityCheck": {
 			const r = await charSheet.clickAbilityRoll(e.ability, "check");
 			// Dismiss BEFORE asserting: a thrown assertion must not leave a

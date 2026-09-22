@@ -4365,6 +4365,1097 @@ export class CharacterSheetPage {
 		await expect(row.locator(".charsheet__spell-prepared")).toHaveCount(0);
 	}
 
+	async probeToolProficiencies ({
+		includes,
+		feature,
+		excludedFeatureSources = [],
+		conditionalGrantKey,
+	}: {
+		includes: string[];
+		feature?: {
+			name: string;
+			source: string;
+			className: string;
+			classSource: string;
+			subclassName?: string;
+			subclassSource?: string;
+			level: number;
+		};
+		excludedFeatureSources?: string[];
+		conditionalGrantKey?: string;
+	}): Promise<void> {
+		const result = await this.page.evaluate((cfg) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const exactFeature = cfg.feature
+				? state?.getFeatures?.().find((it: any) =>
+					it?.name === cfg.feature.name
+					&& it?.source === cfg.feature.source
+					&& it?.className === cfg.feature.className
+					&& it?.classSource === cfg.feature.classSource
+					&& (!cfg.feature.subclassName || it?.subclassShortName === cfg.feature.subclassName)
+					&& (!cfg.feature.subclassSource || it?.subclassSource === cfg.feature.subclassSource)
+					&& Number(it?.level) === cfg.feature.level,
+				)
+				: null;
+			const conditional = exactFeature?._conditionalToolGrant || null;
+			const nestedDecision = state?.getLevelHistory?.()
+				.flatMap((entry: any) => entry?.decisions || [])
+				.find((it: any) => it?.type === "nestedTool" && it?.grantKey === cfg.conditionalGrantKey);
+			return {
+				tools: state?.getToolProficiencies?.() || [],
+				hasExactFeature: !cfg.feature || !!exactFeature,
+				hasExcludedFeature: !!state?.getFeatures?.().some((it: any) =>
+					it?.name === cfg.feature?.name
+					&& cfg.excludedFeatureSources.includes(it?.source || it?.subclassSource),
+				),
+				requiredReplacementCount: conditional?.requiredCount ?? 0,
+				selections: conditional?.selections || [],
+				pendingChoiceCount: (state?.getPendingFeatureChoices?.() || [])
+					.filter((it: any) => it?.grantKey === cfg.conditionalGrantKey).length,
+				nestedDecisionSelection: nestedDecision?.selection || [],
+			};
+		}, {feature, excludedFeatureSources, conditionalGrantKey});
+
+		expect(result.hasExactFeature, "exact tool-granting feature").toBe(true);
+		expect(result.hasExcludedFeature, "incompatible feature source must stay isolated").toBe(false);
+		if (conditionalGrantKey) expect(result.pendingChoiceCount, "conditional tool replacement choice should be resolved").toBe(0);
+		for (const tool of includes) {
+			expect(
+				result.tools.some((it: string) => it.toLowerCase() === tool.toLowerCase()),
+				`tool proficiency ${tool}; seen=[${result.tools.join(", ")}]`,
+			).toBe(true);
+		}
+		expect(result.selections).toHaveLength(result.requiredReplacementCount);
+		if (result.requiredReplacementCount) {
+			expect(result.nestedDecisionSelection).toEqual(result.selections);
+		}
+	}
+
+	async probePreparedSpellGrants ({
+		sourceFeature,
+		className,
+		classSource,
+		subclassName,
+		subclassSource,
+		grants,
+		expectPreparedAllowanceFilled = false,
+		currentLevel,
+	}: {
+		sourceFeature: string;
+		className: string;
+		classSource: string;
+		subclassName: string;
+		subclassSource: string;
+		grants: Array<{level: number; name: string; source: string}>;
+		expectPreparedAllowanceFilled?: boolean;
+		currentLevel: number;
+	}): Promise<void> {
+		const expected = grants.filter(it => it.level <= currentLevel);
+		const result = await this.page.evaluate((cfg) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const allSpells = state?.getSpellsKnown?.() || state?.getSpells?.() || [];
+			const sourceFeatureSpells = allSpells.filter((spell: any) =>
+				spell?.sourceFeature === cfg.sourceFeature
+				&& spell?.sourceClass === cfg.className
+				&& spell?.sourceClassSource === cfg.classSource
+				&& spell?.sourceSubclass === cfg.subclassName
+				&& spell?.sourceSubclassSource === cfg.subclassSource,
+			);
+			const found = cfg.expected.map((want: any) => {
+				const spell = allSpells.find((it: any) =>
+					it?.name === want.name
+					&& it?.source === want.source
+					&& it?.sourceFeature === cfg.sourceFeature,
+				);
+				if (!spell) return {name: want.name, source: want.source, missing: true};
+				const unprepareResult = state?.setSpellPrepared?.(spell.id, false);
+				const after = (state?.getSpellsKnown?.() || state?.getSpells?.() || [])
+					.find((it: any) => it?.id === spell.id);
+				return {
+					name: spell.name,
+					source: spell.source,
+					sourceFeature: spell.sourceFeature,
+					sourceClass: spell.sourceClass,
+					sourceClassSource: spell.sourceClassSource,
+					sourceSubclass: spell.sourceSubclass,
+					sourceSubclassSource: spell.sourceSubclassSource,
+					alwaysPrepared: spell.alwaysPrepared,
+					prepared: after?.prepared,
+					unprepareResult,
+				};
+			});
+			const card = state?.getSpellcastingClassBreakdown?.().find((it: any) =>
+				it?.className === cfg.className && it?.classSource === cfg.classSource,
+			) || state?.getSpellcastingClassBreakdown?.().find((it: any) =>
+				it?.className === cfg.className,
+			);
+			return {
+				found,
+				sourceFeatureUids: sourceFeatureSpells.map((spell: any) => `${spell.name}|${spell.source}`).sort(),
+				card: card
+					? {
+						spellsCount: card.spellsCount,
+						spellsGranted: card.spellsGranted,
+						spellsMax: card.spellsMax,
+					}
+					: null,
+			};
+		}, {sourceFeature, className, classSource, subclassName, subclassSource, expected});
+
+		const expectedUids = expected.map(it => `${it.name}|${it.source}`).sort();
+		expect(result.sourceFeatureUids, "exact cumulative Alchemist spell grants").toEqual(expectedUids);
+		for (const spell of result.found) {
+			expect(spell, `${spell.name}|${spell.source} should be an exact-source always-prepared grant`).toMatchObject({
+				sourceFeature,
+				sourceClass: className,
+				sourceClassSource: classSource,
+				sourceSubclass: subclassName,
+				sourceSubclassSource: subclassSource,
+				alwaysPrepared: true,
+				prepared: true,
+				unprepareResult: false,
+			});
+		}
+		expect(result.card, `${className}|${classSource} spellcasting breakdown`).not.toBeNull();
+		expect(result.card?.spellsGranted, "granted spells should be counted separately").toBe(expected.length);
+		if (expectPreparedAllowanceFilled) {
+			expect(result.card?.spellsCount, "player-prepared allowance should remain fully available").toBe(result.card?.spellsMax);
+		}
+
+		await this.switchToTab(this.tabSpells);
+		for (const spell of expected) {
+			const row = this.page.locator(".charsheet__spell-item")
+				.filter({has: this.page.locator(".charsheet__spell-item-name", {hasText: new RegExp(`^${spell.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")})})
+				.first();
+			await expect(row, `${spell.name} should render`).toBeVisible();
+			await expect(row.locator(".charsheet__spell-always-prepared")).toContainText("Always");
+			await expect(row.locator(".charsheet__spell-prepared")).toHaveCount(0);
+		}
+	}
+
+	async probeCraftingTimeCalculation ({
+		recipeCategory,
+		rarity,
+		expectValueAbsent = false,
+		baselineWorkweeks,
+		effectiveWorkweeks,
+		multiplier,
+		sourceUid,
+	}: {
+		recipeCategory: string;
+		rarity: string;
+		expectValueAbsent?: boolean;
+		baselineWorkweeks: number;
+		effectiveWorkweeks: number;
+		multiplier: number;
+		sourceUid: string;
+	}): Promise<void> {
+		const result = await this.page.evaluate(async (cfg) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const response = await fetch("/data/crafting.json");
+			if (!response.ok) return {error: `crafting catalog HTTP ${response.status}`};
+			const catalog = await response.json();
+			const recipes = catalog?.craftingRecipe || [];
+			const recipe = recipes.find((it: any) =>
+				it?.recipeCategory === cfg.recipeCategory
+				&& it?.rarity === cfg.rarity
+				&& (!cfg.expectValueAbsent || it?.value == null),
+			);
+			if (!recipe) return {error: "matching real crafting recipe not found"};
+			const calculation = state?.getCraftingTimeCalculation?.({recipe});
+			const negativeRecipe = recipes.find((it: any) =>
+				it?.recipeCategory !== cfg.recipeCategory
+				&& it?.rarity === cfg.rarity
+				&& it?.value == null,
+			);
+			const negative = negativeRecipe
+				? state?.getCraftingTimeCalculation?.({recipe: negativeRecipe})
+				: null;
+			return {
+				error: null,
+				recipe: {
+					name: recipe.name,
+					source: recipe.source,
+					hasValue: Object.prototype.hasOwnProperty.call(recipe, "value") && recipe.value != null,
+				},
+				calculation,
+				negative,
+			};
+		}, {recipeCategory, rarity, expectValueAbsent});
+
+		expect(result.error, "real crafting recipe lookup").toBeNull();
+		if (expectValueAbsent) expect(result.recipe?.hasValue, "fixture must be value-less").toBe(false);
+		expect(result.calculation).toMatchObject({
+			isSupported: true,
+			baselineWorkweeks,
+			effectiveWorkweeks,
+			multiplier,
+		});
+		expect(result.calculation?.sourceBreakdown).toEqual([expect.objectContaining({uid: sourceUid, multiplier})]);
+		if (result.negative) {
+			expect(result.negative.effectiveWorkweeks, "non-potion recipe should not receive the Alchemist multiplier")
+				.toBe(result.negative.baselineWorkweeks);
+			expect(result.negative.sourceBreakdown).toEqual([]);
+		}
+	}
+
+	async probeSourceQualifiedRoundTrip ({
+		className,
+		classSource,
+		subclassName,
+		subclassSource,
+		featureUids,
+		spellGrants = [],
+		spellGrantSourceFeature,
+		incompatibleSubclassSources = [],
+		currentLevel,
+	}: {
+		className: string;
+		classSource: string;
+		subclassName: string;
+		subclassSource: string;
+		featureUids: Array<{level: number; uid: string}>;
+		spellGrants?: Array<{level: number; name: string; source: string}>;
+		spellGrantSourceFeature?: string;
+		incompatibleSubclassSources?: string[];
+		currentLevel: number;
+	}): Promise<void> {
+		const expectedFeatureUids = featureUids.filter(it => it.level <= currentLevel).map(it => it.uid);
+		const expectedSpellUids = spellGrants.filter(it => it.level <= currentLevel).map(it => `${it.name}|${it.source}`).sort();
+		const result = await this.page.evaluate((cfg) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const json = state?.toJson?.();
+			if (!json) return {error: "state.toJson unavailable"};
+			const loaded = state.loadFromJson(structuredClone(json));
+			if (loaded === false) return {error: "state.loadFromJson rejected export"};
+			cs?._renderCharacter?.();
+			const cls = state.getClasses?.().find((it: any) =>
+				it?.name === cfg.className && it?.source === cfg.classSource,
+			);
+			const toFeatureUid = (feature: any) => [
+				feature?.name,
+				feature?.className,
+				feature?.classSource,
+				feature?.subclassShortName,
+				feature?.subclassSource,
+				feature?.level,
+				feature?.source,
+			].join("|");
+			const featureSet = new Set((state.getFeatures?.() || []).map(toFeatureUid));
+			const spells = state.getSpellsKnown?.() || state.getSpells?.() || [];
+			const grantUids = spells
+				.filter((spell: any) =>
+					(!cfg.spellGrantSourceFeature || spell?.sourceFeature === cfg.spellGrantSourceFeature)
+					&& spell?.sourceClass === cfg.className
+					&& spell?.sourceClassSource === cfg.classSource
+					&& spell?.sourceSubclass === cfg.subclassName
+					&& spell?.sourceSubclassSource === cfg.subclassSource,
+				)
+				.map((spell: any) => `${spell.name}|${spell.source}`)
+				.sort();
+			return {
+				error: null,
+				classEntry: cls ? {
+					name: cls.name,
+					source: cls.source,
+					subclassName: cls.subclass?.name,
+					subclassSource: cls.subclass?.source,
+				} : null,
+				hasCompatibilitySubclass: !!state.getClasses?.().some((it: any) =>
+					it?.name === cfg.className
+					&& it?.source === cfg.classSource
+					&& it?.subclass?.name === cfg.subclassName
+					&& cfg.incompatibleSubclassSources.includes(it?.subclass?.source),
+				),
+				missingFeatures: cfg.expectedFeatureUids.filter((uid: string) => !featureSet.has(uid)),
+				grantUids,
+			};
+		}, {
+			className,
+			classSource,
+			subclassName,
+			subclassSource,
+			expectedFeatureUids,
+			spellGrantSourceFeature,
+			incompatibleSubclassSources,
+		});
+
+		expect(result.error, "source-qualified export round-trip").toBeNull();
+		expect(result.classEntry).toEqual({
+			name: className,
+			source: classSource,
+			subclassName,
+			subclassSource,
+		});
+		expect(result.hasCompatibilitySubclass, "incompatible subclass source must not replace exact identity").toBe(false);
+		expect(result.missingFeatures).toEqual([]);
+		expect(result.grantUids).toEqual(expectedSpellUids);
+	}
+
+	async probeEfaArtificerPlans (): Promise<void> {
+		await this._ensureExactToolItem("Tinker's Tools", "XPHB");
+		const result = await this.page.evaluate(() => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const snapshot = state?.toJson?.();
+			const calc = state?.getFeatureCalculations?.() || {};
+			const plans = state?.getEfaArtificerPlans?.() || [];
+			const projection = state?.getEfaArtificerPlanProjection?.() || {};
+			const production = state?.getEfaReplicateMagicItemProductionOptions?.();
+			const firstResolved = production?.plans?.find((it: any) => it?.ok && it?.options?.length);
+			const firstOption = firstResolved?.options?.[0];
+			const committed = firstResolved && firstOption
+				? state.commitEfaReplicateMagicItemsAtLongRest({
+					selections: [{
+						slotId: firstResolved.plan.slotId,
+						resolvedItemUid: firstOption.itemUid,
+						attune: false,
+					}],
+				})
+				: null;
+			const created = committed?.created?.[0];
+			const createdRow = created
+				? state.getInventory().find((row: any) => row.id === (created.itemId || created.id))
+				: null;
+			const classification = createdRow ? state.classifyGeneratedFeatureItem(createdRow) : null;
+			state.loadFromJson(structuredClone(snapshot));
+			cs?._renderCharacter?.();
+			return {
+				expectedPlans: calc.artificerPlansKnown,
+				expectedCreatedMax: calc.artificerCreatedMagicItemsMax,
+				plans: plans.map((plan: any) => ({
+					slotId: plan.slotId,
+					acquisitionLevel: plan.acquisitionLevel,
+					itemUid: plan.selection?.itemUid,
+					planUid: plan.selection?.planUid,
+				})),
+				unresolvedCount: (projection.unresolved || []).length,
+				productionAvailable: production?.available,
+				productionMax: production?.maxCreatedItems,
+				committed,
+				classification,
+			};
+		});
+
+		expect(result.expectedPlans, "EFA Artificer plans-known calculation").toBeGreaterThan(0);
+		expect(result.plans, "auto-filled Replicate Magic Item plan choices").toHaveLength(result.expectedPlans);
+		expect(new Set(result.plans.map((it: any) => it.slotId)).size).toBe(result.expectedPlans);
+		expect(new Set(result.plans.map((it: any) => it.planUid || it.itemUid)).size).toBe(result.expectedPlans);
+		expect(result.plans.every((it: any) => !!it.itemUid && !!it.planUid)).toBe(true);
+		expect(result.unresolvedCount, "Replicate Magic Item plan projection").toBe(0);
+		expect(result.productionAvailable, "equipped Tinker's Tools should enable production").toBe(true);
+		expect(result.productionMax).toBe(result.expectedCreatedMax);
+		expect(result.committed).toMatchObject({
+			ok: true,
+			code: "replicate-production-committed",
+		});
+		expect(result.committed.created).toHaveLength(1);
+		expect(result.classification).toMatchObject({
+			status: "valid",
+			owner: {
+				featureUid: "Replicate Magic Item|Artificer|EFA|2",
+				featureSource: "EFA",
+				classUid: "Artificer|EFA",
+			},
+		});
+	}
+
+	async probeSourceQualifiedInnateSpellFlow ({
+		spellName,
+		spellSource,
+		ownerUid,
+		classUid,
+		sourceFeatureUid,
+		expectedMax,
+		expectedSlotLevel,
+		ability = "int",
+	}: {
+		spellName: string;
+		spellSource: string;
+		ownerUid: string;
+		classUid: string;
+		sourceFeatureUid: string;
+		expectedMax: number | "abilityMod";
+		expectedSlotLevel: number;
+		ability?: "str" | "dex" | "con" | "int" | "wis" | "cha";
+	}): Promise<void> {
+		const focusId = await this._ensureExactToolItem("Alchemist's Supplies", "XPHB");
+		const result = await this.page.evaluate(async (cfg) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			const spell = state?.getInnateSpells?.().find((it: any) =>
+				it?.name === cfg.spellName
+				&& it?.source === cfg.spellSource
+				&& it?.ownerUid === cfg.ownerUid,
+			);
+			if (!spell) return {error: "exact innate spell grant missing"};
+			const slotsBefore = structuredClone(state.getSpellSlots());
+			const preparedMaxBefore = state.getMaxPreparedSpells("Artificer");
+			const beforeUses = {...spell.uses};
+			const receipt = await cs._spells._castInnateSpell(spell.id, {
+				decision: {focusInventoryItemId: cfg.focusId},
+			});
+			const afterCastUses = {...state.getInnateSpells().find((it: any) => it.id === spell.id)?.uses};
+			const slotsAfter = structuredClone(state.getSpellSlots());
+			state.onLongRest();
+			const afterRestUses = {...state.getInnateSpells().find((it: any) => it.id === spell.id)?.uses};
+			cs._renderCharacter?.();
+			return {
+				error: null,
+				metadata: {
+					ownerUid: spell.ownerUid,
+					classUid: spell.classUid,
+					sourceFeatureUid: spell.sourceFeatureUid,
+					sourceClassSource: spell.sourceClassSource,
+					sourceSubclassSource: spell.sourceSubclassSource,
+					ignoresPreparation: spell.ignoresPreparation,
+					ignoresMaterialComponents: spell.ignoresMaterialComponents,
+					focusItemUids: spell.spellcastingFocusRequirement?.filter?.itemUids,
+				},
+				beforeUses,
+				afterCastUses,
+				afterRestUses,
+				expectedAbilityMax: Math.max(1, state.getAbilityMod(cfg.ability)),
+				slotsUnchanged: JSON.stringify(slotsBefore) === JSON.stringify(slotsAfter),
+				preparedMaxUnchanged: state.getMaxPreparedSpells("Artificer") === preparedMaxBefore,
+				receipt,
+			};
+		}, {spellName, spellSource, ownerUid, focusId, ability});
+
+		expect(result.error, `${spellName} innate cast`).toBeNull();
+		const max = expectedMax === "abilityMod" ? result.expectedAbilityMax : expectedMax;
+		expect(result.metadata).toMatchObject({
+			ownerUid,
+			classUid,
+			sourceFeatureUid,
+			sourceClassSource: "EFA",
+			sourceSubclassSource: "EFA",
+			ignoresPreparation: true,
+			ignoresMaterialComponents: true,
+			focusItemUids: ["Alchemist's Supplies|XPHB"],
+		});
+		expect(result.beforeUses).toEqual({current: max, max});
+		expect(result.afterCastUses).toEqual({current: max - 1, max});
+		expect(result.afterRestUses).toEqual({current: max, max});
+		expect(result.slotsUnchanged, `${spellName} must not spend a spell slot`).toBe(true);
+		expect(result.preparedMaxUnchanged, `${spellName} must not consume prepared allowance`).toBe(true);
+		expect(result.receipt).toMatchObject({
+			ok: true,
+			committed: true,
+			spellUid: `${spellName}|${spellSource}`,
+			castType: "innate",
+			slotLevel: expectedSlotLevel,
+			castingClassUid: classUid,
+			castingSubclassUid: ownerUid,
+			focusInventoryItemId: focusId,
+			focusItemUid: "Alchemist's Supplies|XPHB",
+			sourceFeatureUid,
+			ruleId: "efa-alchemist-alchemists-supplies-required",
+			focusRule: {
+				ruleId: "efa-alchemist-alchemists-supplies-required",
+				sourceFeatureUid,
+			},
+		});
+	}
+
+	async probeEfaAlchemistCastFollowUp (probe: "savant" | "eruption"): Promise<void> {
+		if (probe === "savant") return this._probeEfaAlchemicalSavant();
+		return this._probeEfaAlchemicalEruption();
+	}
+
+	private async _probeEfaAlchemicalSavant (): Promise<void> {
+		const focusId = await this._ensureExactToolItem("Alchemist's Supplies", "XPHB");
+		const result = await this.page.evaluate(async ({focusId}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs._state;
+			const row = state.getInventory().find((it: any) => it.id === focusId);
+			const focus = state.getSpellCastFocusReference(row);
+			const makeReceipt = ({damageType = "acid", kind = "damage", classUid = "Artificer|EFA", itemFocus = focus}: any = {}) => ({
+				receiptVersion: 1,
+				receiptId: `e2e-savant-${kind}-${damageType}-${classUid}`,
+				ok: true,
+				committed: true,
+				castingClassUid: classUid,
+				castingSubclassUid: "Alchemist|Artificer|EFA|EFA",
+				spellUid: "E2E Alchemical Formula|EFA",
+				spell: {name: "E2E Alchemical Formula", source: "EFA", level: 1},
+				castType: "slot",
+				focus: itemFocus,
+				cast: {
+					rolls: [{
+						id: `${kind}:0`,
+						kind,
+						...(kind === "damage" ? {damageType} : {}),
+						formula: "1d6",
+						total: 4,
+					}],
+				},
+			});
+			const intBonus = Math.max(1, state.getAbilityMod("int"));
+			const spell = state.getSpells().find((it: any) =>
+				it.name === "Ray of Sickness"
+				&& it.source === "XPHB"
+				&& it.sourceClass === "Artificer"
+				&& it.sourceClassSource === "EFA",
+			);
+			if (!spell) return {error: "exact EFA Alchemist Ray of Sickness grant missing"};
+			const slotsBefore = state.getSpellSlotsCurrent(1);
+			const eligible = await cs._spells._castSpell(spell.id, {
+				withMetamagic: false,
+				decision: {
+					slotLevel: 1,
+					castAsRitual: false,
+					skipComponentPrompt: true,
+					focusInventoryItemId: focusId,
+				},
+			});
+			const second = await cs._spells._pApplyEfaAlchemicalSavant(eligible);
+			const healing = makeReceipt({kind: "healing"});
+			const healingApplied = await cs._spells._pApplyEfaAlchemicalSavant(healing);
+			const necrotic = await cs._spells._pApplyEfaAlchemicalSavant(makeReceipt({damageType: "necrotic"}));
+			const wrongClass = await cs._spells._pApplyEfaAlchemicalSavant(makeReceipt({classUid: "Artificer|TCE"}));
+			const wrongFocus = await cs._spells._pApplyEfaAlchemicalSavant(makeReceipt({
+				itemFocus: {...focus, itemUid: "Alchemist's Supplies|PHB"},
+			}));
+			const baseInt = state._data.abilities.int;
+			state.setAbilityBase("int", 8);
+			const minimum = makeReceipt({damageType: "fire"});
+			const minimumApplied = await cs._spells._pApplyEfaAlchemicalSavant(minimum);
+			state.setAbilityBase("int", baseInt);
+			return {
+				error: null,
+				intBonus,
+				slotsBefore,
+				slotsAfter: state.getSpellSlotsCurrent(1),
+				liveReceipt: eligible,
+				second,
+				eligibleRoll: eligible.cast.rolls[0],
+				healingApplied,
+				healingRoll: healing.cast.rolls[0],
+				necrotic,
+				wrongClass,
+				wrongFocus,
+				minimumApplied,
+				minimumRoll: minimum.cast.rolls[0],
+			};
+		}, {focusId});
+
+		expect(result.error).toBeNull();
+		expect(result.slotsAfter).toBe(result.slotsBefore - 1);
+		expect(result.liveReceipt, JSON.stringify(result, null, 2)).toMatchObject({
+			ok: true,
+			committed: true,
+			castingClassUid: "Artificer|EFA",
+			castingSubclassUid: "Alchemist|Artificer|EFA|EFA",
+			spellUid: "Ray of Sickness|XPHB",
+			castType: "slot",
+			focusInventoryItemId: focusId,
+			focusItemUid: "Alchemist's Supplies|XPHB",
+			alchemicalSavant: {bonus: result.intBonus},
+		});
+		expect(result.eligibleRoll).toMatchObject({
+			total: result.liveReceipt.alchemicalSavant.finalTotal,
+			alchemicalSavant: {bonus: result.intBonus},
+		});
+		expect(result.liveReceipt.alchemicalSavant.finalTotal - result.liveReceipt.alchemicalSavant.originalTotal).toBe(result.intBonus);
+		expect(result.second).toEqual({applied: false, reason: "alreadyHandled"});
+		expect(result.healingApplied).toMatchObject({applied: true, bonus: result.intBonus});
+		expect(result.healingRoll.total).toBe(4 + result.intBonus);
+		expect(result.minimumApplied).toMatchObject({applied: true, bonus: 1});
+		expect(result.minimumRoll.total).toBe(5);
+		expect(result.necrotic).toEqual({applied: false, reason: "noEligibleRoll"});
+		expect(result.wrongClass).toEqual({applied: false, reason: "ineligibleCast"});
+		expect(result.wrongFocus).toEqual({applied: false, reason: "ineligibleCast"});
+	}
+
+	private async _probeEfaAlchemicalEruption (): Promise<void> {
+		const focusId = await this._ensureExactToolItem("Alchemist's Supplies", "XPHB");
+		const result = await this.page.evaluate(async ({focusId}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			const makeReceipt = ({damageType = "acid", classUid = "Artificer|EFA", subclassUid = "Alchemist|Artificer|EFA|EFA", castType = "slot"}: any = {}) => ({
+				receiptVersion: 1,
+				receiptId: `e2e-eruption-${damageType}-${classUid}-${castType}`,
+				ok: true,
+				committed: true,
+				castingClassUid: classUid,
+				castingSubclassUid: subclassUid,
+				spellUid: "E2E Eruption Spell|EFA",
+				spell: {name: "E2E Eruption Spell", source: "EFA", level: 1},
+				castType,
+				damageEvidence: {
+					version: 1,
+					resolution: "confirmed",
+					damage: [{damageType, amount: 8}],
+					targets: [{targetId: "target-1", targetName: "Goblin", outcome: "damaged"}],
+				},
+			});
+			const target = {targetId: "target-1", targetName: "Goblin"};
+			const roll = async () => ({dice: "2d8", damageType: "force", total: 9});
+			const spell = state.getSpells().find((it: any) =>
+				it.name === "Ray of Sickness"
+				&& it.source === "XPHB"
+				&& it.sourceClass === "Artificer"
+				&& it.sourceClassSource === "EFA",
+			);
+			if (!spell) return {error: "exact EFA Alchemist Ray of Sickness grant missing"};
+			state.endCombat?.();
+			const originalEruptionFollowUp = cs._spells._pHandleAlchemicalEruption;
+			cs._spells._pHandleAlchemicalEruption = async () => ({status: "deferredForE2e"});
+			let liveReceipt;
+			try {
+				liveReceipt = await cs._spells._castSpell(spell.id, {
+					withMetamagic: false,
+					decision: {
+						slotLevel: 1,
+						castAsRitual: false,
+						skipComponentPrompt: true,
+						focusInventoryItemId: focusId,
+					},
+				});
+			} finally {
+				cs._spells._pHandleAlchemicalEruption = originalEruptionFollowUp;
+			}
+			const liveUse = await state.pUseAlchemicalEruption({
+				receipt: liveReceipt,
+				target,
+				manualConfirmed: true,
+				fnRollDamage: roll,
+			});
+			const wrongType = await state.pUseAlchemicalEruption({receipt: makeReceipt({damageType: "necrotic"}), target, manualConfirmed: true, fnRollDamage: roll});
+			const itemCast = await state.pUseAlchemicalEruption({receipt: makeReceipt({castType: "item"}), target, manualConfirmed: true, fnRollDamage: roll});
+			const wrongSubclass = state.getAlchemicalEruptionEligibility(makeReceipt({subclassUid: "Alchemist|Artificer|EFA|TCE"}));
+			state.startCombat();
+			const first = await state.pUseAlchemicalEruption({receipt: makeReceipt(), target, fnRollDamage: roll});
+			const second = await state.pUseAlchemicalEruption({receipt: makeReceipt(), target, fnRollDamage: roll});
+			state.advanceRound();
+			const nextTurn = await state.pUseAlchemicalEruption({receipt: makeReceipt({damageType: "fire"}), target, fnRollDamage: roll});
+			state.endCombat();
+			return {error: null, liveReceipt, liveUse, first, second, nextTurn, wrongType, itemCast, wrongSubclass};
+		}, {focusId});
+
+		expect(result.error).toBeNull();
+		expect(result.liveReceipt).toMatchObject({
+			ok: true,
+			committed: true,
+			castingClassUid: "Artificer|EFA",
+			castingSubclassUid: "Alchemist|Artificer|EFA|EFA",
+			spellUid: "Ray of Sickness|XPHB",
+			castType: "slot",
+			focusInventoryItemId: focusId,
+			focusItemUid: "Alchemist's Supplies|XPHB",
+		});
+		expect(result.liveReceipt.damageEvidence.damage).toEqual(expect.arrayContaining([
+			expect.objectContaining({damageType: "poison"}),
+		]));
+		expect(result.liveUse).toMatchObject({
+			ok: true,
+			committed: true,
+			damage: {dice: "2d8", damageType: "force", total: 9},
+		});
+		expect(result.first).toMatchObject({
+			ok: true,
+			committed: true,
+			damage: {dice: "2d8", damageType: "force", total: 9},
+			target: {targetId: "target-1", targetName: "Goblin"},
+		});
+		expect(result.second).toMatchObject({ok: false, committed: false, reason: "alreadyUsedThisTurn"});
+		expect(result.nextTurn).toMatchObject({ok: true, committed: true, damage: {dice: "2d8", damageType: "force"}});
+		expect(result.wrongType).toMatchObject({ok: false, committed: false, reason: "wrongDamageType"});
+		expect(result.itemCast).toMatchObject({ok: false, committed: false, reason: "wrongCastType"});
+		expect(result.wrongSubclass).toMatchObject({eligible: false, reason: "wrongCastingSubclass"});
+	}
+
+	async probeEfaExperimentalElixirUi (): Promise<void> {
+		console.log("[efa-elixir-ui] start");
+		await this._ensureExactToolItem("Alchemist's Supplies", "XPHB");
+		const original = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.toJson?.());
+		try {
+			const batchSize = await this.page.evaluate(() =>
+				(globalThis as any).charSheet?._state?.getEfaExperimentalElixirBatchSize?.(),
+			);
+			expect(batchSize, "Experimental Elixir batch size at this checkpoint").toBe(5);
+
+			const produced = await this._finishLongRestWithEfaElixir("produce", {verifyRetainedRolls: true});
+			console.log("[efa-elixir-ui] produced long-rest batch");
+			expect(produced.rollsRetained, "Produce → Decline → Produce must retain the original rolls").toBe(true);
+			expect(produced.vials).toHaveLength(batchSize);
+			expect(produced.vials.every((it: any) => it.status === "valid" && it.origin === "longRest")).toBe(true);
+
+			const declined = await this._finishLongRestWithEfaElixir("decline");
+			console.log("[efa-elixir-ui] declined replacement batch");
+			expect(declined.vials, "declining the next batch expires the prior batch").toEqual([]);
+
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const row = cs._state.getEfaExperimentalElixirSuppliesRows()[0];
+				cs._state.setItemEquipped(row.id, false);
+				cs._renderCharacter?.();
+			});
+			const withoutSupplies = await this._finishLongRestWithEfaElixir("decline", {expectSupplies: false});
+			console.log("[efa-elixir-ui] completed no-supplies long rest");
+			expect(withoutSupplies.productionUnavailable).toBe(true);
+			expect(withoutSupplies.vials).toEqual([]);
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const row = cs._state.getInventory().find((it: any) =>
+					it?.item?.name === "Alchemist's Supplies" && it?.item?.source === "XPHB",
+				);
+				cs._state.setItemEquipped(row.id, true);
+				cs._renderCharacter?.();
+			});
+			console.log("[efa-elixir-ui] re-equipped supplies");
+
+			const created: Record<string, string> = {};
+			for (const effectKey of ["healing", "swiftness", "resilience", "boldness", "flight"]) {
+				const result = await this._createEfaExperimentalElixirWithUi(effectKey);
+				console.log(`[efa-elixir-ui] created ${effectKey}`);
+				created[effectKey] = result.itemId;
+				expect(result.slotAfter, `${effectKey} creation spends one spell slot`).toBe(result.slotBefore - 1);
+				expect(result.metadata).toMatchObject({
+					effectKey,
+					origin: "spellSlot",
+					creationArtificerLevel: 17,
+				});
+			}
+
+			await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				state.setCurrentHp(Math.max(1, state.getMaxHp() - 30));
+				(globalThis as any).charSheet?._renderCharacter?.();
+			});
+			const beforeHealing = await this._readEfaExperimentalElixirMechanics();
+			await this._consumeEfaExperimentalElixirWithUi(created.healing);
+			const afterHealing = await this._readEfaExperimentalElixirMechanics();
+			expect(afterHealing.hp, "Healing elixir restores real HP").toBeGreaterThan(beforeHealing.hp);
+
+			const beforeSwiftness = await this._readEfaExperimentalElixirMechanics();
+			await this._consumeEfaExperimentalElixirWithUi(created.swiftness);
+			const afterSwiftness = await this._readEfaExperimentalElixirMechanics();
+			expect(afterSwiftness.walkSpeed).toBe(beforeSwiftness.walkSpeed + 20);
+			const swiftnessState = afterSwiftness.effects.find((it: any) => it.effectKey === "swiftness");
+			expect(swiftnessState).toMatchObject({status: "valid", active: true});
+
+			const beforeResilience = await this._readEfaExperimentalElixirMechanics();
+			await this._consumeEfaExperimentalElixirWithUi(created.resilience);
+			const afterResilience = await this._readEfaExperimentalElixirMechanics();
+			expect(afterResilience.ac).toBe(beforeResilience.ac + 1);
+
+			await this._consumeEfaExperimentalElixirWithUi(created.boldness);
+			const afterBoldness = await this._readEfaExperimentalElixirMechanics();
+			expect(afterBoldness.attackBonusDice).toEqual([
+				expect.objectContaining({dice: "1d4", sign: 1, source: "Experimental Elixir: Boldness"}),
+			]);
+			expect(afterBoldness.saveBonusDice).toEqual([
+				expect.objectContaining({dice: "1d4", sign: 1, source: "Experimental Elixir: Boldness"}),
+			]);
+			expect(afterBoldness.checkBonusDice).toEqual([]);
+
+			await this._consumeEfaExperimentalElixirWithUi(created.flight);
+			const afterFlight = await this._readEfaExperimentalElixirMechanics();
+			expect(afterFlight.flySpeed).toBe(30);
+			console.log("[efa-elixir-ui] consumed five Self effects");
+
+			const refreshOne = await this._createEfaExperimentalElixirWithUi("swiftness");
+			const refreshTwo = await this._createEfaExperimentalElixirWithUi("swiftness");
+			await this._consumeEfaExperimentalElixirWithUi(refreshOne.itemId);
+			const firstRefresh = await this._readEfaExperimentalElixirMechanics();
+			const firstSwiftness = firstRefresh.effects.find((it: any) => it.effectKey === "swiftness");
+			await this.page.evaluate((stateId) => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const active = state._data.activeStates.find((it: any) => it.id === stateId);
+				active.roundsRemaining = 7;
+			}, firstSwiftness.stateId);
+			await this._consumeEfaExperimentalElixirWithUi(refreshTwo.itemId);
+			const refreshed = await this._readEfaExperimentalElixirMechanics();
+			const refreshedSwiftness = refreshed.effects.filter((it: any) => it.effectKey === "swiftness");
+			expect(refreshedSwiftness).toHaveLength(1);
+			expect(refreshedSwiftness[0].stateId).toBe(firstSwiftness.stateId);
+			expect(refreshedSwiftness[0].roundsRemaining).toBeGreaterThan(7);
+			expect(refreshed.walkSpeed).toBe(beforeSwiftness.walkSpeed + 20);
+			console.log("[efa-elixir-ui] verified refresh");
+
+			const other = await this._createEfaExperimentalElixirWithUi("flight");
+			const beforeOther = await this._readEfaExperimentalElixirMechanics();
+			const handoff = await this._consumeEfaExperimentalElixirWithUi(other.itemId, {target: "other", targetName: "Mira"});
+			const afterOther = await this._readEfaExperimentalElixirMechanics();
+			expect(handoff.previewKeptItem, "Other preview must not spend the vial").toBe(true);
+			expect(handoff.handoff).toMatchObject({
+				kind: "efaExperimentalElixirOther",
+				version: 1,
+				target: {
+					type: "external",
+					name: "Mira",
+					range: {maximumFeet: 5, withinRangeConfirmed: true},
+				},
+				effect: {
+					effectKey: "flight",
+					mechanics: [{type: "flySpeed", value: 30, source: "Experimental Elixir"}],
+				},
+				source: {
+					provenance: {
+						owner: {
+							classUid: "Artificer|EFA",
+							subclassUid: "Alchemist|Artificer|EFA|EFA",
+							featureUid: "Experimental Elixir|Artificer|EFA|Alchemist|EFA|3|EFA",
+						},
+						metadata: {effectKey: "flight", origin: "spellSlot"},
+					},
+				},
+			});
+			expect(afterOther.hp).toBe(beforeOther.hp);
+			expect(afterOther.walkSpeed).toBe(beforeOther.walkSpeed);
+			expect(afterOther.flySpeed).toBe(beforeOther.flySpeed);
+			expect(afterOther.ac).toBe(beforeOther.ac);
+			expect(afterOther.effects).toEqual(beforeOther.effects);
+			console.log("[efa-elixir-ui] verified Other handoff");
+
+			await this.triggerShortRest();
+			const afterShortRest = await this._readEfaExperimentalElixirMechanics();
+			expect(afterShortRest.effects.some((it: any) => it.effectKey === "swiftness")).toBe(false);
+			expect(afterShortRest.walkSpeed).toBe(beforeSwiftness.walkSpeed);
+			await this.triggerLongRest();
+			const afterLongRest = await this._readEfaExperimentalElixirMechanics();
+			expect(afterLongRest.effects).toEqual([]);
+			console.log("[efa-elixir-ui] verified rest expiry");
+
+			const isolation = await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const snapshot = cs._state.toJson();
+				cs._state.setSubclass("Artificer", {name: "Alchemist", shortName: "Alchemist", source: "TCE"});
+				const feature = cs._state._data.features.find((it: any) =>
+					it?.name === "Experimental Elixir"
+						&& it?.className === "Artificer"
+						&& it?.classSource === "EFA",
+				);
+				if (feature) feature.subclassSource = "TCE";
+				cs._renderCharacter?.();
+				cs._features?.render?.();
+				return {
+					snapshot,
+					batchSize: cs._state.getEfaExperimentalElixirBatchSize(),
+				};
+			});
+			await this.switchToTab(this.tabFeatures);
+			expect(isolation.batchSize, "TCE compatibility subclass must not enable the EFA operation").toBe(0);
+			await expect(this._featureCard("Experimental Elixir").locator(".charsheet__efa-elixir-create")).toHaveCount(0);
+			await this.page.evaluate((snapshot) => {
+				const cs: any = (globalThis as any).charSheet;
+				cs._state.loadFromJson(snapshot);
+				cs._renderCharacter?.();
+				cs._features?.render?.();
+			}, isolation.snapshot);
+			console.log("[efa-elixir-ui] verified source isolation");
+		} finally {
+			await this.page.evaluate((snapshot) => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.loadFromJson?.(snapshot);
+				cs?._renderCharacter?.();
+			}, original);
+		}
+	}
+
+	private async _finishLongRestWithEfaElixir (
+		decision: "produce" | "decline",
+		{verifyRetainedRolls = false, expectSupplies = true}: {verifyRetainedRolls?: boolean; expectSupplies?: boolean} = {},
+	): Promise<{rollsRetained: boolean; productionUnavailable: boolean; vials: any[]}> {
+		const startedAt = Date.now();
+		console.log(`[efa-elixir-ui] ${decision} rest begin ${startedAt}`);
+		await this.switchToTab(this.tabOverview);
+		console.log(`[efa-elixir-ui] ${decision} overview ready +${Date.now() - startedAt}ms`);
+		await this.page.locator("#charsheet-btn-long-rest").click({timeout: 10_000});
+		console.log(`[efa-elixir-ui] ${decision} modal requested +${Date.now() - startedAt}ms`);
+		const modal = this._visibleModal(/Long Rest/i);
+		const section = modal.locator(".charsheet__efa-elixir-rest");
+		await expect(section).toBeVisible({timeout: 10_000});
+		console.log(`[efa-elixir-ui] ${decision} section visible +${Date.now() - startedAt}ms`);
+		let rollsRetained = false;
+		const productionUnavailable = await section.getByText(/Production unavailable/i).isVisible().catch(() => false);
+
+		const resolveRowSixes = async () => {
+			const selects = section.locator(".charsheet__efa-elixir-rest-roll select");
+			for (let i = 0; i < await selects.count(); i++) await selects.nth(i).selectOption({index: 1});
+		};
+		if (expectSupplies && decision === "produce") {
+			await section.locator("input[value='produce']").check();
+			const before = await section.locator(".charsheet__efa-elixir-roll-value").allTextContents();
+			await resolveRowSixes();
+			if (verifyRetainedRolls) {
+				await section.locator("input[value='decline']").check();
+				await expect(section.locator(".charsheet__efa-elixir-roll-value")).toHaveCount(0);
+				await section.locator("input[value='produce']").check();
+				const after = await section.locator(".charsheet__efa-elixir-roll-value").allTextContents();
+				rollsRetained = JSON.stringify(before) === JSON.stringify(after);
+				await resolveRowSixes();
+			}
+		} else if (expectSupplies) {
+			await section.locator("input[value='decline']").check();
+		}
+		console.log(`[efa-elixir-ui] ${decision} committing +${Date.now() - startedAt}ms`);
+		await modal.getByRole("button", {name: /Finish Long Rest/i}).click({timeout: 10_000});
+		console.log(`[efa-elixir-ui] ${decision} commit click returned +${Date.now() - startedAt}ms`);
+		await expect(modal).toBeHidden({timeout: 10_000});
+		console.log(`[efa-elixir-ui] ${decision} modal hidden +${Date.now() - startedAt}ms`);
+		const vials = await this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			return state.getEfaExperimentalElixirRows().map((row: any) => {
+				const classification = state.classifyEfaExperimentalElixir(row);
+				return {
+					id: row.id,
+					status: classification.status,
+					effectKey: classification.metadata?.effectKey,
+					origin: classification.metadata?.origin,
+				};
+			});
+		});
+		return {rollsRetained, productionUnavailable, vials};
+	}
+
+	private async _createEfaExperimentalElixirWithUi (
+		effectKey: "healing" | "swiftness" | "resilience" | "boldness" | "flight",
+	): Promise<{itemId: string; slotBefore: number; slotAfter: number; metadata: any}> {
+		const startedAt = Date.now();
+		console.log(`[efa-elixir-ui] create ${effectKey} begin ${startedAt}`);
+		const beforeIds = await this.page.evaluate(() =>
+			(globalThis as any).charSheet._state.getEfaExperimentalElixirRows().map((it: any) => it.id),
+		);
+		console.log(`[efa-elixir-ui] create ${effectKey} inventory read +${Date.now() - startedAt}ms`);
+		await this.switchToTab(this.tabFeatures);
+		console.log(`[efa-elixir-ui] create ${effectKey} features ready +${Date.now() - startedAt}ms`);
+		const card = this._featureCard("Experimental Elixir");
+		await expect(card).toContainText(/Supplies ready/i, {timeout: 10_000});
+		await card.locator(".charsheet__efa-elixir-create").click({timeout: 10_000});
+		console.log(`[efa-elixir-ui] create ${effectKey} modal requested +${Date.now() - startedAt}ms`);
+		const modal = this._visibleModal(/Create Experimental Elixir/i);
+		await modal.locator(`input[name="efa-elixir-effect"][value="${effectKey}"]`).check({timeout: 10_000});
+		const slot = modal.locator("[data-efa-elixir-slot]");
+		const slotLevel = Number(await slot.inputValue());
+		const slotBefore = await this.page.evaluate((level) =>
+			(globalThis as any).charSheet._state.getSpellSlotsCurrent(level),
+		slotLevel);
+		await modal.locator("[data-efa-elixir-confirm]").click({timeout: 10_000});
+		await expect(modal.locator("[data-efa-elixir-live]")).toContainText(/vial created/i, {timeout: 10_000});
+		await expect(modal.locator("[data-efa-elixir-confirm]")).toHaveText("Done", {timeout: 10_000});
+		console.log(`[efa-elixir-ui] create ${effectKey} committed +${Date.now() - startedAt}ms`);
+		const created = await this.page.evaluate((ids) => {
+			const state: any = (globalThis as any).charSheet._state;
+			const row = state.getEfaExperimentalElixirRows().find((it: any) => !ids.includes(it.id));
+			const classification = row ? state.classifyEfaExperimentalElixir(row) : null;
+			return {
+				itemId: row?.id || null,
+				slotAfter: state.getSpellSlotsCurrent(classification?.metadata?.spentSlotLevel),
+				metadata: classification?.metadata || null,
+			};
+		}, beforeIds);
+		expect(created.itemId, `${effectKey} vial should appear in inventory`).toBeTruthy();
+		await modal.locator("[data-efa-elixir-confirm]").click({timeout: 10_000});
+		await expect(modal).toBeHidden({timeout: 10_000});
+		await this.switchToTab(this.tabInventory);
+		const item = this.page.locator(`.charsheet__item[data-item-id="${created.itemId}"]`);
+		await expect(item).toContainText(new RegExp(effectKey, "i"));
+		await expect(item).toContainText(/Spell slot/i);
+		await expect(item.locator(`[data-efa-elixir-consume="${created.itemId}"]`)).toBeVisible();
+		return {
+			itemId: created.itemId,
+			slotBefore,
+			slotAfter: created.slotAfter,
+			metadata: created.metadata,
+		};
+	}
+
+	private async _consumeEfaExperimentalElixirWithUi (
+		itemId: string,
+		{target = "self", targetName = ""}: {target?: "self" | "other"; targetName?: string} = {},
+	): Promise<{previewKeptItem: boolean; handoff: any | null}> {
+		await this.switchToTab(this.tabInventory);
+		await this.page.locator(`[data-efa-elixir-consume="${itemId}"]`).click();
+		const modal = this._visibleModal(/Drink or Administer Experimental Elixir/i);
+		let previewKeptItem = false;
+		if (target === "other") {
+			await modal.locator("input[name='efa-elixir-target'][value='other']").check();
+			await modal.locator("[data-efa-elixir-target-name]").fill(targetName);
+			await modal.locator("[data-efa-elixir-within-five]").check();
+			await modal.locator("[data-efa-elixir-confirm]").click();
+			await expect(modal.locator("[data-efa-elixir-live]")).toContainText(/Confirm to spend the vial/i);
+			previewKeptItem = await this.page.evaluate((id) =>
+				(globalThis as any).charSheet._state.getInventory().some((it: any) => it.id === id),
+			itemId);
+		}
+		await modal.locator("[data-efa-elixir-confirm]").click();
+		await expect(modal.locator("[data-efa-elixir-confirm]")).toHaveText("Done");
+		const handoffText = target === "other"
+			? await modal.locator(".charsheet__efa-elixir-handoff").inputValue()
+			: null;
+		const handoff = handoffText ? JSON.parse(handoffText) : null;
+		await modal.locator("[data-efa-elixir-confirm]").click();
+		await expect(modal).toBeHidden();
+		expect(
+			await this.page.evaluate((id) =>
+				(globalThis as any).charSheet._state.getInventory().some((it: any) => it.id === id),
+			itemId),
+			"consumed Experimental Elixir should leave inventory",
+		).toBe(false);
+		return {previewKeptItem, handoff};
+	}
+
+	private async _readEfaExperimentalElixirMechanics (): Promise<any> {
+		return this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			return {
+				hp: state.getCurrentHp(),
+				ac: state.getAc(),
+				walkSpeed: state.getWalkSpeed(),
+				flySpeed: state.getSpeedByType("fly"),
+				attackBonusDice: state.getRollBonusDiceFromStates("attack:melee:str"),
+				saveBonusDice: state.getRollBonusDiceFromStates("save:wis"),
+				checkBonusDice: state.getRollBonusDiceFromStates("check:wis"),
+				effects: state.getEfaExperimentalElixirActiveEffects().map((it: any) => ({
+					status: it.status,
+					stateId: it.stateId,
+					effectKey: it.effectKey,
+					active: it.active,
+					roundsRemaining: it.roundsRemaining,
+					sourceItemId: it.sourceContext?.itemId,
+				})),
+			};
+		});
+	}
+
+	private async _ensureExactToolItem (name: string, source: string): Promise<string> {
+		const result = await this.page.evaluate(async ({name, source}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state = cs?._state;
+			let row = state?.getInventory?.().find((it: any) =>
+				it?.item?.name === name
+				&& it?.item?.source === source,
+			);
+			if (!row) {
+				const loader: any = (globalThis as any).DataLoader;
+				const sourceItems = await loader?.pCacheAndGet?.("item", source, {isCopy: true}).catch(() => null);
+				const allItems = Array.isArray(sourceItems)
+					? sourceItems
+					: await loader?.pCacheAndGetAllSite?.("item").catch(() => []);
+				const item = (allItems || []).find((it: any) =>
+					it?.name?.toLowerCase() === name.toLowerCase() && it?.source === source,
+				);
+				if (item) state?.addItem?.(item, 1, true, false);
+				row = state?.getInventory?.().find((it: any) =>
+					it?.item?.name === name
+					&& it?.item?.source === source,
+				);
+			}
+			if (!row) return {error: `could not add ${name}|${source}`};
+			if (!row.equipped) state?.setItemEquipped?.(row.id, true);
+			if (!state?.hasToolProficiency?.(name)) state?.addToolProficiency?.(name);
+			cs?._inventory?._updateArmorClass?.();
+			cs?._renderCharacter?.();
+			return {error: null, id: row.id};
+		}, {name, source});
+		expect(result.error, `exact ${name}|${source} fixture`).toBeNull();
+		return result.id!;
+	}
+
 	async probeDynamicInitiativeAbilityBonus ({
 		featureName,
 		ability,

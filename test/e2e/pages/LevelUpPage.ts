@@ -243,6 +243,38 @@ export class LevelUpPage {
 			(await accordion.getAttribute("class"))?.includes("completed") || false;
 	}
 
+	private async _autoFillArtificerPlans (): Promise<void> {
+		const accordion = this.page.locator('[data-accordion-id="artificer-plans"]');
+		if (!await accordion.isVisible().catch(() => false)) return;
+		if (await accordion.getAttribute("class").then(it => it?.includes("completed"))) return;
+
+		await accordion.getByRole("button", {name: /choose or replace plans/i}).click();
+		const picker = this.page.locator(".charsheet__artificer-plan-picker");
+		await expect(picker).toBeVisible();
+
+		for (let pass = 0; pass < 20; pass++) {
+			const progress = (await picker.locator(".charsheet__artificer-plan-count").textContent()) || "";
+			const match = progress.match(/(\d+)\s*\/\s*(\d+)\s+required/i);
+			if (!match) throw new Error(`Artificer plan picker did not report required progress: ${progress}`);
+			if (Number(match[1]) >= Number(match[2])) break;
+
+			const incomplete = picker.locator(".charsheet__artificer-plan-opportunity:not(.complete)").filter({hasText: /choose a plan/i}).first();
+			await expect(incomplete, "an unresolved required Artificer plan opportunity").toBeVisible();
+			await incomplete.click();
+
+			const candidate = picker.locator(".charsheet__artificer-plan-result:not([disabled])").first();
+			await expect(candidate, "an eligible exact Artificer plan").toBeVisible();
+			await candidate.click();
+		}
+
+		const progress = (await picker.locator(".charsheet__artificer-plan-count").textContent()) || "";
+		const match = progress.match(/(\d+)\s*\/\s*(\d+)\s+required/i);
+		expect(match, `Artificer plan picker progress: ${progress}`).not.toBeNull();
+		expect(Number(match![1]), "all required Replicate Magic Item plans selected").toBe(Number(match![2]));
+		await this.page.getByRole("button", {name: /review & commit plans/i}).click();
+		await expect(picker).not.toBeVisible();
+	}
+
 	// ========== HP SECTION ==========
 
 	/**
@@ -449,6 +481,7 @@ export class LevelUpPage {
 			for (const acc of accordions) acc.classList.add("expanded");
 		});
 		await this.page.waitForTimeout(300);
+		await this._autoFillArtificerPlans();
 
 		// Replicate Magic Item progression is edited in a nested modal rather
 		// than inline controls, so the generic counter/radio passes below

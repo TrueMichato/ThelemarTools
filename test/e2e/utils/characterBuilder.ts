@@ -187,6 +187,25 @@ export const PRESET_FULL_EFA_BATTLE_SMITH_ARTIFICER: CharacterPreset = {
 	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
 };
 
+/** Exact-source EFA Alchemist Artificer. The subclass arrives at level 3. */
+export const PRESET_FULL_EFA_ALCHEMIST: CharacterPreset = {
+	race: "Dwarf",
+	raceSource: "PHB'24",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA", "XPHB"],
+	skipConditionalPrompt: true,
+	background: "Acolyte",
+	bgSource: "PHB'24",
+	name: "Mira Vialkeeper",
+	skillCount: 2,
+	optFeatCount: 1,
+	subclassName: "Alchemist",
+	subclassSource: "EFA",
+	abilityPriority: ["int", "con", "dex", "wis", "cha", "str"],
+	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
+};
+
 /** Bard — spellcaster with known spells */
 export const PRESET_BARD: CharacterPreset = {
 	race: "Aarakocra",

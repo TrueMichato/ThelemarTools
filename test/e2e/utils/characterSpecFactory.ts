@@ -747,15 +747,32 @@ export function describeCharacter (spec: CharacterSpec): void {
 				return cs?._state?.toJson?.() ?? null;
 			});
 			expect(exported, "state.toJson()").toBeTruthy();
+			expect(
+				exported.classes?.some((it: any) =>
+					it?.name === preset.className
+					&& it?.source === preset.classSource,
+				),
+				`export should preserve exact class identity ${preset.className}|${preset.classSource}`,
+			).toBe(true);
 
 			const reimported = await page.evaluate((json) => {
 				const cs: any = (globalThis as any).charSheet;
 				if (!cs?._state?.loadFromJson) return null;
 				cs._state.loadFromJson(json);
 				cs.render?.();
-				return cs._state._data?.name || cs._state.getName?.() || null;
+				return {
+					name: cs._state._data?.name || cs._state.getName?.() || null,
+					classes: cs._state.getClasses?.() || cs._state._data?.classes || [],
+				};
 			}, exported);
-			expect(reimported).toBe(preset.name);
+			expect(reimported?.name).toBe(preset.name);
+			expect(
+				reimported?.classes?.some((it: any) =>
+					it?.name === preset.className
+					&& it?.source === preset.classSource,
+				),
+				`re-import should preserve exact class identity ${preset.className}|${preset.classSource}`,
+			).toBe(true);
 			await charSheet.expectLevel(1);
 		});
 	});
