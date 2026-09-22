@@ -3,7 +3,15 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
-_None._
+### Round 61 — Respec, Bard capstone, combat methods, specialties, and derived combat statistics
+
+- **R61-S1 — Respec skill mechanics (Bug 1):** the Respec workspace offers skill changes, but the selected skill does not change live sheet mechanics. Owns the Respec skill adapter/editor, candidate transaction, and skill-specific ownership/receipt normalization. Must prove candidate isolation, real proficiency/expertise effects, Apply/reload, Cancel, and one-step Undo.
+- **R61-S2 — Words of Creation (Bug 2):** XPHB/TGTT Bard 20 detects Words of Creation but does not grant Power Word Heal and Power Word Kill as always-prepared spells. Owns Bard capstone spell grants across Builder, Level Up, Quick Build, legacy load, and Respec level changes.
+- **R61-S3 — Combat methods (Bugs 3–4):** Spell Shattering Strike is not implemented and its four choices are absent; combat-method Stamina spending appears to use degree instead of the authored `staminaCost`. Owns combat-method catalog parsing, option persistence/action rendering, Stamina consumption, class-utils integration, and Play Mode parity. Must not edit Chained Fury target lifecycle or generic conditional-modifier copy.
+- **R61-S4 — Chained Fury flow (Bug 5):** the full chain/grapple target-management flow should become optional and less VTT-like while preserving Spectral Chains attacks and riders. Owns Chained Fury-specific target effects, lifecycle cleanup, and combat UX, but must not edit the granted-attack projection or generic combat-method costs/options.
+- **R61-S5 — Specialty mechanics and roll copy (Bugs 6–7):** Agile Sprinter and Lead the Pack are applied unconditionally despite situational wording, while Unyielding Might appears as a roll option tied to grapple/shove instead of clearly increasing the Might skill. Rewrite the three specialties to permanent, explicit mechanics and replace awkward conditional-roll phrases such as “against skillname” with natural source-aware copy. Owns specialty data, modifier parsing/registration, and conditional-picker text only.
+- **R61-S6 — Weapon attack projection (Bugs 8.1–8.3):** critical range, reach, and attack bonus omit stacked material/stance/boon/magic/Masterwork/Ioun effects on Spectral Chains and other weapons. Owns the generated Chained Fury attack descriptor, item material/upgrade/Ioun projection, effective item bonuses, critical-range and reach resolvers, and attack-row total assembly. Must prove regeneration does not discard upgrades and no bonus leaks to unrelated attacks.
+- **R61-S7 — Shield/AC projection (Bug 8.4):** AC is 28 instead of 29 when Dragon Scales add +1 to a shield. Owns `getAc`, the canonical shield slot snapshot, both duplicated inventory shield writers, signed bonus normalization, and equip-flow tests. Must consume—but not alter—the material/upgrade projection owned by R61-S6.
 
 ## Closed Bugs
 
