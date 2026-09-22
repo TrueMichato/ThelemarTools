@@ -5362,7 +5362,14 @@ class CharacterSheetState {
 			//   resistances: [], immunities: [], conditionImmunities: [],
 			//   size, creatureType, alignment,
 			//   concentrationLinked: false, sourceFeatureId,
-			//   active: true, conditions: [], exhaustion: 0 }
+			//   active: true, conditions: [], exhaustion: 0,
+			//   featureGrant?: {type, uid, className, classSource, subclassShortName, subclassSource, level},
+			//   setup?: {status, ...sourceSpecificChoices},
+			//   scaling?: object,
+			//   lifecycle?: {status, generation, createdAtGameMinute?, destroyedAtGameMinute?, timingKnown?},
+			//   uses?: {[resourceName]: {current, max, ...sourceSpecificData}},
+			//   turnUsage?: {action, reaction, flags: {[flagName]: boolean}},
+			//   hitDice?: {die, current, max} }
 			companions: [],
 
 			// Druid 2024 Wild Shape "Known Forms" roster — the persistent list of
@@ -6205,11 +6212,17 @@ class CharacterSheetState {
 		if (!Array.isArray(this._data.companions)) return;
 		for (const c of this._data.companions) {
 			if (!c) continue;
-			// Already a usable string type (canonical or freeform) → leave as-is.
-			if (typeof c.type === "string" && c.type.trim() !== "") continue;
-			const {type, origin} = CharacterSheetState._normalizeCompanionType(c.type, c.origin);
-			c.type = type;
-			if (origin && !c.origin) c.origin = origin;
+			if (typeof c.type !== "string" || c.type.trim() === "") {
+				const {type, origin} = CharacterSheetState._normalizeCompanionType(c.type, c.origin);
+				c.type = type;
+				if (origin && !c.origin) c.origin = origin;
+			}
+
+			const normalized = CharacterSheetState._getNormalizedCompanionFeatureFields(c);
+			for (const key of CharacterSheetState.COMPANION_FEATURE_SCHEMA_FIELDS) {
+				if (Object.hasOwn(normalized, key)) c[key] = normalized[key];
+				else if (Object.hasOwn(c, key)) delete c[key];
+			}
 		}
 	}
 
@@ -70382,6 +70395,95 @@ class CharacterSheetState {
 		CUSTOM: "custom", // User-created companions
 	};
 
+	static COMPANION_FEATURE_SCHEMA_FIELDS = Object.freeze([
+		"featureGrant",
+		"setup",
+		"scaling",
+		"lifecycle",
+		"uses",
+		"turnUsage",
+		"hitDice",
+	]);
+
+	static _isCompanionSchemaObject (value) {
+		return value != null && typeof value === "object" && !Array.isArray(value);
+	}
+
+	/**
+	 * Copy and normalize the optional persisted fields shared by feature-granted
+	 * companions. The schema is deliberately source-agnostic: ownership metadata,
+	 * setup choices, resource names, and per-turn flags are retained verbatim.
+	 *
+	 * Defaults are structural only. Missing resource values become zero rather than
+	 * full, and no HP, healing, recharge, source classification, or scaling formula
+	 * is derived here.
+	 *
+	 * @param {object} companionData
+	 * @returns {object}
+	 */
+	static _getNormalizedCompanionFeatureFields (companionData = {}) {
+		const out = {};
+		const hasOwn = key => Object.hasOwn(companionData, key);
+		const copyObject = value => CharacterSheetState._isCompanionSchemaObject(value)
+			? MiscUtil.copyFast(value)
+			: {};
+
+		const hasFeatureGrant = CharacterSheetState._isCompanionSchemaObject(companionData.featureGrant)
+			&& Object.keys(companionData.featureGrant).length > 0;
+		if (hasFeatureGrant) out.featureGrant = copyObject(companionData.featureGrant);
+
+		if (hasOwn("setup")) out.setup = copyObject(companionData.setup);
+
+		if (hasOwn("scaling")) {
+			out.scaling = CharacterSheetState._isCompanionSchemaObject(companionData.scaling)
+				? copyObject(companionData.scaling)
+				: null;
+		}
+
+		if (hasOwn("lifecycle") || hasFeatureGrant) {
+			out.lifecycle = copyObject(companionData.lifecycle);
+			if (hasFeatureGrant) {
+				const generation = Number(out.lifecycle.generation);
+				out.lifecycle.generation = Number.isInteger(generation) && generation > 0 ? generation : 1;
+			}
+		}
+
+		if (hasOwn("uses")) {
+			const uses = copyObject(companionData.uses);
+			out.uses = Object.fromEntries(
+				Object.entries(uses)
+					.map(([name, resource]) => {
+						const normalized = copyObject(resource);
+						normalized.current ??= 0;
+						normalized.max ??= 0;
+						return [name, normalized];
+					}),
+			);
+		}
+
+		if (hasOwn("turnUsage")) {
+			const turnUsage = copyObject(companionData.turnUsage);
+			out.turnUsage = {
+				...turnUsage,
+				action: turnUsage.action === true,
+				reaction: turnUsage.reaction === true,
+				flags: copyObject(turnUsage.flags),
+			};
+		}
+
+		if (hasOwn("hitDice")) {
+			const hitDice = copyObject(companionData.hitDice);
+			out.hitDice = {
+				...hitDice,
+				die: hitDice.die ?? null,
+				current: hitDice.current ?? 0,
+				max: hitDice.max ?? 0,
+			};
+		}
+
+		return out;
+	}
+
 	/**
 	 * Normalize a companion `type` (and recover `origin`) to honor the type/origin
 	 * contract: `companion.type` is ALWAYS a non-empty string.
@@ -70498,6 +70600,13 @@ class CharacterSheetState {
 	 * @param {number} [companionData.count] - Number of identical creatures (for conjure spells)
 	 * @param {Array<{current: number, max: number}>} [companionData.hpArray] - Individual HP tracking for grouped creatures
 	 * @param {string} [companionData.groupId] - ID to link related conjured creatures
+	 * @param {object} [companionData.featureGrant] - Full granting-feature UID and class/subclass source metadata
+	 * @param {object} [companionData.setup] - Setup status and source-specific choices
+	 * @param {object} [companionData.scaling] - Declarative scaling descriptor
+	 * @param {object} [companionData.lifecycle] - Lifecycle status/generation and optional game-minute timing
+	 * @param {object<string, object>} [companionData.uses] - Named companion-owned resource records
+	 * @param {object} [companionData.turnUsage] - Action/reaction and named per-turn flags
+	 * @param {object} [companionData.hitDice] - Companion hit die and current/max dice
 	 * @returns {string} The new companion's ID
 	 */
 	/**
@@ -70652,7 +70761,9 @@ class CharacterSheetState {
 			// Any companion whose stat block is written in terms of the summoner's
 			// class level / proficiency bonus / spellcasting ability stores the
 			// formula here instead of growing a bespoke `recalculateCompanion` case.
-			scaling: companionData.scaling ? {...companionData.scaling} : null,
+			scaling: null,
+
+			...CharacterSheetState._getNormalizedCompanionFeatureFields(companionData),
 		};
 
 		this._data.companions.push(companion);
@@ -70694,6 +70805,16 @@ class CharacterSheetState {
 		// Apply updates (shallow merge for top-level, deep merge for nested objects)
 		for (const [key, value] of Object.entries(updates)) {
 			if (key === "id") continue; // Never change ID
+			if (CharacterSheetState.COMPANION_FEATURE_SCHEMA_FIELDS.includes(key)) {
+				const normalized = CharacterSheetState._getNormalizedCompanionFeatureFields({
+					...companion,
+					[key]: value,
+				});
+				if (Object.hasOwn(normalized, key)) companion[key] = normalized[key];
+				else delete companion[key];
+				if (key === "featureGrant" && Object.hasOwn(normalized, "lifecycle")) companion.lifecycle = normalized.lifecycle;
+				continue;
+			}
 			if (key === "abilities" || key === "hp" || key === "speed") {
 				companion[key] = {...companion[key], ...value};
 			} else {
@@ -72611,6 +72732,7 @@ class CharacterSheetState {
 			concentrationLinked: options.concentrationLinked || false,
 			sourceFeatureId: options.sourceFeatureId || null,
 			scaling: options.scaling || null,
+			...CharacterSheetState._getNormalizedCompanionFeatureFields(options),
 		});
 
 		// Recalculate if it's a scaling companion
