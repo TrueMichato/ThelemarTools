@@ -1305,7 +1305,33 @@ persisting any duplicate combat numbers:
 All forms require the owner within 60 feet and may move a deployed cannon up to
 15 feet before or after activation. `mending` restores `2d6` up to derived max
 HP. Game-time decrement/end controls remain explicit. Rest expiry, Explosive
-Cannon, Half Cover, dual operation, and Arcane Firearm remain later milestones.
+Cannon, Half Cover, and dual operation remain later milestones.
+
+### EFA Arcane Firearm
+
+Arcane Firearm is an exact-source operational mechanic rather than a flat item
+bonus. At EFA Artificer 5, Long Rest exposes an optional accessible carve or
+re-carve choice for a live positive-quantity rod, staff, wand, or martial
+ranged weapon. The versioned generic inventory binding stores only the stable
+inventory wrapper ID plus exact class/subclass/feature owner UIDs; editable
+names are display metadata and never identity. Item removal, zero quantity,
+ineligible replacement, source change, level loss, load, and Respec reconcile
+idempotently to an actionable unbound status. A legal binding may remain while
+unequipped.
+
+An equipped live binding becomes an exact `inventoryItemIds` alternative in
+the accepted EFA focus requirement while normal proficient tools remain legal.
+Damaging spells prefer the firearm in the picker but permit another legal
+focus. After a committed exact EFA cast receipt confirms that the bound wrapper
+was actually used and produced damage, the spell pipeline rolls one `1d8` and
+adds it once to that cast's aggregate damage result. Deferred weapon-channel
+spells carry the committed cast/focus identity into the later weapon damage
+roll. The feature uses the shared exact turn-receipt ledger with the committed
+cast receipt ID in its stable key, so separate qualifying casts in one turn
+each apply once while retries of the same cast remain idempotent. Failed
+persistence rolls back the receipt, removal/Respec prunes only its exact
+owner/source/action scope, and `resetTurnEconomy()` releases all current-turn
+cast receipts.
 
 ## College of Creation (Bard, TCE)
 

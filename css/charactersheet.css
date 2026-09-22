@@ -15804,6 +15804,72 @@ body.has-quickbuild-overlay .toast__container {
 	color: var(--cs-text-primary, inherit);
 }
 
+.charsheet__arcane-firearm-card {
+	padding: var(--cs-space-md, 0.75rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-left: 3px solid var(--cs-accent, var(--rgb-name-red));
+	border-radius: var(--cs-radius-md, 10px);
+	background: var(--cs-surface, transparent);
+}
+
+.charsheet__arcane-firearm-card--unequipped,
+.charsheet__arcane-firearm-card--unbound,
+.charsheet__arcane-firearm-card--missingItem,
+.charsheet__arcane-firearm-card--zeroQuantity,
+.charsheet__arcane-firearm-card--ineligibleItem {
+	border-left-color: var(--cs-warning, var(--rgb-name-red));
+}
+
+.charsheet__arcane-firearm-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__arcane-firearm-name {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.charsheet__arcane-firearm-badge {
+	flex: 0 0 auto;
+	padding: 0.125rem 0.5rem;
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: 999px;
+	background: var(--cs-surface-muted, transparent);
+	color: var(--cs-text-muted, var(--rgb-muted));
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 600;
+}
+
+.charsheet__arcane-firearm-badge--active {
+	border-color: var(--cs-success, var(--rgb-name-red));
+	background: var(--cs-success-soft, transparent);
+	color: var(--cs-success-text, var(--cs-success, var(--rgb-name-red)));
+}
+
+.charsheet__arcane-firearm-meta,
+.charsheet__arcane-firearm-message {
+	margin-top: var(--cs-space-xs, 0.25rem);
+	color: var(--cs-text-muted, var(--rgb-muted));
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.charsheet__arcane-firearm-rest-label {
+	display: block;
+	margin-bottom: var(--cs-space-xs, 0.25rem);
+	font-weight: 600;
+}
+
+.charsheet__arcane-firearm-rest-empty {
+	padding: var(--cs-space-sm, 0.5rem);
+	border: 1px dashed var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+	background: var(--cs-surface-muted, transparent);
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
 .charsheet__efa-cannon-card {
 	display: flex;
 	flex-direction: column;

@@ -433,6 +433,12 @@ source prunes the receipt.
   summoner magic-weapon hits and committed EFA Steel Defender Rend hits.
   `combatRound` is never consulted, so switching trigger source cannot bypass
   the once-per-turn gate.
+- EFA Arcane Firearm's once-per-committed-cast `1d8`, keyed by the exact
+  `Artillerist|Artificer|EFA|EFA` owner, source-qualified Arcane Firearm feature
+  UID, stable damage action UID, and committed cast receipt ID. The receipt
+  commits only after that cast used the live carved wrapper and produced a
+  damage roll. Save failure rolls back that exact receipt; binding
+  removal/respec prunes only that scope.
 
 Load migration is idempotent. A current-round legacy `resourceTurnUsage`
 entry becomes a receipt only when it represented the live combat turn; stale
@@ -911,6 +917,48 @@ Lightning Absorption likewise expose calculations/status only.
 Command/Dodge, attacks, pushes, aura saves, reaction damage, casting, healing,
 Death Burst resolution, and Life Transfer execution are deferred to R4b.
 
+## Exact-Owner Existing-Inventory Bindings
+
+`inventoryItemBindings` is the generic persisted contract for a feature which
+binds an existing player-owned inventory row:
+
+```javascript
+inventoryItemBindings: {
+    version: 1,
+    bindings: {
+        "<stable binding key>": {
+            version: 1,
+            bindingKey,
+            owner: {classUid, subclassUid, featureUid},
+            sourceUid,
+            inventoryItemId, // stable live wrapper ID; the only item identity
+            eligibility: {anyOf: [/* serializable structural selectors */]},
+            lastKnownItem: {name, source, type}, // display/recovery only
+        },
+    },
+    statuses: {
+        "<stable binding key>": {code, message, lastKnownItem},
+    },
+}
+```
+
+Use `setInventoryItemBinding`, `getInventoryItemBinding`,
+`reconcileInventoryItemBinding`, and `clearInventoryItemBinding`. A binding
+never creates a second inventory record and never re-resolves by editable name.
+Reconciliation validates the exact source-qualified owner, positive quantity,
+live wrapper, and structural eligibility. Missing, zero-quantity, replaced, or
+source-mismatched rows clear the binding and retain an actionable status
+instead of silently selecting a same-named row.
+
+EFA Arcane Firearm is the first consumer. Its adapter accepts only `RD`, `ST`,
+`WD`, or a canonically detected ranged weapon with
+`weaponCategory: "martial"`. The exact
+`Arcane Firearm|Artificer|EFA|Artillerist|EFA|5|EFA` owner must be present.
+The binding may remain while the row is unequipped, but focus/damage use
+requires that same positive-quantity wrapper to be equipped. Long Rest is the
+only player-facing carve/re-carve surface; cancellation and failed persistence
+restore the pre-rest snapshot, and rest undo restores the prior binding.
+
 ## Source-qualified Spell Focus and Committed Cast Receipts
 
 Stored player/class/subclass spell attribution carries
@@ -976,6 +1024,8 @@ The normalized filter supports these OR-composed selectors:
 ```javascript
 filter: {
     inventoryItemIds: ["stable-live-wrapper-id"],
+    inventoryItemIdsBypassProficiency: ["feature-authorized-wrapper-id"],
+    preferredInventoryItemIds: ["stable-live-wrapper-id"],
     itemUids: ["Alchemist's Supplies|XPHB"],
     itemNames: ["Alchemist's Supplies"],
     itemTypes: ["AT"],
@@ -990,12 +1040,14 @@ filter: {
 
 Every candidate is resolved from the live inventory and must still be equipped
 with positive quantity. `inventoryItemIds` is for an explicitly authorized
-stable wrapper (for example, a feature-owned item); it is not a snapshot of all
-currently eligible inventory. `weapon.category: "any"` accepts only a real
-weapon which passes the canonical `_isWeaponProficient(item)` resolver.
-Top-level `requiresProficiency` retains its existing tool-proficiency meaning
-for the exact ID/UID/name/type selectors; it is never used to decide weapon
-proficiency.
+stable wrapper; it is not a snapshot of all currently eligible inventory.
+Top-level `requiresProficiency` still applies to ID/UID/name/type selectors.
+When a feature structurally authorizes one exact wrapper independent of tool
+proficiency, it repeats that ID in `inventoryItemIdsBypassProficiency`;
+Arcane Firearm uses this narrow exception. `preferredInventoryItemIds` never
+expands eligibility; it only supplies a default among already legal candidates.
+`weapon.category: "any"` accepts only a real weapon which passes the canonical
+`_isWeaponProficient(item)` resolver.
 
 The override is evaluated before the material-component waiver, so a feature
 can waive ordinary Material components while still requiring its named focus.
@@ -1098,6 +1150,24 @@ stable `efa-alchemical-savant` hook for an active level-5+
 roll, and marks the receipt before returning so a duplicate hook invocation
 cannot consume a second roll. Multiple candidates use the existing enum modal
 with an explicit decline option.
+
+For exact `Artificer|EFA` casts, a live equipped Arcane Firearm binding is
+added to `filter.inventoryItemIds` alongside the ordinary proficient tool
+selectors. Damaging spells place it in `preferredInventoryItemIds`, so the
+picker defaults to the firearm while still allowing another legal tool to
+decline the bonus. Waived, TCE, ambiguous, missing, zero-quantity, or unequipped
+bindings never enter the candidate list.
+
+After receipt publication, the spell pipeline passes its single aggregate
+damage result to `commitEfaArcaneFirearmDamage`. The adapter re-resolves the
+receipt's focus, checks it is the same live bound wrapper, queries the exact
+cast-keyed turn receipt, and adds one rolled `1d8` to the aggregate total.
+Multi-projectile, multi-component, and upcast spells therefore receive one die
+total per committed cast; separate qualifying casts in the same turn each
+qualify. Deferred weapon-channel damage carries the same committed cast/focus
+receipt into the later weapon damage roll. Spells without a real damage roll
+receive none. Feedback and roll history include the die, combined total, exact
+Arcane Firearm source, and selected focus.
 
 ## Active States / Toggle Abilities
 

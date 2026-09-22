@@ -2625,6 +2625,7 @@ class CharacterSheetSpells {
 		const pendingSpellCast = {
 			spell,
 			spellData,
+			spellEffectResult: castResult,
 			focusReference: focusSelection.focusReference,
 			focusRequirement: focusSelection.requirement
 				? MiscUtil.copyFast(focusSelection.requirement)
@@ -2647,13 +2648,59 @@ class CharacterSheetSpells {
 		const focusInventoryRow = pendingSpellCast.focusReference
 			? this._state.resolveSpellCastFocusReference?.(pendingSpellCast.focusReference)
 			: null;
-		return this._pPublishCommittedSpellCast({
+		const receipt = await this._pPublishCommittedSpellCast({
 			spell: pendingSpellCast.spell,
 			spellData: pendingSpellCast.spellData,
 			focusInventoryRow,
 			focusRequirement: pendingSpellCast.focusRequirement,
 			cast: pendingSpellCast.cast,
 		});
+		await this._pApplyCommittedEfaArcaneFirearmDamage({
+			receipt,
+			spell: pendingSpellCast.spell,
+			castResult: pendingSpellCast.spellEffectResult,
+		});
+		return receipt;
+	}
+
+	async _pApplyCommittedEfaArcaneFirearmDamage ({receipt, spell, castResult} = {}) {
+		const damageResult = castResult?.damageResult;
+		const eligibility = this._state.getEfaArcaneFirearmDamageEligibility?.({receipt, damageResult});
+		if (!eligibility?.ok) return eligibility || {ok: false, code: "unsupported"};
+
+		const firearmRoll = this._page.rollDice
+			? this._page.rollDice(1, 8)
+			: Renderer.dice.parseRandomise2("1d8");
+		const applied = this._state.commitEfaArcaneFirearmDamage?.({receipt, damageResult, firearmRoll});
+		if (!applied?.ok) return applied || {ok: false, code: "notApplied"};
+
+		try {
+			const saveResult = this._page._saveCurrentCharacter
+				? await this._page._saveCurrentCharacter({isReturnStatus: true})
+				: await this._page.saveCharacter?.();
+			if (saveResult === false) throw new Error("saveFailed");
+		} catch (error) {
+			this._state.rollbackEfaArcaneFirearmTurnReceipt?.(applied.turnReceipt);
+			return {ok: false, code: "saveFailed"};
+		}
+
+		damageResult.total = applied.total;
+		damageResult.arcaneFirearm = {
+			die: "1d8",
+			roll: applied.firearmRoll,
+			sourceFeatureUid: applied.sourceFeatureUid,
+			focus: applied.focus,
+		};
+		const focusName = applied.focus?.name || "Arcane Firearm";
+		const feedback = `🔥 Arcane Firearm (EFA) through ${focusName}: 1d8 (${applied.firearmRoll}); spell damage ${applied.baseTotal} → ${applied.total}.`;
+		await this._page.pAnimateDiceSpec?.({groups: [{sides: 8, values: [applied.firearmRoll]}]});
+		JqueryUtil.doToast({type: "info", content: feedback});
+		this._page._rollHistory?.addRoll({
+			title: `${spell?.name || "Spell"} Damage + Arcane Firearm`,
+			total: applied.total,
+			breakdown: `${applied.baseTotal} spell damage + 1d8 (${applied.firearmRoll}) from Arcane Firearm|EFA through ${focusName}`,
+		});
+		return applied;
 	}
 
 	async pCastFeatureSpellGrant (grantId) {
@@ -2989,6 +3036,8 @@ class CharacterSheetSpells {
 					rolls: castResult?.rolls || [],
 				},
 			});
+			if (weaponChannelChoice) this._page._combat?.attachCommittedSpellCastToPendingChannelRider?.(receipt);
+			await this._pApplyCommittedEfaArcaneFirearmDamage({receipt, spell, castResult});
 			if (typeof document !== "undefined") this._page._combat?.renderCombatActionEconomy?.();
 			this._page.saveCharacter();
 			return receipt;
@@ -3097,6 +3146,7 @@ class CharacterSheetSpells {
 						rolls: castResult?.rolls || [],
 					},
 				});
+				await this._pApplyCommittedEfaArcaneFirearmDamage({receipt, spell, castResult});
 				if (typeof document !== "undefined") this._page._combat?.renderCombatActionEconomy?.();
 				this._page.saveCharacter();
 				return receipt;
@@ -3453,6 +3503,7 @@ class CharacterSheetSpells {
 					rolls: castResult?.rolls || [],
 				},
 			});
+		await this._pApplyCommittedEfaArcaneFirearmDamage({receipt, spell, castResult});
 
 		this.renderSlots();
 		this._page._renderQuickSpells(); // Update overview spell slots
@@ -3896,10 +3947,15 @@ class CharacterSheetSpells {
 		if (requestedId && !focusInventoryRow) return {cancelled: true, requirement, reason: "invalidFocusSelection"};
 		if (!focusInventoryRow && candidates.length === 1) focusInventoryRow = candidates[0];
 		if (!focusInventoryRow) {
+			const preferredInventoryItemIds = new Set(
+				(requirement.filter?.preferredInventoryItemIds || []).map(id => String(id)),
+			);
+			const defaultFocus = candidates.find(row => preferredInventoryItemIds.has(String(row.id))) || null;
 			focusInventoryRow = await CharacterSheetModal.pGetUserEnum({
 				title: requirement.ui?.title || "Choose Spellcasting Focus",
 				htmlDescription: requirement.ui?.description || "Choose the equipped focus you are using to cast this spell.",
 				values: candidates,
+				default: defaultFocus,
 				fnDisplay: row => `${row.item.name} (${row.item.source})`,
 				isResolveItem: true,
 			});
@@ -5490,6 +5546,7 @@ class CharacterSheetSpells {
 			externalResolution,
 			effectsApplied,
 			damageResult,
+			spellData,
 		};
 	}
 

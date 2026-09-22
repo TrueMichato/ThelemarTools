@@ -4009,14 +4009,20 @@ class CharacterSheetCombat {
 		// Channeled-spell on-hit rider (Booming/Green-Flame Blade). Armed by the per-weapon
 		// ✨ button AFTER its attack roll; consumed by the FIRST matching weapon damage roll.
 		// Added as a SEPARATE damage type (its own crit handling + display), like Hand of Harm.
+		const channelRiderResult = this._resolveChannelRiderDamage(attack, attackId, isCrit);
 		const {
 			channelSpell,
 			channelSpellRoll,
-			channelSpellDamage,
 			riderMatched,
 			maximized: channelSpellMaximized,
 			triggeredEffects: channelSpellTriggeredEffects = [],
-		} = this._resolveChannelRiderDamage(attack, attackId, isCrit);
+		} = channelRiderResult;
+		let {channelSpellDamage} = channelRiderResult;
+		const arcaneFirearmResult = await this._pApplyEfaArcaneFirearmToChannelRider({
+			channelSpell,
+			channelSpellDamage,
+		});
+		if (arcaneFirearmResult?.ok) channelSpellDamage = arcaneFirearmResult.total;
 
 		// Weapon damage riders carry their own damage type (e.g. Hellish Avenger → fire,
 		// Terrorizing Force → a chosen element). Riders whose type differs from the weapon's
@@ -4075,7 +4081,7 @@ class CharacterSheetCombat {
 		subtitle += ` ${weaponDamageType}`;
 		if (handOfHarmDamage) subtitle += ` | <strong style="color:#9b59b6">+${handOfHarmDamage} necrotic</strong> (Hand of Harm ${handOfHarmFormula})`;
 		if (methodEffectDamage) subtitle += ` | <strong style="color:#c44">+${methodEffectDamage} ongoing</strong> (${methodEffectApplied.name} ${methodEffectFormula}${methodEffectApplied.ongoingSaveType ? `, ${methodEffectApplied.ongoingSaveType.charAt(0).toUpperCase() + methodEffectApplied.ongoingSaveType.slice(1)} DC ${methodEffectApplied.saveDc} to end` : ""})`;
-		if (channelSpellDamage) subtitle += ` | <strong style="color:#e056fd">+${channelSpellDamage} ${channelSpell.damageType}</strong> (${channelSpell.spellName} on hit ${channelSpell.dice})`;
+		if (channelSpellDamage) subtitle += ` | <strong style="color:#e056fd">+${channelSpellDamage} ${channelSpell.damageType}</strong> (${channelSpell.spellName} on hit ${channelSpell.dice}${arcaneFirearmResult?.ok ? ` + Arcane Firearm 1d8 (${arcaneFirearmResult.firearmRoll})` : ""})`;
 		if (triggeredFeatDamage) subtitle += ` | ${triggeredFeatDamage.sourceName} ${triggeredFeatDamage.die}: +${triggeredFeatDamage.roll} untyped`;
 		if (channelSpellMaximized) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
 		if (destructiveWrathApplied) subtitle += " | <strong>Destructive Wrath: maximized</strong>";
@@ -4130,6 +4136,7 @@ class CharacterSheetCombat {
 		this._pushDiceGroup(diceGroups, handOfHarmRollForAnim);
 		this._pushDiceGroup(diceGroups, methodRollForAnim);
 		this._pushDiceGroup(diceGroups, channelSpellRoll);
+		this._pushDiceGroup(diceGroups, arcaneFirearmResult?.rollForAnimation);
 		if (triggeredFeatDamage) {
 			const sides = Number(/^d(\d+)$/i.exec(triggeredFeatDamage.die)?.[1] || 0);
 			if (sides) this._pushDiceGroup(diceGroups, {sides, rolls: [triggeredFeatDamage.roll]});
@@ -5869,6 +5876,12 @@ class CharacterSheetCombat {
 		return true;
 	}
 
+	attachCommittedSpellCastToPendingChannelRider (receipt) {
+		if (!this._pendingSpellRider || !receipt?.receiptId) return false;
+		this._pendingSpellRider.committedSpellCastReceipt = MiscUtil.copyFast(receipt);
+		return true;
+	}
+
 	/**
 	 * Clear the transient channeled-spell rider and refresh its section. Single source of
 	 * truth for discard (fresh attack roll, post-consume, manual Clear button).
@@ -5897,6 +5910,39 @@ class CharacterSheetCombat {
 		const maximized = maximize && this._state.consumePendingDamageMaximization?.(channelSpell.damageType);
 		const triggeredEffects = this._state.getTriggeredDamageEffects?.(channelSpell.damageType) || [];
 		return {channelSpell, channelSpellRoll, channelSpellDamage: channelSpellRoll.total, riderMatched, maximized, triggeredEffects};
+	}
+
+	async _pApplyEfaArcaneFirearmToChannelRider ({channelSpell, channelSpellDamage} = {}) {
+		const receipt = channelSpell?.committedSpellCastReceipt;
+		if (!receipt || !Number.isFinite(Number(channelSpellDamage))) return null;
+		const damageResult = {total: Number(channelSpellDamage), dice: channelSpell.dice};
+		const eligibility = this._state.getEfaArcaneFirearmDamageEligibility?.({receipt, damageResult});
+		if (!eligibility?.ok) return eligibility || null;
+
+		const firearmRoll = this._page.rollDice
+			? this._page.rollDice(1, 8)
+			: Renderer.dice.parseRandomise2("1d8");
+		const applied = this._state.commitEfaArcaneFirearmDamage?.({receipt, damageResult, firearmRoll});
+		if (!applied?.ok) return applied || null;
+
+		try {
+			const saveResult = this._page._saveCurrentCharacter
+				? await this._page._saveCurrentCharacter({isReturnStatus: true})
+				: await this._page.saveCharacter?.();
+			if (saveResult === false) throw new Error("saveFailed");
+		} catch {
+			this._state.rollbackEfaArcaneFirearmTurnReceipt?.(applied.turnReceipt);
+			return {ok: false, code: "saveFailed"};
+		}
+
+		JqueryUtil.doToast({
+			type: "info",
+			content: `🔥 Arcane Firearm (EFA): 1d8 (${applied.firearmRoll}) added to ${channelSpell.spellName}.`,
+		});
+		return {
+			...applied,
+			rollForAnimation: {sides: 8, rolls: [applied.firearmRoll], total: applied.firearmRoll},
+		};
 	}
 
 	/**
@@ -8049,6 +8095,54 @@ class CharacterSheetCombat {
 		});
 	}
 
+	renderCombatEfaArcaneFirearm () {
+		const section = document.getElementById("charsheet-combat-arcane-firearm-section");
+		const container = document.getElementById("charsheet-combat-arcane-firearm");
+		if (!section || !container) return;
+
+		const status = this._state.getEfaArcaneFirearmStatus?.();
+		if (!status?.available) {
+			section.style.display = "none";
+			container.innerHTML = "";
+			return;
+		}
+
+		section.style.display = "";
+		container.innerHTML = "";
+		const card = e_({tag: "div", clazz: `charsheet__arcane-firearm-card charsheet__arcane-firearm-card--${status.code || "unbound"}`});
+		const header = e_({tag: "div", clazz: "charsheet__arcane-firearm-header"});
+		header.appendChild(e_({
+			tag: "strong",
+			clazz: "charsheet__arcane-firearm-name",
+			txt: status.item?.name || status.lastKnownItem?.name || "No carved item",
+		}));
+		header.appendChild(e_({
+			tag: "span",
+			clazz: `charsheet__arcane-firearm-badge${status.active ? " charsheet__arcane-firearm-badge--active" : ""}`,
+			txt: status.active ? "Active" : status.code === "unequipped" ? "Not equipped" : "Needs attention",
+		}));
+		card.appendChild(header);
+
+		if (status.item) {
+			card.appendChild(e_({
+				tag: "div",
+				clazz: "charsheet__arcane-firearm-meta",
+				txt: this._state.getEfaArcaneFirearmItemLabel?.(status.item) || status.item.name,
+			}));
+		}
+		card.appendChild(e_({
+			tag: "p",
+			clazz: "charsheet__arcane-firearm-message mb-0",
+			txt: status.message,
+		}));
+		card.appendChild(e_({
+			tag: "p",
+			clazz: "ve-small ve-muted mt-1 mb-0",
+			txt: "Carving can only be changed when you finish a Long Rest.",
+		}));
+		container.appendChild(card);
+	}
+
 	render () {
 		// Always refresh state reference from page at start of render
 		this._state = this._page.getState();
@@ -8073,6 +8167,7 @@ class CharacterSheetCombat {
 			() => this.renderCombatIoun(),
 			() => this.renderCombatFighter(),
 			() => this.renderCombatEfaCannon(),
+			() => this.renderCombatEfaArcaneFirearm(),
 			() => this.renderCombatVitality(),
 			() => this.renderCombatDefenses(),
 			() => this.renderCombatConditions(),

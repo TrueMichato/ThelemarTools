@@ -4390,6 +4390,9 @@ class CharacterSheetState {
 		ARCANE_JOLT: "Arcane Jolt|Artificer|EFA|Battle Smith|EFA|9|EFA",
 		IMPROVED_DEFENDER: "Improved Defender|Artificer|EFA|Battle Smith|EFA|15|EFA",
 	});
+	static EFA_ARCANE_FIREARM_BINDING_KEY = "arcaneFirearm|Artificer|EFA|Artillerist|EFA";
+	static EFA_ARCANE_FIREARM_DAMAGE_ACTION_UID = "Arcane Firearm Damage|Artificer|EFA|Artillerist|EFA";
+	static INVENTORY_ITEM_BINDING_VERSION = 1;
 	static ADVENTURERS_ATLAS_VERSION = 1;
 	static ADVENTURERS_ATLAS_INTEGRATION_VERSION = 1;
 	static ADVENTURERS_ATLAS_INITIATIVE_DIE = "1d4";
@@ -4496,6 +4499,17 @@ class CharacterSheetState {
 	]);
 	static TCE_BATTLE_READY_FEATURE_UID = "Battle Ready|Artificer|TCE|Battle Smith|TCE|3|TCE";
 
+	static get EFA_ARCANE_FIREARM_FEATURE_UID () {
+		return CharacterSheetState._getSourceAwareSubclassFeatureUid({
+			name: "Arcane Firearm",
+			source: "EFA",
+			className: "Artificer",
+			classSource: "EFA",
+			subclassShortName: "Artillerist",
+			subclassSource: "EFA",
+			level: 5,
+		});
+	}
 	/**
 	 * Build the exact owner identity used by fixed-proficiency fallback
 	 * transactions. Class, subclass, and feature sources remain independent.
@@ -5572,6 +5586,13 @@ class CharacterSheetState {
 
 			// Resources (class features, racial abilities, etc.)
 			resources: [], // [{id, name, current, max, recharge: "short"|"long"|"dawn"}]
+			// Exact-owner bindings to existing live inventory wrappers. Bindings never
+			// create or duplicate items; the wrapper ID remains the sole item identity.
+			inventoryItemBindings: {
+				version: CharacterSheetState.INVENTORY_ITEM_BINDING_VERSION,
+				bindings: {},
+				statuses: {},
+			},
 			// Shared stable-key receipts for once-per-turn effects. `turnId` is an
 			// opaque sequence advanced only by resetTurnEconomy(); it is deliberately
 			// independent of combatRound so out-of-combat callers use the same gate.
@@ -6082,6 +6103,7 @@ class CharacterSheetState {
 			|| Array.isArray(this._data.generatedClassSummonRevisions)) {
 			this._data.generatedClassSummonRevisions = {};
 		}
+		this._normalizeInventoryItemBindings();
 		if (this._data.characterBase && typeof this._data.characterBase === "object") {
 			if (!Number(this._data.characterBase.v)) this._data.characterBase.v = 1;
 			if (!Array.isArray(this._data.characterBase.decisions)) this._data.characterBase.decisions = [];
@@ -6484,6 +6506,7 @@ class CharacterSheetState {
 		this._syncAdventurersAtlasEligibility();
 		this._syncCharacterDeathConsequences();
 		this._migrateEfaArcaneJoltResource();
+		this.reconcileEfaArcaneFirearmBinding();
 	}
 
 	_migrateAdventurersAtlasState () {
@@ -38211,6 +38234,11 @@ class CharacterSheetState {
 		const descriptors = this.getEfaReplicateMagicItemLifecycleDescriptors({extensions: request.extensions || []});
 		const owner = CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER;
 		const currentRows = this.getGeneratedFeatureItemRows(owner);
+		const protectedInventoryItemIds = new Set(
+			Array.isArray(request.protectedInventoryItemIds)
+				? request.protectedInventoryItemIds.map(id => String(id || "").trim()).filter(Boolean)
+				: [],
+		);
 		const batchId = CryptUtil.uid();
 		const nextCreationOrder = this._getNextGeneratedFeatureItemCreationOrder();
 		const projectedRows = [
@@ -38257,10 +38285,18 @@ class CharacterSheetState {
 			owner,
 			rows: projectedRows,
 			descriptors,
-			canEvict: row => !String(row.id).startsWith("projected-"),
+			canEvict: row => !String(row.id).startsWith("projected-") && !protectedInventoryItemIds.has(row.id),
 		});
 		if (!capacity.fits) {
-			return {ok: false, code: "replicate-production-capacity-exceeded", message: "The selected items exceed the available created-item capacity."};
+			return {
+				ok: false,
+				code: protectedInventoryItemIds.size
+					? "replicate-production-protected-item-capacity-exceeded"
+					: "replicate-production-capacity-exceeded",
+				message: protectedInventoryItemIds.size
+					? "The selected items would replace an inventory item reserved by another Long Rest choice."
+					: "The selected items exceed the available created-item capacity.",
+			};
 		}
 		const evicted = capacity.evicted;
 
@@ -38478,6 +38514,400 @@ class CharacterSheetState {
 			if (!Array.isArray(provenance.extensions)) provenance.extensions = [];
 			if (!provenance.metadata || typeof provenance.metadata !== "object" || Array.isArray(provenance.metadata)) provenance.metadata = {};
 		}
+	}
+
+	_normalizeInventoryItemBindings () {
+		const raw = this._data.inventoryItemBindings;
+		if (!raw || typeof raw !== "object" || Array.isArray(raw) || Number(raw.version) !== CharacterSheetState.INVENTORY_ITEM_BINDING_VERSION) {
+			this._data.inventoryItemBindings = {
+				version: CharacterSheetState.INVENTORY_ITEM_BINDING_VERSION,
+				bindings: {},
+				statuses: {},
+			};
+			return this._data.inventoryItemBindings;
+		}
+
+		const bindings = {};
+		for (const [key, record] of Object.entries(raw.bindings || {})) {
+			if (!key || !record || typeof record !== "object" || Array.isArray(record)) continue;
+			if (Number(record.version) !== CharacterSheetState.INVENTORY_ITEM_BINDING_VERSION) continue;
+			if (typeof record.inventoryItemId !== "string" || !record.inventoryItemId.trim()) continue;
+			const owner = CharacterSheetState._normalizeInventoryItemBindingOwner(record.owner);
+			if (!owner || typeof record.sourceUid !== "string" || !record.sourceUid.trim()) continue;
+			bindings[key] = {
+				version: CharacterSheetState.INVENTORY_ITEM_BINDING_VERSION,
+				bindingKey: key,
+				owner,
+				sourceUid: record.sourceUid.trim(),
+				inventoryItemId: record.inventoryItemId.trim(),
+				eligibility: record.eligibility && typeof record.eligibility === "object"
+					? MiscUtil.copyFast(record.eligibility)
+					: {},
+				lastKnownItem: record.lastKnownItem && typeof record.lastKnownItem === "object"
+					? MiscUtil.copyFast(record.lastKnownItem)
+					: null,
+			};
+		}
+
+		const statuses = {};
+		for (const [key, status] of Object.entries(raw.statuses || {})) {
+			if (!key || !status || typeof status !== "object" || Array.isArray(status)) continue;
+			if (typeof status.code !== "string" || !status.code.trim()) continue;
+			statuses[key] = {
+				code: status.code.trim(),
+				message: typeof status.message === "string" ? status.message : "",
+				lastKnownItem: status.lastKnownItem && typeof status.lastKnownItem === "object"
+					? MiscUtil.copyFast(status.lastKnownItem)
+					: null,
+			};
+		}
+
+		this._data.inventoryItemBindings = {
+			version: CharacterSheetState.INVENTORY_ITEM_BINDING_VERSION,
+			bindings,
+			statuses,
+		};
+		return this._data.inventoryItemBindings;
+	}
+
+	static _normalizeInventoryItemBindingOwner (owner) {
+		if (!owner || typeof owner !== "object" || Array.isArray(owner)) return null;
+		const normalized = {
+			classUid: typeof owner.classUid === "string" ? owner.classUid.trim() : "",
+			subclassUid: typeof owner.subclassUid === "string" ? owner.subclassUid.trim() : "",
+			featureUid: typeof owner.featureUid === "string" ? owner.featureUid.trim() : "",
+		};
+		return Object.values(normalized).every(Boolean) ? normalized : null;
+	}
+
+	static _getInventoryItemBindingOwnerKey (owner) {
+		const normalized = CharacterSheetState._normalizeInventoryItemBindingOwner(owner);
+		if (!normalized) return null;
+		return [normalized.classUid, normalized.subclassUid, normalized.featureUid]
+			.map(part => part.toLowerCase())
+			.join("::");
+	}
+
+	static _getInventoryItemTypeCode (item) {
+		return String(typeof item?.type === "string" ? item.type : item?.type?.value || "")
+			.split("|")[0]
+			.trim()
+			.toUpperCase();
+	}
+
+	static _getInventoryItemPropertyCodes (item) {
+		return (Array.isArray(item?.property) ? item.property : [])
+			.map(prop => String(typeof prop === "string" ? prop : prop?.uid || prop?.name || "").trim().toUpperCase())
+			.filter(Boolean);
+	}
+
+	_isRangedWeaponItem (item) {
+		if (!this._isWeaponItem(item)) return false;
+		const type = CharacterSheetState._getInventoryItemTypeCode(item);
+		if (type === "R" || type === "RW") return true;
+		if (item?.isMelee === false) return true;
+		return CharacterSheetState._getInventoryItemPropertyCodes(item).includes("A");
+	}
+
+	_matchesInventoryItemBindingEligibility (item, descriptor) {
+		if (!item || !descriptor || typeof descriptor !== "object") return false;
+		if (Array.isArray(descriptor.anyOf)) {
+			return descriptor.anyOf.some(part => this._matchesInventoryItemBindingEligibility(item, part));
+		}
+		const type = CharacterSheetState._getInventoryItemTypeCode(item);
+		if (Array.isArray(descriptor.itemTypes) && !descriptor.itemTypes.map(it => String(it).toUpperCase()).includes(type)) return false;
+		if (descriptor.weaponCategory != null
+			&& String(item.weaponCategory || "").trim().toLowerCase() !== String(descriptor.weaponCategory).trim().toLowerCase()) return false;
+		if (descriptor.rangedWeapon === true && !this._isRangedWeaponItem(item)) return false;
+		return true;
+	}
+
+	_getInventoryItemBindingLastKnownItem (row) {
+		if (!row?.item) return null;
+		return {
+			name: row.item.name || "Unnamed item",
+			source: row.item.source || null,
+			type: CharacterSheetState._getInventoryItemTypeCode(row.item) || null,
+		};
+	}
+
+	getInventoryItemBinding (bindingKey) {
+		const store = this._normalizeInventoryItemBindings();
+		return store.bindings[bindingKey] ? MiscUtil.copyFast(store.bindings[bindingKey]) : null;
+	}
+
+	getInventoryItemBindingStatus (bindingKey) {
+		const store = this._normalizeInventoryItemBindings();
+		return store.statuses[bindingKey] ? MiscUtil.copyFast(store.statuses[bindingKey]) : null;
+	}
+
+	setInventoryItemBinding ({bindingKey, owner, sourceUid, inventoryItemId, eligibility}) {
+		if (typeof bindingKey !== "string" || !bindingKey.trim()) return {ok: false, code: "invalidBindingKey"};
+		const normalizedOwner = CharacterSheetState._normalizeInventoryItemBindingOwner(owner);
+		if (!normalizedOwner || typeof sourceUid !== "string" || !sourceUid.trim()) return {ok: false, code: "invalidOwner"};
+		const row = this._findInventoryRow(inventoryItemId);
+		if (!row || Number(row.quantity) <= 0) return {ok: false, code: "missingItem"};
+		if (!this._matchesInventoryItemBindingEligibility(row.item, eligibility)) return {ok: false, code: "ineligibleItem"};
+
+		const key = bindingKey.trim();
+		const store = this._normalizeInventoryItemBindings();
+		const record = {
+			version: CharacterSheetState.INVENTORY_ITEM_BINDING_VERSION,
+			bindingKey: key,
+			owner: normalizedOwner,
+			sourceUid: sourceUid.trim(),
+			inventoryItemId: row.id,
+			eligibility: MiscUtil.copyFast(eligibility),
+			lastKnownItem: this._getInventoryItemBindingLastKnownItem(row),
+		};
+		store.bindings[key] = record;
+		store.statuses[key] = {
+			code: "bound",
+			message: `${record.lastKnownItem.name} is bound.`,
+			lastKnownItem: MiscUtil.copyFast(record.lastKnownItem),
+		};
+		return {ok: true, code: "bound", binding: MiscUtil.copyFast(record)};
+	}
+
+	clearInventoryItemBinding (bindingKey, {code = "cleared", message = "", lastKnownItem = null} = {}) {
+		const store = this._normalizeInventoryItemBindings();
+		const existing = store.bindings[bindingKey] || null;
+		if (existing) delete store.bindings[bindingKey];
+		store.statuses[bindingKey] = {
+			code,
+			message,
+			lastKnownItem: MiscUtil.copyFast(lastKnownItem || existing?.lastKnownItem || null),
+		};
+		return !!existing;
+	}
+
+	reconcileInventoryItemBinding ({
+		bindingKey,
+		owner,
+		sourceUid,
+		eligibility,
+		isOwnerActive = true,
+		ownerInactiveCode = "ownerRemoved",
+		ownerInactiveMessage = "",
+	} = {}) {
+		const binding = this.getInventoryItemBinding(bindingKey);
+		if (!binding) return {ok: true, code: "unbound", binding: null};
+
+		const ownerKey = CharacterSheetState._getInventoryItemBindingOwnerKey(owner);
+		const bindingOwnerKey = CharacterSheetState._getInventoryItemBindingOwnerKey(binding.owner);
+		if (!ownerKey || ownerKey !== bindingOwnerKey || String(binding.sourceUid || "").toLowerCase() !== String(sourceUid || "").toLowerCase()) {
+			this.clearInventoryItemBinding(bindingKey, {
+				code: "sourceMismatch",
+				message: "The saved binding belongs to a different source-qualified feature. Choose a new item after your next Long Rest.",
+				lastKnownItem: binding.lastKnownItem,
+			});
+			return {ok: false, code: "sourceMismatch", binding: null};
+		}
+		if (!isOwnerActive) {
+			this.clearInventoryItemBinding(bindingKey, {
+				code: ownerInactiveCode,
+				message: ownerInactiveMessage || "The owning feature is no longer available.",
+				lastKnownItem: binding.lastKnownItem,
+			});
+			return {ok: false, code: ownerInactiveCode, binding: null};
+		}
+
+		const row = this._findInventoryRow(binding.inventoryItemId);
+		if (!row) {
+			this.clearInventoryItemBinding(bindingKey, {
+				code: "missingItem",
+				message: "The carved item is no longer in inventory. Choose a new eligible item after your next Long Rest.",
+				lastKnownItem: binding.lastKnownItem,
+			});
+			return {ok: false, code: "missingItem", binding: null};
+		}
+		if (Number(row.quantity) <= 0) {
+			this.clearInventoryItemBinding(bindingKey, {
+				code: "zeroQuantity",
+				message: "The carved item has no remaining quantity. Choose a new eligible item after your next Long Rest.",
+				lastKnownItem: this._getInventoryItemBindingLastKnownItem(row),
+			});
+			return {ok: false, code: "zeroQuantity", binding: null};
+		}
+		if (!this._matchesInventoryItemBindingEligibility(row.item, eligibility)) {
+			this.clearInventoryItemBinding(bindingKey, {
+				code: "ineligibleItem",
+				message: "The carved inventory row is no longer an eligible rod, staff, wand, or martial ranged weapon. Choose again after your next Long Rest.",
+				lastKnownItem: this._getInventoryItemBindingLastKnownItem(row),
+			});
+			return {ok: false, code: "ineligibleItem", binding: null};
+		}
+
+		const store = this._normalizeInventoryItemBindings();
+		store.bindings[bindingKey] = {
+			...binding,
+			eligibility: MiscUtil.copyFast(eligibility),
+			lastKnownItem: this._getInventoryItemBindingLastKnownItem(row),
+		};
+		store.statuses[bindingKey] = {
+			code: "bound",
+			message: `${row.item.name || "The item"} is bound.`,
+			lastKnownItem: this._getInventoryItemBindingLastKnownItem(row),
+		};
+		return {ok: true, code: "bound", binding: MiscUtil.copyFast(store.bindings[bindingKey]), row};
+	}
+
+	_getEfaArcaneFirearmOwner () {
+		return {
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			subclassUid: CharacterSheetState.EFA_ARTILLERIST_SUBCLASS_UID,
+			featureUid: CharacterSheetState.EFA_ARCANE_FIREARM_FEATURE_UID,
+		};
+	}
+
+	_getEfaArcaneFirearmEligibility () {
+		return {
+			anyOf: [
+				{itemTypes: ["RD", "ST", "WD"]},
+				{weaponCategory: "martial", rangedWeapon: true},
+			],
+		};
+	}
+
+	_getEfaArcaneFirearmOwnerState () {
+		const ownerClass = (this._data.classes || []).find(cls =>
+			String(cls?.name || "").trim().toLowerCase() === "artificer"
+			&& String(cls?.source || "").trim().toUpperCase() === "EFA",
+		);
+		if (!ownerClass) {
+			const hasOtherArtificer = (this._data.classes || []).some(cls => String(cls?.name || "").trim().toLowerCase() === "artificer");
+			return {
+				ok: false,
+				code: hasOtherArtificer ? "sourceMismatch" : "ownerRemoved",
+				message: hasOtherArtificer
+					? "Arcane Firearm requires the EFA Artificer and cannot use another source's Artificer."
+					: "Arcane Firearm is unavailable because the EFA Artificer is no longer present.",
+			};
+		}
+		const subclass = this.getEffectiveSubclassForClass(ownerClass);
+		const actualSubclassUid = subclass
+			? [
+				subclass.shortName || subclass.name || "",
+				ownerClass.name || "",
+				ownerClass.source || "",
+				subclass.source || "",
+			].join("|")
+			: "";
+		if (actualSubclassUid.toLowerCase() !== CharacterSheetState.EFA_ARTILLERIST_SUBCLASS_UID.toLowerCase()) {
+			const hasOtherArtillerist = String(subclass?.shortName || subclass?.name || "").trim().toLowerCase() === "artillerist";
+			return {
+				ok: false,
+				code: hasOtherArtillerist ? "sourceMismatch" : "ownerRemoved",
+				message: hasOtherArtillerist
+					? "Arcane Firearm requires the EFA Artillerist and cannot use another source's Artillerist."
+					: "Arcane Firearm is unavailable because the EFA Artillerist is no longer selected.",
+			};
+		}
+		const level = Math.max(0, Math.floor(Number(ownerClass.level) || 0));
+		if (level < 5) {
+			return {
+				ok: false,
+				code: "levelReduced",
+				message: "Arcane Firearm requires 5 levels in EFA Artificer.",
+				level,
+			};
+		}
+		return {ok: true, code: "available", ownerClass, subclass, level};
+	}
+
+	isEfaArcaneFirearmEligibleItem (item) {
+		return this._matchesInventoryItemBindingEligibility(item, this._getEfaArcaneFirearmEligibility());
+	}
+
+	getEfaArcaneFirearmEligibleInventoryRows () {
+		if (!this._getEfaArcaneFirearmOwnerState().ok) return [];
+		return (this._data.inventory || [])
+			.filter(row => Number(row?.quantity) > 0 && this.isEfaArcaneFirearmEligibleItem(row.item))
+			.map(row => ({
+				...this.getItemRaw(row.id),
+				bindingLabel: this.getEfaArcaneFirearmItemLabel(row.item),
+			}));
+	}
+
+	getEfaArcaneFirearmItemLabel (item) {
+		const type = CharacterSheetState._getInventoryItemTypeCode(item);
+		const typeLabel = {
+			RD: "Rod",
+			ST: "Staff",
+			WD: "Wand",
+			R: "Martial ranged weapon",
+		}[type] || (this._isRangedWeaponItem(item) ? "Martial ranged weapon" : type || "Item");
+		return `${item?.name || "Unnamed item"} — ${item?.source || "Unknown source"} — ${typeLabel}`;
+	}
+
+	setEfaArcaneFirearmBinding (inventoryItemId) {
+		const ownerState = this._getEfaArcaneFirearmOwnerState();
+		if (!ownerState.ok) return {ok: false, code: ownerState.code, message: ownerState.message};
+		const result = this.setInventoryItemBinding({
+			bindingKey: CharacterSheetState.EFA_ARCANE_FIREARM_BINDING_KEY,
+			owner: this._getEfaArcaneFirearmOwner(),
+			sourceUid: CharacterSheetState.EFA_ARCANE_FIREARM_FEATURE_UID,
+			inventoryItemId,
+			eligibility: this._getEfaArcaneFirearmEligibility(),
+		});
+		return result;
+	}
+
+	reconcileEfaArcaneFirearmBinding () {
+		const ownerState = this._getEfaArcaneFirearmOwnerState();
+		const result = this.reconcileInventoryItemBinding({
+			bindingKey: CharacterSheetState.EFA_ARCANE_FIREARM_BINDING_KEY,
+			owner: this._getEfaArcaneFirearmOwner(),
+			sourceUid: CharacterSheetState.EFA_ARCANE_FIREARM_FEATURE_UID,
+			eligibility: this._getEfaArcaneFirearmEligibility(),
+			isOwnerActive: ownerState.ok,
+			ownerInactiveCode: ownerState.code,
+			ownerInactiveMessage: ownerState.message,
+		});
+		if (!result.ok && result.code !== "unbound") this.pruneEfaArcaneFirearmTurnReceipts();
+		return result;
+	}
+
+	getEfaArcaneFirearmStatus () {
+		const ownerState = this._getEfaArcaneFirearmOwnerState();
+		this.reconcileEfaArcaneFirearmBinding();
+		const binding = this.getInventoryItemBinding(CharacterSheetState.EFA_ARCANE_FIREARM_BINDING_KEY);
+		const storedStatus = this.getInventoryItemBindingStatus(CharacterSheetState.EFA_ARCANE_FIREARM_BINDING_KEY);
+		if (!ownerState.ok) {
+			return {
+				available: false,
+				active: false,
+				code: ownerState.code,
+				message: ownerState.message,
+				binding: null,
+				item: null,
+			};
+		}
+		if (!binding) {
+			return {
+				available: true,
+				active: false,
+				code: storedStatus?.code || "unbound",
+				message: storedStatus?.message || "No item is carved. Choose an eligible item when you finish a Long Rest.",
+				binding: null,
+				item: null,
+				lastKnownItem: storedStatus?.lastKnownItem || null,
+			};
+		}
+		const row = this._findInventoryRow(binding.inventoryItemId);
+		const item = row ? this.getItemRaw(row.id) : null;
+		const active = !!row?.equipped && Number(row?.quantity) > 0;
+		return {
+			available: true,
+			active,
+			code: active ? "active" : "unequipped",
+			message: active
+				? `${item.name} is equipped and can serve as your Arcane Firearm.`
+				: `${item?.name || "The carved item"} remains carved but must be equipped to serve as a focus or add damage.`,
+			binding,
+			item,
+			lastKnownItem: binding.lastKnownItem,
+		};
 	}
 
 	getInventory () { return [...this._data.inventory]; }
@@ -42168,6 +42598,7 @@ class CharacterSheetState {
 		// An equipped upgraded armor/shield leaving inventory must drop its conditional modifiers.
 		this._recalculateEquipmentModifiers();
 		this.reconcileEfaArmorerState({cause: "remove-item", itemId});
+		this.reconcileEfaArcaneFirearmBinding();
 	}
 
 	/**
@@ -42247,6 +42678,7 @@ class CharacterSheetState {
 		this._recalculateEquipmentModifiers();
 		this.reconcileEfaArmorerState({cause: "replace-item", itemId});
 		this.reconcileEfaSpellStoringItem({reason: "host-replaced"});
+		this.reconcileEfaArcaneFirearmBinding();
 		return true;
 	}
 
@@ -43155,6 +43587,8 @@ class CharacterSheetState {
 				.filter(Boolean),
 		)];
 		const inventoryItemIds = normalizeList(raw.filter?.inventoryItemIds);
+		const inventoryItemIdsBypassProficiency = normalizeList(raw.filter?.inventoryItemIdsBypassProficiency);
+		const preferredInventoryItemIds = normalizeList(raw.filter?.preferredInventoryItemIds);
 		const itemUids = normalizeList(raw.filter?.itemUids)
 			.filter(uid => {
 				const parts = uid.split("|");
@@ -43210,6 +43644,8 @@ class CharacterSheetState {
 			addsMaterialComponent: raw.addsMaterialComponent === true,
 			filter: {
 				inventoryItemIds,
+				inventoryItemIdsBypassProficiency,
+				preferredInventoryItemIds,
 				itemUids,
 				itemNames,
 				itemTypes,
@@ -43256,6 +43692,18 @@ class CharacterSheetState {
 		const hasBattleReady = calculations.hasEfaBattleReady
 			&& calculations.efaBattleReadyFeatureUid === CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.BATTLE_READY;
 		const hasArcaneArmorFocus = arcaneArmorInventoryItemIds.length > 0;
+		const firearmStatus = this.getEfaArcaneFirearmStatus();
+		const firearmInventoryItemId = firearmStatus.active
+			? firearmStatus.binding?.inventoryItemId
+			: null;
+		const focusInventoryItemIds = [
+			...arcaneArmorInventoryItemIds,
+			...(firearmInventoryItemId ? [firearmInventoryItemId] : []),
+		];
+		const preferredInventoryItemIds = firearmInventoryItemId && CharacterSheetState.isSpellDamageBearing(spell)
+			? [firearmInventoryItemId]
+			: [];
+		const hasArcaneFirearmFocus = !!firearmInventoryItemId;
 		return {
 			required: true,
 			ruleId: hasBattleReady
@@ -43268,7 +43716,9 @@ class CharacterSheetState {
 			castingClass,
 			addsMaterialComponent: true,
 			filter: {
-				inventoryItemIds: arcaneArmorInventoryItemIds,
+				inventoryItemIds: focusInventoryItemIds,
+				inventoryItemIdsBypassProficiency: focusInventoryItemIds,
+				preferredInventoryItemIds,
 				itemUids: [],
 				itemNames: ["Thieves' Tools", "Tinker's Tools"],
 				itemTypes: ["AT"],
@@ -43286,25 +43736,38 @@ class CharacterSheetState {
 				requiresProficiency: true,
 			},
 			ui: {
-				title: hasBattleReady || hasArcaneArmorFocus
+				title: hasBattleReady || hasArcaneArmorFocus || hasArcaneFirearmFocus
 					? "Choose Artificer Spellcasting Focus"
 					: "Choose Artificer Spellcasting Tools",
-				description: hasBattleReady && hasArcaneArmorFocus
-					? "Choose your worn Arcane Armor, an equipped proficient tool or weapon, or an equipped replicated Wand or Weapon as the spellcasting focus."
+				description: hasBattleReady && hasArcaneArmorFocus && hasArcaneFirearmFocus
+					? "Choose your worn Arcane Armor, equipped Arcane Firearm, proficient tool or weapon, or equipped replicated Wand or Weapon as the spellcasting focus."
 					: hasBattleReady
-						? "Choose an equipped proficient tool or weapon, or an equipped replicated Wand or Weapon, as the material focus for this spell."
-						: hasArcaneArmorFocus
-							? "Choose your worn Arcane Armor, an equipped proficient tool, or an equipped replicated Wand or Weapon as the spellcasting focus."
+						? `Choose ${hasArcaneArmorFocus ? "your worn Arcane Armor, " : ""}${hasArcaneFirearmFocus ? "your equipped Arcane Firearm, " : ""}an equipped proficient tool or weapon, or an equipped replicated Wand or Weapon as the material focus for this spell.`
+						: hasArcaneArmorFocus || hasArcaneFirearmFocus
+							? `Choose ${hasArcaneArmorFocus ? "your worn Arcane Armor, " : ""}${hasArcaneFirearmFocus ? "your equipped Arcane Firearm, " : ""}an equipped proficient tool, or an equipped replicated Wand or Weapon as the spellcasting focus.`
 							: "Choose the equipped proficient tool or replicated Wand or Weapon you are using as the material focus for this spell.",
-				unavailableMessage: hasBattleReady && hasArcaneArmorFocus
-					? "EFA Battle Smith spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, a proficient weapon, or an equipped replicated Wand or Weapon."
+				unavailableMessage: hasBattleReady && (hasArcaneArmorFocus || hasArcaneFirearmFocus)
+					? `EFA Battle Smith spells require ${hasArcaneArmorFocus ? "worn Arcane Armor, " : ""}${hasArcaneFirearmFocus ? "an equipped Arcane Firearm, " : ""}equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, a proficient weapon, or an equipped replicated Wand or Weapon.`
 					: hasBattleReady
 						? "EFA Battle Smith spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, a proficient weapon, or an equipped replicated Wand or Weapon."
-						: hasArcaneArmorFocus
-							? "EFA Artificer spells require worn Arcane Armor, equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon."
+						: hasArcaneArmorFocus || hasArcaneFirearmFocus
+							? `EFA Artificer spells require ${hasArcaneArmorFocus ? "worn Arcane Armor, " : ""}${hasArcaneFirearmFocus ? "an equipped Arcane Firearm, " : ""}equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon.`
 							: "EFA Artificer spells require equipped Thieves' Tools, Tinker's Tools, proficient Artisan's Tools, or an equipped replicated Wand or Weapon.",
 			},
 		};
+	}
+
+	static isSpellDamageBearing (spell) {
+		if (!spell || typeof spell !== "object") return false;
+		if (Array.isArray(spell.damageInflict) && spell.damageInflict.length) return true;
+		if (spell.scalingLevelDice && typeof spell.scalingLevelDice === "object") return true;
+		const visit = value => {
+			if (typeof value === "string") return /\{@(?:damage|scaledamage)\s/i.test(value);
+			if (Array.isArray(value)) return value.some(visit);
+			if (!value || typeof value !== "object") return false;
+			return Object.values(value).some(visit);
+		};
+		return visit(spell.entries) || visit(spell.entriesHigherLevel);
 	}
 
 	/**
@@ -43317,6 +43780,7 @@ class CharacterSheetState {
 		if (!requirement?.filter) return [];
 		if (requirement.hasInvalidSourceFeatureUid) return [];
 		const inventoryItemIds = new Set((requirement.filter.inventoryItemIds || []).map(id => String(id)));
+		const inventoryItemIdsBypassProficiency = new Set((requirement.filter.inventoryItemIdsBypassProficiency || []).map(id => String(id)));
 		const itemUids = new Set((requirement.filter.itemUids || []).map(uid => String(uid).toLowerCase()));
 		const itemNames = new Set((requirement.filter.itemNames || []).map(name => CharacterSheetState.normalizeToolKey(name)));
 		const itemTypes = new Set((requirement.filter.itemTypes || []).map(type => String(type).toUpperCase()));
@@ -43333,17 +43797,20 @@ class CharacterSheetState {
 			if (!wrapper?.id || (!includeUnequipped && !wrapper.equipped) || Number(wrapper.quantity ?? 1) <= 0) return false;
 			const item = wrapper.item;
 			if (!item?.name || !item.source) return false;
-			if (inventoryItemIds.has(wrapper.id)) return true;
 			const normalizedName = CharacterSheetState.normalizeToolKey(item.name);
 			const baseType = String(item.type || "").split("|")[0].toUpperCase();
 			const itemUid = `${item.name}|${item.source}`.toLowerCase();
-			const isExplicitlyAuthorized = inventoryItemIds.has(wrapper.id)
-				|| itemUids.has(itemUid)
+			const isExactInventoryItem = inventoryItemIds.has(wrapper.id);
+			const isExplicitlyAuthorizedEntity = itemUids.has(itemUid)
 				|| itemNames.has(normalizedName)
 				|| itemTypes.has(baseType);
-			const isAuthorizedEntityUsable = isExplicitlyAuthorized
+			const isExactInventoryItemUsable = isExactInventoryItem
+				&& (inventoryItemIdsBypassProficiency.has(wrapper.id)
+					|| !requirement.filter.requiresProficiency
+					|| this.hasToolProficiency(item.name));
+			const isAuthorizedEntityUsable = isExactInventoryItemUsable || (isExplicitlyAuthorizedEntity
 				&& (!itemSources.size || itemSources.has(String(item.source).toUpperCase()))
-				&& (!requirement.filter.requiresProficiency || this.hasToolProficiency(item.name));
+				&& (!requirement.filter.requiresProficiency || this.hasToolProficiency(item.name)));
 			const isWeaponUsable = !!weaponFilter
 				&& this._isWeaponItem(item)
 				&& this._isWeaponProficient(item);
@@ -47720,6 +48187,104 @@ class CharacterSheetState {
 			turnId: store.turnId,
 			count: removed.length,
 			receipts: removed,
+		};
+	}
+
+	getEfaArcaneFirearmTurnReceiptDescriptor ({castReceiptId = null} = {}) {
+		const normalizedCastReceiptId = String(castReceiptId || "").trim();
+		return {
+			key: `${CharacterSheetState.EFA_ARCANE_FIREARM_FEATURE_UID}:action:${CharacterSheetState.EFA_ARCANE_FIREARM_DAMAGE_ACTION_UID}${normalizedCastReceiptId ? `:cast:${normalizedCastReceiptId}` : ""}`,
+			ownerUid: `subclass:${CharacterSheetState.EFA_ARTILLERIST_SUBCLASS_UID}`,
+			sourceUid: CharacterSheetState.EFA_ARCANE_FIREARM_FEATURE_UID,
+			actionUid: CharacterSheetState.EFA_ARCANE_FIREARM_DAMAGE_ACTION_UID,
+		};
+	}
+
+	queryEfaArcaneFirearmTurnReceipt ({castReceiptId = null} = {}) {
+		const normalizedCastReceiptId = String(castReceiptId || "").trim();
+		if (normalizedCastReceiptId) {
+			return this.queryTurnReceipt(this.getEfaArcaneFirearmTurnReceiptDescriptor({castReceiptId: normalizedCastReceiptId}).key);
+		}
+		const descriptor = this.getEfaArcaneFirearmTurnReceiptDescriptor();
+		const store = this._getTurnReceiptStore();
+		const receipt = Object.values(store.receipts).find(it =>
+			it.ownerUid === descriptor.ownerUid
+			&& it.sourceUid === descriptor.sourceUid
+			&& it.actionUid === descriptor.actionUid,
+		) || null;
+		return {
+			ok: true,
+			used: !!receipt,
+			key: descriptor.key,
+			turnId: store.turnId,
+			receipt: receipt ? MiscUtil.copyFast(receipt) : null,
+		};
+	}
+
+	commitEfaArcaneFirearmTurnReceipt ({spellUid = null, inventoryItemId = null, castReceiptId = null} = {}) {
+		return this.commitTurnReceipt({
+			...this.getEfaArcaneFirearmTurnReceiptDescriptor({castReceiptId}),
+			metadata: {
+				spellUid,
+				inventoryItemId,
+				castReceiptId,
+			},
+		});
+	}
+
+	rollbackEfaArcaneFirearmTurnReceipt (receipt) {
+		return this.rollbackTurnReceipt(receipt);
+	}
+
+	pruneEfaArcaneFirearmTurnReceipts () {
+		return this.pruneTurnReceipts(this.getEfaArcaneFirearmTurnReceiptDescriptor());
+	}
+
+	getEfaArcaneFirearmDamageEligibility ({receipt, damageResult} = {}) {
+		if (!receipt || receipt.committed !== true || Number(receipt.receiptVersion) !== 1) return {ok: false, code: "uncommittedCast"};
+		if (receipt.castingClassUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return {ok: false, code: "wrongClass"};
+		const status = this.getEfaArcaneFirearmStatus();
+		if (!status.active || !status.binding?.inventoryItemId) return {ok: false, code: status.code || "inactiveBinding"};
+		const focus = this.resolveCommittedSpellCastReceiptFocus(receipt);
+		if (!focus || focus.id !== status.binding.inventoryItemId) return {ok: false, code: "otherFocus"};
+		const hasDamageRoll = Array.isArray(damageResult?.dice)
+			? !!damageResult.dice.length
+			: typeof damageResult?.dice === "string"
+				? !!damageResult.dice.trim()
+				: !!damageResult?.dice;
+		if (!hasDamageRoll || !Number.isFinite(Number(damageResult.total))) return {ok: false, code: "noDamageRoll"};
+		const turnGate = this.queryEfaArcaneFirearmTurnReceipt({castReceiptId: receipt.receiptId});
+		if (turnGate.used) return {ok: false, code: "alreadyAppliedToCast", turnGate};
+		return {
+			ok: true,
+			code: "eligible",
+			status,
+			focus,
+			turnGate,
+		};
+	}
+
+	commitEfaArcaneFirearmDamage ({receipt, damageResult, firearmRoll} = {}) {
+		const eligibility = this.getEfaArcaneFirearmDamageEligibility({receipt, damageResult});
+		if (!eligibility.ok) return eligibility;
+		const roll = Math.floor(Number(firearmRoll));
+		if (!Number.isFinite(roll) || roll < 1 || roll > 8) return {ok: false, code: "invalidFirearmRoll"};
+		const committed = this.commitEfaArcaneFirearmTurnReceipt({
+			spellUid: receipt.spellUid,
+			inventoryItemId: eligibility.status.binding.inventoryItemId,
+			castReceiptId: receipt.receiptId,
+		});
+		if (!committed.ok || !committed.receipt) return {ok: false, code: "alreadyAppliedToCast"};
+		const baseTotal = Number(damageResult.total);
+		return {
+			ok: true,
+			code: "applied",
+			turnReceipt: committed.receipt,
+			firearmRoll: roll,
+			baseTotal,
+			total: baseTotal + roll,
+			sourceFeatureUid: CharacterSheetState.EFA_ARCANE_FIREARM_FEATURE_UID,
+			focus: this.getSpellCastFocusReference(eligibility.focus),
 		};
 	}
 
@@ -82846,7 +83411,9 @@ class CharacterSheetState {
 
 	_reconcileClassSummonsAfterOwnerChange () {
 		if (this._classSummonReconciliationDeferDepth > 0) return [];
-		return this.reconcileClassSummons();
+		const result = this.reconcileClassSummons();
+		this.reconcileEfaArcaneFirearmBinding();
+		return result;
 	}
 
 	withClassSummonReconciliationDeferred (callback) {
@@ -82856,7 +83423,10 @@ class CharacterSheetState {
 			return callback();
 		} finally {
 			this._classSummonReconciliationDeferDepth = Math.max(0, this._classSummonReconciliationDeferDepth - 1);
-			if (!this._classSummonReconciliationDeferDepth) this.reconcileClassSummons();
+			if (!this._classSummonReconciliationDeferDepth) {
+				this.reconcileClassSummons();
+				this.reconcileEfaArcaneFirearmBinding();
+			}
 		}
 	}
 

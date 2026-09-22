@@ -907,6 +907,13 @@ class CharacterSheetRest {
 			else modalInner.append(huntersPreySwap.section);
 		}
 
+		const arcaneFirearmChoice = this._buildEfaArcaneFirearmLongRestSection();
+		if (arcaneFirearmChoice) {
+			const afTarget = modalInner.querySelector(".charsheet__modal-footer") || btnCancel.parentNode;
+			if (afTarget?.parentNode) afTarget.parentNode.insertBefore(arcaneFirearmChoice.section, afTarget);
+			else modalInner.append(arcaneFirearmChoice.section);
+		}
+
 		// --- Primal Focus mode selector (TGTT Ranger) ---
 		const primalFocusSelect = this._buildPrimalFocusModeSection();
 		if (primalFocusSelect) {
@@ -966,7 +973,7 @@ class CharacterSheetRest {
 		temporalMasteryAge?.onChange(syncValidity);
 		adventurersAtlas?.onChange(syncValidity);
 		syncValidity();
-		btnConfirm.onClick(() => {
+		btnConfirm.onClick(async () => {
 			if (temporalMasteryAge && !temporalMasteryAge.isValid()) return;
 			if (adventurersAtlas && !adventurersAtlas.isValid()) {
 				adventurersAtlas.focusFirstInvalid();
@@ -974,184 +981,220 @@ class CharacterSheetRest {
 			}
 			// Snapshot the full pre-rest state so this rest can be undone (BUG 8).
 			// Captured BEFORE any mutation below; transient and never persisted.
-			this._captureRestSnapshot("long");
-			const atlasResult = this._applyAdventurersAtlasLongRestPlan(adventurersAtlas?.getPlan());
-			if (!atlasResult.ok) {
-				if (this._page) this._page._lastRestSnapshot = null;
-				JqueryUtil.doToast({type: "danger", content: atlasResult.errors.join(" ")});
-				adventurersAtlas?.focusFirstInvalid();
+			const previousRestSnapshot = this._page?._lastRestSnapshot || null;
+			const restSnapshot = this._captureRestSnapshot("long");
+			if (!restSnapshot?.json) {
+				this._page._lastRestSnapshot = previousRestSnapshot;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: "The Long Rest could not start because the current character state could not be protected for rollback. No changes were made.",
+				});
 				return;
 			}
-
-			// Full HP recovery
-			this._state.setHp(maxHp, maxHp);
-			if (cbResetTempHp.checked) this._state.setTempHp(0);
-
-			// Recover half hit dice (minimum 1)
-			hitDice.forEach(hd => {
-				const recovery = Math.max(1, Math.floor(hd.max / 2));
-				hd.current = Math.min(hd.max, hd.current + recovery);
-			});
-			this._state.setHitDice(hitDice);
-
-			// Restore all spell slots
-			for (let level = 1; level <= 9; level++) {
-				const max = this._state.getSpellSlotsMax(level);
-				if (max > 0) {
-					this._state.setSpellSlots(level, max, max);
+			btnConfirm.disabled = true;
+			let atlasResult = null;
+			try {
+				atlasResult = this._applyAdventurersAtlasLongRestPlan(adventurersAtlas?.getPlan());
+				if (!atlasResult.ok) {
+					throw new Error(atlasResult.errors.join(" "));
 				}
-			}
+				this._state.resetTurnEconomy?.({round: null});
 
-			// Restore Warlock pact slots on long rest as well
-			const pactSlots = this._state.getPactSlots();
-			if (pactSlots && pactSlots.max > 0) {
-				this._state.setPactSlotsCurrent(pactSlots.max);
-			}
+				// Full HP recovery
+				this._state.setHp(maxHp, maxHp, cbResetTempHp.checked ? 0 : this._state.getHp().temp);
 
-			// Restore long-rest and short-rest resources
-			this._restoreResources("long");
-			this._state.restoreSignatureSpells?.();
-			this._state.restoreCartographerMappingMagicUses?.();
-			this._state.resetTurnEconomy?.({round: null});
-
-			// Clear one level of exhaustion using the dedicated exhaustion tracker
-			if (cbClearExhaustion.checked) {
-				const currentExhaustion = this._state.getExhaustion();
-				if (currentExhaustion > 0) {
-					this._state.setExhaustion(currentExhaustion - 1);
-				}
-			}
-
-			// Restore ability-score damage (all drains) if requested.
-			let abilityDamageRestored = 0;
-			if (cbRestoreAbilityDamage?.checked) {
-				abilityDamageRestored = totalAbilityDamage;
-				this._state.clearAllAbilityDamage?.();
-			}
-
-			// Remove selected conditions
-			conditionsToRemove.forEach(condition => {
-				this._state.removeCondition?.(condition);
-			});
-
-			// Break concentration if requested
-			if (cbBreakConcentration?.checked) {
-				this._state.breakConcentration?.();
-			}
-
-			// Reset death saves
-			this._state.setDeathSaves({successes: 0, failures: 0});
-
-			// Clear transient Druid Wild Shape forms and Wild-Companion familiars.
-			// Wild Shape uses recharge on a rest, so any assumed beast form reverts
-			// and a Wild-Companion-summoned familiar (which cost a Wild Shape use)
-			// disappears — re-summoning after the rest costs a fresh use. Regular
-			// Find Familiar / Pact of the Chain familiars are NOT removed (only the
-			// Wild-Companion-origin ones), and other companion types are untouched.
-			const removedCompanions = this._removeWildShapeCompanionsOnLongRest();
-
-			// Reset Gambler prepared spell roll (TGTT Rogue subclass)
-			const calcs = this._state.getFeatureCalculations();
-			if (calcs.hasGamblerSpellcasting) {
-				// Reset the rolled prepared count - requires new roll after rest
-				this._state.resetGamblerPreparedRoll(false); // Keep current prepared spells as options
-			}
-
-			// Reset Gambler daily resources (Extra Luck, Master of Fortune uses)
-			if (calcs.hasGamblerFolly) {
-				this._state.resetGamblerDailyResources();
-			}
-			this._state.resetBonusAction?.();
-
-			// Apply Hunter's Prey option swap, if changed
-			huntersPreySwap?.apply();
-
-			// Apply Primal Focus mode selection, if changed (free on a long rest)
-			const primalFocusChanged = primalFocusSelect?.apply() || false;
-			const daemonologistSideChanged = daemonologistSideSelect?.apply() || false;
-
-			// Forked Tongue: a new long rest re-enables the once-per-rest swap, then we
-			// apply any language swap the player chose in this dialog.
-			this._state.resetForkedTongueSwap?.();
-			const forkedTongueChanged = forkedTongueSwap?.apply() || false;
-
-			// Apply Terrorizing Force damage-type re-choice (free on a long rest)
-			const terrorizingForceChanged = terrorizingForceChoice?.apply() || false;
-			const spellMasteryChanged = spellMasterySwap?.apply() || false;
-			const temporalAgeChanged = temporalMasteryAge?.apply() || false;
-			const armorModelOutcome = armorModelSwitch?.apply() || null;
-			const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
-			const replicateMagicItemResult = this._commitEfaReplicateMagicItemProduction(replicateMagicItemProduction);
-			const spellStoringItemResult = this._commitEfaSpellStoringItemChoice(spellStoringItemChoice);
-
-			// Save changes
-			this._page.saveCharacter();
-			this._page.renderCharacter();
-
-			doClose(true);
-
-			let message = "🌙 Long rest complete! All resources restored.";
-			if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
-			if (daemonologistSideChanged) message += ` Fair and Foul set to ${daemonologistSideChanged}.`;
-			if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
-			if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
-			if (spellMasteryChanged) message += ` Spell Mastery changed to ${spellMasteryChanged}.`;
-			if (temporalAgeChanged) message += ` Temporal Mastery changed age to ${temporalAgeChanged}.`;
-			if (replicateMagicItemResult?.ok && replicateMagicItemResult.code === "replicate-production-committed") {
-				message += ` Created ${replicateMagicItemResult.created.length} replicated item${replicateMagicItemResult.created.length === 1 ? "" : "s"}.`;
-				if (replicateMagicItemResult.evicted.length) {
-					message += ` Removed ${replicateMagicItemResult.evicted.length} oldest replicated item${replicateMagicItemResult.evicted.length === 1 ? "" : "s"} to stay within capacity.`;
-				}
-				const failedAttunements = replicateMagicItemResult.attunement.filter(result =>
-					["requirements-failed", "cap-reached"].includes(result.status),
-				);
-				if (failedAttunements.length) {
-					message += ` ${failedAttunements.length} requested attunement${failedAttunements.length === 1 ? "" : "s"} could not be completed; the item${failedAttunements.length === 1 ? " was" : "s were"} still created.`;
-				}
-			} else if (
-				replicateMagicItemResult
-				&& !replicateMagicItemResult.ok
-				&& replicateMagicItemProduction?.getRequest().selections.length
-			) {
-				message += ` Replicate Magic Item made no inventory changes: ${replicateMagicItemResult.message || "the production choices could not be resolved"}.`;
-			}
-			if (spellStoringItemResult?.committed) {
-				message += ` Stored ${spellStoringItemResult.storage.spell.name} in ${spellStoringItemResult.storage.host.name}.`;
-			} else if (spellStoringItemResult && !spellStoringItemResult.ok) {
-				message += " Spell-Storing Item was unchanged because the selected host or spell could not be resolved.";
-			}
-			if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
-			if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
-			if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
-			if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
-			if (atlasResult.changed) message += ` Adventurer's Atlas ${atlasResult.atlas.generation > 1 ? "recreated" : "created"}.`;
-			message += armorModelFeedback.successSuffix;
-
-			JqueryUtil.doToast({
-				type: "success",
-				content: message,
-			});
-			if (armorModelFeedback.warning) {
-				JqueryUtil.doToast({
-					type: "warning",
-					content: armorModelFeedback.warning,
+				// Recover half hit dice (minimum 1)
+				hitDice.forEach(hd => {
+					const recovery = Math.max(1, Math.floor(hd.max / 2));
+					hd.current = Math.min(hd.max, hd.current + recovery);
 				});
+				this._state.setHitDice(hitDice);
+
+				// Restore all spell slots
+				for (let level = 1; level <= 9; level++) {
+					const max = this._state.getSpellSlotsMax(level);
+					if (max > 0) {
+						this._state.setSpellSlots(level, max, max);
+					}
+				}
+
+				// Restore Warlock pact slots on long rest as well
+				const pactSlots = this._state.getPactSlots();
+				if (pactSlots && pactSlots.max > 0) {
+					this._state.setPactSlotsCurrent(pactSlots.max);
+				}
+
+				// Restore long-rest and short-rest resources
+				this._restoreResources("long");
+				this._state.restoreSignatureSpells?.();
+				this._state.restoreCartographerMappingMagicUses?.();
+
+				// Clear one level of exhaustion using the dedicated exhaustion tracker
+				if (cbClearExhaustion.checked) {
+					const currentExhaustion = this._state.getExhaustion();
+					if (currentExhaustion > 0) {
+						this._state.setExhaustion(currentExhaustion - 1);
+					}
+				}
+
+				// Restore ability-score damage (all drains) if requested.
+				let abilityDamageRestored = 0;
+				if (cbRestoreAbilityDamage?.checked) {
+					abilityDamageRestored = totalAbilityDamage;
+					this._state.clearAllAbilityDamage?.();
+				}
+
+				// Remove selected conditions
+				conditionsToRemove.forEach(condition => {
+					this._state.removeCondition?.(condition);
+				});
+
+				// Break concentration if requested
+				if (cbBreakConcentration?.checked) {
+					this._state.breakConcentration?.();
+				}
+
+				// Reset death saves
+				this._state.setDeathSaves({successes: 0, failures: 0});
+
+				// Clear transient Druid Wild Shape forms and Wild-Companion familiars.
+				// Wild Shape uses recharge on a rest, so any assumed beast form reverts
+				// and a Wild-Companion-summoned familiar (which cost a Wild Shape use)
+				// disappears — re-summoning after the rest costs a fresh use. Regular
+				// Find Familiar / Pact of the Chain familiars are NOT removed (only the
+				// Wild-Companion-origin ones), and other companion types are untouched.
+				const removedCompanions = this._removeWildShapeCompanionsOnLongRest();
+
+				// Reset Gambler prepared spell roll (TGTT Rogue subclass)
+				const calcs = this._state.getFeatureCalculations();
+				if (calcs.hasGamblerSpellcasting) {
+					this._state.resetGamblerPreparedRoll(false); // Keep current prepared spells as options
+				}
+
+				// Reset Gambler daily resources (Extra Luck, Master of Fortune uses)
+				if (calcs.hasGamblerFolly) {
+					this._state.resetGamblerDailyResources();
+				}
+				this._state.resetBonusAction?.();
+
+				// Apply Hunter's Prey option swap, if changed
+				huntersPreySwap?.apply();
+				const replicateMagicItemResult = this._commitEfaReplicateMagicItemProduction(replicateMagicItemProduction, {
+					protectedInventoryItemIds: [arcaneFirearmChoice?.getSelectedItemId?.()].filter(Boolean),
+				});
+				const arcaneFirearmChanged = arcaneFirearmChoice?.apply() || false;
+
+				// Apply Primal Focus mode selection, if changed (free on a long rest)
+				const primalFocusChanged = primalFocusSelect?.apply() || false;
+				const daemonologistSideChanged = daemonologistSideSelect?.apply() || false;
+
+				// Forked Tongue: a new long rest re-enables the once-per-rest swap, then we
+				// apply any language swap the player chose in this dialog.
+				this._state.resetForkedTongueSwap?.();
+				const forkedTongueChanged = forkedTongueSwap?.apply() || false;
+
+				// Apply Terrorizing Force damage-type re-choice (free on a long rest)
+				const terrorizingForceChanged = terrorizingForceChoice?.apply() || false;
+				const spellMasteryChanged = spellMasterySwap?.apply() || false;
+				const temporalAgeChanged = temporalMasteryAge?.apply() || false;
+				const armorModelOutcome = armorModelSwitch?.apply() || null;
+				const armorModelFeedback = CharacterSheetRest.getEfaArmorModelRestFeedback(armorModelOutcome);
+				const spellStoringItemResult = this._commitEfaSpellStoringItemChoice(spellStoringItemChoice);
+
+				// Save changes
+				let saveResult;
+				if (this._page._saveCurrentCharacter) {
+					saveResult = await this._page._saveCurrentCharacter({isReturnStatus: true});
+				} else {
+					saveResult = this._page.saveCharacter?.();
+					if (saveResult?.then) saveResult = await saveResult;
+				}
+				if (saveResult === false) throw new Error("The Long Rest could not be saved.");
+				this._page.renderCharacter();
+
+				doClose(true);
+
+				let message = "🌙 Long rest complete! All resources restored.";
+				if (primalFocusChanged) message += ` Primal Focus set to ${primalFocusChanged}.`;
+				if (daemonologistSideChanged) message += ` Fair and Foul set to ${daemonologistSideChanged}.`;
+				if (forkedTongueChanged) message += ` Forked Tongue: swapped ${forkedTongueChanged}.`;
+				if (terrorizingForceChanged) message += ` Terrorizing Force damage set to ${terrorizingForceChanged}.`;
+				if (spellMasteryChanged) message += ` Spell Mastery changed to ${spellMasteryChanged}.`;
+				if (temporalAgeChanged) message += ` Temporal Mastery changed age to ${temporalAgeChanged}.`;
+				if (arcaneFirearmChanged) message += ` Arcane Firearm carved into ${arcaneFirearmChanged}.`;
+				if (replicateMagicItemResult?.ok && replicateMagicItemResult.code === "replicate-production-committed") {
+					message += ` Created ${replicateMagicItemResult.created.length} replicated item${replicateMagicItemResult.created.length === 1 ? "" : "s"}.`;
+					if (replicateMagicItemResult.evicted.length) {
+						message += ` Removed ${replicateMagicItemResult.evicted.length} oldest replicated item${replicateMagicItemResult.evicted.length === 1 ? "" : "s"} to stay within capacity.`;
+					}
+				} else if (replicateMagicItemResult && !replicateMagicItemResult.ok) {
+					message += ` Replicate Magic Item was skipped: ${replicateMagicItemResult.message || replicateMagicItemResult.code}.`;
+				}
+				if (spellStoringItemResult?.committed) {
+					message += ` Stored ${spellStoringItemResult.storage.spell.name} in ${spellStoringItemResult.storage.host.name}.`;
+				} else if (spellStoringItemResult && !spellStoringItemResult.ok) {
+					message += " Spell-Storing Item was unchanged because the selected host or spell could not be resolved.";
+				}
+				if (abilityDamageRestored > 0) message += ` Restored ${abilityDamageRestored} ability damage.`;
+				if (conditionsToRemove.size > 0) message += ` Removed ${conditionsToRemove.size} condition(s).`;
+				if (cbBreakConcentration?.checked) message += ` Broke concentration.`;
+				if (removedCompanions > 0) message += ` Wild Shape form/companion dismissed.`;
+				if (atlasResult.changed) message += ` Adventurer's Atlas ${atlasResult.atlas.generation > 1 ? "recreated" : "created"}.`;
+				message += armorModelFeedback.successSuffix;
+
+				JqueryUtil.doToast({
+					type: "success",
+					content: message,
+				});
+				if (armorModelFeedback.warning) {
+					JqueryUtil.doToast({
+						type: "warning",
+						content: armorModelFeedback.warning,
+					});
+				}
+
+				// Offer a persistent undo for this rest (BUG 8).
+				this._showUndoRestAffordance("long");
+
+				// Auto-popup Gambler prepared roll modal after long rest
+				if (calcs.hasGamblerSpellcasting) {
+					this._showGamblerPreparedRollModal();
+				}
+
+				// Auto-popup scribing memorization after long rest (Spell Scribing Adept)
+				if (calcs.hasSpellScribingAdept && calcs.scribingSpellbookCount > 0) {
+					this._showScribingMemorizeModal();
+				}
+
+				this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("long");
+			} catch (error) {
+				if (restSnapshot?.json) this._state.loadFromJson(restSnapshot.json);
+				if (this._page) this._page._lastRestSnapshot = previousRestSnapshot;
+				if (previousRestSnapshot) this._showUndoRestAffordance(previousRestSnapshot.restType);
+				else this._removeUndoRestAffordance();
+				let isRollbackPersisted = true;
+				try {
+					let rollbackSaveResult;
+					if (this._page._saveCurrentCharacter) {
+						rollbackSaveResult = await this._page._saveCurrentCharacter({isReturnStatus: true});
+					} else {
+						rollbackSaveResult = this._page.saveCharacter?.();
+						if (rollbackSaveResult?.then) rollbackSaveResult = await rollbackSaveResult;
+					}
+					isRollbackPersisted = rollbackSaveResult !== false;
+				} catch {
+					isRollbackPersisted = false;
+				}
+				this._page.renderCharacter?.();
+				btnConfirm.disabled = false;
+				JqueryUtil.doToast({
+					type: "danger",
+					content: isRollbackPersisted
+						? `${error?.message || "The Long Rest could not be completed."} No changes were kept.`
+						: `${error?.message || "The Long Rest could not be completed."} The sheet was restored, but that rollback could not be saved; save the character manually before leaving.`,
+				});
+				if (atlasResult && !atlasResult.ok) adventurersAtlas?.focusFirstInvalid();
 			}
-
-			// Offer a persistent undo for this rest (BUG 8).
-			this._showUndoRestAffordance("long");
-
-			// Auto-popup Gambler prepared roll modal after long rest
-			if (calcs.hasGamblerSpellcasting) {
-				this._showGamblerPreparedRollModal();
-			}
-
-			// Auto-popup scribing memorization after long rest (Spell Scribing Adept)
-			if (calcs.hasSpellScribingAdept && calcs.scribingSpellbookCount > 0) {
-				this._showScribingMemorizeModal();
-			}
-
-			this._page.getMaterialsModule?.()?.notifyOverloadedItemsOnRest("long");
 		});
 
 		ee`<div class="charsheet__modal-footer">
@@ -1649,9 +1692,14 @@ class CharacterSheetRest {
 		};
 	}
 
-	_commitEfaReplicateMagicItemProduction (production) {
+	_commitEfaReplicateMagicItemProduction (production, {protectedInventoryItemIds = []} = {}) {
 		if (!production) return null;
-		return this._state.commitEfaReplicateMagicItemsAtLongRest(production.getRequest());
+		const request = production.getRequest();
+		const protectedIds = [...new Set(protectedInventoryItemIds.filter(Boolean))];
+		return this._state.commitEfaReplicateMagicItemsAtLongRest({
+			...request,
+			...(protectedIds.length ? {protectedInventoryItemIds: protectedIds} : {}),
+		});
 	}
 
 	_buildTemporalMasteryAgeSection () {
@@ -2094,6 +2142,92 @@ class CharacterSheetRest {
 				if (chosen && chosen !== currentOption) {
 					this._state.setHuntersPreyOption?.(chosen);
 				}
+			},
+		};
+	}
+
+	/**
+	 * Build the optional EFA Arcane Firearm carve/re-carve choice for Long Rest.
+	 * The returned apply callback is the only UI path which changes the binding.
+	 * @returns {{section: HTMLElement, apply: function}|null}
+	 */
+	_buildEfaArcaneFirearmLongRestSection () {
+		const status = this._state.getEfaArcaneFirearmStatus?.();
+		if (!status?.available) return null;
+
+		const candidates = this._state.getEfaArcaneFirearmEligibleInventoryRows?.() || [];
+		const currentId = status.binding?.inventoryItemId || null;
+		const currentIsLegal = !!currentId && candidates.some(item => item.id === currentId);
+		const section = e_({outer: `<div class="charsheet__rest-section charsheet__arcane-firearm-rest">
+			<div class="charsheet__rest-section-title">🔥 Arcane Firearm</div>
+			<p class="ve-muted ve-small mb-2">Optionally carve or re-carve one eligible inventory item when this Long Rest finishes.</p>
+		</div>`});
+
+		if (!candidates.length) {
+			const empty = e_({
+				tag: "div",
+				clazz: "charsheet__arcane-firearm-rest-empty",
+				txt: currentIsLegal
+					? `${status.item?.name || "Your current Arcane Firearm"} remains carved.`
+					: "No eligible rod, staff, wand, or martial ranged weapon is in your inventory. Add one before a future Long Rest to carve it.",
+			});
+			empty.setAttribute("role", "status");
+			section.appendChild(empty);
+			return {
+				section,
+				getSelectedItemId: () => null,
+				apply: () => false,
+			};
+		}
+
+		const selectId = "charsheet-rest-arcane-firearm-choice";
+		const label = e_({
+			tag: "label",
+			clazz: "charsheet__arcane-firearm-rest-label",
+			txt: "Item to carve",
+		});
+		label.setAttribute("for", selectId);
+		const select = e_({
+			tag: "select",
+			clazz: "form-control input-sm charsheet__arcane-firearm-rest-select",
+			id: selectId,
+		});
+		select.setAttribute("aria-label", "Arcane Firearm item to carve after this Long Rest");
+
+		select.appendChild(e_({
+			tag: "option",
+			val: "__keep__",
+			txt: currentIsLegal
+				? `Keep Current — ${status.item?.name || "carved item"}`
+				: "Do not carve an item",
+		}));
+		candidates.forEach(item => {
+			select.appendChild(e_({
+				tag: "option",
+				val: item.id,
+				txt: item.bindingLabel,
+			}));
+		});
+		select.value = "__keep__";
+		section.appendChild(label);
+		section.appendChild(select);
+		section.appendChild(e_({
+			tag: "p",
+			clazz: "ve-muted ve-small mt-1 mb-0",
+			txt: "The item remains in inventory and may stay carved while unequipped, but it must be equipped to serve as a focus or add damage.",
+		}));
+
+		return {
+			section,
+			getSelectedItemId: () => {
+				if (!select.value || select.value === "__keep__") return currentIsLegal ? currentId : null;
+				return candidates.some(item => item.id === select.value) ? select.value : null;
+			},
+			apply: () => {
+				if (!select.value || select.value === "__keep__") return false;
+				const result = this._state.setEfaArcaneFirearmBinding?.(select.value);
+				if (!result?.ok) throw new Error("The selected Arcane Firearm item is no longer eligible.");
+				return result.binding?.lastKnownItem?.name || "the selected item";
 			},
 		};
 	}

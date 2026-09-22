@@ -252,6 +252,30 @@ describe("EFA Replicate Magic Item lifecycle", () => {
 			.map(row => row.item._generatedItemProvenance.creation.order)).toEqual([3, 4]);
 	});
 
+	test("preserves an exact generated inventory row reserved by another Long Rest decision", () => {
+		const {state} = buildState();
+		const bag = getSlot(state, "Bag of Holding|XDMG");
+		const weapon = getSlot(state, "+1 Weapon|XDMG");
+		const first = state.commitEfaReplicateMagicItemsAtLongRest({
+			selections: [
+				{slotId: bag.slotId},
+				{slotId: weapon.slotId, resolvedItemUid: "Longsword +1|XDMG"},
+			],
+		});
+
+		const replacement = state.commitEfaReplicateMagicItemsAtLongRest({
+			selections: [{slotId: bag.slotId}],
+			protectedInventoryItemIds: [first.created[0].itemId],
+		});
+
+		expect(replacement).toMatchObject({
+			ok: true,
+			evicted: [{itemId: first.created[1].itemId}],
+		});
+		expect(state.getGeneratedFeatureItemRows(State.EFA_REPLICATE_MAGIC_ITEM_OWNER).map(row => row.id))
+			.toEqual(expect.arrayContaining([first.created[0].itemId, replacement.created[0].itemId]));
+	});
+
 	test("maximizes overlapping extension capacity independently of descriptor order", () => {
 		const {state} = buildState();
 		const owner = State.EFA_REPLICATE_MAGIC_ITEM_OWNER;

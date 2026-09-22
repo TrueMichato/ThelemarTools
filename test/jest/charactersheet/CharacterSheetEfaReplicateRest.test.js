@@ -163,7 +163,7 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 		await rest._showLongRestDialog();
 		const confirm = createdElements.find(element => element.textContent === "🌙 Finish Long Rest");
 		expect(confirm).toBeDefined();
-		confirm.click();
+		await confirm._handlers.click();
 
 		expect(state.getCurrentHp()).toBe(state.getMaxHp());
 		expect(state.toJson().inventory).toEqual(beforeInventory);
@@ -171,5 +171,68 @@ describe("EFA Replicate Magic Item long-rest interaction", () => {
 		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
 		expect(page.renderCharacter).toHaveBeenCalledTimes(1);
 		expect(doClose).toHaveBeenCalledWith(true);
+	});
+
+	test("protects the selected Arcane Firearm wrapper while committing Replicate production", async () => {
+		const state = new State();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 5,
+			subclass: {name: "Artillerist", shortName: "Artillerist", source: "EFA"},
+		});
+		const firearmId = "replicated-firearm";
+		state.addItem({
+			id: firearmId,
+			name: "Carved Wand",
+			source: "XPHB",
+			type: "WD",
+			quantity: 1,
+			equipped: true,
+			_isCustom: true,
+		});
+		state.setItemEquipped(firearmId, true);
+		expect(state.setEfaArcaneFirearmBinding(firearmId).ok).toBe(true);
+		mockProductionOptions(state);
+		const commitProduction = jest.spyOn(state, "commitEfaReplicateMagicItemsAtLongRest")
+			.mockReturnValue({ok: true, code: "replicate-production-skipped", resolved: []});
+		const {rest} = makeRest(state);
+		const modalInner = globalThis.e_({tag: "div"});
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: modalInner, doClose: jest.fn()});
+
+		await rest._showLongRestDialog();
+		const confirm = createdElements.find(element => element.textContent === "🌙 Finish Long Rest");
+		await confirm._handlers.click();
+
+		expect(commitProduction).toHaveBeenCalledWith({
+			selections: [],
+			protectedInventoryItemIds: [firearmId],
+		});
+	});
+
+	test("failed Long Rest persistence restores the previous undo snapshot and affordance", async () => {
+		const state = new State();
+		state.addClass({name: "Fighter", source: "PHB", level: 1});
+		state.setMaxHp(20);
+		state.setCurrentHp(5);
+		const {rest, page} = makeRest(state);
+		const previousSnapshot = {
+			restType: "short",
+			json: structuredClone(state.toJson()),
+		};
+		page._lastRestSnapshot = previousSnapshot;
+		page._saveCurrentCharacter = jest.fn()
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true);
+		const modalInner = globalThis.e_({tag: "div"});
+		jest.spyOn(CharacterSheetModal, "pGetShow").mockResolvedValue({eleModalInner: modalInner, doClose: jest.fn()});
+
+		await rest._showLongRestDialog();
+		const confirm = createdElements.find(element => element.textContent === "🌙 Finish Long Rest");
+		await confirm._handlers.click();
+
+		expect(state.getCurrentHp()).toBe(5);
+		expect(page._lastRestSnapshot).toBe(previousSnapshot);
+		expect(rest._showUndoRestAffordance).toHaveBeenCalledWith("short");
 	});
 });

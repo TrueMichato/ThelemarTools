@@ -28,6 +28,17 @@
 		flex-direction: column;
 	}
 
+	.charsheet__arcane-firearm-header {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	.charsheet__arcane-firearm-rest-select {
+		font-size: 1rem;
+		min-height: 44px;
+		width: 100%;
+	}
+
 	.charsheet__efa-cannon-create,
 	.charsheet__efa-cannon-activate {
 		width: 100%;
