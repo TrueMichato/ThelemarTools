@@ -6369,6 +6369,7 @@ class CharacterSheetState {
 		// string type. Idempotent.
 		this._migrateCompanions();
 		this.reconcileClassSummons();
+		this._ensureEfaEldritchCannonCreationResource();
 
 		// (#11) Backfill quiver contents for saves whose quiver was already equipped
 		// before the auto-place pipeline existed (or before dart recognition). Runs
@@ -78070,9 +78071,18 @@ class CharacterSheetState {
 		}
 
 		let resource = candidates[0] || null;
+		const hasActiveFreeUseCannon = !candidates.length
+			&& (this._data.companions || []).some(record =>
+				record?.createdWith === "freeUse"
+				&& CharacterSheetState._isSameClassSummonUid(
+					record.generatedClassSummon?.templateUid,
+					CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID,
+				)
+				&& this._validateGeneratedClassSummonRecord(record).ok,
+			);
 		const current = candidates.length
 			? (candidates.some(candidate => (Number(candidate?.current) || 0) <= 0) ? 0 : 1)
-			: 1;
+			: hasActiveFreeUseCannon ? 0 : 1;
 		if (!resource) {
 			resource = {
 				id: CryptUtil.uid(),
@@ -78238,6 +78248,7 @@ class CharacterSheetState {
 		createdWithSlotKind = "spell",
 		cancelled = false,
 		pCommit = null,
+		pRollback = null,
 	} = {}) {
 		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
 		const validation = this._validateEfaEldritchCannonCreationRequest({
@@ -78256,6 +78267,21 @@ class CharacterSheetState {
 		const rollback = (reason, details = null) => {
 			this.loadFromJson(snapshot);
 			return {ok: false, committed: false, reason, ...(details ? {details} : {})};
+		};
+		const pRollbackCommittedMutation = async (reason, details = null) => {
+			const result = rollback(reason, details);
+			if (!pRollback) return result;
+			try {
+				const rollbackSaved = (await pRollback()) !== false;
+				return {...result, rollbackSaveAttempted: true, rollbackSaved};
+			} catch (error) {
+				return {
+					...result,
+					rollbackSaveAttempted: true,
+					rollbackSaved: false,
+					rollbackSaveError: error instanceof Error ? error.message : String(error),
+				};
+			}
 		};
 
 		const actionTracked = this.isInCombat();
@@ -78287,9 +78313,9 @@ class CharacterSheetState {
 					payment: validation.payment,
 					action: {type: "action", subtype: "Magic action", spent: actionTracked},
 				});
-				if (didCommit === false) return rollback("saveFailed");
+				if (didCommit === false) return pRollbackCommittedMutation("saveFailed");
 			} catch (error) {
-				return rollback("saveFailed", {message: error instanceof Error ? error.message : String(error)});
+				return pRollbackCommittedMutation("saveFailed", {message: error instanceof Error ? error.message : String(error)});
 			}
 		}
 

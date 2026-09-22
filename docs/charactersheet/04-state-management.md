@@ -68,7 +68,10 @@ request before spending anything, consumes the canonical Action slot only in
 combat, and spends either the source-qualified one-use Long Rest resource or an
 explicit normal/Pact spell slot. The callback-backed persistence commit is
 atomic: a failed save restores the full pre-request state, including action
-economy, resource/slot counts, summon revisions, and companion records.
+economy, resource/slot counts, summon revisions, and companion records, then
+attempts to persist the rollback. Resource-less Milestone 2 saves initialize
+the use as spent only when a surviving exact-owner cannon records
+`createdWith: "freeUse"`; explicit resources remain authoritative.
 
 Base operation remains on dedicated EFA APIs:
 `validateEfaEldritchCannonActivation()` /

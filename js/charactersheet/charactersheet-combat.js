@@ -7523,9 +7523,9 @@ class CharacterSheetCombat {
 				createdWithSlotLevel: payment === "spellSlot" ? Number(slotLevel) : null,
 				createdWithSlotKind: payment === "spellSlot" ? slotKind : "spell",
 				pCommit: () => this._pSaveEfaCannonState(),
+				pRollback: () => this._pSaveEfaCannonState(),
 			});
 			if (!result.ok) {
-				if (result.reason === "saveFailed") await this._pSaveEfaCannonState();
 				feedback.textContent = result.reason === "saveFailed"
 					? "The character could not be saved. No Action, free use, spell slot, or cannon was committed. Try again."
 					: result.reason === "invalidState"

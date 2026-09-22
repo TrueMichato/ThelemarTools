@@ -1271,6 +1271,9 @@ the compact record contract:
   "Magic Action" subtype.
 - `Eldritch Cannon Creation` is a contextual, exact-feature resource with one
   Long Rest use. An explicit normal or Pact spell slot is the alternative.
+  Resource-less Milestone 2 saves initialize that use as spent only when a
+  surviving exact-owner cannon records `createdWith: "freeUse"`; explicit
+  resources remain authoritative.
 - `validateEfaEldritchCannonActivation()` /
   `activateEfaEldritchCannon()` require the owner within 60 feet, consume the
   canonical `bonus` slot only in combat, and allow a deployed cannon to move up

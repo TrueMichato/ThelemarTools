@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {jest} from "@jest/globals";
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
@@ -54,6 +55,24 @@ const createRequest = (overrides = {}) => ({
 	createdWithSlotLevel: null,
 	...overrides,
 });
+
+const getCreationResource = state => state.toJson().resources.find(resource =>
+	resource.featureUid === CharacterSheetState.EFA_ELDRITCH_CANNON_FEATURE_UID,
+);
+
+const getCannonTransactionState = state => {
+	const json = state.toJson();
+	return {
+		actionEconomyUsage: json.actionEconomyUsage,
+		spellSlots: json.spellcasting.spellSlots,
+		pactSlots: json.spellcasting.pactSlots,
+		creationResource: json.resources.find(resource =>
+			resource.featureUid === CharacterSheetState.EFA_ELDRITCH_CANNON_FEATURE_UID,
+		),
+		generatedClassSummonRevisions: json.generatedClassSummonRevisions,
+		companions: json.companions,
+	};
+};
 
 describe("EFA Artillerist Milestone 3 cannon creation", () => {
 	test("validates the complete request before spending its Magic Action or free use", async () => {
@@ -168,6 +187,116 @@ describe("EFA Artillerist Milestone 3 cannon creation", () => {
 		expect(state.getEfaEldritchCannon(created.instanceId)).toBeTruthy();
 	});
 
+	test("migrates a resource-less M2 free-use cannon save as spent until Long Rest", async () => {
+		const legacy = makeState();
+		const created = legacy.createEfaEldritchCannon(createRequest());
+		const legacySave = legacy.toJson();
+		legacySave.resources = [];
+
+		const catalogDeferred = new CharacterSheetState();
+		catalogDeferred.loadFromJson(legacySave);
+		expect(getCreationResource(catalogDeferred)).toMatchObject({current: 0});
+
+		const loaded = makeState();
+		loaded.loadFromJson(legacySave);
+		const migratedResource = getCreationResource(loaded);
+		expect(migratedResource).toMatchObject({
+			current: 0,
+			max: 1,
+			recharge: "long",
+			featureUid: CharacterSheetState.EFA_ELDRITCH_CANNON_FEATURE_UID,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			subclassUid: CharacterSheetState.EFA_ARTILLERIST_SUBCLASS_UID,
+		});
+		expect(loaded.getEfaEldritchCannonCreationState().freeUse.current).toBe(0);
+
+		const roundTrip = makeState();
+		roundTrip.loadFromJson(loaded.toJson());
+		expect(getCreationResource(roundTrip)).toEqual(migratedResource);
+		expect(roundTrip.dismissEfaEldritchCannon(created.instanceId).ok).toBe(true);
+		expect(await roundTrip.pCreateEfaEldritchCannon(createRequest())).toMatchObject({
+			ok: false,
+			committed: false,
+			reason: "freeUseUnavailable",
+		});
+
+		roundTrip.onLongRest();
+		expect(roundTrip.getEfaEldritchCannonCreationState().freeUse.current).toBe(1);
+		const afterRestRoundTrip = makeState();
+		afterRestRoundTrip.loadFromJson(roundTrip.toJson());
+		expect(afterRestRoundTrip.getEfaEldritchCannonCreationState().freeUse.current).toBe(1);
+	});
+
+	test("keeps a resource-less M2 slot-funded cannon's free use available", () => {
+		const legacy = makeState();
+		legacy.createEfaEldritchCannon(createRequest({
+			createdWith: "spellSlot",
+			createdWithSlotLevel: 1,
+		}));
+		const legacySave = legacy.toJson();
+		legacySave.resources = [];
+
+		const loaded = makeState();
+		loaded.loadFromJson(legacySave);
+		expect(getCreationResource(loaded)).toMatchObject({current: 1, max: 1, recharge: "long"});
+		expect(loaded.getEfaEldritchCannonCreationState().freeUse.current).toBe(1);
+	});
+
+	test.each([
+		["malformed", record => { record.form = "invalid"; }],
+		["retired", record => { record.durationRemainingMinutes = 0; }],
+	])("does not infer a spent free use from a %s legacy cannon record", (label, mutateRecord) => {
+		const legacy = makeState();
+		legacy.createEfaEldritchCannon(createRequest());
+		const legacySave = legacy.toJson();
+		legacySave.resources = [];
+		mutateRecord(legacySave.companions[0]);
+
+		const loaded = makeState();
+		loaded.loadFromJson(legacySave);
+		expect(loaded.listEfaEldritchCannons()).toEqual([]);
+		expect(getCreationResource(loaded)).toMatchObject({current: 1});
+	});
+
+	test.each([
+		["TCE", save => {
+			save.classes = makeState({source: "TCE"}).toJson().classes;
+		}],
+		["missing owner", save => {
+			save.classes = [];
+		}],
+	])("does not create an EFA resource for a %s legacy save", (label, mutateSave) => {
+		const legacy = makeState();
+		legacy.createEfaEldritchCannon(createRequest());
+		const legacySave = legacy.toJson();
+		legacySave.resources = [];
+		mutateSave(legacySave);
+
+		const loaded = makeState();
+		loaded.loadFromJson(legacySave);
+		expect(loaded.listEfaEldritchCannons()).toEqual([]);
+		expect(getCreationResource(loaded)).toBeUndefined();
+		expect(loaded.getEfaEldritchCannonCreationState()).toMatchObject({available: false});
+	});
+
+	test.each([
+		["available", 1, "freeUse"],
+		["spent", 0, "spellSlot"],
+	])("keeps an existing explicit %s creation resource authoritative", (label, current, createdWith) => {
+		const source = makeState();
+		const resourceId = source.getEfaEldritchCannonCreationState().freeUse.resourceId;
+		source.setResourceCurrent(resourceId, current);
+		source.createEfaEldritchCannon(createRequest({
+			createdWith,
+			createdWithSlotLevel: createdWith === "spellSlot" ? 1 : null,
+		}));
+
+		const loaded = makeState();
+		loaded.loadFromJson(source.toJson());
+		expect(getCreationResource(loaded).current).toBe(current);
+		expect(loaded.getEfaEldritchCannonCreationState().freeUse.current).toBe(current);
+	});
+
 	test("rejects a second active cannon and isolates all M3 resources and creation paths from TCE", async () => {
 		const state = makeState();
 		await state.pCreateEfaEldritchCannon(createRequest());
@@ -200,6 +329,61 @@ describe("EFA Artillerist Milestone 3 cannon creation", () => {
 			committed: false,
 			reason: "sourceMismatch",
 		});
+	});
+
+	test.each([
+		["normal spell", {
+			setup: state => state.setPactSlots({current: 1, max: 1, level: 2}),
+			request: {createdWithSlotLevel: 1, createdWithSlotKind: "spell"},
+			assertSpent: state => {
+				expect(state.getSpellSlotsCurrent(1)).toBe(1);
+				expect(state.getPactSlots().current).toBe(1);
+			},
+		}],
+		["Pact", {
+			setup: state => state.setPactSlots({current: 1, max: 1, level: 2}),
+			request: {createdWithSlotLevel: 2, createdWithSlotKind: "pact"},
+			assertSpent: state => {
+				expect(state.getSpellSlotsCurrent(1)).toBe(2);
+				expect(state.getPactSlots().current).toBe(0);
+			},
+		}],
+	])("rolls back a failed %s slot-funded production commit and executes rollback persistence", async (label, {setup, request, assertSpent}) => {
+		const state = makeState();
+		setup(state);
+		state.getEfaEldritchCannonCreationState();
+		state.startCombat();
+		const before = getCannonTransactionState(state);
+		const pCommit = jest.fn(async () => {
+			expect(state.getActionEconomyState().action).toBe(false);
+			assertSpent(state);
+			expect(state.listEfaEldritchCannons()).toHaveLength(1);
+			expect(Object.keys(state.toJson().generatedClassSummonRevisions)).toHaveLength(1);
+			expect(state.getEfaEldritchCannonCreationState().freeUse.current).toBe(1);
+			return false;
+		});
+		const pRollback = jest.fn(async () => {
+			expect(getCannonTransactionState(state)).toEqual(before);
+			return false;
+		});
+
+		const failed = await state.pCreateEfaEldritchCannon(createRequest({
+			createdWith: "spellSlot",
+			...request,
+			pCommit,
+			pRollback,
+		}));
+
+		expect(failed).toMatchObject({
+			ok: false,
+			committed: false,
+			reason: "saveFailed",
+			rollbackSaveAttempted: true,
+			rollbackSaved: false,
+		});
+		expect(pCommit).toHaveBeenCalledTimes(1);
+		expect(pRollback).toHaveBeenCalledTimes(1);
+		expect(getCannonTransactionState(state)).toEqual(before);
 	});
 });
 

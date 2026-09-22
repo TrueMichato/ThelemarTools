@@ -179,6 +179,7 @@ describe("EFA Artillerist Milestone 3 Combat rendering", () => {
 		expect(combatSource).toContain("type=\"radio\"");
 		expect(combatSource).toContain("type=\"submit\"");
 		expect(combatSource).toContain("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\"");
+		expect(combatSource).toContain("pRollback: () => this._pSaveEfaCannonState()");
 		expect(modalSource).toContain("evt.key === \"Escape\"");
 		expect(modalSource).toContain("_handleTab");
 		expect(modalSource).toContain("eleTrigger.focus");
