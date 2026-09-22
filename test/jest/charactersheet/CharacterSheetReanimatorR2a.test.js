@@ -180,6 +180,76 @@ function makeRespecPage (state) {
 	};
 }
 
+function resolveFixtureOnlyRespecDecisions (engine) {
+	for (const decision of engine.manifest.decisions) decision.status = "resolved";
+	expect(engine.getValidation().errors).toEqual([]);
+}
+
+function makeSpentRhwRespecState () {
+	const state = makeState(15, {
+		playerSpells: [
+			{name: "False Life"},
+			{name: "False Life", source: "PHB"},
+		],
+	});
+	const jolt = getOwnedResource(state, SKILL_SET_UID);
+	const facilitated = getOwnedResource(state, REFINED_REANIMATION_UID);
+	state.setResourceCurrent(jolt.id, 2);
+	state.setResourceCurrent(facilitated.id, 0);
+
+	const wrongOwnerClass = {
+		name: "Artificer",
+		source: "EFA",
+		subclass: {name: "Reanimator", source: "TST"},
+	};
+	const wrongOwner = state.getSubclassSpellGrantOwner(wrongOwnerClass, {
+		sourceFeature: "Reanimator Spells",
+		sourceClass: "Artificer",
+		isCantrip: false,
+	});
+	const witchBolt = getSpellEntry(state, "Witch Bolt|XPHB");
+	witchBolt.subclassSpellGrantOwners.push(wrongOwner);
+	state._reapplySubclassSpellGrantOwners(witchBolt);
+	state._data.resources.push({
+		id: "foreign-reanimator-resource",
+		name: "Jolt to Life",
+		current: 7,
+		max: 7,
+		recharge: "long",
+		featureUid: "Reanimator's Skill Set|Artificer|EFA|Reanimator|TST|3",
+		classUid: CLASS_UID,
+		subclassUid: "Reanimator|Artificer|EFA|TST",
+	});
+	expect(state.loadFromJson(copy(state.toJson()))).not.toBe(false);
+	return {state, wrongOwner};
+}
+
+function expectRhwRemovedAndCollisionsPreserved (state, wrongOwner) {
+	expect(allSpellEntries(state).flatMap(spell => ownersFor(spell, SPELLS_OWNER_UID))).toEqual([]);
+	expect(allSpellEntries(state).flatMap(spell => ownersFor(spell, REFINED_REANIMATION_UID))).toEqual([]);
+	expect(getOwnedResource(state, SKILL_SET_UID)).toBeUndefined();
+	expect(getOwnedResource(state, REFINED_REANIMATION_UID)).toBeUndefined();
+	expect(getSpellEntry(state, "False Life|XPHB")).toMatchObject({
+		sourceFeature: "Prepared Spells",
+		sourceClass: "Artificer",
+		prepared: true,
+		alwaysPrepared: false,
+	});
+	expect(getSpellEntry(state, "False Life|PHB")).toMatchObject({
+		sourceFeature: "Prepared Spells",
+		sourceClass: "Artificer",
+		prepared: true,
+	});
+	expect(getSpellEntry(state, "Witch Bolt|XPHB").subclassSpellGrantOwners).toEqual([wrongOwner]);
+	expect(state.getResources()).toEqual(expect.arrayContaining([
+		expect.objectContaining({
+			id: "foreign-reanimator-resource",
+			current: 7,
+			max: 7,
+		}),
+	]));
+}
+
 describe("RHW Reanimator R2a progression descriptors", () => {
 	test.each([2, 3, 4, 5, 6, 8, 9, 10, 14, 15, 16])(
 		"projects only the unlocked level %i surfaces",
@@ -694,8 +764,7 @@ describe("RHW Reanimator R2a migration, export, and Respec isolation", () => {
 		engine.state.getClasses()[0].level = 15;
 		engine.state.applyClassFeatureEffects();
 		engine.markDirty();
-		for (const decision of engine.manifest.decisions) decision.status = "resolved";
-		expect(engine.getValidation().errors).toEqual([]);
+		resolveFixtureOnlyRespecDecisions(engine);
 		await expect(engine.apply()).resolves.toBe(true);
 		expect(liveState.getClasses()[0].level).toBe(15);
 		expect(getSpellEntry(liveState, "Raise Dead|XPHB")).toMatchObject({level: 5});
@@ -711,5 +780,62 @@ describe("RHW Reanimator R2a migration, export, and Respec isolation", () => {
 		expect(liveState.getClasses()[0].level).toBe(14);
 		expect(getSpellEntry(liveState, "Raise Dead|XPHB")).toBeUndefined();
 		expect(getOwnedResource(liveState, REFINED_REANIMATION_UID)).toBeUndefined();
+	});
+
+	it("applies exact RHW subclass teardown and Undo restores the full spent pre-Apply state", async () => {
+		const {state: liveState, wrongOwner} = makeSpentRhwRespecState();
+		const beforeApply = JSON.stringify(liveState.toJson());
+		const page = makeRespecPage(liveState);
+		const engine = new CharacterSheetRespecEngine({page, state: liveState});
+
+		expect(getOwnedResource(liveState, SKILL_SET_UID)).toMatchObject({current: 2, max: 4});
+		expect(getOwnedResource(liveState, REFINED_REANIMATION_UID)).toMatchObject({current: 0, max: 1});
+		expect(ownersFor(getSpellEntry(liveState, "False Life|XPHB"), SPELLS_OWNER_UID)).toHaveLength(1);
+		expect(ownersFor(getSpellEntry(liveState, "Raise Dead|XPHB"), REFINED_REANIMATION_UID)).toHaveLength(1);
+
+		engine.begin();
+		engine.state.getClasses()[0].subclass = null;
+		engine.state.applyClassFeatureEffects();
+		expectRhwRemovedAndCollisionsPreserved(engine.state, wrongOwner);
+		engine.markDirty();
+		resolveFixtureOnlyRespecDecisions(engine);
+
+		await expect(engine.apply()).resolves.toBe(true);
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(page.renderCharacter).toHaveBeenCalledTimes(1);
+		expectRhwRemovedAndCollisionsPreserved(liveState, wrongOwner);
+
+		await expect(engine.undo()).resolves.toBe(true);
+		expect(page.saveCharacter).toHaveBeenCalledTimes(2);
+		expect(page.renderCharacter).toHaveBeenCalledTimes(2);
+		expect(JSON.stringify(liveState.toJson())).toBe(beforeApply);
+		expect(getOwnedResource(liveState, SKILL_SET_UID)).toMatchObject({current: 2, max: 4});
+		expect(getOwnedResource(liveState, REFINED_REANIMATION_UID)).toMatchObject({current: 0, max: 1});
+	});
+
+	it("rolls the live RHW state back byte-for-byte when persistence fails after reconciliation", async () => {
+		const {state: liveState, wrongOwner} = makeSpentRhwRespecState();
+		const beforeApply = JSON.stringify(liveState.toJson());
+		const page = makeRespecPage(liveState);
+		page.saveCharacter.mockRejectedValueOnce(new Error("save failed"));
+		const engine = new CharacterSheetRespecEngine({page, state: liveState});
+
+		engine.begin();
+		const candidateClass = engine.state.getClasses()[0];
+		candidateClass.level = 17;
+		candidateClass.subclass = subclassSnapshot(REANIMATOR, {source: "ALT"});
+		engine.state.applyClassFeatureEffects();
+		expectRhwRemovedAndCollisionsPreserved(engine.state, wrongOwner);
+		engine.markDirty();
+		resolveFixtureOnlyRespecDecisions(engine);
+
+		await expect(engine.apply()).rejects.toThrow("save failed");
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(page.renderCharacter).not.toHaveBeenCalled();
+		expect(JSON.stringify(liveState.toJson())).toBe(beforeApply);
+		expect(getOwnedResource(liveState, SKILL_SET_UID)).toMatchObject({current: 2, max: 4});
+		expect(getOwnedResource(liveState, REFINED_REANIMATION_UID)).toMatchObject({current: 0, max: 1});
+		expect(ownersFor(getSpellEntry(liveState, "False Life|XPHB"), SPELLS_OWNER_UID)).toHaveLength(1);
+		expect(ownersFor(getSpellEntry(liveState, "Raise Dead|XPHB"), REFINED_REANIMATION_UID)).toHaveLength(1);
 	});
 });

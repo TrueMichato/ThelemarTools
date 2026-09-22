@@ -147,7 +147,9 @@ adds `Raise Dead|XPHB` at level 15 as an unprepared alternate cast with zero
 slot cost and ignored material components. At level 17 both owners coexist on
 one spell identity, and the fixed owner keeps it prepared. Removing either
 owner preserves the other; final removal restores player metadata. Wrong
-sources and same-label owners are never removed by RHW teardown.
+sources and same-label owners are never removed by RHW teardown. Legacy
+source-label pruning applies only when no owner ledger exists; once a ledger is
+present, exact owner keys are authoritative.
 
 `pUseRhwReanimatorJoltToLife()` validates exact
 `Spare the Dying|XPHB` plus the exact Reanimator Spells owner before calling

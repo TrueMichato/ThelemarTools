@@ -20042,6 +20042,7 @@ class CharacterSheetState {
 			// spell belongs to a locked tier. Saves whose subclass snapshot omitted
 			// `additionalSpells` cannot be reconciled safely and are left intact.
 			if (sourceFeature
+				&& !Array.isArray(spell.subclassSpellGrantOwners)
 				&& spell.sourceFeature === sourceFeature
 				&& authoredIds.has(spellId)
 				&& !desiredIds.has(spellId)) {
