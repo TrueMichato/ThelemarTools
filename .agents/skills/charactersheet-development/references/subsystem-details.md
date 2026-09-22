@@ -278,13 +278,14 @@ const receipt = await state.pPublishCommittedSpellCast({
 });
 ```
 
-The serializable receipt contains `receiptVersion`, `receiptId`,
-`castingClassUid`, `castingSubclassUid`, `spellEntryId`, `spellUid`,
-`spell`, `castType`, `slotLevel`, `cast`, `focusInventoryItemId`,
-`focusItemUid`, `focus`, `followUps`, and `followUpFailed`. It never stores a
-DOM node or live data object. A saved receipt can re-resolve its live focus
-after export/import with `resolveCommittedSpellCastReceiptFocus(receipt)`,
-which verifies both wrapper id and item UID.
+The serializable receipt contains `receiptVersion`, `receiptId`, `ok`,
+`committed`, `castingClassUid`, `castingSubclassUid`, `spellEntryId`,
+`spellUid`, `spell`, `castType`, `slotLevel`, `cast`,
+`focusInventoryItemId`, `focusItemUid`, `focus`, `followUps`, and
+`followUpFailed`. It never stores a DOM node or live data object. A saved
+receipt can re-resolve its live focus after export/import with
+`resolveCommittedSpellCastReceiptFocus(receipt)`, which verifies both wrapper
+id and item UID.
 
 Hooks are runtime-only and keyed by exact class UID (or `"*"`). A cancelled,
 blocked, refunded, source-ambiguous, or explicitly component-waived EFA cast
