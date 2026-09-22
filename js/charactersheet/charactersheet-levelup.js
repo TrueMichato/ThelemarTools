@@ -5449,6 +5449,13 @@ class CharacterSheetLevelUp {
 		CharacterSheetClassUtils.seedSubclassFeatureChoices(this._state, newFeatures, {allSpells: seedAllSpells || []});
 
 		await this._processFeatSpellChoices();
+		if (this._page.reconcileFeatureCompanionGrants) {
+			await this._page.reconcileFeatureCompanionGrants({
+				state: this._state,
+				reason: "levelUpFinalization",
+				allowPrompt: true,
+			});
+		}
 
 		// Save and re-render
 		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({

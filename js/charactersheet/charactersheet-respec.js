@@ -5128,6 +5128,7 @@ class CharacterSheetRespec {
 		this._state.applyClassFeatureEffects();
 		this._state.calculateSpellSlots();
 		this._state._syncAdventurersAtlasEligibility?.();
+		this._state.reconcileFeatureCompanionGrants?.({reason: "respecCandidate"});
 
 		// Subclass features may grant hpPerLevel — recalc max HP.
 		this._recalcHpPreservingHealing();

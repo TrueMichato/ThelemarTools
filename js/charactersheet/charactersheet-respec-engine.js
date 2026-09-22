@@ -650,6 +650,7 @@ class CharacterSheetRespecEngine {
 		}
 		const candidate = this._candidateState.toJson();
 		if (this._liveState.loadFromJson(candidate) === false) throw new Error("The rebuilt character could not be loaded.");
+		this._liveState.reconcileFeatureCompanionGrants?.({reason: "respecApply"});
 
 		try {
 			await this._page.saveCharacter();
@@ -660,7 +661,7 @@ class CharacterSheetRespecEngine {
 		}
 
 		this._undoSnapshot = beforeApply;
-		this._originalSnapshot = candidate;
+		this._originalSnapshot = this._liveState.toJson();
 		this._candidateState = null;
 		this._manifest = null;
 		this._originalManifest = null;

@@ -294,9 +294,39 @@ untouched. Outcomes are exposed by `getFeatureCompanionMigrationStatus()` under
 `migrationFlags.featureCompanionLegacyV1`; migration never creates a companion,
 heals it, or initializes resource/Hit Die current values above zero.
 
-This State milestone does not acquire companions, prompt for setup, render
-companion controls, spend Repair/Hit Dice, implement command economy, transition
-death/revival/replacement state, apply rest policies, or run Arcane Jolt.
+Acquisition/setup lives in the generic versioned
+`featureCompanionSetups.records` store, keyed by the normalized full feature
+owner UID. A record contains `ownerUid`, `status` (`pending` or `complete`),
+`eligibility` (`active` or `inactive`), source-specific `choices`, and the
+compatible `companionId` when one exists. Pending setup is never represented by
+a fake companion.
+
+`registerFeatureCompanionGrant()` registers narrow source setup descriptors,
+while `reconcileFeatureCompanionGrants()` provides the shared orchestration used
+by Builder, Level Up, Quick Build, load, and Respec. For the EFA Battle Smith it:
+
+- consumes the exact `Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA`
+  fixed-proficiency transaction;
+- persists deferred appearance/body-shape choices without inventing defaults;
+- creates or reuses exactly one
+  `Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA` companion after required
+  setup is complete;
+- preserves the companion ID across repeated reconciliation and compatible
+  EFA/TCE rebinds; and
+- marks lost exact grants inactive/`vanished` instead of deleting the record.
+
+`getFeatureCompanionSetupRecord()`,
+`getFeatureCompanionSetupToolState()`,
+`getFeatureCompanionSetupMissingChoices()`,
+`updateFeatureCompanionSetup()`, `deferFeatureCompanionSetup()`,
+`completeFeatureCompanionSetup()`, and
+`getPendingFeatureCompanionSetups()` expose the persisted transaction without
+copying any companion formula. `CharacterSheetCompanionRules` remains the sole
+formula authority.
+
+The setup milestone still does not spend Repair/Hit Dice, implement command
+economy/default Dodge, transition death/revival/replacement state, apply rest
+policies, run Arcane Jolt, or implement Battle Ready attack substitution.
 
 ### Spellcasting
 

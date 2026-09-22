@@ -20,6 +20,7 @@ const TARGET_EFFECT_METADATA_METHODS = Object.freeze({
 	"efa-armorer-thunder-pulse": "getEfaThunderPulseTargetEffectMetadata",
 });
 const FIXED_PROFICIENCY_FALLBACK_DEFINITIONS = new Map();
+const FEATURE_COMPANION_GRANT_DEFINITIONS = new Map();
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -4587,6 +4588,48 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Register exact-owner acquisition/setup behavior for a feature companion.
+	 * Companion formulas remain in CharacterSheetCompanionRules; this registry only
+	 * describes acquisition, setup fields, and compatible source-qualified owners.
+	 * @param {object} definition
+	 * @returns {object}
+	 */
+	static registerFeatureCompanionGrant (definition) {
+		const featureUid = CharacterSheetState._normalizeFeatureCompanionUid(definition?.featureUid);
+		if (!featureUid || !definition?.fixedProficiencyOwnerUid || !definition?.companion?.type) {
+			throw new Error("Invalid feature-companion grant definition.");
+		}
+		const normalized = Object.freeze({
+			featureUid,
+			fixedProficiencyOwnerUid: definition.fixedProficiencyOwnerUid,
+			compatibleFeatureUids: Object.freeze((definition.compatibleFeatureUids || [])
+				.map(uid => CharacterSheetState._normalizeFeatureCompanionUid(uid))
+				.filter(Boolean)),
+			companion: Object.freeze({...definition.companion}),
+			setup: Object.freeze({
+				required: Object.freeze([...(definition.setup?.required || [])]),
+				locomotionOptions: Object.freeze([...(definition.setup?.locomotionOptions || [])]),
+			}),
+		});
+		FEATURE_COMPANION_GRANT_DEFINITIONS.set(featureUid.toLowerCase(), normalized);
+		return normalized;
+	}
+
+	static getFeatureCompanionGrantDefinition (featureOrUid) {
+		const featureUid = typeof featureOrUid === "string"
+			? CharacterSheetState._normalizeFeatureCompanionUid(featureOrUid)
+			: CharacterSheetState._normalizeFeatureCompanionUid(
+				featureOrUid?.featureUid || CharacterSheetState.getSourceAwareFeatureUid(featureOrUid),
+			);
+		if (!featureUid) return null;
+		const direct = FEATURE_COMPANION_GRANT_DEFINITIONS.get(featureUid.toLowerCase());
+		if (direct) return direct;
+		return [...FEATURE_COMPANION_GRANT_DEFINITIONS.values()]
+			.find(definition => definition.compatibleFeatureUids
+				.some(uid => uid.toLowerCase() === featureUid.toLowerCase())) || null;
+	}
+
+	/**
 	 * Return whether a feature is a class/subclass progression feature whose
 	 * prose-derived mechanics belong to the class-feature cleanup/rebuild domain.
 	 *
@@ -5575,6 +5618,13 @@ class CharacterSheetState {
 				transactions: {},
 			},
 
+			// Pending/completed setup is persisted independently of companion records so
+			// Finish later never creates a fake or incomplete creature.
+			featureCompanionSetups: {
+				version: 1,
+				records: {},
+			},
+
 			// Progression-owned values may overlap with species, background, feature, or manual grants.
 			// Respec uses this source ledger to detach only the decision being changed.
 			progressionOwnership: {
@@ -6129,6 +6179,11 @@ class CharacterSheetState {
 			|| typeof this._data.fixedProficiencyFallbacks?.transactions !== "object") {
 			this._data.fixedProficiencyFallbacks = {version: 1, transactions: {}};
 		}
+		if (this._data.featureCompanionSetups?.version !== 1
+			|| typeof this._data.featureCompanionSetups?.records !== "object"
+			|| Array.isArray(this._data.featureCompanionSetups.records)) {
+			this._data.featureCompanionSetups = {version: 1, records: {}};
+		}
 		if (this._data.progressionOwnership?.version !== 1 || typeof this._data.progressionOwnership?.values !== "object") {
 			this._data.progressionOwnership = {version: 1, initialized: false, values: {}};
 		}
@@ -6375,6 +6430,7 @@ class CharacterSheetState {
 		this._migrateCompanions();
 		this.reconcileClassSummons();
 		this._ensureEfaEldritchCannonCreationResource();
+		this._migrateFeatureCompanionSetups();
 
 		// (#11) Backfill quiver contents for saves whose quiver was already equipped
 		// before the auto-place pipeline existed (or before dart recognition). Runs
@@ -22760,6 +22816,16 @@ class CharacterSheetState {
 	_beginFixedProficiencyFallbackTransaction (feature) {
 		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(feature);
 		if (!definition) return null;
+		const fixedKey = CharacterSheetState.normalizeToolKey(definition.fixedProficiency);
+		const classEffectIndex = (this._data._classFeatureToolProficiencies || [])
+			.findIndex(tool => CharacterSheetState.normalizeToolKey(tool) === fixedKey);
+		const sameFeatureEffect = (this._data.appliedClassFeatureEffects || [])
+			.includes(`${definition.owner.name}: ${definition.fixedProficiency} proficiency`);
+		if (classEffectIndex >= 0 && sameFeatureEffect) {
+			this._data._classFeatureToolProficiencies.splice(classEffectIndex, 1);
+			this._data.toolProficiencies = (this._data.toolProficiencies || [])
+				.filter(tool => CharacterSheetState.normalizeToolKey(tool) !== fixedKey);
+		}
 		const hadFixedProficiency = this.hasToolProficiency(definition.fixedProficiency);
 		const transaction = this._upsertFixedProficiencyFallbackTransaction({
 			ownerUid: definition.ownerUid,
@@ -77622,6 +77688,418 @@ class CharacterSheetState {
 		);
 	}
 
+	_getFeatureCompanionSetupStore () {
+		if (
+			this._data.featureCompanionSetups?.version !== 1
+			|| !CharacterSheetState._isCompanionSchemaObject(this._data.featureCompanionSetups.records)
+		) {
+			this._data.featureCompanionSetups = {version: 1, records: {}};
+		}
+		return this._data.featureCompanionSetups;
+	}
+
+	_getFeatureCompanionSetupDefinition (featureUid) {
+		const normalizedUid = CharacterSheetState._normalizeFeatureCompanionUid(featureUid);
+		const definition = CharacterSheetState.getFeatureCompanionGrantDefinition(normalizedUid);
+		if (!definition) throw new RangeError(`No feature-companion setup is registered for "${featureUid}".`);
+		if (
+			definition.featureUid.toLowerCase() !== normalizedUid.toLowerCase()
+			&& !definition.compatibleFeatureUids.some(uid => uid.toLowerCase() === normalizedUid.toLowerCase())
+		) {
+			throw new RangeError(`Feature companion "${featureUid}" is not compatible with this setup.`);
+		}
+		return {definition, featureUid: normalizedUid};
+	}
+
+	_getFeatureCompanionSetupRecordRaw (featureUid) {
+		const normalizedUid = CharacterSheetState._normalizeFeatureCompanionUid(featureUid);
+		if (!normalizedUid) return null;
+		return this._getFeatureCompanionSetupStore().records[normalizedUid.toLowerCase()] || null;
+	}
+
+	getFeatureCompanionSetupRecord (featureUid) {
+		const record = this._getFeatureCompanionSetupRecordRaw(featureUid);
+		return record ? MiscUtil.copyFast(record) : null;
+	}
+
+	getFeatureCompanionSetupToolState (featureUid) {
+		const {definition, featureUid: normalizedUid} = this._getFeatureCompanionSetupDefinition(featureUid);
+		if (normalizedUid.toLowerCase() !== definition.featureUid.toLowerCase()) {
+			return {
+				status: "notApplicable",
+				label: "",
+				options: [],
+			};
+		}
+		const transaction = this.getFixedProficiencyFallbackTransaction(definition.fixedProficiencyOwnerUid);
+		if (!transaction) {
+			return {
+				status: "unresolved",
+				label: "Smith's Tools or an alternate artisan's tool",
+				options: [],
+			};
+		}
+		if (transaction.mode === "fixed") {
+			return {
+				status: "fixed",
+				label: transaction.fixedProficiency,
+				options: [],
+			};
+		}
+		if (transaction.selection) {
+			return {
+				status: "alternate",
+				label: transaction.selection,
+				options: [],
+			};
+		}
+		const descriptor = this.getFixedProficiencyFallbackChoiceDescriptor(definition.fixedProficiencyOwnerUid);
+		const choice = this.getPendingFeatureChoices().find(candidate =>
+			this._getFixedProficiencyFallbackOwnerUid(candidate)?.toLowerCase() ===
+			definition.fixedProficiencyOwnerUid.toLowerCase(),
+		);
+		return {
+			status: "pending",
+			label: `Choose an alternate artisan's tool; ${transaction.fixedProficiency} was already known`,
+			options: [...(descriptor?.options || choice?.options || [])],
+			choiceId: choice?.id || null,
+		};
+	}
+
+	getFeatureCompanionSetupMissingChoices (featureUid, choices = null) {
+		const {definition, featureUid: normalizedUid} = this._getFeatureCompanionSetupDefinition(featureUid);
+		const record = choices ? null : this._getFeatureCompanionSetupRecordRaw(featureUid);
+		const values = choices || record?.choices || {};
+		const missing = [];
+		if (definition.setup.required.includes("appearance") && !String(values.appearance || "").trim()) {
+			missing.push("appearance");
+		}
+		if (
+			definition.setup.required.includes("locomotion")
+			&& !definition.setup.locomotionOptions.includes(values.locomotion)
+		) {
+			missing.push("two legs or four legs");
+		}
+		if (
+			normalizedUid.toLowerCase() === definition.featureUid.toLowerCase()
+			&& ["pending", "unresolved"].includes(this.getFeatureCompanionSetupToolState(featureUid).status)
+		) {
+			missing.push("alternate artisan's tool");
+		}
+		return missing;
+	}
+
+	updateFeatureCompanionSetup (featureUid, choices = {}, {status = null, eligibility = "active"} = {}) {
+		const {featureUid: normalizedUid} = this._getFeatureCompanionSetupDefinition(featureUid);
+		const store = this._getFeatureCompanionSetupStore();
+		const key = normalizedUid.toLowerCase();
+		const existing = store.records[key] || {};
+		const normalizedChoices = {};
+		for (const field of ["nickname", "appearance"]) {
+			const value = String(choices[field] ?? existing.choices?.[field] ?? "").trim();
+			if (value) normalizedChoices[field] = value;
+		}
+		const locomotion = choices.locomotion ?? existing.choices?.locomotion;
+		if (locomotion === "twoLegs" || locomotion === "fourLegs") normalizedChoices.locomotion = locomotion;
+
+		const next = {
+			version: 1,
+			ownerUid: normalizedUid,
+			status: status || existing.status || "pending",
+			eligibility,
+			choices: normalizedChoices,
+			companionId: existing.companionId || null,
+		};
+		if (eligibility !== "active") next.inactiveReason = "featureGrantMissing";
+		store.records[key] = next;
+		return MiscUtil.copyFast(next);
+	}
+
+	deferFeatureCompanionSetup (featureUid, choices = {}) {
+		return this.updateFeatureCompanionSetup(featureUid, choices, {status: "pending", eligibility: "active"});
+	}
+
+	_getFeatureCompanionInitialUses (resolved) {
+		return Object.fromEntries(
+			Object.entries(resolved?.actions || {})
+				.filter(([, action]) => action?.uses)
+				.map(([key, action]) => [key, {
+					current: Math.max(0, Number(action.uses.max) || 0),
+					max: Math.max(0, Number(action.uses.max) || 0),
+					recharge: action.uses.recharge,
+				}]),
+		);
+	}
+
+	_createFeatureCompanionFromSetup (featureUid, setupRecord, definition) {
+		const summonerContext = this.getFeatureCompanionSummonerContext(featureUid);
+		const resolved = this.resolveFeatureCompanionRules(featureUid, summonerContext);
+		const maxHp = Math.max(1, Number(resolved.statistics?.maxHp) || 1);
+		const hitDice = resolved.statistics?.hitDice || {};
+		const owner = CharacterSheetState._getFeatureCompanionOwnerMetadata(
+			featureUid,
+			CharacterSheetState._getFeatureCompanionRulesModule().getDescriptor(featureUid),
+		);
+		const companionId = this.addCompanion({
+			name: resolved.identity.name,
+			source: resolved.identity.source,
+			type: definition.companion.type,
+			origin: definition.companion.origin,
+			customName: setupRecord.choices.nickname || null,
+			creatureType: resolved.statistics?.creatureType,
+			hp: {max: maxHp, current: maxHp, temp: 0},
+			featureGrant: owner,
+			setup: MiscUtil.copyFast(setupRecord.choices),
+			lifecycle: {status: "alive", generation: 1},
+			uses: this._getFeatureCompanionInitialUses(resolved),
+			hitDice: {
+				die: hitDice.die || null,
+				current: Math.max(0, Number(hitDice.count) || 0),
+				max: Math.max(0, Number(hitDice.count) || 0),
+			},
+		});
+		this.reconcileFeatureOwnedCompanion(companionId, {featureUid, summonerContext});
+		return companionId;
+	}
+
+	_syncFeatureCompanionSetupToRecord (companion, setupRecord) {
+		if (!companion || !setupRecord) return;
+		companion.setup = MiscUtil.copyFast(setupRecord.choices || {});
+		companion.customName = setupRecord.choices?.nickname || null;
+		companion.active = true;
+		companion.lifecycle = {
+			...(CharacterSheetState._isCompanionSchemaObject(companion.lifecycle) ? companion.lifecycle : {}),
+			status: "alive",
+		};
+	}
+
+	_transferFeatureCompanionSetupRecord (fromFeatureUid, toFeatureUid, companionId) {
+		const store = this._getFeatureCompanionSetupStore();
+		const fromKey = CharacterSheetState._normalizeFeatureCompanionUid(fromFeatureUid).toLowerCase();
+		const toKey = CharacterSheetState._normalizeFeatureCompanionUid(toFeatureUid).toLowerCase();
+		if (fromKey === toKey) return store.records[toKey] || null;
+		const source = store.records[fromKey];
+		const target = store.records[toKey];
+		if (!source) return target || null;
+		if (target && source.companionId !== companionId) return target;
+		store.records[toKey] = {
+			...source,
+			ownerUid: CharacterSheetState._normalizeFeatureCompanionUid(toFeatureUid),
+			eligibility: "active",
+			companionId: companionId || source.companionId || null,
+		};
+		delete store.records[fromKey];
+		return store.records[toKey];
+	}
+
+	_hasExactFeatureCompanionGrant (featureUid) {
+		const ownerKey = CharacterSheetState._getFeatureCompanionOwnerKey(featureUid);
+		return (this._data.features || []).some(feature =>
+			CharacterSheetState._getFeatureCompanionOwnerKey(
+				CharacterSheetState.getSourceAwareFeatureUid(feature),
+			) === ownerKey,
+		);
+	}
+
+	_reconcileFeatureCompanionGrantDefinition (definition) {
+		const compatibleUids = [definition.featureUid, ...definition.compatibleFeatureUids];
+		const eligibleUids = compatibleUids.filter(uid => this._hasExactFeatureCompanionGrant(uid));
+		const changedBefore = JSON.stringify({
+			setups: this._getFeatureCompanionSetupStore(),
+			companions: this._data.companions || [],
+		});
+
+		if (eligibleUids.length === 1) {
+			const targetUid = eligibleUids[0];
+			const targetOwned = this.getFeatureOwnedCompanions(targetUid);
+			if (!targetOwned.length) {
+				const rebindCandidates = compatibleUids
+					.filter(uid => uid.toLowerCase() !== targetUid.toLowerCase())
+					.flatMap(uid => this.getFeatureOwnedCompanions(uid));
+				if (rebindCandidates.length === 1) {
+					const previousUid = rebindCandidates[0].featureGrant.uid;
+					const result = this.rebindFeatureOwnedCompanion(rebindCandidates[0].id, {
+						fromFeatureUid: previousUid,
+						toFeatureUid: targetUid,
+					});
+					if (result.ok) this._transferFeatureCompanionSetupRecord(previousUid, targetUid, result.companion.id);
+				}
+			}
+		}
+
+		const primaryEligible = eligibleUids
+			.find(uid => uid.toLowerCase() === definition.featureUid.toLowerCase()) || null;
+		if (primaryEligible) {
+			let setupRecord = this._getFeatureCompanionSetupRecordRaw(primaryEligible);
+			if (!setupRecord) {
+				setupRecord = this.deferFeatureCompanionSetup(primaryEligible);
+			} else {
+				setupRecord = this.updateFeatureCompanionSetup(
+					primaryEligible,
+					setupRecord.choices,
+					{status: setupRecord.status, eligibility: "active"},
+				);
+			}
+
+			const owned = this.getFeatureOwnedCompanions(primaryEligible);
+			if (setupRecord.status === "complete" && !this.getFeatureCompanionSetupMissingChoices(primaryEligible).length) {
+				let companion = owned.find(candidate => candidate.id === setupRecord.companionId)
+					|| owned.find(candidate => candidate.active !== false)
+					|| owned[0]
+					|| null;
+				if (!companion) {
+					const companionId = this._createFeatureCompanionFromSetup(primaryEligible, setupRecord, definition);
+					companion = this.getCompanion(companionId);
+				} else {
+					this._syncFeatureCompanionSetupToRecord(companion, setupRecord);
+					this.reconcileFeatureOwnedCompanion(companion.id, {
+						featureUid: primaryEligible,
+						summonerContext: this.getFeatureCompanionSummonerContext(primaryEligible),
+					});
+				}
+				const stored = this._getFeatureCompanionSetupRecordRaw(primaryEligible);
+				stored.companionId = companion.id;
+				for (const duplicate of this.getFeatureOwnedCompanions(primaryEligible).filter(candidate => candidate.id !== companion.id)) {
+					duplicate.active = false;
+					duplicate.lifecycle = {
+						...(duplicate.lifecycle || {}),
+						status: "vanished",
+					};
+				}
+			} else if (owned[0]) {
+				this._getFeatureCompanionSetupRecordRaw(primaryEligible).companionId = owned[0].id;
+			}
+		}
+
+		for (const uid of compatibleUids) {
+			if (eligibleUids.some(eligibleUid => eligibleUid.toLowerCase() === uid.toLowerCase())) continue;
+			const owned = this.getFeatureOwnedCompanions(uid);
+			if (owned.length) {
+				this.deactivateFeatureOwnedCompanions(uid, {status: "vanished"});
+			}
+			const record = this._getFeatureCompanionSetupRecordRaw(uid);
+			if (record) {
+				this.updateFeatureCompanionSetup(
+					uid,
+					record.choices,
+					{status: record.status, eligibility: "inactive"},
+				);
+			}
+		}
+
+		const setup = primaryEligible ? this._getFeatureCompanionSetupRecordRaw(primaryEligible) : null;
+		const missingChoices = setup?.status === "pending"
+			? this.getFeatureCompanionSetupMissingChoices(primaryEligible)
+			: [];
+		return {
+			featureUid: definition.featureUid,
+			activeFeatureUid: primaryEligible,
+			setup: setup ? MiscUtil.copyFast(setup) : null,
+			needsPrompt: !!primaryEligible && setup?.status === "pending",
+			missingChoices,
+			changed: changedBefore !== JSON.stringify({
+				setups: this._getFeatureCompanionSetupStore(),
+				companions: this._data.companions || [],
+			}),
+		};
+	}
+
+	reconcileFeatureCompanionGrants ({reason = "reconcile"} = {}) {
+		const results = [...FEATURE_COMPANION_GRANT_DEFINITIONS.values()]
+			.map(definition => this._reconcileFeatureCompanionGrantDefinition(definition));
+		const pending = results.filter(result => result.needsPrompt);
+		return {
+			reason,
+			changed: results.some(result => result.changed),
+			results,
+			pending,
+			needsPrompt: !!pending.length,
+		};
+	}
+
+	completeFeatureCompanionSetup (featureUid, choices = {}) {
+		const {featureUid: normalizedUid} = this._getFeatureCompanionSetupDefinition(featureUid);
+		if (!this._hasExactFeatureCompanionGrant(normalizedUid)) {
+			throw new RangeError(`Feature companion setup cannot complete without the exact grant "${normalizedUid}".`);
+		}
+		const mergedChoices = {
+			...(this._getFeatureCompanionSetupRecordRaw(normalizedUid)?.choices || {}),
+			...choices,
+		};
+		const missing = this.getFeatureCompanionSetupMissingChoices(normalizedUid, mergedChoices);
+		if (missing.length) {
+			throw new RangeError(`Complete the required Steel Defender setup: ${missing.join(", ")}.`);
+		}
+		this.updateFeatureCompanionSetup(normalizedUid, mergedChoices, {status: "complete", eligibility: "active"});
+		this.reconcileFeatureCompanionGrants({reason: "setupComplete"});
+		const record = this._getFeatureCompanionSetupRecordRaw(normalizedUid);
+		const companion = record?.companionId ? this.getCompanion(record.companionId) : null;
+		if (!companion) throw new Error(`Steel Defender setup completed without creating a companion.`);
+		return companion;
+	}
+
+	getPendingFeatureCompanionSetups () {
+		return Object.values(this._getFeatureCompanionSetupStore().records)
+			.filter(record => record?.status === "pending" && record?.eligibility === "active")
+			.map(record => ({
+				...MiscUtil.copyFast(record),
+				missingChoices: this.getFeatureCompanionSetupMissingChoices(record.ownerUid),
+				toolState: this.getFeatureCompanionSetupToolState(record.ownerUid),
+			}));
+	}
+
+	_migrateFeatureCompanionSetups () {
+		const store = this._getFeatureCompanionSetupStore();
+		const migrated = {};
+		for (const [key, record] of Object.entries(store.records || {})) {
+			if (!CharacterSheetState._isCompanionSchemaObject(record)) continue;
+			const ownerUid = CharacterSheetState._normalizeFeatureCompanionUid(record.ownerUid || key);
+			if (!ownerUid || !CharacterSheetState.getFeatureCompanionGrantDefinition(ownerUid)) continue;
+			const choices = CharacterSheetState._isCompanionSchemaObject(record.choices) ? record.choices : {};
+			migrated[ownerUid.toLowerCase()] = {
+				version: 1,
+				ownerUid,
+				status: record.status === "complete" ? "complete" : "pending",
+				eligibility: record.eligibility === "inactive" ? "inactive" : "active",
+				choices: Object.fromEntries(
+					Object.entries({
+						nickname: String(choices.nickname || "").trim(),
+						appearance: String(choices.appearance || "").trim(),
+						locomotion: ["twoLegs", "fourLegs"].includes(choices.locomotion) ? choices.locomotion : "",
+					}).filter(([, value]) => value),
+				),
+				companionId: record.companionId || null,
+			};
+		}
+
+		for (const companion of this._data.companions || []) {
+			const ownerUid = CharacterSheetState._normalizeFeatureCompanionUid(companion?.featureGrant?.uid);
+			if (!ownerUid || !CharacterSheetState.getFeatureCompanionGrantDefinition(ownerUid)) continue;
+			const key = ownerUid.toLowerCase();
+			if (migrated[key]) continue;
+			const choices = CharacterSheetState._isCompanionSchemaObject(companion.setup)
+				? MiscUtil.copyFast(companion.setup)
+				: {};
+			const requiredComplete = String(choices.appearance || "").trim()
+				&& ["twoLegs", "fourLegs"].includes(choices.locomotion);
+			migrated[key] = {
+				version: 1,
+				ownerUid,
+				status: requiredComplete ? "complete" : "pending",
+				eligibility: "active",
+				choices,
+				companionId: companion.id,
+			};
+		}
+		store.records = migrated;
+		for (const record of Object.values(store.records)) {
+			if (record.status !== "complete") continue;
+			if (this.getFeatureCompanionSetupMissingChoices(record.ownerUid, record.choices).length) {
+				record.status = "pending";
+			}
+		}
+	}
+
 	/**
 	 * Copy and normalize the optional persisted fields shared by feature-granted
 	 * companions. The schema is deliberately source-agnostic: ownership metadata,
@@ -86257,6 +86735,22 @@ CharacterSheetState.registerFixedProficiencyFallback({
 		source: "EFA",
 		className: "Artificer",
 		classSource: "EFA",
+		subclassShortName: "Battle Smith",
+		subclassSource: "EFA",
+		level: 3,
+	},
+	proficiencyType: "tool",
+	fixedProficiency: "Smith's Tools",
+	fallbackCatalog: "artisan",
+	grantKey: "fixedToolProficiencyFallback",
+});
+
+CharacterSheetState.registerFixedProficiencyFallback({
+	owner: {
+		name: "Tools of the Trade",
+		source: "EFA",
+		className: "Artificer",
+		classSource: "EFA",
 		subclassShortName: "Artillerist",
 		subclassSource: "EFA",
 		level: 3,
@@ -86281,6 +86775,20 @@ CharacterSheetState.registerFixedProficiencyFallback({
 	fixedProficiency: "Alchemist's Supplies",
 	fallbackCatalog: "artisan",
 	grantKey: "fixedToolProficiencyFallback",
+});
+
+CharacterSheetState.registerFeatureCompanionGrant({
+	featureUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER,
+	fixedProficiencyOwnerUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.TOOLS_OF_THE_TRADE,
+	compatibleFeatureUids: ["Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE"],
+	companion: {
+		type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+		origin: "Battle Smith",
+	},
+	setup: {
+		required: ["appearance", "locomotion"],
+		locomotionOptions: ["twoLegs", "fourLegs"],
+	},
 });
 
 // Make available globally and as module export

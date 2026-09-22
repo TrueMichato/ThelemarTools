@@ -5343,6 +5343,13 @@ class CharacterSheetQuickBuild {
 		if (this._page.processPendingFeatureChoices) {
 			await this._page.processPendingFeatureChoices();
 		}
+		if (this._page.reconcileFeatureCompanionGrants) {
+			await this._page.reconcileFeatureCompanionGrants({
+				state: this._state,
+				reason: "quickBuildFinalization",
+				allowPrompt: true,
+			});
+		}
 
 		// Final recalculations
 		this._state.ensureXpMatchesLevel();

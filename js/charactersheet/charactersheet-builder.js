@@ -2555,6 +2555,13 @@ class CharacterSheetBuilder {
 		if (this._page.processPendingFeatureChoices) {
 			await this._page.processPendingFeatureChoices();
 		}
+		if (this._page.reconcileFeatureCompanionGrants) {
+			await this._page.reconcileFeatureCompanionGrants({
+				state: this._state,
+				reason: "builderFinalization",
+				allowPrompt: true,
+			});
+		}
 
 		globalThis.CharacterSheetProgression?.syncCanonicalDecisions?.({
 			page: this._page,

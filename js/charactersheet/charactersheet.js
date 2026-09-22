@@ -1780,7 +1780,11 @@ class CharacterSheetPage {
 			// (the await above can interleave with another load).
 			const needsSave = mirrorWon
 				|| transferResults.some(({result}) => result.applied.length)
-				|| (reconcileResult && (reconcileResult.added > 0 || reconcileResult.backfilled > 0));
+				|| (reconcileResult && (
+					reconcileResult.added > 0
+					|| reconcileResult.backfilled > 0
+					|| reconcileResult.featureCompanionChanged
+				));
 			if (needsSave && this._isCharacterTransactionCurrent({characterId: charId, loadGeneration})) {
 				const isSaved = await this._saveCurrentCharacter({
 					isReturnStatus: true,
@@ -6661,18 +6665,24 @@ class CharacterSheetPage {
 		list.innerHTML = "";
 
 		const companions = this._state.getActiveCompanions?.() || [];
+		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
 
 		// Also render the overview indicator
 		this._renderCompanionsOverviewIndicator();
 
+		for (const setup of pendingSetups) {
+			list.insertAdjacentHTML("beforeend", this._getFeatureCompanionSetupIncompleteHtml(setup));
+		}
+		this._bindFeatureCompanionSetupActions(list);
+
 		if (companions.length === 0) {
-			list.innerHTML = `
+			list.insertAdjacentHTML("beforeend", `
 				<div class="charsheet__companions-empty">
 					<div class="charsheet__companions-empty-icon">🦉</div>
 					<div class="ve-muted charsheet__companions-empty-title">No active companions</div>
 					<div class="ve-muted ve-small">Cast <em>Find Familiar</em> or click the button above to summon one.</div>
 				</div>
-			`;
+			`);
 			return;
 		}
 
@@ -6699,6 +6709,7 @@ class CharacterSheetPage {
 				familiar: {label: "Familiar", icon: "🦉", color: "#8b5cf6"},
 				beast_companion: {label: "Beast Companion", icon: "🐺", color: "#22c55e"},
 				steel_defender: {label: "Steel Defender", icon: "🤖", color: "#64748b"},
+				class_summon: {label: companion.name || "Class Companion", icon: "✨", color: "#64748b"},
 				drake: {label: "Drake", icon: "🐉", color: "#f59e0b"},
 				summon: {label: "Summon", icon: "✨", color: "#3b82f6"},
 				mount: {label: "Mount", icon: "🐴", color: "#a855f7"},
@@ -7060,8 +7071,9 @@ class CharacterSheetPage {
 		if (!container || !section) return;
 
 		const companions = this._state.getActiveCompanions?.() || [];
+		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
 
-		if (companions.length === 0) {
+		if (companions.length === 0 && pendingSetups.length === 0) {
 			container.style.display = "none";
 			section.style.display = "none";
 			return;
@@ -7070,6 +7082,11 @@ class CharacterSheetPage {
 		container.innerHTML = "";
 		container.style.display = "";
 		section.style.display = "";
+
+		for (const setup of pendingSetups) {
+			container.insertAdjacentHTML("beforeend", this._getFeatureCompanionSetupIncompleteHtml(setup));
+		}
+		this._bindFeatureCompanionSetupActions(container);
 
 		companions.forEach(companion => {
 			const hp = companion.hp || {current: 1, max: 1};
@@ -16368,6 +16385,174 @@ class CharacterSheetPage {
 		});
 	}
 
+	_getFeatureCompanionSetupIncompleteHtml (setup) {
+		const featureUid = CharacterSheetModal._escapeHtml(setup.ownerUid);
+		const missing = setup.missingChoices?.length
+			? setup.missingChoices.join(", ")
+			: "required defender details";
+		return `<section class="alert alert-warning charsheet__feature-companion-setup" role="status" aria-label="Battle Smith setup incomplete">
+			<div class="bold">Battle Smith setup incomplete</div>
+			<div class="ve-small mb-2">Missing: ${CharacterSheetModal._escapeHtml(missing)}.</div>
+			<button type="button" class="ve-btn ve-btn-primary ve-btn-xs" data-feature-companion-setup="${featureUid}">
+				Finish setup
+			</button>
+		</section>`;
+	}
+
+	_bindFeatureCompanionSetupActions (root) {
+		root?.querySelectorAll?.("[data-feature-companion-setup]").forEach(button => {
+			button.addEventListener("click", async () => {
+				const featureUid = button.getAttribute("data-feature-companion-setup");
+				const outcome = await this._pShowFeatureCompanionSetupModal(featureUid);
+				if (!outcome) return;
+				await this.saveCharacter();
+				this.renderCharacter();
+			});
+		});
+	}
+
+	async reconcileFeatureCompanionGrants ({
+		state = this._state,
+		reason = "reconcile",
+		allowPrompt = false,
+	} = {}) {
+		let result = state?.reconcileFeatureCompanionGrants?.({reason}) || {changed: false, pending: []};
+		if (!allowPrompt || state !== this._state) return result;
+		for (const pending of result.pending || []) {
+			// eslint-disable-next-line no-await-in-loop
+			await this._pShowFeatureCompanionSetupModal(pending.activeFeatureUid);
+		}
+		result = state.reconcileFeatureCompanionGrants?.({reason: `${reason}:afterPrompt`}) || result;
+		return result;
+	}
+
+	async _pShowFeatureCompanionSetupModal (featureUid) {
+		const record = this._state.getFeatureCompanionSetupRecord?.(featureUid);
+		if (!record) return null;
+		const toolState = this._state.getFeatureCompanionSetupToolState(featureUid);
+		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
+			title: "Create your Steel Defender",
+			isMinHeight0: true,
+			isWidth100: true,
+		});
+
+		let toolHtml;
+		if (toolState.status === "pending") {
+			toolHtml = `<label class="ve-flex-col mb-3">
+				<span class="bold">Tools of the Trade</span>
+				<span class="ve-small ve-muted mb-1">You already know Smith's Tools. Choose the alternate artisan's tool granted by the feature.</span>
+				<select class="form-control input-xs" data-role="tool">
+					<option value="">Choose an artisan's tool</option>
+					${toolState.options.map(option => `<option value="${CharacterSheetModal._escapeHtml(option)}">${CharacterSheetModal._escapeHtml(option)}</option>`).join("")}
+				</select>
+			</label>`;
+		} else if (toolState.status === "unresolved") {
+			toolHtml = `<div class="alert alert-warning ve-small mb-3">
+				Tools of the Trade has not been reconciled yet. Finish the class-feature acquisition before creating the defender.
+			</div>`;
+		} else {
+			toolHtml = `<div class="mb-3">
+				<div class="bold">Tools of the Trade</div>
+				<div class="ve-small">${CharacterSheetModal._escapeHtml(toolState.label)}</div>
+			</div>`;
+		}
+
+		modalInner.innerHTML = `<div class="charsheet__feature-companion-setup-modal">
+			<p class="ve-muted mb-3">Describe the defender you build. Its number of legs changes its appearance only; there is no statistical difference.</p>
+			${toolHtml}
+			<label class="ve-flex-col mb-3">
+				<span class="bold">Nickname <span class="ve-muted ve-small">(optional)</span></span>
+				<input class="form-control input-xs" data-role="nickname" autocomplete="off">
+			</label>
+			<label class="ve-flex-col mb-3">
+				<span class="bold">Appearance</span>
+				<textarea class="form-control" data-role="appearance" rows="4" aria-describedby="charsheet-steel-defender-setup-status"></textarea>
+			</label>
+			<fieldset class="mb-3">
+				<legend class="bold">Body shape</legend>
+				<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
+					<label class="ve-btn ve-btn-default"><input type="radio" name="steel-defender-locomotion" value="twoLegs"> Two legs</label>
+					<label class="ve-btn ve-btn-default"><input type="radio" name="steel-defender-locomotion" value="fourLegs"> Four legs</label>
+				</div>
+				<div class="ve-small ve-muted mt-1">There is no statistical difference between these choices.</div>
+			</fieldset>
+			<div id="charsheet-steel-defender-setup-status" class="ve-small mb-3" role="alert" aria-live="polite"></div>
+			<div class="charsheet__modal-actions">
+				<button type="button" class="ve-btn ve-btn-default" data-role="defer">Finish later</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="create">Create defender</button>
+			</div>
+		</div>`;
+
+		const nickname = modalInner.querySelector("[data-role=nickname]");
+		const appearance = modalInner.querySelector("[data-role=appearance]");
+		const tool = modalInner.querySelector("[data-role=tool]");
+		const status = modalInner.querySelector("#charsheet-steel-defender-setup-status");
+		const create = modalInner.querySelector("[data-role=create]");
+		nickname.value = record.choices?.nickname || "";
+		appearance.value = record.choices?.appearance || "";
+		const existingLocomotion = record.choices?.locomotion;
+		if (existingLocomotion) {
+			const radio = modalInner.querySelector(`[name=steel-defender-locomotion][value="${existingLocomotion}"]`);
+			if (radio) radio.checked = true;
+		}
+
+		const getChoices = () => ({
+			...(nickname.value.trim() ? {nickname: nickname.value.trim()} : {}),
+			...(appearance.value.trim() ? {appearance: appearance.value.trim()} : {}),
+			...(modalInner.querySelector("[name=steel-defender-locomotion]:checked")?.value
+				? {locomotion: modalInner.querySelector("[name=steel-defender-locomotion]:checked").value}
+				: {}),
+		});
+		const getMissing = () => {
+			const missing = [];
+			if (!appearance.value.trim()) missing.push("appearance");
+			if (!modalInner.querySelector("[name=steel-defender-locomotion]:checked")) missing.push("two legs or four legs");
+			if (toolState.status === "pending" && !tool?.value) missing.push("alternate artisan's tool");
+			if (toolState.status === "unresolved") missing.push("Tools of the Trade reconciliation");
+			return missing;
+		};
+		const updateStatus = () => {
+			const missing = getMissing();
+			create.disabled = !!missing.length;
+			create.title = missing.length ? `Missing: ${missing.join(", ")}` : "";
+			status.textContent = missing.length
+				? `Required before creation: ${missing.join(", ")}.`
+				: "Ready to create the defender.";
+			status.classList.toggle("text-danger", !!missing.length);
+		};
+		modalInner.addEventListener("input", updateStatus);
+		modalInner.addEventListener("change", updateStatus);
+		updateStatus();
+
+		modalInner.querySelector("[data-role=defer]").addEventListener("click", () => {
+			this._state.deferFeatureCompanionSetup(featureUid, getChoices());
+			doClose("deferred");
+		});
+		create.addEventListener("click", () => {
+			if (getMissing().length) {
+				updateStatus();
+				return;
+			}
+			try {
+				if (toolState.status === "pending") {
+					const allSpells = this.getFilteredSpellData?.() || this.getSpells?.() || [];
+					if (!toolState.choiceId || !this._state.fulfillFeatureChoice(toolState.choiceId, tool.value, allSpells)) {
+						throw new Error("The alternate artisan's tool could not be recorded. Choose it again.");
+					}
+				}
+				this._state.completeFeatureCompanionSetup(featureUid, getChoices());
+				doClose("complete");
+			} catch (error) {
+				status.textContent = error?.message || "Steel Defender setup could not be completed.";
+				status.classList.add("text-danger");
+			}
+		});
+
+		CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-role=appearance]"});
+		const [result] = await pGetResolved();
+		return result || null;
+	}
+
 	/**
 	 * Resolve any queued prose "either A or B" feature choices (e.g. Arcane Archer
 	 * Lore's skill-proficiency + cantrip picks). Generic: drives a single small
@@ -21901,6 +22086,10 @@ class CharacterSheetPage {
 			// ferocity control, exploit and bond feature keys off the companion record.
 			// Guarantee one exists once the brew roster is loaded. Idempotent.
 			this._ensureBeastheartCompanionBonded();
+			const featureCompanionResult = this._state.reconcileFeatureCompanionGrants?.({
+				reason: "classFeatureReconcile",
+			});
+			result.featureCompanionChanged = !!featureCompanionResult?.changed;
 		} catch (e) {
 			// Reconciliation is best-effort; never block render on a bad save.
 			// eslint-disable-next-line no-console

@@ -21,6 +21,17 @@ candidate until Apply succeeds. An untouched candidate refreshes if the live
 character changes before editing begins; a dirty candidate is never replaced
 silently.
 
+Feature-companion setup follows the same isolation rule. Subclass replacement
+runs `reconcileFeatureCompanionGrants({reason: "respecCandidate"})` against the
+candidate only. A legal exact-owner setup and companion retain their stable
+identity; a compatible EFA/TCE Battle Smith change uses
+`rebindFeatureOwnedCompanion()`; losing the exact grant marks the candidate
+companion inactive with lifecycle status `vanished` and leaves its setup
+record inactive rather than deleting either. Atomic Apply reruns the same
+idempotent reconciliation on the newly loaded live candidate before save.
+Cancel therefore cannot deactivate, rebind, or otherwise mutate the live
+companion.
+
 ## Progression Manifest and Ledger
 
 `levelHistory` remains the chronological source of class assignment, but each

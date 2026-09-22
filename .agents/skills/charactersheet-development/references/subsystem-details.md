@@ -16,6 +16,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Committed Feature Uses and EFA Flash of Genius
 - RHW Reanimator R2a State and Ownership
 - Fixed Proficiency with Fallback Transactions
+- Feature-Companion Acquisition and Setup
 
 ## Gemstone Empowerment
 
@@ -377,6 +378,32 @@ Load migration adopts only exact owner evidence. A resolved exact-owner
 translated; a markerless save that already contains the fixed proficiency is
 left as a pending fallback rather than guessing whether that proficiency was
 pre-existing or feature-owned.
+
+## Feature-Companion Acquisition and Setup
+
+Feature-companion setup is persisted separately from `_data.companions[]` in
+`_data.featureCompanionSetups = {version: 1, records: {}}`, keyed by the lower
+case full source-qualified feature owner UID. This separation is load-bearing:
+`Finish later` must preserve pending setup without creating an incomplete
+creature record.
+
+Use `CharacterSheetState.registerFeatureCompanionGrant()` for narrow
+source-specific setup descriptors and
+`state.reconcileFeatureCompanionGrants({reason})` for orchestration. Builder,
+Level Up, Quick Build, load, and Respec all call the same operation. Completion
+must go through `completeFeatureCompanionSetup()`, which validates registered
+required fields, consumes the existing fixed-proficiency fallback transaction,
+creates or reuses one stable companion, and delegates every derived statistic
+to `resolveFeatureCompanionRules()` /
+`reconcileFeatureOwnedCompanion()`.
+
+For EFA Battle Smith, pending setup requires appearance, a two-leg/four-leg
+choice (cosmetic only), and any unresolved alternate artisan-tool choice owned
+by Tools of the Trade. Nickname is optional and absent when blank. Compatible
+EFA/TCE owner changes use `rebindFeatureOwnedCompanion()`; loss of the exact
+grant deactivates with lifecycle status `vanished`. Never infer setup across a
+same-label source, and never claim mixed-source Reanimator companions.
+
 ## Source-qualified Spell Focus and Committed Cast Receipts
 
 Stored player/class/subclass spell attribution carries
