@@ -1583,6 +1583,16 @@ receipt into the later weapon damage roll. Spells without a real damage roll
 receive none. Feedback and roll history include the die, combined total, exact
 Arcane Firearm source, and selected focus.
 
+Executable source-owned innate grants use the same contract rather than a
+parallel feature-cast path. Their stored row carries exact class/subclass/feature
+provenance, an explicit `spellcastingFocusRequirement`, and the linked resource
+identity. `_castInnateSpell` validates that canonical live row, resolves focus
+and the normal spell-result pipeline before spending, decrements the linked
+innate/resource pool exactly once, then publishes the committed receipt. A
+focus/target cancellation spends nothing; a post-commit hook failure stays spent
+and cannot be retried. The cast refreshes the Spells, Overview Resources,
+Features resources, and Combat resources surfaces immediately.
+
 ## Active States / Toggle Abilities
 
 ### ACTIVE_STATE_TYPES

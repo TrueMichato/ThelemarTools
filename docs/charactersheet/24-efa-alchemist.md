@@ -10,32 +10,26 @@ including how the sheet distinguishes it from the legacy TCE Alchemist, what
 state must be saved, and what the player-facing controls must do.
 
 > **Innate-grant milestone status:** canonical source-owned grant/resource
-> metadata and lifecycle state now ship for `Lesser Restoration|XPHB` and
-> `Tasha's Bubbling Cauldron|XPHB`. The shared exact-focus and committed-cast
-> receipt contract now ships; wiring these grants to Alchemist-specific cast
-> execution remains a separate milestone, so they do not yet expose a cast action.
+> metadata and executable cast transactions now ship for
+> `Lesser Restoration|XPHB` and `Tasha's Bubbling Cauldron|XPHB`. Both require
+> equipped, proficient `Alchemist's Supplies|XPHB`, resolve through the normal
+> spell-result pipeline, spend their linked use only after successful resolution,
+> and publish the shared exact committed-cast receipt.
 >
 > **Alchemical Savant milestone status:** the level-5 Savant modifier now ships
 > for exact committed `Artificer|EFA` casts by
 > `Alchemist|Artificer|EFA|EFA` using held
-> `Alchemist's Supplies|XPHB`. Experimental Elixir, Restorative Reagents cast
-> execution, Alchemical Eruption, and Conjured Cauldron remain separate work.
+> `Alchemist's Supplies|XPHB`. Experimental Elixir and Alchemical Eruption
+> remain separate work.
 
 > **Chemical Resistance milestone status:** the exact
 > `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA` owner now contributes
 > Acid resistance, Poison resistance, and Poisoned condition immunity through
 > the canonical defense queries. The grant is source/owner/level gated,
 > round-trips idempotently, follows class/subclass/feature teardown, and
-> coexists with independent grants. Alchemical Eruption and cast execution are
-> not part of this milestone.
-
-> **Chemical Resistance milestone status:** the exact
-> `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA` owner now contributes
-> Acid resistance, Poison resistance, and Poisoned condition immunity through
-> the canonical defense queries. The grant is source/owner/level gated,
-> round-trips idempotently, follows class/subclass/feature teardown, and
-> coexists with independent grants. Alchemical Eruption and cast execution are
-> not part of this milestone.
+> coexists with independent grants. Alchemical Eruption is not part of this
+> milestone; Conjured Cauldron cast execution ships through the innate-grant
+> milestone above.
 
 ## 1. Identity comes before feature names
 
@@ -307,6 +301,12 @@ retryable.
 
 ## 6. Level 9: Restorative Reagents
 
+> **Implemented:** the exact EFA-owned grant exposes a cast action, requires
+> equipped, proficient `Alchemist's Supplies|XPHB`, resolves the normal spell
+> result, and then spends its linked Intelligence-derived use before publishing
+> the committed receipt. Cancellation or failed focus/ownership validation is a
+> no-op.
+
 Restorative Reagents grants the innate Lesser Restoration cast described in
 the spell table
 ([`data/class/class-artificer.json:2997-3010`](../../data/class/class-artificer.json#L2997-L3010)).
@@ -318,6 +318,11 @@ second generic "Restorative Reagents" resource.
 A successful cast spends one grant use. Cancelling the cast or failing focus,
 target, or spell-resolution validation spends none. A Long Rest restores the
 grant to its current Intelligence-derived maximum.
+
+The generic spell-result engine does not currently automate choosing and
+removing one of Lesser Restoration's four conditions from another creature.
+The cast transaction, focus, use, receipt, and visible spell result are
+canonical; the downstream condition change remains player-resolved.
 
 ## 7. Level 15: Chemical Mastery
 
@@ -360,6 +365,11 @@ active toggle or resource.
 
 ### 7.3 Conjured Cauldron
 
+> **Implemented:** the exact EFA-owned grant exposes a cast action and publishes
+> the same committed receipt contract as other exact EFA casts. Its explicit
+> supplies requirement remains active even though the feature waives the spell's
+> ordinary Material component.
+
 The once-per-Long-Rest Cauldron grant uses the normal spell-resolution
 pipeline:
 
@@ -369,6 +379,11 @@ pipeline:
 - ignore Material components;
 - still require exact `Alchemist's Supplies|XPHB` as the focus;
 - spend the use only after a successful cast transaction.
+
+The generic spell-result engine does not currently create or track the chosen
+Common/Uncommon potion inventory produced by the cauldron. This milestone proves
+the legal cast transaction and visible result only; potion choice, withdrawals,
+and expiration remain player-resolved.
 
 ## 8. EFA and TCE must remain isolated
 
@@ -569,7 +584,7 @@ Implementation is intentionally split into bounded reviewable milestones:
 | 2 | Tools of the Trade choices and shared Potion Crafting multiplier |
 | 3 | Experimental Elixir state, inventory, transactions, and effect lifecycle |
 | 4 | Operate-mode UI, rest choices, accessibility, and mobile behavior |
-| 5 | Chemical Resistance defenses (shipped); Savant, Restorative Reagents, Eruption, and Cauldron execution remain separate bounded work |
+| 5 | Chemical Resistance defenses and Restorative Reagents/Cauldron cast execution (shipped); Savant and Alchemical Eruption remain separate bounded work |
 | 6 | Migration, respec, export, rendering, and isolation hardening |
 | 7 | Integrated Jest/E2E verification and documentation alignment |
 

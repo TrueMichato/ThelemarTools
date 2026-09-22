@@ -4497,28 +4497,6 @@ class CharacterSheetState {
 		};
 		return freeze(copied);
 	}
-	static EFA_ALCHEMIST_SUBCLASS_UID = "Alchemist|Artificer|EFA|EFA";
-	static EFA_ALCHEMIST_INNATE_SPELL_GRANTS = Object.freeze([
-		Object.freeze({
-			grantId: "subclass-innate:alchemist|artificer|efa|efa:lesser-restoration|xphb",
-			innateSpellId: "subclass-innate-spell:alchemist|artificer|efa|efa:lesser-restoration|xphb",
-			resourceId: "subclass-innate-resource:alchemist|artificer|efa|efa:lesser-restoration|xphb",
-			spellUid: "Lesser Restoration|XPHB",
-			requiredLevel: 9,
-			sourceFeature: "Restorative Reagents",
-			maxMode: "abilityMod",
-			maxAbility: "int",
-		}),
-		Object.freeze({
-			grantId: "subclass-innate:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
-			innateSpellId: "subclass-innate-spell:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
-			resourceId: "subclass-innate-resource:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
-			spellUid: "Tasha's Bubbling Cauldron|XPHB",
-			requiredLevel: 15,
-			sourceFeature: "Chemical Mastery",
-			max: 1,
-		}),
-	]);
 	static RHW_REANIMATOR_SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
 	static RHW_FACILITATED_REVIVAL_FOCUS_RULE_ID = "rhw-facilitated-revival-focus";
 	static RHW_REANIMATOR_TOOL_OWNER_UID = "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW";
@@ -4626,6 +4604,7 @@ class CharacterSheetState {
 		return definition ? `fixed-proficiency-fallback:${definition.ownerUid.toLowerCase()}` : "";
 	}
 	static EFA_ALCHEMIST_SUBCLASS_UID = "Alchemist|Artificer|EFA|EFA";
+	static EFA_ALCHEMIST_SUPPLIES_UID = "Alchemist's Supplies|XPHB";
 	static EFA_ALCHEMIST_INNATE_SPELL_GRANTS = Object.freeze([
 		Object.freeze({
 			grantId: "subclass-innate:alchemist|artificer|efa|efa:lesser-restoration|xphb",
@@ -4634,6 +4613,7 @@ class CharacterSheetState {
 			spellUid: "Lesser Restoration|XPHB",
 			requiredLevel: 9,
 			sourceFeature: "Restorative Reagents",
+			sourceFeatureUid: "Restorative Reagents|Artificer|EFA|Alchemist|EFA|9|EFA",
 			maxMode: "abilityMod",
 			maxAbility: "int",
 		}),
@@ -4644,6 +4624,7 @@ class CharacterSheetState {
 			spellUid: "Tasha's Bubbling Cauldron|XPHB",
 			requiredLevel: 15,
 			sourceFeature: "Chemical Mastery",
+			sourceFeatureUid: "Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA",
 			max: 1,
 		}),
 	]);
@@ -4716,6 +4697,23 @@ class CharacterSheetState {
 		return [...FEATURE_COMPANION_GRANT_DEFINITIONS.values()]
 			.find(definition => definition.compatibleFeatureUids
 				.some(uid => uid.toLowerCase() === featureUid.toLowerCase())) || null;
+	}
+
+	static _getEfaAlchemistSuppliesFocusRequirement ({sourceFeatureUid} = {}) {
+		return {
+			required: true,
+			ruleId: "efa-alchemist-alchemists-supplies-required",
+			sourceFeatureUid,
+			filter: {
+				itemUids: [CharacterSheetState.EFA_ALCHEMIST_SUPPLIES_UID],
+				requiresProficiency: true,
+			},
+			ui: {
+				title: "Choose Alchemist's Supplies",
+				description: "Choose the equipped Alchemist's Supplies (XPHB) used as the spellcasting focus for this cast.",
+				unavailableMessage: "This feature requires equipped, proficient Alchemist's Supplies (XPHB).",
+			},
+		};
 	}
 
 	/**
@@ -21924,6 +21922,7 @@ class CharacterSheetState {
 			spellUid: definition.spellUid,
 			sourceType: "subclassInnateSpell",
 			sourceFeature: definition.sourceFeature,
+			sourceFeatureUid: definition.sourceFeatureUid,
 			requiredLevel: definition.requiredLevel,
 		};
 		const derivedMaxMetadata = definition.maxMode === "abilityMod"
@@ -21941,7 +21940,11 @@ class CharacterSheetState {
 			linkedResourceId: definition.resourceId,
 			ignoresPreparation: true,
 			ignoresMaterialComponents: true,
-			castExecutionBlocked: true,
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+			sourceSubclass: "Alchemist",
+			sourceSubclassSource: "EFA",
+			spellcastingFocusRequirement: CharacterSheetState._getEfaAlchemistSuppliesFocusRequirement(definition),
 			...commonMetadata,
 			...derivedMaxMetadata,
 		});
@@ -22720,14 +22723,20 @@ class CharacterSheetState {
 			"subclassUid",
 			"spellUid",
 			"sourceType",
+			"sourceFeatureUid",
 			"requiredLevel",
 			"ignoresPreparation",
 			"ignoresMaterialComponents",
 			"castExecutionBlocked",
+			"spellcastingFocusRequirement",
 			"maxMode",
 			"maxAbility",
 		]) {
-			if (spell[metadataKey] != null) innateSpell[metadataKey] = spell[metadataKey];
+			if (spell[metadataKey] != null) {
+				innateSpell[metadataKey] = typeof spell[metadataKey] === "object"
+					? MiscUtil.copyFast(spell[metadataKey])
+					: spell[metadataKey];
+			}
 		}
 
 		// Add uses tracking if not at-will
@@ -22777,6 +22786,109 @@ class CharacterSheetState {
 			return true;
 		}
 		return false;
+	}
+
+	_getEfaAlchemistInnateSpellGrantDefinition (spell) {
+		if (!spell) return null;
+		const exactIdentity = CharacterSheetState.EFA_ALCHEMIST_INNATE_SPELL_GRANTS.find(definition =>
+			spell.id === definition.innateSpellId
+			|| spell.grantId === definition.grantId
+			|| spell.linkedResourceId === definition.resourceId
+			|| spell.sourceFeatureUid === definition.sourceFeatureUid,
+		);
+		if (exactIdentity) return exactIdentity;
+
+		const isOwnedGrant = spell.sourceType === "subclassInnateSpell"
+			&& spell.ownerUid === CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID;
+		const isAttributedGrant = spell.sourceClass === "Artificer"
+			&& spell.sourceClassSource === "EFA"
+			&& spell.sourceSubclass === "Alchemist"
+			&& spell.sourceSubclassSource === "EFA";
+		if (!isOwnedGrant && !isAttributedGrant) return null;
+		return CharacterSheetState.EFA_ALCHEMIST_INNATE_SPELL_GRANTS.find(definition =>
+			spell.spellUid === definition.spellUid
+			|| (
+				spell.name === definition.spellUid.split("|")[0]
+				&& spell.source === definition.spellUid.split("|")[1]
+				&& spell.sourceFeature === definition.sourceFeature
+			),
+		) || null;
+	}
+
+	_isEfaAlchemistInnateSpellGrantCandidate (spell) {
+		if (!spell) return false;
+		if (this._getEfaAlchemistInnateSpellGrantDefinition(spell)) return true;
+		return CharacterSheetState.EFA_ALCHEMIST_INNATE_SPELL_GRANTS.some(definition =>
+			spell.name === definition.spellUid.split("|")[0]
+			&& spell.source === definition.spellUid.split("|")[1]
+			&& spell.sourceFeature === definition.sourceFeature,
+		);
+	}
+
+	_isExecutableEfaAlchemistInnateSpellGrant (spell, definition) {
+		const classEntry = this._getEfaAlchemistClassEntry();
+		if (!classEntry || (Number(classEntry.level) || 0) < definition.requiredLevel) return false;
+
+		const [spellName, spellSource] = definition.spellUid.split("|");
+		const ownedSpells = (this._data.spellcasting.innateSpells || [])
+			.filter(candidate => this._isEfaAlchemistOwnedInnateSpell(candidate, definition));
+		if (ownedSpells.length !== 1 || ownedSpells[0].id !== spell.id) return false;
+
+		const ownedResources = (this._data.resources || [])
+			.filter(resource => this._isEfaAlchemistOwnedInnateResource(resource, definition));
+		if (ownedResources.length !== 1) return false;
+		const resource = ownedResources[0];
+
+		const focusRequirement = this._getExplicitSpellCastFocusRequirement({
+			spell,
+			castMeta: spell,
+			castingClass: {
+				name: "Artificer",
+				source: "EFA",
+				uid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			},
+		});
+		const exactFocusUids = focusRequirement?.filter?.itemUids || [];
+
+		return spell.id === definition.innateSpellId
+			&& spell.grantId === definition.grantId
+			&& spell.ownerUid === CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID
+			&& spell.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+			&& spell.subclassUid === CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID
+			&& spell.spellUid === definition.spellUid
+			&& spell.name === spellName
+			&& spell.source === spellSource
+			&& spell.sourceType === "subclassInnateSpell"
+			&& spell.sourceFeature === definition.sourceFeature
+			&& spell.sourceFeatureUid === definition.sourceFeatureUid
+			&& spell.requiredLevel === definition.requiredLevel
+			&& spell.sourceClass === "Artificer"
+			&& spell.sourceClassSource === "EFA"
+			&& spell.sourceSubclass === "Alchemist"
+			&& spell.sourceSubclassSource === "EFA"
+			&& spell.linkedResourceId === definition.resourceId
+			&& spell.ignoresPreparation === true
+			&& spell.ignoresMaterialComponents === true
+			&& exactFocusUids.length === 1
+			&& exactFocusUids[0] === CharacterSheetState.EFA_ALCHEMIST_SUPPLIES_UID
+			&& focusRequirement.filter.requiresProficiency === true
+			&& resource.id === definition.resourceId
+			&& resource.grantId === definition.grantId
+			&& resource.ownerUid === CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID
+			&& resource.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
+			&& resource.subclassUid === CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID
+			&& resource.spellUid === definition.spellUid
+			&& resource.sourceFeatureUid === definition.sourceFeatureUid
+			&& resource.linkedInnateSpellId === definition.innateSpellId
+			&& Number(resource.current) === Number(spell.uses?.current)
+			&& Number(resource.max) === Number(spell.uses?.max);
+	}
+
+	canExecuteInnateSpellCast (spell) {
+		if (!spell || spell.castExecutionBlocked) return false;
+		const definition = this._getEfaAlchemistInnateSpellGrantDefinition(spell);
+		if (definition) return this._isExecutableEfaAlchemistInnateSpellGrant(spell, definition);
+		return !this._isEfaAlchemistInnateSpellGrantCandidate(spell);
 	}
 
 	// (Bug 4 follow-up) Restore a single innate-spell use (e.g. clicking a "used" pip in the

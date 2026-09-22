@@ -9231,6 +9231,7 @@ class CharacterSheetSpells {
 			: "";
 
 		const dcBadge = this._renderSpellDcAttackBadge(spell);
+		const canCast = this._state.canExecuteInnateSpellCast?.(spell) ?? !spell.castExecutionBlocked;
 
 		const item = e_({outer: `
 			<div class="charsheet__spell-item charsheet__spell-item--innate" data-innate-spell-id="${spellId}">
@@ -9241,7 +9242,7 @@ class CharacterSheetSpells {
 				</div>
 				<div class="charsheet__spell-item-actions">
 					${usageInfo}
-					${!spell.atWill && !spell.castExecutionBlocked ? `
+					${!spell.atWill && canCast ? `
 						<button class="ve-btn ve-btn-sm ve-btn-primary charsheet__innate-cast" title="Cast">
 							<span class="glyphicon glyphicon-flash"></span>
 						</button>
@@ -9281,69 +9282,101 @@ class CharacterSheetSpells {
 	/**
 	 * Cast an innate spell (use one charge)
 	 */
-	async _castInnateSpell (spellId) {
+	async _castInnateSpell (spellId, {decision = null} = {}) {
 		const spell = this._state.getInnateSpells().find(s => s.id === spellId);
-		if (!spell || spell.castExecutionBlocked) return;
+		if (!spell || !(this._state.canExecuteInnateSpellCast?.(spell) ?? !spell.castExecutionBlocked)) return;
 
 		// Get full spell data for constraint checks
 		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source) || spell;
-
-		// Check for conditions that prevent spellcasting
-		const focusRequirement = this._state.getSpellCastFocusRequirement?.(spell, spell) || null;
-		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: !!focusRequirement})) return;
-		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta: spell});
-		if (focusSelection.cancelled) return;
-		const focusText = focusSelection.focusReference?.name ? ` using ${focusSelection.focusReference.name}` : "";
-		if (focusRequirement) {
-			await this._pConsumeMaterialComponent({
-				spell,
-				spellData,
-				variantUsed: false,
-			});
-		}
-
-		if (spell.atWill) {
-			// At-will spells can always be cast
-			JqueryUtil.doToast({type: "info", content: `Cast ${spell.name}${focusText} (at will)`});
-			const receipt = await this._pPublishCommittedSpellCast({
-				spell,
-				spellData,
-				focusInventoryRow: focusSelection.focusInventoryRow,
-				focusRequirement: focusSelection.requirement,
-				cast: {
-					type: "innate",
-					slotLevel: spell.level || 0,
-					innateSpellId: spell.id,
-					focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
-				},
-			});
-			this._page.saveCharacter();
-			return receipt;
-		}
-
-		if (!spell.uses || spell.uses.current <= 0) {
+		if (!spell.atWill && (!spell.uses || spell.uses.current <= 0)) {
 			JqueryUtil.doToast({type: "warning", content: `No uses remaining for ${spell.name}`});
 			return;
 		}
 
-		this._state.useInnateSpell(spellId);
-		JqueryUtil.doToast({type: "info", content: `Cast ${spell.name}${focusText} (${spell.uses.current}/${spell.uses.max} remaining)`});
+		// Check for conditions that prevent spellcasting
+		const focusRequirement = this._state.getSpellCastFocusRequirement?.(spell, spell) || null;
+		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: !!focusRequirement})) return;
+		const castMeta = {
+			...(this._state.isSpellCastMaterialComponentWaived?.(spell, spell) ? {ignoresMaterialComponents: true} : {}),
+			...(spell.spellcastingFocusRequirement
+				? {spellcastingFocusRequirement: MiscUtil.copyFast(spell.spellcastingFocusRequirement)}
+				: {}),
+		};
+		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
+		if (focusSelection.cancelled) return;
+		if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
+		const focusText = focusSelection.focusReference?.name ? ` using ${focusSelection.focusReference.name}` : "";
+		const castLevel = Number(spellData.level ?? spell.level ?? 0);
+		const castResult = await this._showCastResult(spell, castLevel, false, false, castMeta);
+		if (castResult?.cancelled) return;
+
+		if (focusRequirement?.addsMaterialComponent) {
+			await this._pConsumeMaterialComponent({spell, spellData, decision, variantUsed: false});
+		}
+
+		const committedSpell = this._state.getInnateSpells().find(s => s.id === spellId);
+		if (!committedSpell || !(this._state.canExecuteInnateSpellCast?.(committedSpell) ?? !committedSpell.castExecutionBlocked)) return;
+		const committedFocusRow = focusSelection.focusReference
+			? this._state.resolveSpellCastFocusReference?.(focusSelection.focusReference)
+			: null;
+		if (focusSelection.requirement && !committedFocusRow) return;
+
+		if (committedSpell.atWill) {
+			this._state.consumeStatesEndingOnSpellCast?.();
+			this._state.applyCommittedSpellCastTriggers?.(spellData, castMeta);
+			const receipt = await this._pPublishCommittedSpellCast({
+				spell: committedSpell,
+				spellData,
+				focusInventoryRow: committedFocusRow,
+				focusRequirement: focusSelection.requirement,
+				cast: {
+					type: "innate",
+					slotLevel: castLevel,
+					innateSpellId: committedSpell.id,
+					focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+					rolls: castResult?.rolls || [],
+				},
+			});
+			JqueryUtil.doToast({type: "info", content: `Cast ${committedSpell.name}${focusText} (at will)`});
+			this._page.saveCharacter();
+			return receipt;
+		}
+
+		if (!this._state.useInnateSpell(spellId)) return;
+		this._state.consumeStatesEndingOnSpellCast?.();
+		this._state.applyCommittedSpellCastTriggers?.(spellData, castMeta);
 		const receipt = await this._pPublishCommittedSpellCast({
-			spell,
+			spell: committedSpell,
 			spellData,
-			focusInventoryRow: focusSelection.focusInventoryRow,
+			focusInventoryRow: committedFocusRow,
 			focusRequirement: focusSelection.requirement,
 			cast: {
 				type: "innate",
-				slotLevel: spell.level || 0,
-				innateSpellId: spell.id,
-				resourceId: spell.linkedResourceId || null,
+				slotLevel: castLevel,
+				innateSpellId: committedSpell.id,
+				resourceId: committedSpell.linkedResourceId || null,
 				focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+				rolls: castResult?.rolls || [],
 			},
 		});
+		const isExactSourceOwnedCast = committedSpell.sourceType === "subclassInnateSpell"
+			&& committedSpell.ownerUid === CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID;
+		if (isExactSourceOwnedCast && !receipt) {
+			this._state.restoreInnateSpell(spellId);
+			this._refreshInnateCastUi();
+			return;
+		}
+		JqueryUtil.doToast({type: "info", content: `Cast ${committedSpell.name}${focusText} (${committedSpell.uses.current}/${committedSpell.uses.max} remaining)`});
 		this._page.saveCharacter();
-		this._renderSpellList();
+		this._refreshInnateCastUi();
 		return receipt;
+	}
+
+	_refreshInnateCastUi () {
+		this._renderSpellList();
+		this._page._renderResources?.();
+		this._page._features?._renderResources?.();
+		this._page._combat?.renderCombatResources?.();
 	}
 
 	/**
