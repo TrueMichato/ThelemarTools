@@ -15,14 +15,14 @@ const SELF = {name: "Mira", isSelf: true, status: "active"};
 const ALLY = {name: "Thorn", isSelf: false, status: "active"};
 const ALLY_TWO = {name: "Vey", isSelf: false, status: "active"};
 
-function makeCartographer ({int = 16, hasTools = true} = {}) {
+function makeCartographer ({int = 16, hasTools = true, level = 3} = {}) {
 	const state = new CharacterSheetState();
 	state.setCharacterName("Mira");
 	state.setAbilityBase("int", int);
 	state.addClass({
 		name: "Artificer",
 		source: "EFA",
-		level: 3,
+		level,
 		subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
 	});
 	if (hasTools) state.addItem({name: "Cartographer's Tools", source: "XPHB", type: "AT", quantity: 1});
@@ -502,5 +502,400 @@ describe("Cartographer — Features Atlas card model", () => {
 			selfStatus: "Not mapped",
 			awarenessLabel: "Inactive",
 		});
+	});
+});
+
+describe("Cartographer — Superior Atlas Safe Haven", () => {
+	const DESTROYED_AT = 1_700_000_040_000;
+
+	function makeSafeHavenCartographer ({level = 15, holders = [SELF, ALLY], hp = 80} = {}) {
+		const state = makeCartographer({level});
+		state.setHp(hp, hp);
+		createAtlas(state, holders);
+		return state;
+	}
+
+	function dropToZero (state, damage = state.getCurrentHp()) {
+		state.takeDamage(damage);
+		return state.getPendingZeroHpIntervention();
+	}
+
+	test("registers the source-qualified level-15 feature and restores exactly twice the current Artificer level", () => {
+		const below = makeCartographer({level: 14});
+		expect(below.getFeatureCalculations().hasSuperiorAtlasSafeHaven).toBeUndefined();
+		expect(below.getAdventurersAtlasSafeHavenAvailability()).toMatchObject({
+			available: false,
+			unavailableReason: "Safe Haven requires Artificer level 15.",
+		});
+		const wrongSource = makeCartographer({level: 15});
+		wrongSource.setSubclass("Artificer", {name: "Cartographer", source: "HB"});
+		expect(wrongSource.getFeatureCalculations().hasSuperiorAtlasSafeHaven).toBeUndefined();
+		expect(wrongSource.getAdventurersAtlasSafeHavenAvailability()).toMatchObject({
+			available: false,
+			unavailableReason: "Safe Haven requires the EFA Cartographer subclass.",
+		});
+
+		const state = makeSafeHavenCartographer({level: 17});
+		expect(state.getFeatureCalculations()).toMatchObject({
+			hasSuperiorAtlasSafeHaven: true,
+			safeHavenHitPoints: 34,
+			safeHavenSourceFeatureUid: "Superior Atlas|Artificer|EFA|Cartographer|EFA|15|EFA",
+		});
+		dropToZero(state);
+
+		const result = state.applyZeroHpIntervention(
+			CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+			{destroyedAt: DESTROYED_AT},
+		);
+		expect(result).toMatchObject({
+			applied: true,
+			committed: true,
+			success: true,
+			hp: 34,
+			consumption: {
+				type: "adventurersAtlasMap",
+				amount: 1,
+				holderName: "Mira",
+				status: "destroyed",
+				destroyedBy: "Safe Haven",
+			},
+			postApplication: {
+				kind: "safeHaven",
+				sourceFeatureUid: "Superior Atlas|Artificer|EFA|Cartographer|EFA|15|EFA",
+				hitPoints: 34,
+			},
+		});
+		expect(state.getCurrentHp()).toBe(34);
+	});
+
+	test("uses the generic automatic transaction, destroys exactly the self map once, and returns placement requirements", () => {
+		const state = makeSafeHavenCartographer();
+		state.addConcentration({id: "spell:haste", kind: "spell", name: "Haste"});
+		const atlas = state.getAdventurersAtlas();
+		const self = atlas.holders.find(holder => holder.isSelf);
+		const ally = atlas.holders.find(holder => !holder.isSelf);
+		const destroySpy = jest.spyOn(state, "destroyAdventurersAtlasHolder");
+		const pending = dropToZero(state);
+
+		expect(pending.chooser.options.map(option => option.id)).toContain(
+			CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+		);
+		const result = state.applyZeroHpIntervention(
+			CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+			{destroyedAt: DESTROYED_AT},
+		);
+
+		expect(destroySpy).toHaveBeenCalledTimes(1);
+		expect(destroySpy).toHaveBeenCalledWith(self.id, {
+			destroyedBy: "Safe Haven",
+			destroyedAt: DESTROYED_AT,
+		});
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === self.id)).toMatchObject({
+			status: "destroyed",
+			destroyedBy: "Safe Haven",
+			destroyedAt: DESTROYED_AT,
+		});
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === ally.id).status).toBe("active");
+		expect(result.postApplication.teleport).toEqual({
+			kind: "safeHavenTeleport",
+			status: "requires-placement",
+			applied: false,
+			maxDistanceFeet: 5,
+			mustBeUnoccupied: true,
+			anchorChoiceRequired: false,
+			instruction: "Place the creature in an unoccupied space within 5 feet of one listed anchor.",
+			anchors: [{
+				kind: "activeMapHolder",
+				holderId: ally.id,
+				name: "Thorn",
+				isActiveMapHolder: true,
+			}],
+		});
+		expect(Object.isFrozen(result.postApplication)).toBe(true);
+		expect(Object.isFrozen(result.postApplication.teleport)).toBe(true);
+		expect(state.isConcentrating()).toBe(true);
+		expect(state.applyZeroHpIntervention(CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID)).toBeNull();
+		expect(destroySpy).toHaveBeenCalledTimes(1);
+
+		const pageSource = readFileSync(new URL("../../../js/charactersheet/charactersheet.js", import.meta.url), "utf8");
+		const applyDamageSource = pageSource.slice(
+			pageSource.indexOf("async _pApplyDamage"),
+			pageSource.indexOf("async _pOfferMaterialDamageReactions"),
+		);
+		expect(applyDamageSource.indexOf("await this._pOfferZeroHpIntervention();"))
+			.toBeLessThan(applyDamageSource.indexOf("if (this._state.isConcentrating?.())"));
+	});
+
+	test("cancels or fails revalidation without spending the self map", () => {
+		const cancelled = makeSafeHavenCartographer();
+		const cancelledSelf = cancelled.getAdventurersAtlas().holders.find(holder => holder.isSelf);
+		dropToZero(cancelled);
+		expect(cancelled.applyZeroHpIntervention(
+			CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+			{cancelled: true},
+		)).toMatchObject({applied: false, committed: false, cancelled: true});
+		expect(cancelled.getAdventurersAtlas().holders.find(holder => holder.id === cancelledSelf.id).status).toBe("active");
+
+		const failed = makeSafeHavenCartographer();
+		const failedAtlas = failed.getAdventurersAtlas();
+		const failedSelf = failedAtlas.holders.find(holder => holder.isSelf);
+		const failedAlly = failedAtlas.holders.find(holder => !holder.isSelf);
+		dropToZero(failed);
+		failed.destroyAdventurersAtlasHolder(failedAlly.id, {destroyedAt: DESTROYED_AT});
+
+		expect(failed.applyZeroHpIntervention(CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID)).toMatchObject({
+			applied: false,
+			committed: false,
+			available: false,
+			unavailableReason: "Safe Haven requires another legal destination anchor.",
+		});
+		expect(failed.getAdventurersAtlas().holders.find(holder => holder.id === failedSelf.id).status).toBe("active");
+		expect(failed.getCurrentHp()).toBe(0);
+		expect(failed.getPendingZeroHpIntervention()).not.toBeNull();
+	});
+
+	test("reports an invalidated Atlas explicitly and spends no map", () => {
+		const state = makeSafeHavenCartographer();
+		const self = state.getAdventurersAtlas().holders.find(holder => holder.isSelf);
+		state.invalidateAdventurersAtlas("test-invalidation");
+
+		expect(state.getAdventurersAtlasSafeHavenAvailability()).toMatchObject({
+			available: false,
+			unavailableReason: "Safe Haven is unavailable because the Atlas is invalidated (test-invalidation).",
+		});
+		expect(state.resolveAdventurersAtlasSafeHavenForExternalHolder(
+			state.getAdventurersAtlas().holders.find(holder => !holder.isSelf).id,
+			{confirmedReducedToZero: true, killedOutright: false},
+		)).toMatchObject({
+			ok: false,
+			committed: false,
+			errors: ["Safe Haven is unavailable because the Atlas is invalidated (test-invalidation)."],
+		});
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === self.id).status).toBe("active");
+	});
+
+	test("leaves massive-damage death to the canonical pipeline without offering or consuming Safe Haven", () => {
+		const state = makeSafeHavenCartographer({hp: 40});
+		const self = state.getAdventurersAtlas().holders.find(holder => holder.isSelf);
+		const destroySpy = jest.spyOn(state, "destroyAdventurersAtlasHolder");
+
+		state.takeDamage(80);
+
+		expect(state.isDead()).toBe(true);
+		expect(state.getPendingZeroHpIntervention()).toBeNull();
+		expect(state.applyZeroHpIntervention(CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID)).toBeNull();
+		expect(destroySpy).not.toHaveBeenCalled();
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === self.id).status).toBe("active");
+		expect(state.getAdventurersAtlas().invalidatedReason).toBe("character-death");
+	});
+
+	test("uses deterministic chooser ordering and consumes only the selected intervention", () => {
+		const original = CharacterSheetState.ZERO_HP_INTERVENTIONS;
+		let customConsumes = 0;
+		CharacterSheetState.ZERO_HP_INTERVENTIONS = [
+			...original,
+			{
+				id: "testAlternative",
+				featureName: "Test Alternative",
+				displayName: "Test Alternative",
+				saveAbility: null,
+				dcBase: 0,
+				dcAddsDamage: false,
+				excludedDamageTypes: [],
+				excludeCritical: false,
+				spendOn: "success",
+				usesMax: null,
+				recharge: null,
+				hpOutcome: 3,
+				consumption: () => {
+					customConsumes++;
+					return {type: "test"};
+				},
+			},
+		];
+		try {
+			const state = makeSafeHavenCartographer();
+			const pending = dropToZero(state);
+			expect(pending.chooser).toMatchObject({required: true});
+			expect(pending.chooser.options.map(option => option.id)).toEqual([
+				CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+				"testAlternative",
+			]);
+
+			const result = state.applyZeroHpIntervention(
+				CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+				{destroyedAt: DESTROYED_AT},
+			);
+			expect(result.consumption.type).toBe("adventurersAtlasMap");
+			expect(customConsumes).toBe(0);
+		} finally {
+			CharacterSheetState.ZERO_HP_INTERVENTIONS = original;
+		}
+	});
+
+	test("supports ally-only Atlases through the external resolver while automatic self use stays unavailable", () => {
+		const state = makeSafeHavenCartographer({holders: [ALLY, ALLY_TWO]});
+		const atlas = state.getAdventurersAtlas();
+		const thorn = atlas.holders.find(holder => holder.name === "Thorn");
+		const vey = atlas.holders.find(holder => holder.name === "Vey");
+
+		expect(state.getAdventurersAtlasSafeHavenAvailability()).toMatchObject({
+			available: false,
+			unavailableReason: "Safe Haven is unavailable because the Cartographer has no Atlas map.",
+		});
+		const pending = dropToZero(state);
+		expect(pending.interventions.find(intervention =>
+			intervention.id === CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+		)).toMatchObject({
+			available: false,
+			unavailableReason: "Safe Haven is unavailable because the Cartographer has no Atlas map.",
+		});
+		expect(pending.chooser.options).toEqual([]);
+
+		const result = state.resolveAdventurersAtlasSafeHavenForExternalHolder(thorn.id, {
+			confirmedReducedToZero: true,
+			killedOutright: false,
+			destroyedAt: DESTROYED_AT,
+		});
+		expect(result).toMatchObject({
+			ok: true,
+			committed: true,
+			hp: 30,
+			consumption: {
+				holderId: thorn.id,
+				holderName: "Thorn",
+			},
+		});
+		expect(result.postApplication.teleport.anchors).toEqual([
+			{
+				kind: "cartographer",
+				holderId: null,
+				name: "Mira",
+				isActiveMapHolder: false,
+			},
+			{
+				kind: "activeMapHolder",
+				holderId: vey.id,
+				name: "Vey",
+				isActiveMapHolder: true,
+			},
+		]);
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === thorn.id).status).toBe("destroyed");
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === vey.id).status).toBe("active");
+	});
+
+	test("requires explicit external confirmation, blocks killed-outright use, and prevents destroyed-map reuse", () => {
+		const state = makeSafeHavenCartographer({holders: [ALLY, ALLY_TWO]});
+		const thorn = state.getAdventurersAtlas().holders.find(holder => holder.name === "Thorn");
+
+		expect(state.resolveAdventurersAtlasSafeHavenForExternalHolder(thorn.id)).toMatchObject({
+			ok: false,
+			committed: false,
+			errors: ["Confirm that the external map holder reached 0 hit points."],
+		});
+		expect(state.resolveAdventurersAtlasSafeHavenForExternalHolder(thorn.id, {
+			confirmedReducedToZero: true,
+			killedOutright: true,
+		})).toMatchObject({
+			ok: false,
+			committed: false,
+			errors: ["Safe Haven can't resolve unless the external map holder was not killed outright."],
+		});
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === thorn.id).status).toBe("active");
+
+		expect(state.resolveAdventurersAtlasSafeHavenForExternalHolder(thorn.id, {
+			confirmedReducedToZero: true,
+			killedOutright: false,
+			destroyedAt: DESTROYED_AT,
+		}).ok).toBe(true);
+		expect(state.resolveAdventurersAtlasSafeHavenForExternalHolder(thorn.id, {
+			confirmedReducedToZero: true,
+			killedOutright: false,
+		})).toMatchObject({
+			ok: false,
+			committed: false,
+			errors: ["Safe Haven is unavailable because Thorn's map is destroyed."],
+		});
+	});
+
+	test("persists destruction, recreates cleanly, reports teardown reasons, and remains rest-undo safe", () => {
+		const state = makeSafeHavenCartographer();
+		state.setHp(50, 80);
+		const self = state.getAdventurersAtlas().holders.find(holder => holder.isSelf);
+		const {rest} = makeRest(state);
+		rest._captureRestSnapshot("short");
+		dropToZero(state, 50);
+		state.applyZeroHpIntervention(
+			CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+			{destroyedAt: DESTROYED_AT},
+		);
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.getAdventurersAtlas().holders.find(holder => holder.id === self.id)).toMatchObject({
+			status: "destroyed",
+			destroyedBy: "Safe Haven",
+			destroyedAt: DESTROYED_AT,
+		});
+		expect(loaded.getAdventurersAtlasSafeHavenAvailability()).toMatchObject({
+			available: false,
+			unavailableReason: "Safe Haven is unavailable because Mira's map is destroyed.",
+		});
+
+		expect(rest._onUndoRest()).toBe(true);
+		expect(state.getCurrentHp()).toBe(50);
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === self.id).status).toBe("active");
+
+		const recreated = loaded.recreateAdventurersAtlas([SELF, ALLY], {isHoldingTools: true});
+		expect(recreated.ok).toBe(true);
+		expect(loaded.getAdventurersAtlasSafeHavenAvailability().available).toBe(true);
+		loaded.setSubclass("Artificer", {name: "Armorer", source: "EFA"});
+		expect(loaded.getAdventurersAtlas().invalidatedReason).toBe("subclass-removed");
+		expect(loaded.getAdventurersAtlasSafeHavenAvailability()).toMatchObject({
+			available: false,
+			unavailableReason: "Safe Haven requires the EFA Cartographer subclass.",
+		});
+	});
+
+	test("does not arm from non-damage 0-HP changes", () => {
+		const state = makeSafeHavenCartographer();
+		state.setHp(0, 80);
+
+		expect(state.getPendingZeroHpIntervention()).toBeNull();
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.isSelf).status).toBe("active");
+	});
+
+	test("surfaces an accessible external-holder action on the Atlas card and resolves only that named holder", async () => {
+		const state = makeSafeHavenCartographer({holders: [ALLY, ALLY_TWO]});
+		const page = {saveCharacter: jest.fn(), openAdventurersAtlasLongRest: jest.fn()};
+		const features = Object.create(CharacterSheetFeatures.prototype);
+		features._state = state;
+		features._page = page;
+		features.render = jest.fn();
+		const model = features._getAdventurersAtlasCardModel();
+
+		expect(model.safeHaven).toMatchObject({
+			hitPoints: 30,
+			unavailableReason: null,
+		});
+		expect(model.safeHaven.externalHolders.map(holder => holder.name)).toEqual(["Thorn", "Vey"]);
+
+		const thorn = model.safeHaven.externalHolders.find(holder => holder.name === "Thorn");
+		const originalConfirm = globalThis.InputUiUtil.pGetUserBoolean;
+		globalThis.InputUiUtil.pGetUserBoolean = jest.fn().mockResolvedValue(true);
+		try {
+			const result = await features._pResolveAdventurersAtlasSafeHavenExternal(thorn.id);
+			expect(result).toMatchObject({ok: true, hp: 30});
+		} finally {
+			globalThis.InputUiUtil.pGetUserBoolean = originalConfirm;
+		}
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(features.render).toHaveBeenCalledTimes(1);
+		expect(state.getAdventurersAtlas().holders.find(holder => holder.id === thorn.id).status).toBe("destroyed");
+
+		const source = readFileSync(new URL("../../../js/charactersheet/charactersheet-features.js", import.meta.url), "utf8");
+		expect(source).toContain(`attrs: {for: selectId}`);
+		expect(source).toContain(`"aria-describedby": "charsheet-atlas-safe-haven-help charsheet-atlas-safe-haven-status"`);
+		expect(source).toContain(`role: "status"`);
 	});
 });

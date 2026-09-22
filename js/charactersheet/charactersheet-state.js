@@ -4351,6 +4351,9 @@ class CharacterSheetState {
 	static _adventurersAtlasHolderIdSeq = 0;
 	static GUIDED_PRECISION_FEATURE_UID = "Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA";
 	static GUIDED_PRECISION_FAERIE_FIRE_UID = "faerie fire|xphb";
+	static SAFE_HAVEN_FEATURE_UID = "Superior Atlas|Artificer|EFA|Cartographer|EFA|15|EFA";
+	static SAFE_HAVEN_ZERO_HP_INTERVENTION_ID = "safeHavenEfaCartographer";
+	static SAFE_HAVEN_TELEPORT_RANGE_FEET = 5;
 
 	static _getEmptyAdventurersAtlas () {
 		return {
@@ -6445,6 +6448,250 @@ class CharacterSheetState {
 					? CharacterSheetState.ADVENTURERS_ATLAS_INITIATIVE_DIE
 					: null,
 			})),
+		});
+	}
+
+	_getEfaCartographerClass () {
+		return this._data.classes.find(cls =>
+			cls?.name?.toLowerCase() === "artificer"
+			&& cls?.source?.toUpperCase() === "EFA"
+			&& cls?.subclass?.name?.toLowerCase() === "cartographer"
+			&& cls?.subclass?.source?.toUpperCase() === "EFA",
+		) || null;
+	}
+
+	hasAdventurersAtlasSafeHavenFeature () {
+		return Number(this._getEfaCartographerClass()?.level || 0) >= 15;
+	}
+
+	getAdventurersAtlasSafeHavenHitPoints () {
+		return this.hasAdventurersAtlasSafeHavenFeature()
+			? 2 * Number(this._getEfaCartographerClass().level)
+			: 0;
+	}
+
+	_getAdventurersAtlasSafeHavenTeleportRequirement (triggerHolder) {
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		const anchors = [];
+		const selfHolder = atlas.holders.find(holder => holder.isSelf) || null;
+
+		if (!triggerHolder?.isSelf) {
+			anchors.push({
+				kind: "cartographer",
+				holderId: selfHolder?.id || null,
+				name: this.getCharacterName() || "Cartographer",
+				isActiveMapHolder: selfHolder?.status === "active",
+			});
+		}
+
+		for (const holder of atlas.holders) {
+			if (holder.id === triggerHolder?.id || holder.status !== "active" || holder.isSelf) continue;
+			anchors.push({
+				kind: "activeMapHolder",
+				holderId: holder.id,
+				name: holder.name,
+				isActiveMapHolder: true,
+			});
+		}
+
+		return CharacterSheetState._copyAndFreeze({
+			kind: "safeHavenTeleport",
+			status: "requires-placement",
+			applied: false,
+			maxDistanceFeet: CharacterSheetState.SAFE_HAVEN_TELEPORT_RANGE_FEET,
+			mustBeUnoccupied: true,
+			anchorChoiceRequired: anchors.length > 1,
+			instruction: "Place the creature in an unoccupied space within 5 feet of one listed anchor.",
+			anchors,
+		});
+	}
+
+	getAdventurersAtlasSafeHavenAvailability ({holderId = null, isExternal = false} = {}) {
+		const cls = this._getEfaCartographerClass();
+		if (!cls) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: "Safe Haven requires the EFA Cartographer subclass.",
+			});
+		}
+		if (Number(cls.level || 0) < 15) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: "Safe Haven requires Artificer level 15.",
+			});
+		}
+		if (this.isDead()) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: "A dead Cartographer can't resolve Safe Haven.",
+			});
+		}
+
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		if (!atlas.generation) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: "Safe Haven requires a created Adventurer's Atlas.",
+			});
+		}
+		if (atlas.invalidatedReason) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: `Safe Haven is unavailable because the Atlas is invalidated (${atlas.invalidatedReason}).`,
+			});
+		}
+
+		const holder = holderId
+			? atlas.holders.find(it => it.id === holderId)
+			: atlas.holders.find(it => it.isSelf);
+		if (!holder) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: isExternal
+					? "Safe Haven requires a named Atlas holder."
+					: "Safe Haven is unavailable because the Cartographer has no Atlas map.",
+			});
+		}
+		if (isExternal && holder.isSelf) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: "Manual Safe Haven resolution requires an external Atlas holder.",
+			});
+		}
+		if (!isExternal && !holder.isSelf) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: "Automatic Safe Haven resolution requires the Cartographer's own map.",
+			});
+		}
+		if (holder.status !== "active") {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: `Safe Haven is unavailable because ${holder.name}'s map is destroyed.`,
+				holder: {
+					id: holder.id,
+					name: holder.name,
+					isSelf: holder.isSelf,
+					status: holder.status,
+				},
+			});
+		}
+
+		const teleport = this._getAdventurersAtlasSafeHavenTeleportRequirement(holder);
+		if (!teleport.anchors.length) {
+			return CharacterSheetState._copyAndFreeze({
+				available: false,
+				unavailableReason: "Safe Haven requires another legal destination anchor.",
+				holder: {
+					id: holder.id,
+					name: holder.name,
+					isSelf: holder.isSelf,
+					status: holder.status,
+				},
+			});
+		}
+
+		return CharacterSheetState._copyAndFreeze({
+			available: true,
+			unavailableReason: null,
+			hitPoints: this.getAdventurersAtlasSafeHavenHitPoints(),
+			holder: {
+				id: holder.id,
+				name: holder.name,
+				isSelf: holder.isSelf,
+				status: holder.status,
+			},
+			teleport,
+		});
+	}
+
+	getAdventurersAtlasSafeHavenExternalHolderOptions () {
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		return CharacterSheetState._copyAndFreeze(atlas.holders
+			.filter(holder => !holder.isSelf)
+			.map(holder => ({
+				id: holder.id,
+				name: holder.name,
+				status: holder.status,
+				...this.getAdventurersAtlasSafeHavenAvailability({holderId: holder.id, isExternal: true}),
+			})));
+	}
+
+	_getAdventurersAtlasSafeHavenFailure (reason) {
+		return CharacterSheetState._copyAndFreeze({
+			ok: false,
+			committed: false,
+			errors: [reason],
+			hp: null,
+			consumption: null,
+			postApplication: null,
+		});
+	}
+
+	_consumeAdventurersAtlasSafeHavenMap (holderId, {destroyedAt = Date.now()} = {}) {
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		const holder = atlas.holders.find(it => it.id === holderId);
+		if (!holder) return {ok: false, error: "Safe Haven's Atlas holder was not found."};
+		const result = this.destroyAdventurersAtlasHolder(holderId, {
+			destroyedBy: "Safe Haven",
+			destroyedAt,
+		});
+		if (!result.ok) return {ok: false, error: result.errors.join(" ")};
+		if (!result.changed) return {ok: false, error: `${holder.name}'s Atlas map was already destroyed.`};
+		return {
+			type: "adventurersAtlasMap",
+			amount: 1,
+			holderId: holder.id,
+			holderName: holder.name,
+			generation: atlas.generation,
+			status: "destroyed",
+			destroyedBy: "Safe Haven",
+		};
+	}
+
+	_buildAdventurersAtlasSafeHavenResult ({holder, hitPoints, teleport}) {
+		return CharacterSheetState._copyAndFreeze({
+			kind: "safeHaven",
+			sourceFeatureUid: CharacterSheetState.SAFE_HAVEN_FEATURE_UID,
+			holder: {
+				id: holder.id,
+				name: holder.name,
+				isSelf: holder.isSelf,
+			},
+			hitPoints,
+			message: teleport.instruction,
+			teleport,
+		});
+	}
+
+	resolveAdventurersAtlasSafeHavenForExternalHolder (
+		holderId,
+		{confirmedReducedToZero = false, killedOutright = null, destroyedAt = Date.now()} = {},
+	) {
+		if (confirmedReducedToZero !== true) {
+			return this._getAdventurersAtlasSafeHavenFailure("Confirm that the external map holder reached 0 hit points.");
+		}
+		if (killedOutright !== false) {
+			return this._getAdventurersAtlasSafeHavenFailure("Safe Haven can't resolve unless the external map holder was not killed outright.");
+		}
+
+		const availability = this.getAdventurersAtlasSafeHavenAvailability({holderId, isExternal: true});
+		if (!availability.available) return this._getAdventurersAtlasSafeHavenFailure(availability.unavailableReason);
+		const consumption = this._consumeAdventurersAtlasSafeHavenMap(holderId, {destroyedAt});
+		if (consumption?.ok === false) return this._getAdventurersAtlasSafeHavenFailure(consumption.error);
+
+		const postApplication = this._buildAdventurersAtlasSafeHavenResult({
+			holder: availability.holder,
+			hitPoints: availability.hitPoints,
+			teleport: availability.teleport,
+		});
+		return CharacterSheetState._copyAndFreeze({
+			ok: true,
+			committed: true,
+			errors: [],
+			hp: availability.hitPoints,
+			consumption,
+			postApplication,
 		});
 	}
 
@@ -12767,6 +13014,48 @@ class CharacterSheetState {
 				},
 			},
 			description: "If you have one or more active crimson rites and are reduced to 0 hit points without dying outright, all your active crimson rites end and you drop to 1 hit point instead.",
+		},
+		{
+			id: CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
+			featureName: "Superior Atlas",
+			displayName: "Safe Haven",
+			calcFlag: "hasSuperiorAtlasSafeHaven",
+			sourceFeatureUid: CharacterSheetState.SAFE_HAVEN_FEATURE_UID,
+			saveAbility: null,
+			dcBase: 0,
+			dcAddsDamage: false,
+			excludedDamageTypes: [],
+			excludeCritical: false,
+			spendOn: "success",
+			usesMax: null,
+			recharge: null,
+			availability: ({state}) => state.getAdventurersAtlasSafeHavenAvailability(),
+			validation: ({state}) => {
+				const availability = state.getAdventurersAtlasSafeHavenAvailability();
+				if (!availability.available) return {valid: false, error: availability.unavailableReason};
+				return {
+					valid: true,
+					holder: availability.holder,
+					teleport: availability.teleport,
+				};
+			},
+			consumption: {
+				consume: ({state, validation, options}) => state._consumeAdventurersAtlasSafeHavenMap(
+					validation.holder.id,
+					{destroyedAt: options.destroyedAt},
+				),
+			},
+			hpOutcome: {
+				calculate: ({state}) => state.getAdventurersAtlasSafeHavenHitPoints(),
+			},
+			postApplicationResult: {
+				build: ({state, validation, hp}) => state._buildAdventurersAtlasSafeHavenResult({
+					holder: validation.holder,
+					hitPoints: hp,
+					teleport: validation.teleport,
+				}),
+			},
+			description: "Destroy your active Atlas map to change your hit points to twice your Artificer level, then place yourself in an unoccupied space within 5 feet of another active map holder.",
 		},
 	];
 
@@ -30525,6 +30814,11 @@ class CharacterSheetState {
 						if (level >= 5) {
 							calculations.hasGuidedPrecision = true;
 							calculations.guidedPrecisionSourceFeatureUid = CharacterSheetState.GUIDED_PRECISION_FEATURE_UID;
+						}
+						if (level >= 15) {
+							calculations.hasSuperiorAtlasSafeHaven = true;
+							calculations.safeHavenHitPoints = 2 * level;
+							calculations.safeHavenSourceFeatureUid = CharacterSheetState.SAFE_HAVEN_FEATURE_UID;
 						}
 					}
 

@@ -254,6 +254,24 @@ Reset Turn control all use that canonical reset; save/load during the same turn 
 receipt. Declining or cancelling never calls the consume method and therefore never writes a
 receipt. Subclass/class teardown prunes source-owned receipts.
 
+### Cartographer Atlas Safe Haven
+
+Superior Atlas — Safe Haven is registered in `ZERO_HP_INTERVENTIONS` as
+`safeHavenEfaCartographer`; it does not add a parallel damage path. The generic
+availability, validation, consumption, HP-outcome, and post-application callbacks
+recheck the versioned Atlas, destroy exactly the triggering self map, set HP to
+twice the current EFA Artificer level, and return an immutable placement
+requirement. Massive-damage death remains blocked before the registry is armed.
+
+External holders use
+`resolveAdventurersAtlasSafeHavenForExternalHolder(holderId, confirmation)`.
+That manual resolver requires an active named external holder plus explicit
+confirmation that it reached 0 HP without being killed outright. It returns the
+same HP and teleport-result shape without editing another character sheet or
+claiming coordinates/occupancy were resolved. The teleport anchors are the
+Cartographer (even for an ally-only Atlas) and other active holders, excluding
+the creature whose map is consumed.
+
 ### Subclass-Scoped State Effects
 
 `getActiveStateEffects()` can append state-specific supplemental effects

@@ -25,9 +25,14 @@ The four core Artificer subclasses are fully implemented with mechanical calcula
   creation-time capacity freezing, death/subclass invalidation, rest undo,
   authoritative Features rendering, ally-only or optional-self rosters, and the
   self-holder Awareness initiative die are supported. External holder initiative
-  is exposed through an immutable integration snapshot. Cartographer spells,
-  Portal Jump/movement, Positioning, Guided Precision, Ingenious Movement, Safe
-  Haven consumption, and Unerring Path remain outside this bounded milestone.
+  is exposed through an immutable integration snapshot. Superior Atlas — Safe
+  Haven now uses the generic zero-HP transaction for the Cartographer's own map
+  and an explicit Features-card resolver for external holders; both destroy the
+  exact map, return the `2 × Artificer level` HP result plus placement
+  requirements, and leave coordinates/external-sheet mutation to the table.
+  Cartographer spells, Portal Jump/movement, Positioning, Ingenious Movement,
+  Unerring Path, and the other Superior Atlas benefits remain outside this
+  bounded milestone.
 
 #### Druid Circles ✅
 All Druid circles are fully implemented:

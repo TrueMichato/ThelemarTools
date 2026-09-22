@@ -8678,6 +8678,60 @@ body[data-font="readable"] {
 	font-size: var(--cs-text-sm, 0.875rem);
 }
 
+.charsheet__atlas-card-safe-haven {
+	margin-top: var(--cs-space-md, 0.75rem);
+	padding-top: var(--cs-space-md, 0.75rem);
+	border-top: 1px solid var(--cs-border);
+}
+
+.charsheet__atlas-card-safe-haven h4 {
+	margin: 0 0 var(--cs-space-xs, 0.25rem);
+	font-size: var(--cs-text-md, 1rem);
+}
+
+.charsheet__atlas-card-safe-haven-copy,
+.charsheet__atlas-card-safe-haven-status {
+	max-width: 72ch;
+	color: var(--cs-text-muted);
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
+.charsheet__atlas-card-safe-haven-copy {
+	margin: 0 0 var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__atlas-card-safe-haven-controls {
+	display: flex;
+	align-items: flex-end;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__atlas-card-safe-haven-field {
+	display: flex;
+	flex: 1 1 240px;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	max-width: 420px;
+}
+
+.charsheet__atlas-card-safe-haven-field label {
+	color: var(--cs-text-secondary);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 700;
+}
+
+.charsheet__atlas-card-safe-haven-field select {
+	min-height: 40px;
+}
+
+.charsheet__atlas-card-safe-haven-status {
+	margin: var(--cs-space-sm, 0.5rem) 0 0;
+}
+
+.charsheet__atlas-card-safe-haven-status--unavailable {
+	color: var(--cs-danger);
+}
+
 .charsheet__atlas-card-footer {
 	align-items: center;
 	padding-top: var(--cs-space-md, 0.75rem);

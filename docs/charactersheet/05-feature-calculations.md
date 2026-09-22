@@ -1486,6 +1486,14 @@ strengthOfTheGraveRhw: {
 `_resolveZeroHpInterventionHp()` resolves the descriptor, defaults to a flat 1
 and clamps into `[1, maxHp]`.
 
+The registry also accepts callback-backed `availability`, `validation`,
+`consumption`, `hpOutcome`, and `postApplicationResult` descriptors. Cartographer
+Safe Haven is the reference implementation: the transaction revalidates the
+versioned Atlas at commit time, destroys only the selected map, derives HP from
+the current source-qualified Artificer level, and returns a structured teleport
+placement requirement. Callback failures roll the complete transaction back;
+cancelled or unavailable choices spend nothing.
+
 > **The stored feature is `Power of Shadow`, not `Strength of the Grave`.**
 > Eyes of the Dark and Strength of the Grave are *nested named entries* inside
 > one JSON feature; nothing in the codebase splits nested entries into separate

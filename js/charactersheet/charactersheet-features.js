@@ -1225,6 +1225,10 @@ class CharacterSheetFeatures {
 		const status = this._state.getAdventurersAtlasStatus();
 		const selfHolder = atlas.holders.find(holder => holder.isSelf) || null;
 		const initiativeDie = this._state.getAdventurersAtlasInitiativeDie();
+		const safeHavenOptions = this._state.hasAdventurersAtlasSafeHavenFeature?.()
+			? this._state.getAdventurersAtlasSafeHavenExternalHolderOptions?.() || []
+			: [];
+		const safeHavenHolders = safeHavenOptions.filter(holder => holder.available);
 		const reasonLabels = {
 			"character-death": "Character death",
 			"subclass-removed": "Cartographer subclass removed",
@@ -1247,7 +1251,57 @@ class CharacterSheetFeatures {
 			awarenessLabel: initiativeDie ? `${initiativeDie.dice} to Initiative` : "Inactive",
 			hasTools: this._state.hasCartographersToolsForAtlas(),
 			actionLabel: atlas.generation ? "Plan Atlas recreation" : "Plan Atlas creation",
+			safeHaven: this._state.hasAdventurersAtlasSafeHavenFeature?.()
+				? {
+					hitPoints: this._state.getAdventurersAtlasSafeHavenHitPoints(),
+					externalHolders: safeHavenHolders,
+					unavailableReason: safeHavenHolders.length
+						? null
+						: safeHavenOptions.find(holder => holder.unavailableReason)?.unavailableReason
+							|| "No active external map holder can use Safe Haven.",
+				}
+				: null,
 		};
+	}
+
+	async _pResolveAdventurersAtlasSafeHavenExternal (holderId) {
+		const option = this._state.getAdventurersAtlasSafeHavenExternalHolderOptions?.()
+			.find(holder => holder.id === holderId);
+		if (!option?.available) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: option?.unavailableReason || "Choose an active external map holder.",
+			});
+			return null;
+		}
+
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: `Resolve Safe Haven for ${option.name}?`,
+			htmlDescription: `<div>Confirm that this creature reached 0 hit points without being killed outright.</div><div class="ve-muted ve-small mt-1">This permanently destroys that creature's current Atlas map until the Atlas is recreated.</div>`,
+			textYes: "Confirm and destroy map",
+			textNo: "Cancel",
+		});
+		if (!confirmed) return {ok: false, committed: false, cancelled: true};
+
+		const result = this._state.resolveAdventurersAtlasSafeHavenForExternalHolder(holderId, {
+			confirmedReducedToZero: true,
+			killedOutright: false,
+		});
+		if (!result?.ok) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: result?.errors?.join(" ") || "Safe Haven could not be resolved.",
+			});
+			return result;
+		}
+
+		this._page.saveCharacter?.();
+		this.render();
+		JqueryUtil.doToast({
+			type: "success",
+			content: `${option.name}'s map is destroyed. Set that creature to ${result.hp} hit points, then place it in an unoccupied space within 5 feet of a listed destination.`,
+		});
+		return result;
 	}
 
 	_renderAdventurersAtlasCard () {
@@ -1337,6 +1391,77 @@ class CharacterSheetFeatures {
 				buildRoster("Destroyed holders", model.destroyedHolders, true),
 			);
 			card.append(rosters);
+		}
+
+		if (model.safeHaven) {
+			const safeHaven = e_({
+				tag: "section",
+				clazz: "charsheet__atlas-card-safe-haven",
+				attrs: {"aria-labelledby": "charsheet-atlas-safe-haven-title"},
+			});
+			safeHaven.append(
+				e_({
+					tag: "h4",
+					attrs: {id: "charsheet-atlas-safe-haven-title"},
+					txt: "Safe Haven",
+				}),
+				e_({
+					tag: "p",
+					clazz: "charsheet__atlas-card-safe-haven-copy",
+					attrs: {id: "charsheet-atlas-safe-haven-help"},
+					txt: `When an external map holder reaches 0 hit points without being killed outright, destroy that map to set the creature to ${model.safeHaven.hitPoints} hit points and require its teleport placement.`,
+				}),
+			);
+
+			const controls = e_({tag: "div", clazz: "charsheet__atlas-card-safe-haven-controls"});
+			const field = e_({tag: "div", clazz: "charsheet__atlas-card-safe-haven-field"});
+			const selectId = "charsheet-atlas-safe-haven-holder";
+			const select = e_({
+				tag: "select",
+				clazz: "form-control input-sm",
+				attrs: {
+					id: selectId,
+					"aria-describedby": "charsheet-atlas-safe-haven-help charsheet-atlas-safe-haven-status",
+				},
+			});
+			for (const holder of model.safeHaven.externalHolders) {
+				select.append(e_({
+					tag: "option",
+					attrs: {value: holder.id},
+					txt: holder.name,
+				}));
+			}
+			if (model.safeHaven.externalHolders[0]) select.value = model.safeHaven.externalHolders[0].id;
+			select.disabled = !model.safeHaven.externalHolders.length;
+			field.append(
+				e_({tag: "label", attrs: {for: selectId}, txt: "External map holder"}),
+				select,
+			);
+
+			const btnResolve = e_({
+				tag: "button",
+				clazz: "ve-btn ve-btn-warning charsheet__atlas-card-action",
+				attrs: {
+					type: "button",
+					"aria-describedby": "charsheet-atlas-safe-haven-help charsheet-atlas-safe-haven-status",
+				},
+				txt: "Resolve Safe Haven",
+			});
+			btnResolve.disabled = !model.safeHaven.externalHolders.length;
+			btnResolve.addEventListener("click", () => this._pResolveAdventurersAtlasSafeHavenExternal(select.value));
+			controls.append(field, btnResolve);
+			safeHaven.append(controls);
+			safeHaven.append(e_({
+				tag: "p",
+				clazz: `charsheet__atlas-card-safe-haven-status${model.safeHaven.unavailableReason ? " charsheet__atlas-card-safe-haven-status--unavailable" : ""}`,
+				attrs: {
+					id: "charsheet-atlas-safe-haven-status",
+					role: "status",
+				},
+				txt: model.safeHaven.unavailableReason
+					|| "The selected map is consumed only after confirmation. This sheet reports the result but does not move or edit the external creature.",
+			}));
+			card.append(safeHaven);
 		}
 
 		const footer = e_({tag: "footer", clazz: "charsheet__atlas-card-footer"});

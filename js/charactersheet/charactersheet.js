@@ -14506,6 +14506,12 @@ class CharacterSheetPage {
 					: `💀 <strong>${result.name}</strong>: you stay up at <strong>${result.hp} hit point${result.hp === 1 ? "" : "s"}</strong>.`
 				: `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you drop to 0 hit points.`,
 		}));
+		if (result.success && result.postApplication?.message) {
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "info",
+				content: result.postApplication.message,
+			}));
+		}
 	}
 
 	/**

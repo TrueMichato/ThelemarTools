@@ -1832,6 +1832,15 @@
 		grid-template-columns: 1fr;
 	}
 
+	.charsheet__atlas-card-safe-haven-controls {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__atlas-card-safe-haven-field {
+		max-width: none;
+	}
+
 	.charsheet__atlas-card-action {
 		width: 100%;
 	}
