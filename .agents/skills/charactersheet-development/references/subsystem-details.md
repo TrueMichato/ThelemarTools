@@ -109,13 +109,24 @@ Current consumers are:
 - Deferred spell-damage riders such as Summer's Defiant Blood, keyed by exact
   class and subclass sources. Consuming or clearing the armed rider does not
   release its receipt.
+- EFA Cartographer Guided Precision, which shares one receipt across its
+  Cartographer-spell and attack routes:
+  - key/source: `Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA`
+  - owner: `Cartographer|Artificer|EFA|EFA`
+  - action: `guided-precision:damage-rider`
+
+Guided Precision's shared receipt preserves the authored “once per turn”
+ceiling while allowing a qualifying reaction on another creature's turn in the
+same round. Save/load preserves the current turn and receipt. Removing the
+exact EFA Cartographer source prunes the receipt.
 
 Load migration is idempotent. A current-round legacy `resourceTurnUsage`
 entry becomes a receipt only when it represented the live combat turn; stale
 round values remain unused. `pendingSpellDamageBonusUsedKeys` and the pending
 descriptor's `oncePerRoundKey` migrate to the exact deferred-rider receipt.
-Both legacy fields are removed after migration, so they never remain a second
-source of truth.
+`deferredFlatDamageRiderTurnUsage` likewise migrates only when it represented
+the current combat turn. All legacy fields are removed after migration, so
+they never remain a second source of truth.
 
 ## Committed Feature Uses and EFA Flash of Genius
 

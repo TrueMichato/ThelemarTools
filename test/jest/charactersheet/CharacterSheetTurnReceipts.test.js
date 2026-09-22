@@ -159,6 +159,74 @@ describe("CharacterSheetState stable-key per-turn receipts", () => {
 		expect(state.queryTurnReceipt(RECEIPT_A.key).used).toBe(false);
 		expect(state.queryTurnReceipt(RECEIPT_B.key).used).toBe(true);
 	});
+
+	it("opens a new rules turn without changing the combat round", () => {
+		const state = new CharacterSheetState();
+		state.startCombat();
+		const committed = state.commitTurnReceipt(RECEIPT_A);
+
+		const reset = state.resetTurnEconomy();
+		expect(state.getCombatRound()).toBe(1);
+		expect(reset).toMatchObject({
+			ok: true,
+			reset: true,
+			previousTurnId: committed.turnId,
+			turnId: committed.turnId + 1,
+			clearedReceipts: [expect.objectContaining(RECEIPT_A)],
+		});
+		expect(state.queryTurnReceipt(RECEIPT_A.key)).toMatchObject({
+			ok: true,
+			used: false,
+			turnId: committed.turnId + 1,
+			receipt: null,
+		});
+	});
+
+	it("persists the current turn identity and receipt through save/load", () => {
+		const state = new CharacterSheetState();
+		state.startCombat();
+		const committed = state.commitTurnReceipt({...RECEIPT_A, metadata: {route: "reaction"}});
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+
+		expect(loaded.getCombatRound()).toBe(1);
+		expect(loaded.queryTurnReceipt(RECEIPT_A.key)).toMatchObject({
+			ok: true,
+			used: true,
+			turnId: committed.turnId,
+			receipt: {
+				...committed.receipt,
+				metadata: {route: "reaction"},
+			},
+		});
+	});
+
+	it("uses resetTurnEconomy at every combat lifecycle boundary", () => {
+		const state = new CharacterSheetState();
+		const initialTurnId = state.queryTurnReceipt(RECEIPT_A.key).turnId;
+
+		state.startCombat();
+		expect(state.queryTurnReceipt(RECEIPT_A.key).turnId).toBe(initialTurnId + 1);
+		state.commitTurnReceipt(RECEIPT_A);
+		expect(state.pruneTurnReceipts({
+			ownerUid: RECEIPT_A.ownerUid,
+			sourceUid: RECEIPT_A.sourceUid,
+			actionUid: RECEIPT_A.actionUid,
+		})).toMatchObject({
+			ok: true,
+			pruned: true,
+			count: 1,
+			receipts: [expect.objectContaining(RECEIPT_A)],
+		});
+
+		const beforeAdvance = state.queryTurnReceipt(RECEIPT_A.key).turnId;
+		state.advanceRound();
+		expect(state.queryTurnReceipt(RECEIPT_A.key).turnId).toBe(beforeAdvance + 1);
+		const beforeEnd = state.queryTurnReceipt(RECEIPT_A.key).turnId;
+		state.endCombat();
+		expect(state.queryTurnReceipt(RECEIPT_A.key).turnId).toBe(beforeEnd + 1);
+	});
 });
 
 describe("per-turn receipt consumer migration", () => {

@@ -141,6 +141,16 @@ describe("Guided Precision provider and shared receipt", () => {
 			value: 3,
 			receiptKey: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
 		});
+		expect(state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID)).toMatchObject({
+			ok: true,
+			used: true,
+			receipt: {
+				key: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+				ownerUid: "Cartographer|Artificer|EFA|EFA",
+				sourceUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+				actionUid: "guided-precision:damage-rider",
+			},
+		});
 		expect(state.getDeferredFlatDamageRiderOptions({route: "attack"})).toEqual([]);
 
 		state.advanceRound();
@@ -163,23 +173,52 @@ describe("Guided Precision provider and shared receipt", () => {
 
 		expect(state.getDeferredFlatDamageRiderOptions({route: "attack"})).toEqual([]);
 		expect(state.getCombatRound()).toBe(1);
+		const usedTurnId = state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID).turnId;
 
-		state.resetTurnEconomy();
+		const reset = state.resetTurnEconomy();
 
 		expect(state.getCombatRound()).toBe(1);
+		expect(reset).toMatchObject({
+			previousTurnId: usedTurnId,
+			turnId: usedTurnId + 1,
+		});
 		expect(state.getDeferredFlatDamageRiderOptions({route: "attack"})).toHaveLength(1);
 	});
 
-	it("persists the receipt through save/load and releases it on the next turn", () => {
+	it("permits a qualifying reaction on another creature's turn in the same round", () => {
+		const state = makeCartographer();
+		state.startCombat();
+		state.consumeDeferredFlatDamageRider(state.getDeferredFlatDamageRiderOptions({
+			route: "spell",
+			spell: {name: "Guiding Bolt", source: "XPHB"},
+		})[0]);
+		const firstTurnId = state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID).turnId;
+
+		state.resetTurnEconomy();
+		const reactionRider = state.getDeferredFlatDamageRiderOptions({route: "attack"})[0];
+		expect(state.getCombatRound()).toBe(1);
+		expect(state.consumeDeferredFlatDamageRider(reactionRider)).toMatchObject({value: 3});
+		expect(state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID)).toMatchObject({
+			used: true,
+			turnId: firstTurnId + 1,
+		});
+	});
+
+	it("persists the receipt through save/load within one turn and releases it on the next turn", () => {
 		const state = makeCartographer();
 		state.startCombat();
 		state.consumeDeferredFlatDamageRider(state.getDeferredFlatDamageRiderOptions({route: "attack"})[0]);
+		const usedTurnId = state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID).turnId;
 
 		const loaded = new CharacterSheetState();
 		loaded.loadFromJson(state.toJson());
 		loaded.setClassCatalog([fullArtificer]);
 		expect(loaded.getDeferredFlatDamageRiderOptions({route: "attack"})).toEqual([]);
-		loaded.advanceRound();
+		expect(loaded.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID)).toMatchObject({
+			used: true,
+			turnId: usedTurnId,
+		});
+		loaded.resetTurnEconomy();
 		expect(loaded.getDeferredFlatDamageRiderOptions({route: "attack"})).toHaveLength(1);
 	});
 
@@ -194,6 +233,33 @@ describe("Guided Precision provider and shared receipt", () => {
 		expect(state.getDeferredFlatDamageRiderOptions({route: "attack"})).toEqual([]);
 		expect(state.getDamageConcentrationProtection()).toBeNull();
 		expect(state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID).used).toBe(false);
+	});
+
+	it("migrates the legacy current-turn lock once and removes the old store", () => {
+		const original = makeCartographer();
+		original.startCombat();
+		const legacy = original.toJson();
+		delete legacy.turnReceipts;
+		legacy.deferredFlatDamageRiderTurnUsage = {
+			[CharacterSheetState.GUIDED_PRECISION_FEATURE_UID]: legacy.combatRound,
+		};
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(legacy);
+		loaded.setClassCatalog([fullArtificer]);
+
+		expect(loaded.getDeferredFlatDamageRiderOptions({route: "attack"})).toEqual([]);
+		expect(loaded.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID)).toMatchObject({
+			ok: true,
+			used: true,
+			receipt: {
+				ownerUid: "Cartographer|Artificer|EFA|EFA",
+				sourceUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+				actionUid: "guided-precision:damage-rider",
+				metadata: {migratedFrom: "deferredFlatDamageRiderTurnUsage"},
+			},
+		});
+		expect(loaded.toJson()).not.toHaveProperty("deferredFlatDamageRiderTurnUsage");
 	});
 });
 

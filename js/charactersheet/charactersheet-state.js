@@ -4403,6 +4403,8 @@ class CharacterSheetState {
 	static CARTOGRAPHER_PORTAL_JUMP_SOURCE = "efa-cartographer:portal-jump";
 	static GUIDED_PRECISION_FEATURE_UID = "Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA";
 	static GUIDED_PRECISION_FAERIE_FIRE_UID = "faerie fire|xphb";
+	static GUIDED_PRECISION_RECEIPT_OWNER_UID = "Cartographer|Artificer|EFA|EFA";
+	static GUIDED_PRECISION_RECEIPT_ACTION_UID = "guided-precision:damage-rider";
 	static INGENIOUS_MOVEMENT_FEATURE_UID = "Ingenious Movement|Artificer|EFA|Cartographer|EFA|9|EFA";
 	static INGENIOUS_MOVEMENT_HOOK_ID = "efaCartographerIngeniousMovement";
 	static INGENIOUS_MOVEMENT_RANGE_FEET = 30;
@@ -6458,6 +6460,7 @@ class CharacterSheetState {
 		this._ensureFeatRegistryResources();
 		this._endBladesongForInvalidEquipment();
 		this._migrateLegacyTurnReceipts();
+		this._migrateLegacyGuidedPrecisionTurnReceipt();
 		this._migrateEfaFlashOfGeniusResource();
 		this._syncAdventurersAtlasEligibility();
 		this._syncCharacterDeathConsequences();
@@ -36203,7 +36206,7 @@ class CharacterSheetState {
 		// (e.g. Iron Will). Idempotent; surfaces in the conditional-modifier opt-in picker.
 		this._syncCombatMethodConditionalModifiers();
 		this.reconcileTargetEffects();
-		this._pruneDeferredFlatDamageRiderTurnUsage();
+		this._pruneGuidedPrecisionTurnReceipt();
 
 		return appliedEffects;
 	}
@@ -45818,7 +45821,9 @@ class CharacterSheetState {
 			receiptId: `turn-receipt-${CryptUtil.uid()}`,
 			...normalized,
 			turnId: store.turnId,
-			metadata: metadata && typeof metadata === "object" ? MiscUtil.copyFast(metadata) : {},
+			metadata: metadata && typeof metadata === "object" && !Array.isArray(metadata)
+				? MiscUtil.copyFast(metadata)
+				: {},
 		};
 		store.receipts[normalized.key] = receipt;
 		return {
@@ -45961,6 +45966,22 @@ class CharacterSheetState {
 
 		delete this._data.resourceTurnUsage;
 		delete this._data.pendingSpellDamageBonusUsedKeys;
+	}
+
+	_migrateLegacyGuidedPrecisionTurnReceipt () {
+		const legacy = this._data.deferredFlatDamageRiderTurnUsage;
+		const usedRound = legacy?.[CharacterSheetState.GUIDED_PRECISION_FEATURE_UID];
+		if (
+			this._getGuidedPrecisionClassEntry()
+			&& this.isInCombat()
+			&& Number(usedRound) === this.getCombatRound()
+		) {
+			this.commitTurnReceipt({
+				...this._getGuidedPrecisionTurnReceiptDescriptor(),
+				metadata: {migratedFrom: "deferredFlatDamageRiderTurnUsage"},
+			});
+		}
+		delete this._data.deferredFlatDamageRiderTurnUsage;
 	}
 	// #endregion
 
@@ -51351,28 +51372,28 @@ class CharacterSheetState {
 		}, fullClass);
 	}
 
+	_getGuidedPrecisionTurnReceiptDescriptor () {
+		return {
+			key: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+			ownerUid: CharacterSheetState.GUIDED_PRECISION_RECEIPT_OWNER_UID,
+			sourceUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+			actionUid: CharacterSheetState.GUIDED_PRECISION_RECEIPT_ACTION_UID,
+		};
+	}
+
 	_isDeferredFlatDamageRiderUsedThisTurn (receiptKey) {
 		if (!receiptKey) return false;
 		return this.queryTurnReceipt(receiptKey).used;
 	}
 
 	_markDeferredFlatDamageRiderUsedThisTurn (receiptKey) {
-		if (!receiptKey) return null;
-		return this.commitTurnReceipt({
-			key: receiptKey,
-			ownerUid: "Cartographer|Artificer|EFA|EFA",
-			sourceUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
-			actionUid: "guided-precision:damage-rider",
-		});
+		if (receiptKey !== CharacterSheetState.GUIDED_PRECISION_FEATURE_UID) return null;
+		return this.commitTurnReceipt(this._getGuidedPrecisionTurnReceiptDescriptor());
 	}
 
-	_pruneDeferredFlatDamageRiderTurnUsage () {
+	_pruneGuidedPrecisionTurnReceipt () {
 		if (this._getGuidedPrecisionClassEntry()) return;
-		this.pruneTurnReceipts({
-			ownerUid: "Cartographer|Artificer|EFA|EFA",
-			sourceUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
-			actionUid: "guided-precision:damage-rider",
-		});
+		this.pruneTurnReceipts(this._getGuidedPrecisionTurnReceiptDescriptor());
 	}
 
 	/**
