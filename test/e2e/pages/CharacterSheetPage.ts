@@ -4541,6 +4541,8 @@ export class CharacterSheetPage {
 		effectiveWorkweeks,
 		multiplier,
 		sourceUid,
+		sourceMultiplier = multiplier,
+		allowAdditionalSources = false,
 	}: {
 		recipeCategory: string;
 		rarity: string;
@@ -4549,6 +4551,8 @@ export class CharacterSheetPage {
 		effectiveWorkweeks: number;
 		multiplier: number;
 		sourceUid: string;
+		sourceMultiplier?: number;
+		allowAdditionalSources?: boolean;
 	}): Promise<void> {
 		const result = await this.page.evaluate(async (cfg) => {
 			const state: any = (globalThis as any).charSheet?._state;
@@ -4591,11 +4595,19 @@ export class CharacterSheetPage {
 			effectiveWorkweeks,
 			multiplier,
 		});
-		expect(result.calculation?.sourceBreakdown).toEqual([expect.objectContaining({uid: sourceUid, multiplier})]);
+		const expectedSource = expect.objectContaining({uid: sourceUid, multiplier: sourceMultiplier});
+		if (allowAdditionalSources) {
+			expect(result.calculation?.sourceBreakdown).toEqual(expect.arrayContaining([expectedSource]));
+		} else {
+			expect(result.calculation?.sourceBreakdown).toEqual([expectedSource]);
+		}
 		if (result.negative) {
-			expect(result.negative.effectiveWorkweeks, "non-potion recipe should not receive the Alchemist multiplier")
-				.toBe(result.negative.baselineWorkweeks);
-			expect(result.negative.sourceBreakdown).toEqual([]);
+			expect(result.negative.sourceBreakdown, "non-potion recipe should not receive the Alchemist multiplier")
+				.not.toEqual(expect.arrayContaining([expect.objectContaining({uid: sourceUid})]));
+			if (!allowAdditionalSources) {
+				expect(result.negative.effectiveWorkweeks).toBe(result.negative.baselineWorkweeks);
+				expect(result.negative.sourceBreakdown).toEqual([]);
+			}
 		}
 	}
 

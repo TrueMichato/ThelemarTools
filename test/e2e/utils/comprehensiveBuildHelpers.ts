@@ -948,6 +948,8 @@ export type EffectCheck = _EffectCommon & (
 		effectiveWorkweeks: number;
 		multiplier: number;
 		sourceUid: string;
+		sourceMultiplier?: number;
+		allowAdditionalSources?: boolean;
 	}
 	| {
 		kind: "sourceQualifiedRoundTrip";
