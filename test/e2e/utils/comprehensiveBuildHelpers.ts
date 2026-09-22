@@ -847,6 +847,7 @@ export type EffectCheck = _EffectCommon & (
 		probe: "tools" | "toolPersistence" | "spells" | "atlas" | "mappingMagic" | "guidedPrecision" | "guidedPrecisionSpell" | "ingeniousMovement" | "superiorAtlas" | "lifecycle" | "lifecycleSpellCleanup" | "progression";
 		spellThreshold?: 3 | 5 | 9 | 13 | 17;
 	}
+	| {kind: "efaArtilleristProbe"; probe: "baseCannon" | "arcaneFirearm" | "explosiveCannon" | "fortifiedPosition"}
 	| {kind: "proficiency"; proficiencyType: "armor" | "weapon"; includes: string}
 	| {kind: "featureUsesEqualAbilityMod"; feature: string; ability: AblKey; minimum?: number; recharge: "short" | "long"}
 	| {
@@ -1768,6 +1769,11 @@ async function _runPassiveOrRollEffect (
 									: e.spellThreshold;
 			if (owningLevel != null && currentLevel != null && currentLevel !== owningLevel) return;
 			await charSheet.probeCartographerFlow(e.probe, e.spellThreshold);
+			return;
+		}
+		case "efaArtilleristProbe": {
+			const result = await charSheet.probeEfaArtilleristFlow(e.probe);
+			if (!result?.ok) throw new Error(`EFA Artillerist ${e.probe} probe failed: ${result?.error || "unknown error"}`);
 			return;
 		}
 		case "proficiency": {

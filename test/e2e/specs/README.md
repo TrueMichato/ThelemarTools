@@ -62,6 +62,7 @@ a session. The maintained catalog is
 |19 | `tgtt-creation-bard.spec.ts`                    | College of Creation Bard Changeling                | 1→20 |
 |20 | `tgtt-wicked-witch-sorcerer.spec.ts`            | Wicked Witch Sorcerer Dwarf (Ar8 via TGTT `_copy`) | 1→20 |
 |21 | `tgtt-efa-cartographer-artificer.spec.ts`       | EFA Cartographer Artificer Dwarf                   | 1→20 |
+|22 | `tgtt-efa-artillerist-artificer.spec.ts`         | EFA Artillerist Artificer Human                    | 1→20 |
 
 The `tgtt-player-party.spec.ts` file is a separate party-import smoke test (not part of the comprehensive build standard).
 

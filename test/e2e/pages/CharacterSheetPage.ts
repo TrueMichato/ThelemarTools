@@ -2360,6 +2360,100 @@ export class CharacterSheetPage {
 		await this.page.waitForTimeout(200);
 	}
 
+	async probeEfaArtilleristFlow (
+		probe: "baseCannon" | "arcaneFirearm" | "explosiveCannon" | "fortifiedPosition",
+	): Promise<{ok: boolean; error?: string}> {
+		if (probe !== "baseCannon") return {ok: false, error: `${probe} probe is not implemented`};
+		try {
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				for (const cannon of state?.listEfaEldritchCannons?.() || []) {
+					state.dismissEfaEldritchCannon?.(cannon.instanceId);
+				}
+				state?.onLongRest?.();
+				state?.endCombat?.();
+				state?.startCombat?.();
+				cs?._renderCharacter?.();
+			});
+			await this.switchToTab(this.tabCombat);
+
+			const create = this.page.locator("#charsheet-combat-efa-cannon-create");
+			await create.waitFor({state: "visible", timeout: 5000});
+			await create.click();
+			const creation = this.page.locator(".charsheet__efa-cannon-create-form");
+			await creation.waitFor({state: "visible", timeout: 5000});
+			await creation.locator('input[name="efa-cannon-form"][value="forceBallista"]').check();
+			await creation.locator("[data-efa-cannon-submit]").click();
+
+			const card = this.page.locator("[data-efa-cannon-id]").first();
+			await card.waitFor({state: "visible", timeout: 10_000});
+			const created = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				const cannon = state?.listEfaEldritchCannons?.()?.[0];
+				return {
+					cannon,
+					resource: state?.getEfaEldritchCannonCreationState?.()?.freeUse?.current,
+					economy: state?.getActionEconomyState?.(),
+				};
+			});
+			if (!created.cannon) return {ok: false, error: "creation UI did not persist a cannon"};
+			if (created.cannon.form !== "forceBallista" || created.cannon.ac !== 18) {
+				return {ok: false, error: `unexpected cannon projection: ${JSON.stringify(created.cannon)}`};
+			}
+			if (created.resource !== 0 || created.economy?.action !== false) {
+				return {ok: false, error: `creation costs were not committed: ${JSON.stringify(created)}`};
+			}
+
+			await card.locator("[data-efa-cannon-activate]").click();
+			const activation = this.page.locator(".charsheet__efa-cannon-activate-form");
+			await activation.waitFor({state: "visible", timeout: 5000});
+			await activation.locator("[data-efa-cannon-submit]").click();
+			await activation.waitFor({state: "hidden", timeout: 10_000});
+
+			const activated = await this.page.evaluate(() => {
+				const state: any = (globalThis as any).charSheet?._state;
+				return {
+					cannon: state?.listEfaEldritchCannons?.()?.[0],
+					economy: state?.getActionEconomyState?.(),
+				};
+			});
+			if (activated.economy?.bonus !== false) {
+				return {ok: false, error: `activation did not spend the Bonus Action: ${JSON.stringify(activated.economy)}`};
+			}
+			if (!String(await this.page.locator("#charsheet-combat-efa-cannon-feedback").textContent()).match(/force|push/i)) {
+				return {ok: false, error: "activation feedback did not report Force Ballista damage/push"};
+			}
+
+			const hpBefore = Number(activated.cannon?.hp?.current);
+			await card.locator("[data-efa-cannon-hp-amount]").fill("1");
+			await card.locator("[data-efa-cannon-damage]").click();
+			await this.page.waitForFunction((expected) => {
+				const cannon = (globalThis as any).charSheet?._state?.listEfaEldritchCannons?.()?.[0];
+				return cannon?.hp?.current === expected;
+			}, hpBefore - 1);
+			await card.locator("[data-efa-cannon-mending]").click();
+			await this.page.waitForFunction((minimum) => {
+				const cannon = (globalThis as any).charSheet?._state?.listEfaEldritchCannons?.()?.[0];
+				return Number(cannon?.hp?.current) > minimum;
+			}, hpBefore - 1);
+			return {ok: true};
+		} catch (error) {
+			return {ok: false, error: error instanceof Error ? error.message : String(error)};
+		} finally {
+			await this.dismissTransientModals().catch(() => {});
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const state = cs?._state;
+				for (const cannon of state?.listEfaEldritchCannons?.() || []) {
+					state.dismissEfaEldritchCannon?.(cannon.instanceId);
+				}
+				state?.endCombat?.();
+				cs?._renderCharacter?.();
+			}).catch(() => {});
+		}
+	}
+
 	// ========== SHEET-USAGE HELPERS (Phase 2) ==========
 
 	/**

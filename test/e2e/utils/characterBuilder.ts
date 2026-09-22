@@ -206,6 +206,25 @@ export const PRESET_FULL_EFA_ALCHEMIST: CharacterPreset = {
 	signatureSpells: ["Guidance", "Cure Wounds", "Faerie Fire"],
 };
 
+/** Exploring Eberron Artificer (2024 chassis), specialized as an EFA Artillerist. */
+export const PRESET_FULL_EFA_ARTILLERIST_ARTIFICER: CharacterPreset = {
+	race: "Human",
+	raceSource: "PHB'24",
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA"],
+	skipConditionalPrompt: true,
+	background: "Sage",
+	bgSource: "PHB'24",
+	name: "Mara Cannonsmith",
+	skillCount: 2,
+	optFeatCount: 1,
+	abilityPriority: ["int", "con", "dex", "wis", "cha", "str"],
+	subclassName: "Artillerist",
+	subclassSource: "EFA",
+	signatureSpells: ["Fire Bolt", "Guidance", "Cure Wounds", "Faerie Fire"],
+};
+
 /** Bard — spellcaster with known spells */
 export const PRESET_BARD: CharacterPreset = {
 	race: "Aarakocra",
@@ -1245,6 +1264,7 @@ export const PRESETS_FULL_PARTY: CharacterPreset[] = [
 	PRESET_FULL_EFA_CARTOGRAPHER_ARTIFICER,
 	PRESET_FULL_WICKED_WITCH_SORCERER,
 	PRESET_FULL_LUNAR_SORCERY_SORCERER,
+	PRESET_FULL_EFA_ARTILLERIST_ARTIFICER,
 ];
 
 /**

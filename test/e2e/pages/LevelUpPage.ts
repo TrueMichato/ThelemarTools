@@ -458,6 +458,58 @@ export class LevelUpPage {
 	}
 
 	/**
+	 * Complete required EFA Artificer Replicate Magic Item plan acquisitions.
+	 * Optional every-level replacements are deliberately left unchanged.
+	 */
+	async selectRequiredArtificerPlans (): Promise<void> {
+		const accordion = this.page.locator('[data-accordion-id="artificer-plans"]');
+		if (!await accordion.isVisible().catch(() => false)) return;
+		const badge = accordion.locator(".charsheet__levelup-accordion-badge");
+		if (!/required/i.test(await badge.textContent().catch(() => "") || "")) return;
+
+		const openPicker = accordion.getByRole("button", {name: /choose or replace plans/i});
+		if (!await openPicker.isVisible().catch(() => false)) {
+			throw new Error("selectRequiredArtificerPlans: required plan accordion has no picker button");
+		}
+		await openPicker.click();
+
+		const picker = this.page.locator(".charsheet__artificer-plan-picker");
+		await picker.waitFor({state: "visible", timeout: 10_000});
+		for (let guard = 0; guard < 20; guard++) {
+			const countText = await picker.locator(".charsheet__artificer-plan-count").textContent() || "";
+			const match = /(\d+)\s*\/\s*(\d+)\s+required plans selected/i.exec(countText);
+			if (!match) throw new Error(`selectRequiredArtificerPlans: unreadable selection count "${countText.trim()}"`);
+			const selected = Number(match[1]);
+			const required = Number(match[2]);
+			if (selected >= required) break;
+
+			const result = picker.locator(".charsheet__artificer-plan-result:not(:disabled)").first();
+			if (!await result.isVisible().catch(() => false)) {
+				throw new Error(`selectRequiredArtificerPlans: no eligible result for required plan ${selected + 1}/${required}`);
+			}
+			await result.click();
+			await this.page.waitForTimeout(100);
+
+			if (selected + 1 < required) {
+				const nextOpportunity = picker.locator(".charsheet__artificer-plan-opportunity").nth(selected + 1);
+				if (!await nextOpportunity.isVisible().catch(() => false)) {
+					throw new Error(`selectRequiredArtificerPlans: missing opportunity ${selected + 2}/${required}`);
+				}
+				await nextOpportunity.click();
+				await this.page.waitForTimeout(100);
+			}
+		}
+
+		const finalCount = await picker.locator(".charsheet__artificer-plan-count").textContent() || "";
+		const finalMatch = /(\d+)\s*\/\s*(\d+)\s+required plans selected/i.exec(finalCount);
+		if (!finalMatch || Number(finalMatch[1]) < Number(finalMatch[2])) {
+			throw new Error(`selectRequiredArtificerPlans: required choices remain (${finalCount.trim()})`);
+		}
+		await this.page.getByRole("button", {name: /review & commit plans/i}).click();
+		await picker.waitFor({state: "hidden", timeout: 10_000});
+	}
+
+	/**
 	 * Auto-fill all remaining required selections in the level-up wizard.
 	 * Uses jQuery to find and check unchecked checkboxes in sections that need more selections.
 	 *
@@ -487,6 +539,8 @@ export class LevelUpPage {
 		// than inline controls, so the generic counter/radio passes below
 		// cannot satisfy its required opportunities.
 		await fillRequiredArtificerPlans(this.page);
+
+		await this.selectRequiredArtificerPlans();
 
 		// A subclass whose data defines a persisted named branch (Divine
 		// Soul Affinity, and anything else `hasNamedSubclassChoice`

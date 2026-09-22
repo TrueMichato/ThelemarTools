@@ -79,6 +79,9 @@ Drives the level-up wizard for L2+ (and multiclass entries).
   provided; falls back to first-match if not.
 - `addKnownSpell(name)` / `addFirstAvailableKnownSpells(count)`.
 - `selectOptionalFeature(name)` / `selectFirstAvailableOptions()`.
+- `selectRequiredArtificerPlans()` — completes only required EFA Artificer
+  Replicate Magic Item plan acquisitions, then commits them. Optional
+  every-level replacement opportunities remain unchanged.
 - **`autoFillAllSelections()` — the critical one.**  Optimised
   state-stable polling sweep (per Phase 3): required Replicate Magic
   Item plans, ASI stepper, counters, spell picks, optional features.
@@ -134,6 +137,12 @@ The sheet itself.  Most probes go through this.
 - `activateFeatureWithTargets(name, targetNames, {contestWon?})` — drives
   named-target capture and any follow-up contested-check confirmation through
   the real activation UI.
+- `probeEfaArtilleristFlow(probe)` — drives source-specific EFA Artillerist
+  mechanics through rendered sheet controls. The `baseCannon` probe creates,
+  activates, damages, repairs, and cleans up a Force Ballista while asserting
+  Action/Bonus Action and free-use costs. Higher-level probe variants cover
+  Arcane Firearm, Explosive Cannon, and Fortified Position as those mechanics
+  become available.
 
 ### Resources & slots
 
