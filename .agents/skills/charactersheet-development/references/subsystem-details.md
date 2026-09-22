@@ -14,6 +14,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
 - Committed Feature Uses and EFA Flash of Genius
 - RHW Reanimator R2a State and Ownership
+- Fixed Proficiency with Fallback Transactions
 
 ## Gemstone Empowerment
 
@@ -169,6 +170,54 @@ load, subclass teardown, and Respec. Respec drafts must install the spell
 catalog before `loadFromJson()` so newly unlocked grants retain canonical
 levels and metadata. Reconciliation is idempotent and source-owned resources
 are removed below threshold or when the exact subclass identity disappears.
+
+## Fixed Proficiency with Fallback Transactions
+
+Features whose rule is "gain fixed proficiency X; if already proficient, choose
+fallback Y" use the source-aware transaction registry on
+`CharacterSheetState`; they must not add subclass/name branches to the prose
+parser.
+
+Register an exact owner with
+`CharacterSheetState.registerFixedProficiencyFallback()`. The owner UID is:
+
+```text
+feature name|class name|class source|subclass short name|subclass source|level|feature source
+```
+
+Class, subclass, and feature sources are independent. For example,
+`Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW` is valid and must
+not be normalized to an EFA subclass source.
+
+State persists
+`fixedProficiencyFallbacks: {version: 1, transactions: {<lowercase owner UID>:
+transaction}}`. A transaction records the exact owner fields, fixed
+proficiency, fallback catalog, acquisition mode (`fixed` or `fallback`), status
+(`pending` or `resolved`), selection, exact grant source, parent decision key,
+resolved decision key, feature ID, and acquisition character level.
+
+Acquisition snapshots `hasToolProficiency(fixedProficiency)` before prose or
+structured proficiency parsing. Fixed mode claims the fixed value immediately;
+fallback mode queues the existing `kind: "tool"` feature-choice modal. The
+fixed tool is claimed so later generic parsers cannot double-grant it.
+
+Public integration points:
+
+- `getFixedProficiencyFallbackTransaction(featureOrUid)`
+- `getFixedProficiencyFallbackChoiceDescriptor(entity)`
+- `setFixedProficiencyFallbackSelection(featureOrUid, selection, opts)`
+
+The descriptor feeds the normal `nestedTool` progression path. Respec updates
+the transaction and exact ownership ledger together. Removal deletes only the
+matching owner's pending choice, decision, fixed/fallback grant, and
+fulfillment marker; overlapping feature/progression/manual evidence is
+preserved.
+
+Load migration adopts only exact owner evidence. A resolved exact-owner
+`nestedTool` decision is retained; accepted legacy fixed/fallback markers are
+translated; a markerless save that already contains the fixed proficiency is
+left as a pending fallback rather than guessing whether that proficiency was
+pre-existing or feature-owned.
 
 ## Active States / Toggle Abilities
 

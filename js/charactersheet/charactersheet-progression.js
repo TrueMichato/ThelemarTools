@@ -745,6 +745,13 @@ class CharacterSheetProgression {
 	}
 
 	static _getNestedSelectionFallback ({descriptor, entity, state}) {
+		const fixedProficiencyFallbackOwnerUid = descriptor.rules?.fixedProficiencyFallback
+			? descriptor.rules?.ownerUid
+			: null;
+		if (fixedProficiencyFallbackOwnerUid) {
+			const transaction = state?.getFixedProficiencyFallbackTransaction?.(fixedProficiencyFallbackOwnerUid);
+			if (transaction?.status === "resolved" && transaction.selection) return transaction.selection;
+		}
 		const selected = CharacterSheetProgression._getSelectedDescriptorValue({descriptor, entity, state});
 		if (selected != null && (!Array.isArray(selected) || selected.length)) return selected;
 		if (descriptor.kind === "entity") {
@@ -865,13 +872,14 @@ class CharacterSheetProgression {
 			nextVisited.add(visitedKey);
 			const type = CharacterSheetProgression.getDecisionTypeForDescriptor(descriptor);
 			const parentSemanticKey = parentDecision?.semanticKey || descriptor.rules?.parentSemanticKey || null;
+			const pickSlot = descriptor.rules?.pickSlot ?? descriptorIx;
 			const semanticKey = CharacterSheetProgression.getNestedSemanticKey({
 				parentSemanticKey,
 				acquisitionKey: descriptorAcquisitionKey,
 				grantKey: descriptor.grantKey,
 				selectedGrantKey: selectedKeys.join("|"),
 				occurrence: descriptor.occurrence,
-				slot: descriptorIx,
+				slot: pickSlot,
 				identityMode: descriptor.rules?.identityMode,
 			});
 			const exact = storedPool.get(semanticKey)?.find(decision => decision.selection != null);
@@ -891,7 +899,7 @@ class CharacterSheetProgression {
 				type,
 				label: descriptor.label,
 				sourceKey: descriptor.grantKey,
-				slot: descriptorIx,
+				slot: pickSlot,
 				required: descriptor.required,
 				count: descriptor.count,
 				options: descriptor.options,
@@ -914,7 +922,7 @@ class CharacterSheetProgression {
 					grantKey: descriptor.grantKey,
 					sourcePath: descriptor.sourcePath,
 					occurrence: descriptor.occurrence,
-					pickSlot: descriptorIx,
+					pickSlot,
 				},
 			});
 			decisions.push(decision);

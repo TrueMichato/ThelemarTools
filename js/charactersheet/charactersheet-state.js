@@ -16,6 +16,7 @@ const TARGET_EFFECT_HANDLER_METHODS = Object.freeze({
 const TARGET_EFFECT_METADATA_METHODS = Object.freeze({
 	"chained-fury": "getChainedTargetEffectMetadata",
 });
+const FIXED_PROFICIENCY_FALLBACK_DEFINITIONS = new Map();
 
 /**
  * Utility to parse feature text and extract limited-use information
@@ -4414,6 +4415,71 @@ class CharacterSheetState {
 	]);
 
 	/**
+	 * Build the exact owner identity used by fixed-proficiency fallback
+	 * transactions. Class, subclass, and feature sources remain independent.
+	 * @param {object} feature
+	 * @returns {string}
+	 */
+	static getSourceAwareFeatureUid (feature) {
+		if (!feature) return "";
+		return [
+			feature.name || "",
+			feature.className || "",
+			feature.classSource || "",
+			feature.subclassShortName || feature.subclassName || "",
+			feature.subclassSource || "",
+			feature.level != null ? feature.level : "",
+			feature.source || "",
+		].join("|");
+	}
+
+	static _getSourceAwareSubclassFeatureUid (feature) {
+		return CharacterSheetState.getSourceAwareFeatureUid(feature);
+	}
+
+	/**
+	 * Register an exact feature whose acquisition grants a fixed proficiency, or
+	 * a fallback choice when that proficiency was already owned.
+	 * @param {{
+	 *   owner: object,
+	 *   proficiencyType: "tool",
+	 *   fixedProficiency: string,
+	 *   fallbackCatalog: string,
+	 *   grantKey?: string,
+	 * }} definition
+	 */
+	static registerFixedProficiencyFallback (definition) {
+		const ownerUid = CharacterSheetState.getSourceAwareFeatureUid(definition?.owner);
+		if (!ownerUid || definition?.proficiencyType !== "tool" || !definition.fixedProficiency || !definition.fallbackCatalog) {
+			throw new Error("Invalid fixed-proficiency fallback definition.");
+		}
+		const normalized = Object.freeze({
+			ownerUid,
+			owner: Object.freeze({...definition.owner}),
+			proficiencyType: definition.proficiencyType,
+			fixedProficiency: definition.fixedProficiency,
+			fallbackCatalog: definition.fallbackCatalog,
+			grantKey: definition.grantKey || "fixedProficiencyFallback",
+		});
+		FIXED_PROFICIENCY_FALLBACK_DEFINITIONS.set(ownerUid.toLowerCase(), normalized);
+		return normalized;
+	}
+
+	static getFixedProficiencyFallbackDefinition (featureOrUid) {
+		const ownerUid = typeof featureOrUid === "string"
+			? featureOrUid
+			: CharacterSheetState.getSourceAwareFeatureUid(featureOrUid);
+		return ownerUid
+			? FIXED_PROFICIENCY_FALLBACK_DEFINITIONS.get(ownerUid.toLowerCase()) || null
+			: null;
+	}
+
+	static getFixedProficiencyFallbackGrantSource (featureOrUid) {
+		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(featureOrUid);
+		return definition ? `fixed-proficiency-fallback:${definition.ownerUid.toLowerCase()}` : "";
+	}
+
+	/**
 	 * Return whether a feature is a class/subclass progression feature whose
 	 * prose-derived mechanics belong to the class-feature cleanup/rebuild domain.
 	 *
@@ -5355,6 +5421,13 @@ class CharacterSheetState {
 				languages: {},
 			},
 
+			// Exact-owner acquisition transactions for rules of the form:
+			// "gain fixed proficiency X; if already proficient, choose fallback Y."
+			fixedProficiencyFallbacks: {
+				version: 1,
+				transactions: {},
+			},
+
 			// Progression-owned values may overlap with species, background, feature, or manual grants.
 			// Respec uses this source ledger to detach only the decision being changed.
 			progressionOwnership: {
@@ -5895,6 +5968,10 @@ class CharacterSheetState {
 			this._data.grantedProficiencies = {skills: {}, saves: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
 		}
 		this._data.grantedProficiencies.saves ||= {};
+		if (this._data.fixedProficiencyFallbacks?.version !== 1
+			|| typeof this._data.fixedProficiencyFallbacks?.transactions !== "object") {
+			this._data.fixedProficiencyFallbacks = {version: 1, transactions: {}};
+		}
 		if (this._data.progressionOwnership?.version !== 1 || typeof this._data.progressionOwnership?.values !== "object") {
 			this._data.progressionOwnership = {version: 1, initialized: false, values: {}};
 		}
@@ -5924,7 +6001,7 @@ class CharacterSheetState {
 
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
-		this._migrateEfaArtilleristToolsOfTheTrade();
+		this._migrateFixedProficiencyFallbacks();
 
 		// Repair old saves whose entries-only features predate use/resource parsing.
 		// Runs after subclass repair + featureType migration and is idempotent.
@@ -6959,7 +7036,11 @@ class CharacterSheetState {
 				&& !feature.languageProficiencies
 				&& !feature.savingThrowProficiencies
 			) continue;
-			this._processFeatureProficiencyGrants(feature, feature.id);
+			const transaction = this.getFixedProficiencyFallbackTransaction(feature);
+			const claimedTools = transaction
+				? new Set([CharacterSheetState.normalizeToolKey(transaction.fixedProficiency)])
+				: null;
+			this._processFeatureProficiencyGrants(feature, feature.id, {claimedTools});
 		}
 	}
 
@@ -8679,33 +8760,101 @@ class CharacterSheetState {
 		});
 	}
 
-	_migrateEfaArtilleristToolsOfTheTrade () {
-		for (const feature of this._data.features || []) {
-			if (!CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature(feature)) continue;
-			feature._sourceAwareFeatureUid ||= CharacterSheetState._getSourceAwareSubclassFeatureUid(feature);
-			if (!feature.sourceDecisionKey) {
-				const cls = this._data.classes?.find(it =>
-					it.name === "Artificer"
-						&& it.source === "EFA"
-						&& it.subclass?.name === "Artillerist"
-						&& it.subclass?.source === "EFA");
-				const history = this._data.levelHistory?.find(entry =>
-					entry.class?.name === "Artificer"
-						&& entry.class?.source === "EFA"
-						&& Number(entry.classLevel) === Number(feature.level));
-				if (cls && history) {
-					feature.sourceDecisionKey = CharacterSheetProgression.getSemanticKey({
-						className: "Artificer",
-						classSource: "EFA",
-						classLevel: feature.level,
-						type: "subclass",
-						sourceKey: "subclass",
-						slot: 0,
-					});
+	_migrateFixedProficiencyFallbacks () {
+		if (!Array.isArray(this._data.features) || !this._data.features.length) return;
+
+		for (const feature of this._data.features) {
+			const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(feature);
+			if (!definition) continue;
+			const ownerUid = definition.ownerUid;
+			const existing = this.getFixedProficiencyFallbackTransaction(ownerUid);
+			const exactDecision = this._getFixedProficiencyFallbackDecisions(ownerUid)
+				.find(decision => decision.selection != null);
+			const exactPending = (this._data.pendingFeatureChoices || []).find(choice =>
+				this._getFixedProficiencyFallbackOwnerUid(choice)?.toLowerCase() === ownerUid.toLowerCase(),
+			);
+			const exactGrantSource = CharacterSheetState.getFixedProficiencyFallbackGrantSource(ownerUid);
+			const exactGrantedKeys = Object.entries(this._data.grantedProficiencies?.tools || {})
+				.filter(([, sources]) => (sources || []).includes(exactGrantSource))
+				.map(([key]) => CharacterSheetState.normalizeToolKey(key));
+			const exactGrantedSelection = exactGrantedKeys.length === 1
+				? [
+					definition.fixedProficiency,
+					...(CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS?.[definition.fallbackCatalog] || []),
+				].find(tool => CharacterSheetState.normalizeToolKey(tool) === exactGrantedKeys[0]) || null
+				: null;
+			const legacyRequiresFallback = typeof feature._requiresArtisanToolReplacement === "boolean"
+				? feature._requiresArtisanToolReplacement
+				: null;
+
+			let mode = existing?.mode || null;
+			let status = existing?.status || null;
+			let selection = existing?.selection || null;
+			if (!mode && exactDecision) {
+				mode = "fallback";
+				status = "resolved";
+				selection = Array.isArray(exactDecision.selection)
+					? exactDecision.selection[0]
+					: exactDecision.selection;
+			} else if (!mode && exactGrantedSelection) {
+				mode = CharacterSheetState.normalizeToolKey(exactGrantedSelection) ===
+					CharacterSheetState.normalizeToolKey(definition.fixedProficiency)
+					? "fixed"
+					: "fallback";
+				status = "resolved";
+				selection = exactGrantedSelection;
+			} else if (!mode && exactPending) {
+				mode = "fallback";
+				status = "pending";
+			} else if (!mode && legacyRequiresFallback === false) {
+				mode = "fixed";
+				status = "resolved";
+				selection = definition.fixedProficiency;
+			} else if (!mode && legacyRequiresFallback === true) {
+				mode = "fallback";
+				status = "pending";
+			} else if (!mode && !this.hasToolProficiency(definition.fixedProficiency)) {
+				mode = "fixed";
+				status = "resolved";
+				selection = definition.fixedProficiency;
+			} else if (!mode) {
+				// A markerless save with the fixed proficiency cannot prove whether
+				// that value predated acquisition or was granted by this feature.
+				// Preserve it as external evidence and surface the fallback instead
+				// of guessing ownership across same-label/source records.
+				mode = "fallback";
+				status = "pending";
+			}
+
+			const transaction = this._upsertFixedProficiencyFallbackTransaction({
+				...existing,
+				ownerUid,
+				proficiencyType: definition.proficiencyType,
+				fixedProficiency: definition.fixedProficiency,
+				fallbackCatalog: definition.fallbackCatalog,
+				grantKey: definition.grantKey,
+				mode,
+				status: status || (mode === "fixed" ? "resolved" : "pending"),
+				selection: selection || (mode === "fixed" ? definition.fixedProficiency : null),
+				sourceDecisionKey: existing?.sourceDecisionKey
+					|| feature.sourceDecisionKey
+					|| this._getFixedProficiencyFallbackParentDecisionKey(feature),
+				decisionSemanticKey: existing?.decisionSemanticKey || exactDecision?.semanticKey || null,
+				characterLevel: existing?.characterLevel ?? feature.characterLevel ?? null,
+				featureId: feature.id,
+			});
+			feature._sourceAwareFeatureUid = ownerUid;
+			feature._fixedProficiencyFallbackOwnerUid = ownerUid;
+			feature._requiresArtisanToolReplacement = transaction.mode === "fallback";
+			if (!feature.sourceDecisionKey && transaction.sourceDecisionKey) {
+				feature.sourceDecisionKey = transaction.sourceDecisionKey;
+			}
+			if (transaction.status === "resolved" && transaction.selection) {
+				this._applyFixedProficiencyFallbackGrant(transaction, transaction.selection);
+				if (transaction.decisionSemanticKey) {
+					this.claimProgressionOwnership("tools", transaction.selection, transaction.decisionSemanticKey);
 				}
 			}
-			if (typeof feature._requiresArtisanToolReplacement === "boolean") continue;
-			feature._requiresArtisanToolReplacement = this.hasToolProficiency("Woodcarver's Tools");
 		}
 	}
 
@@ -21361,6 +21510,359 @@ class CharacterSheetState {
 	// pendingSpellChoices (which are filter-based spell grants from feats).
 	// =========================================================================
 
+	_getFixedProficiencyFallbackStore () {
+		if (this._data.fixedProficiencyFallbacks?.version !== 1
+			|| typeof this._data.fixedProficiencyFallbacks?.transactions !== "object") {
+			this._data.fixedProficiencyFallbacks = {version: 1, transactions: {}};
+		}
+		return this._data.fixedProficiencyFallbacks.transactions;
+	}
+
+	_getFixedProficiencyFallbackOwnerUid (featureOrChoice) {
+		const explicit = featureOrChoice?.fixedProficiencyFallbackOwnerUid
+			|| featureOrChoice?._fixedProficiencyFallbackOwnerUid
+			|| featureOrChoice?.featureUid
+			|| featureOrChoice?._sourceAwareFeatureUid;
+		if (explicit && CharacterSheetState.getFixedProficiencyFallbackDefinition(explicit)) return explicit;
+		const derived = typeof featureOrChoice === "object"
+			? CharacterSheetState.getSourceAwareFeatureUid(featureOrChoice)
+			: featureOrChoice;
+		return CharacterSheetState.getFixedProficiencyFallbackDefinition(derived)?.ownerUid || "";
+	}
+
+	/**
+	 * Return a copy of the exact-owner transaction for a registered feature.
+	 * @param {object|string} featureOrUid
+	 * @returns {object|null}
+	 */
+	getFixedProficiencyFallbackTransaction (featureOrUid) {
+		const ownerUid = this._getFixedProficiencyFallbackOwnerUid(featureOrUid)
+			|| (typeof featureOrUid === "string"
+				? CharacterSheetState.getFixedProficiencyFallbackDefinition(featureOrUid)?.ownerUid
+				: "");
+		const transaction = ownerUid
+			? this._getFixedProficiencyFallbackStore()[ownerUid.toLowerCase()]
+			: null;
+		return transaction ? MiscUtil.copyFast(transaction) : null;
+	}
+
+	_upsertFixedProficiencyFallbackTransaction (data) {
+		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(data?.ownerUid);
+		if (!definition) return null;
+		const ownerUid = definition.ownerUid;
+		const existing = this._getFixedProficiencyFallbackStore()[ownerUid.toLowerCase()] || {};
+		const owner = definition.owner;
+		const transaction = {
+			...existing,
+			...data,
+			ownerUid,
+			owner: {
+				featureName: owner.name,
+				featureSource: owner.source,
+				className: owner.className,
+				classSource: owner.classSource,
+				subclassShortName: owner.subclassShortName || owner.subclassName || "",
+				subclassSource: owner.subclassSource || "",
+				level: Number(owner.level) || 0,
+			},
+			proficiencyType: definition.proficiencyType,
+			fixedProficiency: definition.fixedProficiency,
+			fallbackCatalog: definition.fallbackCatalog,
+			grantKey: definition.grantKey,
+			grantSource: CharacterSheetState.getFixedProficiencyFallbackGrantSource(ownerUid),
+			mode: data.mode === "fallback" ? "fallback" : "fixed",
+			status: data.status === "pending" ? "pending" : "resolved",
+			selection: data.selection || null,
+			sourceDecisionKey: data.sourceDecisionKey || null,
+			decisionSemanticKey: data.decisionSemanticKey || null,
+			characterLevel: data.characterLevel != null ? Number(data.characterLevel) || 0 : null,
+			featureId: data.featureId || existing.featureId || null,
+		};
+		this._getFixedProficiencyFallbackStore()[ownerUid.toLowerCase()] = transaction;
+		return transaction;
+	}
+
+	_getFixedProficiencyFallbackParentDecisionKey (feature) {
+		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(feature);
+		if (!definition) return null;
+		const normalize = value => String(value || "").trim().toLowerCase();
+		const owner = definition.owner;
+		const cls = (this._data.classes || []).find(candidate =>
+			normalize(candidate.name) === normalize(owner.className)
+				&& normalize(candidate.source) === normalize(owner.classSource)
+				&& normalize(candidate.subclass?.shortName || candidate.subclass?.name) === normalize(owner.subclassShortName || owner.subclassName)
+				&& normalize(candidate.subclass?.source) === normalize(owner.subclassSource),
+		);
+		const history = (this._data.levelHistory || []).find(entry =>
+			normalize(entry.class?.name) === normalize(owner.className)
+				&& normalize(entry.class?.source) === normalize(owner.classSource)
+				&& Number(entry.classLevel) === Number(owner.level),
+		);
+		if (!cls || !history) return null;
+		return CharacterSheetProgression.getSemanticKey({
+			className: owner.className,
+			classSource: owner.classSource,
+			classLevel: owner.level,
+			type: "subclass",
+			sourceKey: "subclass",
+			slot: 0,
+		});
+	}
+
+	_getFixedProficiencyFallbackDecisions (featureOrUid) {
+		const ownerUid = this._getFixedProficiencyFallbackOwnerUid(featureOrUid)
+			|| CharacterSheetState.getFixedProficiencyFallbackDefinition(featureOrUid)?.ownerUid
+			|| "";
+		if (!ownerUid) return [];
+		return [
+			...(this._data.characterBase?.decisions || []),
+			...(this._data.levelHistory || []).flatMap(entry => entry.decisions || []),
+		].filter(decision =>
+			decision.type === "nestedTool"
+				&& String(decision.provenance?.ownerUid || "").toLowerCase() === ownerUid.toLowerCase(),
+		);
+	}
+
+	_beginFixedProficiencyFallbackTransaction (feature) {
+		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(feature);
+		if (!definition) return null;
+		const hadFixedProficiency = this.hasToolProficiency(definition.fixedProficiency);
+		const transaction = this._upsertFixedProficiencyFallbackTransaction({
+			ownerUid: definition.ownerUid,
+			mode: hadFixedProficiency ? "fallback" : "fixed",
+			status: hadFixedProficiency ? "pending" : "resolved",
+			selection: hadFixedProficiency ? null : definition.fixedProficiency,
+			sourceDecisionKey: feature.sourceDecisionKey
+				|| this._getFixedProficiencyFallbackParentDecisionKey(feature),
+			characterLevel: feature.characterLevel ?? this._getFeatureChoiceCharacterLevel({
+				featureClass: feature.className,
+				featureClassSource: feature.classSource,
+				level: feature.level,
+			}),
+			featureId: feature.id,
+		});
+		feature._sourceAwareFeatureUid = definition.ownerUid;
+		feature._fixedProficiencyFallbackOwnerUid = definition.ownerUid;
+		feature._requiresArtisanToolReplacement = hadFixedProficiency;
+		if (!feature.sourceDecisionKey && transaction.sourceDecisionKey) {
+			feature.sourceDecisionKey = transaction.sourceDecisionKey;
+		}
+		if (transaction.mode === "fixed") {
+			this._applyFixedProficiencyFallbackGrant(transaction, definition.fixedProficiency);
+		}
+		return transaction;
+	}
+
+	_applyFixedProficiencyFallbackGrant (transaction, proficiency) {
+		if (!transaction || transaction.proficiencyType !== "tool" || !proficiency) return;
+		const toolKey = CharacterSheetState.normalizeToolKey(proficiency);
+		this.addToolProficiency(proficiency);
+		this._trackGrantedProficiency("tools", toolKey, transaction.grantSource);
+	}
+
+	_releaseFixedProficiencyFallbackGrant (transaction, proficiency, decisionSourceIds = []) {
+		if (!transaction || transaction.proficiencyType !== "tool" || !proficiency) return;
+		const toolKey = CharacterSheetState.normalizeToolKey(proficiency);
+		const sources = this._data.grantedProficiencies?.tools?.[toolKey] || [];
+		if (sources.includes(transaction.grantSource)) {
+			this._untrackGrantedProficiency("tools", toolKey, transaction.grantSource);
+			if (!this._data.grantedProficiencies.tools[toolKey].length) {
+				delete this._data.grantedProficiencies.tools[toolKey];
+			}
+		}
+		for (const sourceId of [...new Set(decisionSourceIds.filter(Boolean))]) {
+			this.releaseProgressionOwnership("tools", proficiency, sourceId);
+		}
+		const remainingGrantSources = this._data.grantedProficiencies?.tools?.[toolKey] || [];
+		const progressionEntry = this._getProgressionOwnershipEntry("tools", proficiency);
+		if (!remainingGrantSources.length
+			&& !progressionEntry?.preserved
+			&& !progressionEntry?.sources?.length) {
+			this.removeToolProficiency(proficiency);
+		}
+	}
+
+	/**
+	 * Resolve or replace the fallback selection owned by one exact feature.
+	 * @param {object|string} featureOrUid
+	 * @param {string} selection
+	 * @param {{decisionSemanticKey?: string}} [opts]
+	 * @returns {boolean}
+	 */
+	setFixedProficiencyFallbackSelection (featureOrUid, selection, opts = {}) {
+		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(
+			this._getFixedProficiencyFallbackOwnerUid(featureOrUid) || featureOrUid,
+		);
+		const transaction = definition
+			? this._getFixedProficiencyFallbackStore()[definition.ownerUid.toLowerCase()]
+			: null;
+		if (!definition || !transaction || transaction.mode !== "fallback") return false;
+		const selected = String(selection || "").trim();
+		const selectedKey = CharacterSheetState.normalizeToolKey(selected);
+		const fixedKey = CharacterSheetState.normalizeToolKey(definition.fixedProficiency);
+		const catalog = CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS?.[definition.fallbackCatalog] || [];
+		const canonical = catalog.find(tool => CharacterSheetState.normalizeToolKey(tool) === selectedKey);
+		if (!canonical || selectedKey === fixedKey) return false;
+
+		const previous = transaction.status === "resolved" ? transaction.selection : null;
+		const previousDecisionKey = transaction.decisionSemanticKey;
+		if (previous && CharacterSheetState.normalizeToolKey(previous) !== selectedKey) {
+			this._releaseFixedProficiencyFallbackGrant(
+				transaction,
+				previous,
+				[previousDecisionKey, opts.decisionSemanticKey],
+			);
+		}
+		this._applyFixedProficiencyFallbackGrant(transaction, canonical);
+		transaction.status = "resolved";
+		transaction.selection = canonical;
+		transaction.decisionSemanticKey = opts.decisionSemanticKey || previousDecisionKey || null;
+		if (transaction.decisionSemanticKey) {
+			this.claimProgressionOwnership("tools", canonical, transaction.decisionSemanticKey);
+		}
+		this._recordFulfilledFeatureToolChoice({featureUid: definition.ownerUid});
+		this._data.pendingFeatureChoices = (this._data.pendingFeatureChoices || []).filter(choice =>
+			this._getFixedProficiencyFallbackOwnerUid(choice)?.toLowerCase() !== definition.ownerUid.toLowerCase(),
+		);
+		return true;
+	}
+
+	_removeFixedProficiencyFallbackTransaction (feature) {
+		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(feature);
+		if (!definition) return;
+		const store = this._getFixedProficiencyFallbackStore();
+		const transaction = store[definition.ownerUid.toLowerCase()];
+		if (!transaction) return;
+		const decisions = this._getFixedProficiencyFallbackDecisions(definition.ownerUid);
+		if (transaction.selection) {
+			this._releaseFixedProficiencyFallbackGrant(
+				transaction,
+				transaction.selection,
+				[transaction.decisionSemanticKey, ...decisions.map(decision => decision.semanticKey)],
+			);
+		}
+		for (const entry of [this._data.characterBase, ...(this._data.levelHistory || [])]) {
+			if (!Array.isArray(entry?.decisions)) continue;
+			entry.decisions = entry.decisions.filter(decision =>
+				String(decision.provenance?.ownerUid || "").toLowerCase() !== definition.ownerUid.toLowerCase(),
+			);
+		}
+		this._data.pendingFeatureChoices = (this._data.pendingFeatureChoices || []).filter(choice =>
+			this._getFixedProficiencyFallbackOwnerUid(choice)?.toLowerCase() !== definition.ownerUid.toLowerCase(),
+		);
+		const fulfillmentKey = this._getFeatureToolChoiceFulfillmentKey({featureUid: definition.ownerUid});
+		this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || [])
+			.filter(key => key !== fulfillmentKey);
+		delete store[definition.ownerUid.toLowerCase()];
+	}
+
+	_getFeatureToolChoiceFulfillmentKey (featureOrChoice) {
+		const featureUid = featureOrChoice?.featureUid
+			|| featureOrChoice?._sourceAwareFeatureUid
+			|| featureOrChoice?._fixedProficiencyFallbackOwnerUid
+			|| "";
+		if (featureUid) return `uid:${featureUid.toLowerCase()}`;
+		const name = featureOrChoice?.featureName || featureOrChoice?.name || featureOrChoice;
+		return name ? String(name).toLowerCase() : "";
+	}
+
+	hasFulfilledFeatureToolChoice (featureOrChoice) {
+		const key = this._getFeatureToolChoiceFulfillmentKey(featureOrChoice);
+		return !!key && (this._data.fulfilledFeatureToolChoices || []).includes(key);
+	}
+
+	_recordFulfilledFeatureToolChoice (featureOrChoice) {
+		const key = this._getFeatureToolChoiceFulfillmentKey(featureOrChoice);
+		if (!key) return;
+		if (!Array.isArray(this._data.fulfilledFeatureToolChoices)) this._data.fulfilledFeatureToolChoices = [];
+		if (!this._data.fulfilledFeatureToolChoices.includes(key)) {
+			this._data.fulfilledFeatureToolChoices.push(key);
+		}
+	}
+
+	_ensureFixedProficiencyFallbackChoices () {
+		for (const feature of this._data.features || []) {
+			const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(feature);
+			if (!definition) continue;
+			const transaction = this._getFixedProficiencyFallbackStore()[definition.ownerUid.toLowerCase()];
+			if (!transaction || transaction.mode !== "fallback" || transaction.status !== "pending") continue;
+			const options = (CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS?.[definition.fallbackCatalog] || [])
+				.filter(tool => CharacterSheetState.normalizeToolKey(tool) !==
+					CharacterSheetState.normalizeToolKey(definition.fixedProficiency))
+				.filter(tool => !this.hasToolProficiency(tool));
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId: feature.id,
+				featureUid: definition.ownerUid,
+				fixedProficiencyFallbackOwnerUid: definition.ownerUid,
+				featureSource: feature.source,
+				featureClass: feature.className,
+				featureClassSource: feature.classSource,
+				featureSubclass: feature.subclassShortName || feature.subclassName,
+				featureSubclassSource: feature.subclassSource,
+				level: feature.level,
+				characterLevel: transaction.characterLevel,
+				kind: "tool",
+				options,
+				count: 1,
+				sourceDecisionKey: transaction.sourceDecisionKey,
+				acquisitionKey: definition.ownerUid,
+			});
+		}
+	}
+
+	_reconcileFixedProficiencyFallbackGrants () {
+		for (const transaction of Object.values(this._getFixedProficiencyFallbackStore())) {
+			if (transaction.status !== "resolved" || !transaction.selection) continue;
+			this._applyFixedProficiencyFallbackGrant(transaction, transaction.selection);
+			if (transaction.decisionSemanticKey) {
+				this.claimProgressionOwnership("tools", transaction.selection, transaction.decisionSemanticKey);
+			}
+		}
+	}
+
+	/**
+	 * Return the shared Respec descriptor for an active fallback transaction.
+	 * @param {object} entity
+	 * @returns {object|null}
+	 */
+	getFixedProficiencyFallbackChoiceDescriptor (entity) {
+		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(entity);
+		const transaction = definition
+			? this._getFixedProficiencyFallbackStore()[definition.ownerUid.toLowerCase()]
+			: null;
+		if (!definition || !transaction || transaction.mode !== "fallback") return null;
+		const currentKey = CharacterSheetState.normalizeToolKey(transaction.selection);
+		const pending = (this._data.pendingFeatureChoices || []).find(choice =>
+			this._getFixedProficiencyFallbackOwnerUid(choice)?.toLowerCase() === definition.ownerUid.toLowerCase(),
+		);
+		const stored = this._getFixedProficiencyFallbackDecisions(definition.ownerUid)[0];
+		const catalog = CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS?.[definition.fallbackCatalog] || [];
+		const options = (pending?.options?.length ? pending.options : stored?.options?.length ? stored.options : catalog)
+			.filter(tool => CharacterSheetState.normalizeToolKey(tool) !==
+				CharacterSheetState.normalizeToolKey(definition.fixedProficiency))
+			.filter(tool => CharacterSheetState.normalizeToolKey(tool) === currentKey || !this.hasToolProficiency(tool));
+		return {
+			kind: "tool",
+			label: entity.name || definition.owner.name,
+			count: 1,
+			options,
+			grantKey: definition.grantKey,
+			sourcePath: definition.ownerUid,
+			occurrence: 0,
+			rules: {
+				identityMode: "opportunity",
+				parentSemanticKey: transaction.sourceDecisionKey,
+				rootSemanticKey: transaction.sourceDecisionKey,
+				acquisitionKey: definition.ownerUid,
+				ownerUid: definition.ownerUid,
+				pickSlot: 0,
+				fixedProficiencyFallback: true,
+				optionSource: {kind: "explicitList", values: options},
+			},
+		};
+	}
+
 	getPendingFeatureChoices () {
 		this._ensureSeededFeatureChoices();
 		return [...(this._data.pendingFeatureChoices || [])];
@@ -21383,7 +21885,7 @@ class CharacterSheetState {
 	 */
 	_ensureSeededFeatureChoices () {
 		this._ensureStudentOfWarChoices();
-		this._ensureEfaArtilleristToolsOfTheTradeChoice();
+		this._ensureFixedProficiencyFallbackChoices();
 		this._ensureHagAncestorChoice();
 	}
 
@@ -21419,24 +21921,6 @@ class CharacterSheetState {
 		}
 	}
 
-	static _getSourceAwareSubclassFeatureUid (feature) {
-		if (!feature) return "";
-		return [
-			feature.name || "",
-			feature.className || "",
-			feature.classSource || "",
-			feature.subclassShortName || feature.subclassName || "",
-			feature.subclassSource || "",
-			feature.level != null ? feature.level : "",
-			feature.source || "",
-		].join("|");
-	}
-
-	static _isEfaArtilleristToolsOfTheTradeFeature (feature) {
-		return CharacterSheetState._getSourceAwareSubclassFeatureUid(feature).toLowerCase() ===
-			"tools of the trade|artificer|efa|artillerist|efa|3|efa";
-	}
-
 	_getFeatureToolChoiceFulfillmentKey (featureOrChoice) {
 		const featureUid = featureOrChoice?.featureUid
 			|| featureOrChoice?._sourceAwareFeatureUid
@@ -21458,44 +21942,19 @@ class CharacterSheetState {
 		if (!this._data.fulfilledFeatureToolChoices.includes(key)) this._data.fulfilledFeatureToolChoices.push(key);
 	}
 
-	_ensureEfaArtilleristToolsOfTheTradeChoice () {
-		const feature = this._data.features?.find(CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature);
-		if (!feature?._requiresArtisanToolReplacement || this.hasFulfilledFeatureToolChoice({featureUid: feature._sourceAwareFeatureUid})) return;
-
-		const options = (CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS?.artisan || [])
-			.filter(tool => !this.hasToolProficiency(tool))
-			.filter(tool => CharacterSheetState.normalizeToolKey(tool) !== CharacterSheetState.normalizeToolKey("Woodcarver's Tools"));
-		this.addPendingFeatureChoice({
-			featureName: feature.name,
-			featureId: feature.id,
-			featureUid: feature._sourceAwareFeatureUid,
-			featureSource: feature.source,
-			featureClass: feature.className,
-			featureClassSource: feature.classSource,
-			featureSubclass: feature.subclassShortName || feature.subclassName,
-			featureSubclassSource: feature.subclassSource,
-			level: feature.level,
-			kind: "tool",
-			options,
-			count: 1,
-			sourceDecisionKey: feature.sourceDecisionKey,
-		});
-	}
-
-	_reconcileEfaArtilleristToolsOfTheTradeFixedGrant () {
-		const feature = this._data.features?.find(CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature);
-		if (!feature || feature._requiresArtisanToolReplacement) return;
-		this._addClassFeatureToolProficiency("Woodcarver's Tools");
-	}
-
 	/**
 	 * Queue a prose-parsed feature choice. Deduped by featureId + kind + option
 	 * signature so respec/level-up replays don't stack duplicate prompts.
-	 * @param {{featureName?: string, featureId?: string, featureUid?: string, featureSource?: string, featureClass?: string, featureClassSource?: string, featureSubclass?: string, featureSubclassSource?: string, level?: number, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
+	 * @param {{featureName?: string, featureId?: string, featureUid?: string, fixedProficiencyFallbackOwnerUid?: string, featureSource?: string, featureClass?: string, featureClassSource?: string, featureSubclass?: string, featureSubclassSource?: string, level?: number, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
 	 * @returns {boolean} True if a new choice was queued.
 	 */
 	addPendingFeatureChoice (choice) {
-		if (!choice || !choice.kind || !Array.isArray(choice.options) || choice.options.length < 2) return false;
+		const isFixedProficiencyFallback = !!choice?.fixedProficiencyFallbackOwnerUid;
+		if (!choice
+			|| !choice.kind
+			|| !Array.isArray(choice.options)
+			|| (!isFixedProficiencyFallback && choice.options.length < 2)
+			|| (isFixedProficiencyFallback && !choice.options.length)) return false;
 		if (!this._data.pendingFeatureChoices) this._data.pendingFeatureChoices = [];
 
 		const sig = this._featureChoiceSignature(choice);
@@ -21511,6 +21970,9 @@ class CharacterSheetState {
 			featureName: choice.featureName,
 			featureId: choice.featureId,
 			...(choice.featureUid ? {featureUid: choice.featureUid} : {}),
+			...(choice.fixedProficiencyFallbackOwnerUid
+				? {fixedProficiencyFallbackOwnerUid: choice.fixedProficiencyFallbackOwnerUid}
+				: {}),
 			...(choice.featureSource ? {featureSource: choice.featureSource} : {}),
 			...(choice.featureClass ? {featureClass: choice.featureClass} : {}),
 			...(choice.featureClassSource ? {featureClassSource: choice.featureClassSource} : {}),
@@ -21524,6 +21986,7 @@ class CharacterSheetState {
 			...(choice.unique ? {unique: true} : {}),
 			...(choice.expertiseIfProficient ? {expertiseIfProficient: true} : {}),
 			...(choice.sourceDecisionKey ? {sourceDecisionKey: choice.sourceDecisionKey} : {}),
+			...(choice.acquisitionKey ? {acquisitionKey: choice.acquisitionKey} : {}),
 		});
 		return true;
 	}
@@ -21645,7 +22108,12 @@ class CharacterSheetState {
 		// class so a same-named choice on a different multiclass class stays distinct.
 		const lvl = choice.level != null ? `@${choice.level}` : "";
 		const cls = choice.featureClass ? `#${String(choice.featureClass).toLowerCase()}` : "";
-		return `${choice.featureId || choice.featureName || ""}${cls}${lvl}|${choice.kind}|${opts}`;
+		const owner = choice.fixedProficiencyFallbackOwnerUid
+			|| choice.featureUid
+			|| choice.featureId
+			|| choice.featureName
+			|| "";
+		return `${String(owner).toLowerCase()}${cls}${lvl}|${choice.kind}|${opts}`;
 	}
 
 	/**
@@ -21720,18 +22188,23 @@ class CharacterSheetState {
 			const selectedName = typeof selection === "string" ? selection : selection?.name;
 			const tool = choice.options.find(option =>
 				CharacterSheetState.normalizeToolKey(typeof option === "string" ? option : option?.name) ===
-				CharacterSheetState.normalizeToolKey(selectedName));
+					CharacterSheetState.normalizeToolKey(selectedName));
 			if (!tool) return false;
 			const toolName = typeof tool === "string" ? tool : tool.name;
-			progressionSelection = toolName;
-			const toolKey = toolName.toLowerCase();
-			const trackSource = `feature-choice:${choice.featureId || choice.featureName}`;
-			if (this.hasToolProficiency(toolName) && !this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
-				this._trackGrantedProficiency("tools", toolKey, "base");
+			const fallbackOwnerUid = this._getFixedProficiencyFallbackOwnerUid(choice);
+			if (fallbackOwnerUid) {
+				if (!this.setFixedProficiencyFallbackSelection(fallbackOwnerUid, toolName)) return false;
+			} else {
+				const toolKey = CharacterSheetState.normalizeToolKey(toolName);
+				const trackSource = `feature-choice:${choice.featureId || choice.featureName}`;
+				if (this.hasToolProficiency(toolName) && !this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
+					this._trackGrantedProficiency("tools", toolKey, "base");
+				}
+				this.addToolProficiency(toolName);
+				this._trackGrantedProficiency("tools", toolKey, trackSource);
+				this._recordFulfilledFeatureToolChoice(choice);
 			}
-			this.addToolProficiency(toolName);
-			this._trackGrantedProficiency("tools", toolKey, trackSource);
-			this._recordFulfilledFeatureToolChoice(choice);
+			progressionSelection = toolName;
 		} else if (choice.kind === "cantrip") {
 			const sel = typeof selection === "string"
 				? choice.options.find(o => o.name?.toLowerCase() === selection.toLowerCase())
@@ -21778,7 +22251,10 @@ class CharacterSheetState {
 				provenance: {
 					ownerType: "feature",
 					ownerUid: choice.featureUid || choice.featureId || choice.featureName || choice.kind,
-					acquisitionKey: choice.sourceDecisionKey || `${choice.featureId || choice.featureName || choice.kind}|${choice.level || 0}`,
+					acquisitionKey: choice.acquisitionKey
+						|| choice.featureUid
+						|| choice.sourceDecisionKey
+						|| `${choice.featureId || choice.featureName || choice.kind}|${choice.level || 0}`,
 					selectedGrantKey: typeof normalizedSelection === "object"
 						? normalizedSelection.name || normalizedSelection.value || ""
 						: String(normalizedSelection),
@@ -21793,6 +22269,11 @@ class CharacterSheetState {
 			if (decision && choice.kind === "tool") {
 				decision.options = MiscUtil.copyFast(choice.options || []);
 				this.claimProgressionOwnership("tools", normalizedSelection, decision.semanticKey);
+				const fallbackOwnerUid = this._getFixedProficiencyFallbackOwnerUid(choice);
+				if (fallbackOwnerUid) {
+					const transaction = this._getFixedProficiencyFallbackStore()[fallbackOwnerUid.toLowerCase()];
+					if (transaction) transaction.decisionSemanticKey = decision.semanticKey;
+				}
 			}
 		}
 		this.removePendingFeatureChoice(choiceId);
@@ -34207,9 +34688,13 @@ class CharacterSheetState {
 		// class-feature source marker makes the pass idempotent and tear-down-safe.
 		for (const feature of this._data.features || []) {
 			if (!CharacterSheetState._isClassFeatureEffectSource(feature)) continue;
-			this._processFeatureModifiers(feature, feature.id);
+			const transaction = this.getFixedProficiencyFallbackTransaction(feature);
+			const claimedTools = transaction
+				? new Set([CharacterSheetState.normalizeToolKey(transaction.fixedProficiency)])
+				: null;
+			this._processFeatureModifiers(feature, feature.id, {claimedTools});
 		}
-		this._reconcileEfaArtilleristToolsOfTheTradeFixedGrant();
+		this._reconcileFixedProficiencyFallbackGrants();
 
 		// Store applied effects for debugging/display
 		this._data.appliedClassFeatureEffects = appliedEffects;
@@ -50193,6 +50678,10 @@ class CharacterSheetState {
 			if (normalizeIdentity(f.source) !== normalizeIdentity(feature.source)) return false;
 			if (f.className || feature.className) {
 				if (normalizeIdentity(f.className) !== normalizeIdentity(feature.className)) return false;
+				if (normalizeIdentity(f.classSource) !== normalizeIdentity(feature.classSource)) return false;
+				if (normalizeIdentity(f.subclassShortName || f.subclassName) !==
+					normalizeIdentity(feature.subclassShortName || feature.subclassName)) return false;
+				if (normalizeIdentity(f.subclassSource) !== normalizeIdentity(feature.subclassSource)) return false;
 				const existingLevel = Number(f.level);
 				const incomingLevel = Number(feature.level);
 				if (Number.isFinite(existingLevel) || Number.isFinite(incomingLevel)) {
@@ -50245,10 +50734,7 @@ class CharacterSheetState {
 				? {sourceDecisionKey: opts.sourceDecisionKey || feature.sourceDecisionKey}
 				: {}),
 		};
-		if (CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature(featureData)) {
-			featureData._sourceAwareFeatureUid = CharacterSheetState._getSourceAwareSubclassFeatureUid(featureData);
-			featureData._requiresArtisanToolReplacement = this.hasToolProficiency("Woodcarver's Tools");
-		}
+		const fixedProficiencyFallback = this._beginFixedProficiencyFallbackTransaction(featureData);
 
 		// Add uses if detected or passed in
 		if (uses) {
@@ -50259,9 +50745,8 @@ class CharacterSheetState {
 				...(uses.shortRestRecovery != null ? {shortRestRecovery: uses.shortRestRecovery} : {}),
 			};
 		}
-
 		this._data.features.push(featureData);
-		this._reconcileEfaArtilleristToolsOfTheTradeFixedGrant();
+		this._data.features.push(featureData);
 
 		// Process resistances/immunities/vulnerabilities granted by the feature
 		if (feature.resistances) {
@@ -50341,6 +50826,9 @@ class CharacterSheetState {
 		// cantrip picks) into pending feature choices, and collect the skill/spell
 		// identities they claim so the greedy parsers below don't also grant them.
 		const {claimedSkills, claimedSpells} = this._processFeatureChoices(featureData, featureData.id);
+		const claimedTools = fixedProficiencyFallback
+			? new Set([CharacterSheetState.normalizeToolKey(fixedProficiencyFallback.fixedProficiency)])
+			: null;
 
 		// Bug #5 belt-and-braces: if this feature's prose choice claims cantrips that the
 		// owning subclass already auto-granted (sourceFeature "<subclass> Spells"), strip those
@@ -50366,7 +50854,7 @@ class CharacterSheetState {
 		this._processFeatureSpells(feature, featureData.id, {allSpells: opts?.allSpells, claimedSpells});
 
 		// Check if this feature grants modifiers to rolls, AC, etc.
-		this._processFeatureModifiers(feature, featureData.id, {claimedSkills});
+		this._processFeatureModifiers(feature, featureData.id, {claimedSkills, claimedTools});
 		this.ensureBloodHunterResources();
 		this.ensureTalentResources();
 
@@ -50375,7 +50863,10 @@ class CharacterSheetState {
 		// gives `classFeature` and `subclassFeature` schema parity with backgrounds and
 		// races for granted profs. `skillToolLanguageProficiencies` is player-choice
 		// only and is left for the (future) feature-level choose picker.
-		this._processFeatureProficiencyGrants(feature, featureData.id, {claimedSkills});
+		this._processFeatureProficiencyGrants(feature, featureData.id, {claimedSkills, claimedTools});
+		if (fixedProficiencyFallback?.mode === "fallback") {
+			this._ensureFixedProficiencyFallbackChoices();
+		}
 
 		// Check if this feature grants specific combat methods directly (e.g. Primal Focus Upgrade).
 		// Resolve each granted method against the catalog and add it as a real combat method.
@@ -52119,6 +52610,8 @@ class CharacterSheetState {
 	 * @param {object} [opts]
 	 * @param {Set<string>} [opts.claimedSkills] - Skill keys handled by a pending feature
 	 *   CHOICE (e.g. Arcane Archer Lore's "Arcana or Nature"); skip auto-granting them.
+	 * @param {Set<string>} [opts.claimedTools] - Tool keys owned by an acquisition
+	 *   transaction; skip the greedy prose grant.
 	 */
 	_processFeatureModifiers (feature, featureId, opts = {}) {
 		// Prefer rendered descriptions when available. Raw entries retain tags such
@@ -52130,6 +52623,7 @@ class CharacterSheetState {
 			|| CharacterSheetState._featureTextFromEntries(feature);
 		if (!featureText) return;
 		const claimedSkills = opts.claimedSkills;
+		const claimedTools = opts.claimedTools;
 
 		// Skip combat methods (stances) - their effects are handled dynamically by the stance system
 		// (activateStance, _getActiveStanceEffects, getSkillBonusFromStates, etc.)
@@ -52242,9 +52736,13 @@ class CharacterSheetState {
 						.find(tool => CharacterSheetState.normalizeToolKey(tool) === CharacterSheetState.normalizeToolKey(profTarget));
 					const toolName = canonicalTool
 						|| profTarget.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/tools/gi, " tools").replace(/kit/gi, " kit").trim().toTitleCase();
-					if (!this._data.toolProficiencies.some(t => t.toLowerCase().includes(profTarget.toLowerCase().substring(0, 6)))) {
-						if (CharacterSheetState._isClassFeatureEffectSource(feature)) this._addClassFeatureToolProficiency(toolName);
-						else this.addToolProficiency(toolName);
+					const toolKey = CharacterSheetState.normalizeToolKey(toolName);
+					if (claimedTools?.has(toolKey)) return;
+					if (CharacterSheetState._isClassFeatureEffectSource(feature)) {
+						this.addToolProficiency(toolName);
+						this._trackGrantedProficiency("tools", toolKey, `feature:${featureId}`);
+					} else if (!this._data.toolProficiencies.some(t => t.toLowerCase().includes(profTarget.toLowerCase().substring(0, 6)))) {
+						this.addToolProficiency(toolName);
 					}
 				}
 				return; // Don't create a named modifier for proficiency grants
@@ -52449,11 +52947,14 @@ class CharacterSheetState {
 	 * @param {object} [opts]
 	 * @param {Set<string>} [opts.claimedSkills] - skill keys already claimed by a
 	 *   prose-parsed feature choice (avoid double-granting).
+	 * @param {Set<string>} [opts.claimedTools] - tool keys already owned by a
+	 *   fixed-proficiency fallback transaction.
 	 */
 	_processFeatureProficiencyGrants (feature, featureId, opts = {}) {
 		if (!feature || !featureId) return;
 		const trackSource = `feature:${featureId}`;
 		const claimedSkills = opts.claimedSkills instanceof Set ? opts.claimedSkills : null;
+		const claimedTools = opts.claimedTools instanceof Set ? opts.claimedTools : null;
 
 		const asArray = (v) => {
 			if (v == null) return [];
@@ -52488,6 +52989,7 @@ class CharacterSheetState {
 		for (const tp of asArray(feature.toolProficiencies)) {
 			if (tp == null) continue;
 			if (typeof tp === "string") {
+				if (claimedTools?.has(CharacterSheetState.normalizeToolKey(tp))) continue;
 				if (!this._data.toolProficiencies.some(t => t.toLowerCase() === tp.toLowerCase())) {
 					this.addToolProficiency(tp);
 				}
@@ -52500,6 +53002,7 @@ class CharacterSheetState {
 				const val = tp[tool];
 				if (val !== true && val !== 1) continue;
 				const toolDisplay = tool.toTitleCase ? tool.toTitleCase() : tool.replace(/\b\w/g, c => c.toUpperCase());
+				if (claimedTools?.has(CharacterSheetState.normalizeToolKey(toolDisplay))) continue;
 				if (!this._data.toolProficiencies.some(t => t.toLowerCase() === tool.toLowerCase())) {
 					this.addToolProficiency(toolDisplay);
 				}
@@ -52809,6 +53312,7 @@ class CharacterSheetState {
 
 		// Remove associated resource if it was auto-added
 		if (feature) {
+			this._removeFixedProficiencyFallbackTransaction(feature);
 			for (const trackedSource of [`feature-choice:${feature.id}`, `feature:${feature.id}`]) {
 				for (const [type, remove] of [
 					["skills", name => this.setSkillProficiency(name, 0)],
@@ -52825,11 +53329,12 @@ class CharacterSheetState {
 			const featureKey = feature.name.toLowerCase();
 			this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
 			const featureToolKey = this._getFeatureToolChoiceFulfillmentKey({
-				featureUid: feature._sourceAwareFeatureUid,
+				featureUid: feature._fixedProficiencyFallbackOwnerUid || feature._sourceAwareFeatureUid,
 				featureName: feature.name,
 			});
+			const hasExactToolChoiceOwner = featureToolKey.startsWith("uid:");
 			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || [])
-				.filter(name => name !== featureKey && name !== featureToolKey);
+				.filter(name => name !== featureToolKey && (hasExactToolChoiceOwner || name !== featureKey));
 			const removedResourceIds = this._data.resources
 				.filter(r =>
 					r.featureId === feature.id
@@ -52852,7 +53357,7 @@ class CharacterSheetState {
 			this.removeInnateSpellsByFeature(feature.name);
 			// Remove any unresolved prose "either A or B" choices queued by this feature
 			this.clearPendingFeatureChoicesByFeature(feature.id);
-			this.clearPendingFeatureChoicesByFeature(feature.name);
+			if (!feature.id) this.clearPendingFeatureChoicesByFeature(feature.name);
 			// Remove any cantrip this feature granted as a player choice (sourceFeature is
 			// unique to the granting feature — e.g. Arcane Archer Lore's chosen cantrip).
 			if (this._data.spellcasting?.cantripsKnown?.length) {
@@ -80619,6 +81124,38 @@ class CharacterSheetState {
 	}
 	// #endregion
 }
+
+CharacterSheetState.registerFixedProficiencyFallback({
+	owner: {
+		name: "Tools of the Trade",
+		source: "EFA",
+		className: "Artificer",
+		classSource: "EFA",
+		subclassShortName: "Artillerist",
+		subclassSource: "EFA",
+		level: 3,
+	},
+	proficiencyType: "tool",
+	fixedProficiency: "Woodcarver's Tools",
+	fallbackCatalog: "artisan",
+	grantKey: "fixedToolProficiencyFallback",
+});
+
+CharacterSheetState.registerFixedProficiencyFallback({
+	owner: {
+		name: "Reanimator's Skill Set",
+		source: "RHW",
+		className: "Artificer",
+		classSource: "EFA",
+		subclassShortName: "Reanimator",
+		subclassSource: "RHW",
+		level: 3,
+	},
+	proficiencyType: "tool",
+	fixedProficiency: "Alchemist's Supplies",
+	fallbackCatalog: "artisan",
+	grantKey: "fixedToolProficiencyFallback",
+});
 
 // Make available globally and as module export
 globalThis.CharacterSheetState = CharacterSheetState;

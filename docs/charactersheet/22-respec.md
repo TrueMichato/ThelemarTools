@@ -164,6 +164,15 @@ candidate back on failure. A future rules-driven switch flow can use the same
 transaction with history persistence and canonical synchronization instead of
 maintaining a second model-specific state path.
 
+Fixed-proficiency fallback features ("gain X; if already proficient, choose
+Y") expose their pending/resolved transaction as a normal `nestedTool`
+decision. The descriptor carries the full feature/class/subclass source UID,
+an exact acquisition key, and the subclass decision parent. Respec replacement
+updates the transaction, pending queue, fulfillment marker, progression
+ownership, and feature grant ledger atomically. It never matches by feature
+label, and removing or replacing one owner preserves the same tool proficiency
+when another exact owner or preserved source still requires it.
+
 ## Legacy Reconstruction
 
 Old saves are normalized on load.

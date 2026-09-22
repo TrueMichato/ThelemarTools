@@ -4565,52 +4565,8 @@ class CharacterSheetClassUtils {
 			addProseDescriptors(node, path);
 		};
 		visit(entity, sourcePath || entity.name || "entity");
-
-		const sourceAwareSubclassFeatureUid = feature => [
-			feature?.name || "",
-			feature?.className || "",
-			feature?.classSource || "",
-			feature?.subclassShortName || feature?.subclassName || "",
-			feature?.subclassSource || "",
-			feature?.level != null ? feature.level : "",
-			feature?.source || "",
-		].join("|");
-		const efaToolsUid = "Tools of the Trade|Artificer|EFA|Artillerist|EFA|3|EFA";
-		if (sourceAwareSubclassFeatureUid(entity).toLowerCase() === efaToolsUid.toLowerCase()) {
-			const materialized = opts.state?.getFeatures?.()
-				.find(feature => sourceAwareSubclassFeatureUid(feature).toLowerCase() === efaToolsUid.toLowerCase());
-			if (materialized?._requiresArtisanToolReplacement) {
-				const pending = opts.state?.getPendingFeatureChoices?.()
-					.find(choice => choice.featureUid?.toLowerCase() === efaToolsUid.toLowerCase());
-				const stored = (opts.state?.getLevelHistory?.() || [])
-					.flatMap(entry => entry.decisions || [])
-					.find(decision =>
-						decision.type === "nestedTool"
-						&& decision.provenance?.ownerUid?.toLowerCase() === efaToolsUid.toLowerCase());
-				const options = pending?.options?.length
-					? pending.options
-					: stored?.options?.length
-						? stored.options
-						: CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS.artisan
-							.filter(tool => tool !== "Woodcarver's Tools");
-				add({
-					kind: "tool",
-					label: "Tools of the Trade",
-					count: 1,
-					options,
-					grantKey: "Tools of the Trade",
-					sourcePath: efaToolsUid,
-					rules: {
-						identityMode: "opportunity",
-						parentSemanticKey: materialized.sourceDecisionKey || null,
-						rootSemanticKey: materialized.sourceDecisionKey || null,
-						acquisitionKey: materialized.sourceDecisionKey || "",
-						ownerUid: efaToolsUid,
-						optionSource: {kind: "explicitList", values: options},
-					},
-				});
-			}
-		}
+		const fixedProficiencyFallback = opts.state?.getFixedProficiencyFallbackChoiceDescriptor?.(entity);
+		if (fixedProficiencyFallback) add(fixedProficiencyFallback);
 		return descriptors;
 	}
 

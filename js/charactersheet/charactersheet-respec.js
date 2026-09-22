@@ -2037,6 +2037,20 @@ class CharacterSheetRespec {
 			return;
 		}
 		if (nestedSet) {
+			const fixedProficiencyFallback = decision.type === "nestedTool"
+				? this._state.getFixedProficiencyFallbackTransaction?.(decision.provenance?.ownerUid)
+				: null;
+			if (fixedProficiencyFallback?.mode === "fallback") {
+				const selected = next.length === 1 ? valueName(next[0]) : null;
+				if (selected) {
+					this._state.setFixedProficiencyFallbackSelection(
+						decision.provenance.ownerUid,
+						selected,
+						{decisionSemanticKey: decision.semanticKey},
+					);
+				}
+				return;
+			}
 			const pendingFeatureChoice = decision.type === "nestedTool" && decision.parentSemanticKey
 				? this._state._data?.pendingFeatureChoices?.find(choice =>
 					choice.kind === "tool"
