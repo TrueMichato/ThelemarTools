@@ -7369,7 +7369,7 @@ class CharacterSheetState {
 				holder: {
 					holderMaximumDistance: 30,
 					destinationMaximumDistanceFromHolder: 5,
-					requiresVisible: false,
+					requiresVisible: true,
 					requiresUnoccupied: true,
 					holders: context.externalHolders.map(holder => ({id: holder.id, name: holder.name})),
 				},
@@ -7491,9 +7491,10 @@ class CharacterSheetState {
 		const portal = this.getCartographerPortalJumpState();
 		if (!portal.available) return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-unavailable", error: portal.reason});
 		const mode = `${destinationMode || ""}`.trim().toLowerCase();
+		const hasDestinationConfirmation = confirmedVisible && confirmedUnoccupied;
 		let destination;
 		if (mode === "direct") {
-			if (!confirmedVisible || !confirmedWithin10Feet || !confirmedUnoccupied) {
+			if (!hasDestinationConfirmation || !confirmedWithin10Feet) {
 				return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-confirmation-required"});
 			}
 			destination = {
@@ -7505,12 +7506,13 @@ class CharacterSheetState {
 		} else if (mode === "holder") {
 			const holder = portal.destinations.holder.holders.find(it => it.id === holderId);
 			if (!holder) return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-holder-unavailable"});
-			if (!confirmedHolderWithin30Feet || !confirmedWithin5FeetOfHolder || !confirmedUnoccupied) {
+			if (!hasDestinationConfirmation || !confirmedHolderWithin30Feet || !confirmedWithin5FeetOfHolder) {
 				return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-confirmation-required"});
 			}
 			destination = {
 				mode,
 				holder,
+				visible: true,
 				holderWithin30Feet: true,
 				within5FeetOfHolder: true,
 				unoccupied: true,

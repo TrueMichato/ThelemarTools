@@ -770,7 +770,9 @@ destination receipt during combat, so save/load and `resetTurnEconomy()` use the
 same movement ledger as every other movement feature. Positive Speed 1 has the
 authored zero-foot cost and succeeds without manufacturing a receipt. Outside
 combat, the same validation and structured result run without persisting a
-transient turn receipt.
+transient turn receipt. Both its direct and Atlas-holder routes require an
+explicitly confirmed visible, unoccupied destination; the holder route additionally
+confirms the holder is within 30 feet and the destination is within 5 feet of them.
 
 The exact EFA progression is data-authoritative: Mapping Magic, Portal Jump, and
 Adventurer's Atlas Positioning begin at Cartographer level 3. Illuminated
@@ -783,8 +785,9 @@ Targeting rules which waive only selected requirements use
 requires an active self-held Atlas map plus explicit same-plane, normal-range,
 and otherwise-eligible-target confirmations. Its resolver waives sight and cover
 only; range, target eligibility, components, and other casting requirements remain
-intact. The sheet records adjudication facts but does not invent coordinates,
-line of sight, planes, or DM Screen/Journey state.
+intact. This targeting exception does not waive Portal Jump's destination visibility.
+The sheet records adjudication facts but does not invent coordinates, line of sight,
+planes, or DM Screen/Journey state.
 
 ### Subclass-Scoped State Effects
 

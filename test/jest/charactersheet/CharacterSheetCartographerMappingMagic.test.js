@@ -675,24 +675,31 @@ describe("EFA Cartographer — Portal Jump", () => {
 		expect(state.getMovementEconomyState()).toMatchObject({used: 0, remaining: 35, receipts: []});
 	});
 
-	test("supports the external-holder destination without inventing sight or geometry", () => {
+	test("requires a visible unoccupied destination for the external-holder route without inventing geometry", () => {
 		const state = makeCartographer({level: 3});
 		createSelfAtlas(state);
-		const holder = state.getCartographerPortalJumpState().destinations.holder.holders[0];
+		const portal = state.getCartographerPortalJumpState();
+		const holder = portal.destinations.holder.holders[0];
 
 		const rejected = state.useCartographerPortalJump({
 			destinationMode: "holder",
 			holderId: holder.id,
-			confirmedHolderWithin30Feet: false,
+			confirmedVisible: false,
+			confirmedHolderWithin30Feet: true,
 			confirmedWithin5FeetOfHolder: true,
 			confirmedUnoccupied: true,
 		});
 		expect(rejected).toMatchObject({ok: false, reason: "portal-jump-confirmation-required"});
 		expect(state.getMovementEconomyState().used).toBe(0);
+		expect(portal.destinations.holder).toMatchObject({
+			requiresVisible: true,
+			requiresUnoccupied: true,
+		});
 
 		const committed = state.useCartographerPortalJump({
 			destinationMode: "holder",
 			holderId: holder.id,
+			confirmedVisible: true,
 			confirmedHolderWithin30Feet: true,
 			confirmedWithin5FeetOfHolder: true,
 			confirmedUnoccupied: true,
@@ -702,12 +709,12 @@ describe("EFA Cartographer — Portal Jump", () => {
 			destination: {
 				mode: "holder",
 				holder: {id: holder.id, name: "Thorn"},
+				visible: true,
 				holderWithin30Feet: true,
 				within5FeetOfHolder: true,
 				unoccupied: true,
 			},
 		});
-		expect(committed.destination).not.toHaveProperty("visible");
 	});
 
 	test("does not strand movement outside combat across repeated jumps or save/load", () => {
@@ -990,6 +997,39 @@ describe("EFA Cartographer — Mapping Magic Operate-mode adapters", () => {
 		expect(state.getMovementEconomyState().used).toBe(0);
 		expect(features._queueAdventurersAtlasActionFocus).toHaveBeenCalledWith("portal-jump");
 		expect(features._queueAdventurersAtlasActionFocus).toHaveBeenCalledWith("positioning");
+	});
+
+	test("Portal Jump confirms holder-route visibility separately from Positioning", async () => {
+		const state = makeCartographer({level: 15});
+		createSelfAtlas(state);
+		const features = makeFeatures(state);
+		const portalSpy = jest.spyOn(state, "useCartographerPortalJump").mockReturnValue({
+			ok: true,
+			movementCost: 15,
+			destination: {holder: {name: "Thorn"}},
+		});
+		globalThis.InputUiUtil.pGetUserEnum
+			.mockResolvedValueOnce("Visible unoccupied space within 5 feet of an active map holder")
+			.mockResolvedValueOnce("Thorn");
+		globalThis.InputUiUtil.pGetUserBoolean.mockResolvedValueOnce(true);
+
+		await features._pUseCartographerPortalJump();
+
+		expect(globalThis.InputUiUtil.pGetUserBoolean).toHaveBeenCalledWith(expect.objectContaining({
+			htmlDescription: expect.stringContaining("<strong>visible to you</strong>"),
+		}));
+		expect(portalSpy).toHaveBeenCalledWith({
+			destinationMode: "holder",
+			holderId: expect.any(String),
+			confirmedVisible: true,
+			confirmedWithin10Feet: false,
+			confirmedHolderWithin30Feet: true,
+			confirmedWithin5FeetOfHolder: true,
+			confirmedUnoccupied: true,
+		});
+		expect(features._page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(features.render).toHaveBeenCalledTimes(1);
+		expect(features._page._combat.renderCombatMovement).toHaveBeenCalledTimes(1);
 	});
 });
 

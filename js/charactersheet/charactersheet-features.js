@@ -1328,12 +1328,12 @@ class CharacterSheetFeatures {
 			return;
 		}
 		const directLabel = "Visible unoccupied space within 10 feet";
-		const holderLabel = "Space within 5 feet of an active map holder";
+		const holderLabel = "Visible unoccupied space within 5 feet of an active map holder";
 		const values = [directLabel];
 		if (portal.destinations.holder.holders.length) values.push(holderLabel);
 		const modeChoice = await InputUiUtil.pGetUserEnum({
 			title: "Portal Jump — Destination",
-			htmlDescription: `<div>Spend <strong>${portal.movementCost} feet</strong> of movement (half your current Speed of ${portal.speed}, rounded down).</div><div class="ve-muted ve-small mt-1">Choose a legal destination. The sheet records your confirmation; it does not invent coordinates or line of sight.</div>`,
+			htmlDescription: `<div>Spend <strong>${portal.movementCost} feet</strong> of movement (half your current Speed of ${portal.speed}, rounded down).</div><div class="ve-muted ve-small mt-1">Choose a legal visible, unoccupied destination. The sheet records your confirmation; it does not invent coordinates or line of sight.</div>`,
 			values,
 			fnDisplay: value => value,
 			isResolveItem: true,
@@ -1376,7 +1376,7 @@ class CharacterSheetFeatures {
 			title: "Confirm Portal Jump",
 			htmlDescription: isDirect
 				? `<div>Confirm the destination is <strong>unoccupied</strong>, <strong>visible to you</strong>, and <strong>within 10 feet</strong>.</div><div class="ve-muted ve-small mt-1">${portal.movementCost} feet of movement is spent only after confirmation.</div>`
-				: `<div>Confirm <strong>${holder.name}</strong> is an active Atlas holder within <strong>30 feet</strong>, and the destination is an <strong>unoccupied</strong> space within <strong>5 feet</strong> of them.</div><div class="ve-muted ve-small mt-1">This route does not add a sight requirement. ${portal.movementCost} feet of movement is spent only after confirmation.</div>`,
+				: `<div>Confirm <strong>${holder.name}</strong> is an active Atlas holder within <strong>30 feet</strong>, and the destination is an <strong>unoccupied</strong> space <strong>visible to you</strong> within <strong>5 feet</strong> of them.</div><div class="ve-muted ve-small mt-1">Positioning's sight and cover exception applies to targeting map holders, not to Portal Jump's destination. ${portal.movementCost} feet of movement is spent only after confirmation.</div>`,
 			textYes: `Teleport and spend ${portal.movementCost} ft`,
 			textNo: "Cancel",
 		});
@@ -1388,7 +1388,7 @@ class CharacterSheetFeatures {
 		const result = this._state.useCartographerPortalJump({
 			destinationMode: isDirect ? "direct" : "holder",
 			holderId: holder?.id || null,
-			confirmedVisible: isDirect,
+			confirmedVisible: true,
 			confirmedWithin10Feet: isDirect,
 			confirmedHolderWithin30Feet: !isDirect,
 			confirmedWithin5FeetOfHolder: !isDirect,
@@ -1406,7 +1406,7 @@ class CharacterSheetFeatures {
 			type: "info",
 			content: isDirect
 				? `Portal Jump: teleported to the confirmed visible space; spent ${result.movementCost} feet of movement.`
-				: `Portal Jump: teleported beside ${result.destination.holder.name}; spent ${result.movementCost} feet of movement.`,
+				: `Portal Jump: teleported to the confirmed visible space beside ${result.destination.holder.name}; spent ${result.movementCost} feet of movement.`,
 		});
 		this._queueAdventurersAtlasActionFocus("portal-jump");
 	}
@@ -1692,7 +1692,7 @@ class CharacterSheetFeatures {
 				id: "portal-jump",
 				title: "Portal Jump",
 				meta: `${portalJump.movementCost} ft cost · ${portalJump.movementRemaining} ft left`,
-				detail: "Teleport to a confirmed visible space within 10 feet, or beside an active holder within 30 feet.",
+				detail: "Teleport to a confirmed visible, unoccupied space within 10 feet, or within 5 feet of an active holder who is within 30 feet.",
 				available: portalJump.available,
 				reason: portalJump.reason,
 				buttonLabel: "Choose destination",
