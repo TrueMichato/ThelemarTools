@@ -32027,6 +32027,32 @@ class CharacterSheetState {
 					if (
 						isEfa
 						&& level >= 3
+						&& subclassName === "alchemist"
+						&& subclassSource === "EFA"
+					) {
+						const hasEfaToolsOfTheTrade = this._data.features.some(feature =>
+							typeof CharacterSheetClassUtils !== "undefined"
+							&& CharacterSheetClassUtils.isExactEfaAlchemistToolsOfTheTrade(feature),
+						);
+						if (hasEfaToolsOfTheTrade) {
+							(calculations.craftingTimeModifiers ||= []).push({
+								id: "efa-alchemist-tools-of-the-trade-potion-crafting",
+								owner: {
+									kind: "subclassFeature",
+									name: "Tools of the Trade",
+									source: "EFA",
+									uid: "Tools of the Trade|Artificer|EFA|Alchemist|EFA|3|EFA",
+								},
+								multiplier: 0.5,
+								filter: {recipeCategories: ["potion"]},
+							});
+						}
+						if (level >= 15) calculations.hasEfaAlchemistChemicalResistance = true;
+					}
+
+					if (
+						isEfa
+						&& level >= 3
 						&& subclassName === "cartographer"
 						&& subclassSource === "EFA"
 					) {
@@ -34749,6 +34775,14 @@ class CharacterSheetState {
 				ignoreRequirements: calculations.magicItemSavantIgnoreRequirements === true,
 				source: "Magic Item Savant",
 			});
+		}
+
+		if (calculations.hasEfaAlchemistChemicalResistance && !alreadyProcessed("Chemical Mastery")) {
+			effects.push(
+				{type: "resistance", damageType: "acid", source: "Chemical Mastery"},
+				{type: "resistance", damageType: "poison", source: "Chemical Mastery"},
+				{type: "conditionImmunity", condition: "poisoned", source: "Chemical Mastery"},
+			);
 		}
 
 		// Soul of Artifice (Artificer 20): +1 to saves per attuned item
