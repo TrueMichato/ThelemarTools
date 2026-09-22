@@ -208,7 +208,7 @@ export class CharacterSheetPlayMode {
 		this._state = page.getState();
 
 		// UI state (not persisted — resets on load)
-		const actionEconomy = {action: true, reaction: true, movement: true};
+		const actionEconomy = {action: true, reaction: true};
 		Object.defineProperty(actionEconomy, "bonus", {
 			enumerable: true,
 			get: () => this._state.isBonusActionAvailable?.() !== false,
@@ -1628,12 +1628,24 @@ export class CharacterSheetPlayMode {
 			});
 		});
 
-		// Movement
-		const walkSpeed = this._state.getSpeed("walk") || 30;
-		const mvEl = this._ce("div", `pm-economy__slot pm-economy__slot--${this._actionEconomy.movement ? "available" : "used"}`, row);
-		mvEl.replaceChildren(this._icon("speed"), document.createTextNode(` ${this._fmtSpeed(walkSpeed)}`));
-		this._makeClickable(mvEl, `${this._actionEconomy.movement ? "Use" : "Restore"} Movement`, () => {
-			this._actionEconomy.movement = !this._actionEconomy.movement;
+		// Movement is numeric and state-owned: the displayed total follows live Speed,
+		// while source-tagged receipts preserve partial spends across re-renders/saves.
+		const movement = this._state.getMovementEconomyState?.() || {
+			allowance: Math.max(0, Number(this._state.getSpeed?.("walk")) || 0),
+			used: 0,
+			remaining: Math.max(0, Number(this._state.getSpeed?.("walk")) || 0),
+		};
+		const canSpendMovement = movement.remaining > 0;
+		const hasSpentMovement = movement.used > 0;
+		const mvEl = this._ce("div", `pm-economy__slot pm-economy__slot--${canSpendMovement ? "available" : "used"}`, row);
+		mvEl.replaceChildren(this._icon("speed"), document.createTextNode(` ${movement.remaining}/${movement.allowance} ft.`));
+		const movementLabel = canSpendMovement ? "Use Movement" : hasSpentMovement ? "Restore Movement" : "Movement unavailable";
+		this._makeClickable(mvEl, movementLabel, () => {
+			if (movement.remaining > 0) {
+				this._state.spendMovement?.(movement.remaining, {source: "play-mode:manual"});
+			} else if (movement.used > 0) {
+				this._state.resetMovementEconomy?.();
+			}
 			this._renderActionEconomy();
 		});
 
@@ -1641,8 +1653,11 @@ export class CharacterSheetPlayMode {
 		const reset = this._ce("span", "pm-economy__reset", row);
 		this._setIconLabel(reset, "refresh", " Reset turn");
 		this._makeClickable(reset, "Reset turn (restore all actions)", () => {
-			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
-			this._state.resetActionEconomy?.();
+			if (this._state.resetTurnEconomy) this._state.resetTurnEconomy();
+			else {
+				this._state.resetActionEconomy?.();
+				this._state.resetMovementEconomy?.();
+			}
 			this._renderActionEconomy();
 			this._logActivity("turn", "New turn started");
 		});

@@ -5503,10 +5503,10 @@ class CharacterSheetState {
 			// features which explicitly opt into this collection can persist target state
 			// without creating a second source of truth outside CharacterSheetState.
 			targetEffects: [], // [{id, source, targetName, ...effect fields}]
-			// Per-turn accounting for chain-only movement. This is deliberately kept in
-			// CharacterSheetState so Combat, Play Mode, and headless callers share one
-			// source of truth for the bonus-action doubling rule.
-			chainedMovementUsage: {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false},
+			// State-owned per-turn movement accounting. Spend receipts reduce every
+			// movement pool; allowance receipts can be global or scoped to one mechanic.
+			// The live allowance is always derived from current walking Speed.
+			movementEconomyUsage: {round: null, receipts: []},
 			// Shared transient action-economy usage for surfaces which do not own the
 			// Combat module (notably Play Mode). Combat keeps its richer attack tracker,
 			// while bonus-action consumers use this common gate.
@@ -5555,6 +5555,11 @@ class CharacterSheetState {
 			...this._getDefaultState(),
 			...MiscUtil.copyFast(data),
 		};
+		const hadMovementEconomyUsage = !!data
+			&& typeof data === "object"
+			&& !Array.isArray(data)
+			&& Object.hasOwn(data, "movementEconomyUsage");
+		const legacyChainedMovementUsage = data?.chainedMovementUsage;
 		this._migrateInventoryItemMetadata();
 
 		this._data.xp = Math.max(0, Math.floor(Number(this._data.xp) || 0));
@@ -5661,16 +5666,16 @@ class CharacterSheetState {
 			.filter(it => it && typeof it === "object")
 			.map(it => this._normalizeTargetEffect(it))
 			.filter(Boolean);
-		if (!this._data.chainedMovementUsage || typeof this._data.chainedMovementUsage !== "object") {
-			this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
-		} else {
-			this._data.chainedMovementUsage = {
-				round: this._data.chainedMovementUsage.round == null ? null : Number(this._data.chainedMovementUsage.round),
-				movementUsed: Math.max(0, Number(this._data.chainedMovementUsage.movementUsed) || 0),
-				bonusActionUsed: !!this._data.chainedMovementUsage.bonusActionUsed,
-				doubled: !!this._data.chainedMovementUsage.doubled,
-			};
+		const movementUsage = hadMovementEconomyUsage
+			? this._normalizeMovementEconomyUsage(this._data.movementEconomyUsage)
+			: this._migrateLegacyChainedMovementUsage(legacyChainedMovementUsage);
+		if (movementUsage) this._data.movementEconomyUsage = movementUsage;
+		else {
+			// eslint-disable-next-line no-console
+			console.warn("[CharSheet State] Reset malformed movement economy usage.");
+			this._data.movementEconomyUsage = this._getDefaultState().movementEconomyUsage;
 		}
+		delete this._data.chainedMovementUsage;
 		if (!this._data.actionEconomyUsage || typeof this._data.actionEconomyUsage !== "object") {
 			this._data.actionEconomyUsage = {action: false, bonus: false, reaction: false};
 		} else {
@@ -5681,6 +5686,13 @@ class CharacterSheetState {
 			};
 		}
 		if (!hadActionEconomyUsage && legacyBonusActionAvailable === false) this._data.actionEconomyUsage.bonus = true;
+		if (
+			!hadMovementEconomyUsage
+			&& movementUsage
+			&& (legacyChainedMovementUsage?.bonusActionUsed || legacyChainedMovementUsage?.doubled)
+		) {
+			this._data.actionEconomyUsage.bonus = true;
+		}
 		if (!this._data.resourceTurnUsage || typeof this._data.resourceTurnUsage !== "object" || Array.isArray(this._data.resourceTurnUsage)) {
 			this._data.resourceTurnUsage = {};
 		}
@@ -67199,8 +67211,7 @@ class CharacterSheetState {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
-		this._data.chainedMovementUsage = {round: 1, movementUsed: 0, bonusActionUsed: false, doubled: false};
-		this.resetActionEconomy();
+		this.resetTurnEconomy({round: 1});
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -67237,8 +67248,7 @@ class CharacterSheetState {
 		this._data.hybridBloodlustTurnStartCheck = null;
 		this._data.resourceTurnUsage = {};
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
-		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
-		this.resetActionEconomy();
+		this.resetTurnEconomy({round: null});
 
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
@@ -67263,8 +67273,7 @@ class CharacterSheetState {
 
 		this._data.combatRound++;
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
-		this._data.chainedMovementUsage = {round: this._data.combatRound, movementUsed: 0, bonusActionUsed: false, doubled: false};
-		this.resetActionEconomy();
+		this.resetTurnEconomy({round: this._data.combatRound});
 		this._data.sanguineMasteryLastRerollRound = null;
 		this.applyHybridRegenerationAtTurnStart();
 		this.applyTurnStartEffects();
@@ -68909,18 +68918,229 @@ class CharacterSheetState {
 		return keeper.id;
 	}
 
-	getChainedMovementState () {
-		const usage = this._data.chainedMovementUsage || {};
-		const speed = Number(this.getSpeed?.("walk")) || 30;
-		const doubled = !!usage.doubled;
+	_normalizeMovementEconomyScope (scope) {
+		if (scope == null || scope === "") return null;
+		if (typeof scope !== "string" || !scope.trim()) return undefined;
+		return scope.trim().toLowerCase();
+	}
+
+	_normalizeMovementEconomyUsage (usage) {
+		if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
+		const round = usage.round == null ? null : Number(usage.round);
+		if (round != null && (!Number.isFinite(round) || round < 0)) return null;
+		if (!Array.isArray(usage.receipts)) return null;
+
+		const ids = new Set();
+		const receipts = [];
+		for (const raw of usage.receipts) {
+			if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+			const id = typeof raw.id === "string" ? raw.id.trim() : "";
+			const source = typeof raw.source === "string" ? raw.source.trim() : "";
+			const kind = raw.kind;
+			const scope = this._normalizeMovementEconomyScope(raw.scope);
+			if (!id || ids.has(id) || !source || !["spend", "allowance"].includes(kind) || scope === undefined) return null;
+
+			const receipt = {id, kind, source, scope};
+			if (kind === "spend") {
+				const amount = Number(raw.amount);
+				if (!Number.isFinite(amount) || amount <= 0) return null;
+				receipt.amount = amount;
+			} else {
+				const speedMultiplier = Number(raw.speedMultiplier);
+				if (!Number.isFinite(speedMultiplier) || speedMultiplier <= 0) return null;
+				receipt.speedMultiplier = speedMultiplier;
+			}
+			if (raw.createdAt != null) {
+				const createdAt = Number(raw.createdAt);
+				if (!Number.isFinite(createdAt) || createdAt < 0) return null;
+				receipt.createdAt = createdAt;
+			}
+			if (raw.metadata != null) {
+				if (typeof raw.metadata !== "object" || Array.isArray(raw.metadata)) return null;
+				receipt.metadata = MiscUtil.copyFast(raw.metadata);
+			}
+			ids.add(id);
+			receipts.push(receipt);
+		}
+		return {round, receipts};
+	}
+
+	_migrateLegacyChainedMovementUsage (legacy) {
+		if (legacy == null) return this._getDefaultState().movementEconomyUsage;
+		if (typeof legacy !== "object" || Array.isArray(legacy)) return null;
+
+		const round = legacy.round == null ? null : Number(legacy.round);
+		const movementUsed = legacy.movementUsed == null ? 0 : Number(legacy.movementUsed);
+		if (
+			(round != null && (!Number.isFinite(round) || round < 0))
+			|| !Number.isFinite(movementUsed)
+			|| movementUsed < 0
+			|| (legacy.bonusActionUsed != null && typeof legacy.bonusActionUsed !== "boolean")
+			|| (legacy.doubled != null && typeof legacy.doubled !== "boolean")
+		) return null;
+
+		const receipts = [];
+		if (movementUsed > 0) {
+			receipts.push({
+				id: "movement:legacy-chained-spend",
+				kind: "spend",
+				source: "chained-fury",
+				scope: "chained-fury",
+				amount: movementUsed,
+			});
+		}
+		if (legacy.doubled) {
+			receipts.push({
+				id: "movement:legacy-chained-double",
+				kind: "allowance",
+				source: "chained-fury:double-movement",
+				scope: "chained-fury",
+				speedMultiplier: 1,
+			});
+		}
+		return {round, receipts};
+	}
+
+	_syncMovementEconomyRound () {
+		if (!this._data.inCombat) return;
+		const round = Math.max(0, Number(this._data.combatRound) || 0);
+		if (this._data.movementEconomyUsage?.round === round) return;
+		this.resetMovementEconomy({round});
+	}
+
+	getMovementEconomyState ({scope = null} = {}) {
+		this._syncMovementEconomyRound();
+		const normalizedScope = this._normalizeMovementEconomyScope(scope);
+		if (normalizedScope === undefined) return null;
+		const usage = this._data.movementEconomyUsage || this._getDefaultState().movementEconomyUsage;
+		const speedRaw = Number(this.getSpeed?.("walk"));
+		const speed = Number.isFinite(speedRaw) ? Math.max(0, speedRaw) : 0;
+		const receipts = usage.receipts || [];
+		const used = receipts
+			.filter(receipt => receipt.kind === "spend")
+			.reduce((total, receipt) => total + receipt.amount, 0);
+		const allowanceMultiplier = receipts
+			.filter(receipt => receipt.kind === "allowance"
+				&& (receipt.scope == null || receipt.scope === normalizedScope))
+			.reduce((total, receipt) => total + receipt.speedMultiplier, 1);
+		const allowance = Math.max(0, speed * allowanceMultiplier);
 		return {
 			round: usage.round ?? null,
+			scope: normalizedScope,
 			speed,
-			allowance: speed * (doubled ? 2 : 1),
-			used: Math.max(0, Number(usage.movementUsed) || 0),
-			remaining: Math.max(0, speed * (doubled ? 2 : 1) - (Number(usage.movementUsed) || 0)),
+			allowance,
+			total: allowance,
+			used,
+			remaining: Math.max(0, allowance - used),
+			receipts: MiscUtil.copyFast(receipts),
+		};
+	}
+
+	spendMovement (amount, {source, scope = null, receiptId = null, metadata = null} = {}) {
+		const movementAmount = Number(amount);
+		const normalizedSource = typeof source === "string" ? source.trim() : "";
+		const normalizedScope = this._normalizeMovementEconomyScope(scope);
+		if (!Number.isFinite(movementAmount) || movementAmount <= 0 || !normalizedSource || normalizedScope === undefined) {
+			return {ok: false, reason: "invalid-movement-spend"};
+		}
+		if (metadata != null && (typeof metadata !== "object" || Array.isArray(metadata))) {
+			return {ok: false, reason: "invalid-movement-spend"};
+		}
+		const movement = this.getMovementEconomyState({scope: normalizedScope});
+		if (movementAmount > movement.remaining) {
+			return {
+				ok: false,
+				reason: "insufficient-movement",
+				requested: movementAmount,
+				available: movement.remaining,
+				allowance: movement.allowance,
+			};
+		}
+
+		const id = typeof receiptId === "string" && receiptId.trim()
+			? receiptId.trim()
+			: `movement:${CryptUtil.uid()}`;
+		if (this._data.movementEconomyUsage.receipts.some(receipt => receipt.id === id)) {
+			return {ok: false, reason: "duplicate-movement-receipt"};
+		}
+		const receipt = {
+			id,
+			kind: "spend",
+			source: normalizedSource,
+			scope: normalizedScope,
+			amount: movementAmount,
+			createdAt: Date.now(),
+			...(metadata ? {metadata: MiscUtil.copyFast(metadata)} : {}),
+		};
+		this._data.movementEconomyUsage.receipts.push(receipt);
+		return {ok: true, receipt: MiscUtil.copyFast(receipt), movement: this.getMovementEconomyState({scope: normalizedScope})};
+	}
+
+	grantMovementAllowance ({source, scope = null, speedMultiplier = 1, receiptId = null, metadata = null} = {}) {
+		const normalizedSource = typeof source === "string" ? source.trim() : "";
+		const normalizedScope = this._normalizeMovementEconomyScope(scope);
+		const multiplier = Number(speedMultiplier);
+		if (!normalizedSource || normalizedScope === undefined || !Number.isFinite(multiplier) || multiplier <= 0) {
+			return {ok: false, reason: "invalid-movement-allowance"};
+		}
+		if (metadata != null && (typeof metadata !== "object" || Array.isArray(metadata))) {
+			return {ok: false, reason: "invalid-movement-allowance"};
+		}
+		this._syncMovementEconomyRound();
+		const id = typeof receiptId === "string" && receiptId.trim()
+			? receiptId.trim()
+			: `movement:${CryptUtil.uid()}`;
+		if (this._data.movementEconomyUsage.receipts.some(receipt => receipt.id === id)) {
+			return {ok: false, reason: "duplicate-movement-receipt"};
+		}
+		const receipt = {
+			id,
+			kind: "allowance",
+			source: normalizedSource,
+			scope: normalizedScope,
+			speedMultiplier: multiplier,
+			createdAt: Date.now(),
+			...(metadata ? {metadata: MiscUtil.copyFast(metadata)} : {}),
+		};
+		this._data.movementEconomyUsage.receipts.push(receipt);
+		return {ok: true, receipt: MiscUtil.copyFast(receipt), movement: this.getMovementEconomyState({scope: normalizedScope})};
+	}
+
+	refundMovement (receiptId) {
+		const id = typeof receiptId === "string" ? receiptId.trim() : "";
+		if (!id) return {ok: false, reason: "invalid-movement-receipt"};
+		this._syncMovementEconomyRound();
+		const ix = this._data.movementEconomyUsage.receipts.findIndex(receipt => receipt.id === id);
+		if (ix < 0) return {ok: false, reason: "movement-receipt-not-found"};
+		const [receipt] = this._data.movementEconomyUsage.receipts.splice(ix, 1);
+		return {ok: true, receipt: MiscUtil.copyFast(receipt), movement: this.getMovementEconomyState({scope: receipt.scope})};
+	}
+
+	rollbackMovement (receiptId) {
+		return this.refundMovement(receiptId);
+	}
+
+	resetMovementEconomy ({round = this._data.inCombat ? Math.max(0, Number(this._data.combatRound) || 0) : null} = {}) {
+		this._data.movementEconomyUsage = {round, receipts: []};
+		return this.getMovementEconomyState();
+	}
+
+	resetTurnEconomy ({round = this._data.inCombat ? Math.max(0, Number(this._data.combatRound) || 0) : null} = {}) {
+		this.resetActionEconomy();
+		this.resetMovementEconomy({round});
+	}
+
+	getChainedMovementState () {
+		const movement = this.getMovementEconomyState({scope: "chained-fury"});
+		const doubled = movement.receipts.some(receipt =>
+			receipt.kind === "allowance"
+			&& receipt.scope === "chained-fury"
+			&& receipt.source === "chained-fury:double-movement",
+		);
+		return {
+			...movement,
 			doubled,
-			bonusActionUsed: !!usage.bonusActionUsed,
+			bonusActionUsed: !this.isActionTypeAvailable("bonus"),
 		};
 	}
 
@@ -69202,28 +69422,66 @@ class CharacterSheetState {
 		const canMoveFullSpeed = !!this.getFeatureCalculations()?.chainFreeMovement;
 		const dragMultiplier = canMoveFullSpeed || grapplerRank - targetRank >= 2 ? 1 : 2;
 		const movementCost = delta * dragMultiplier;
-		const round = Number(this._data.combatRound) || 0;
-		const priorUsage = this._data.chainedMovementUsage || {};
-		const usage = priorUsage.round === round
-			? {...priorUsage}
-			: {round, movementUsed: 0, bonusActionUsed: !this.isActionTypeAvailable("bonus"), doubled: false};
-		const speed = Number(this.getSpeed?.("walk")) || 30;
 		const doubleMovement = !!options.doubleMovement;
-		const isNewRound = priorUsage.round !== round;
-		if (doubleMovement && (usage.bonusActionUsed || !this.isActionTypeAvailable("bonus"))) return {ok: false, reason: "bonus-action-used"};
-		const doubled = usage.doubled || doubleMovement;
-		const allowance = speed * (doubled ? 2 : 1);
-		const available = allowance - (Number(usage.movementUsed) || 0);
-		if (movementCost > available) return {ok: false, reason: "movement-exceeded", speed, movementCost, available, allowance};
+		const movement = this.getMovementEconomyState({scope: "chained-fury"});
+		const hasDoubleMovement = movement.receipts.some(receipt =>
+			receipt.kind === "allowance"
+			&& receipt.scope === "chained-fury"
+			&& receipt.source === "chained-fury:double-movement",
+		);
+		if (doubleMovement && (hasDoubleMovement || !this.isActionTypeAvailable("bonus"))) {
+			return {ok: false, reason: "bonus-action-used"};
+		}
+		const available = movement.remaining + (doubleMovement ? movement.speed : 0);
+		const allowance = movement.allowance + (doubleMovement ? movement.speed : 0);
+		if (movementCost > available) {
+			return {ok: false, reason: "movement-exceeded", speed: movement.speed, movementCost, available, allowance};
+		}
+
+		let allowanceReceipt = null;
 		if (doubleMovement) {
 			// Consume the shared bonus action only after every movement guard has
 			// passed. This keeps a rejected request fully transactional.
 			if (!this.consumeActionType("bonus")) return {ok: false, reason: "bonus-action-used"};
+			const grant = this.grantMovementAllowance({
+				source: "chained-fury:double-movement",
+				scope: "chained-fury",
+				speedMultiplier: 1,
+				metadata: {targetId: id},
+			});
+			if (!grant.ok) {
+				this.restoreActionType("bonus");
+				return {ok: false, reason: grant.reason};
+			}
+			allowanceReceipt = grant.receipt;
 		}
-		usage.doubled = doubled;
-		usage.movementUsed = (Number(usage.movementUsed) || 0) + movementCost;
-		usage.bonusActionUsed = !!usage.bonusActionUsed || doubleMovement;
-		this._data.chainedMovementUsage = usage;
+		let spend = null;
+		if (movementCost > 0) {
+			spend = this.spendMovement(movementCost, {
+				source: "chained-fury:target-move",
+				scope: "chained-fury",
+				metadata: {
+					targetId: id,
+					fromDistance: previousDistance,
+					toDistance: finalDistance,
+					dragMultiplier,
+				},
+			});
+			if (!spend.ok) {
+				if (allowanceReceipt) {
+					this.rollbackMovement(allowanceReceipt.id);
+					this.restoreActionType("bonus");
+				}
+				return {
+					ok: false,
+					reason: spend.reason === "insufficient-movement" ? "movement-exceeded" : spend.reason,
+					speed: movement.speed,
+					movementCost,
+					available: spend.available,
+					allowance: spend.allowance,
+				};
+			}
+		}
 		target.distance = Number(distance);
 		target.declaredDistance = Number(distance);
 		target.movementCost = movementCost;
@@ -69236,6 +69494,7 @@ class CharacterSheetState {
 			dragMultiplier,
 			bonusActionUsed: doubleMovement,
 			movement: this.getChainedMovementState(),
+			movementReceipt: spend?.receipt || null,
 		};
 	}
 
@@ -72773,8 +73032,7 @@ class CharacterSheetState {
 		// Clear active states that end on rest
 		this.clearStatesOnRest("short");
 		this.clearChainedFuryTargets();
-		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
-		this.resetActionEconomy();
+		this.resetTurnEconomy({round: null});
 
 		// Recover short rest resources (includes Ki/Focus Points)
 		this.recoverResources("short");
@@ -72809,7 +73067,7 @@ class CharacterSheetState {
 		// Clear active states that end on rest
 		this.clearStatesOnRest("long");
 		this.clearChainedFuryTargets();
-		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		this.resetMovementEconomy({round: null});
 
 		// Recover all HP
 		this._data.hp.current = this.getMaxHp();

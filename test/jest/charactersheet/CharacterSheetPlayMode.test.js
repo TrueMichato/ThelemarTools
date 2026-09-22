@@ -274,12 +274,27 @@ describe("CharacterSheetPlayMode", () => {
 				},
 			};
 			const economy = {action: false, bonus: false, reaction: false};
+			let movementUsed = 0;
 			const pm = new CharacterSheetPlayMode({
 				getState: () => ({
 					getActionEconomyState: () => ({...economy}),
 					isActionTypeAvailable: type => economy[type],
 					restoreActionType: type => { economy[type] = true; return true; },
-					getSpeed: () => 30,
+					getMovementEconomyState: () => ({
+						speed: 30,
+						allowance: 30,
+						used: movementUsed,
+						remaining: 30 - movementUsed,
+						receipts: [],
+					}),
+					spendMovement: amount => { movementUsed += amount; return {ok: true}; },
+					resetMovementEconomy: () => { movementUsed = 0; },
+					resetTurnEconomy: () => {
+						economy.action = true;
+						economy.bonus = true;
+						economy.reaction = true;
+						movementUsed = 0;
+					},
 				}),
 			});
 
@@ -337,6 +352,18 @@ describe("CharacterSheetPlayMode", () => {
 					"Use Movement",
 					"Reset turn (restore all actions)",
 				]);
+				const movement = clickable.slice(-5)[3];
+				expect(movement.children[1]).toBe(" 30/30 ft.");
+				movement._handler();
+
+				const usedMovement = clickable.slice(-5)[3];
+				expect(usedMovement._label).toBe("Restore Movement");
+				expect(usedMovement.children[1]).toBe(" 0/30 ft.");
+				usedMovement._handler();
+
+				const restoredMovement = clickable.slice(-5)[3];
+				expect(restoredMovement._label).toBe("Use Movement");
+				expect(restoredMovement.children[1]).toBe(" 30/30 ft.");
 			} finally {
 				if (previousDocument === undefined) delete globalThis.document;
 				else globalThis.document = previousDocument;

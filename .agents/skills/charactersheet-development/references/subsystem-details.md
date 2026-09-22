@@ -406,7 +406,29 @@ riders remain roll-time concerns and must not appear in the standing formula.
 
 ### Action Economy Tracking
 
-`_turnActionUsage`: tracks `{action, bonus, reaction}` booleans per turn. Reset on turn advance.
+`CharacterSheetState.actionEconomyUsage` tracks `{action, bonus, reaction}`
+consumption for state-owned callers such as Play Mode and feature interactions.
+Use `consumeActionType`, `restoreActionType`, and `resetActionEconomy`; combat's
+attack-count tracker remains separate.
+
+`movementEconomyUsage` is the parallel persisted movement ledger. It stores
+source-tagged atomic receipts rather than a frozen allowance:
+
+- `spendMovement(amount, {source, scope?})` validates against live walking Speed
+  and returns a receipt which can be refunded with `refundMovement` or
+  `rollbackMovement`.
+- `getMovementEconomyState({scope?})` recalculates total/remaining movement from
+  `getSpeed("walk")` on every read, so conditions and temporary Speed modifiers
+  immediately change the allowance without rewriting receipts.
+- `grantMovementAllowance` adds a Speed-relative allowance receipt. A scoped
+  grant is visible only to that mechanic; Chained Fury uses scope
+  `"chained-fury"` so its bonus-action doubling remains chain-only.
+- `resetTurnEconomy` clears action and movement usage together. Combat start,
+  round advance, and Play Mode's Reset Turn route through this shared reset.
+
+Legacy `chainedMovementUsage` saves migrate to generic spend/allowance receipts
+on load. Malformed ledgers are rejected as a unit and reset rather than
+partially salvaged.
 
 ### Critical Hit Range Scoping
 
