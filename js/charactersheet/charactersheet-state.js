@@ -10612,6 +10612,9 @@ class CharacterSheetState {
 			existing.level = classData.level;
 			// Only update subclass if one is provided, preserve existing subclass otherwise
 			if (classData.subclass !== undefined) {
+				const previousOwner = this._getSubclassSpellGrantOwnerForClass(existing);
+				const nextOwner = this._getSubclassSpellGrantOwnerForClass({...existing, subclass: classData.subclass});
+				if (previousOwner?.key && previousOwner.key !== nextOwner?.key) this.removeSubclassSpells(previousOwner);
 				existing.subclass = classData.subclass;
 			}
 			if (classData.subclassChoice !== undefined) {
@@ -21263,6 +21266,10 @@ class CharacterSheetState {
 
 		const isDivineSoul = CharacterSheetClassUtils.isDivineSoulSubclass(subclassData);
 		const hasNamedChoice = CharacterSheetClassUtils.hasNamedSubclassChoice(subclassData);
+		const isEfaAlchemist = `${cls.name || ""}`.toLowerCase() === "artificer"
+			&& `${cls.source || ""}`.toUpperCase() === "EFA"
+			&& `${subclassData.name || subclassData.shortName || ""}`.toLowerCase() === "alchemist"
+			&& `${subclassData.source || ""}`.toUpperCase() === "EFA";
 		// The Divine Soul affinity spell is swappable: resolve the *effective*
 		// grant (override || alignment default) and tag it so the spells tab can
 		// offer a Swap control instead of the usual "Locked" button.
@@ -21322,7 +21329,10 @@ class CharacterSheetState {
 
 			// Process "innate" entries (level-keyed, granted as innate spells/cantrips)
 			// e.g., "innate": { "0": ["light#c"] } — key "0" means always available, "#c" marks cantrips
-			if (spellBlock.innate) {
+			// EFA Alchemist's two innate spells have source-owned use counters and exact
+			// focus requirements. They are not prepared spells; their dedicated grant
+			// lifecycle is handled separately from this always-prepared projection.
+			if (spellBlock.innate && !isEfaAlchemist) {
 				for (const [levelKey, spells] of Object.entries(spellBlock.innate)) {
 					const reqLevel = parseInt(levelKey);
 					// Key "0" means always available (no level requirement)

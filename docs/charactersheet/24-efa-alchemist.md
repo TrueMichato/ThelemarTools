@@ -29,7 +29,6 @@ state must be saved, and what the player-facing controls must do.
 > coexists with independent grants. Alchemical Eruption and cast execution are
 > not part of this milestone.
 
-=======
 ## 1. Identity comes before feature names
 
 The word "Alchemist" is not enough to identify the rules. The data contains
