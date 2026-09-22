@@ -52,6 +52,29 @@ const MULTI_ROLL_SPELL = {
 	damageInflict: ["acid", "fire"],
 };
 
+const RAY_OF_SICKNESS = {
+	name: "Ray of Sickness",
+	source: "XPHB",
+	level: 1,
+	school: "N",
+	time: [{number: 1, unit: "action"}],
+	range: {type: "point", distance: {type: "feet", amount: 60}},
+	components: {v: true, s: true},
+	duration: [{type: "instant"}],
+	entries: [
+		"You shoot a greenish ray at a creature within range. Make a ranged spell attack against the target. On a hit, the target takes {@damage 2d8} Poison damage and has the {@condition Poisoned|XPHB} condition until the end of your next turn.",
+	],
+	entriesHigherLevel: [{
+		type: "entries",
+		name: "Using a Higher-Level Spell Slot",
+		entries: ["The damage increases by {@scaledamage 2d8|1-9|1d8} for each spell slot level above 1."],
+	}],
+	damageInflict: ["poison"],
+	conditionInflict: ["poisoned"],
+	spellAttack: ["R"],
+	areaTags: ["ST"],
+};
+
 function addTool (state, {
 	id = "supplies",
 	name = "Alchemist's Supplies",
@@ -202,24 +225,43 @@ describe("EFA Alchemical Savant committed cast roll modifier", () => {
 		expect(receipt.cast.rolls.filter(roll => roll.alchemicalSavant)).toHaveLength(1);
 	});
 
-	it("keeps damage evidence for a damaging spell that can inflict a condition", async () => {
-		const spellData = {
-			...damageSpell("poison", {name: "Ray of Sickness"}),
-			conditionInflict: ["poisoned"],
-		};
-		const {receipt} = await castSpell({spellData});
+	it("keeps canonical Ray of Sickness on the enemy-damage path and publishes its live roll evidence", async () => {
+		const effects = CharacterSheetState.parseSpellEffects(RAY_OF_SICKNESS);
+		const targetInfo = CharacterSheetState.getValidTargets(RAY_OF_SICKNESS);
 
+		expect(effects.conditions).toContain("poisoned");
+		expect(CharacterSheetSpells.resolveSelfTargetingMode(targetInfo, effects)).toBe("none");
+
+		const {receipt} = await castSpell({spellData: RAY_OF_SICKNESS});
+
+		expect(receipt).toMatchObject({
+			committed: true,
+			castingClassUid: "Artificer|EFA",
+			castingSubclassUid: "Alchemist|Artificer|EFA|EFA",
+			focusItemUid: "Alchemist's Supplies|XPHB",
+			damageEvidence: {
+				damage: [{damageType: "poison", amount: 4}],
+			},
+			alchemicalSavant: {
+				kind: "damage",
+				damageType: "poison",
+				originalFormula: "2d8",
+				originalTotal: 4,
+				finalTotal: 7,
+			},
+		});
 		expect(receipt.cast.rolls).toEqual([
 			expect.objectContaining({
 				kind: "damage",
 				damageType: "poison",
-				alchemicalSavant: expect.objectContaining({bonus: 3}),
+				originalFormula: "2d8",
+				total: 7,
+				alchemicalSavant: expect.objectContaining({
+					consumed: true,
+					finalTotal: 7,
+				}),
 			}),
 		]);
-		expect(receipt.damageEvidence).toMatchObject({
-			resolution: "unavailable",
-			damage: [expect.objectContaining({damageType: "poison"})],
-		});
 	});
 
 	it("does not apply to necrotic damage", async () => {
