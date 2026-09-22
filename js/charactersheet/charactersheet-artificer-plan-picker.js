@@ -22,6 +22,8 @@ class CharacterSheetArtificerPlanPicker {
 			className: level.className,
 			classSource: level.classSource,
 			classLevel: level.classLevel,
+			subclassShortName: level.subclassShortName,
+			subclassSource: level.subclassSource,
 			extensions,
 		}).map(opportunity => ({
 			...opportunity,
@@ -249,7 +251,11 @@ class CharacterSheetArtificerPlanPicker {
 					classLevel: opportunity.classLevel,
 					constraints: opportunity.constraints,
 				}).filter(candidate =>
-					(kind === "all" || candidate.planKind === kind)
+					CharacterSheetArtificerPlans.matchesCandidateConstraints({
+						candidate,
+						constraints: targetSlot?.constraints || {},
+					})
+					&& (kind === "all" || candidate.planKind === kind)
 					&& (!query || [
 						candidate.name,
 						candidate.displayName,

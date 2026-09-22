@@ -8,6 +8,7 @@ import "../../../js/charactersheet/charactersheet-combat.js";
 import "../../../js/charactersheet/charactersheet-spells.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const Plans = globalThis.CharacterSheetArtificerPlans;
 const CharacterSheetInventory = globalThis.CharacterSheetInventory;
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
 const CharacterSheetSpells = globalThis.CharacterSheetSpells;
@@ -602,6 +603,33 @@ describe("EFA Armorer Arcane Armor inventory powers and while-worn benefits", ()
 		};
 
 		const requirement = state.getSpellCastFocusRequirement(artificerSpell);
+		const replicatedArmor = state.createGeneratedFeatureItem({
+			item: {
+				...getBaseItem("Plate Armor"),
+				name: "Replicated Plate",
+				_isCustom: true,
+			},
+			owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+			catalog: {
+				plan: {
+					slotId: Plans.getExtensionSlotId(Plans.EFA_ARMORER_ARMOR_REPLICATION_EXTENSION_ID),
+					selection: {
+						name: "+1 Armor",
+						source: "XDMG",
+						itemUid: "+1 Armor|XDMG",
+						planUid: "+1 Armor|XDMG",
+						catalogEntryId: "fixed|+1 armor|xdmg",
+					},
+				},
+				resolvedItem: {
+					itemUid: "Replicated Plate|XPHB",
+					name: "Replicated Plate",
+					source: "XPHB",
+				},
+			},
+			equipped: false,
+		});
+		expect(replicatedArmor.ok).toBe(true);
 		expect(requirement).toMatchObject({
 			classUid: "Artificer|EFA",
 			castingClass: {name: "Artificer", source: "EFA"},
@@ -609,6 +637,7 @@ describe("EFA Armorer Arcane Armor inventory powers and while-worn benefits", ()
 		});
 		const eligibleFocusRows = state.getEligibleSpellCastFocusInventoryRows(requirement);
 		expect(eligibleFocusRows.map(row => row.id)).toContain(armor.id);
+		expect(eligibleFocusRows.map(row => row.id)).not.toContain(replicatedArmor.itemId);
 		const arcaneArmorFocusRow = eligibleFocusRows.find(row => row.id === armor.id);
 		const focusReference = state.getSpellCastFocusReference(arcaneArmorFocusRow);
 		expect(focusReference).toEqual({

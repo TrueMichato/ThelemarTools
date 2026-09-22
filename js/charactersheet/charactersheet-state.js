@@ -4,6 +4,7 @@
  */
 
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {CharacterSheetArtificerPlans} from "./charactersheet-artificer-plans.js";
 import "./charactersheet-companion-rules.js";
 import {CharacterSheetGamblerRules, GAMBLER_GAMBLING_TABLE} from "./charactersheet-gambler.js";
 import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
@@ -11544,6 +11545,7 @@ class CharacterSheetState {
 				kind: decision.meta?.kind,
 				opportunityId: decision.meta?.opportunityId,
 				slotId: decision.meta?.slotId,
+				constraints: decision.meta?.constraints || decision.constraints || {},
 			})),
 		});
 	}
@@ -11557,6 +11559,7 @@ class CharacterSheetState {
 			slotId: slot.slotId,
 			acquisitionLevel: slot.acquisitionLevel,
 			selection: CharacterSheetProgression._copy(slot.selection),
+			constraints: CharacterSheetProgression._copy(slot.constraints || {}),
 			lineage: CharacterSheetProgression._copy(slot.lineage || []),
 		}));
 	}
@@ -37082,12 +37085,6 @@ class CharacterSheetState {
 	static GENERATED_FEATURE_ITEM_PROVENANCE_VERSION = 1;
 	static GENERATED_FEATURE_ITEM_LIFECYCLE_VERSION = 1;
 	static EFA_REPLICATE_MAGIC_ITEM_FEATURE_UID = "Replicate Magic Item|Artificer|EFA|2|EFA";
-	static EFA_REPLICATE_MAGIC_ITEM_OWNER = Object.freeze({
-		featureUid: "Replicate Magic Item|Artificer|EFA|2",
-		classUid: "Artificer|EFA",
-		subclassUid: null,
-		featureSource: "EFA",
-	});
 
 	static _normalizeGeneratedFeatureItemOwner (
 		owner,
@@ -37629,17 +37626,7 @@ class CharacterSheetState {
 	}
 
 	static _getGeneratedFeatureItemKind (item) {
-		const type = String(item?.type || item?.typeCode || "").trim().toUpperCase();
-		if (item?.weapon || ["M", "R", "AF"].includes(type)) return "weapon";
-		if (["LA", "MA", "HA"].includes(type)) return "armor";
-		if (type === "S") return "shield";
-		if (type === "WD") return "wand";
-		if (type === "ST") return "staff";
-		if (type === "RD") return "rod";
-		if (type === "RG") return "ring";
-		if (type === "P") return "potion";
-		if (type === "SC") return "scroll";
-		return "wondrous";
+		return CharacterSheetItemUtils.getCanonicalItemKinds(item)[0] || "wondrous";
 	}
 
 	_getEfaReplicateMagicItemClassLevel () {
@@ -37647,6 +37634,28 @@ class CharacterSheetState {
 			String(cls?.name || "").toLowerCase() === "artificer"
 			&& String(cls?.source || "").toUpperCase() === "EFA",
 		)?.level) || 0;
+	}
+
+	getEfaArmorerArmorReplicationLifecycleExtensions () {
+		const armorer = this._getEfaArmorerClass();
+		if (!armorer || Number(armorer.level) < 9) return [];
+		return [CharacterSheetState.createGeneratedFeatureItemLifecycleDescriptor({
+			id: "efa-armorer-armor-replication-capacity",
+			owner: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER,
+			capacity: 1,
+			allowedOwners: [CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER],
+			allowedItemKinds: [...CharacterSheetArtificerPlans.EFA_ARMORER_ARMOR_REPLICATION_ITEM_KINDS],
+			categoryPredicate: {
+				itemKinds: [...CharacterSheetArtificerPlans.EFA_ARMORER_ARMOR_REPLICATION_ITEM_KINDS],
+			},
+			generatedPredicate: {
+				featureUid: CharacterSheetState.EFA_REPLICATE_MAGIC_ITEM_OWNER.featureUid,
+			},
+			metadata: {
+				sourceFeatureUid: CharacterSheetArtificerPlans.EFA_ARMORER_ARMOR_REPLICATION_FEATURE_UID,
+				extensionKind: "armor-replication",
+			},
+		})];
 	}
 
 	getEfaReplicateMagicItemLifecycleDescriptors ({extensions = []} = {}) {
@@ -37667,7 +37676,12 @@ class CharacterSheetState {
 				temporary: true,
 			},
 		});
-		const normalizedExtensions = extensions.map(extension => CharacterSheetState.createGeneratedFeatureItemLifecycleDescriptor(extension));
+		const normalizedExtensions = [
+			...this.getEfaArmorerArmorReplicationLifecycleExtensions(),
+			...extensions.map(extension => CharacterSheetState.createGeneratedFeatureItemLifecycleDescriptor(extension)),
+		].filter((descriptor, index, all) =>
+			all.findIndex(other => String(other.id).toLowerCase() === String(descriptor.id).toLowerCase()) === index,
+		);
 		return [base, ...normalizedExtensions];
 	}
 
@@ -37744,6 +37758,31 @@ class CharacterSheetState {
 		};
 	}
 
+	_getGeneratedFeatureItemEvictionsToFit ({owner, rows, descriptors, canEvict = () => true} = {}) {
+		const projectedRows = [...(rows || [])];
+		const evicted = [];
+		while (true) {
+			const snapshot = this.getGeneratedFeatureItemCapacitySnapshot({owner, rows: projectedRows, descriptors});
+			if (snapshot.fits) return {fits: true, rows: projectedRows, evicted};
+			const deficit = projectedRows.length - snapshot.capacity;
+			const candidates = projectedRows
+				.filter(canEvict)
+				.sort((a, b) => {
+					const aOrder = Number(a.item?._generatedItemProvenance?.creation?.order) || Number.MAX_SAFE_INTEGER;
+					const bOrder = Number(b.item?._generatedItemProvenance?.creation?.order) || Number.MAX_SAFE_INTEGER;
+					return aOrder - bOrder;
+				});
+			const candidate = candidates.find(row => {
+				const remaining = projectedRows.filter(it => it !== row);
+				const next = this.getGeneratedFeatureItemCapacitySnapshot({owner, rows: remaining, descriptors});
+				return remaining.length - next.capacity < deficit;
+			});
+			if (!candidate) return {fits: false, rows: projectedRows, evicted};
+			evicted.push(candidate);
+			projectedRows.splice(projectedRows.indexOf(candidate), 1);
+		}
+	}
+
 	_resolveEfaReplicateMagicItemPlanOptions (plan) {
 		const selection = plan?.selection;
 		if (!selection?.name || !selection?.source) {
@@ -37798,10 +37837,11 @@ class CharacterSheetState {
 		};
 	}
 
-	getEfaReplicateMagicItemProductionOptions () {
+	getEfaReplicateMagicItemProductionOptions ({extensions = []} = {}) {
 		const plans = this.getEfaArtificerPlans().map(plan => this._resolveEfaReplicateMagicItemPlanOptions(plan));
 		const classLevel = this._getEfaReplicateMagicItemClassLevel();
-		const maxCreatedItems = CharacterSheetClassUtils.getEfaArtificerCreatedMagicItemsMax(classLevel);
+		const descriptors = this.getEfaReplicateMagicItemLifecycleDescriptors({extensions});
+		const maxCreatedItems = descriptors.reduce((total, descriptor) => total + descriptor.capacity, 0);
 		const tinkersTools = (this._data.inventory || []).find(row =>
 			row.equipped
 			&& String(row.item?.name || "").trim().toLowerCase() === "tinker's tools"
@@ -37823,7 +37863,7 @@ class CharacterSheetState {
 	}
 
 	_resolveEfaReplicateMagicItemRequest (request) {
-		const options = this.getEfaReplicateMagicItemProductionOptions();
+		const options = this.getEfaReplicateMagicItemProductionOptions({extensions: request?.extensions || []});
 		if (!options.available) return {ok: false, code: "replicate-production-unavailable", message: options.unavailableReason};
 		const selections = Array.isArray(request?.selections) ? request.selections : [];
 		if (!selections.length) return {ok: true, code: "replicate-production-skipped", options, resolved: []};
@@ -37914,21 +37954,16 @@ class CharacterSheetState {
 				},
 			})),
 		];
-		const evicted = [];
-		while (!this.getGeneratedFeatureItemCapacitySnapshot({owner, rows: projectedRows, descriptors}).fits) {
-			const oldest = projectedRows
-				.slice()
-				.sort((a, b) => {
-					const aOrder = Number(a.item?._generatedItemProvenance?.creation?.order) || Number.MAX_SAFE_INTEGER;
-					const bOrder = Number(b.item?._generatedItemProvenance?.creation?.order) || Number.MAX_SAFE_INTEGER;
-					return aOrder - bOrder;
-				})[0];
-			if (!oldest || String(oldest.id).startsWith("projected-")) {
-				return {ok: false, code: "replicate-production-capacity-exceeded", message: "The selected items exceed the available created-item capacity."};
-			}
-			evicted.push(oldest);
-			projectedRows.splice(projectedRows.indexOf(oldest), 1);
+		const capacity = this._getGeneratedFeatureItemEvictionsToFit({
+			owner,
+			rows: projectedRows,
+			descriptors,
+			canEvict: row => !String(row.id).startsWith("projected-"),
+		});
+		if (!capacity.fits) {
+			return {ok: false, code: "replicate-production-capacity-exceeded", message: "The selected items exceed the available created-item capacity."};
 		}
+		const evicted = capacity.evicted;
 
 		const snapshot = this.toJson();
 		const created = [];
@@ -38088,11 +38123,19 @@ class CharacterSheetState {
 				lifecycle.state = "active";
 			}
 		}
-		removed.forEach(itemId => this.removeItem(itemId));
+		const removedSet = new Set(removed);
+		const remainingRows = rows.filter(row => !removedSet.has(row.id));
+		const capacity = this._getGeneratedFeatureItemEvictionsToFit({
+			owner,
+			rows: remainingRows,
+			descriptors: this.getEfaReplicateMagicItemLifecycleDescriptors(),
+		});
+		capacity.evicted.forEach(row => removedSet.add(row.id));
+		removedSet.forEach(itemId => this.removeItem(itemId));
 		return {
 			reason,
-			removed,
-			unresolved,
+			removed: [...removedSet],
+			unresolved: unresolved.filter(entry => !removedSet.has(entry.itemId)),
 			management: this.getGeneratedFeatureItemManagementRows(),
 		};
 	}

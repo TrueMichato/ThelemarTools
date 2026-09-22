@@ -142,8 +142,17 @@ Overlapping constrained descriptors are assigned with maximum matching, so
 capacity is independent of descriptor registration order.
 Descriptors declare exact allowed owners, allowed item kinds, optional
 category/generated predicates, lifecycle callback metadata, and extension
-metadata. This is the reusable seam for later Experimental Elixir, Armorer,
-and Reanimator consumers; those consumers are not registered by the base
+metadata. This is the reusable seam for subclass and feature consumers.
+
+EFA Armorer Armor Replication is the first registered subclass consumer. Exact
+`Artificer|EFA` + `Armorer|EFA` at level 9 contributes one descriptor owned by
+`Improved Armorer|Artificer|EFA|Armorer|EFA|9|EFA`. The descriptor adds one
+capacity slot which matches only canonical `armor` or `shield` item kinds. The
+base cap remains unchanged; a fourth non-Armor replica therefore fails capacity
+matching instead of consuming an unconstrained `+1`. Descriptor derivation is
+read-only from the exact class/subclass identity, so downgrade, Respec, source
+loss, save/load, and reconciliation need no persisted Armorer ledger.
+Experimental Elixir and Reanimator consumers are not registered by the base
 Replicate implementation.
 
 Committed M2 plan replacement calls the generic plan-lineage hook; class/source
@@ -568,6 +577,15 @@ exact plan identity; the current target is disabled in the picker and
 `same-plan-replacement` is rejected by model/progression validation. Public EFA
 state projections discard same-type decisions whose base owner is not exact
 `Artificer|EFA`.
+
+Acquire extensions receive stable extension-owned slot IDs. Slot constraints are
+projected with the acquisition and reapplied whenever a later base replacement
+targets that slot. EFA Armorer Armor Replication registers one required level-9
+acquisition constrained by canonical item kinds `armor` and `shield`; both fixed
+and wildcard catalog candidates are classified from item type/variant
+requirements, never display names or wildcard labels. Replacing that slot at a
+later Artificer level therefore remains Armor-only while **Keep Current Plans**
+and same-plan rejection retain the base behavior.
 
 This contract distinguishes a known plan from a replicated item instance.
 Milestone 2 has no item creation, inventory mutation, or expiration behavior;

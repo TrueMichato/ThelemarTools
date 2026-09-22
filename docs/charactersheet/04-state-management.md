@@ -650,8 +650,10 @@ coexist with player-authored effects.
 
 Deferred Armorer work includes Giant Stature activation/resources, Force
 Demolisher push/pull resolution, Thunder Pulse's target rider, Defensive Field,
-Lightning Launcher's once-per-turn extra damage, Improved Arsenal, level 9/15,
-Armor Replication, and E2E coverage.
+Lightning Launcher's once-per-turn extra damage, Improved Arsenal, remaining
+level 9/15 mechanics, and E2E coverage. Level-9 Armor Replication uses the
+shared source-qualified plan-extension and constrained generated-item-capacity
+contracts; it does not add an Armorer-specific persisted ledger.
 
 ### Active States & Conditions
 

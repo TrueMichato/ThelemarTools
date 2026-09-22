@@ -27,6 +27,41 @@ export class CharacterSheetItemUtils {
 		return "gear";
 	}
 
+	/**
+	 * Return the stable rules categories used by generated-item capacity and
+	 * catalog-backed plan constraints. Generic variants derive their category
+	 * from canonical `requires` metadata rather than their editable names.
+	 */
+	static getCanonicalItemKinds (item) {
+		const sourceItem = item?._compositionRaw || item;
+		if (!sourceItem || typeof sourceItem !== "object") return [];
+		const out = new Set();
+		const addType = rawType => {
+			const type = String(rawType || "").split("|")[0].trim().toUpperCase();
+			if (["M", "R", "AF"].includes(type)) out.add("weapon");
+			else if (["LA", "MA", "HA"].includes(type)) out.add("armor");
+			else if (type === "S") out.add("shield");
+			else if (type === "WD") out.add("wand");
+			else if (type === "ST") out.add("staff");
+			else if (type === "RD") out.add("rod");
+			else if (type === "RG") out.add("ring");
+			else if (type === "P") out.add("potion");
+			else if (type === "SC") out.add("scroll");
+		};
+
+		if (this.isWeapon(sourceItem)) out.add("weapon");
+		if (sourceItem.armor) out.add("armor");
+		addType(sourceItem.typeCode || sourceItem.type);
+		for (const requirement of sourceItem.requires || []) {
+			if (requirement?.weapon) out.add("weapon");
+			if (requirement?.armor) out.add("armor");
+			addType(requirement?.type);
+		}
+		if (sourceItem.wondrous) out.add("wondrous");
+		if (!out.size) out.add("wondrous");
+		return [...out];
+	}
+
 	static parseBonus (bonus) {
 		if (bonus == null) return 0;
 		if (typeof bonus === "number") return bonus;

@@ -30,6 +30,8 @@ class CharacterSheetLevelUp {
 				className: classEntry.name,
 				classSource: classEntry.source,
 				classLevel: newLevel,
+				subclassShortName: classEntry.subclass?.shortName || classEntry.subclass?.name || null,
+				subclassSource: classEntry.subclass?.source || null,
 			}],
 		});
 	}

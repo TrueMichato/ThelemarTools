@@ -962,6 +962,8 @@ class CharacterSheetQuickBuild {
 				className: level.className,
 				classSource: level.classSource,
 				classLevel: level.classLevel,
+				subclassShortName: level.subclass?.shortName || level.subclass?.name || null,
+				subclassSource: level.subclass?.source || null,
 			})),
 		});
 	}

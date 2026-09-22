@@ -2813,6 +2813,8 @@ class CharacterSheetProgression {
 				className: classData.name,
 				classSource: classData.source,
 				classLevel: levelInfo.classLevel,
+				subclassShortName: subclass?.shortName || subclass?.name || null,
+				subclassSource: subclass?.source || null,
 			})) {
 				const options = CharacterSheetArtificerPlans.getEligibleCandidates({
 					catalog: artificerPlanCatalog,

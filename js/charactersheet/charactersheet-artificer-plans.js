@@ -1,4 +1,5 @@
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {CharacterSheetItemUtils} from "./charactersheet-item-utils.js";
 
 /**
  * Data-driven Replicate Magic Item plan decisions.
@@ -17,6 +18,9 @@ class CharacterSheetArtificerPlans {
 	static DECISION_TYPE_REPLACE = "artificerPlanReplacement";
 	static CHOICE_KEY_ACQUIRE = "artificerPlans";
 	static CHOICE_KEY_REPLACE = "artificerPlanReplacements";
+	static EFA_ARMORER_ARMOR_REPLICATION_EXTENSION_ID = "efa-armorer-armor-replication-plan";
+	static EFA_ARMORER_ARMOR_REPLICATION_FEATURE_UID = "Improved Armorer|Artificer|EFA|Armorer|EFA|9|EFA";
+	static EFA_ARMORER_ARMOR_REPLICATION_ITEM_KINDS = Object.freeze(["armor", "shield"]);
 
 	static _copy (value) {
 		if (value == null) return value;
@@ -92,6 +96,10 @@ class CharacterSheetArtificerPlans {
 		].join("|");
 	}
 
+	static getExtensionSlotId (id) {
+		return `artificer-plan-extension|${this._normalize(id).replace(/[^a-z0-9-]+/g, "-")}`;
+	}
+
 	static getExtensionDescriptor ({
 		id,
 		className,
@@ -126,10 +134,40 @@ class CharacterSheetArtificerPlans {
 		};
 	}
 
+	static getSourceQualifiedExtensions ({
+		className,
+		classSource,
+		classLevel,
+		subclassShortName = null,
+		subclassSource = null,
+	} = {}) {
+		if (
+			!this.isExactOwner({className, classSource})
+			|| Number(classLevel) < 9
+			|| this._normalize(subclassShortName) !== "armorer"
+			|| this._normalize(subclassSource) !== "efa"
+		) return [];
+		return [this.getExtensionDescriptor({
+			id: this.EFA_ARMORER_ARMOR_REPLICATION_EXTENSION_ID,
+			className,
+			classSource,
+			subclassShortName,
+			subclassSource,
+			featureName: "Improved Armorer",
+			featureSource: "EFA",
+			classLevel: 9,
+			kind: "acquire",
+			optional: false,
+			constraints: {itemKinds: [...this.EFA_ARMORER_ARMOR_REPLICATION_ITEM_KINDS]},
+		})];
+	}
+
 	static getProgressionOpportunities ({
 		className,
 		classSource,
 		classLevel,
+		subclassShortName = null,
+		subclassSource = null,
 		extensions = [],
 	}) {
 		if (!this.isExactOwner({className, classSource})) return [];
@@ -169,10 +207,24 @@ class CharacterSheetArtificerPlans {
 				constraints: {},
 			});
 		}
-		for (const extension of extensions || []) {
+		const registeredExtensions = [
+			...this.getSourceQualifiedExtensions({
+				className,
+				classSource,
+				classLevel,
+				subclassShortName,
+				subclassSource,
+			}),
+			...(extensions || []),
+		].filter((extension, index, all) =>
+			all.findIndex(other => this._normalize(other?.id) === this._normalize(extension?.id)) === index,
+		);
+		for (const extension of registeredExtensions) {
 			if (Number(extension?.classLevel) !== Number(classLevel)) continue;
 			if (this._normalize(extension?.owner?.className) !== this._normalize(className)
 				|| this._normalize(extension?.owner?.classSource) !== this._normalize(classSource)) continue;
+			const isAcquire = extension.kind === "acquire";
+			const slotId = isAcquire ? this.getExtensionSlotId(extension.id) : null;
 			out.push({
 				version: 1,
 				kind: extension.kind,
@@ -181,12 +233,15 @@ class CharacterSheetArtificerPlans {
 				classSource,
 				classLevel: Number(classLevel),
 				slot: 0,
-				opportunityId: this.getReplacementOpportunityId({
-					className,
-					classSource,
-					classLevel,
-					descriptorId: extension.id,
-				}),
+				...(slotId ? {slotId} : {}),
+				opportunityId: isAcquire
+					? this.getAcquisitionOpportunityId({className, classSource, classLevel, slotId})
+					: this.getReplacementOpportunityId({
+						className,
+						classSource,
+						classLevel,
+						descriptorId: extension.id,
+					}),
 				owner: this._copy(extension.owner),
 				constraints: this._copy(extension.constraints || {}),
 				extensionId: extension.id,
@@ -383,16 +438,28 @@ class CharacterSheetArtificerPlans {
 			tableLevel: entry.tableLevel,
 			repeatableCategory: entry.kind === "wildcard",
 			displayName: entry.kind === "fixed" ? entry.displayName : item.name,
+			itemKinds: CharacterSheetItemUtils.getCanonicalItemKinds(item),
 		};
+	}
+
+	static matchesCandidateConstraints ({candidate, constraints = {}} = {}) {
+		if (constraints.planKinds?.length && !constraints.planKinds.includes(candidate.planKind)) return false;
+		if (constraints.categoryIds?.length && !constraints.categoryIds.includes(candidate.categoryId)) return false;
+		if (constraints.itemUids?.length && !constraints.itemUids.some(uid => this._normalize(uid) === this._normalize(candidate.itemUid))) return false;
+		if (
+			constraints.itemKinds?.length
+			&& !constraints.itemKinds.some(kind =>
+				(candidate.itemKinds || []).some(candidateKind => this._normalize(candidateKind) === this._normalize(kind)),
+			)
+		) return false;
+		return true;
 	}
 
 	static getEligibleCandidates ({catalog, classLevel, constraints = {}}) {
 		const byItemUid = new Map();
 		for (const candidate of catalog?.candidates || []) {
 			if (Number(candidate.tableLevel) > Number(classLevel)) continue;
-			if (constraints.planKinds?.length && !constraints.planKinds.includes(candidate.planKind)) continue;
-			if (constraints.categoryIds?.length && !constraints.categoryIds.includes(candidate.categoryId)) continue;
-			if (constraints.itemUids?.length && !constraints.itemUids.some(uid => this._normalize(uid) === this._normalize(candidate.itemUid))) continue;
+			if (!this.matchesCandidateConstraints({candidate, constraints})) continue;
 			const key = this._normalize(candidate.itemUid);
 			const existing = byItemUid.get(key);
 			if (!existing || (existing.planKind === "wildcard" && candidate.planKind === "fixed")) byItemUid.set(key, candidate);
@@ -475,6 +542,7 @@ class CharacterSheetArtificerPlans {
 					acquisitionLevel: decision.classLevel,
 					acquisitionOpportunityId: decision.opportunityId,
 					selection: validation.selection,
+					constraints: this._copy(decision.constraints || {}),
 					lineage: [],
 				});
 				continue;
@@ -499,6 +567,16 @@ class CharacterSheetArtificerPlans {
 			});
 			if (!validation.isValid) {
 				issues.push({...validation, opportunityId: decision.opportunityId});
+				continue;
+			}
+			const targetValidation = this.validatePlanSelection({
+				selection: validation.selection,
+				catalog,
+				classLevel: decision.classLevel,
+				constraints: target.constraints || {},
+			});
+			if (!targetValidation.isValid) {
+				issues.push({...targetValidation, opportunityId: decision.opportunityId});
 				continue;
 			}
 			if (this.getSelectionIdentity(target.selection) === this.getSelectionIdentity(validation.selection)) {
@@ -568,6 +646,7 @@ class CharacterSheetArtificerPlans {
 					acquisitionLevel: decision.classLevel,
 					acquisitionOpportunityId: opportunityId,
 					selection: this._copy(decision.selection),
+					constraints: this._copy(decision.constraints || decision.meta?.constraints || {}),
 					lineage: [],
 				});
 				continue;
