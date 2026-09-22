@@ -4392,6 +4392,7 @@ class CharacterSheetState {
 		return freeze(copied);
 	}
 	static RHW_REANIMATOR_SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
+	static RHW_REANIMATOR_TOOL_OWNER_UID = "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW";
 	static RHW_REANIMATOR_FEATURE_UIDS = Object.freeze({
 		REANIMATOR: "Reanimator|Artificer|EFA|Reanimator|RHW|3",
 		SPELLS: "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3",
@@ -8866,7 +8867,11 @@ class CharacterSheetState {
 					|| feature.sourceDecisionKey
 					|| this._getFixedProficiencyFallbackParentDecisionKey(feature),
 				decisionSemanticKey: existing?.decisionSemanticKey || exactDecision?.semanticKey || null,
-				characterLevel: existing?.characterLevel ?? feature.characterLevel ?? null,
+				characterLevel: existing?.characterLevel ??
+					exactDecision?.characterLevel ??
+					exactPending?.characterLevel ??
+					feature.characterLevel ??
+					null,
 				featureId: feature.id,
 			});
 			feature._sourceAwareFeatureUid = ownerUid;
@@ -10765,6 +10770,7 @@ class CharacterSheetState {
 			base: manifest?.base,
 			characterBase: this._data.characterBase,
 		});
+		this._syncFixedProficiencyFallbackDecisionReferences();
 	}
 
 	_normalizeStoredSkillState () {
@@ -11332,6 +11338,8 @@ class CharacterSheetState {
 			if (!["skills", "tools", "languages", "saves", "weapons", "armor", "resistances"].includes(type)) continue;
 			for (const [value, sources] of Object.entries(entries || {})) {
 				if (!sources?.length) continue;
+				if (type === "tools" && sources.every(source =>
+					String(source).startsWith("fixed-proficiency-fallback:"))) continue;
 				add(type, value);
 				if (type === "skills" && Number(this._data.skillProficiencies?.[value]) >= 2) add("expertise", value);
 			}
@@ -21744,17 +21752,22 @@ class CharacterSheetState {
 	_releaseFixedProficiencyFallbackGrant (transaction, proficiency, decisionSourceIds = []) {
 		if (!transaction || transaction.proficiencyType !== "tool" || !proficiency) return;
 		const toolKey = CharacterSheetState.normalizeToolKey(proficiency);
-		const sources = this._data.grantedProficiencies?.tools?.[toolKey] || [];
-		if (sources.includes(transaction.grantSource)) {
-			this._untrackGrantedProficiency("tools", toolKey, transaction.grantSource);
-			if (!this._data.grantedProficiencies.tools[toolKey].length) {
-				delete this._data.grantedProficiencies.tools[toolKey];
+		const matchingGrantKeys = Object.keys(this._data.grantedProficiencies?.tools || {})
+			.filter(key => CharacterSheetState.normalizeToolKey(key) === toolKey);
+		for (const grantKey of matchingGrantKeys) {
+			const sources = this._data.grantedProficiencies.tools[grantKey] || [];
+			if (!sources.includes(transaction.grantSource)) continue;
+			this._untrackGrantedProficiency("tools", grantKey, transaction.grantSource);
+			if (!this._data.grantedProficiencies.tools[grantKey].length) {
+				delete this._data.grantedProficiencies.tools[grantKey];
 			}
 		}
 		for (const sourceId of [...new Set(decisionSourceIds.filter(Boolean))]) {
 			this.releaseProgressionOwnership("tools", proficiency, sourceId);
 		}
-		const remainingGrantSources = this._data.grantedProficiencies?.tools?.[toolKey] || [];
+		const remainingGrantSources = Object.entries(this._data.grantedProficiencies?.tools || {})
+			.filter(([key]) => CharacterSheetState.normalizeToolKey(key) === toolKey)
+			.flatMap(([, sources]) => sources || []);
 		const progressionEntry = this._getProgressionOwnershipEntry("tools", proficiency);
 		if (!remainingGrantSources.length
 			&& !progressionEntry?.preserved
@@ -21899,6 +21912,25 @@ class CharacterSheetState {
 			if (transaction.decisionSemanticKey) {
 				this.claimProgressionOwnership("tools", transaction.selection, transaction.decisionSemanticKey);
 			}
+		}
+	}
+
+	_syncFixedProficiencyFallbackDecisionReferences () {
+		for (const transaction of Object.values(this._getFixedProficiencyFallbackStore())) {
+			const decision = this._getFixedProficiencyFallbackDecisions(transaction.ownerUid)
+				.find(candidate => candidate.selection != null);
+			if (!decision) continue;
+			const previousDecisionKey = transaction.decisionSemanticKey;
+			const nextDecisionKey = decision.semanticKey;
+			if (transaction.status === "resolved" && transaction.selection && previousDecisionKey !== nextDecisionKey) {
+				if (previousDecisionKey) {
+					this.releaseProgressionOwnership("tools", transaction.selection, previousDecisionKey);
+				}
+				this.claimProgressionOwnership("tools", transaction.selection, nextDecisionKey);
+			}
+			transaction.decisionSemanticKey = nextDecisionKey;
+			transaction.characterLevel = decision.characterLevel ?? transaction.characterLevel;
+			transaction.sourceDecisionKey = decision.parentSemanticKey || transaction.sourceDecisionKey;
 		}
 	}
 
@@ -44028,6 +44060,9 @@ class CharacterSheetState {
 
 		const intMod = this.getAbilityMod("int");
 		const featureUids = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS;
+		const toolsTransaction = this.getFixedProficiencyFallbackTransaction(
+			CharacterSheetState.RHW_REANIMATOR_TOOL_OWNER_UID,
+		);
 		const calculations = {
 			hasReanimatorSpells: true,
 			reanimatorSpells: {
@@ -44055,10 +44090,14 @@ class CharacterSheetState {
 			hasReanimatorsToolsRequirement: true,
 			reanimatorsTools: {
 				featureUid: featureUids.SKILL_SET,
+				ownerUid: CharacterSheetState.RHW_REANIMATOR_TOOL_OWNER_UID,
 				requiredProficiency: "Alchemist's Supplies|XPHB",
-				proficiencyGranted: false,
-				fallbackChoiceGranted: false,
-				implementationBoundary: "sharedToolPickerR2b",
+				mode: toolsTransaction?.mode || null,
+				status: toolsTransaction?.status || null,
+				fixedProficiency: toolsTransaction?.fixedProficiency || "Alchemist's Supplies",
+				selection: toolsTransaction?.selection || null,
+				pending: toolsTransaction?.status === "pending",
+				resolved: toolsTransaction?.status === "resolved",
 			},
 			hasReanimatedCompanionOwnership: true,
 			reanimatedCompanion: {
@@ -53325,7 +53364,7 @@ class CharacterSheetState {
 				if (!this._data.toolProficiencies.some(t => t.toLowerCase() === tp.toLowerCase())) {
 					this.addToolProficiency(tp);
 				}
-				this._trackGrantedProficiency("tools", tp.toLowerCase(), trackSource);
+				this._trackGrantedProficiency("tools", CharacterSheetState.normalizeToolKey(tp), trackSource);
 				continue;
 			}
 			if (typeof tp !== "object") continue;
@@ -53338,7 +53377,7 @@ class CharacterSheetState {
 				if (!this._data.toolProficiencies.some(t => t.toLowerCase() === tool.toLowerCase())) {
 					this.addToolProficiency(toolDisplay);
 				}
-				this._trackGrantedProficiency("tools", tool.toLowerCase(), trackSource);
+				this._trackGrantedProficiency("tools", CharacterSheetState.normalizeToolKey(toolDisplay), trackSource);
 			}
 		}
 

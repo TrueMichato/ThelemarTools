@@ -32,6 +32,7 @@ const REANIMATOR = ARTIFICER_DATA.subclass.find(sc =>
 );
 const SPELLS_OWNER_UID = "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3";
 const SKILL_SET_UID = "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3";
+const SKILL_SET_TOOL_OWNER_UID = `${SKILL_SET_UID}|RHW`;
 const COMPANION_UID = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3";
 const STRANGE_MODIFICATIONS_UID = "Strange Modifications|Artificer|EFA|Reanimator|RHW|5";
 const IMPROVED_REANIMATION_UID = "Improved Reanimation|Artificer|EFA|Reanimator|RHW|9";
@@ -305,10 +306,14 @@ describe("RHW Reanimator R2a progression descriptors", () => {
 		});
 		expect(calculations.reanimatorsTools).toEqual({
 			featureUid: SKILL_SET_UID,
+			ownerUid: SKILL_SET_TOOL_OWNER_UID,
 			requiredProficiency: "Alchemist's Supplies|XPHB",
-			proficiencyGranted: false,
-			fallbackChoiceGranted: false,
-			implementationBoundary: "sharedToolPickerR2b",
+			mode: null,
+			status: null,
+			fixedProficiency: "Alchemist's Supplies",
+			selection: null,
+			pending: false,
+			resolved: false,
 		});
 		expect(calculations.reanimatedCompanion).toEqual({
 			featureUid: COMPANION_UID,

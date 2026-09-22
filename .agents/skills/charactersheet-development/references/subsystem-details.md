@@ -163,13 +163,20 @@ maximum is `max(0, current INT modifier)` with no minimum of 1.
 Facilitated Revival has a separate one-use long-rest resource, but R2a has no
 execution method. `getRhwFacilitatedRevivalBoundary()` returns
 `executable: false`, reason `pendingSharedToolContract`, and the exact
-alternate-cast ownership. Tool receipt/focus validation and spending are R2b.
+alternate-cast ownership. R2b wires Reanimator's Tools through the generic
+fixed-proficiency fallback transaction, but tool focus/inventory receipt
+validation and Facilitated Revival spending remain a later shared dependency.
 
 `applyClassFeatureEffects()` owns reconciliation across add, level change,
 load, subclass teardown, and Respec. Respec drafts must install the spell
 catalog before `loadFromJson()` so newly unlocked grants retain canonical
 levels and metadata. Reconciliation is idempotent and source-owned resources
 are removed below threshold or when the exact subclass identity disappears.
+
+The Reanimator calculation descriptor exposes the live transaction without
+mutating it: exact owner UID, acquisition `mode`, `status`, fixed proficiency,
+selection, and pending/resolved booleans. It never activates for
+`Artificer|TCE`, a non-RHW Reanimator, or a name-only feature.
 
 ## Fixed Proficiency with Fallback Transactions
 

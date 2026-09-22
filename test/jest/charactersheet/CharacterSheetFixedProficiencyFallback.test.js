@@ -434,13 +434,15 @@ const expectNoResolvedFallbackDecision = state => {
 const expectResolvedFallbackDecision = state => {
 	expect(state.hasToolProficiency("Smith's Tools")).toBe(true);
 	expect(state.getPendingFeatureChoices().filter(choice => choice.featureUid === ARTILLERIST_UID)).toHaveLength(0);
-	expect(state.getFixedProficiencyFallbackTransaction(ARTILLERIST_UID)).toMatchObject({
+	const transaction = state.getFixedProficiencyFallbackTransaction(ARTILLERIST_UID);
+	expect(transaction).toMatchObject({
 		mode: "fallback",
 		status: "resolved",
 		selection: "Smith's Tools",
 	});
-	expect(state.getLevelHistory()[2].decisions.find(decision =>
-		decision.provenance?.ownerUid === ARTILLERIST_UID)).toMatchObject({
+	const decision = state.getLevelHistory()[2].decisions.find(candidate =>
+		candidate.provenance?.ownerUid === ARTILLERIST_UID);
+	expect(decision).toMatchObject({
 		type: "nestedTool",
 		selection: "Smith's Tools",
 		characterLevel: 3,
@@ -448,6 +450,7 @@ const expectResolvedFallbackDecision = state => {
 			ownerUid: ARTILLERIST_UID,
 		},
 	});
+	expect(transaction.decisionSemanticKey).toBe(decision.semanticKey);
 };
 
 describe("fixed proficiency with fallback transaction", () => {
@@ -683,6 +686,7 @@ describe("fixed proficiency fallback migration and progression surfaces", () => 
 			mode: "fallback",
 			status: "resolved",
 			selection: "Smith's Tools",
+			characterLevel: 3,
 		});
 		expect(restored.getPendingFeatureChoices().filter(candidate => candidate.featureUid === ARTILLERIST_UID)).toHaveLength(0);
 		expect(restored.hasToolProficiency("Smith's Tools")).toBe(true);
@@ -755,6 +759,8 @@ describe("fixed proficiency fallback migration and progression surfaces", () => 
 		expect(state.hasToolProficiency("Smith's Tools")).toBe(true);
 
 		decision.selection = ["Smith's Tools"];
+		decision.status = "resolved";
+		state.initializeProgressionOwnership({decisions: [decision]});
 		respec._applyDecisionMechanicsProficiencies(decision, ["Weaver's Tools"], decision.options, state);
 		expect(state.hasToolProficiency("Smith's Tools")).toBe(false);
 		expect(state.hasToolProficiency("Weaver's Tools")).toBe(true);
@@ -774,7 +780,8 @@ describe("fixed proficiency fallback migration and progression surfaces", () => 
 			className: "Inventor",
 			classSource: "HB",
 			level: 3,
-			description: "You gain proficiency with Smith's Tools.",
+			toolProficiencies: ["Smith's Tools"],
+			description: "Independent tool training.",
 		});
 
 		const decision = state.getLevelHistory()[2].decisions.find(candidate =>

@@ -227,11 +227,14 @@ legacy name must not activate these calculations or fixed spell grants.
 - level 15: `hasRefinedReanimation`, `hasSuperiorModifications`,
   `hasFacilitatedRevival`, `hasLifeTransfer`, and modification count 3.
 
-Every descriptor carries the exact RHW feature UID. Reanimator's Tools is only
-a pending shared-picker requirement in R2a: it grants no proficiency or
-fallback choice. Reanimated Companion is ownership-only; creation/lifecycle,
-modification runtime, Life Transfer resolution, action economy, and UI belong
-to later milestones.
+Every descriptor carries the exact RHW feature UID. Reanimator's Tools reports
+the live generic fixed-proficiency fallback transaction for the exact mixed
+owner `Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW`: acquisition
+mode, pending/resolved status, fixed proficiency, and current selection. The
+descriptor is read-only; authoritative feature ingestion and the shared
+transaction own grants and choices. Reanimated Companion is ownership-only;
+creation/lifecycle, modification runtime, Life Transfer resolution, action
+economy, and UI belong to later milestones.
 
 Jolt to Life uses the exact EFA Artificer level, not total character level. Its
 calculation exposes uses `max(0, current INT modifier)`, exact
