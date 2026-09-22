@@ -50748,7 +50748,6 @@ class CharacterSheetState {
 			};
 		}
 		this._data.features.push(featureData);
-		this._data.features.push(featureData);
 
 		// Process resistances/immunities/vulnerabilities granted by the feature
 		if (feature.resistances) {
