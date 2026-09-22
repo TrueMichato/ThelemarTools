@@ -4441,6 +4441,26 @@ cannot leave a stale receipt. Save/load normalization preserves a valid receipt 
 - **EFA Armor Model**: Uses the same staged/revalidated selector and transaction as Short Rest.
 - **Feature companions**: `applyFeatureCompanionRest("long")` applies registry rest policies. RHW Reanimated Companion exact-owner instances expire and their persisted free-creation resource restores to maximum; foreign and same-label records are untouched.
 
+### Transactional Long Rest Feature Drafts
+
+EFA Experimental Elixir is the reference state/controller transaction layered
+over the existing rest and undo contracts. The controller calls
+`prepareEfaExperimentalElixirLongRestDraft()` before mutation, then
+`commitEfaExperimentalElixirLongRestDraft()` captures the ordinary full-state
+rest snapshot, runs `state.onLongRest()`, and commits the exact-owner batch
+replacement. Invalid selected production fails before the rest; any later
+failure restores the captured snapshot. Missing exact held
+`Alchemist's Supplies|XPHB` demotes requested production to a committed empty
+replacement rather than blocking the rest. Existing `_onUndoRest()` therefore
+restores the prior generated-item wrapper IDs, generated IDs, metadata, and all
+other pre-rest state through the same load boundary.
+
+Slot-funded vial creation stays state-owned:
+`commitEfaExperimentalElixirSpellSlotVial()` reuses the canonical exact-focus
+filter, spell-slot ledger, action-economy API, and generated-feature-item
+factory. It validates every cost before mutation, tracks the Magic action only
+in combat, and restores the full state snapshot if item creation fails.
+
 ### Item Charge Restoration
 Recognizes recharge types: `restLong`, `dawn`, `dusk`, `midnight` (on long rest), `restShort` (short rest only). Parses `rechargeAmount` dice notation (e.g., `"1d6 + 1"`) and rolls if present.
 

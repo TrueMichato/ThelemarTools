@@ -762,6 +762,74 @@ class CharacterSheetRest {
 		};
 	}
 
+	prepareEfaExperimentalElixirLongRestDraft (opts = {}) {
+		return this._state.prepareEfaExperimentalElixirLongRestDraft(opts);
+	}
+
+	commitEfaExperimentalElixirLongRestDraft ({
+		draft,
+		cancelled = false,
+		restOptions = {},
+	} = {}) {
+		if (cancelled) {
+			return {
+				ok: false,
+				committed: false,
+				restCommitted: false,
+				code: "long-rest-cancelled",
+			};
+		}
+
+		const validated = this._state.validateEfaExperimentalElixirLongRestDraft(draft);
+		if (!validated.ok) return {...validated, committed: false, restCommitted: false};
+
+		const snapshot = this._captureRestSnapshot("long");
+		if (!snapshot) {
+			return {
+				ok: false,
+				committed: false,
+				restCommitted: false,
+				code: "long-rest-snapshot-failed",
+			};
+		}
+
+		try {
+			this._state.onLongRest(restOptions);
+			const experimentalElixir = this._state.commitEfaExperimentalElixirLongRestDraft(validated.draft);
+			if (!experimentalElixir.ok) {
+				this._state.loadFromJson(snapshot.json);
+				if (this._page) this._page._lastRestSnapshot = null;
+				return {
+					...experimentalElixir,
+					committed: false,
+					restCommitted: false,
+					rolledBack: true,
+				};
+			}
+
+			this._page?.saveCharacter?.();
+			this._page?.renderCharacter?.();
+			return {
+				ok: true,
+				committed: true,
+				restCommitted: true,
+				restType: "long",
+				experimentalElixir,
+			};
+		} catch (error) {
+			this._state.loadFromJson(snapshot.json);
+			if (this._page) this._page._lastRestSnapshot = null;
+			return {
+				ok: false,
+				committed: false,
+				restCommitted: false,
+				code: "long-rest-commit-failed",
+				error: error?.message || "Unable to commit Long Rest.",
+				rolledBack: true,
+			};
+		}
+	}
+
 	async _showLongRestDialog ({focusAdventurersAtlas = false} = {}) {
 		const currentHp = this._state.getHp().current;
 		const maxHp = this._state.getHp().max;

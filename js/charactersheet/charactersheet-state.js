@@ -4614,6 +4614,7 @@ class CharacterSheetState {
 	static EFA_EXPERIMENTAL_ELIXIR_METADATA_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_BATCH_PLAN_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_ACTIVE_EFFECT_VERSION = 1;
+	static EFA_EXPERIMENTAL_ELIXIR_REST_DRAFT_VERSION = 1;
 	static EFA_EXPERIMENTAL_ELIXIR_OWNER = Object.freeze({
 		featureUid: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID,
 		featureSource: "EFA",
@@ -21895,6 +21896,14 @@ class CharacterSheetState {
 		);
 	}
 
+	getEfaExperimentalElixirSuppliesRows () {
+		return this.getEligibleSpellCastFocusInventoryRows(
+			CharacterSheetState._getEfaAlchemistSuppliesFocusRequirement({
+				sourceFeatureUid: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID,
+			}),
+		);
+	}
+
 	static getEfaExperimentalElixirEffectSnapshot (effectKey, artificerLevel) {
 		const level = Number(artificerLevel);
 		if (!Number.isInteger(level) || level < 3 || level > 20) return null;
@@ -22199,6 +22208,96 @@ class CharacterSheetState {
 		return this._createEfaExperimentalElixirVialFromMetadata(metadata);
 	}
 
+	commitEfaExperimentalElixirSpellSlotVial ({
+		effectKey,
+		slotLevel,
+		batchId = null,
+		cancelled = false,
+	} = {}) {
+		if (cancelled) {
+			return {
+				ok: false,
+				committed: false,
+				code: "efa-experimental-elixir-spell-slot-cancelled",
+			};
+		}
+
+		const classEntry = this._getEfaAlchemistClassEntry();
+		const creationArtificerLevel = Number(classEntry?.level) || 0;
+		if (!CharacterSheetState.getEfaExperimentalElixirBatchSizeForLevel(creationArtificerLevel)) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-unavailable"};
+		}
+		const effect = Object.values(CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_EFFECTS)
+			.find(it => it.key === effectKey);
+		if (!effect) {
+			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-effect"};
+		}
+
+		const suppliesRows = this.getEfaExperimentalElixirSuppliesRows();
+		if (!suppliesRows.length) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-focus-unavailable"};
+		}
+
+		const spentSlotLevel = Number(slotLevel);
+		if (!Number.isInteger(spentSlotLevel) || spentSlotLevel < 1 || spentSlotLevel > 9) {
+			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-slot-level"};
+		}
+		if (this.getSpellSlotsCurrent(spentSlotLevel) <= 0) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-spell-slot-unavailable"};
+		}
+
+		const isActionTracked = this.isInCombat();
+		if (isActionTracked && !this.isActionTypeAvailable("action")) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-action-unavailable"};
+		}
+
+		const resolvedBatchId = batchId == null ? CryptUtil.uid() : String(batchId).trim();
+		const metadata = this._buildEfaExperimentalElixirMetadata({
+			effectKey: effect.key,
+			origin: "spellSlot",
+			batchId: resolvedBatchId,
+			creationArtificerLevel,
+			spentSlotLevel,
+		});
+		if (!metadata) {
+			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-metadata"};
+		}
+
+		const dataSnapshot = MiscUtil.copyFast(this._data);
+		try {
+			if (isActionTracked && !this.consumeActionType("action")) {
+				throw new Error("efa-experimental-elixir-action-unavailable");
+			}
+			if (!this.useSpellSlot(spentSlotLevel)) {
+				throw new Error("efa-experimental-elixir-spell-slot-unavailable");
+			}
+			const created = this._createEfaExperimentalElixirVialFromMetadata(metadata);
+			if (!created.ok) throw new Error(created.code || "efa-experimental-elixir-item-creation-failed");
+
+			return {
+				...created,
+				ok: true,
+				committed: true,
+				code: "efa-experimental-elixir-spell-slot-created",
+				actionType: "action",
+				actionLabel: "Magic",
+				actionTracked: isActionTracked,
+				spentSlotLevel,
+				focus: this.getSpellCastFocusReference(suppliesRows[0]),
+				metadata: MiscUtil.copyFast(metadata),
+			};
+		} catch (error) {
+			this._data = dataSnapshot;
+			return {
+				ok: false,
+				committed: false,
+				code: "efa-experimental-elixir-spell-slot-commit-failed",
+				error: error?.message || "Unable to create an Experimental Elixir.",
+				rolledBack: true,
+			};
+		}
+	}
+
 	classifyEfaExperimentalElixir (itemOrWrapper) {
 		const item = itemOrWrapper?.item || itemOrWrapper;
 		const rawOwner = item?._generatedItemProvenance?.owner;
@@ -22492,6 +22591,88 @@ class CharacterSheetState {
 		const itemIds = this.getEfaExperimentalElixirRows().map(row => row.id);
 		itemIds.forEach(itemId => this.removeItem(itemId));
 		return itemIds;
+	}
+
+	prepareEfaExperimentalElixirLongRestDraft ({decision, plan = null} = {}) {
+		if (!this.getEfaExperimentalElixirBatchSize()) {
+			return {ok: false, code: "efa-experimental-elixir-unavailable"};
+		}
+		if (!["produce", "decline"].includes(decision)) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-decision"};
+		}
+
+		const hasRequiredSupplies = this.getEfaExperimentalElixirSuppliesRows().length > 0;
+		const effectiveDecision = decision === "produce" && hasRequiredSupplies ? "produce" : "decline";
+		const validated = effectiveDecision === "produce"
+			? this._validateEfaExperimentalElixirBatchPlan(plan)
+			: {ok: true, plan: null};
+		if (!validated.ok) return validated;
+
+		return {
+			ok: true,
+			code: "efa-experimental-elixir-rest-draft-prepared",
+			hasRequiredSupplies,
+			draft: {
+				draftVersion: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_REST_DRAFT_VERSION,
+				featureUid: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID,
+				requestedDecision: decision,
+				decision: effectiveDecision,
+				plan: validated.plan,
+			},
+		};
+	}
+
+	validateEfaExperimentalElixirLongRestDraft (draft) {
+		if (!this.getEfaExperimentalElixirBatchSize()) {
+			return {ok: false, code: "efa-experimental-elixir-unavailable"};
+		}
+		if (
+			!draft
+			|| typeof draft !== "object"
+			|| Array.isArray(draft)
+			|| draft.draftVersion !== CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_REST_DRAFT_VERSION
+			|| draft.featureUid !== CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID
+			|| !["produce", "decline"].includes(draft.requestedDecision)
+			|| !["produce", "decline"].includes(draft.decision)
+			|| (draft.requestedDecision === "decline" && draft.decision !== "decline")
+		) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-rest-draft"};
+		}
+
+		const hasRequiredSupplies = this.getEfaExperimentalElixirSuppliesRows().length > 0;
+		const effectiveDecision = draft.decision === "produce" && hasRequiredSupplies ? "produce" : "decline";
+		const validated = effectiveDecision === "produce"
+			? this._validateEfaExperimentalElixirBatchPlan(draft.plan)
+			: {ok: true, plan: null};
+		if (!validated.ok) return validated;
+
+		return {
+			ok: true,
+			hasRequiredSupplies,
+			effectiveDecision,
+			draft: {
+				draftVersion: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_REST_DRAFT_VERSION,
+				featureUid: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID,
+				requestedDecision: draft.requestedDecision,
+				decision: effectiveDecision,
+				plan: validated.plan,
+			},
+		};
+	}
+
+	commitEfaExperimentalElixirLongRestDraft (draft) {
+		const validated = this.validateEfaExperimentalElixirLongRestDraft(draft);
+		if (!validated.ok) return {...validated, committed: false};
+		const result = this.commitEfaExperimentalElixirBatch({
+			decision: validated.effectiveDecision,
+			plan: validated.draft.plan,
+		});
+		return {
+			...result,
+			requestedDecision: validated.draft.requestedDecision,
+			decision: validated.effectiveDecision,
+			hasRequiredSupplies: validated.hasRequiredSupplies,
+		};
 	}
 
 	commitEfaExperimentalElixirBatch ({decision, plan = null} = {}) {

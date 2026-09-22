@@ -22,6 +22,15 @@ state must be saved, and what the player-facing controls must do.
 > `Alchemist's Supplies|XPHB`. Experimental Elixir and Alchemical Eruption
 > remain separate work.
 
+> **Experimental Elixir transaction milestone status:** exact-owner Long Rest
+> drafts now commit produce/decline/no-supplies replacements through the normal
+> rest recovery and full-state undo boundary. Slot-funded creation validates the
+> exact held XPHB supplies, chosen effect, selected slot, and combat-tracked Magic
+> action before atomically spending costs and creating one provenance-backed vial.
+> Rest/create modals and Other handoff remain separate work; Self consumption
+> and all measurable effect applications now ship through the lifecycle
+> milestone below.
+
 > **Chemical Resistance milestone status:** the exact
 > `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA` owner now contributes
 > Acid resistance, Poison resistance, and Poisoned condition immunity through
@@ -39,7 +48,7 @@ state must be saved, and what the player-facing controls must do.
 > committed in-combat use spends the shared Bonus Action and vial together;
 > invalid, cancelled, stale, wrong-source, or failed commits spend nothing.
 > Player-facing controls, Other-target handoff, slot-funded creation UI, and
-> Long Rest production orchestration remain later milestones.
+> Long Rest production UI remain later milestones.
 
 > **Alchemical Eruption milestone status:** exact level-15 EFA Alchemist owners
 > now receive the optional post-commit `2d8` Force follow-up when a normalized
@@ -193,20 +202,20 @@ creation and use. Its source rules cover Long Rest production, slot-funded
 creation, Bonus Action consumption, and all five effects
 ([`data/class/class-artificer.json:2889-2955`](../../data/class/class-artificer.json#L2889-L2955)).
 
-> **Core state milestone:** the exact-owner generated-vial contract, pure d6
-> batch planner, creation-time scaling snapshots, atomic batch replacement,
-> save/load reconciliation, and source-loss cleanup are implemented. Rest UI,
-> slot-funded creation, player-facing controls, Other-target handoff, Long Rest
-> production orchestration, and undo remain later milestones.
->
-> **Self-consumption state milestone:** the model transaction for exact
+> **State, transaction, and Self-consumption milestones:** the exact-owner
+> generated-vial contract, pure d6 batch planner, creation-time scaling
+> snapshots, atomic batch replacement, save/load reconciliation, source-loss
+> cleanup, Long Rest produce/decline/no-supplies transactions, full-state rest
+> undo, and atomic spell-slot/Magic-action creation are implemented. The model
+> transaction for exact
 > `Alchemist|Artificer|EFA|EFA` vials is implemented. It consumes the shared
 > Bonus Action only for an in-combat committed use, consumes the quantity-1
 > generated vial, and applies Healing or the creation-snapshotted timed effect
 > atomically. Outside combat it does not latch action economy. Save/load,
 > source-loss cleanup, same-effect refresh, round expiry, and Short/Long Rest
 > expiry use the shared inventory, action-economy, healing, and active-state
-> systems rather than parallel ledgers.
+> systems rather than parallel ledgers. Rest/create/consume UI and Other handoff
+> remain later milestones.
 
 ### 4.1 Long Rest batch
 
@@ -299,6 +308,16 @@ Other-target handoff receipt, slot-funded creation UI, Long Rest production
 orchestration, and undo presentation.
 
 ### 4.5 Generated-item ownership
+
+> **Prerequisite status:** the shared versioned generated-feature-item
+> provenance, classification, exact-owner listing/removal, replacement, and
+> save/load contract is available. Subclass feature ownership uses the
+> repository's canonical seven-part source-aware UID, for example
+> `Experimental Elixir|Artificer|EFA|Alchemist|EFA|3|EFA`; six-part legacy
+> records are repair-required and never activated or removed. Experimental
+> Elixir effects and UI are not implemented by this prerequisite. Exact-owner
+> creation, subclass lifecycle cleanup, and rest/spell-slot transactions now
+> build on it.
 
 Each vial is a normal quantity-1 inventory item with a stable unique ID and
 versioned provenance containing at least:
