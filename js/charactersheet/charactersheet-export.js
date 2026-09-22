@@ -32,8 +32,41 @@ class CharacterSheetExport {
 		document.getElementById("charsheet-btn-save")?.addEventListener("click", () => this._saveCharacter());
 	}
 
+	_getCharacterExportData () {
+		return this._state.toJSON();
+	}
+
+	static _getCharacterImportData (rawData) {
+		let data = rawData;
+		if (data && typeof data === "object" && data.character && typeof data.character === "object" && (data.character.name || data.character.classes || data.character.race)) {
+			data = data.character;
+		}
+		if (!data || typeof data !== "object" || (!data.name && !data.classes && !data.race)) {
+			throw new Error("Invalid character data structure");
+		}
+		return data;
+	}
+
+	async _importCharacterData (rawData, {replaceExisting = false} = {}) {
+		const data = CharacterSheetExport._getCharacterImportData(rawData);
+		let importedState = this._state;
+
+		if (replaceExisting) {
+			if (this._state.fromJSON(data) === false) throw new Error("Unable to load character data");
+		} else {
+			const StateClass = this._state.constructor;
+			importedState = new StateClass();
+			if (importedState.fromJSON(data) === false) throw new Error("Unable to load character data");
+			await this._page.addCharacter(importedState);
+		}
+
+		this._page.renderCharacter();
+		await this._page.saveCharacter();
+		return importedState;
+	}
+
 	async _showExportDialog () {
-		const characterData = this._state.toJSON();
+		const characterData = this._getCharacterExportData();
 		const jsonStr = JSON.stringify(characterData, null, 2);
 		const characterName = this._state.getName() || "character";
 
@@ -248,31 +281,8 @@ class CharacterSheetExport {
 				}
 
 				try {
-					let data = JSON.parse(jsonStr);
-
-					// Accept the E2E test-export wrapper shape
-					// ({status, displayName, character: <state>, ...}) by
-					// unwrapping to the inner `character`. Spec authors
-					// load these JSONs by hand to validate open bugs.
-					if (data && typeof data === "object" && data.character && typeof data.character === "object" && (data.character.name || data.character.classes || data.character.race)) {
-						data = data.character;
-					}
-
-					// Validate basic structure
-					if (!data.name && !data.classes && !data.race) {
-						throw new Error("Invalid character data structure");
-					}
-
-					if (replaceExisting) {
-						this._state.fromJSON(data);
-					} else {
-						const newState = new CharacterSheetState();
-						newState.fromJSON(data);
-						await this._page.addCharacter(newState);
-					}
-
-					this._page.renderCharacter();
-					await this._page.saveCharacter();
+					const data = CharacterSheetExport._getCharacterImportData(JSON.parse(jsonStr));
+					await this._importCharacterData(data, {replaceExisting});
 
 					doClose(true);
 					JqueryUtil.doToast({type: "success", content: `Imported ${data.name || "character"} successfully!`});

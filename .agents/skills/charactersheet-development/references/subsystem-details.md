@@ -500,6 +500,28 @@ an auto-fit single-column layout preserve keyboard and mobile use.
 Anti-goals are subclass mechanics, Spell-Storing Item, levels 10/14/18/20,
 random recharge, a parallel item ledger, or broad state refactors.
 
+### Transient generated items at the NPC export boundary
+
+NPC export must classify source-owned transient inventory before applying
+ordinary equipment rules. The reusable EFA Experimental Elixir boundary is:
+
+```javascript
+CharacterSheetNpcExporter.classifyInventoryItemForNpcExport(state, itemOrWrapper);
+CharacterSheetNpcExporter.getInventoryItemsForNpcExport(state, {warnings});
+```
+
+Both supported exact-owner vials and stale repair-required EFA Elixir
+provenance are excluded. The same filtered inventory feeds Special Equipment,
+Consumables, magic-item use blocks, and companion item bundling. Item-granted
+spells are filtered only by an excluded row's exact inventory ID; name-only
+spell ownership remains ambiguous and is preserved.
+
+When companion export receives a warnings array, stale rows emit one
+repository-standard validation warning rather than silently becoming
+permanent gear. Ordinary same-name custom items, wrong-source compatibility
+items, and unrelated generated feature items remain eligible under their
+existing exporter rules.
+
 ## Stable-Key Per-Turn Receipts
 
 Once-per-turn mechanics that need to work across multiple routes use the

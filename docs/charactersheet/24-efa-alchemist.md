@@ -536,6 +536,12 @@ Every source-sensitive test must cover all three combinations:
 
 ### Save/export contract
 
+> **Shipped non-UI hardening:** ordinary state serialization and the user-facing
+> JSON export/import path now have focused combined round-trip coverage for a
+> supported vial, a repair-required stale vial, an active Self effect, fixed
+> prepared-spell owners, and innate spell/resource owner metadata. Repeated
+> load/reconcile preserves identities and spent uses without duplicate grants.
+
 The saved character must retain:
 
 - exact parent and subclass identities;
@@ -568,6 +574,10 @@ Migration is exact-source, conservative, and idempotent:
 
 ### Respec contract
 
+> **Shipped non-UI hardening:** both public remove-level flows and the isolated
+> Respec candidate/commit flow are covered against the exact EFA owner.
+> Candidate cleanup does not mutate live state; commit loads the candidate once.
+
 Respec operates on the isolated candidate state. Moving away from exact
 `Alchemist|EFA` removes only its owned prepared/innate grants, grant uses,
 tool receipts, generated vials, active elixir states, crafting modifier, and
@@ -579,7 +589,29 @@ EFA vials into TCE vials or leave EFA-only spell and effect rows behind.
 Returning to EFA recomputes Tools of the Trade from the candidate state's
 pre-acquisition proficiencies.
 
+### NPC export contract
+
+Supported exact-owner Experimental Elixir vials are transient inventory, not
+NPC possessions. The exporter classifies inventory through
+`classifyEfaExperimentalElixir()` at its shared boundary and excludes valid
+vials from Special Equipment/Consumables, magic-item use blocks, item-granted
+spell entries, and companion item bundles.
+
+Repair-required stale EFA Elixir provenance is excluded at the same boundary
+instead of being laundered into permanent equipment. Companion export emits a
+validation warning naming the excluded stale row and classifier reason. Item
+spell filtering uses the exact inventory wrapper ID; it does not infer
+ownership from the item name.
+
+Ordinary same-name custom potions, compatibility `Alchemist|TCE` rows, and
+unrelated generated feature items remain eligible under the existing exporter
+rules.
+
 ## 10. Operate-mode interaction contract
+
+> **Status:** this non-UI lifecycle-hardening milestone does not ship or claim
+> Operate-mode rendering or comprehensive Playwright coverage. Those remain
+> separate milestones.
 
 The interface is for completing operations clearly, not for simulating an
 always-open alchemy workshop.
@@ -705,7 +737,7 @@ Implementation is intentionally split into bounded reviewable milestones:
 | 3 | Experimental Elixir state, inventory, transactions, and effect lifecycle |
 | 4 | Operate-mode UI, rest choices, accessibility, and mobile behavior |
 | 5 | Chemical Resistance defenses and Restorative Reagents/Cauldron cast execution (shipped); Savant and Alchemical Eruption remain separate bounded work |
-| 6 | Migration, respec, export, rendering, and isolation hardening |
+| 6 | Non-UI persistence/import, public teardown, Respec isolation, and NPC export hardening (shipped); Operate-mode rendering remains milestone 4 |
 | 7 | Integrated Jest/E2E verification and documentation alignment |
 
 The guide becomes a description of shipped support only after the integrated
