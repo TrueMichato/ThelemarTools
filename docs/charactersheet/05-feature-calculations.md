@@ -1282,11 +1282,30 @@ record derives AC 18 and poison/psychic immunities from `Eldritch Cannon|EFA`,
 maximum HP as five times the exact `Artificer|EFA` level, and attack/save/form
 formulas from current character state. Its 60-minute duration is advanced only
 through the explicit game-time API. Slot 1 is schema-valid at Artificer 15 for
-future dual-cannon work, but Milestone 2 creates slot 0 only.
+future dual-cannon work, but the Milestone 3 transaction still permits exactly
+one active cannon.
 
-These projections are descriptive state. They do not apply cannon damage,
-invoke the sheet's damage pipeline, grant Protector temporary HP, or add
-detonation/operation controls.
+`pCreateEfaEldritchCannon()` owns the creation cost: the source-qualified
+`Eldritch Cannon Creation` resource recharges on a Long Rest, or the caller
+selects any available normal/Pact spell slot. Creation/dismissal consume the
+canonical Action slot in combat while displaying the source's "Magic Action"
+subtype; activation consumes the canonical Bonus Action slot in combat. The
+creation transaction restores its entire snapshot when persistence fails.
+
+`activateEfaEldritchCannon()` resolves the derived form contract without
+persisting any duplicate combat numbers:
+
+- Flamethrower reports a 15-foot cone, current Artificer spell-save DC,
+  `2d8`/`3d8` fire damage, and half on a successful Dexterity save.
+- Force Ballista uses the current Artificer spell-attack modifier at 120 feet,
+  rolls `2d8`/`3d8` force damage, and reports the 5-foot push.
+- Protector rolls `1d8`/`2d8 + max(1, INT modifier)` within 10 feet and applies
+  normal temporary-HP replacement to self. Other targets are report-only.
+
+All forms require the owner within 60 feet and may move a deployed cannon up to
+15 feet before or after activation. `mending` restores `2d6` up to derived max
+HP. Game-time decrement/end controls remain explicit. Rest expiry, Explosive
+Cannon, Half Cover, dual operation, and Arcane Firearm remain later milestones.
 
 ## College of Creation (Bard, TCE)
 

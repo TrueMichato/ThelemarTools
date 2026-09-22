@@ -15634,6 +15634,249 @@ body.has-quickbuild-overlay .toast__container {
 	border: 0;
 }
 
+/* EFA Artillerist — dedicated cannon operation surface */
+.charsheet__efa-cannon-section-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__efa-cannon-section-header .charsheet__section-title {
+	margin: 0;
+}
+
+.charsheet__efa-cannon-feedback,
+.charsheet__efa-cannon-modal-feedback {
+	min-height: 1.25rem;
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-success-text, var(--cs-success, #10b981));
+}
+
+.charsheet__efa-cannon-feedback--error,
+.charsheet__efa-cannon-modal-feedback--error {
+	color: var(--cs-danger-text, var(--cs-danger, #f26161));
+}
+
+.charsheet__efa-cannon-empty {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	padding: var(--cs-space-md, 0.75rem);
+	border: 1px dashed var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-md, 10px);
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.charsheet__efa-cannon-empty strong {
+	color: var(--cs-text-primary, inherit);
+}
+
+.charsheet__efa-cannon-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__efa-cannon-identity,
+.charsheet__efa-cannon-vitals,
+.charsheet__efa-cannon-meta,
+.charsheet__efa-cannon-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__efa-cannon-identity {
+	justify-content: space-between;
+}
+
+.charsheet__efa-cannon-identity h5 {
+	margin: 0;
+	font-size: var(--cs-text-md, 1rem);
+}
+
+.charsheet__efa-cannon-status {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.charsheet__efa-cannon-vitals {
+	align-items: stretch;
+}
+
+.charsheet__efa-cannon-vitals > div {
+	flex: 1 1 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-2xs, 2px);
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.12));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+}
+
+.charsheet__efa-cannon-vitals span,
+.charsheet__efa-cannon-control > label {
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.charsheet__efa-cannon-vitals strong {
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-variant-numeric: tabular-nums;
+}
+
+.charsheet__efa-cannon-meta {
+	flex-wrap: wrap;
+	font-size: var(--cs-text-xs, 0.75rem);
+	color: var(--cs-text-secondary, inherit);
+}
+
+.charsheet__efa-cannon-operation,
+.charsheet__efa-cannon-operation-summary,
+.charsheet__efa-cannon-cost-summary {
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-base, rgba(0, 0, 0, 0.12));
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+	font-size: var(--cs-text-xs, 0.75rem);
+}
+
+.charsheet__efa-cannon-activate {
+	min-height: 40px;
+	font-weight: var(--cs-weight-bold, 700);
+}
+
+.charsheet__efa-cannon-secondary {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__efa-cannon-control {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	min-width: 0;
+}
+
+.charsheet__efa-cannon-control > div {
+	display: flex;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__efa-cannon-control input {
+	min-width: 0;
+}
+
+.charsheet__efa-cannon-actions {
+	flex-wrap: wrap;
+}
+
+.charsheet__efa-cannon-modal {
+	width: min(46rem, 100%);
+}
+
+.charsheet__efa-cannon-create-form,
+.charsheet__efa-cannon-activate-form {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-md, 0.75rem);
+}
+
+.charsheet__efa-cannon-modal-intro {
+	max-width: 70ch;
+	margin: 0;
+	color: var(--cs-text-secondary, inherit);
+}
+
+.charsheet__efa-cannon-fieldset {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-sm, 0.5rem);
+	margin: 0;
+	padding: var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+}
+
+.charsheet__efa-cannon-fieldset legend {
+	padding: 0 var(--cs-space-xs, 0.25rem);
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: var(--cs-weight-bold, 700);
+}
+
+.charsheet__efa-cannon-radio-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__efa-cannon-radio-grid label,
+.charsheet__efa-cannon-payment-options label {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--cs-space-xs, 0.25rem);
+	cursor: pointer;
+}
+
+.charsheet__efa-cannon-radio-grid label {
+	padding: var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 6px);
+}
+
+.charsheet__efa-cannon-radio-grid label:has(input:checked) {
+	border-color: var(--cs-primary, var(--rgb-link));
+	background: var(--cs-primary-light, rgba(59, 130, 246, 0.12));
+}
+
+.charsheet__efa-cannon-radio-grid span {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-2xs, 2px);
+}
+
+.charsheet__efa-cannon-radio-grid small,
+.charsheet__efa-cannon-payment-options span {
+	color: var(--cs-text-muted, var(--rgb-muted));
+}
+
+.charsheet__efa-cannon-form-row {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__efa-cannon-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	min-width: 0;
+	font-size: var(--cs-text-sm, 0.875rem);
+	font-weight: var(--cs-weight-semibold, 600);
+}
+
+.charsheet__efa-cannon-field[hidden] {
+	display: none;
+}
+
+.charsheet__efa-cannon-payment-options {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-sm, 0.5rem) var(--cs-space-lg, 1rem);
+}
+
+.charsheet__efa-cannon-modal-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--cs-space-sm, 0.5rem);
+	padding-top: var(--cs-space-sm, 0.5rem);
+	border-top: 1px solid var(--cs-border, var(--rgb-border-grey));
+}
+
 .charsheet__combat-state-item {
 	cursor: pointer;
 	transition: all 0.15s ease;

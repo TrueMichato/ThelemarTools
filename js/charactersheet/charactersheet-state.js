@@ -4555,6 +4555,7 @@ class CharacterSheetState {
 
 	static EFA_ARTILLERIST_SUBCLASS_UID = "Artillerist|Artificer|EFA|EFA";
 	static EFA_ELDRITCH_CANNON_TEMPLATE_UID = "Eldritch Cannon|EFA";
+	static EFA_ELDRITCH_CANNON_CREATION_RESOURCE_NAME = "Eldritch Cannon Creation";
 	static GENERATED_CLASS_SUMMON_GENERATION_VERSION = 1;
 	static CLASS_SUMMON_RETIREMENT_REASONS = Object.freeze({
 		DISMISSED: "dismissed",
@@ -46896,6 +46897,7 @@ class CharacterSheetState {
 		this._reconcileRhwReanimatorState();
 		this._ensureEfaFlashOfGeniusResource();
 		this._ensureEfaGiantStatureResource();
+		this._ensureEfaEldritchCannonCreationResource();
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
@@ -77541,6 +77543,7 @@ class CharacterSheetState {
 	static EFA_ELDRITCH_CANNON_SIZES = Object.freeze(["T", "S"]);
 	static EFA_ELDRITCH_CANNON_PLACEMENTS = Object.freeze(["carried", "deployed"]);
 	static EFA_ELDRITCH_CANNON_MOBILITY = Object.freeze(["legs", "wheels"]);
+	static EFA_ELDRITCH_CANNON_PAYMENT_TYPES = Object.freeze(["freeUse", "spellSlot"]);
 
 	static _isGeneratedClassSummonRecord (record) {
 		return record != null && Object.hasOwn(record, "generatedClassSummon");
@@ -78047,6 +78050,260 @@ class CharacterSheetState {
 			.filter(Boolean);
 	}
 
+	_isEfaEldritchCannonCreationResource (resource) {
+		return CharacterSheetState._isSameClassSummonUid(resource?.featureUid, CharacterSheetState.EFA_ELDRITCH_CANNON_FEATURE_UID)
+			&& CharacterSheetState._isSameClassSummonUid(resource?.classUid, CharacterSheetState.EFA_ARTIFICER_CLASS_UID)
+			&& CharacterSheetState._isSameClassSummonUid(resource?.subclassUid, CharacterSheetState.EFA_ARTILLERIST_SUBCLASS_UID);
+	}
+
+	_getEfaEldritchCannonCreationResource () {
+		return (this._data.resources || []).find(resource => this._isEfaEldritchCannonCreationResource(resource)) || null;
+	}
+
+	_ensureEfaEldritchCannonCreationResource () {
+		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
+		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
+		const candidates = (this._data.resources || []).filter(resource => this._isEfaEldritchCannonCreationResource(resource));
+		if (!ownerState.ok) {
+			if (candidates.length) this._data.resources = (this._data.resources || []).filter(resource => !candidates.includes(resource));
+			return null;
+		}
+
+		let resource = candidates[0] || null;
+		const current = candidates.length
+			? (candidates.some(candidate => (Number(candidate?.current) || 0) <= 0) ? 0 : 1)
+			: 1;
+		if (!resource) {
+			resource = {
+				id: CryptUtil.uid(),
+				name: CharacterSheetState.EFA_ELDRITCH_CANNON_CREATION_RESOURCE_NAME,
+				current,
+				max: 1,
+				recharge: "long",
+			};
+			(this._data.resources ||= []).push(resource);
+		}
+
+		resource.name = CharacterSheetState.EFA_ELDRITCH_CANNON_CREATION_RESOURCE_NAME;
+		resource.current = current;
+		resource.max = 1;
+		resource.recharge = "long";
+		resource.contextualOnly = true;
+		resource.actionLabel = "Magic Action";
+		resource.featureUid = CharacterSheetState.EFA_ELDRITCH_CANNON_FEATURE_UID;
+		resource.classUid = CharacterSheetState.EFA_ARTIFICER_CLASS_UID;
+		resource.subclassUid = CharacterSheetState.EFA_ARTILLERIST_SUBCLASS_UID;
+		resource.source = "EFA";
+
+		this._data.resources = (this._data.resources || [])
+			.filter(candidate => candidate === resource || !this._isEfaEldritchCannonCreationResource(candidate));
+		return resource;
+	}
+
+	_getEfaEldritchCannonSpellSlotOptions () {
+		const options = [];
+		for (const [levelKey, slot] of Object.entries(this._data.spellcasting?.spellSlots || {})) {
+			const level = Number(levelKey);
+			const current = Math.max(0, Number(slot?.current) || 0);
+			if (!Number.isInteger(level) || level < 1 || current < 1) continue;
+			options.push({kind: "spell", level, current, max: Math.max(0, Number(slot?.max) || 0)});
+		}
+		const pact = this._data.spellcasting?.pactSlots;
+		if ((Number(pact?.current) || 0) > 0 && (Number(pact?.level) || 0) > 0) {
+			options.push({
+				kind: "pact",
+				level: Number(pact.level),
+				current: Number(pact.current),
+				max: Math.max(0, Number(pact.max) || 0),
+			});
+		}
+		return options.sort((a, b) => a.level - b.level || a.kind.localeCompare(b.kind));
+	}
+
+	getEfaEldritchCannonCreationState () {
+		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
+		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
+		const resource = ownerState.ok ? this._ensureEfaEldritchCannonCreationResource() : null;
+		const cannons = ownerState.ok ? this.listEfaEldritchCannons() : [];
+		const spellSlots = ownerState.ok ? this._getEfaEldritchCannonSpellSlotOptions() : [];
+		const actionAvailable = !this.isInCombat() || this.isActionTypeAvailable("action");
+		let reason = null;
+		if (!ownerState.ok) reason = ownerState.reason;
+		else if (cannons.length) reason = "slotOccupied";
+		else if (!actionAvailable) reason = "actionUnavailable";
+		else if ((Number(resource?.current) || 0) < 1 && !spellSlots.length) reason = "paymentUnavailable";
+		return {
+			available: ownerState.ok,
+			canCreate: reason == null,
+			reason,
+			artificerLevel: ownerState.ok ? ownerState.level : 0,
+			freeUse: {
+				available: (Number(resource?.current) || 0) > 0,
+				current: Math.max(0, Number(resource?.current) || 0),
+				max: 1,
+				resourceId: resource?.id || null,
+			},
+			spellSlots,
+			action: {
+				type: "action",
+				subtype: "Magic action",
+				tracked: this.isInCombat(),
+				available: actionAvailable,
+			},
+			activeCannons: cannons,
+		};
+	}
+
+	_validateEfaEldritchCannonCreationRequest ({
+		form,
+		size,
+		placement,
+		mobility = null,
+		distanceFromOwnerFt = 0,
+		createdWith,
+		createdWithSlotLevel = null,
+		createdWithSlotKind = "spell",
+	} = {}) {
+		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
+		const templateState = this._validateGeneratedClassSummonTemplate(definition);
+		if (!templateState.ok || !templateState.template) {
+			return {ok: false, reason: "templateUnavailable", details: templateState.details || null};
+		}
+		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
+		if (!ownerState.ok) return {ok: false, reason: ownerState.reason, details: ownerState.details || null};
+
+		const runtimeValid = definition.forms.includes(form)
+			&& definition.sizes.includes(size)
+			&& CharacterSheetState.EFA_ELDRITCH_CANNON_PLACEMENTS.includes(placement)
+			&& Number.isFinite(distanceFromOwnerFt)
+			&& distanceFromOwnerFt >= 0
+			&& distanceFromOwnerFt <= 5
+			&& (placement === "carried"
+				? mobility == null && distanceFromOwnerFt === 0
+				: CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(mobility));
+		if (!runtimeValid) return {ok: false, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE};
+		if (this.listEfaEldritchCannons().length) return {ok: false, reason: "slotOccupied"};
+
+		const generatedClassSummon = {
+			templateUid: definition.templateUid,
+			ownerClassUid: definition.ownerClassUid,
+			ownerSubclassUid: definition.ownerSubclassUid,
+			ownerFeatureUid: definition.ownerFeatureUid,
+			generatedSlot: 0,
+			generationVersion: definition.generationVersion,
+		};
+		const ownershipKey = CharacterSheetState._getGeneratedClassSummonOwnershipKey(generatedClassSummon);
+		if ((this._data.companions || []).some(companion =>
+			CharacterSheetState._getGeneratedClassSummonOwnershipKey(companion?.generatedClassSummon) === ownershipKey,
+		)) return {ok: false, reason: "slotOccupied"};
+
+		if (this.isInCombat() && !this.isActionTypeAvailable("action")) {
+			return {ok: false, reason: "actionUnavailable", actionType: "action", actionSubtype: "Magic action"};
+		}
+
+		if (!CharacterSheetState.EFA_ELDRITCH_CANNON_PAYMENT_TYPES.includes(createdWith)) {
+			return {ok: false, reason: "invalidPayment"};
+		}
+		if (createdWith === "freeUse") {
+			if (createdWithSlotLevel != null) return {ok: false, reason: "invalidPayment"};
+			const resource = this._getEfaEldritchCannonCreationResource();
+			const current = resource ? Number(resource.current) || 0 : 1;
+			if (current < 1) return {ok: false, reason: "freeUseUnavailable"};
+			return {ok: true, definition, ownerState, resource, payment: {type: "freeUse"}};
+		}
+
+		const slotLevel = Number(createdWithSlotLevel);
+		if (!Number.isInteger(slotLevel) || slotLevel < 1 || !["spell", "pact"].includes(createdWithSlotKind)) {
+			return {ok: false, reason: "invalidPayment"};
+		}
+		const slot = this._getEfaEldritchCannonSpellSlotOptions()
+			.find(option => option.kind === createdWithSlotKind && option.level === slotLevel);
+		if (!slot) return {ok: false, reason: "spellSlotUnavailable", createdWithSlotLevel: slotLevel, createdWithSlotKind};
+		return {
+			ok: true,
+			definition,
+			ownerState,
+			payment: {type: "spellSlot", level: slotLevel, kind: createdWithSlotKind},
+		};
+	}
+
+	async pCreateEfaEldritchCannon ({
+		form,
+		size,
+		placement,
+		mobility = null,
+		distanceFromOwnerFt = 0,
+		createdWith,
+		createdWithSlotLevel = null,
+		createdWithSlotKind = "spell",
+		cancelled = false,
+		pCommit = null,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		const validation = this._validateEfaEldritchCannonCreationRequest({
+			form,
+			size,
+			placement,
+			mobility,
+			distanceFromOwnerFt,
+			createdWith,
+			createdWithSlotLevel,
+			createdWithSlotKind,
+		});
+		if (!validation.ok) return {...validation, committed: false};
+
+		const snapshot = this.toJson();
+		const rollback = (reason, details = null) => {
+			this.loadFromJson(snapshot);
+			return {ok: false, committed: false, reason, ...(details ? {details} : {})};
+		};
+
+		const actionTracked = this.isInCombat();
+		if (actionTracked && !this.consumeActionType("action")) return rollback("actionUnavailable");
+
+		if (createdWith === "freeUse") {
+			const resource = this._ensureEfaEldritchCannonCreationResource();
+			if (!resource || resource.current < 1) return rollback("freeUseUnavailable");
+			resource.current--;
+		} else if (createdWithSlotKind === "pact") {
+			if (!this.usePactSlot()) return rollback("spellSlotUnavailable");
+		} else if (!this.useSpellSlot(createdWithSlotLevel)) return rollback("spellSlotUnavailable");
+
+		const created = this.createEfaEldritchCannon({
+			form,
+			size,
+			placement,
+			mobility,
+			distanceFromOwnerFt,
+			createdWith,
+			createdWithSlotLevel: createdWith === "spellSlot" ? createdWithSlotLevel : null,
+		});
+		if (!created.ok) return rollback(created.reason || "creationFailed", created);
+
+		if (pCommit) {
+			try {
+				const didCommit = await pCommit({
+					summon: created.summon,
+					payment: validation.payment,
+					action: {type: "action", subtype: "Magic action", spent: actionTracked},
+				});
+				if (didCommit === false) return rollback("saveFailed");
+			} catch (error) {
+				return rollback("saveFailed", {message: error instanceof Error ? error.message : String(error)});
+			}
+		}
+
+		const creationState = this.getEfaEldritchCannonCreationState();
+		return {
+			...created,
+			committed: true,
+			payment: validation.payment,
+			action: {type: "action", subtype: "Magic action", spent: actionTracked},
+			freeUseRemaining: creationState.freeUse.current,
+			spellSlotsRemaining: creationState.spellSlots,
+		};
+	}
+
 	createEfaEldritchCannon ({
 		form,
 		size,
@@ -78209,6 +78466,315 @@ class CharacterSheetState {
 
 	setEfaEldritchCannonCurrentHp (instanceId, currentHp) {
 		return this.setClassSummonCurrentHp(instanceId, currentHp);
+	}
+
+	_getEfaEldritchCannonRecord (instanceId) {
+		const record = (this._data.companions || []).find(companion =>
+			companion?.id === instanceId
+			&& CharacterSheetState._isGeneratedClassSummonRecord(companion)
+			&& CharacterSheetState._isSameClassSummonUid(
+				companion.generatedClassSummon?.templateUid,
+				CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID,
+			),
+		);
+		const summon = record ? this._projectGeneratedClassSummon(record) : null;
+		return {record: summon ? record : null, summon};
+	}
+
+	setEfaEldritchCannonPosition (instanceId, {
+		placement = null,
+		mobility = undefined,
+		distanceFromOwnerFt = null,
+	} = {}) {
+		const {record, summon} = this._getEfaEldritchCannonRecord(instanceId);
+		if (!record || !summon) return {ok: false, reason: "notFound", instanceId};
+		const nextPlacement = placement || record.placement;
+		const nextMobility = mobility === undefined ? record.mobility : mobility;
+		const nextDistance = distanceFromOwnerFt == null ? record.distanceFromOwnerFt : Number(distanceFromOwnerFt);
+		const isValid = CharacterSheetState.EFA_ELDRITCH_CANNON_PLACEMENTS.includes(nextPlacement)
+			&& Number.isFinite(nextDistance)
+			&& nextDistance >= 0
+			&& (nextPlacement === "carried"
+				? nextMobility == null && nextDistance === 0
+				: CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(nextMobility));
+		if (!isValid) return {ok: false, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE, instanceId};
+		record.placement = nextPlacement;
+		record.mobility = nextMobility;
+		record.distanceFromOwnerFt = nextDistance;
+		return {
+			ok: true,
+			instanceId,
+			placement: record.placement,
+			mobility: record.mobility,
+			distanceFromOwnerFt: record.distanceFromOwnerFt,
+		};
+	}
+
+	damageEfaEldritchCannon (instanceId, amount) {
+		const {summon} = this._getEfaEldritchCannonRecord(instanceId);
+		const damage = Math.floor(Number(amount));
+		if (!summon) return {ok: false, reason: "notFound", instanceId};
+		if (!Number.isInteger(damage) || damage < 1) return {ok: false, reason: "invalidAmount", instanceId};
+		const result = this.setEfaEldritchCannonCurrentHp(instanceId, Math.max(0, summon.hp.current - damage));
+		return {...result, amount: damage, previousHp: summon.hp.current};
+	}
+
+	healEfaEldritchCannon (instanceId, amount) {
+		const {summon} = this._getEfaEldritchCannonRecord(instanceId);
+		const healing = Math.floor(Number(amount));
+		if (!summon) return {ok: false, reason: "notFound", instanceId};
+		if (!Number.isInteger(healing) || healing < 1) return {ok: false, reason: "invalidAmount", instanceId};
+		const nextHp = Math.min(summon.hp.max, summon.hp.current + healing);
+		const result = this.setEfaEldritchCannonCurrentHp(instanceId, nextHp);
+		return {
+			...result,
+			amount: healing,
+			healed: nextHp - summon.hp.current,
+			previousHp: summon.hp.current,
+			maxHp: summon.hp.max,
+		};
+	}
+
+	static _getDiceFormulaBounds (formula) {
+		const match = /^(\d+)d(\d+)(?:\+(-?\d+))?$/.exec(String(formula || "").replace(/\s+/g, ""));
+		if (!match) return null;
+		const count = Number(match[1]);
+		const sides = Number(match[2]);
+		const bonus = Number(match[3] || 0);
+		return {
+			count,
+			sides,
+			bonus,
+			min: count + bonus,
+			max: (count * sides) + bonus,
+		};
+	}
+
+	_rollEfaEldritchCannonFormula (formula, suppliedTotal = null) {
+		const bounds = CharacterSheetState._getDiceFormulaBounds(formula);
+		if (!bounds) return {ok: false, reason: "invalidFormula"};
+		if (suppliedTotal != null) {
+			const total = Number(suppliedTotal);
+			if (!Number.isInteger(total) || total < bounds.min || total > bounds.max) {
+				return {ok: false, reason: "invalidRoll"};
+			}
+			return {ok: true, total, formula, bounds};
+		}
+		return {ok: true, total: this._rollDiceExpression(formula), formula, bounds};
+	}
+
+	validateEfaEldritchCannonActivation ({
+		instanceId,
+		targetType = null,
+		targetName = null,
+		targetDistanceFromCannonFt = null,
+		movementTiming = "none",
+		movementDistanceFromOwnerFt = null,
+	} = {}) {
+		const {record, summon} = this._getEfaEldritchCannonRecord(instanceId);
+		if (!record || !summon) return {ok: false, reason: "notFound", instanceId};
+		if (this.isInCombat() && !this.isActionTypeAvailable("bonus")) {
+			return {ok: false, reason: "actionUnavailable", actionType: "bonus"};
+		}
+
+		const timing = movementTiming || "none";
+		if (!["none", "before", "after"].includes(timing)) return {ok: false, reason: "invalidMovement"};
+		let nextDistance = record.distanceFromOwnerFt;
+		if (timing !== "none") {
+			nextDistance = Number(movementDistanceFromOwnerFt);
+			if (record.placement === "carried"
+				|| !CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(record.mobility)
+				|| !Number.isFinite(nextDistance)
+				|| nextDistance < 0
+				|| Math.abs(nextDistance - record.distanceFromOwnerFt) > summon.calculations.movementSpeedFt) {
+				return {ok: false, reason: "invalidMovement"};
+			}
+		} else if (movementDistanceFromOwnerFt != null) return {ok: false, reason: "invalidMovement"};
+
+		const activationDistance = timing === "before" ? nextDistance : record.distanceFromOwnerFt;
+		if (activationDistance > summon.calculations.activationRangeFt) {
+			return {
+				ok: false,
+				reason: "ownerOutOfRange",
+				distanceFromOwnerFt: activationDistance,
+				rangeFt: summon.calculations.activationRangeFt,
+			};
+		}
+		const targetDistance = targetDistanceFromCannonFt == null ? null : Number(targetDistanceFromCannonFt);
+		if (summon.form === "forceBallista") {
+			if (!Number.isFinite(targetDistance) || targetDistance < 0 || targetDistance > summon.calculations.rangeFt) {
+				return {ok: false, reason: "targetOutOfRange", rangeFt: summon.calculations.rangeFt};
+			}
+		}
+		if (summon.form === "protector") {
+			if (!["self", "creature"].includes(targetType)) return {ok: false, reason: "invalidTarget"};
+			const protectorDistance = targetType === "self" ? activationDistance : targetDistance;
+			if (targetType === "creature" && !String(targetName || "").trim()) return {ok: false, reason: "invalidTarget"};
+			if (!Number.isFinite(protectorDistance) || protectorDistance < 0 || protectorDistance > summon.calculations.rangeFt) {
+				return {ok: false, reason: "targetOutOfRange", rangeFt: summon.calculations.rangeFt};
+			}
+		}
+
+		return {
+			ok: true,
+			record,
+			summon,
+			movement: {
+				timing,
+				fromDistanceFt: record.distanceFromOwnerFt,
+				toDistanceFt: nextDistance,
+				movedFt: Math.abs(nextDistance - record.distanceFromOwnerFt),
+			},
+			target: summon.form === "protector"
+				? {
+					type: targetType,
+					name: targetType === "self" ? (this._data.name || "Self") : String(targetName).trim(),
+					distanceFromCannonFt: targetType === "self" ? activationDistance : targetDistance,
+				}
+				: {
+					type: "creature",
+					name: String(targetName || "Target").trim() || "Target",
+					distanceFromCannonFt: targetDistance,
+				},
+		};
+	}
+
+	activateEfaEldritchCannon ({
+		instanceId,
+		targetType = null,
+		targetName = null,
+		targetDistanceFromCannonFt = null,
+		movementTiming = "none",
+		movementDistanceFromOwnerFt = null,
+		attackRoll = null,
+		effectRoll = null,
+	} = {}) {
+		const validation = this.validateEfaEldritchCannonActivation({
+			instanceId,
+			targetType,
+			targetName,
+			targetDistanceFromCannonFt,
+			movementTiming,
+			movementDistanceFromOwnerFt,
+		});
+		if (!validation.ok) return {...validation, committed: false};
+
+		const {record, summon, movement, target} = validation;
+		const effectFormula = summon.form === "protector"
+			? `${summon.calculations.tempHpDice}+${summon.calculations.tempHpBonus}`
+			: summon.calculations.damageDice;
+		const effect = this._rollEfaEldritchCannonFormula(effectFormula, effectRoll);
+		if (!effect.ok) return {...effect, committed: false};
+		let attack = null;
+		if (summon.form === "forceBallista") {
+			const natural = attackRoll == null
+				? (typeof RollerUtil !== "undefined" && RollerUtil.randomise ? RollerUtil.randomise(20) : Math.ceil(Math.random() * 20))
+				: Number(attackRoll);
+			if (!Number.isInteger(natural) || natural < 1 || natural > 20) return {ok: false, committed: false, reason: "invalidRoll"};
+			attack = {
+				natural,
+				bonus: summon.calculations.attackBonus,
+				total: natural + summon.calculations.attackBonus,
+			};
+		}
+
+		const actionTracked = this.isInCombat();
+		if (actionTracked && !this.consumeActionType("bonus")) {
+			return {ok: false, committed: false, reason: "actionUnavailable", actionType: "bonus"};
+		}
+		if (movement.timing === "before") record.distanceFromOwnerFt = movement.toDistanceFt;
+
+		let result;
+		if (summon.form === "flamethrower") {
+			result = {
+				kind: "savingThrow",
+				saveAbility: summon.calculations.saveAbility,
+				saveDc: summon.calculations.saveDc,
+				damage: effect.total,
+				damageOnSuccess: Math.floor(effect.total / 2),
+				damageDice: summon.calculations.damageDice,
+				damageType: summon.calculations.damageType,
+				area: summon.calculations.area,
+			};
+		} else if (summon.form === "forceBallista") {
+			result = {
+				kind: "spellAttack",
+				attack,
+				damage: effect.total,
+				damageDice: summon.calculations.damageDice,
+				damageType: summon.calculations.damageType,
+				rangeFt: summon.calculations.rangeFt,
+				pushFt: summon.calculations.pushFt,
+			};
+		} else {
+			const previousTempHp = this.getTempHp() || 0;
+			const applied = target.type === "self" && effect.total > previousTempHp;
+			if (applied) this.setTempHp(effect.total);
+			result = {
+				kind: "temporaryHitPoints",
+				tempHp: effect.total,
+				tempHpDice: summon.calculations.tempHpDice,
+				tempHpBonus: summon.calculations.tempHpBonus,
+				target,
+				applied,
+				previousTempHp,
+				currentTempHp: target.type === "self" ? this.getTempHp() : previousTempHp,
+				rangeFt: summon.calculations.rangeFt,
+			};
+		}
+
+		if (movement.timing === "after") record.distanceFromOwnerFt = movement.toDistanceFt;
+		return {
+			ok: true,
+			committed: true,
+			instanceId,
+			form: summon.form,
+			action: {type: "bonus", subtype: "Eldritch Cannon activation", spent: actionTracked},
+			movement,
+			target,
+			effect: {formula: effect.formula, total: effect.total},
+			result,
+			cannon: this.getEfaEldritchCannon(instanceId),
+		};
+	}
+
+	mendEfaEldritchCannon (instanceId, {roll = null} = {}) {
+		const {summon} = this._getEfaEldritchCannonRecord(instanceId);
+		if (!summon) return {ok: false, reason: "notFound", instanceId};
+		const effect = this._rollEfaEldritchCannonFormula("2d6", roll);
+		if (!effect.ok) return effect;
+		const healed = this.healEfaEldritchCannon(instanceId, effect.total);
+		return {
+			...healed,
+			formula: "2d6",
+			roll: effect.total,
+		};
+	}
+
+	dismissEfaEldritchCannonWithMagicAction (instanceId) {
+		const {summon} = this._getEfaEldritchCannonRecord(instanceId);
+		if (!summon) return {ok: false, committed: false, reason: "notFound", instanceId};
+		if (this.isInCombat() && !this.isActionTypeAvailable("action")) {
+			return {ok: false, committed: false, reason: "actionUnavailable", actionType: "action"};
+		}
+		const actionTracked = this.isInCombat();
+		if (actionTracked && !this.consumeActionType("action")) {
+			return {ok: false, committed: false, reason: "actionUnavailable", actionType: "action"};
+		}
+		const dismissed = this.dismissEfaEldritchCannon(instanceId);
+		if (!dismissed.ok) {
+			if (actionTracked) this.restoreActionType("action");
+			return {...dismissed, committed: false};
+		}
+		return {
+			...dismissed,
+			committed: true,
+			action: {type: "action", subtype: "Magic action", spent: actionTracked},
+		};
+	}
+
+	endEfaEldritchCannonDuration (instanceId) {
+		return this.retireClassSummon(instanceId, CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DURATION_EXPIRED);
 	}
 
 	advanceClassSummonGameTime (minutes) {

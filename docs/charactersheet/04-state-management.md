@@ -62,6 +62,23 @@ would otherwise expose unsupported controls or persist fake derived fields.
 Dedicated class-summon APIs remain the only read/mutation surface, while
 `toJson()` continues to serialize the compact record from `_data.companions[]`.
 
+EFA cannon creation is a higher-level transaction over that compact lifecycle.
+`pCreateEfaEldritchCannon()` validates the complete form/size/placement/payment
+request before spending anything, consumes the canonical Action slot only in
+combat, and spends either the source-qualified one-use Long Rest resource or an
+explicit normal/Pact spell slot. The callback-backed persistence commit is
+atomic: a failed save restores the full pre-request state, including action
+economy, resource/slot counts, summon revisions, and companion records.
+
+Base operation remains on dedicated EFA APIs:
+`validateEfaEldritchCannonActivation()` /
+`activateEfaEldritchCannon()` enforce the 60-foot owner range, optional
+15-foot movement, form target ranges, and the canonical Bonus Action slot in
+combat. Position, HP damage/healing, `mending`, Magic Action dismissal, and
+explicit duration-ending each have source-specific methods. Protector applies
+the ordinary temporary-HP replacement rule to self only; another creature's
+rolled result is reported without mutating another character.
+
 ### Basic Information
 
 ```javascript

@@ -1260,10 +1260,31 @@ keeps the compact record in `_data.companions[]`. Carried cannons require
 `"legs"` or `"wheels"`.
 
 Duration is game time, not wall time. `advanceClassSummonGameTime(minutes)`
-reduces the persisted 60-minute duration and retires at zero. Milestone 2 only
-projects form damage and Protector temporary-HP formulas; applying damage,
-granting temporary HP, detonation, cannon controls, and other operational UI are
-deferred.
+reduces the persisted 60-minute duration and retires at zero.
+
+Milestone 3 adds one-active-cannon creation and base operation without changing
+the compact record contract:
+
+- `pCreateEfaEldritchCannon()` validates before spending and atomically rolls
+  back Action/resource/slot/revision/summon state if its persistence callback
+  fails. In combat it consumes the canonical `action` slot and reports the
+  "Magic Action" subtype.
+- `Eldritch Cannon Creation` is a contextual, exact-feature resource with one
+  Long Rest use. An explicit normal or Pact spell slot is the alternative.
+- `validateEfaEldritchCannonActivation()` /
+  `activateEfaEldritchCannon()` require the owner within 60 feet, consume the
+  canonical `bonus` slot only in combat, and allow a deployed cannon to move up
+  to 15 feet before or after activation. Carried cannons remain at zero.
+- Flamethrower, Force Ballista, and Protector read all dice, attack/DC, and
+  ranges from the projection. Protector uses `max(1, INT modifier)` and only
+  applies temporary-HP replacement directly when the target is self.
+- Dedicated methods own position updates, HP damage/healing, `mending` (`2d6`,
+  capped), Magic Action dismissal, and explicit duration ending.
+
+The Combat tab owns a dedicated cannon card and canonical
+`CharacterSheetModal` creation/activation dialogs. The card never renders
+through generic companion APIs. Rest expiry, Explosive Cannon, Half Cover,
+dual operation, and Arcane Firearm remain deferred.
 
 Catalog adds preserve both type layers: inventory grouping continues to use the coarse
 `type`, while rules logic reads `typeCode` first and strips any `|source` suffix.

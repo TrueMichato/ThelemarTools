@@ -65,6 +65,7 @@ const CS_COMBAT_ICONS = {
 	"edit": "✏️",
 	// Channeled cantrip vocabulary (rider row).
 	"clear": "✖️",
+	"cannon": "💥",
 };
 
 /**
@@ -548,6 +549,9 @@ class CharacterSheetCombat {
 
 		// Add condition button in combat tab
 		document.getElementById("charsheet-combat-add-condition")?.addEventListener("click", () => this._onAddCondition());
+		document.getElementById("charsheet-combat-efa-cannon-create")?.addEventListener("click", (event) => {
+			void this._pShowEfaEldritchCannonCreationModal(event.currentTarget);
+		});
 	}
 
 	/**
@@ -7310,6 +7314,589 @@ class CharacterSheetCombat {
 		return el;
 	}
 
+	static _getEfaCannonFormLabel (form) {
+		return {
+			flamethrower: "Flamethrower",
+			forceBallista: "Force Ballista",
+			protector: "Protector",
+		}[form] || "Eldritch Cannon";
+	}
+
+	static _getEfaCannonPlacementLabel (cannon) {
+		if (cannon.placement === "carried") return "Carried";
+		return `Deployed on ${cannon.mobility === "legs" ? "legs" : "wheels"}`;
+	}
+
+	static _formatEfaCannonDuration (minutes) {
+		const value = Math.max(0, Number(minutes) || 0);
+		if (value >= 60 && value % 60 === 0) return `${value / 60} hr`;
+		return `${value} min`;
+	}
+
+	static _getEfaCannonCreationReason (state) {
+		return {
+			slotOccupied: "Dismiss, destroy, or end the active cannon before creating another.",
+			actionUnavailable: "Your Action is already spent this turn.",
+			paymentUnavailable: "No free creation use or spell slot is available.",
+			sourceMismatch: "This control is only available to the EFA Artillerist.",
+			ownerRemoved: "Add the EFA Artillerist subclass to create a cannon.",
+			levelReduced: "Eldritch Cannon becomes available at Artificer level 3.",
+		}[state?.reason] || "";
+	}
+
+	_setEfaCannonFeedback (message, {isError = false} = {}) {
+		const feedback = document.getElementById("charsheet-combat-efa-cannon-feedback");
+		if (!feedback) return;
+		feedback.textContent = message || "";
+		feedback.classList.toggle("charsheet__efa-cannon-feedback--error", !!isError);
+	}
+
+	async _pSaveEfaCannonState () {
+		try {
+			if (this._page?._saveCurrentCharacter) {
+				return (await this._page._saveCurrentCharacter({isReturnStatus: true})) !== false;
+			}
+			this._page?.saveCharacter?.();
+			return true;
+		} catch (error) {
+			return false;
+		}
+	}
+
+	_refreshEfaCannonSurfaces () {
+		this.renderCombatEfaCannon();
+		this.renderCombatActionEconomy?.();
+		this._page?._renderResources?.();
+		this._page?._features?._renderResources?.();
+		this._page?._spells?.render?.();
+	}
+
+	async _pCommitEfaCannonMutation (mutate) {
+		const snapshot = this._state.toJson();
+		const result = mutate();
+		if (!result?.ok) return result;
+		if (await this._pSaveEfaCannonState()) return result;
+		this._state.loadFromJson(snapshot);
+		await this._pSaveEfaCannonState();
+		return {ok: false, committed: false, reason: "saveFailed"};
+	}
+
+	_rollEfaCannonFormula (formula) {
+		const match = /^(\d+)d(\d+)(?:\+(-?\d+))?$/.exec(String(formula || "").replace(/\s+/g, ""));
+		if (!match) return null;
+		const count = Number(match[1]);
+		const sides = Number(match[2]);
+		const bonus = Number(match[3] || 0);
+		const rolls = Array.from({length: count}, () => this._page.rollDice(1, sides));
+		return {
+			formula,
+			rolls,
+			bonus,
+			total: rolls.reduce((sum, roll) => sum + roll, 0) + bonus,
+			groups: [{sides, rolls}],
+			breakdown: `${rolls.join(" + ")}${bonus ? ` ${bonus >= 0 ? "+" : "−"} ${Math.abs(bonus)}` : ""}`,
+		};
+	}
+
+	async _pShowEfaEldritchCannonCreationModal () {
+		const creationState = this._state.getEfaEldritchCannonCreationState();
+		if (!creationState.available) return;
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: "Create Eldritch Cannon",
+			isMinHeight0: true,
+			isWidth100: true,
+		});
+		modalInner.classList.add("charsheet__efa-cannon-modal");
+
+		const slotOptions = creationState.spellSlots
+			.map(slot => `<option value="${slot.kind}:${slot.level}">${slot.kind === "pact" ? "Pact" : `Level ${slot.level}`} slot — ${slot.current} remaining</option>`)
+			.join("");
+		const freeDisabled = creationState.freeUse.available ? "" : " disabled";
+		const slotDisabled = creationState.spellSlots.length ? "" : " disabled";
+		const defaultPayment = creationState.freeUse.available ? "freeUse" : "spellSlot";
+		modalInner.innerHTML = `
+			<form class="charsheet__efa-cannon-create-form" novalidate>
+				<p class="charsheet__efa-cannon-modal-intro">Choose the cannon's form and physical setup. The full request is checked before any Action, free use, or spell slot is spent.</p>
+				<fieldset class="charsheet__efa-cannon-fieldset">
+					<legend>Form</legend>
+					<div class="charsheet__efa-cannon-radio-grid">
+						<label><input type="radio" name="efa-cannon-form" value="flamethrower" checked> <span><strong>Flamethrower</strong><small>15-ft cone · Dex save · fire damage</small></span></label>
+						<label><input type="radio" name="efa-cannon-form" value="forceBallista"> <span><strong>Force Ballista</strong><small>120-ft spell attack · force damage · 5-ft push</small></span></label>
+						<label><input type="radio" name="efa-cannon-form" value="protector"> <span><strong>Protector</strong><small>Temporary HP to a target within 10 ft</small></span></label>
+					</div>
+				</fieldset>
+				<div class="charsheet__efa-cannon-form-row">
+					<label class="charsheet__efa-cannon-field">
+						<span>Size</span>
+						<select class="ve-form-control" name="efa-cannon-size">
+							<option value="T">Tiny</option>
+							<option value="S">Small</option>
+						</select>
+					</label>
+					<label class="charsheet__efa-cannon-field">
+						<span>Placement</span>
+						<select class="ve-form-control" name="efa-cannon-placement">
+							<option value="deployed">Deployed</option>
+							<option value="carried">Carried</option>
+						</select>
+					</label>
+					<label class="charsheet__efa-cannon-field" data-efa-cannon-mobility-field>
+						<span>Mobility</span>
+						<select class="ve-form-control" name="efa-cannon-mobility">
+							<option value="legs">Legs</option>
+							<option value="wheels">Wheels</option>
+						</select>
+					</label>
+					<label class="charsheet__efa-cannon-field" data-efa-cannon-distance-field>
+						<span>Initial distance from you (0–5 ft)</span>
+						<input class="ve-form-control" type="number" name="efa-cannon-distance" min="0" max="5" step="1" value="0" inputmode="numeric">
+					</label>
+				</div>
+				<fieldset class="charsheet__efa-cannon-fieldset">
+					<legend>Creation payment</legend>
+					<div class="charsheet__efa-cannon-payment-options">
+						<label><input type="radio" name="efa-cannon-payment" value="freeUse"${defaultPayment === "freeUse" ? " checked" : ""}${freeDisabled}> Free use <span>${creationState.freeUse.current} / 1 remaining · Long Rest</span></label>
+						<label><input type="radio" name="efa-cannon-payment" value="spellSlot"${defaultPayment === "spellSlot" ? " checked" : ""}${slotDisabled}> Spell slot</label>
+					</div>
+					<label class="charsheet__efa-cannon-field" data-efa-cannon-slot-field>
+						<span>Spell slot to spend</span>
+						<select class="ve-form-control" name="efa-cannon-slot"${slotDisabled}>${slotOptions || "<option>No spell slots available</option>"}</select>
+					</label>
+				</fieldset>
+				<div class="charsheet__efa-cannon-cost-summary" data-efa-cannon-cost-summary></div>
+				<div class="charsheet__efa-cannon-modal-feedback" role="status" aria-live="polite" aria-atomic="true" data-efa-cannon-modal-feedback></div>
+				<div class="charsheet__efa-cannon-modal-actions">
+					<button type="button" class="ve-btn ve-btn-default" data-efa-cannon-cancel>Cancel</button>
+					<button type="submit" class="ve-btn ve-btn-primary" data-efa-cannon-submit>Create Cannon</button>
+				</div>
+			</form>
+		`;
+
+		const form = modalInner.querySelector(".charsheet__efa-cannon-create-form");
+		const placement = form.elements.namedItem("efa-cannon-placement");
+		const mobility = form.elements.namedItem("efa-cannon-mobility");
+		const distance = form.elements.namedItem("efa-cannon-distance");
+		const slot = form.elements.namedItem("efa-cannon-slot");
+		const slotField = form.querySelector("[data-efa-cannon-slot-field]");
+		const feedback = form.querySelector("[data-efa-cannon-modal-feedback]");
+		const summary = form.querySelector("[data-efa-cannon-cost-summary]");
+		const submit = form.querySelector("[data-efa-cannon-submit]");
+
+		const update = () => {
+			const isCarried = placement.value === "carried";
+			mobility.disabled = isCarried;
+			distance.disabled = isCarried;
+			if (isCarried) {
+				mobility.value = "legs";
+				distance.value = "0";
+			}
+			form.querySelector("[data-efa-cannon-mobility-field]").hidden = isCarried;
+			form.querySelector("[data-efa-cannon-distance-field]").hidden = isCarried;
+			const payment = form.querySelector("[name=efa-cannon-payment]:checked")?.value;
+			slotField.hidden = payment !== "spellSlot";
+			const actionCost = creationState.action.tracked ? "Magic Action (your Action)" : "Magic Action (not tracked outside combat)";
+			const paymentText = payment === "freeUse"
+				? "free creation use"
+				: (slot.selectedOptions[0]?.textContent || "spell slot");
+			summary.textContent = `${actionCost} · ${paymentText}`;
+			feedback.textContent = "";
+			submit.disabled = !creationState.action.available || (payment === "spellSlot" && !creationState.spellSlots.length);
+		};
+		form.addEventListener("change", update);
+		placement.addEventListener("input", update);
+		form.querySelector("[data-efa-cannon-cancel]").addEventListener("click", () => doClose(false));
+		form.addEventListener("submit", async event => {
+			event.preventDefault();
+			const formValue = form.querySelector("[name=efa-cannon-form]:checked")?.value;
+			const payment = form.querySelector("[name=efa-cannon-payment]:checked")?.value;
+			const [slotKind, slotLevel] = payment === "spellSlot" ? String(slot.value || "").split(":") : [null, null];
+			submit.disabled = true;
+			feedback.textContent = "Creating cannon…";
+			feedback.classList.remove("charsheet__efa-cannon-modal-feedback--error");
+			const result = await this._state.pCreateEfaEldritchCannon({
+				form: formValue,
+				size: form.elements.namedItem("efa-cannon-size").value,
+				placement: placement.value,
+				mobility: placement.value === "carried" ? null : mobility.value,
+				distanceFromOwnerFt: placement.value === "carried" ? 0 : Number(distance.value),
+				createdWith: payment,
+				createdWithSlotLevel: payment === "spellSlot" ? Number(slotLevel) : null,
+				createdWithSlotKind: payment === "spellSlot" ? slotKind : "spell",
+				pCommit: () => this._pSaveEfaCannonState(),
+			});
+			if (!result.ok) {
+				if (result.reason === "saveFailed") await this._pSaveEfaCannonState();
+				feedback.textContent = result.reason === "saveFailed"
+					? "The character could not be saved. No Action, free use, spell slot, or cannon was committed. Try again."
+					: result.reason === "invalidState"
+						? "Choose a form and size. A carried cannon stays at 0 ft; a deployed cannon needs legs or wheels and a starting distance from 0 to 5 ft."
+						: ["invalidPayment", "freeUseUnavailable", "spellSlotUnavailable"].includes(result.reason)
+							? "Choose an available free use or spell slot, then try again."
+							: CharacterSheetCombat._getEfaCannonCreationReason(result) || "Check every choice and try again.";
+				feedback.classList.add("charsheet__efa-cannon-modal-feedback--error");
+				submit.disabled = false;
+				return;
+			}
+			const cannon = result.summon;
+			const slots = result.spellSlotsRemaining.reduce((total, entry) => total + entry.current, 0);
+			const message = `${CharacterSheetCombat._getEfaCannonFormLabel(cannon.form)} created, ${CharacterSheetCombat._getEfaCannonPlacementLabel(cannon)}, ${cannon.hp.current}/${cannon.hp.max} HP, ${CharacterSheetCombat._formatEfaCannonDuration(cannon.durationRemainingMinutes)} remaining. Free use: ${result.freeUseRemaining}; available spell slots: ${slots}.`;
+			doClose(true);
+			this._refreshEfaCannonSurfaces();
+			this._setEfaCannonFeedback(message);
+			this._announceCombat(message);
+		});
+		update();
+		form.querySelector("[name=efa-cannon-form]")?.focus();
+	}
+
+	async _pShowEfaEldritchCannonActivationModal (instanceId) {
+		const cannon = this._state.getEfaEldritchCannon(instanceId);
+		if (!cannon) return;
+		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
+			title: `Activate ${CharacterSheetCombat._getEfaCannonFormLabel(cannon.form)}`,
+			isMinHeight0: true,
+			isWidth100: true,
+		});
+		modalInner.classList.add("charsheet__efa-cannon-modal");
+		const isProtector = cannon.form === "protector";
+		const isBallista = cannon.form === "forceBallista";
+		const movementFields = cannon.placement === "deployed"
+			? `
+				<div class="charsheet__efa-cannon-form-row">
+					<label class="charsheet__efa-cannon-field">
+						<span>Optional movement</span>
+						<select class="ve-form-control" name="efa-cannon-movement-timing">
+							<option value="none">No movement</option>
+							<option value="before">Move before activation</option>
+							<option value="after">Move after activation</option>
+						</select>
+					</label>
+					<label class="charsheet__efa-cannon-field" data-efa-cannon-movement-distance hidden>
+						<span>New distance from you (within 15 ft)</span>
+						<input class="ve-form-control" type="number" min="0" step="1" name="efa-cannon-movement-distance" value="${cannon.distanceFromOwnerFt}" inputmode="numeric">
+					</label>
+				</div>`
+			: "";
+		const targetFields = isProtector
+			? `
+				<fieldset class="charsheet__efa-cannon-fieldset">
+					<legend>Target within 10 ft of the cannon</legend>
+					<div class="charsheet__efa-cannon-payment-options">
+						<label><input type="radio" name="efa-cannon-target-type" value="self" checked> Self</label>
+						<label><input type="radio" name="efa-cannon-target-type" value="creature"> Another creature</label>
+					</div>
+					<div class="charsheet__efa-cannon-form-row" data-efa-cannon-target-details hidden>
+						<label class="charsheet__efa-cannon-field"><span>Target name</span><input class="ve-form-control" name="efa-cannon-target-name" type="text" autocomplete="off"></label>
+						<label class="charsheet__efa-cannon-field"><span>Distance from cannon (ft)</span><input class="ve-form-control" name="efa-cannon-target-distance" type="number" min="0" max="10" step="1" value="0" inputmode="numeric"></label>
+					</div>
+				</fieldset>`
+			: `
+				<div class="charsheet__efa-cannon-form-row">
+					<label class="charsheet__efa-cannon-field"><span>Target name (optional)</span><input class="ve-form-control" name="efa-cannon-target-name" type="text" autocomplete="off"></label>
+					${isBallista ? `<label class="charsheet__efa-cannon-field"><span>Distance from cannon (0–120 ft)</span><input class="ve-form-control" name="efa-cannon-target-distance" type="number" min="0" max="120" step="1" value="0" inputmode="numeric"></label>` : ""}
+				</div>`;
+		const operationText = cannon.form === "flamethrower"
+			? `15-ft cone · DC ${cannon.calculations.saveDc} Dexterity save · ${cannon.calculations.damageDice} fire · half on success`
+			: cannon.form === "forceBallista"
+				? `+${cannon.calculations.attackBonus} ranged spell attack · 120 ft · ${cannon.calculations.damageDice} force · 5-ft push`
+				: `${cannon.calculations.tempHpDice} + ${cannon.calculations.tempHpBonus} temporary HP · replacement, not stacking`;
+		modalInner.innerHTML = `
+			<form class="charsheet__efa-cannon-activate-form" novalidate>
+				<div class="charsheet__efa-cannon-operation-summary">${operationText}</div>
+				${targetFields}
+				${movementFields}
+				<div class="charsheet__efa-cannon-cost-summary">${this._state.isInCombat() ? "Bonus Action" : "Bonus Action (not tracked outside combat)"} · owner must remain within 60 ft</div>
+				<div class="charsheet__efa-cannon-modal-feedback" role="status" aria-live="polite" aria-atomic="true" data-efa-cannon-modal-feedback></div>
+				<div class="charsheet__efa-cannon-modal-actions">
+					<button type="button" class="ve-btn ve-btn-default" data-efa-cannon-cancel>Cancel</button>
+					<button type="submit" class="ve-btn ve-btn-primary" data-efa-cannon-submit>Activate Cannon</button>
+				</div>
+			</form>
+		`;
+		const form = modalInner.querySelector(".charsheet__efa-cannon-activate-form");
+		const feedback = form.querySelector("[data-efa-cannon-modal-feedback]");
+		const submit = form.querySelector("[data-efa-cannon-submit]");
+		const movementTiming = form.elements.namedItem("efa-cannon-movement-timing");
+		const movementDistance = form.elements.namedItem("efa-cannon-movement-distance");
+		const targetDetails = form.querySelector("[data-efa-cannon-target-details]");
+		const update = () => {
+			if (movementTiming && movementDistance) {
+				const field = form.querySelector("[data-efa-cannon-movement-distance]");
+				field.hidden = movementTiming.value === "none";
+				movementDistance.disabled = movementTiming.value === "none";
+			}
+			if (targetDetails) targetDetails.hidden = form.querySelector("[name=efa-cannon-target-type]:checked")?.value !== "creature";
+			feedback.textContent = "";
+			feedback.classList.remove("charsheet__efa-cannon-modal-feedback--error");
+		};
+		form.addEventListener("change", update);
+		form.querySelector("[data-efa-cannon-cancel]").addEventListener("click", () => doClose(false));
+		form.addEventListener("submit", async event => {
+			event.preventDefault();
+			const targetType = isProtector ? form.querySelector("[name=efa-cannon-target-type]:checked")?.value : "creature";
+			const targetName = form.elements.namedItem("efa-cannon-target-name")?.value || "";
+			const targetDistance = form.elements.namedItem("efa-cannon-target-distance");
+			const request = {
+				instanceId,
+				targetType,
+				targetName,
+				targetDistanceFromCannonFt: targetDistance ? Number(targetDistance.value) : null,
+				movementTiming: movementTiming?.value || "none",
+				movementDistanceFromOwnerFt: movementTiming?.value && movementTiming.value !== "none"
+					? Number(movementDistance.value)
+					: null,
+			};
+			const validation = this._state.validateEfaEldritchCannonActivation(request);
+			if (!validation.ok) {
+				feedback.textContent = {
+					ownerOutOfRange: "Move the cannon to within 60 ft of you before activating it.",
+					actionUnavailable: "Your Bonus Action is already spent this turn.",
+					targetOutOfRange: `The target must be within ${validation.rangeFt} ft of the cannon.`,
+					invalidTarget: "Choose a target and provide its name and distance.",
+					invalidMovement: "Choose a non-negative new distance no more than 15 ft from the cannon's current distance.",
+				}[validation.reason] || "Check the target and movement details, then try again.";
+				feedback.classList.add("charsheet__efa-cannon-modal-feedback--error");
+				return;
+			}
+			const effectFormula = cannon.form === "protector"
+				? `${cannon.calculations.tempHpDice}+${cannon.calculations.tempHpBonus}`
+				: cannon.calculations.damageDice;
+			const effectRoll = this._rollEfaCannonFormula(effectFormula);
+			const attackRoll = cannon.form === "forceBallista" ? this._page.rollD20({isAttack: true}) : null;
+			submit.disabled = true;
+			feedback.textContent = "Activating cannon…";
+			const result = await this._pCommitEfaCannonMutation(() => this._state.activateEfaEldritchCannon({
+				...request,
+				attackRoll: attackRoll?.roll ?? null,
+				effectRoll: effectRoll.total,
+			}));
+			if (!result.ok) {
+				feedback.textContent = result.reason === "saveFailed"
+					? "The character could not be saved, so the activation, movement, Bonus Action, and temporary HP were rolled back."
+					: "The cannon could not activate. Check its range and action availability.";
+				feedback.classList.add("charsheet__efa-cannon-modal-feedback--error");
+				submit.disabled = false;
+				return;
+			}
+
+			if (attackRoll) {
+				void this._page.pAnimateD20?.(attackRoll);
+				this._page.showDiceResult?.({
+					title: `${CharacterSheetCombat._getEfaCannonFormLabel(cannon.form)} Attack`,
+					roll: attackRoll.roll,
+					modifier: result.result.attack.bonus,
+					total: result.result.attack.total,
+					subtitle: this._page.formatD20Breakdown?.(attackRoll, result.result.attack.bonus),
+				});
+			}
+			void this._page.pAnimateDamageDice?.(effectRoll.groups);
+			const outcome = cannon.form === "flamethrower"
+				? `${result.result.damage} fire; ${result.result.damageOnSuccess} on a successful DC ${result.result.saveDc} Dexterity save`
+				: cannon.form === "forceBallista"
+					? `${result.result.damage} force; push 5 ft on hit`
+					: result.result.target.type === "self"
+						? `${result.result.tempHp} temporary HP rolled; ${result.result.applied ? "replaced your current temporary HP" : `kept your existing ${result.result.currentTempHp}`}`
+						: `${result.result.tempHp} temporary HP for ${result.result.target.name}`;
+			this._page.showDiceResult?.({
+				title: `${CharacterSheetCombat._getEfaCannonFormLabel(cannon.form)} ${cannon.form === "protector" ? "Temporary HP" : "Damage"}`,
+				roll: effectRoll.total - effectRoll.bonus,
+				modifier: effectRoll.bonus,
+				total: effectRoll.total,
+				subtitle: `${effectRoll.formula}: ${effectRoll.breakdown}. ${outcome}`,
+			});
+			doClose(true);
+			this._refreshEfaCannonSurfaces();
+			this._setEfaCannonFeedback(outcome);
+			this._announceCombat(outcome);
+		});
+		update();
+		form.querySelector("input, select, button")?.focus();
+	}
+
+	renderCombatEfaCannon () {
+		const section = document.getElementById("charsheet-combat-efa-cannon-section");
+		const container = document.getElementById("charsheet-combat-efa-cannon");
+		const createButton = document.getElementById("charsheet-combat-efa-cannon-create");
+		if (!section || !container || !createButton) return;
+		const creationState = this._state.getEfaEldritchCannonCreationState();
+		section.style.display = creationState.available ? "" : "none";
+		if (!creationState.available) return;
+
+		const [cannon] = creationState.activeCannons;
+		createButton.disabled = !creationState.canCreate;
+		createButton.title = creationState.canCreate
+			? "Create one EFA Eldritch Cannon"
+			: CharacterSheetCombat._getEfaCannonCreationReason(creationState);
+		container.innerHTML = "";
+
+		if (!cannon) {
+			const paymentText = creationState.freeUse.available
+				? "Your free creation use is ready."
+				: creationState.spellSlots.length
+					? "Your free use is spent; choose an available spell slot."
+					: "Your free use is spent and no spell slots are available.";
+			container.innerHTML = `
+				<div class="charsheet__efa-cannon-empty">
+					<strong>No active cannon</strong>
+					<span>${paymentText}</span>
+					${creationState.action.tracked ? `<span>${creationState.action.available ? "Your Action is available." : "Your Action is already spent this turn."}</span>` : ""}
+				</div>
+			`;
+			return;
+		}
+
+		const formLabel = CharacterSheetCombat._getEfaCannonFormLabel(cannon.form);
+		const payment = cannon.createdWith === "freeUse"
+			? "Free creation use"
+			: `Level ${cannon.createdWithSlotLevel} spell slot`;
+		const operation = cannon.form === "flamethrower"
+			? `DC ${cannon.calculations.saveDc} Dex · ${cannon.calculations.damageDice} fire · 15-ft cone`
+			: cannon.form === "forceBallista"
+				? `+${cannon.calculations.attackBonus} spell attack · ${cannon.calculations.damageDice} force · 120 ft`
+				: `${cannon.calculations.tempHpDice} + ${cannon.calculations.tempHpBonus} temp HP · 10 ft`;
+		container.innerHTML = `
+			<article class="charsheet__efa-cannon-card" data-efa-cannon-id="${cannon.instanceId}" aria-label="${formLabel} cannon">
+				<div class="charsheet__efa-cannon-identity">
+					<div>
+						<h5>${formLabel}</h5>
+						<span class="charsheet__efa-cannon-status">Active · AC ${cannon.ac}</span>
+					</div>
+					<span class="cs-combat-chip">${csCombatIcon("cannon")}<span>${cannon.size === "T" ? "Tiny" : "Small"}</span></span>
+				</div>
+				<div class="charsheet__efa-cannon-vitals" role="group" aria-label="Cannon hit points and duration">
+					<div><span>Hit Points</span><strong>${cannon.hp.current} / ${cannon.hp.max}</strong></div>
+					<div><span>Duration</span><strong>${CharacterSheetCombat._formatEfaCannonDuration(cannon.durationRemainingMinutes)}</strong></div>
+				</div>
+				<div class="charsheet__efa-cannon-meta">
+					<span><strong>Placement:</strong> ${CharacterSheetCombat._getEfaCannonPlacementLabel(cannon)}</span>
+					<span><strong>Distance:</strong> ${cannon.distanceFromOwnerFt} ft from you</span>
+					<span><strong>Payment:</strong> ${payment}</span>
+					<span><strong>Defenses:</strong> immune to poison and psychic damage</span>
+				</div>
+				<div class="charsheet__efa-cannon-operation">${operation}</div>
+				<button type="button" class="ve-btn ve-btn-primary charsheet__efa-cannon-activate" data-efa-cannon-activate>
+					${csCombatIcon("bonus")} Activate Cannon
+				</button>
+				<div class="charsheet__efa-cannon-secondary" aria-label="Cannon controls">
+					<div class="charsheet__efa-cannon-control">
+						<label for="efa-cannon-distance-${cannon.instanceId}">Distance from you</label>
+						<div>
+							<input class="ve-form-control" id="efa-cannon-distance-${cannon.instanceId}" data-efa-cannon-distance type="number" min="0" step="1" value="${cannon.distanceFromOwnerFt}" inputmode="numeric" ${cannon.placement === "carried" ? "disabled" : ""}>
+							<button type="button" class="ve-btn ve-btn-default" data-efa-cannon-update-distance ${cannon.placement === "carried" ? "disabled" : ""}>Update</button>
+						</div>
+					</div>
+					<div class="charsheet__efa-cannon-control">
+						<label for="efa-cannon-hp-${cannon.instanceId}">HP amount</label>
+						<div>
+							<input class="ve-form-control" id="efa-cannon-hp-${cannon.instanceId}" data-efa-cannon-hp-amount type="number" min="1" step="1" value="1" inputmode="numeric">
+							<button type="button" class="ve-btn ve-btn-default" data-efa-cannon-damage>Damage</button>
+							<button type="button" class="ve-btn ve-btn-default" data-efa-cannon-heal>Heal</button>
+						</div>
+					</div>
+					<div class="charsheet__efa-cannon-control">
+						<label for="efa-cannon-time-${cannon.instanceId}">Game time</label>
+						<div>
+							<input class="ve-form-control" id="efa-cannon-time-${cannon.instanceId}" data-efa-cannon-time type="number" min="0.5" step="0.5" value="1" inputmode="decimal">
+							<button type="button" class="ve-btn ve-btn-default" data-efa-cannon-time-advance>Decrement</button>
+						</div>
+					</div>
+				</div>
+				<div class="charsheet__efa-cannon-actions">
+					<button type="button" class="cs-combat-btn cs-combat-btn--heal" data-efa-cannon-mending>${csCombatIcon("heal")} Mending (2d6)</button>
+					<button type="button" class="cs-combat-btn" data-efa-cannon-end>${csCombatIcon("clear")} End Duration</button>
+					<button type="button" class="cs-combat-btn cs-combat-btn--danger" data-efa-cannon-dismiss>${csCombatIcon("action")} Dismiss</button>
+				</div>
+			</article>
+		`;
+
+		const card = container.querySelector("[data-efa-cannon-id]");
+		const reportFailure = result => {
+			const message = result.reason === "saveFailed"
+				? "The character could not be saved, so the cannon change was rolled back."
+				: result.reason === "actionUnavailable"
+					? "Your Action is already spent this turn."
+					: "The cannon could not be updated. Check the entered value and try again.";
+			this._setEfaCannonFeedback(message, {isError: true});
+		};
+		const finish = message => {
+			this._refreshEfaCannonSurfaces();
+			this._setEfaCannonFeedback(message);
+			this._announceCombat(message);
+		};
+		card.querySelector("[data-efa-cannon-activate]").addEventListener("click", () => {
+			void this._pShowEfaEldritchCannonActivationModal(cannon.instanceId);
+		});
+		card.querySelector("[data-efa-cannon-update-distance]").addEventListener("click", async () => {
+			const nextDistance = Number(card.querySelector("[data-efa-cannon-distance]").value);
+			const result = await this._pCommitEfaCannonMutation(() => this._state.setEfaEldritchCannonPosition(cannon.instanceId, {distanceFromOwnerFt: nextDistance}));
+			if (!result.ok) return reportFailure(result);
+			finish(`Cannon distance updated to ${result.distanceFromOwnerFt} ft from you.`);
+		});
+		const applyHp = async kind => {
+			const amount = Number(card.querySelector("[data-efa-cannon-hp-amount]").value);
+			const result = await this._pCommitEfaCannonMutation(() => kind === "damage"
+				? this._state.damageEfaEldritchCannon(cannon.instanceId, amount)
+				: this._state.healEfaEldritchCannon(cannon.instanceId, amount));
+			if (!result.ok) return reportFailure(result);
+			finish(kind === "damage"
+				? (result.action === "retired" ? "The cannon was destroyed at 0 HP." : `Cannon damaged for ${result.amount}; ${result.currentHp} HP remains.`)
+				: `Cannon healed for ${result.healed}; ${result.currentHp}/${result.maxHp} HP.`);
+		};
+		card.querySelector("[data-efa-cannon-damage]").addEventListener("click", () => void applyHp("damage"));
+		card.querySelector("[data-efa-cannon-heal]").addEventListener("click", () => void applyHp("heal"));
+		card.querySelector("[data-efa-cannon-mending]").addEventListener("click", async () => {
+			const roll = this._rollEfaCannonFormula("2d6");
+			const result = await this._pCommitEfaCannonMutation(() => this._state.mendEfaEldritchCannon(cannon.instanceId, {roll: roll.total}));
+			if (!result.ok) return reportFailure(result);
+			void this._page.pAnimateDamageDice?.(roll.groups);
+			this._page.showDiceResult?.({
+				title: "Mending — Eldritch Cannon",
+				roll: roll.total,
+				modifier: 0,
+				total: result.healed,
+				subtitle: `2d6: ${roll.breakdown}. Restored ${result.healed} HP, capped at ${result.maxHp}.`,
+			});
+			finish(`Mending restored ${result.healed} HP; ${result.currentHp}/${result.maxHp} HP.`);
+		});
+		card.querySelector("[data-efa-cannon-time-advance]").addEventListener("click", async () => {
+			const minutes = Number(card.querySelector("[data-efa-cannon-time]").value);
+			const result = await this._pCommitEfaCannonMutation(() => {
+				if (!Number.isFinite(minutes) || minutes <= 0) return {ok: false, reason: "invalidAmount"};
+				const [advance] = this._state.advanceClassSummonGameTime(minutes)
+					.filter(it => it.instanceId === cannon.instanceId);
+				return advance ? {ok: true, ...advance} : {ok: false, reason: "notFound"};
+			});
+			if (!result.ok) return reportFailure(result);
+			finish(result.action === "retired"
+				? "The cannon's duration expired."
+				: `Cannon duration reduced by ${minutes} minutes; ${CharacterSheetCombat._formatEfaCannonDuration(result.details.durationRemainingMinutes)} remains.`);
+		});
+		card.querySelector("[data-efa-cannon-end]").addEventListener("click", async () => {
+			const isConfirm = await CharacterSheetModal.pGetUserBoolean({
+				title: "End Cannon Duration?",
+				htmlDescription: "The cannon will expire immediately. This does not spend an Action.",
+				textYes: "End Duration",
+				textNo: "Keep Cannon",
+			});
+			if (!isConfirm) return;
+			const result = await this._pCommitEfaCannonMutation(() => this._state.endEfaEldritchCannonDuration(cannon.instanceId));
+			if (!result.ok) return reportFailure(result);
+			finish("The cannon's duration ended.");
+		});
+		card.querySelector("[data-efa-cannon-dismiss]").addEventListener("click", async () => {
+			const isConfirm = await CharacterSheetModal.pGetUserBoolean({
+				title: "Dismiss Eldritch Cannon?",
+				htmlDescription: `${this._state.isInCombat() ? "This spends your Action. " : ""}The cannon will be removed.`,
+				textYes: "Dismiss Cannon",
+				textNo: "Keep Cannon",
+			});
+			if (!isConfirm) return;
+			const result = await this._pCommitEfaCannonMutation(() => this._state.dismissEfaEldritchCannonWithMagicAction(cannon.instanceId));
+			if (!result.ok) return reportFailure(result);
+			finish("The Eldritch Cannon was dismissed.");
+		});
+	}
+
 	render () {
 		// Always refresh state reference from page at start of render
 		this._state = this._page.getState();
@@ -7333,6 +7920,7 @@ class CharacterSheetCombat {
 			() => this.renderCombatDruidResources(),
 			() => this.renderCombatIoun(),
 			() => this.renderCombatFighter(),
+			() => this.renderCombatEfaCannon(),
 			() => this.renderCombatVitality(),
 			() => this.renderCombatDefenses(),
 			() => this.renderCombatConditions(),
