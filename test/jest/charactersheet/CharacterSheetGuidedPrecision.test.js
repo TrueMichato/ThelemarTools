@@ -193,7 +193,7 @@ describe("Guided Precision provider and shared receipt", () => {
 		state.setSubclass("Artificer", null);
 		expect(state.getDeferredFlatDamageRiderOptions({route: "attack"})).toEqual([]);
 		expect(state.getDamageConcentrationProtection()).toBeNull();
-		expect(state.toJson().deferredFlatDamageRiderTurnUsage).not.toHaveProperty(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID);
+		expect(state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID).used).toBe(false);
 	});
 });
 
