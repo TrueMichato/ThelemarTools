@@ -184,15 +184,16 @@ class CharacterSheetProgression {
 
 	static getFeatureOwnerUid (entity) {
 		if (!entity?.name) return "";
-		return [
+		const parts = [
 			entity.name,
-			entity.source,
 			entity.className,
 			entity.classSource,
-			entity.subclassShortName,
-			entity.subclassSource,
-			entity.level,
-		].map(CharacterSheetProgression._normalize).join("|");
+		];
+		if (entity.subclassShortName || entity.subclassName || entity.subclassSource) {
+			parts.push(entity.subclassShortName || entity.subclassName, entity.subclassSource);
+		}
+		parts.push(entity.level, entity.source);
+		return parts.map(value => String(value ?? "").trim()).join("|");
 	}
 
 	static _matchesFeatureEntity (candidate, entity) {
@@ -505,7 +506,10 @@ class CharacterSheetProgression {
 			...(state?.getLevelHistory?.() || []).flatMap(entry => entry.decisions || []),
 		]
 			.filter(decision => decision.type === "nestedTool"
-				&& CharacterSheetProgression._normalize(decision.provenance?.ownerUid) === ownerUid)
+				&& [
+					CharacterSheetProgression._normalize(ownerUid),
+					CharacterSheetProgression.getEntityUid(entity),
+				].includes(CharacterSheetProgression._normalize(decision.provenance?.ownerUid)))
 			.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : [decision.selection])
 			.map(value => state?._getProgressionOwnershipKey?.("tools", value?.name ?? value)
 				|| CharacterSheetProgression._slug(value?.name ?? value))

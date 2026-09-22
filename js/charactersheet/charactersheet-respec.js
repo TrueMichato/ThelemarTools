@@ -2135,8 +2135,12 @@ class CharacterSheetRespec {
 				: null;
 			const featureChoiceOwner = decision.type === "nestedTool" && decision.provenance?.ownerUid
 				? this._state._data.features.find(feature =>
-					CharacterSheetProgression.getFeatureOwnerUid(feature) ===
-						CharacterSheetProgression._normalize(decision.provenance.ownerUid),
+					[
+						CharacterSheetProgression.getFeatureOwnerUid(feature),
+						CharacterSheetProgression.getEntityUid(feature),
+					]
+						.map(CharacterSheetProgression._normalize)
+						.includes(CharacterSheetProgression._normalize(decision.provenance.ownerUid)),
 				)
 				: null;
 			const nextToolsOwnedBefore = decision.type === "nestedTool"

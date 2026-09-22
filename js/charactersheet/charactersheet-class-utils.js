@@ -178,6 +178,16 @@ class CharacterSheetClassUtils {
 			&& Number(a?.level || 0) === Number(b?.level || 0);
 	}
 
+	static getSourceAwareFeatureOwnerUid (feature) {
+		if (!feature?.name) return "";
+		const parts = [feature.name, feature.className, feature.classSource];
+		if (feature.subclassShortName || feature.subclassName || feature.subclassSource) {
+			parts.push(feature.subclassShortName || feature.subclassName, feature.subclassSource);
+		}
+		parts.push(feature.level, feature.source);
+		return parts.map(value => String(value ?? "").trim()).join("|");
+	}
+
 	static getRuntimeFeature (feature, state) {
 		return state?.getFeatures?.().find(it => this._isSameFeatureIdentity(feature, it)) || null;
 	}
@@ -4218,6 +4228,7 @@ class CharacterSheetClassUtils {
 		const runtimeFeature = this.getRuntimeFeature(entity, opts.state);
 		const conditionalToolGrant = entity?._conditionalToolGrant || runtimeFeature?._conditionalToolGrant;
 		if (conditionalToolGrant?.requiredCount > 0) {
+			const conditionalToolOwner = runtimeFeature || entity;
 			add({
 				kind: "tool",
 				type: "nestedTool",
@@ -4228,6 +4239,8 @@ class CharacterSheetClassUtils {
 				grantKey: "conditionalToolGrant.tools",
 				rules: {
 					identityMode: "opportunity",
+					ownerUid: this.getSourceAwareFeatureOwnerUid(conditionalToolOwner),
+					parentSemanticKey: conditionalToolOwner.sourceDecisionKey || null,
 					fixedGrants: [...(conditionalToolGrant.fixedGrants || [])],
 					acquisitionFacts: {...(conditionalToolGrant.acquisitionFacts || {})},
 					selectedValues: [...(conditionalToolGrant.selections || [])],

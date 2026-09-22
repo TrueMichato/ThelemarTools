@@ -7713,7 +7713,10 @@ class CharacterSheetState {
 			...(this._data.levelHistory || []).flatMap(entry => entry.decisions || []),
 		].filter(decision =>
 			decision.type === "nestedTool"
-				&& CharacterSheetProgression._normalize(decision.provenance?.ownerUid) === ownerUid,
+				&& [
+					CharacterSheetProgression._normalize(ownerUid),
+					CharacterSheetProgression.getEntityUid(feature),
+				].includes(CharacterSheetProgression._normalize(decision.provenance?.ownerUid)),
 		);
 		for (const decision of matchingDecisions) {
 			for (const value of Array.isArray(decision.selection) ? decision.selection : [decision.selection]) addSelected(value);
@@ -22970,6 +22973,21 @@ class CharacterSheetState {
 		(this._data.features || []).forEach(feature => {
 			const grant = feature?._conditionalToolGrant;
 			if (!grant?.requiredCount || grant.selections?.length === grant.requiredCount) return;
+			const ownerUids = new Set([
+				CharacterSheetProgression.getFeatureOwnerUid(feature),
+				CharacterSheetProgression.getEntityUid(feature),
+			].map(CharacterSheetProgression._normalize));
+			const resolvedDecision = [
+				...(this._data.characterBase?.decisions || []),
+				...(this._data.levelHistory || []).flatMap(entry => entry.decisions || []),
+			].find(decision =>
+				decision.type === "nestedTool"
+				&& (decision.provenance?.grantKey || decision.provenance?.sourceKey) === "conditionalToolGrant.tools"
+				&& ownerUids.has(CharacterSheetProgression._normalize(decision.provenance?.ownerUid)),
+			);
+			if (resolvedDecision && this.syncConditionalToolGrantSelection(resolvedDecision, resolvedDecision.selection)) return;
+			const featureUid = CharacterSheetProgression.getFeatureOwnerUid(feature);
+			if (this.hasFulfilledFeatureToolChoice({featureUid})) return;
 			this._queueConditionalToolGrantChoice(feature);
 		});
 	}
@@ -22985,7 +23003,7 @@ class CharacterSheetState {
 			occurrence: 0,
 		});
 		return progression.getNestedSemanticKey({
-			parentSemanticKey: null,
+			parentSemanticKey: feature.sourceDecisionKey || null,
 			acquisitionKey,
 			grantKey: "conditionalToolGrant.tools",
 			identityMode: "opportunity",
@@ -22998,14 +23016,18 @@ class CharacterSheetState {
 		this.addPendingFeatureChoice({
 			featureName: feature.name,
 			featureId: feature.id,
+			featureUid: CharacterSheetProgression.getFeatureOwnerUid(feature),
 			featureSource: feature.source,
 			featureClass: feature.className,
 			featureClassSource: feature.classSource,
+			featureSubclass: feature.subclassShortName || feature.subclassName,
+			featureSubclassSource: feature.subclassSource,
 			level: feature.level,
 			kind: "tool",
 			options: CharacterSheetClassUtils.getConditionalToolChoiceOptions(grant),
 			count: grant.requiredCount,
 			unique: true,
+			sourceDecisionKey: feature.sourceDecisionKey,
 			semanticKey: this._getConditionalToolDecisionSemanticKey(feature),
 			sourcePath: `${feature.name}.conditionalToolGrant.tools`,
 			grantKey: "conditionalToolGrant.tools",
@@ -23017,9 +23039,13 @@ class CharacterSheetState {
 		const ownerUid = decision.provenance?.ownerUid;
 		const grantKey = decision.provenance?.grantKey || decision.provenance?.sourceKey;
 		if (!ownerUid || grantKey !== "conditionalToolGrant.tools") return false;
+		const normalizedOwnerUid = CharacterSheetProgression._normalize(ownerUid);
 		const feature = this._data.features.find(it =>
 			it?._conditionalToolGrant
-			&& CharacterSheetProgression.getEntityUid(it) === ownerUid,
+			&& [
+				CharacterSheetProgression.getFeatureOwnerUid(it),
+				CharacterSheetProgression.getEntityUid(it),
+			].map(CharacterSheetProgression._normalize).includes(normalizedOwnerUid),
 		);
 		if (!feature) return false;
 		const tools = CharacterSheetClassUtils.getNormalizedToolChoiceSelection(selection, {

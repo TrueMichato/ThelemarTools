@@ -10,6 +10,7 @@ import "../../../js/charactersheet/charactersheet-respec.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const CharacterSheetArtificerPlans = globalThis.CharacterSheetArtificerPlans;
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCrafting = globalThis.CharacterSheetCrafting;
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
@@ -40,6 +41,36 @@ afterAll(() => {
 });
 
 const artificerData = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
+const itemData = JSON.parse(fs.readFileSync("data/items.json", "utf8"));
+const magicVariantData = JSON.parse(fs.readFileSync("data/magicvariants.json", "utf8"));
+const planItems = [
+	...itemData.item,
+	...magicVariantData.magicvariant.map(variant => ({
+		...variant,
+		source: variant.source || variant.inherits?.source,
+	})),
+	{name: "+1 Shield", source: "XDMG"},
+	{name: "Armor of Resistance", source: "XDMG"},
+	{name: "+2 Shield", source: "XDMG"},
+];
+
+const resolveRequiredArtificerPlans = engine => {
+	const used = new Set();
+	while (true) {
+		const decision = engine.manifest.decisions.find(it =>
+			it.type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE
+			&& it.required
+			&& it.selection == null);
+		if (!decision) return;
+		const selection = decision.options.find(option => {
+			const identity = CharacterSheetArtificerPlans.getSelectionIdentity(option);
+			return identity && !used.has(identity);
+		});
+		if (!selection) throw new Error("No legal unique Artificer plan remained for the Respec fixture.");
+		used.add(CharacterSheetArtificerPlans.getSelectionIdentity(selection));
+		engine.stageGraphMutation(decision.id, selection);
+	}
+};
 
 const getSubclass = (source) => artificerData.subclass.find(subclass =>
 	subclass.name === "Artillerist"
@@ -268,16 +299,19 @@ describe("EFA Artillerist Tools of the Trade", () => {
 				classFeatures: [],
 				subclasses: [EFA_ARTILLERIST],
 			}],
-			getClassFeatures: () => [],
+			getClassFeatures: () => artificerData.classFeature,
 			getSubclassFeatures: () => artificerData.subclassFeature,
 			getOptionalFeatures: () => [],
 			getFeats: () => [],
+			getItems: () => planItems,
+			filterByAllowedSources: values => values,
 			getSkillsList: () => [],
 			saveCharacter: jest.fn().mockResolvedValue(undefined),
 			renderCharacter: jest.fn(),
 		};
 		const engine = new CharacterSheetRespecEngine({page, state: liveState});
 		engine.begin();
+		resolveRequiredArtificerPlans(engine);
 		const respec = Object.create(CharacterSheetRespec.prototype);
 		respec._page = page;
 		respec._engine = engine;
@@ -358,7 +392,7 @@ describe("EFA Artillerist Tools of the Trade", () => {
 		const sheet = fs.readFileSync("js/charactersheet/charactersheet.js", "utf8");
 
 		for (const source of [builder, levelUp, quickBuild]) expect(source).toMatch(/processPendingFeatureChoices/);
-		expect(sheet).toMatch(/finalize\(isSkill \|\| isTool \? opt/);
+		expect(sheet).toMatch(/const value = optionValue\(opt\);[\s\S]*finalize\(value\)/);
 	});
 
 	test("applies the reusable 0.5 wand-crafting multiplier only to EFA Artillerist magic wands", () => {
@@ -434,16 +468,19 @@ describe("EFA Artillerist Tools of the Trade", () => {
 		};
 		const page = {
 			getClasses: () => [classData],
-			getClassFeatures: () => [],
+			getClassFeatures: () => artificerData.classFeature,
 			getSubclassFeatures: () => artificerData.subclassFeature,
 			getOptionalFeatures: () => [],
 			getFeats: () => [],
+			getItems: () => planItems,
+			filterByAllowedSources: values => values,
 			getSkillsList: () => [],
 			saveCharacter: jest.fn().mockResolvedValue(undefined),
 			renderCharacter: jest.fn(),
 		};
 		const engine = new CharacterSheetRespecEngine({page, state});
 		engine.begin();
+		resolveRequiredArtificerPlans(engine);
 		const respec = Object.create(CharacterSheetRespec.prototype);
 		respec._page = page;
 		respec._engine = engine;
