@@ -174,6 +174,68 @@ describe("RHW Reanimated Companion rules", () => {
 				healing: {formula: "lightningDamageDealt"},
 			});
 		});
+
+		it("publishes authoritative creation, command, lifecycle, and rest policies", () => {
+			const resolved = CharacterSheetCompanionRules.resolve(RHW_UID, getContext(), getSetup([]));
+
+			expect(resolved.creationPolicy).toEqual({
+				actionType: "magicAction",
+				manifest: {
+					rangeFeet: 5,
+					space: "unoccupied",
+				},
+				toolEligibility: {
+					requiresProficiency: true,
+					allowed: [
+						{kind: "tool", uid: "Tinker's Tools|XPHB"},
+						{kind: "toolCategory", uid: "Artisan's Tools|XPHB"},
+					],
+				},
+				freeCreation: {
+					uses: 1,
+					recharge: "longRest",
+				},
+				alternatePayment: {
+					spellSlot: {minimumLevel: 1, expend: 1},
+				},
+				maximumActive: 1,
+				prohibitedWhileActive: true,
+			});
+			expect(resolved.commandPolicy).toEqual({
+				turnTiming: "duringSummonerTurn",
+				movement: "autonomous",
+				reaction: "autonomous",
+				defaultAction: "dodge",
+				commandMethods: [{cost: "bonusAction", permits: "anyAction"}],
+				whileSummonerIncapacitated: {
+					actsAutonomously: true,
+					actionRestriction: null,
+				},
+			});
+			expect(resolved.lifecycle).toEqual({
+				duration: {until: "finishLongRest"},
+				earlyDismissal: {
+					actionType: "magicAction",
+					outcome: "harmlessCollapse",
+					triggersDeathBurst: false,
+				},
+				onSummonerDeath: {
+					hitPoints: 0,
+					outcome: "dies",
+					triggersDeathBurst: true,
+				},
+				onCompanionDeath: {
+					triggersDeathBurst: true,
+				},
+			});
+			expect(resolved.restPolicy).toEqual({
+				shortRest: {automaticChanges: []},
+				longRest: {
+					companionLifecycle: "expires",
+					freeCreationRecharge: "all",
+				},
+			});
+		});
 	});
 
 	describe("modification progression and derived effects", () => {
@@ -492,8 +554,17 @@ describe("RHW Reanimated Companion rules", () => {
 
 			descriptor.identity.source = "MUTATED";
 			resolved.statistics.maxHp = 999;
+			resolved.creationPolicy.toolEligibility.allowed[0].uid = "MUTATED";
+			resolved.commandPolicy.commandMethods[0].permits = "nothing";
+			resolved.lifecycle.earlyDismissal.triggersDeathBurst = true;
+			resolved.restPolicy.longRest.freeCreationRecharge = "none";
 			expect(CharacterSheetCompanionRules.getDescriptor(RHW_UID).identity.source).toBe("RHW");
-			expect(CharacterSheetCompanionRules.resolve(RHW_UID, getContext(), getSetup([])).statistics.maxHp).toBe(20);
+			const recalculated = CharacterSheetCompanionRules.resolve(RHW_UID, getContext(), getSetup([]));
+			expect(recalculated.statistics.maxHp).toBe(20);
+			expect(recalculated.creationPolicy.toolEligibility.allowed[0].uid).toBe("Tinker's Tools|XPHB");
+			expect(recalculated.commandPolicy.commandMethods[0].permits).toBe("anyAction");
+			expect(recalculated.lifecycle.earlyDismissal.triggersDeathBurst).toBe(false);
+			expect(recalculated.restPolicy.longRest.freeCreationRecharge).toBe("all");
 		});
 	});
 });

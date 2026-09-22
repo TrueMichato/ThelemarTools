@@ -258,6 +258,63 @@ const COMPANION_RULES = deepFreeze({
 				healing: {formula: "lightningDamageDealt"},
 			},
 		},
+		creationPolicy: {
+			actionType: "magicAction",
+			manifest: {
+				rangeFeet: 5,
+				space: "unoccupied",
+			},
+			toolEligibility: {
+				requiresProficiency: true,
+				allowed: [
+					{kind: "tool", uid: "Tinker's Tools|XPHB"},
+					{kind: "toolCategory", uid: "Artisan's Tools|XPHB"},
+				],
+			},
+			freeCreation: {
+				uses: 1,
+				recharge: "longRest",
+			},
+			alternatePayment: {
+				spellSlot: {minimumLevel: 1, expend: 1},
+			},
+			maximumActive: 1,
+			prohibitedWhileActive: true,
+		},
+		commandPolicy: {
+			turnTiming: "duringSummonerTurn",
+			movement: "autonomous",
+			reaction: "autonomous",
+			defaultAction: "dodge",
+			commandMethods: [{cost: "bonusAction", permits: "anyAction"}],
+			whileSummonerIncapacitated: {
+				actsAutonomously: true,
+				actionRestriction: null,
+			},
+		},
+		lifecycle: {
+			duration: {until: "finishLongRest"},
+			earlyDismissal: {
+				actionType: "magicAction",
+				outcome: "harmlessCollapse",
+				triggersDeathBurst: false,
+			},
+			onSummonerDeath: {
+				hitPoints: 0,
+				outcome: "dies",
+				triggersDeathBurst: true,
+			},
+			onCompanionDeath: {
+				triggersDeathBurst: true,
+			},
+		},
+		restPolicy: {
+			shortRest: {automaticChanges: []},
+			longRest: {
+				companionLifecycle: "expires",
+				freeCreationRecharge: "all",
+			},
+		},
 		damageRules: {
 			necrotic: {
 				ignoresResistance: false,
@@ -843,6 +900,10 @@ function resolveRhwReanimatedCompanion (descriptor, context, setup) {
 			},
 			lightningAbsorption: cloneJson(descriptor.traits.lightningAbsorption),
 		},
+		creationPolicy: cloneJson(descriptor.creationPolicy),
+		commandPolicy: cloneJson(descriptor.commandPolicy),
+		lifecycle: cloneJson(descriptor.lifecycle),
+		restPolicy: cloneJson(descriptor.restPolicy),
 		damageRules: {
 			necrotic: {
 				ignoresResistance: improvedReanimationAvailable,
