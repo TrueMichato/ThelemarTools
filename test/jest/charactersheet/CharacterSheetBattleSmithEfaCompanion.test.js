@@ -1,4 +1,5 @@
 import {jest} from "@jest/globals";
+import fs from "node:fs";
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-companion-rules.js";
@@ -642,13 +643,15 @@ describe("Battle Smith companion atomicity, persistence, and isolation", () => {
 		const sharedOperation = jest.fn(async () => ({ok: true, committed: true}));
 		const playPage = {
 			getState: () => state,
-			getCompanionOperationAvailability: (id, operation) => page.getCompanionOperationAvailability(id, operation),
+			getCompanionOperationAvailability: (id, operation, options) => page.getCompanionOperationAvailability(id, operation, options),
+			getCompanionOperationFocusKey: (id, operation, actionKey) => page.getCompanionOperationFocusKey(id, operation, actionKey),
 			pUseCompanionOperation: sharedOperation,
 		};
 		const playMode = new CharacterSheetPlayMode(playPage);
-		playMode._refreshOpenDrawer = jest.fn();
 		const buttons = [];
+		const selects = [];
 		playMode._ce = (tag, className, parent) => {
+			let value = "";
 			const element = {
 				tag,
 				className,
@@ -656,21 +659,41 @@ describe("Battle Smith companion atomicity, persistence, and isolation", () => {
 				style: {},
 				attributes: {},
 				handlers: {},
+				textContent: "",
+				disabled: false,
+				get value () { return value; },
+				set value (next) {
+					value = next;
+					if (tag === "option" && parent?.tag === "select" && !parent.value) parent.value = next;
+				},
+				get selectedOptions () {
+					return tag === "select"
+						? this.children.filter(child => child.value === this.value)
+						: [];
+				},
 				setAttribute (name, value) { this.attributes[name] = value; },
 				addEventListener (name, handler) { this.handlers[name] = handler; },
 			};
 			if (tag === "button") buttons.push(element);
+			if (tag === "select") selects.push(element);
 			parent?.children?.push(element);
 			return element;
 		};
 		const card = {children: []};
 		playMode._renderFeatureCompanionOperations(card, state.getCompanion(companionId));
-		await buttons[0].handlers.click();
-		expect(sharedOperation).toHaveBeenCalledWith({
-			companionId,
-			operation: "forceEmpoweredRend",
-		});
-		expect(playMode._refreshOpenDrawer).toHaveBeenCalledWith("companions");
+		for (const button of buttons.slice(0, 4)) await button.handlers.click();
+		selects[0].value = "help";
+		selects[0].handlers.change();
+		await buttons[4].handlers.click();
+		expect(sharedOperation.mock.calls).toEqual([
+			[{companionId, operation: "forceEmpoweredRend", actionKey: undefined, commandMethod: "bonusAction"}],
+			[{companionId, operation: "repair", actionKey: undefined}],
+			[{companionId, operation: "deflectAttack", actionKey: undefined}],
+			[{companionId, operation: "action", actionKey: "dodge"}],
+			[{companionId, operation: "action", actionKey: "help"}],
+		]);
+		expect(buttons.every(button => button.attributes["aria-describedby"])).toBe(true);
+		expect(buttons.every(button => button.attributes["data-companion-operation-key"])).toBe(true);
 	});
 
 	test("attaches the shared Arcane Jolt Page flow only after a committed hit-confirmed EFA Rend", async () => {
@@ -688,6 +711,21 @@ describe("Battle Smith companion atomicity, persistence, and isolation", () => {
 			page.rollDice = jest.fn()
 				.mockReturnValueOnce(14)
 				.mockReturnValueOnce(6);
+			const focusKey = page.getCompanionOperationFocusKey(companionId, "forceEmpoweredRend");
+			const originalTrigger = {
+				closest: () => originalTrigger,
+				getAttribute: name => name === "data-companion-operation-key" ? focusKey : null,
+				isConnected: false,
+			};
+			const replacementTrigger = {
+				getAttribute: name => name === "data-companion-operation-key" ? focusKey : null,
+				isConnected: true,
+			};
+			const previousDocument = globalThis.document;
+			globalThis.document = {
+				activeElement: originalTrigger,
+				querySelectorAll: () => [replacementTrigger],
+			};
 
 			const originalString = globalThis.InputUiUtil.pGetUserString;
 			const originalBoolean = globalThis.InputUiUtil.pGetUserBoolean;
@@ -700,11 +738,19 @@ describe("Battle Smith companion atomicity, persistence, and isolation", () => {
 					companionId,
 					operation: "forceEmpoweredRend",
 				});
-				return {page, result};
+				const offerArgs = page.pOfferEfaArcaneJolt.mock.calls[0]?.[0];
+				return {
+					page,
+					result,
+					originalTrigger,
+					replacementTrigger,
+					reacquiredTarget: offerArgs?.getFocusRestoreTarget?.(),
+				};
 			} finally {
 				globalThis.InputUiUtil.pGetUserString = originalString;
 				globalThis.InputUiUtil.pGetUserBoolean = originalBoolean;
 				globalThis.InputUiUtil.pGetUserEnum = originalEnum;
+				globalThis.document = previousDocument;
 			}
 		};
 
@@ -720,8 +766,10 @@ describe("Battle Smith companion atomicity, persistence, and isolation", () => {
 				type: "steelDefenderRend",
 				operationResult: hit.result,
 			},
-			focusRestoreTarget: null,
+			focusRestoreTarget: hit.originalTrigger,
+			getFocusRestoreTarget: expect.any(Function),
 		});
+		expect(hit.reacquiredTarget).toBe(hit.replacementTrigger);
 
 		const miss = await run("miss");
 		expect(miss.result).toMatchObject({
@@ -730,5 +778,59 @@ describe("Battle Smith companion atomicity, persistence, and isolation", () => {
 			rolls: {attack: {hitConfirmed: false}, damage: null},
 		});
 		expect(miss.page.pOfferEfaArcaneJolt).not.toHaveBeenCalled();
+	});
+
+	test("announces no-spend cancellation and exposes stable operation focus keys", () => {
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._announceCompanionInteraction = jest.fn();
+		page._showCompanionOperationResult({
+			ok: false,
+			reason: "cancelled",
+			message: "Companion operation cancelled before spending.",
+		});
+		expect(page._announceCompanionInteraction).toHaveBeenCalledWith(
+			"Companion operation cancelled before spending.",
+			{type: "info", isToast: true},
+		);
+		page._state = {getCompanion: () => ({name: "Aegis"})};
+		page._playMode = null;
+		page._showCompanionOperationResult({
+			ok: true,
+			operation: "repair",
+			companionId: "companion-1",
+			target: {companionId: "companion-1"},
+			costs: {ownerAction: "bonus", companionAction: true, repairUses: 1},
+			rolls: {healing: {total: 9}},
+			hp: {companionId: "companion-1", before: 7, after: 16},
+		});
+		expect(page._announceCompanionInteraction).toHaveBeenLastCalledWith(expect.stringMatching(
+			/Aegis used Repair.*HP: 7 → 16.*owner Bonus Action.*defender action.*1 Repair use/,
+		));
+
+		const key = page.getCompanionOperationFocusKey("companion-1", "action", "dodge");
+		const target = {getAttribute: name => name === "data-companion-operation-key" ? key : null};
+		const previousDocument = globalThis.document;
+		globalThis.document = {querySelectorAll: () => [target]};
+		try {
+			expect(page.getCompanionOperationFocusTarget(key)).toBe(target);
+		} finally {
+			globalThis.document = previousDocument;
+		}
+	});
+
+	test("keeps disabled reasons screen-readable and operation controls mobile-safe", () => {
+		const pageSource = fs.readFileSync("js/charactersheet/charactersheet.js", "utf8");
+		const playSource = fs.readFileSync("js/charactersheet/charactersheet-playmode.js", "utf8");
+		const mobileCss = fs.readFileSync("css/charactersheet-mobile.css", "utf8");
+		const playCss = fs.readFileSync("css/charactersheet-playmode.css", "utf8");
+		expect(pageSource).toContain("charsheet__feature-companion-disabled-reasons");
+		expect(pageSource).toContain("aria-describedby=");
+		expect(playSource).toContain("pm-companion-operations__reasons");
+		expect(playSource).toContain("Rend owner cost");
+		expect(playSource).toContain("sheet cannot verify");
+		expect(mobileCss).toContain("grid-template-columns: minmax(0, 1fr)");
+		expect(playCss).toContain(".pm-companion-toolbar__btn,");
+		expect(playCss).toContain(".pm-companion-operations__select");
+		expect(playCss).toContain("min-height: 44px");
 	});
 });

@@ -1957,6 +1957,34 @@
 	.charsheet__companion-quick-rolls {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
+
+	.charsheet__feature-companion-setup {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.charsheet__feature-companion-setup .btn-feature-companion-setup,
+	.charsheet__feature-companion-operation-controls .ve-btn,
+	.charsheet__companion-card .btn-companion-action {
+		width: 100%;
+		min-height: 44px;
+	}
+
+	.charsheet__feature-companion-operation-controls {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		width: 100%;
+	}
+
+	.charsheet__feature-companion-shape-options {
+		display: grid;
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__feature-companion-shape-options label {
+		min-height: 44px;
+		padding: 0.65rem 0.75rem;
+	}
 }
 
 /* ========================================================================
@@ -2281,6 +2309,10 @@
 	.cs-combat-target-modal .cs-combat-target-effect .form-control {
 		width: 100% !important;
 		min-width: 0;
+		min-height: 44px;
+	}
+
+	.cs-combat-target-modal .charsheet__arcane-jolt-restorative label {
 		min-height: 44px;
 	}
 

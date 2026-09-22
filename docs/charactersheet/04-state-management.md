@@ -409,6 +409,14 @@ by Builder, Level Up, Quick Build, load, and Respec. For the EFA Battle Smith it
 copying any companion formula. `CharacterSheetCompanionRules` remains the sole
 formula authority.
 
+Both renderers open that transaction through
+`CharacterSheetPage.pShowFeatureCompanionSetup()`. The setup modal uses native
+required controls, focuses the first missing choice, announces validation,
+defer, cancellation, and error outcomes, then restores focus to either the
+still-pending setup button or the created companion after the shared render.
+Play Mode suppresses the legacy summon route only for an exact EFA setup
+record, so same-name TCE/RHW content is not captured.
+
 In-play operations use one State transaction from both desktop and Play Mode:
 
 ```javascript
@@ -432,6 +440,16 @@ collisions never reach the resolver. The generic non-attack action set is Dash,
 Disengage, Dodge, Help, Hide, Influence, Magic, Ready, Search, Study, and
 Utilize. Attack remains available only through an explicitly registered
 operation such as Force-Empowered Rend or Dreadful Swipe.
+
+The interaction layer remains shared too:
+`CharacterSheetPage.pUseCompanionOperation()` supplies both desktop and Play
+Mode. Controls carry stable focus keys for post-render restoration, visible
+disabled reasons are connected with `aria-describedby`, and a polite live
+region reports cancellations and complete success summaries. Play Mode's
+native owner-cost/Dodge/other-action controls still call the Page method; they
+do not mutate State or maintain a second resource store. Mobile layouts stack
+the setup and command controls, preserve 44px targets, and keep primary actions
+above statblock details.
 
 EFA Force-Empowered Rend uses the rules registry's spell attack and
 `1d8 + 2 + INT` force damage. Repair can heal a modeled Construct atomically or

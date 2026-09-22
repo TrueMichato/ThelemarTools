@@ -6772,9 +6772,20 @@ class CharacterSheetPage {
 			const deflectAvailability = isFeatureOperationCompanion
 				? this.getCompanionOperationAvailability(companion.id, "deflectAttack")
 				: null;
-			const otherActionAvailability = isFeatureOperationCompanion
-				? this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "help"})
-				: null;
+			const featureActionSpecs = [
+				{actionKey: "help", label: "🤝 Help", description: "Give an ally advantage on their next attack or ability check."},
+				{actionKey: "dash", label: "💨 Dash", description: "Double the defender's speed for this turn."},
+				{actionKey: "disengage", label: "🏃 Disengage", description: "The defender's movement does not provoke opportunity attacks this turn."},
+				{actionKey: "dodge", label: "🛡️ Dodge", description: "Attacks against the defender have disadvantage; its Dexterity saves have advantage."},
+				{actionKey: "hide", label: "🫥 Hide", description: "Make a Stealth check to become hidden."},
+				{actionKey: "search", label: "🔎 Search", description: "Make a Perception or Investigation check to find something."},
+			];
+			const featureActionAvailabilities = isFeatureOperationCompanion
+				? Object.fromEntries(featureActionSpecs.map(spec => [
+					spec.actionKey,
+					this.getCompanionOperationAvailability(companion.id, "action", {actionKey: spec.actionKey}),
+				]))
+				: {};
 
 			// Registry-backed companions use persisted turn receipts, not legacy flags.
 			const usedAction = isFeatureOperationCompanion
@@ -6783,7 +6794,6 @@ class CharacterSheetPage {
 			const usedReaction = isFeatureOperationCompanion
 				? !deflectAvailability?.status?.reactionAvailable
 				: companion.usedReaction || false;
-			const otherActionsDisabled = usedAction || (isFeatureOperationCompanion && !otherActionAvailability?.available);
 
 			// Get all attack actions from the companion's stat block
 			const attackActions = companion.actions?.filter(a =>
@@ -6805,6 +6815,7 @@ class CharacterSheetPage {
 			const featureOperationHtml = isFeatureOperationCompanion ? (() => {
 				const repair = companion.uses?.repair || {current: 0, max: 0};
 				const hitDice = companion.hitDice || {die: "d8", current: 0, max: 0};
+				const operationId = `charsheet-feature-companion-operations-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 				const commandStatus = rendAvailability?.commandMethods
 					?.map(method => `${method.label}: ${method.available ? "available" : method.reason}`)
 					.join(" • ") || "No command method available.";
@@ -6812,34 +6823,72 @@ class CharacterSheetPage {
 					!rendAvailability?.available ? `Rend: ${rendAvailability?.message}` : null,
 					!repairAvailability?.available ? `Repair: ${repairAvailability?.message}` : null,
 					!deflectAvailability?.available ? `Deflect: ${deflectAvailability?.message}` : null,
-					!otherActionAvailability?.available ? `Other actions: ${otherActionAvailability?.message}` : null,
+					...featureActionSpecs
+						.filter(spec => !featureActionAvailabilities[spec.actionKey]?.available)
+						.map(spec => `${spec.label.replace(/^[^\p{L}]+/u, "")}: ${featureActionAvailabilities[spec.actionKey]?.message}`),
 				].filter(Boolean);
+				const getButtonAttrs = (operation, availability, actionKey = null) => {
+					const focusKey = CharacterSheetModal._escapeHtml(this.getCompanionOperationFocusKey(companion.id, operation, actionKey));
+					return `${availability?.available ? "" : "disabled"} aria-describedby="${operationId}-status ${operationId}-reasons" data-companion-operation-key="${focusKey}"`;
+				};
 				return `
-					<div class="mb-2" style="padding: 10px; border: 1px solid rgba(var(--rgb-bg-text), 0.12); border-radius: 8px;">
-						<div class="ve-small mb-1"><strong>Steel Defender operations</strong> — uncommanded action: Dodge; movement and reaction are autonomous.</div>
-						<div class="ve-muted ve-small mb-2">${commandStatus}</div>
-						<div class="ve-flex mb-2" style="gap: 6px; flex-wrap: wrap;">
+					<section class="charsheet__feature-companion-operations mb-2" role="region" aria-labelledby="${operationId}-heading">
+						<div class="ve-small mb-1" id="${operationId}-heading"><strong>Steel Defender operations</strong> — uncommanded action: Dodge; movement and reaction are autonomous.</div>
+						<div class="ve-muted ve-small mb-2 charsheet__feature-companion-command-status">${CharacterSheetModal._escapeHtml(commandStatus)}</div>
+						<div class="ve-muted ve-small mb-2">Rend: 5-foot reach. Repair: visible Construct or object within 5 feet. Deflect: visible attacker within 5 feet. The sheet asks you to confirm ranges it cannot verify.</div>
+						<div class="charsheet__feature-companion-operation-controls mb-2" role="group" aria-label="Steel Defender feature operations">
 							<button class="ve-btn ve-btn-xs ve-btn-danger btn-feature-companion-operation" data-operation="forceEmpoweredRend"
-								${rendAvailability?.available ? "" : "disabled"} title="${rendAvailability?.message || "5-foot melee weapon attack using your spell attack bonus."}">
+								${getButtonAttrs("forceEmpoweredRend", rendAvailability)} title="${CharacterSheetModal._escapeHtml(rendAvailability?.message || "5-foot melee weapon attack using your spell attack bonus.")}">
 								⚔️ Rend
 							</button>
 							<button class="ve-btn ve-btn-xs ve-btn-success btn-feature-companion-operation" data-operation="repair"
-								${repairAvailability?.available ? "" : "disabled"} title="${repairAvailability?.message || "Visible Construct or object within 5 feet; confirm range manually."}">
+								${getButtonAttrs("repair", repairAvailability)} title="${CharacterSheetModal._escapeHtml(repairAvailability?.message || "Visible Construct or object within 5 feet; confirm range manually.")}">
 								<span class="glyphicon glyphicon-heart"></span> Repair ${repair.current}/${repair.max}
 							</button>
 							<button class="ve-btn ve-btn-xs ve-btn-default btn-feature-companion-operation" data-operation="deflectAttack"
-								${deflectAvailability?.available ? "" : "disabled"} title="${deflectAvailability?.message || "Visible attacker within 5 feet; protects a different creature."}">
+								${getButtonAttrs("deflectAttack", deflectAvailability)} title="${CharacterSheetModal._escapeHtml(deflectAvailability?.message || "Visible attacker within 5 feet; protects a different creature.")}">
 								↩ Deflect
 							</button>
 						</div>
-						<div class="ve-small">
+						<div class="ve-small" id="${operationId}-status">
 							<strong>Hit Dice:</strong> ${hitDice.current}/${hitDice.max}${hitDice.die ? ` ${hitDice.die}` : ""}
 							<span class="ve-muted">— spend during Short Rest.</span>
 						</div>
-						${disabledReasons.length ? `<div class="ve-muted ve-small mt-1" role="status">${disabledReasons.join(" ")}</div>` : ""}
-					</div>
+						<div class="ve-muted ve-small mt-1 charsheet__feature-companion-disabled-reasons" id="${operationId}-reasons" role="status" aria-live="polite" aria-atomic="true">${disabledReasons.length ? disabledReasons.map(CharacterSheetModal._escapeHtml).join(" ") : "All listed operations are available."}</div>
+					</section>
 				`;
 			})() : "";
+			const featureActionButtonsHtml = isFeatureOperationCompanion
+				? featureActionSpecs.map(spec => {
+					const availability = featureActionAvailabilities[spec.actionKey];
+					const focusKey = CharacterSheetModal._escapeHtml(this.getCompanionOperationFocusKey(companion.id, "action", spec.actionKey));
+					const operationId = `charsheet-feature-companion-operations-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+					return `<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="${spec.actionKey}"
+						data-companion-operation-key="${focusKey}" aria-describedby="${operationId}-reasons"
+						title="${CharacterSheetModal._escapeHtml(availability?.message || spec.description)}" ${availability?.available ? "" : "disabled"}>
+						${spec.label}
+					</button>`;
+				}).join("")
+				: `
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="help" title="Give an ally advantage on their next attack or ability check" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🤝 Help
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dash" title="Double your speed for this turn" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						💨 Dash
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="disengage" title="Your movement doesn't provoke opportunity attacks" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🏃 Disengage
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dodge" title="Attacks against you have disadvantage; DEX saves have advantage" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🛡️ Dodge
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="hide" title="Make a Stealth check to become hidden" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🫥 Hide
+					</button>
+					<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="search" title="Make a Perception or Investigation check to find something" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
+						🔎 Search
+					</button>
+				`;
 
 			const card = e_({outer: `
 				<div class="charsheet__companion-card" data-companion-id="${companion.id}" style="
@@ -6959,24 +7008,7 @@ class CharacterSheetPage {
 							</span>
 						</div>
 						<div class="ve-flex" style="gap: 6px; flex-wrap: wrap;">
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="help" title="Give an ally advantage on their next attack or ability check" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🤝 Help
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dash" title="Double your speed for this turn" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								💨 Dash
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="disengage" title="Your movement doesn't provoke opportunity attacks" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🏃 Disengage
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="dodge" title="Attacks against you have disadvantage; DEX saves have advantage" ${usedAction ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🛡️ Dodge
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="hide" title="Make a Stealth check to become hidden" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🫥 Hide
-							</button>
-							<button class="ve-btn ve-btn-xs ve-btn-default btn-companion-action" data-action="search" title="Make a Perception or Investigation check to find something" ${otherActionsDisabled ? "disabled style=\"opacity: 0.5;\"" : ""}>
-								🔎 Search
-							</button>
+							${featureActionButtonsHtml}
 						</div>
 						${attackButtonsHtml ? `
 						<div class="ve-flex mt-2" style="gap: 6px; flex-wrap: wrap;">
@@ -16466,10 +16498,11 @@ class CharacterSheetPage {
 		const missing = setup.missingChoices?.length
 			? setup.missingChoices.join(", ")
 			: "required defender details";
-		return `<section class="alert alert-warning charsheet__feature-companion-setup" role="status" aria-label="Battle Smith setup incomplete">
-			<div class="bold">Battle Smith setup incomplete</div>
-			<div class="ve-small mb-2">Missing: ${CharacterSheetModal._escapeHtml(missing)}.</div>
-			<button type="button" class="ve-btn ve-btn-primary ve-btn-xs" data-feature-companion-setup="${featureUid}">
+		const statusId = `charsheet-feature-companion-setup-${String(setup.ownerUid || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		return `<section class="alert alert-warning charsheet__feature-companion-setup" role="region" aria-labelledby="${statusId}-title">
+			<div class="bold" id="${statusId}-title">Battle Smith setup incomplete</div>
+			<div class="ve-small mb-2" id="${statusId}-reason" role="status" aria-live="polite" aria-atomic="true">Missing: ${CharacterSheetModal._escapeHtml(missing)}.</div>
+			<button type="button" class="ve-btn ve-btn-primary ve-btn-xs btn-feature-companion-setup" data-feature-companion-setup="${featureUid}" aria-describedby="${statusId}-reason">
 				Finish setup
 			</button>
 		</section>`;
@@ -16479,12 +16512,65 @@ class CharacterSheetPage {
 		root?.querySelectorAll?.("[data-feature-companion-setup]").forEach(button => {
 			button.addEventListener("click", async () => {
 				const featureUid = button.getAttribute("data-feature-companion-setup");
-				const outcome = await this._pShowFeatureCompanionSetupModal(featureUid);
-				if (!outcome) return;
-				await this.saveCharacter();
-				this.renderCharacter();
+				await this.pShowFeatureCompanionSetup(featureUid, {
+					focusRestoreTarget: button,
+					getFocusRestoreTarget: () => this.getFeatureCompanionSetupFocusTarget(featureUid),
+				});
 			});
 		});
+	}
+
+	_announceCompanionInteraction (message, {type = null, isToast = false} = {}) {
+		const text = String(message || "").trim();
+		if (!text) return;
+		const liveRegion = typeof document !== "undefined"
+			? document.getElementById?.("charsheet-companion-interaction-status")
+			: null;
+		if (liveRegion) {
+			liveRegion.textContent = "";
+			queueMicrotask(() => { liveRegion.textContent = text; });
+		}
+		if (isToast) JqueryUtil.doToast({type: type || "info", content: text});
+	}
+
+	getFeatureCompanionSetupFocusTarget (featureUid) {
+		if (typeof document === "undefined") return null;
+		const pending = [...(document.querySelectorAll?.("[data-feature-companion-setup]") || [])]
+			.filter(element => element.getAttribute?.("data-feature-companion-setup") === featureUid);
+		if (pending.length) return pending.find(element => element.offsetParent !== null) || pending[0];
+		const companionId = this._state.getFeatureCompanionSetupRecord?.(featureUid)?.companionId;
+		if (!companionId) return null;
+		const targets = [...(document.querySelectorAll?.("[data-companion-id]") || [])]
+			.filter(element => element.getAttribute?.("data-companion-id") === companionId)
+			.map(card => card.querySelector?.("[data-companion-operation-key]:not([disabled]), button:not([disabled]), [role=button]:not([aria-disabled=true])"))
+			.filter(Boolean);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
+	async pShowFeatureCompanionSetup (featureUid, focusOptions = {}) {
+		const outcome = await this._pShowFeatureCompanionSetupModal(featureUid, focusOptions);
+		if (!outcome) return null;
+		try {
+			await this.saveCharacter();
+			this.renderCharacter();
+			const postRenderFocusTarget = focusOptions.getFocusRestoreTarget?.();
+			if (postRenderFocusTarget?.focus) {
+				queueMicrotask(() => {
+					if (postRenderFocusTarget.isConnected !== false) postRenderFocusTarget.focus();
+				});
+			}
+			this._announceCompanionInteraction(
+				outcome === "complete"
+					? "Steel Defender created and saved."
+					: "Steel Defender setup saved for later. No defender was created.",
+				{type: outcome === "complete" ? "success" : "info", isToast: true},
+			);
+			return outcome;
+		} catch (error) {
+			const message = error?.message || "Steel Defender setup changed in memory but could not be saved.";
+			this._announceCompanionInteraction(message, {type: "danger", isToast: true});
+			throw error;
+		}
 	}
 
 	async reconcileFeatureCompanionGrants ({
@@ -16502,14 +16588,30 @@ class CharacterSheetPage {
 		return result;
 	}
 
-	async _pShowFeatureCompanionSetupModal (featureUid) {
+	async _pShowFeatureCompanionSetupModal (
+		featureUid,
+		{
+			focusRestoreTarget = null,
+			getFocusRestoreTarget = null,
+		} = {},
+	) {
 		const record = this._state.getFeatureCompanionSetupRecord?.(featureUid);
 		if (!record) return null;
 		const toolState = this._state.getFeatureCompanionSetupToolState(featureUid);
+		let isSettled = false;
 		const {eleModalInner: modalInner, doClose, pGetResolved} = await CharacterSheetModal.pGetShow({
 			title: "Create your Steel Defender",
 			isMinHeight0: true,
 			isWidth100: true,
+			focusRestoreTarget,
+			getFocusRestoreTarget,
+			cbClose: () => {
+				if (isSettled) return;
+				this._announceCompanionInteraction(
+					"Steel Defender setup closed. No unsaved choices were applied.",
+					{type: "info", isToast: true},
+				);
+			},
 		});
 
 		let toolHtml;
@@ -16517,7 +16619,7 @@ class CharacterSheetPage {
 			toolHtml = `<label class="ve-flex-col mb-3">
 				<span class="bold">Tools of the Trade</span>
 				<span class="ve-small ve-muted mb-1">You already know Smith's Tools. Choose the alternate artisan's tool granted by the feature.</span>
-				<select class="form-control input-xs" data-role="tool">
+				<select class="form-control input-xs" data-role="tool" required aria-required="true" aria-describedby="charsheet-steel-defender-setup-status">
 					<option value="">Choose an artisan's tool</option>
 					${toolState.options.map(option => `<option value="${CharacterSheetModal._escapeHtml(option)}">${CharacterSheetModal._escapeHtml(option)}</option>`).join("")}
 				</select>
@@ -16533,7 +16635,8 @@ class CharacterSheetPage {
 			</div>`;
 		}
 
-		modalInner.innerHTML = `<div class="charsheet__feature-companion-setup-modal">
+		modalInner.innerHTML = `<div class="charsheet__feature-companion-setup-modal" role="form" aria-labelledby="charsheet-steel-defender-setup-heading">
+			<h4 class="sr-only" id="charsheet-steel-defender-setup-heading">Steel Defender setup details</h4>
 			<p class="ve-muted mb-3">Describe the defender you build. Its number of legs changes its appearance only; there is no statistical difference.</p>
 			${toolHtml}
 			<label class="ve-flex-col mb-3">
@@ -16542,20 +16645,20 @@ class CharacterSheetPage {
 			</label>
 			<label class="ve-flex-col mb-3">
 				<span class="bold">Appearance</span>
-				<textarea class="form-control" data-role="appearance" rows="4" aria-describedby="charsheet-steel-defender-setup-status"></textarea>
+				<textarea class="form-control" data-role="appearance" rows="4" required aria-required="true" aria-describedby="charsheet-steel-defender-setup-status"></textarea>
 			</label>
-			<fieldset class="mb-3">
+			<fieldset class="mb-3" aria-describedby="charsheet-steel-defender-setup-status">
 				<legend class="bold">Body shape</legend>
-				<div class="ve-flex" style="gap: 8px; flex-wrap: wrap;">
-					<label class="ve-btn ve-btn-default"><input type="radio" name="steel-defender-locomotion" value="twoLegs"> Two legs</label>
+				<div class="ve-flex charsheet__feature-companion-shape-options">
+					<label class="ve-btn ve-btn-default"><input type="radio" name="steel-defender-locomotion" value="twoLegs" required> Two legs</label>
 					<label class="ve-btn ve-btn-default"><input type="radio" name="steel-defender-locomotion" value="fourLegs"> Four legs</label>
 				</div>
 				<div class="ve-small ve-muted mt-1">There is no statistical difference between these choices.</div>
 			</fieldset>
-			<div id="charsheet-steel-defender-setup-status" class="ve-small mb-3" role="alert" aria-live="polite"></div>
+			<div id="charsheet-steel-defender-setup-status" class="ve-small mb-3" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
 			<div class="charsheet__modal-actions">
 				<button type="button" class="ve-btn ve-btn-default" data-role="defer">Finish later</button>
-				<button type="button" class="ve-btn ve-btn-primary" data-role="create">Create defender</button>
+				<button type="button" class="ve-btn ve-btn-primary" data-role="create" aria-describedby="charsheet-steel-defender-setup-status">Create defender</button>
 			</div>
 		</div>`;
 
@@ -16590,10 +16693,12 @@ class CharacterSheetPage {
 		const updateStatus = () => {
 			const missing = getMissing();
 			create.disabled = !!missing.length;
+			create.setAttribute("aria-disabled", String(!!missing.length));
 			create.title = missing.length ? `Missing: ${missing.join(", ")}` : "";
 			status.textContent = missing.length
 				? `Required before creation: ${missing.join(", ")}.`
 				: "Ready to create the defender.";
+			status.setAttribute("role", "status");
 			status.classList.toggle("text-danger", !!missing.length);
 		};
 		modalInner.addEventListener("input", updateStatus);
@@ -16602,6 +16707,10 @@ class CharacterSheetPage {
 
 		modalInner.querySelector("[data-role=defer]").addEventListener("click", () => {
 			this._state.deferFeatureCompanionSetup(featureUid, getChoices());
+			isSettled = true;
+			this._announceCompanionInteraction(
+				"Steel Defender setup deferred. No defender was created.",
+			);
 			doClose("deferred");
 		});
 		create.addEventListener("click", () => {
@@ -16617,14 +16726,27 @@ class CharacterSheetPage {
 					}
 				}
 				this._state.completeFeatureCompanionSetup(featureUid, getChoices());
+				isSettled = true;
+				this._announceCompanionInteraction("Steel Defender setup complete. Saving changes.");
 				doClose("complete");
 			} catch (error) {
-				status.textContent = error?.message || "Steel Defender setup could not be completed.";
+				const message = error?.message || "Steel Defender setup could not be completed.";
+				status.textContent = message;
+				status.setAttribute("role", "alert");
 				status.classList.add("text-danger");
+				this._announceCompanionInteraction(message, {type: "danger", isToast: true});
+				status.focus();
 			}
 		});
 
-		CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-role=appearance]"});
+		const preferSelector = toolState.status === "pending"
+			? "[data-role=tool]"
+			: !appearance.value.trim()
+				? "[data-role=appearance]"
+				: !modalInner.querySelector("[name=steel-defender-locomotion]:checked")
+					? "[name=steel-defender-locomotion]"
+					: "[data-role=create]";
+		CharacterSheetModal.focusFirst(modalInner, {preferSelector});
 		const [result] = await pGetResolved();
 		return result || null;
 	}
@@ -22154,13 +22276,24 @@ class CharacterSheetPage {
 		});
 	}
 
+	getCompanionOperationFocusKey (companionId, operation, actionKey = null) {
+		return [companionId, operation, actionKey || ""].map(part => String(part || "")).join("::");
+	}
+
+	getCompanionOperationFocusTarget (focusKey) {
+		if (!focusKey || typeof document === "undefined") return null;
+		const targets = [...(document.querySelectorAll?.("[data-companion-operation-key]") || [])]
+			.filter(element => element.getAttribute?.("data-companion-operation-key") === focusKey);
+		return targets.find(element => element.offsetParent !== null) || targets[0] || null;
+	}
+
 	async _pGetCompanionCommandMethod (availability, commandMethod = null) {
 		if (commandMethod) return commandMethod;
 		if (availability.availableCommandMethods.length === 1) return availability.availableCommandMethods[0].id;
 		if (!availability.availableCommandMethods.length) return null;
 		return InputUiUtil.pGetUserEnum({
 			title: "Command Steel Defender",
-			htmlDescription: "Choose the owner cost before committing the defender action.",
+			htmlDescription: "Choose the owner cost before committing it together with the defender's action. Cancel spends neither resource.",
 			values: availability.availableCommandMethods.map(it => it.id),
 			fnDisplay: id => availability.availableCommandMethods.find(it => it.id === id)?.label || id,
 			isResolveItem: true,
@@ -22208,6 +22341,7 @@ class CharacterSheetPage {
 				"combat",
 				`Arcane Jolt dealt ${roll.total} Force damage to ${result.target.name}`,
 			);
+			this._announceCompanionInteraction(`Arcane Jolt dealt ${roll.total} Force damage to ${result.target.name}.`);
 			return true;
 		}
 
@@ -22224,6 +22358,7 @@ class CharacterSheetPage {
 			"combat",
 			`Arcane Jolt restored ${roll.total} HP to ${targetName}${result.hp?.manualApplication ? " (manual target)" : ""}`,
 		);
+		this._announceCompanionInteraction(`Arcane Jolt restored ${roll.total} HP to ${targetName}.`);
 		return true;
 	}
 
@@ -22231,9 +22366,14 @@ class CharacterSheetPage {
 		trigger,
 		rollFollowup = null,
 		focusRestoreTarget = null,
+		getFocusRestoreTarget = null,
 	} = {}) {
 		const triggerStatus = this._state.getEfaArcaneJoltTriggerStatus?.(trigger);
 		if (!triggerStatus?.available) {
+			this._announceCompanionInteraction(
+				triggerStatus?.message || "Arcane Jolt is unavailable.",
+				{type: "warning", isToast: true},
+			);
 			return {
 				ok: false,
 				committed: false,
@@ -22276,27 +22416,31 @@ class CharacterSheetPage {
 
 		let resolveOuter = null;
 		let isResolved = false;
+		let isBusy = false;
+		const cancelledResult = {
+			ok: false,
+			committed: false,
+			reason: "cancelled",
+			message: "Arcane Jolt skipped before any resource or receipt was spent.",
+			rollback: null,
+			error: null,
+		};
 		const modalOptions = {
 			title: "Arcane Jolt",
 			isMinHeight0: true,
 			focusRestoreTarget,
+			getFocusRestoreTarget,
 			cbClose: () => {
-				if (!resolveOuter || isResolved) return;
+				if (!resolveOuter || isResolved || isBusy) return;
 				isResolved = true;
-				resolveOuter({
-					ok: false,
-					committed: false,
-					reason: "cancelled",
-					message: "Arcane Jolt skipped before any resource or receipt was spent.",
-					rollback: null,
-					error: null,
-				});
+				this._announceCompanionInteraction(cancelledResult.message, {type: "info", isToast: true});
+				resolveOuter(cancelledResult);
 			},
 		};
 		const modal = rollFollowup
 			? await CharacterSheetModal.pGetRollFollowup({...modalOptions, rollFollowup})
 			: await CharacterSheetModal.pGetShow(modalOptions);
-		const {eleModalInner: modalInner, doClose} = modal;
+		const {eleModal: modalShell, eleModalInner: modalInner, doClose} = modal;
 		modalInner.classList.add("cs-combat-target-modal");
 		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
 		modalInner.style.overflowY = "auto";
@@ -22311,58 +22455,76 @@ class CharacterSheetPage {
 				resolve(result);
 			};
 			modalInner.innerHTML = `
-				<div class="ve-flex-col">
-					<div class="ve-small ve-muted mb-2">${escapeHtml(statusText)}</div>
-					<label class="mb-2">
+				<div class="ve-flex-col cs-combat-target-effect charsheet__arcane-jolt" role="form" aria-label="Arcane Jolt options">
+					<div class="ve-small ve-muted mb-2 charsheet__arcane-jolt-status" data-jolt-status role="status" aria-live="polite" aria-atomic="true">${escapeHtml(statusText)}</div>
+					<label class="mb-2 ve-form-label">
 						<span class="ve-small bold">Target hit by the attack</span>
 						<input class="form-control input-sm w-100" type="text" data-jolt-attack-target value="${escapeHtml(attackTargetName)}" autocomplete="off">
 					</label>
-					<div class="ve-flex-col mb-2">
-						<span class="ve-small bold">Restorative recipient</span>
-						<select class="form-control input-sm w-100" data-jolt-recipient>
+					<fieldset class="ve-flex-col mb-2 charsheet__arcane-jolt-restorative">
+						<legend class="ve-small bold">Restorative recipient</legend>
+						<select class="form-control input-sm w-100" data-jolt-recipient aria-label="Restorative recipient">
 							${targetOptions.map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}
 						</select>
-						<input class="form-control input-sm w-100 mt-1" type="text" data-jolt-external-name placeholder="External target name" autocomplete="off" style="display: none;">
+						<label class="ve-form-label mt-1" data-jolt-external-label hidden>
+							<span>External target name</span>
+							<input class="form-control input-sm w-100" type="text" data-jolt-external-name autocomplete="off">
+						</label>
 						<label class="ve-flex-v-center mt-1">
 							<input type="checkbox" data-jolt-visible>
 							<span class="ml-1">I can see the recipient</span>
 						</label>
-						<label class="ve-flex-v-center mt-1">
-							<span class="mr-1">Distance from the attack target</span>
-							<input class="form-control input-sm" type="number" min="0" max="30" inputmode="numeric" data-jolt-distance style="width: 6rem;">
-							<span class="ml-1">ft.</span>
+						<label class="ve-form-label mt-1">
+							<span>Distance from the attack target (feet)</span>
+							<input class="form-control input-sm" type="number" min="0" max="30" inputmode="numeric" data-jolt-distance>
 						</label>
+					</fieldset>
+					<div class="ve-small text-danger mb-2" data-jolt-error role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1"></div>
+					<div class="ve-flex-v-center ve-flex-wrap cs-combat-target-modal__footer">
+						<button type="button" class="ve-btn ve-btn-default mr-2 mb-1" data-jolt-action="skip" aria-describedby="charsheet-arcane-jolt-action-help">Skip</button>
+						<button type="button" class="ve-btn ve-btn-danger mr-2 mb-1" data-jolt-action="destructive" aria-describedby="charsheet-arcane-jolt-action-help">Destructive</button>
+						<button type="button" class="ve-btn ve-btn-success mb-1" data-jolt-action="restorative" aria-describedby="charsheet-arcane-jolt-action-help">Restorative</button>
 					</div>
-					<div class="ve-small text-danger mb-2" data-jolt-error role="alert" aria-live="polite"></div>
-					<div class="ve-flex-v-center ve-flex-wrap">
-						<button type="button" class="ve-btn ve-btn-default mr-2 mb-1" data-jolt-action="skip">Skip</button>
-						<button type="button" class="ve-btn ve-btn-danger mr-2 mb-1" data-jolt-action="destructive">Destructive</button>
-						<button type="button" class="ve-btn ve-btn-success mb-1" data-jolt-action="restorative">Restorative</button>
-					</div>
+					<div class="ve-small ve-muted mt-1" id="charsheet-arcane-jolt-action-help">Skip spends nothing. Destructive damages the hit target. Restorative requires sight and a target-relative distance.</div>
 				</div>
 			`;
 
 			const attackTargetEl = modalInner.querySelector("[data-jolt-attack-target]");
 			const recipientEl = modalInner.querySelector("[data-jolt-recipient]");
+			const externalLabelEl = modalInner.querySelector("[data-jolt-external-label]");
 			const externalNameEl = modalInner.querySelector("[data-jolt-external-name]");
 			const visibleEl = modalInner.querySelector("[data-jolt-visible]");
 			const distanceEl = modalInner.querySelector("[data-jolt-distance]");
 			const errorEl = modalInner.querySelector("[data-jolt-error]");
+			const statusEl = modalInner.querySelector("[data-jolt-status]");
 			const buttons = [...modalInner.querySelectorAll("[data-jolt-action]")];
-			let isBusy = false;
+			const closeButton = modalShell?.querySelector?.(".cs-modal__btn-close");
 			const setBusy = value => {
 				isBusy = value;
 				buttons.forEach(button => { button.disabled = value; });
+				if (closeButton) closeButton.disabled = value;
+				modalShell?.setAttribute?.("aria-busy", String(value));
+				statusEl.textContent = value ? "Resolving Arcane Jolt. Keep this dialog open." : statusText;
 			};
-			const showError = message => {
+			const showError = (message, {focus = false} = {}) => {
 				errorEl.textContent = message || "";
+				if (message && focus) errorEl.focus();
 			};
 			const updateRecipientUi = () => {
-				externalNameEl.style.display = recipientEl.value.startsWith("external:") ? "" : "none";
+				const isExternal = recipientEl.value.startsWith("external:");
+				externalLabelEl.hidden = !isExternal;
+				externalNameEl.required = isExternal;
+				externalNameEl.setAttribute("aria-required", String(isExternal));
 			};
 			recipientEl.addEventListener("change", updateRecipientUi);
 			updateRecipientUi();
-			queueMicrotask(() => attackTargetEl.focus());
+			modalShell?.addEventListener?.("keydown", event => {
+				if (!isBusy || event.key !== "Escape") return;
+				event.preventDefault();
+				event.stopImmediatePropagation?.();
+				statusEl.textContent = "Arcane Jolt is still resolving. Wait for the result before closing.";
+			}, true);
+			queueMicrotask(() => CharacterSheetModal.focusFirst(modalInner, {preferSelector: "[data-jolt-attack-target]"}));
 
 			const resolveUse = async effect => {
 				if (isBusy) return;
@@ -22408,39 +22570,40 @@ class CharacterSheetPage {
 				}
 
 				setBusy(true);
-				const dice = effect === "destructive" ? triggerStatus.damageDice : triggerStatus.healingDice;
-				const diceCount = Number(String(dice).match(/^(\d+)d6$/)?.[1]) || 0;
-				const result = await this._state.pUseEfaArcaneJolt({
-					trigger,
-					effect,
-					target,
-					rolls: {effectDice: this.rollDice(diceCount, 6)},
-					publishResult: published => this._publishEfaArcaneJoltResult(published),
-				});
-				if (!result.ok) {
+				try {
+					const dice = effect === "destructive" ? triggerStatus.damageDice : triggerStatus.healingDice;
+					const diceCount = Number(String(dice).match(/^(\d+)d6$/)?.[1]) || 0;
+					const result = await this._state.pUseEfaArcaneJolt({
+						trigger,
+						effect,
+						target,
+						rolls: {effectDice: this.rollDice(diceCount, 6)},
+						publishResult: published => this._publishEfaArcaneJoltResult(published),
+					});
+					if (!result.ok) {
+						setBusy(false);
+						showError(result.message || "Arcane Jolt could not be resolved.", {focus: true});
+						return;
+					}
+					await this.saveCharacter();
+					this._renderResources?.();
+					this._features?._renderResources?.();
+					this._combat?.renderCombatResources?.();
+					this._renderCompanions?.();
+					if (this._state.getViewMode?.() === "play") this._playMode?.render();
+					finish(result);
+					doClose();
+				} catch (error) {
 					setBusy(false);
-					showError(result.message || "Arcane Jolt could not be resolved.");
-					return;
+					const message = error?.message || "Arcane Jolt could not be resolved.";
+					showError(message, {focus: true});
+					this._announceCompanionInteraction(message, {type: "danger", isToast: true});
 				}
-				await this.saveCharacter();
-				this._renderResources?.();
-				this._features?._renderResources?.();
-				this._combat?.renderCombatResources?.();
-				this._renderCompanions?.();
-				if (this._state.getViewMode?.() === "play") this._playMode?.render();
-				finish(result);
-				doClose();
 			};
 
 			modalInner.querySelector("[data-jolt-action=\"skip\"]").addEventListener("click", () => {
-				finish({
-					ok: false,
-					committed: false,
-					reason: "cancelled",
-					message: "Arcane Jolt skipped before any resource or receipt was spent.",
-					rollback: null,
-					error: null,
-				});
+				this._announceCompanionInteraction(cancelledResult.message, {type: "info", isToast: true});
+				finish(cancelledResult);
 				doClose();
 			});
 			modalInner.querySelector("[data-jolt-action=\"destructive\"]").addEventListener("click", () => void resolveUse("destructive"));
@@ -22457,20 +22620,30 @@ class CharacterSheetPage {
 		const operationFocusTarget = typeof document !== "undefined"
 			? document.activeElement?.closest?.("button, [role=button]")
 			: null;
+		const operationFocusKey = operationFocusTarget?.getAttribute?.("data-companion-operation-key") || null;
+		const getFocusRestoreTarget = operationFocusKey
+			? () => this.getCompanionOperationFocusTarget(operationFocusKey)
+			: null;
 		const initialAvailability = this.getCompanionOperationAvailability(companionId, operation, {actionKey});
 		if (!initialAvailability.available) {
-			JqueryUtil.doToast({type: "warning", content: initialAvailability.message || "That companion operation is unavailable."});
-			return this._state.performCompanionOperation({
+			const unavailable = this._state.performCompanionOperation({
 				companionId,
 				operation,
 				actionKey,
 				attackReplacement: this._getCompanionAttackReplacementBridge().availability,
 			});
+			this._announceCompanionInteraction(
+				unavailable.message || initialAvailability.message || "That companion operation is unavailable.",
+				{type: "warning", isToast: true},
+			);
+			return unavailable;
 		}
 
 		const selectedCommandMethod = await this._pGetCompanionCommandMethod(initialAvailability, commandMethod);
 		if (initialAvailability.availableCommandMethods.length && !selectedCommandMethod) {
-			return this._state.performCompanionOperation({companionId, operation, actionKey, cancelled: true});
+			const cancelled = this._state.performCompanionOperation({companionId, operation, actionKey, cancelled: true});
+			this._showCompanionOperationResult(cancelled);
+			return cancelled;
 		}
 
 		const bridge = this._getCompanionAttackReplacementBridge();
@@ -22495,7 +22668,7 @@ class CharacterSheetPage {
 				payload.target = {name: String(targetName).trim()};
 				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
 					title: "Confirm Rend Range",
-					htmlDescription: "Confirm the target is within the defender's 5-foot reach.",
+					htmlDescription: `${initialAvailability.availableCommandMethods.find(it => it.id === selectedCommandMethod)?.label || "The selected owner command"} and the defender's action will be spent together. The sheet cannot verify distance; confirm the target is within the defender's 5-foot reach.`,
 					textYes: "Within 5 feet",
 					textNo: "Cancel",
 				});
@@ -22524,7 +22697,7 @@ class CharacterSheetPage {
 			else {
 				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
 					title: "Confirm Repair Target",
-					htmlDescription: "Confirm the defender can see the Construct or object within 5 feet.",
+					htmlDescription: `${initialAvailability.availableCommandMethods.find(it => it.id === selectedCommandMethod)?.label || "The selected owner command"}, the defender's action, and one Repair use will be spent together. The sheet cannot verify sight or distance; confirm the defender can see the Construct or object within 5 feet.`,
 					textYes: "Target confirmed",
 					textNo: "Cancel",
 				});
@@ -22545,7 +22718,7 @@ class CharacterSheetPage {
 				};
 				payload.rangeConfirmed = await InputUiUtil.pGetUserBoolean({
 					title: "Confirm Deflect Attack Trigger",
-					htmlDescription: "Confirm the visible attacker is within 5 feet of the defender and hit a different creature.",
+					htmlDescription: "The defender's reaction will be spent. The sheet cannot verify sight or distance; confirm the visible attacker is within 5 feet of the defender and hit a different creature.",
 					textYes: "Trigger confirmed",
 					textNo: "Cancel",
 				});
@@ -22571,6 +22744,7 @@ class CharacterSheetPage {
 				await this.pOfferEfaArcaneJolt({
 					trigger: arcaneJoltTrigger,
 					focusRestoreTarget: operationFocusTarget,
+					getFocusRestoreTarget,
 				});
 			}
 		}
@@ -22579,13 +22753,26 @@ class CharacterSheetPage {
 
 	_showCompanionOperationResult (result) {
 		if (!result?.ok) {
-			if (result?.reason !== "cancelled") {
-				JqueryUtil.doToast({type: "danger", content: result?.message || "Companion operation failed."});
-			}
+			const isCancelled = result?.reason === "cancelled";
+			const message = result?.message || (isCancelled
+				? "Companion operation cancelled. No action or resource was spent."
+				: "Companion operation failed.");
+			this._announceCompanionInteraction(message, {
+				type: isCancelled ? "info" : "danger",
+				isToast: true,
+			});
 			return;
 		}
 		const companion = this._state.getCompanion(result.companionId);
 		const name = companion?.customName || companion?.name || "Companion";
+		const costSummary = [
+			result.costs?.ownerAction === "bonus" ? "owner Bonus Action" : null,
+			result.costs?.ownerAction === "replaceOneAttack" ? "one owner Attack" : null,
+			result.costs?.companionAction ? "defender action" : null,
+			result.costs?.companionReaction ? "defender reaction" : null,
+			result.costs?.repairUses ? `${result.costs.repairUses} Repair use${result.costs.repairUses === 1 ? "" : "s"}` : null,
+		].filter(Boolean).join(", ");
+		const costSuffix = costSummary ? ` Spent: ${costSummary}.` : "";
 		let activity = `${name}: ${result.operation}`;
 		if (result.rolls?.attack) {
 			const attack = result.rolls.attack;
@@ -22596,22 +22783,29 @@ class CharacterSheetPage {
 				attack.critical ? "critical" : attack.fumble ? "fumble" : "",
 				result.rolls.damage ? `${result.rolls.damage.total} force damage` : "Miss",
 			);
-			activity = `${name} used Rend (${attack.total} to hit${result.rolls.damage ? `, ${result.rolls.damage.total} force` : ", miss"})`;
+			activity = `${name} used Rend against ${result.target?.name || "the target"} (${attack.total} to hit${result.rolls.damage ? `, ${result.rolls.damage.total} force` : ", miss"}).${costSuffix}`;
+			this._announceCompanionInteraction(activity);
 		} else if (result.operation === "repair") {
 			const healing = result.rolls.healing.total;
 			const target = result.target?.external ? `${result.target.name} (manual)` : this._state.getCompanion(result.hp?.companionId)?.customName || this._state.getCompanion(result.hp?.companionId)?.name;
-			JqueryUtil.doToast({type: "success", content: `${name} repairs ${target || "the target"} for ${healing} HP.`});
-			activity = `${name} used Repair for ${healing} HP${result.hp?.manualApplication ? " (manual target)" : ""}`;
+			const hpSummary = result.hp?.manualApplication
+				? " Apply the healing manually."
+				: ` HP: ${result.hp?.before} → ${result.hp?.after}.`;
+			JqueryUtil.doToast({type: "success", content: `${name} repairs ${target || "the target"} for ${healing} HP.${costSuffix}`});
+			activity = `${name} used Repair on ${target || "the target"} for ${healing} HP.${hpSummary}${costSuffix}`;
+			this._announceCompanionInteraction(activity);
 		} else if (result.operation === "deflectAttack") {
 			const retaliation = result.rolls.retaliation;
 			JqueryUtil.doToast({
 				type: "info",
-				content: `Deflect Attack: resolve the triggering attack with disadvantage.${retaliation ? ` ${retaliation.total} force damage to the attacker.` : ""}`,
+				content: `Deflect Attack: resolve the triggering attack with disadvantage.${retaliation ? ` ${retaliation.total} force damage to the attacker.` : ""}${costSuffix}`,
 			});
-			activity = `${name} used Deflect Attack${retaliation ? ` (${retaliation.total} force)` : ""}`;
+			activity = `${name} used Deflect Attack against ${result.target?.attackerName || "the attacker"} to protect ${result.target?.protectedTargetName || "the target"}${retaliation ? ` (${retaliation.total} force)` : ""}.${costSuffix}`;
+			this._announceCompanionInteraction(activity);
 		} else {
-			JqueryUtil.doToast({type: "success", content: `${name} used ${result.actionKey || result.operation}.`});
-			activity = `${name} used ${result.actionKey || result.operation}`;
+			JqueryUtil.doToast({type: "success", content: `${name} used ${result.actionKey || result.operation}.${costSuffix}`});
+			activity = `${name} used ${result.actionKey || result.operation}.${costSuffix}`;
+			this._announceCompanionInteraction(activity);
 		}
 		this._playMode?._logActivity?.("companion", activity);
 	}

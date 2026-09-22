@@ -16362,6 +16362,59 @@ body.is-charsheet-page #charsheet-tab-builder .ve-btn-primary.disabled {
 	gap: var(--cs-space-sm, 8px);
 }
 
+.charsheet__feature-companion-setup {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-md, 12px);
+	padding: var(--cs-space-md, 12px);
+	margin-bottom: var(--cs-space-md, 12px);
+	border: 1px solid var(--cs-warning, #f59e0b);
+	border-radius: var(--cs-radius-md, 10px);
+	background: var(--cs-warning-subtle, rgba(245, 158, 11, 0.08));
+}
+
+.charsheet__feature-companion-shape-options {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-sm, 8px);
+}
+
+.charsheet__feature-companion-operations {
+	padding: var(--cs-space-md, 10px);
+	border: 1px solid var(--cs-border);
+	border-radius: var(--cs-radius-sm);
+}
+
+.charsheet__feature-companion-operation-controls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--cs-space-sm, 6px);
+}
+
+.charsheet__feature-companion-disabled-reasons:empty {
+	display: none;
+}
+
+.charsheet__feature-companion-setup .ve-btn:focus-visible,
+.charsheet__feature-companion-operations .ve-btn:focus-visible,
+.charsheet__arcane-jolt .ve-btn:focus-visible,
+.charsheet__arcane-jolt input:focus-visible,
+.charsheet__arcane-jolt select:focus-visible {
+	outline: 3px solid var(--cs-accent-sapphire);
+	outline-offset: 2px;
+}
+
+.charsheet__feature-companion-operations .ve-btn:disabled {
+	cursor: not-allowed;
+	opacity: 0.55;
+}
+
+.charsheet__arcane-jolt[aria-busy="true"],
+.cs-modal[aria-busy="true"] .charsheet__arcane-jolt {
+	cursor: progress;
+}
+
 /* Edit Ability Scores modal: only six short rows, so opt out of the tall
    picker default above and size to content (kills ~200px of dead space).
    Rows are flat divider-separated data rows, not nested cards. */

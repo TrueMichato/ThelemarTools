@@ -3075,6 +3075,47 @@ export class CharacterSheetPlayMode {
 		const hasSubclassDrake = classes.some(c => c.subclass?.name?.toLowerCase().includes("drake"));
 		const hasSubclassSteel = classes.some(c => c.subclass?.name?.toLowerCase().includes("steel"));
 		const hasSubclassBeast = classes.some(c => c.subclass?.name?.toLowerCase().includes("beast"));
+		const efaSteelDefenderUid = CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER;
+		const efaSteelDefenderSetup = efaSteelDefenderUid
+			? this._state.getFeatureCompanionSetupRecord?.(efaSteelDefenderUid)
+			: null;
+		const hasEfaSteelDefenderSetup = efaSteelDefenderSetup?.eligibility === "active";
+		const pendingSetups = this._state.getPendingFeatureCompanionSetups?.() || [];
+
+		pendingSetups.forEach(setup => {
+			const callout = this._ce("section", "pm-companion-setup", container);
+			callout.setAttribute("role", "region");
+
+			const heading = this._ce("div", "pm-companion-setup__heading", callout);
+			heading.textContent = "Battle Smith setup incomplete";
+			const headingId = `pm-companion-setup-heading-${String(setup.ownerUid || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+			heading.id = headingId;
+			callout.setAttribute("aria-labelledby", headingId);
+
+			const missing = Array.isArray(setup.missingChoices) && setup.missingChoices.length
+				? `Missing: ${setup.missingChoices.join(", ")}.`
+				: "Choose your defender's appearance and body shape.";
+			const reason = this._ce("div", "pm-companion-setup__reason", callout);
+			reason.textContent = `${missing} You can defer without losing progress.`;
+			const reasonId = `pm-companion-setup-reason-${String(setup.ownerUid || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+			reason.id = reasonId;
+			reason.setAttribute("role", "status");
+			reason.setAttribute("aria-live", "polite");
+			reason.setAttribute("aria-atomic", "true");
+
+			const setupBtn = this._ce("button", "pm-companion-setup__btn", callout);
+			setupBtn.type = "button";
+			setupBtn.textContent = "Finish setup";
+			setupBtn.setAttribute("data-feature-companion-setup", setup.ownerUid);
+			setupBtn.setAttribute("aria-describedby", reasonId);
+			setupBtn.addEventListener("click", () => this._page.pShowFeatureCompanionSetup?.(
+				setup.ownerUid,
+				{
+					focusRestoreTarget: setupBtn,
+					getFocusRestoreTarget: () => this._page.getFeatureCompanionSetupFocusTarget?.(setup.ownerUid),
+				},
+			));
+		});
 
 		const toolbar = this._ce("div", "pm-companion-toolbar", container);
 
@@ -3089,7 +3130,7 @@ export class CharacterSheetPlayMode {
 		addCompBtn("eagle", "Familiar", hasWarlock || hasWizard, () => this._addBuiltinCompanion("familiar"));
 		addCompBtn("bear", "Beast Companion", hasRanger || hasSubclassBeast, () => this._addBuiltinCompanion("beast-companion"));
 		addCompBtn("dragon", "Drake", hasSubclassDrake, () => this._addBuiltinCompanion("drake"));
-		addCompBtn("settings", "Steel Defender", hasSubclassSteel || hasArtificer, () => this._addBuiltinCompanion("steel-defender"));
+		addCompBtn("settings", "Steel Defender", (hasSubclassSteel || hasArtificer) && !hasEfaSteelDefenderSetup, () => this._addBuiltinCompanion("steel-defender"));
 		addCompBtn("lion", "Wild Shape", hasDruid, () => this._addBuiltinCompanion("wild-shape"));
 		addCompBtn("nature", "Wild Companion", hasDruid, () => this._addBuiltinCompanion("wild-companion"));
 		addCompBtn("horse", "Find Steed", hasPaladin, () => this._addBuiltinCompanion("find-steed"));
@@ -3101,12 +3142,19 @@ export class CharacterSheetPlayMode {
 
 		const companions = this._state.getCompanions();
 		if (!companions.length) {
-			this._renderEmptyState(container, "companion", "No companions yet. Use the buttons above to add one.");
+			this._renderEmptyState(
+				container,
+				"companion",
+				pendingSetups.length
+					? "Complete the Battle Smith setup above to create your Steel Defender."
+					: "No companions yet. Use the buttons above to add one.",
+			);
 			return;
 		}
 
 		companions.forEach(comp => {
 			const card = this._makeCard(container, "companion", comp.name || "Companion");
+			card.setAttribute("data-companion-id", comp.id);
 
 			// ── Interactive controls (B4) ────────────────────────────
 			const controls = this._ce("div", "pm-companion__controls", card);
@@ -3305,33 +3353,79 @@ export class CharacterSheetPlayMode {
 		const repair = this._page.getCompanionOperationAvailability?.(companion.id, "repair");
 		const deflect = this._page.getCompanionOperationAvailability?.(companion.id, "deflectAttack");
 		if (!rend || !repair || !deflect) return;
+		const otherActionSpecs = [
+			{actionKey: "help", label: "Help"},
+			{actionKey: "dash", label: "Dash"},
+			{actionKey: "disengage", label: "Disengage"},
+			{actionKey: "hide", label: "Hide"},
+			{actionKey: "search", label: "Search"},
+		];
+		const dodge = this._page.getCompanionOperationAvailability?.(companion.id, "action", {actionKey: "dodge"});
+		const otherActions = Object.fromEntries(otherActionSpecs.map(spec => [
+			spec.actionKey,
+			this._page.getCompanionOperationAvailability?.(companion.id, "action", {actionKey: spec.actionKey}),
+		]));
 
 		const header = this._ce("div", "pm-card__header", card);
 		const title = this._ce("span", "pm-card__badge", header);
 		title.textContent = "Operate";
+		const operationId = `pm-companion-operations-${String(companion.id || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+		title.id = `${operationId}-heading`;
 
-		const status = this._ce("div", "pm-feature__desc", card);
+		const operationRegion = this._ce("section", "pm-companion-operations", card);
+		operationRegion.setAttribute("role", "region");
+		operationRegion.setAttribute("aria-labelledby", title.id);
+
+		const status = this._ce("div", "pm-feature__desc pm-companion-operations__status", operationRegion);
 		status.style.display = "block";
+		status.id = `${operationId}-status`;
 		status.textContent = `${rend.status.actionAvailable ? "Action ready" : "Action used"} • ${deflect.status.reactionAvailable ? "Reaction ready" : "Reaction used"} • default Dodge`;
 
-		const costs = this._ce("div", "pm-feature__desc", card);
+		const costs = this._ce("div", "pm-feature__desc", operationRegion);
 		costs.style.display = "block";
 		costs.textContent = rend.commandMethods.length
 			? rend.commandMethods
 				.map(method => `${method.label}: ${method.available ? "available" : method.reason}`)
 				.join(" • ")
 			: rend.message;
+		const ranges = this._ce("div", "pm-feature__desc", operationRegion);
+		ranges.style.display = "block";
+		ranges.textContent = "Rend: 5-foot reach • Repair: visible Construct/object within 5 feet • Deflect: visible attacker within 5 feet. Confirm ranges the sheet cannot verify.";
+		let rendCommandMethod = rend.availableCommandMethods[0]?.id || null;
+		if (rend.availableCommandMethods.length > 1) {
+			const commandLabel = this._ce("label", "pm-companion-operations__other-label", operationRegion);
+			commandLabel.textContent = "Rend owner cost";
+			const commandSelect = this._ce("select", "pm-companion-operations__select", commandLabel);
+			commandSelect.setAttribute("aria-describedby", `${operationId}-status`);
+			rend.availableCommandMethods.forEach(method => {
+				const option = this._ce("option", null, commandSelect);
+				option.value = method.id;
+				option.textContent = `${method.label}${method.available ? "" : ` — ${method.reason}`}`;
+				option.disabled = !method.available;
+			});
+			commandSelect.value = rendCommandMethod;
+			commandSelect.addEventListener("change", () => { rendCommandMethod = commandSelect.value; });
+		}
 
-		const controls = this._ce("div", "pm-companion__controls", card);
+		const controls = this._ce("div", "pm-companion__controls pm-companion-operations__controls", operationRegion);
+		controls.setAttribute("role", "group");
+		controls.setAttribute("aria-label", "Steel Defender feature operations");
 		const specs = [
 			{operation: "forceEmpoweredRend", label: "Rend", availability: rend},
 			{operation: "repair", label: `Repair ${companion.uses?.repair?.current || 0}/${companion.uses?.repair?.max || 0}`, availability: repair},
 			{operation: "deflectAttack", label: "Deflect", availability: deflect},
+			{operation: "action", actionKey: "dodge", label: "Dodge", availability: dodge},
 		];
 		specs.forEach(spec => {
 			const btn = this._ce("button", "pm-companion__ctrl-btn", controls);
+			btn.type = "button";
 			btn.textContent = spec.label;
 			btn.disabled = !spec.availability.available;
+			btn.setAttribute("aria-describedby", `${operationId}-status ${operationId}-reasons`);
+			btn.setAttribute(
+				"data-companion-operation-key",
+				this._page.getCompanionOperationFocusKey?.(companion.id, spec.operation, spec.actionKey) || "",
+			);
 			btn.title = spec.availability.message || (
 				spec.operation === "repair"
 					? "Confirm a visible Construct or object within 5 feet."
@@ -3340,27 +3434,67 @@ export class CharacterSheetPlayMode {
 						: "5-foot melee weapon attack using your spell attack bonus."
 			);
 			btn.addEventListener("click", async () => {
-				const result = await this._page.pUseCompanionOperation?.({
+				const request = {
 					companionId: companion.id,
 					operation: spec.operation,
-				});
-				if (result?.committed) this._refreshOpenDrawer("companions");
+					actionKey: spec.actionKey,
+				};
+				if (spec.operation === "forceEmpoweredRend" && rendCommandMethod) request.commandMethod = rendCommandMethod;
+				const result = await this._page.pUseCompanionOperation?.(request);
+				return result;
 			});
 		});
 
-		const resources = this._ce("div", "pm-feature__desc", card);
+		const otherActionGroup = this._ce("div", "pm-companion-operations__other", operationRegion);
+		const otherActionLabel = this._ce("label", "pm-companion-operations__other-label", otherActionGroup);
+		otherActionLabel.textContent = "Other action";
+		const otherActionSelect = this._ce("select", "pm-companion-operations__select", otherActionLabel);
+		otherActionSpecs.forEach(spec => {
+			const option = this._ce("option", null, otherActionSelect);
+			option.value = spec.actionKey;
+			option.textContent = spec.label;
+			option.disabled = !otherActions[spec.actionKey]?.available;
+		});
+		const otherActionBtn = this._ce("button", "pm-companion__ctrl-btn", otherActionGroup);
+		otherActionBtn.type = "button";
+		otherActionBtn.textContent = "Use action";
+		otherActionBtn.setAttribute("aria-describedby", `${operationId}-status ${operationId}-reasons`);
+		const updateOtherAction = () => {
+			const availability = otherActions[otherActionSelect.value];
+			otherActionBtn.disabled = !availability?.available;
+			otherActionBtn.title = availability?.message || `Use ${otherActionSelect.selectedOptions[0]?.textContent || "selected action"}.`;
+			otherActionBtn.setAttribute(
+				"data-companion-operation-key",
+				this._page.getCompanionOperationFocusKey?.(companion.id, "action", otherActionSelect.value) || "",
+			);
+		};
+		otherActionSelect.addEventListener("change", updateOtherAction);
+		otherActionBtn.addEventListener("click", () => this._page.pUseCompanionOperation?.({
+			companionId: companion.id,
+			operation: "action",
+			actionKey: otherActionSelect.value,
+		}));
+		updateOtherAction();
+
+		const resources = this._ce("div", "pm-feature__desc", operationRegion);
 		resources.style.display = "block";
 		resources.textContent = `Hit Dice ${companion.hitDice?.current || 0}/${companion.hitDice?.max || 0} ${companion.hitDice?.die || "d8"} • spend during Short Rest`;
 
-		const reasons = specs
-			.filter(spec => !spec.availability.available)
-			.map(spec => `${spec.label}: ${spec.availability.message}`);
-		if (reasons.length) {
-			const reason = this._ce("div", "pm-feature__desc", card);
-			reason.style.display = "block";
-			reason.setAttribute("role", "status");
-			reason.textContent = reasons.join(" ");
-		}
+		const reasons = [
+			...specs
+				.filter(spec => !spec.availability.available)
+				.map(spec => `${spec.label}: ${spec.availability.message}`),
+			...otherActionSpecs
+				.filter(spec => !otherActions[spec.actionKey]?.available)
+				.map(spec => `${spec.label}: ${otherActions[spec.actionKey]?.message}`),
+		];
+		const reason = this._ce("div", "pm-feature__desc pm-companion-operations__reasons", operationRegion);
+		reason.style.display = "block";
+		reason.id = `${operationId}-reasons`;
+		reason.setAttribute("role", "status");
+		reason.setAttribute("aria-live", "polite");
+		reason.setAttribute("aria-atomic", "true");
+		reason.textContent = reasons.length ? reasons.join(" ") : "All listed operations are available.";
 	}
 
 	/** D7: Delegate to existing companion/summon pickers, or show add-custom fallback */

@@ -559,6 +559,16 @@ from the attack target, not the summoner. External creature/object targets are
 manual; dead/vanished modeled companions are rejected without implementing
 revival.
 
+Both trigger sources use the same `CharacterSheetPage.pOfferEfaArcaneJolt()`
+dialog. It begins focus on the triggering target field, uses the shared modal
+focus trap/Escape handling, and receives both the original invoker and a
+replacement-target getter because the triggering operation can re-render
+before the dialog closes. Skip/Escape announce that nothing was spent; errors
+remain in the open dialog, focus the assertive error region, and never return a
+success-shaped result. The status is polite/atomic, the resolving state is
+`aria-busy`, and the shared combat-target classes provide the existing
+single-column, 44px mobile controls.
+
 Long Rest uses the existing generic resource recovery path, resetting this
 exact pool's `spentUses` to zero. It does not heal/revive registry-backed Steel
 Defenders. Improved Defender changes only Arcane Jolt's `2d6` to `4d6` and
@@ -861,6 +871,15 @@ EFA/TCE owner changes use `rebindFeatureOwnedCompanion()`; loss of the exact
 grant deactivates with lifecycle status `vanished`. Never infer setup across a
 same-label source, and never claim mixed-source Reanimator companions.
 
+Desktop and Play Mode both open pending setup through
+`CharacterSheetPage.pShowFeatureCompanionSetup()`. The modal focuses the first
+missing field, uses native required inputs and a body-shape
+`fieldset`/`legend`, announces validation/defer/error outcomes, and restores
+focus to the pending setup control or the created companion's first available
+operation after re-render. Play Mode suppresses its legacy Steel Defender
+summon button only when the exact EFA setup record exists; TCE and unrelated
+Artificer paths remain unchanged.
+
 ## Feature-Companion Operations
 
 Desktop and Play Mode use `CharacterSheetPage.pUseCompanionOperation()`, which
@@ -996,6 +1015,17 @@ dismissal/removal, exact source loss, and Respec Apply. Six-part/malformed
 collisions, TCE/EFA Battle Smith receipts, and foreign receipts remain
 untouched. `resetTurnEconomy()` is the only turn boundary which releases an
 otherwise live Arcane Conduit use.
+
+The shared Page operation also owns interaction feedback. Desktop buttons and
+Play Mode controls expose the same stable operation focus key, so Arcane Jolt
+can restore focus after either renderer replaces its controls. Disabled reasons
+are visible and linked with `aria-describedby`; action/reaction/Hit Dice/Repair
+status is non-color text in polite regions. Play Mode uses native Dodge and
+other-action controls and an owner-cost selector when Rend has multiple legal
+command paths, but all mutations still call `pUseCompanionOperation()`.
+Cancellation explicitly reports that nothing was spent, while success
+summaries name every owner/companion cost, roll/target, and modeled HP delta.
+Range prompts state that the sheet cannot verify map distance.
 
 ## Exact-Owner Existing-Inventory Bindings
 

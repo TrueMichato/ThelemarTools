@@ -182,7 +182,9 @@ describe("_getPostAttackHooks — EFA Arcane Jolt", () => {
 			},
 			rollFollowup,
 			focusRestoreTarget: null,
+			getFocusRestoreTarget: expect.any(Function),
 		});
+		expect(combat._page.pOfferEfaArcaneJolt.mock.calls[0][0].getFocusRestoreTarget()).toBeNull();
 		confirm.mockRestore();
 	});
 });

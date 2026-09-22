@@ -260,6 +260,16 @@ offers **Skip**, **Destructive**, and **Restorative**:
   result. Dead or vanished companions are rejected; Arcane Jolt never revives
   or changes lifecycle state.
 
+The modal uses the shared `CharacterSheetModal` keyboard contract: focus starts
+on the attack-target field, stays trapped, Escape/Skip resolve as an explicit
+no-spend cancellation, and close restores focus to the invoking attack or
+companion control. Because the underlying renderer may refresh before Jolt
+opens or closes, both routes also provide a stable replacement-target getter.
+Resource/busy updates use a polite atomic status; validation and transaction
+errors keep the dialog open and focus an assertive error region. The existing
+combat-target mobile classes stack controls into one column with 44px action
+targets.
+
 `CharacterSheetState.pUseEfaArcaneJolt()` preflights the effect, trigger,
 target acknowledgement, roll, exact resource, and shared per-turn receipt
 before mutation. It commits one use and one receipt. A later modeled-HP or

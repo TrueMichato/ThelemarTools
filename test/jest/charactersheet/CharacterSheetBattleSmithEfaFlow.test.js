@@ -344,6 +344,8 @@ describe("Battle Smith setup UI and lifecycle integration", () => {
 		expect(html).toContain("Missing: appearance, two legs or four legs.");
 		expect(html).toContain("Finish setup");
 		expect(html).toContain(`data-feature-companion-setup="${EFA_STEEL_UID}"`);
+		expect(html).toContain(`aria-describedby=`);
+		expect(html).toContain(`aria-atomic="true"`);
 
 		const modalSource = CharacterSheetPage.prototype._pShowFeatureCompanionSetupModal.toString();
 		for (const contract of [
@@ -356,7 +358,99 @@ describe("Battle Smith setup UI and lifecycle integration", () => {
 			"Four legs",
 			"there is no statistical difference",
 			"aria-live",
+			"aria-required",
+			"aria-describedby",
+			"CharacterSheetModal.focusFirst",
+			"getFocusRestoreTarget",
+			"!appearance.value.trim()",
+			"[name=steel-defender-locomotion]",
+			"No unsaved choices were applied",
 		]) expect(modalSource).toContain(contract);
+
+		const pageSource = fs.readFileSync("js/charactersheet/charactersheet.js", "utf8");
+		const htmlSource = fs.readFileSync("charactersheet.html", "utf8");
+		const mobileCss = fs.readFileSync("css/charactersheet-mobile.css", "utf8");
+		expect(pageSource).toContain("pShowFeatureCompanionSetup(featureUid");
+		expect(htmlSource).toContain(`id="charsheet-companion-interaction-status"`);
+		expect(htmlSource).toContain(`aria-live="polite"`);
+		expect(mobileCss).toContain(".charsheet__feature-companion-setup .btn-feature-companion-setup");
+		expect(mobileCss).toContain("min-height: 44px");
+	});
+
+	test("routes setup persistence and rendering through one public Page operation", async () => {
+		const page = Object.create(CharacterSheetPage.prototype);
+		const focusRestoreTarget = {id: "setup-trigger"};
+		const replacementFocusTarget = {id: "replacement-trigger", isConnected: true, focus: jest.fn()};
+		const getFocusRestoreTarget = jest.fn(() => replacementFocusTarget);
+		page._pShowFeatureCompanionSetupModal = jest.fn(async () => "deferred");
+		page.saveCharacter = jest.fn(async () => {});
+		page.renderCharacter = jest.fn();
+		page._announceCompanionInteraction = jest.fn();
+
+		await expect(page.pShowFeatureCompanionSetup(EFA_STEEL_UID, {
+			focusRestoreTarget,
+			getFocusRestoreTarget,
+		})).resolves.toBe("deferred");
+
+		expect(page._pShowFeatureCompanionSetupModal).toHaveBeenCalledWith(EFA_STEEL_UID, {
+			focusRestoreTarget,
+			getFocusRestoreTarget,
+		});
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
+		expect(page.renderCharacter).toHaveBeenCalledTimes(1);
+		expect(page._announceCompanionInteraction).toHaveBeenCalledWith(
+			"Steel Defender setup saved for later. No defender was created.",
+			{type: "info", isToast: true},
+		);
+		await Promise.resolve();
+		expect(replacementFocusTarget.focus).toHaveBeenCalledTimes(1);
+	});
+
+	test("reacquires setup focus at the pending trigger or created companion operation", () => {
+		const page = Object.create(CharacterSheetPage.prototype);
+		const pending = {
+			getAttribute: name => name === "data-feature-companion-setup" ? EFA_STEEL_UID : null,
+		};
+		const operation = {id: "rend"};
+		const card = {
+			getAttribute: name => name === "data-companion-id" ? "defender-1" : null,
+			querySelector: jest.fn(() => operation),
+		};
+		const previousDocument = globalThis.document;
+		globalThis.document = {querySelectorAll: selector => selector === "[data-feature-companion-setup]" ? [pending] : [card]};
+		try {
+			expect(page.getFeatureCompanionSetupFocusTarget(EFA_STEEL_UID)).toBe(pending);
+			globalThis.document.querySelectorAll = selector => selector === "[data-feature-companion-setup]" ? [] : [card];
+			page._state = {getFeatureCompanionSetupRecord: () => ({companionId: "defender-1"})};
+			expect(page.getFeatureCompanionSetupFocusTarget(EFA_STEEL_UID)).toBe(operation);
+			expect(card.querySelector).toHaveBeenCalledWith(expect.stringContaining("[data-companion-operation-key]"));
+		} finally {
+			globalThis.document = previousDocument;
+		}
+	});
+
+	test("reports setup persistence errors without rendering a success state", async () => {
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._pShowFeatureCompanionSetupModal = jest.fn(async () => "complete");
+		page.saveCharacter = jest.fn(async () => { throw new Error("Save failed"); });
+		page.renderCharacter = jest.fn();
+		page._announceCompanionInteraction = jest.fn();
+
+		await expect(page.pShowFeatureCompanionSetup(EFA_STEEL_UID)).rejects.toThrow("Save failed");
+		expect(page.renderCharacter).not.toHaveBeenCalled();
+		expect(page._announceCompanionInteraction).toHaveBeenCalledWith(
+			"Save failed",
+			{type: "danger", isToast: true},
+		);
+	});
+
+	test("keeps Play Mode setup on the shared Page operation and suppresses the exact EFA legacy route", () => {
+		const source = fs.readFileSync("js/charactersheet/charactersheet-playmode.js", "utf8");
+		expect(source).toContain("getPendingFeatureCompanionSetups");
+		expect(source).toContain("pShowFeatureCompanionSetup");
+		expect(source).toContain("getFeatureCompanionSetupFocusTarget");
+		expect(source).toContain("EFA_BATTLE_SMITH_FEATURE_UIDS?.STEEL_DEFENDER");
+		expect(source).toContain("&& !hasEfaSteelDefenderSetup");
 	});
 
 	test("prompts immediately when allowed and leaves deferred setup pending", async () => {

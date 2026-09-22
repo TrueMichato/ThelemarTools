@@ -2037,6 +2037,7 @@ class CharacterSheetCombat {
 			},
 			rollFollowup: ctx.rollFollowup,
 			focusRestoreTarget,
+			getFocusRestoreTarget: () => csGetAttackFocusTrigger(ctx.attack),
 		});
 	}
 

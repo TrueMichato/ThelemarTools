@@ -2,6 +2,7 @@ import {jest} from "@jest/globals";
 import fs from "node:fs";
 
 import "./setup.js";
+import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
 import "../../../js/charactersheet/charactersheet-companion-rules.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-respec-engine.js";
@@ -14,6 +15,18 @@ const EFA_STEEL_DEFENDER_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|
 const TCE_STEEL_DEFENDER_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
 const REANIMATOR_UID = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW";
 const CHARACTER_SHEET_PAGE_SOURCE = fs.readFileSync(new URL("../../../js/charactersheet/charactersheet.js", import.meta.url), "utf8");
+let CharacterSheetPage;
+
+beforeAll(async () => {
+	globalThis.window = globalThis.window || {
+		addEventListener: () => {},
+		dispatchEvent: () => {},
+		location: {search: ""},
+		matchMedia: () => ({matches: false, addEventListener: () => {}}),
+	};
+	await import("../../../js/charactersheet/charactersheet.js");
+	CharacterSheetPage = globalThis.CharacterSheetPage;
+});
 
 const getOwnerClass = ({
 	source = "EFA",
@@ -685,14 +698,128 @@ describe("Improved Defender scaling, rest, and source isolation", () => {
 			expect(start).toBeGreaterThan(-1);
 			expect(end).toBeGreaterThan(start);
 			const body = CHARACTER_SHEET_PAGE_SOURCE.slice(start, end);
-			expect(body).toContain("data-jolt-action=\"skip\">Skip");
-			expect(body).toContain("data-jolt-action=\"destructive\">Destructive");
-			expect(body).toContain("data-jolt-action=\"restorative\">Restorative");
+			expect(body).toContain("data-jolt-action=\"skip\"");
+			expect(body).toContain("data-jolt-action=\"destructive\"");
+			expect(body).toContain("data-jolt-action=\"restorative\"");
 			expect(body).toContain("triggerStatus.resource.current");
 			expect(body).toContain("available this turn");
 			expect(body).toContain("I can see the recipient");
 			expect(body).toContain("Distance from the attack target");
 			expect(body).toContain("focusRestoreTarget");
+			expect(body).toContain("getFocusRestoreTarget");
+			expect(body).toContain("CharacterSheetModal.focusFirst");
+			expect(body).toContain("aria-live=\"polite\"");
+			expect(body).toContain("aria-live=\"assertive\"");
+			expect(body).toContain("aria-busy");
+			expect(body).toContain("cs-combat-target-effect");
+			expect(body).toContain("cs-combat-target-modal__footer");
+			expect(body).toContain("Arcane Jolt skipped before any resource or receipt was spent.");
+
+			const mobileCss = fs.readFileSync("css/charactersheet-mobile.css", "utf8");
+			expect(mobileCss).toContain(".cs-combat-target-modal__footer > *");
+			expect(mobileCss).toContain("min-height: 44px");
+		});
+
+		test("initializes focus and reports close/Escape cancellation without spending", async () => {
+			const makeControl = ({value = ""} = {}) => ({
+				value,
+				checked: false,
+				disabled: false,
+				required: false,
+				hidden: false,
+				textContent: "",
+				handlers: {},
+				setAttribute: jest.fn(),
+				addEventListener (name, handler) { this.handlers[name] = handler; },
+				focus: jest.fn(),
+			});
+			const attackTarget = makeControl({value: "Training Dummy"});
+			const recipient = makeControl({value: "character"});
+			const externalLabel = makeControl();
+			const externalName = makeControl();
+			const visible = makeControl();
+			const distance = makeControl();
+			const error = makeControl();
+			const status = makeControl();
+			const skip = makeControl();
+			const destructive = makeControl();
+			const restorative = makeControl();
+			const controls = new Map([
+				["[data-jolt-attack-target]", attackTarget],
+				["[data-jolt-recipient]", recipient],
+				["[data-jolt-external-label]", externalLabel],
+				["[data-jolt-external-name]", externalName],
+				["[data-jolt-visible]", visible],
+				["[data-jolt-distance]", distance],
+				["[data-jolt-error]", error],
+				["[data-jolt-status]", status],
+				["[data-jolt-action=\"skip\"]", skip],
+				["[data-jolt-action=\"destructive\"]", destructive],
+				["[data-jolt-action=\"restorative\"]", restorative],
+			]);
+			const modalInner = {
+				classList: {add: jest.fn()},
+				style: {},
+				innerHTML: "",
+				querySelector: selector => controls.get(selector) || null,
+				querySelectorAll: selector => selector === "[data-jolt-action]"
+					? [skip, destructive, restorative]
+					: [],
+			};
+			const close = makeControl();
+			const modalShell = {
+				handlers: {},
+				querySelector: selector => selector === ".cs-modal__btn-close" ? close : null,
+				setAttribute: jest.fn(),
+				addEventListener (name, handler) { this.handlers[name] = handler; },
+			};
+			let modalOptions;
+			const doClose = jest.fn();
+			const modalSpy = jest.spyOn(CharacterSheetModal, "pGetShow").mockImplementation(async options => {
+				modalOptions = options;
+				return {eleModal: modalShell, eleModalInner: modalInner, doClose};
+			});
+			const focusSpy = jest.spyOn(CharacterSheetModal, "focusFirst").mockReturnValue(attackTarget);
+			const page = Object.create(CharacterSheetPage.prototype);
+			page._state = {
+				getEfaArcaneJoltTriggerStatus: () => ({
+					available: true,
+					resource: {current: 3, max: 4},
+					usedThisTurn: false,
+					damageDice: "2d6",
+					healingDice: "2d6",
+					originatingHit: {targetName: "Training Dummy"},
+				}),
+				getCompanions: () => [],
+			};
+			page._announceCompanionInteraction = jest.fn();
+
+			const pending = page.pOfferEfaArcaneJolt({
+				trigger: {type: "summonerMagicWeaponHit"},
+				focusRestoreTarget: {id: "old-trigger"},
+				getFocusRestoreTarget: () => ({id: "new-trigger"}),
+			});
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(modalOptions).toMatchObject({
+				focusRestoreTarget: {id: "old-trigger"},
+				getFocusRestoreTarget: expect.any(Function),
+			});
+			expect(focusSpy).toHaveBeenCalledWith(modalInner, {preferSelector: "[data-jolt-attack-target]"});
+
+			modalOptions.cbClose();
+			await expect(pending).resolves.toMatchObject({
+				ok: false,
+				committed: false,
+				reason: "cancelled",
+			});
+			expect(page._announceCompanionInteraction).toHaveBeenCalledWith(
+				"Arcane Jolt skipped before any resource or receipt was spent.",
+				{type: "info", isToast: true},
+			);
+			expect(doClose).not.toHaveBeenCalled();
+			modalSpy.mockRestore();
+			focusSpy.mockRestore();
 		});
 	});
 
