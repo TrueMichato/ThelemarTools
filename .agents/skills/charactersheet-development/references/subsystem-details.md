@@ -2484,6 +2484,36 @@ Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog va
 
 ## Rest Mechanics
 
+### Source-Owned Temporary HP
+
+`CharacterSheetState` owns both the current pool and its optional source receipt:
+
+```javascript
+hp: {
+    temp: 10,
+    tempOwner: {
+        id: "feature:source-shield",
+        kind: "classFeature",
+        name: "Source Shield",
+        source: "HB",
+        uid: "Source Shield|Example Class|HB|3",
+    },
+}
+```
+
+The receipt is generic, not feature-specific. `id` (or the input alias `key`), `kind`, and
+`name` are required; `source` and `uid` are persisted as nullable identity fields. Use
+`grantOwnedTempHp(value, owner)` for a source-owned grant, `grantTempHp(value)` for an
+unowned grant, and `clearOwnedTempHp(owner)` for exact-owner teardown. Lower or equal grants
+are no-ops and cannot steal ownership; a higher grant replaces value and owner atomically.
+
+`setTempHp(value)` is the compatibility/manual replacement API and clears ownership whenever
+it replaces the pool, even if the numeric value is unchanged. Damage must use
+`consumeTempHp(value)`: partial absorption preserves the receipt, while consuming the pool to 0
+clears it. `setHp(..., temp)` and reset or long-rest clear paths are replacements and therefore
+cannot leave a stale receipt. Save/load normalization preserves a valid receipt only while
+`temp > 0`; legacy, zero-pool, and malformed receipts load as unowned.
+
 ### Short Rest
 - **Hit Dice**: d{classHitDie} + CON mod per die spent; minimum 1 HP healed
 - **Arcane Recovery** (Wizard): Select slot levels to recover, capped by LEVEL SUM (not count). "Max 5 levels" means any combo summing ≤5. No 6th+ slots.
@@ -2496,7 +2526,9 @@ Close | Refresh | **Copy JSON** | Download JSON | Save to Homebrew. In-dialog va
 - All spell slots 1-9 restored
 - Class resources with `recharge: "long"` restored
 - Exhaustion reduced by 1
-- Temp HP reset, death saves reset to 0/0
+- `onLongRest()` preserves temp HP by default (including its owner receipt); the explicit
+  house-rule clear resets both value and owner. The current long-rest dialog preselects that
+  clear option. Death saves reset to 0/0.
 - Concentration optionally broken
 
 ### Item Charge Restoration

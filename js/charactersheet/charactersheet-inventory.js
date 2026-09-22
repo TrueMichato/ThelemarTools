@@ -4790,7 +4790,7 @@ class CharacterSheetInventory {
 		if (tempHp > 0) {
 			const current = this._state.getTempHp() || 0;
 			if (tempHp > current) {
-				this._state.setTempHp(tempHp);
+				this._state.grantTempHp(tempHp);
 				applied.push(`${tempHp} temp HP`);
 			} else {
 				// RAW temporary hit points never stack — but silently doing nothing reads as a bug

@@ -2492,7 +2492,7 @@ class CharacterSheetCombat {
 			rollFollowup: ctx.rollFollowup,
 		});
 		if (!die) return;
-		this._state.setTempHp(Math.max(this._state.getTempHp(), die.roll));
+		this._state.grantTempHp(die.roll);
 		await this._page._saveCurrentCharacter?.();
 		this._page._renderResources?.();
 		this._page._features?._renderResources?.();
@@ -2672,8 +2672,11 @@ class CharacterSheetCombat {
 			const want = rider.tempHp === "damage" ? damage : (Number(rider.tempHp) || 0);
 			tempHpGranted = Math.max(0, want);
 			if (tempHpGranted > 0) {
-				const cur = this._state.getTempHp?.() || 0;
-				this._state.setTempHp?.(Math.max(cur, tempHpGranted));
+				if (this._state.grantTempHp) this._state.grantTempHp(tempHpGranted);
+				else {
+					const cur = this._state.getTempHp?.() || 0;
+					this._state.setTempHp?.(Math.max(cur, tempHpGranted));
+				}
 			}
 		}
 
@@ -9137,7 +9140,8 @@ class CharacterSheetCombat {
 				const currentTemp = this._state.getTempHp?.() || 0;
 				// Temp HP doesn't stack — use the higher value
 				if (tempHp > currentTemp) {
-					this._state.setTempHp?.(tempHp);
+					if (this._state.grantTempHp) this._state.grantTempHp(tempHp);
+					else this._state.setTempHp?.(tempHp);
 					JqueryUtil.doToast({
 						type: "info",
 						content: `${feature.name}: Gained ${tempHp} temporary HP`,
@@ -11234,7 +11238,7 @@ class CharacterSheetCombat {
 
 		// Temp HP display with source
 		const tempHp = this._state.getTempHp?.() || 0;
-		const tempHpSource = this._state._data?.tempHpSource;
+		const tempHpSource = this._state.getTempHpOwner?.()?.name || this._state._data?.tempHpSource;
 		if (tempHp > 0 && tempHpSource) {
 			const tempHpSection = e_({outer: `<div class="charsheet__effect-group mb-2"></div>`});
 			tempHpSection.insertAdjacentHTML("beforeend", `<div class="ve-small ve-bold text-info mb-1">💙 Temporary HP:</div>`);

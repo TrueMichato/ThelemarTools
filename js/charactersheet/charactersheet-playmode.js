@@ -557,7 +557,7 @@ export class CharacterSheetPlayMode {
 			if (isNaN(val) || val < 0) return;
 			const current = this._state.getTempHp();
 			// Temp HP doesn't stack — take the higher value
-			this._state.setTempHp(Math.max(val, current));
+			this._state.grantTempHp(val);
 			close();
 			this._logActivity("shield", `Set temp HP to ${Math.max(val, current)}`);
 			this._renderStatusBar();

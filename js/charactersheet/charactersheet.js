@@ -111,7 +111,7 @@ class CharacterSheetPage {
 		this._lastDamageType = null;
 		this._damageIntakeAmount = 0;
 		this._damageIntakePreviewIntent = "damage";
-		/** @type {?{characterId: string, kind: "damage"|"heal", damageType: ?string, requestedAmount: number, actualDelta: number, before: {currentHp: number, tempHp: number}, after: {currentHp: number, tempHp: number}}} */
+		/** @type {?{characterId: string, kind: "damage"|"heal", damageType: ?string, requestedAmount: number, actualDelta: number, before: {currentHp: number, tempHp: number, tempHpOwner: ?object}, after: {currentHp: number, tempHp: number, tempHpOwner: ?object}}} */
 		this._lastHpChange = null;
 		/** @type {?{text: string, tone: string}} */
 		this._lastHpOutcome = null;
@@ -5080,9 +5080,9 @@ class CharacterSheetPage {
 	_onHealIntakeApply () {
 		const amount = Math.max(0, Math.floor(Number(this._damageIntakeAmount) || 0));
 		if (amount <= 0) return;
-		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		this._state.heal(amount);
-		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		const gained = after.currentHp - before.currentHp;
 		this._storeLastHpChange({kind: "heal", damageType: null, requestedAmount: amount, before, after});
 		this._lastHpOutcome = this._getHpOutcomePreview({
@@ -5152,6 +5152,7 @@ class CharacterSheetPage {
 		if (
 			this._state.getCurrentHp() !== snapshot.after.currentHp
 			|| this._state.getTempHp() !== snapshot.after.tempHp
+			|| JSON.stringify(this._state.getTempHpOwner()) !== JSON.stringify(snapshot.after.tempHpOwner)
 		) {
 			this._clearLastHpChange();
 			this._renderDamageIntakes();
@@ -5159,7 +5160,7 @@ class CharacterSheetPage {
 		}
 		this._lastHpChange = null;
 		this._lastHpOutcome = null;
-		this._state.setHp(snapshot.before.currentHp, undefined, snapshot.before.tempHp);
+		this._state.setHp(snapshot.before.currentHp, undefined, snapshot.before.tempHp, {tempHpOwner: snapshot.before.tempHpOwner});
 		this._saveCurrentCharacter();
 		this._renderHp();
 		this._renderConditions();
@@ -11228,7 +11229,7 @@ class CharacterSheetPage {
 				evt.stopPropagation();
 				if (applyBtn.disabled) return;
 				applyBtn.disabled = true;
-				if (tempHp > this._state.getTempHp()) this._state.setTempHp(tempHp);
+				this._state.grantTempHp(tempHp);
 				applyBtn.textContent = "✓ Applied to Self";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
@@ -11673,7 +11674,7 @@ class CharacterSheetPage {
 				if (applyBtn.disabled) return;
 				applyBtn.disabled = true;
 				const cur = this._state.getTempHp() || 0;
-				if (tempHp > cur) this._state.setTempHp(tempHp);
+				this._state.grantTempHp(tempHp);
 				applyBtn.textContent = "✓ Applied to Self";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
@@ -12130,7 +12131,7 @@ class CharacterSheetPage {
 				evt.stopPropagation();
 				if (btn.disabled) return;
 				btn.disabled = true;
-				this._state.setTempHp(Math.max(this._state.getTempHp() || 0, res.tempHp));
+				this._state.grantTempHp(res.tempHp);
 				btn.textContent = "✓ Applied to Self";
 				this._saveCurrentCharacter();
 				this._renderHp?.();
@@ -14267,7 +14268,7 @@ class CharacterSheetPage {
 	 */
 	async _pApplyDamage (amount, {damageType = null, isMagicalDamage = false} = {}) {
 		const characterId = this._currentCharacterId;
-		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const before = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		const maxHp = this._state.getMaxHp();
 		const preview = this._state.applyDamageDefenses(amount, damageType, {isMagicalDamage});
 
@@ -14307,7 +14308,7 @@ class CharacterSheetPage {
 		if (this._state.isConcentrating?.()) {
 			await this._promptConcentrationCheck(preview.damage);
 		}
-		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp()};
+		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};
 		if (characterId === this._currentCharacterId) {
 			this._storeLastHpChange({kind: "damage", damageType, requestedAmount: amount, before, after});
 			this._lastHpOutcome = this._getHpOutcomePreview({

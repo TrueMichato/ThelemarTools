@@ -854,7 +854,8 @@ class CharacterSheetRest {
 			this._captureRestSnapshot("long");
 
 			// Full HP recovery
-			this._state.setHp(maxHp, maxHp, cbResetTempHp.checked ? 0 : this._state.getHp().temp);
+			this._state.setHp(maxHp, maxHp);
+			if (cbResetTempHp.checked) this._state.setTempHp(0);
 
 			// Recover half hit dice (minimum 1)
 			hitDice.forEach(hd => {

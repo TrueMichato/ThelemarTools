@@ -4975,6 +4975,7 @@ class CharacterSheetState {
 				current: 0,
 				max: 0,
 				temp: 0,
+				tempOwner: null, // {id, kind, name, source, uid} for the current temp-HP pool
 				maxHpReduction: 0,
 			},
 
@@ -5538,6 +5539,7 @@ class CharacterSheetState {
 		if ((this._data.targetEffects || []).some(it => String(it?.source || "").toLowerCase() === "chained-fury")) {
 			this.reconcileTargetEffects();
 		}
+		this._normalizeTempHpState();
 		return MiscUtil.copyFast(this._data);
 	}
 
@@ -5580,6 +5582,7 @@ class CharacterSheetState {
 		this._data.abilities = {...this._getDefaultState().abilities, ...this._data.abilities};
 		this._data.abilityBonuses = {...this._getDefaultState().abilityBonuses, ...this._data.abilityBonuses};
 		this._data.hp = {...this._getDefaultState().hp, ...this._data.hp};
+		this._normalizeTempHpState();
 		this._data.deathSaves = {...this._getDefaultState().deathSaves, ...this._data.deathSaves};
 		this._data.speed = {...this._getDefaultState().speed, ...this._data.speed};
 		this._data.senses = {...this._getDefaultState().senses, ...this._data.senses};
@@ -11921,12 +11924,115 @@ class CharacterSheetState {
 		}
 	}
 
-	setTempHp (hp) {
-		if (hp < 0) return false;
+	_normalizeTempHpOwner (owner) {
+		if (!owner || typeof owner !== "object" || Array.isArray(owner)) return null;
+		const clean = value => {
+			if (value == null) return null;
+			const out = String(value).trim();
+			return out || null;
+		};
+		const normalized = {
+			id: clean(owner.id ?? owner.key),
+			kind: clean(owner.kind),
+			name: clean(owner.name),
+			source: clean(owner.source),
+			uid: clean(owner.uid),
+		};
+		if (!normalized.id || !normalized.kind || !normalized.name) return null;
+		return normalized;
+	}
+
+	_normalizeTempHpState () {
+		const amount = Number(this._data.hp?.temp);
+		const hadOwnerReceipt = this._data.hp?.tempOwner != null;
+		this._data.hp.temp = Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 0;
+		this._data.hp.tempOwner = this._data.hp.temp > 0
+			? this._normalizeTempHpOwner(this._data.hp.tempOwner)
+			: null;
+		if (!this._data.hp.temp || this._data.hp.tempOwner || hadOwnerReceipt) delete this._data.tempHpSource;
+	}
+
+	_setTempHpPool (hp, owner = null) {
 		this._data.hp.temp = hp;
+		this._data.hp.tempOwner = hp > 0 ? this._normalizeTempHpOwner(owner) : null;
+		delete this._data.tempHpSource;
 		return true;
 	}
+
+	/**
+	 * Replace the current temp-HP pool with an unowned value.
+	 * Use {@link grantTempHp} or {@link grantOwnedTempHp} for non-stacking grants, and
+	 * {@link consumeTempHp} when damage spends the current pool.
+	 */
+	setTempHp (hp) {
+		const amount = Number(hp);
+		if (!Number.isFinite(amount) || amount < 0) return false;
+		return this._setTempHpPool(Math.floor(amount));
+	}
+
+	/**
+	 * Grant unowned temp HP using the 5e non-stacking rule.
+	 * @returns {boolean} true if the current pool was replaced
+	 */
+	grantTempHp (hp) {
+		const amount = Number(hp);
+		const normalized = Math.floor(amount);
+		if (!Number.isFinite(amount) || normalized <= this.getTempHp()) return false;
+		return this._setTempHpPool(normalized);
+	}
+
+	/**
+	 * Grant temp HP and record the exact source which owns the resulting pool.
+	 * The receipt is canonicalized to `{id, kind, name, source, uid}`; `id` (or its
+	 * input alias `key`), `kind`, and `name` are required.
+	 * @returns {boolean} true if the current pool was replaced
+	 */
+	grantOwnedTempHp (hp, owner) {
+		const amount = Number(hp);
+		const normalized = Math.floor(amount);
+		const normalizedOwner = this._normalizeTempHpOwner(owner);
+		if (!normalizedOwner || !Number.isFinite(amount) || normalized <= this.getTempHp()) return false;
+		return this._setTempHpPool(normalized, normalizedOwner);
+	}
+
+	/**
+	 * Spend points from the current pool without changing its owner until the pool is empty.
+	 * @returns {number} the amount consumed
+	 */
+	consumeTempHp (amount) {
+		const requested = Number(amount);
+		if (!Number.isFinite(requested) || requested <= 0 || this._data.hp.temp <= 0) return 0;
+		const consumed = Math.min(this._data.hp.temp, Math.floor(requested));
+		this._data.hp.temp -= consumed;
+		if (this._data.hp.temp <= 0) this._setTempHpPool(0);
+		return consumed;
+	}
+
+	_tempHpOwnersMatch (a, b) {
+		const ownerA = this._normalizeTempHpOwner(a);
+		const ownerB = this._normalizeTempHpOwner(b);
+		if (!ownerA || !ownerB) return false;
+		return ["id", "kind", "name", "source", "uid"].every(prop => ownerA[prop] === ownerB[prop]);
+	}
+
+	isTempHpOwnedBy (owner) {
+		return this._data.hp.temp > 0 && this._tempHpOwnersMatch(this._data.hp.tempOwner, owner);
+	}
+
+	/**
+	 * Clear temp HP only when the current receipt exactly matches `owner`.
+	 * @returns {boolean} true if the owned pool was cleared
+	 */
+	clearOwnedTempHp (owner) {
+		if (!this.isTempHpOwnedBy(owner)) return false;
+		this._setTempHpPool(0);
+		return true;
+	}
+
 	getTempHp () { return this._data.hp.temp; }
+	getTempHpOwner () {
+		return this._data.hp.tempOwner ? MiscUtil.copyFast(this._data.hp.tempOwner) : null;
+	}
 
 	// Unified HP methods for rest.js compatibility
 	/**
@@ -12135,14 +12241,12 @@ class CharacterSheetState {
 
 		// Consume temp HP first
 		if (!unpreventable && this._data.hp.temp > 0) {
-			if (this._data.hp.temp >= damage) {
-				this._data.hp.temp -= damage;
+			const absorbed = this.consumeTempHp(damage);
+			if (absorbed >= damage) {
 				this._updateBloodiedCondition();
 				return true;
-			} else {
-				damage -= this._data.hp.temp;
-				this._data.hp.temp = 0;
 			}
+			damage -= absorbed;
 		}
 
 		// Apply remaining damage to current HP
@@ -12795,10 +12899,18 @@ class CharacterSheetState {
 		};
 	}
 
-	setHp (current, max, temp) {
+	/**
+	 * Replace the unified HP values. Supplying `temp` is a pool replacement and clears
+	 * ownership unless `options.tempHpOwner` is explicitly supplied for snapshot restore.
+	 */
+	setHp (current, max, temp, options = {}) {
 		this._data.hp.current = Math.max(0, current);
 		if (max !== undefined) this._data.hp.max = max;
-		if (temp !== undefined) this._data.hp.temp = Math.max(0, temp);
+		if (temp !== undefined) {
+			const amount = Math.max(0, Math.floor(Number(temp) || 0));
+			if (options && Object.hasOwn(options, "tempHpOwner")) this._setTempHpPool(amount, options.tempHpOwner);
+			else this.setTempHp(amount);
+		}
 		if (this._data.hp.current === 0) this._deactivateStatesForEndCondition({isIncapacitated: true});
 		this._updateBloodiedCondition();
 	}
@@ -45997,7 +46109,7 @@ class CharacterSheetState {
 				}
 			} else if (effect.type === "tempHp") {
 				const amount = Number(effect.amount) || 0;
-				if (amount > this.getTempHp()) this.setTempHp(amount);
+				this.grantTempHp(amount);
 				applied.push({...effect, amount});
 			}
 		}
@@ -47422,8 +47534,8 @@ class CharacterSheetState {
 				const amt = calcs.soulEaterTempHp || 0;
 				if (amt <= 0) return null;
 				// Temp HP don't stack (PHB) — keep the higher of current vs. granted.
-				const next = Math.max(state.getTempHp() || 0, amt);
-				state.setTempHp(next);
+				state.grantTempHp(amt);
+				const next = state.getTempHp() || 0;
 				return {label: `Soul Eater: gained ${amt} temporary HP (now ${next}).`};
 			},
 		},
@@ -57790,9 +57902,7 @@ class CharacterSheetState {
 		}
 
 		// Only apply if higher than current temp HP (temp HP doesn't stack per RAW)
-		const currentTempHp = this.getTempHp() || 0;
-		if (tempHp > currentTempHp) {
-			this.setTempHp(tempHp);
+		if (this.grantTempHp(tempHp)) {
 			// Track the source for display
 			this._data.tempHpSource = ability.name;
 		}
@@ -66999,7 +67109,7 @@ class CharacterSheetState {
 		const calcs = this.getFeatureCalculations();
 		if (!calcs.hasVitalityOfTheTree) return;
 		const surge = calcs.vitalityTempHp || 0;
-		if (surge > this.getTempHp()) this.setTempHp(surge);
+		this.grantTempHp(surge);
 	}
 
 	/**
@@ -67320,11 +67430,8 @@ class CharacterSheetState {
 		for (const effect of effects) {
 			if (effect.type === "tempHp") {
 				const value = effect.value || 0;
-				const currentTemp = this.getTempHp();
 				// Temp HP doesn't stack — take the higher value (5e rules)
-				if (value > currentTemp) {
-					this.setTempHp(value);
-				}
+				this.grantTempHp(value);
 			}
 		}
 	}
@@ -70478,12 +70585,7 @@ class CharacterSheetState {
 			// XPHB: Wild Shape grants temp HP = 4 × druid level (already computed by getFeatureCalculations)
 			const calc = this.getFeatureCalculations();
 			const tempHp = calc.wildShapeTempHp || 0;
-			if (tempHp > 0) {
-				const currentTemp = this.getTempHp();
-				if (tempHp > currentTemp) {
-					this.setTempHp(tempHp);
-				}
-			}
+			this.grantTempHp(tempHp);
 		} else {
 			// PHB 2014: Beast has its own HP pool, separate from character's
 			if (state) {
@@ -73686,7 +73788,7 @@ class CharacterSheetState {
 				return {...base, damage: first, damageType: mode.damageType, dc: mode.dc, save: mode.save};
 			case "save": {
 				const tempHp = Math.max(1, first + (mode.tempHpBonus || 0));
-				if (opts.applyTempHpToSelf) this.setTempHp(Math.max(this.getTempHp() || 0, tempHp));
+				if (opts.applyTempHpToSelf) this.grantTempHp(tempHp);
 				return {...base, tempHp, applied: !!opts.applyTempHpToSelf};
 			}
 		}
@@ -73954,7 +74056,7 @@ class CharacterSheetState {
 
 		// Optionally clear temp HP (house rule)
 		if (options.clearTempHp) {
-			this._data.hp.temp = 0;
+			this.setTempHp(0);
 		}
 
 		// Reset death saves
@@ -74847,7 +74949,7 @@ class CharacterSheetState {
 	 * Spellfire is online) to yourself or a creature within 30 ft.
 	 *
 	 * When the target is yourself this performs the REAL mutation — it calls
-	 * {@link setTempHp}, so the granted Temp HP show up on the sheet and obey the
+	 * {@link grantTempHp}, so the granted Temp HP show up on the sheet and obey the
 	 * "higher value wins, no stacking" rule. When the target is an ally the roll
 	 * is still returned so the DM can apply it, but your own Temp HP are left
 	 * untouched.
@@ -74867,7 +74969,7 @@ class CharacterSheetState {
 		const range = calc.bolsteringFlamesRange ?? 30;
 
 		if (target === "self") {
-			this.setTempHp(tempHp);
+			this.grantTempHp(tempHp);
 			return {ok: true, tempHp, applied: true, target, range};
 		}
 		return {ok: true, tempHp, applied: false, target: "ally", range};
@@ -78185,7 +78287,7 @@ class CharacterSheetState {
 				}
 			}
 
-			target.setTempHp(amount);
+			target.grantTempHp(amount);
 		}
 
 		// Convert parsed buffs to proper effect format for customEffects

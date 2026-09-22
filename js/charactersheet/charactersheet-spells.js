@@ -4526,7 +4526,7 @@ class CharacterSheetSpells {
 				const hp = this._state.getHp();
 				const healed = Math.max(0, Math.min(hp.max - hp.current, damageResult.total));
 				if (healed > 0) {
-					this._state.setHp(hp.current + healed, hp.max, hp.temp);
+					this._state.setHp(hp.current + healed, hp.max);
 					effectsApplied.push(`Vampiric Spell healed ${healed} HP`);
 				}
 			}
@@ -6407,7 +6407,7 @@ class CharacterSheetSpells {
 				}
 			}
 
-			this._state.setTempHp(tempHpAmount);
+			this._state.grantTempHp(tempHpAmount);
 			appliedEffects.push(`+${tempHpAmount} temp HP`);
 		}
 
@@ -6656,7 +6656,7 @@ class CharacterSheetSpells {
 		});
 		if (!triggeredFeatDie) return null;
 
-		this._state.setTempHp(Math.max(this._state.getTempHp(), triggeredFeatDie.roll));
+		this._state.grantTempHp(triggeredFeatDie.roll);
 		await this._page._saveCurrentCharacter?.();
 		this._page._renderResources?.();
 		this._page._features?._renderResources?.();
