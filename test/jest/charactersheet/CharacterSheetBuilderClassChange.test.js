@@ -1,8 +1,11 @@
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-progression.js";
+import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-builder.js";
 
 const CharacterSheetBuilder = globalThis.CharacterSheetBuilder;
+const CharacterSheetState = globalThis.CharacterSheetState;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -292,6 +295,122 @@ describe("CharacterSheetBuilder _clearClassApplication()", () => {
 		};
 		builder._clearClassApplication(snapshot);
 		expect(builder._state.levelHistory).toHaveLength(0);
+	});
+
+	test("removes only the exact subclass spell owner when same-label sources coexist", () => {
+		const state = new CharacterSheetState();
+		state.setSpellData([
+			{name: "Faerie Fire", source: "XPHB", level: 1},
+			{name: "Guiding Bolt", source: "XPHB", level: 1},
+			{name: "Light", source: "XPHB", level: 0},
+		]);
+		const makeClass = (source, prepared) => ({
+			name: "Artificer",
+			source,
+			level: 3,
+			subclass: {
+				name: "Cartographer",
+				shortName: "Cartographer",
+				source,
+				additionalSpells: [{
+					prepared: {3: prepared},
+					innate: {"0": ["light|xphb#c"]},
+				}],
+			},
+		});
+		state._data.classes = [
+			makeClass("EFA", ["faerie fire|xphb", "guiding bolt|xphb"]),
+			makeClass("TCE", ["faerie fire|xphb"]),
+		];
+		state.populateSubclassSpells();
+
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._state = state;
+		builder._selectedBackground = null;
+		builder._clearClassApplication({
+			className: "Artificer",
+			classSource: "EFA",
+			subclassName: "Cartographer",
+			saveProficiencies: [],
+			skills: [],
+			expertiseSkills: [],
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: false,
+		});
+
+		expect(state.getSpellsKnown().some(spell => spell.name === "Guiding Bolt")).toBe(false);
+		expect(state.getSpellsKnown().find(spell => spell.name === "Faerie Fire")?.subclassSpellGrantOwners)
+			.toEqual([expect.objectContaining({key: "artificer|tce|cartographer|tce"})]);
+		expect(state.getCantripsKnown().find(spell => spell.name === "Light")?.subclassSpellGrantOwners)
+			.toEqual([expect.objectContaining({key: "artificer|tce|cartographer|tce"})]);
+	});
+
+	test("restores colliding player spell metadata when the removed subclass was the final owner", () => {
+		const state = new CharacterSheetState();
+		state.setSpellData([
+			{name: "Faerie Fire", source: "XPHB", level: 1},
+			{name: "Light", source: "XPHB", level: 0},
+		]);
+		state.addSpell({
+			name: "Faerie Fire",
+			source: "XPHB",
+			level: 1,
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Artificer",
+			prepared: true,
+		}, true);
+		state.addCantrip({
+			name: "Light",
+			source: "XPHB",
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Artificer",
+		});
+		state._data.classes = [{
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: {
+				name: "Cartographer",
+				shortName: "Cartographer",
+				source: "EFA",
+				additionalSpells: [{
+					prepared: {3: ["faerie fire|xphb"]},
+					innate: {"0": ["light|xphb#c"]},
+				}],
+			},
+		}];
+		state.populateSubclassSpells();
+
+		const builder = Object.create(CharacterSheetBuilder.prototype);
+		builder._state = state;
+		builder._selectedBackground = null;
+		builder._clearClassApplication({
+			className: "Artificer",
+			classSource: "EFA",
+			subclassName: "Cartographer",
+			saveProficiencies: [],
+			skills: [],
+			expertiseSkills: [],
+			armorProficiencies: [],
+			weaponProficiencies: [],
+			toolProficiencies: [],
+			languages: [],
+			hadSpellcasting: false,
+		});
+
+		expect(state.getSpellsKnown().find(spell => spell.name === "Faerie Fire")).toEqual(expect.objectContaining({
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Artificer",
+			prepared: true,
+		}));
+		expect(state.getSpellsKnown().find(spell => spell.name === "Faerie Fire")?.alwaysPrepared).not.toBe(true);
+		expect(state.getCantripsKnown().find(spell => spell.name === "Light")).toEqual(expect.objectContaining({
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Artificer",
+		}));
 	});
 });
 

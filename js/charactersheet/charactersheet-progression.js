@@ -178,6 +178,28 @@ class CharacterSheetProgression {
 		return `${CharacterSheetProgression._normalize(entity.name)}|${CharacterSheetProgression._normalize(entity.source)}`;
 	}
 
+	static getFeatureOwnerUid (entity) {
+		if (!entity?.name) return "";
+		const parts = [
+			entity.name,
+			entity.className,
+			entity.classSource,
+		];
+		if (entity.subclassShortName || entity.subclassName || entity.subclassSource) {
+			parts.push(entity.subclassShortName || entity.subclassName, entity.subclassSource);
+		}
+		parts.push(entity.level, entity.source);
+		return parts.map(value => String(value ?? "").trim()).join("|");
+	}
+
+	static _matchesFeatureEntity (candidate, entity) {
+		for (const prop of ["name", "source", "className", "classSource", "subclassShortName", "subclassSource", "level"]) {
+			if (entity?.[prop] == null) continue;
+			if (CharacterSheetProgression._normalize(candidate?.[prop]) !== CharacterSheetProgression._normalize(entity[prop])) return false;
+		}
+		return true;
+	}
+
 	static getClassUid (nameOrEntity, source) {
 		if (typeof nameOrEntity === "object") return CharacterSheetProgression.getEntityUid(nameOrEntity);
 		return CharacterSheetProgression.getEntityUid({name: nameOrEntity, source});
@@ -453,6 +475,55 @@ class CharacterSheetProgression {
 		return selectedValues.every(value => [...getOptionKeys(value)].some(key => optionKeys.has(key)));
 	}
 
+	static _getPreFeatureProficiencySnapshot ({entity, state}) {
+		const currentTools = (state?.getToolProficiencies?.() || [])
+			.map(tool => String(tool?.name ?? tool ?? "").trim())
+			.filter(Boolean);
+		const fixedContract = CharacterSheetClassUtils.getFixedProficiencyGrantContract?.(entity, {ownedTools: []});
+		if (!fixedContract) return {tools: currentTools};
+
+		const ownerUid = CharacterSheetProgression.getFeatureOwnerUid(entity);
+		const storedFeature = (state?.getFeatures?.() || [])
+			.find(feature => CharacterSheetProgression._matchesFeatureEntity(feature, entity));
+		if (!storedFeature?.id) return {tools: currentTools};
+
+		const fixedSource = `feature:${storedFeature.id}`;
+		const choiceSource = `feature-choice:${storedFeature.id}`;
+		const selectedByOwner = new Set([
+			...(state?.getCharacterBase?.()?.decisions || []),
+			...(state?.getLevelHistory?.() || []).flatMap(entry => entry.decisions || []),
+		]
+			.filter(decision => decision.type === "nestedTool"
+				&& CharacterSheetProgression._normalize(decision.provenance?.ownerUid) === ownerUid)
+			.flatMap(decision => Array.isArray(decision.selection) ? decision.selection : [decision.selection])
+			.map(value => state?._getProgressionOwnershipKey?.("tools", value?.name ?? value)
+				|| CharacterSheetProgression._slug(value?.name ?? value))
+			.filter(Boolean));
+		const trackedTools = state?._data?.grantedProficiencies?.tools || {};
+		const getSources = tool => {
+			const key = state?._getProgressionOwnershipKey?.("tools", tool)
+				|| CharacterSheetProgression._slug(tool);
+			return key ? trackedTools[key] || [] : [];
+		};
+		const fixedKeys = new Set(fixedContract.fixed.map(tool =>
+			state?._getProgressionOwnershipKey?.("tools", tool) || CharacterSheetProgression._slug(tool),
+		));
+
+		return {
+			tools: currentTools.filter(tool => {
+				const sources = getSources(tool);
+				const toolKey = state?._getProgressionOwnershipKey?.("tools", tool)
+					|| CharacterSheetProgression._slug(tool);
+				if (fixedKeys.has(toolKey)
+					&& sources.length
+					&& sources.every(source => source === fixedSource)) return false;
+				if (sources.length && sources.every(source => source === choiceSource)) return false;
+				if (selectedByOwner.has(toolKey)) return false;
+				return true;
+			}),
+		};
+	}
+
 	static _getEntityChoiceDescriptors (entity, opts = {}) {
 		const descriptors = (CharacterSheetClassUtils.getChoiceDescriptors?.(entity, opts) || [])
 			.filter(descriptor => descriptor.rules?.poolDefinition !== "optionalFeature");
@@ -540,9 +611,14 @@ class CharacterSheetProgression {
 		type = "skills",
 	} = {}) {
 		const normalizedOwner = CharacterSheetProgression._normalize(ownerUid);
-		const normalizeValue = value => type === "skills"
-			? String(value || "").trim().toLowerCase().replace(/['\s]+/g, "")
-			: CharacterSheetProgression._slug(value);
+		const normalizeValue = value => {
+			if (type === "skills") return String(value || "").trim().toLowerCase().replace(/['\s]+/g, "");
+			if (type === "tools") {
+				return state?._getProgressionOwnershipKey?.("tools", value)
+					|| CharacterSheetProgression._slug(value);
+			}
+			return CharacterSheetProgression._slug(value);
+		};
 		const optionByKey = new Map(options.map(option => {
 			const value = option?.value ?? option?.name ?? option;
 			return [normalizeValue(value), value];
@@ -661,6 +737,21 @@ class CharacterSheetProgression {
 				options: descriptor.options,
 			});
 			if (evidence) return evidence.value;
+		}
+		if (descriptor.kind === "tool") {
+			const storedFeature = (state?.getFeatures?.() || [])
+				.find(feature => CharacterSheetProgression._matchesFeatureEntity(feature, entity));
+			const sourceId = storedFeature?.id ? `feature-choice:${storedFeature.id}` : null;
+			if (sourceId) {
+				const selected = (descriptor.options || [])
+					.map(option => option?.value ?? option?.name ?? option)
+					.filter(value => {
+						const key = state?._getProgressionOwnershipKey?.("tools", value)
+							|| CharacterSheetProgression._slug(value);
+						return key && (state._data.grantedProficiencies.tools[key] || []).includes(sourceId);
+					});
+				if (selected.length === descriptor.count) return descriptor.count === 1 ? selected[0] : selected;
+			}
 		}
 		if (descriptor.kind === "skillBonus") {
 			const optionSkills = new Set((descriptor.options || [])

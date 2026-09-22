@@ -6104,6 +6104,7 @@ class CharacterSheetState {
 			this._data.progressionOwnership = {version: 1, initialized: false, values: {}};
 		}
 		this._normalizeStoredSkillState();
+		this._normalizeToolOwnershipLedgers();
 
 		// Ensure Forked Tongue (Illrigger) state exists. Older saves predate this
 		// feature-state block; backward-compatible default keeps load crash-free and
@@ -6356,12 +6357,10 @@ class CharacterSheetState {
 		// TGTT toggle; leaves explicit con/dex/spellcasting/finesse and non-natural attacks.
 		this._migrateNaturalWeaponFinesse();
 
-		// (5ET-843) Re-apply structured proficiency grants declared on stored features
-		// (skillProficiencies / toolProficiencies / languageProficiencies). Old saves
-		// may hold a Lust Domain L3 "Bonus Proficiencies" wrapper (or any future
-		// subclassFeature with structured profs) that was added BEFORE the addFeature
-		// pipeline processed these fields — the grants were silently dropped.
-		// Idempotent via _trackGrantedProficiency; never downgrades existing levels.
+		// Re-apply fixed proficiency grants declared on stored features. This covers both
+		// structured fields and prose-derived fixed-tool contracts, including reconstruction
+		// of durable replacement-choice ownership for saves created before that integration.
+		// Idempotent via source ledgers; never downgrades existing levels or selections.
 		this._migrateSubclassFeatureProficiencyGrants();
 
 		// (Magic items) Repair the persisted `weapon` boolean on stored inventory items so
@@ -7134,43 +7133,209 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * (5ET-843) Load-time re-application of structured proficiency grants declared on
-	 * stored features. Mirrors `_migrateNaturalWeaponFinesse` — same rationale:
+	 * Load-time re-application of fixed proficiency grants declared on stored features.
+	 * Mirrors `_migrateNaturalWeaponFinesse` — same rationale:
 	 * addFeature-time transforms don't reach saves stored before the transform existed.
 	 *
-	 * For every stored feature that has any of `skillProficiencies` / `toolProficiencies`
-	 * / `languageProficiencies`, re-run `_processFeatureProficiencyGrants`. The tracker
-	 * (`_trackGrantedProficiency`) makes it idempotent by (name, source=feature:id);
-	 * existing proficiency levels are never downgraded. Safe to run every load.
+	 * For every stored feature with structured grants or a prose-derived fixed-tool
+	 * contract, re-run `_processFeatureProficiencyGrants`. The tracker makes fixed grants
+	 * idempotent by (canonical key, source=feature:id). Fixed-tool replacement selections
+	 * are adopted from durable feature choices, progression decisions, or source ledgers;
+	 * only the genuinely unresolved remainder is queued.
 	 *
 	 * MATCHING IS BY FEATURE `id` (a per-instance UID), NEVER BY NAME. Two homebrew
 	 * subclasses may ship a "Bonus Proficiencies" feature with different structured
 	 * grants; each gets processed against its own tracker slot without collision.
 	 * A feature without an `id` (should never happen after loadFromJson, but defensive)
-	 * is skipped. A feature without any of the four prof fields is also skipped —
-	 * no allowlist, no name-based dispatch.
+	 * is skipped. A feature without any proficiency field or fixed-tool contract is also
+	 * skipped — no allowlist, no name-based dispatch.
 	 *
 	 * Repairs:
 	 *   - TGTT Cleric Lust Domain L3 "Bonus Proficiencies" saves that predate 5ET-843
 	 *     (Deception + Persuasion were prose-only, never applied structurally).
-	 *   - Any future subclassFeature (or classFeature) that gains structured prof fields
-	 *     — no per-feature allowlist required.
+	 *   - Prose-derived fixed-tool contracts such as EFA Cartographer Tools of the Trade.
+	 *   - Any future subclassFeature (or classFeature) that gains supported grants.
 	 */
 	_migrateSubclassFeatureProficiencyGrants () {
 		if (!Array.isArray(this._data.features) || !this._data.features.length) return;
 		for (const feature of this._data.features) {
 			if (!feature || !feature.id) continue; // UID gate — never fall back to name matching
+			const proficiencySnapshot = CharacterSheetProgression._getPreFeatureProficiencySnapshot({
+				entity: feature,
+				state: this,
+			});
+			const fixedProficiencyContract = CharacterSheetClassUtils.getFixedProficiencyGrantContract(feature, {
+				ownedTools: proficiencySnapshot.tools,
+			});
 			if (
 				!feature.skillProficiencies
 				&& !feature.toolProficiencies
 				&& !feature.languageProficiencies
 				&& !feature.savingThrowProficiencies
+				&& !fixedProficiencyContract
 			) continue;
 			const transaction = this.getFixedProficiencyFallbackTransaction(feature);
 			const claimedTools = transaction
 				? new Set([CharacterSheetState.normalizeToolKey(transaction.fixedProficiency)])
 				: null;
-			this._processFeatureProficiencyGrants(feature, feature.id, {claimedTools});
+			this._processFeatureProficiencyGrants(feature, feature.id, {claimedTools, proficiencySnapshot});
+			if (fixedProficiencyContract && !transaction) {
+				this._migrateFixedFeatureToolChoices(feature, fixedProficiencyContract);
+			}
+		}
+	}
+
+	_normalizeToolOwnershipLedgers () {
+		const displayByKey = new Map();
+		this._data.toolProficiencies = (this._data.toolProficiencies || []).filter(tool => {
+			const key = CharacterSheetState.normalizeToolKey(tool);
+			if (!key || displayByKey.has(key)) return false;
+			displayByKey.set(key, tool);
+			return true;
+		});
+
+		const normalizedGranted = {};
+		for (const [tool, sources] of Object.entries(this._data.grantedProficiencies?.tools || {})) {
+			const key = CharacterSheetState.normalizeToolKey(tool);
+			if (!key) continue;
+			normalizedGranted[key] ||= [];
+			for (const source of Array.isArray(sources) ? sources : []) {
+				if (!normalizedGranted[key].includes(source)) normalizedGranted[key].push(source);
+			}
+		}
+		this._data.grantedProficiencies.tools = normalizedGranted;
+
+		const normalizedOwnership = {};
+		const ownershipValues = this._data.progressionOwnership?.values || {};
+		const hasToolOwnership = Object.hasOwn(ownershipValues, "tools");
+		const toolOwnership = ownershipValues.tools || {};
+		for (const [tool, rawEntry] of Object.entries(toolOwnership)) {
+			const entry = rawEntry && typeof rawEntry === "object" ? rawEntry : {};
+			const entryValue = entry.value?.name ?? entry.value ?? tool;
+			const key = CharacterSheetState.normalizeToolKey(entryValue);
+			if (!key) continue;
+			const existing = normalizedOwnership[key] ||= {
+				value: displayByKey.get(key) || entryValue,
+				sources: [],
+				preserved: false,
+			};
+			for (const source of Array.isArray(entry.sources) ? entry.sources : []) {
+				if (!existing.sources.includes(source)) existing.sources.push(source);
+			}
+			existing.preserved ||= entry.preserved === true;
+			if (!displayByKey.has(key) && entryValue) existing.value = entryValue;
+		}
+		this._data.progressionOwnership.values ||= {};
+		if (hasToolOwnership || Object.keys(normalizedOwnership).length) {
+			this._data.progressionOwnership.values.tools = normalizedOwnership;
+		}
+	}
+
+	_migrateFixedFeatureToolChoices (feature, contract) {
+		const choiceSource = `feature-choice:${feature.id}`;
+		const ownerUid = CharacterSheetProgression.getFeatureOwnerUid(feature);
+		const normalize = value => CharacterSheetState.normalizeToolKey(value?.name ?? value?.value ?? value);
+		const fixedKeys = new Set((contract.fixed || []).map(normalize));
+		const optionByKey = new Map(CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS.artisan
+			.filter(tool => !fixedKeys.has(normalize(tool)))
+			.map(tool => [normalize(tool), tool]));
+		const selected = [];
+		const addSelected = value => {
+			const key = normalize(value);
+			if (!key || !optionByKey.has(key) || selected.some(tool => normalize(tool) === key)) return;
+			selected.push(optionByKey.get(key));
+		};
+
+		for (const choice of feature._choices || []) {
+			if (choice?.type === "tool") addSelected(choice.value);
+		}
+		const matchingDecisions = [
+			...(this._data.characterBase?.decisions || []),
+			...(this._data.levelHistory || []).flatMap(entry => entry.decisions || []),
+		].filter(decision =>
+			decision.type === "nestedTool"
+				&& CharacterSheetProgression._normalize(decision.provenance?.ownerUid) === ownerUid,
+		);
+		for (const decision of matchingDecisions) {
+			for (const value of Array.isArray(decision.selection) ? decision.selection : [decision.selection]) addSelected(value);
+		}
+		for (const [toolKey, sources] of Object.entries(this._data.grantedProficiencies.tools || {})) {
+			if ((sources || []).includes(choiceSource)) addSelected(optionByKey.get(toolKey));
+		}
+
+		const accepted = selected.slice(0, contract.count);
+		for (const tool of accepted) {
+			if (!this.hasToolProficiency(tool)) this.addToolProficiency(tool);
+			this._trackGrantedProficiency("tools", tool, choiceSource);
+		}
+		const preservedChoices = (feature._choices || [])
+			.filter(choice => choice?.type !== "tool" || !optionByKey.has(normalize(choice.value)));
+		feature._choices = [
+			...preservedChoices,
+			...accepted.map(tool => ({type: "tool", value: tool})),
+		];
+
+		let decision = matchingDecisions[0] || null;
+		if (accepted.length) {
+			if (!decision) {
+				decision = this.recordProgressionDecision({
+					type: "nestedTool",
+					selection: accepted,
+					level: feature.level,
+					characterLevel: this._getFeatureChoiceCharacterLevel({
+						featureClass: feature.className,
+						featureClassSource: feature.classSource,
+						level: feature.level,
+					}),
+					className: feature.className || "Acquisition",
+					classSource: feature.classSource || feature.source || "",
+					label: feature.name || "Feature tool",
+					provenance: {
+						ownerType: "feature",
+						ownerUid,
+						acquisitionKey: `${feature.id}|${feature.level || 0}`,
+						selectedGrantKey: accepted.map(normalize).join("|"),
+						grantKind: "tool",
+						grantKey: feature.name || "tool",
+						sourcePath: feature.name || "tool",
+						occurrence: 0,
+						pickSlot: 0,
+					},
+				});
+			} else {
+				decision.selection = CharacterSheetProgression._copy(accepted);
+				decision.status = "resolved";
+			}
+			if (decision) {
+				decision.receipt = {
+					version: 1,
+					sourceDecisionKey: decision.semanticKey,
+					effects: [{
+						type: "ownership",
+						ownership: accepted.map(tool => ({type: "tools", value: tool})),
+					}],
+				};
+				for (const tool of accepted) this.claimProgressionOwnership("tools", tool, decision.semanticKey);
+			}
+		}
+
+		this._data.pendingFeatureChoices = (this._data.pendingFeatureChoices || [])
+			.filter(choice => !(choice.featureId === feature.id && choice.kind === "tool" && choice.unique));
+		const unresolvedCount = Math.max(0, contract.count - accepted.length);
+		if (unresolvedCount) {
+			const acceptedKeys = new Set(accepted.map(normalize));
+			this.addPendingFeatureChoice({
+				featureName: feature.name,
+				featureId: feature.id,
+				featureSource: feature.source,
+				featureClass: feature.className,
+				featureClassSource: feature.classSource,
+				level: feature.level,
+				kind: "tool",
+				options: contract.replacements.filter(tool => !acceptedKeys.has(normalize(tool))),
+				count: unresolvedCount,
+				unique: true,
+			});
 		}
 	}
 
@@ -10960,6 +11125,7 @@ class CharacterSheetState {
 		if (type === "skills") {
 			return this.normalizeSkillProficiencyKey(value?.name || value);
 		}
+		if (type === "tools") return CharacterSheetState.normalizeToolKey(value?.name || value);
 		return String(value?.name || value || "").trim().toLowerCase().replace(/['\s]+/g, "");
 	}
 
@@ -18267,9 +18433,8 @@ class CharacterSheetState {
 	}
 
 	addToolProficiency (tool) {
-		// Case-insensitive check to avoid duplicates from different sources
-		const toolLower = tool.toLowerCase();
-		if (!this._data.toolProficiencies.some(t => t.toLowerCase() === toolLower)) {
+		const toolKey = CharacterSheetState.normalizeToolKey(tool);
+		if (toolKey && !this._data.toolProficiencies.some(t => CharacterSheetState.normalizeToolKey(t) === toolKey)) {
 			this._data.toolProficiencies.push(tool);
 		}
 	}
@@ -52480,7 +52645,6 @@ class CharacterSheetState {
 			}
 		}
 		const conditionalToolGrant = typeof CharacterSheetClassUtils !== "undefined"
-			&& CharacterSheetClassUtils.isExactEfaAlchemistToolsOfTheTrade(feature)
 			? CharacterSheetClassUtils.getConditionalToolProficiencyGrant(feature, this)
 			: null;
 
@@ -54735,6 +54899,23 @@ class CharacterSheetState {
 		const trackSource = `feature:${featureId}`;
 		const claimedSkills = opts.claimedSkills instanceof Set ? opts.claimedSkills : null;
 		const claimedTools = opts.claimedTools instanceof Set ? opts.claimedTools : null;
+		const fixedProficiencyContract = CharacterSheetClassUtils.getFixedProficiencyGrantContract(feature, {
+			ownedTools: opts.proficiencySnapshot?.tools || [],
+		});
+		if (fixedProficiencyContract) {
+			const ownedBefore = new Set((opts.proficiencySnapshot?.tools || [])
+				.map(tool => CharacterSheetState.normalizeToolKey(tool?.name ?? tool))
+				.filter(Boolean));
+			for (const tool of fixedProficiencyContract.fixed) {
+				const toolKey = CharacterSheetState.normalizeToolKey(tool);
+				if (ownedBefore.has(toolKey)
+					&& !(this._data.grantedProficiencies?.tools?.[toolKey]?.length)) {
+					this._trackGrantedProficiency("tools", tool, "base");
+				}
+				if (!this.hasToolProficiency(tool)) this.addToolProficiency(tool);
+				this._trackGrantedProficiency("tools", tool, trackSource);
+			}
+		}
 
 		const asArray = (v) => {
 			if (v == null) return [];
@@ -61045,14 +61226,14 @@ class CharacterSheetState {
 				this._trackGrantedProficiency("skills", skillKey, sourceId);
 			} else if (profType === "tool") {
 				const toolKey = typeParts[2];
-				const toolKeyLower = toolKey.toLowerCase();
+				const toolKeyNormalized = CharacterSheetState.normalizeToolKey(toolKey);
 				// If tool already exists but isn't tracked, track a base source first
-				if (this._data.toolProficiencies.some(t => t.toLowerCase().replace(/['\s]+/g, "") === toolKeyLower)
-					&& !this._data.grantedProficiencies?.tools?.[toolKeyLower]?.length) {
-					this._trackGrantedProficiency("tools", toolKeyLower, "base");
+				if (this.hasToolProficiency(toolKey)
+					&& !this._data.grantedProficiencies?.tools?.[toolKeyNormalized]?.length) {
+					this._trackGrantedProficiency("tools", toolKey, "base");
 				}
 				this.addToolProficiency(toolKey);
-				this._trackGrantedProficiency("tools", toolKeyLower, sourceId);
+				this._trackGrantedProficiency("tools", toolKey, sourceId);
 			} else if (profType === "language") {
 				const langKey = typeParts[2];
 				const langName = mod.languageName || langKey;
@@ -61600,11 +61781,13 @@ class CharacterSheetState {
 		if (!this._data.grantedProficiencies[type]) {
 			this._data.grantedProficiencies[type] = {};
 		}
-		if (!this._data.grantedProficiencies[type][name]) {
-			this._data.grantedProficiencies[type][name] = [];
+		const key = type === "tools" ? CharacterSheetState.normalizeToolKey(name) : name;
+		if (!key) return;
+		if (!this._data.grantedProficiencies[type][key]) {
+			this._data.grantedProficiencies[type][key] = [];
 		}
-		if (!this._data.grantedProficiencies[type][name].includes(abilityId)) {
-			this._data.grantedProficiencies[type][name].push(abilityId);
+		if (!this._data.grantedProficiencies[type][key].includes(abilityId)) {
+			this._data.grantedProficiencies[type][key].push(abilityId);
 		}
 	}
 
@@ -61617,10 +61800,14 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_untrackGrantedProficiency (type, name, abilityId) {
-		if (type === "skills") name = this.normalizeSkillProficiencyKey(name);
-		if (!this._data.grantedProficiencies?.[type]?.[name]) return false;
+		const key = type === "skills"
+			? this.normalizeSkillProficiencyKey(name)
+			: type === "tools"
+				? CharacterSheetState.normalizeToolKey(name)
+				: name;
+		if (!key || !this._data.grantedProficiencies?.[type]?.[key]) return false;
 
-		const sources = this._data.grantedProficiencies[type][name];
+		const sources = this._data.grantedProficiencies[type][key];
 		const idx = sources.indexOf(abilityId);
 		if (idx !== -1) {
 			sources.splice(idx, 1);

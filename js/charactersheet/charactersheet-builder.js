@@ -2235,13 +2235,23 @@ class CharacterSheetBuilder {
 	_clearClassApplication (snapshot) {
 		if (!snapshot) return;
 
+		const removedClass = this._state.getClasses?.()
+			.find(cls => cls.name === snapshot.className && cls.source === snapshot.classSource);
+		const subclassSpellOwner = removedClass?.subclass
+			? this._state.getSubclassSpellGrantOwner?.(removedClass, {
+				sourceFeature: `${removedClass.subclass.name} Spells`,
+				sourceClass: removedClass.name,
+			})
+			: null;
+
 		// Remove class entry from state (also recalculates HP, hit dice, spell slots)
 		this._state.removeClass(snapshot.className, snapshot.classSource);
 
 		// Prune always-prepared domain/subclass spells granted by the removed subclass so
 		// switching domain (or class) before finishing doesn't leave stale grants behind.
 		// populateSubclassSpells() only adds, so this targeted removal is required.
-		if (snapshot.subclassName) this._state.removeSubclassSpells?.(`${snapshot.subclassName} Spells`);
+		if (subclassSpellOwner) this._state.removeSubclassSpells?.(subclassSpellOwner);
+		else if (snapshot.subclassName) this._state.removeSubclassSpells?.(`${snapshot.subclassName} Spells`);
 
 		// Remove save proficiencies granted by this class
 		(snapshot.saveProficiencies || []).forEach((/** @type {*} */ p) => this._state.removeSaveProficiency(p));

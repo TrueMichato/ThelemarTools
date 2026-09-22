@@ -2058,6 +2058,17 @@ class CharacterSheetRespec {
 						&& (!decision.provenance?.ownerUid || choice.featureUid === decision.provenance.ownerUid),
 				)
 				: null;
+			const featureChoiceOwner = decision.type === "nestedTool" && decision.provenance?.ownerUid
+				? this._state._data.features.find(feature =>
+					CharacterSheetProgression.getFeatureOwnerUid(feature) ===
+						CharacterSheetProgression._normalize(decision.provenance.ownerUid),
+				)
+				: null;
+			const nextToolsOwnedBefore = decision.type === "nestedTool"
+				? new Set(next
+					.filter(value => this._state.hasToolProficiency(valueName(value)))
+					.map(value => CharacterSheetState.normalizeToolKey(valueName(value))))
+				: new Set();
 			const beforeLevels = Object.fromEntries(
 				[...previous, ...next].map(value => {
 					const skill = ["nestedSkill", "nestedExpertise"].includes(decision.type)
@@ -2072,6 +2083,27 @@ class CharacterSheetRespec {
 				this._state.removePendingFeatureChoice?.(pendingFeatureChoice.id);
 			}
 			if (decision.type === "nestedTool") this._state.syncConditionalToolGrantSelection?.(decision, next);
+			if (featureChoiceOwner) {
+				const sourceId = `feature-choice:${featureChoiceOwner.id}`;
+				const previousKeys = new Set(previous.map(value => CharacterSheetState.normalizeToolKey(valueName(value))));
+				for (const value of previous) this._state._untrackGrantedProficiency("tools", valueName(value), sourceId);
+				for (const value of next) {
+					const tool = valueName(value);
+					const key = CharacterSheetState.normalizeToolKey(tool);
+					if (nextToolsOwnedBefore.has(key)
+						&& !this._state._data.grantedProficiencies?.tools?.[key]?.length) {
+						this._state._trackGrantedProficiency("tools", tool, "base");
+					}
+					this._state._trackGrantedProficiency("tools", tool, sourceId);
+				}
+				featureChoiceOwner._choices = [
+					...(featureChoiceOwner._choices || []).filter(choice =>
+						choice?.type !== "tool"
+							|| !previousKeys.has(CharacterSheetState.normalizeToolKey(choice.value)),
+					),
+					...next.map(value => ({type: "tool", value: valueName(value)})),
+				];
+			}
 			if (decision.meta?.unplacedFeatChoice && ["nestedSkill", "nestedExpertise"].includes(decision.type)) {
 				const parent = this._engine?.manifest?.decisions?.find(candidate =>
 					candidate.semanticKey === decision.rootSemanticKey,

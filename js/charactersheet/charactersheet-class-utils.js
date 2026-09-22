@@ -137,6 +137,18 @@ class CharacterSheetClassUtils {
 		return this.CHOICE_TOOL_CATALOGS.artisan.filter(it => !excluded.has(it.toLowerCase()));
 	}
 
+	static getFixedProficiencyGrantContract (feature, {ownedTools = []} = {}) {
+		const grant = this.getConditionalToolProficiencyGrant(feature, {
+			getToolProficiencies: () => ownedTools,
+		});
+		if (!grant) return null;
+		return {
+			fixed: grant.fixedTools.map(it => it.name),
+			replacements: this.getConditionalToolChoiceOptions(grant),
+			count: grant.requiredCount,
+		};
+	}
+
 	static isExactEfaAlchemistToolsOfTheTrade (feature) {
 		return `${feature?.name || ""}`.toLowerCase() === "tools of the trade"
 			&& `${feature?.source || ""}`.toUpperCase() === "EFA"

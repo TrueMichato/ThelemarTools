@@ -11,11 +11,18 @@
  * - Both TCE (Classic) and EFA (2024) versions are handled properly
  * - Spellcasting mechanics (half-caster, prepared, INT-based) work correctly
  */
+import fs from "node:fs";
+import path from "node:path";
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const ARTIFICER_DATA = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "data/class/class-artificer.json"), "utf8"));
+const CARTOGRAPHER_TOOLS = ARTIFICER_DATA.subclassFeature.find(feature =>
+	feature.name === "Tools of the Trade"
+	&& feature.subclassShortName === "Cartographer"
+	&& feature.source === "EFA");
 
 // ==========================================================================
 // PART 1: CORE ARTIFICER CLASS FEATURES (TCE)
@@ -1385,6 +1392,153 @@ describe("Cartographer (EFA 2024)", () => {
 				subclass: { name: "Cartographer", shortName: "Cartographer", source: "EFA" },
 			});
 			expect(state.getTotalLevel()).toBe(3);
+		});
+
+		it("migrates a pre-integration save with fixed grants and only the unresolved replacement count", () => {
+			const legacy = new CharacterSheetState();
+			legacy.addClass({name: "Artificer", source: "EFA", level: 3});
+			for (let level = 1; level <= 3; level++) {
+				legacy.recordLevelChoice({
+					level,
+					class: {name: "Artificer", source: "EFA"},
+					choices: {},
+				});
+			}
+			legacy.addToolProficiency("Calligrapher's Supplies");
+			legacy._data.features.push({
+				id: "legacy-cartographer-tools",
+				...structuredClone(CARTOGRAPHER_TOOLS),
+			});
+
+			const loaded = new CharacterSheetState();
+			expect(loaded.loadFromJson(legacy.toJson())).not.toBe(false);
+			expect(loaded.getToolProficiencies()).toEqual(expect.arrayContaining([
+				"Calligrapher's Supplies",
+				"Cartographer's Tools",
+			]));
+			expect(loaded.getPendingFeatureChoices()).toEqual([
+				expect.objectContaining({
+					featureId: "legacy-cartographer-tools",
+					kind: "tool",
+					count: 1,
+				}),
+			]);
+
+			const reloaded = new CharacterSheetState();
+			expect(reloaded.loadFromJson(loaded.toJson())).not.toBe(false);
+			expect(reloaded.getPendingFeatureChoices()).toHaveLength(1);
+			expect(reloaded._data.grantedProficiencies.tools.calligrapherssupplies).toEqual([
+				"base",
+				"feature:legacy-cartographer-tools",
+			]);
+			expect(reloaded._data.grantedProficiencies.tools.cartographerstools).toEqual([
+				"feature:legacy-cartographer-tools",
+			]);
+		});
+
+		it("adopts valid legacy replacement selections without duplicate prompts or receipts", () => {
+			const legacy = new CharacterSheetState();
+			legacy.addClass({name: "Artificer", source: "EFA", level: 3});
+			for (let level = 1; level <= 3; level++) {
+				legacy.recordLevelChoice({
+					level,
+					class: {name: "Artificer", source: "EFA"},
+					choices: {},
+				});
+			}
+			for (const tool of [
+				"Calligrapher's Supplies",
+				"Cartographer's Tools",
+				"Alchemist's Supplies",
+				"Brewer's Supplies",
+			]) legacy.addToolProficiency(tool);
+			legacy._data.features.push({
+				id: "legacy-cartographer-tools",
+				...structuredClone(CARTOGRAPHER_TOOLS),
+				_choices: [
+					{type: "tool", value: "Alchemist's Supplies"},
+					{type: "tool", value: "Brewer's Supplies"},
+				],
+			});
+
+			const loaded = new CharacterSheetState();
+			expect(loaded.loadFromJson(legacy.toJson())).not.toBe(false);
+			expect(loaded.getPendingFeatureChoices()).toHaveLength(0);
+			expect(loaded._data.grantedProficiencies.tools.alchemistssupplies).toContain("feature-choice:legacy-cartographer-tools");
+			expect(loaded._data.grantedProficiencies.tools.brewerssupplies).toContain("feature-choice:legacy-cartographer-tools");
+			const decisions = loaded.getLevelHistoryEntry(3).decisions.filter(decision =>
+				decision.type === "nestedTool"
+				&& decision.provenance?.ownerUid === CharacterSheetProgression.getFeatureOwnerUid(CARTOGRAPHER_TOOLS),
+			);
+			expect(decisions).toHaveLength(1);
+			expect(decisions[0]).toMatchObject({
+				selection: ["Alchemist's Supplies", "Brewer's Supplies"],
+				receipt: {
+					effects: [{
+						type: "ownership",
+						ownership: [
+							{type: "tools", value: "Alchemist's Supplies"},
+							{type: "tools", value: "Brewer's Supplies"},
+						],
+					}],
+				},
+			});
+
+			const reloaded = new CharacterSheetState();
+			expect(reloaded.loadFromJson(loaded.toJson())).not.toBe(false);
+			expect(reloaded.getPendingFeatureChoices()).toHaveLength(0);
+			expect(reloaded.getLevelHistoryEntry(3).decisions.filter(decision =>
+				decision.type === "nestedTool"
+				&& decision.provenance?.ownerUid === CharacterSheetProgression.getFeatureOwnerUid(CARTOGRAPHER_TOOLS),
+			)).toHaveLength(1);
+		});
+
+		it("normalizes mixed-case tool ledgers and preserves proficiency until the final owner is removed", () => {
+			const legacy = new CharacterSheetState();
+			legacy.addToolProficiency("Smith's Tools");
+			legacy._data.features.push(
+				{id: "feature-a", name: "Owner A", source: "EFA"},
+				{id: "feature-b", name: "Owner B", source: "TCE"},
+			);
+			legacy._data.grantedProficiencies.tools = {
+				"Smith's Tools": ["feature:feature-a"],
+				"smiths tools": ["feature:feature-b", "feature:feature-a"],
+			};
+			legacy._data.progressionOwnership = {
+				version: 1,
+				initialized: true,
+				values: {
+					tools: {
+						"Smith's Tools": {
+							value: "Smith's Tools",
+							sources: ["decision:a"],
+							preserved: false,
+						},
+						smithstools: {
+							value: "smiths tools",
+							sources: ["decision:b", "decision:a"],
+							preserved: true,
+						},
+					},
+				},
+			};
+
+			const loaded = new CharacterSheetState();
+			expect(loaded.loadFromJson(legacy.toJson())).not.toBe(false);
+			expect(loaded._data.grantedProficiencies.tools).toEqual({
+				smithstools: ["feature:feature-a", "feature:feature-b"],
+			});
+			expect(loaded._data.progressionOwnership.values.tools).toEqual({
+				smithstools: expect.objectContaining({
+					sources: ["decision:a", "decision:b"],
+					preserved: true,
+				}),
+			});
+
+			loaded.removeFeature("feature-a");
+			expect(loaded.hasToolProficiency("Smith's Tools")).toBe(true);
+			loaded.removeFeature("feature-b");
+			expect(loaded.hasToolProficiency("Smith's Tools")).toBe(false);
 		});
 	});
 
