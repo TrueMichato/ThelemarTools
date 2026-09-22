@@ -7,6 +7,7 @@ import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetRest} from "../../../js/charactersheet/charactersheet-rest.js";
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
+const CharacterSheetProgression = globalThis.CharacterSheetProgression;
 const CharacterSheetState = globalThis.CharacterSheetState;
 const DATA = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
 const ITEMS = JSON.parse(fs.readFileSync("data/items-base.json", "utf8")).baseitem;
@@ -217,11 +218,12 @@ describe("EFA Armorer Armor Model rest switching", () => {
 			changed: true,
 			oldLabel: "Guardian",
 			newLabel: targetModel,
+			boundName: "Plate Armor",
 			error: null,
 		});
 		expectOneModelEverywhere(state, targetModel);
 		expect(CharacterSheetRest.getEfaArmorModelRestFeedback(outcome)).toEqual({
-			successSuffix: ` Armor Model set to ${targetModel}.`,
+			successSuffix: ` Armor Model changed from Guardian to ${targetModel} on Plate Armor.`,
 			warning: null,
 		});
 	});
@@ -239,6 +241,7 @@ describe("EFA Armorer Armor Model rest switching", () => {
 			changed: false,
 			oldLabel: "Guardian",
 			newLabel: "Guardian",
+			boundName: "Plate Armor",
 			error: null,
 		});
 		expect(state.toJson()).toEqual(before);
@@ -328,8 +331,42 @@ describe("EFA Armorer Armor Model rest switching", () => {
 			error: {code: "missing-smiths-tools-item"},
 		});
 		expect(CharacterSheetRest.getEfaArmorModelRestFeedback(outcome).warning)
-			.toContain("Rest completed, but Armor Model remained Guardian");
+			.toBe("Rest completed, but Armor Model remained Guardian: A canonical Smith's Tools item from PHB or XPHB must be in inventory.");
 		expectOneModelEverywhere(state, "Guardian");
+	});
+
+	it("rebuilds the replacement receipt from live state without reducing resource effects", () => {
+		const {state} = seedEfaArmorer();
+		const subclassFeatures = DATA.subclassFeature.map(feature =>
+			feature.name === "Dreadnaught"
+			&& feature.source === "EFA"
+			&& feature.className === "Artificer"
+			&& feature.classSource === "EFA"
+			&& feature.subclassShortName === "Armorer"
+				? {
+					...copy(feature),
+					uses: {max: 2, current: 2, recharge: "long"},
+				}
+				: feature);
+		const stampSpy = jest.spyOn(CharacterSheetProgression, "_stampAcquisitionReceipts");
+		const {rest} = makeRest(state, {subclassFeatures});
+		const staged = rest._buildEfaArmorModelSection({restType: "short"});
+		staged.control.value = "Dreadnaught";
+
+		expect(staged.apply()).toMatchObject({changed: true, newLabel: "Dreadnaught"});
+		expect(stampSpy).toHaveBeenCalled();
+		const decision = state.getLevelHistoryEntry(3).decisions.find(item =>
+			item.type === "featureChoice"
+			&& item.sourceKey === "Armor Model");
+		const materialized = decision.receipt.effects.find(effect => effect.type === "materialized");
+		expect(materialized).toMatchObject({
+			features: [expect.objectContaining({name: "Dreadnaught", source: "EFA"})],
+			resources: [expect.objectContaining({
+				name: "Dreadnaught",
+				sourceDecisionKey: decision.semanticKey,
+			})],
+		});
+		stampSpy.mockRestore();
 	});
 
 	it("preserves binding/generated row identities and customization through switch and save/load", () => {
@@ -421,7 +458,26 @@ describe("EFA Armorer Armor Model rest switching", () => {
 		expect(staged.control.children.map(option => option.value)).toEqual(MODEL_NAMES);
 	});
 
-	it("renders a native labeled full-width select with described current and disabled states", () => {
+	it("updates the durable model preview on native change without mutating state", () => {
+		const {state} = seedEfaArmorer();
+		const {rest} = makeRest(state);
+		const before = copy(state.toJson());
+		const staged = rest._buildEfaArmorModelSection({restType: "long"});
+
+		expect(staged.previewLine.textContent)
+			.toBe("Selected model: Guardian. Thunder Pulse (melee); Defensive Field while Bloodied.");
+		for (const [model, preview] of [
+			["Dreadnaught", "Selected model: Dreadnaught. Force Demolisher (melee, Reach); Giant Stature."],
+			["Infiltrator", "Selected model: Infiltrator. Lightning Launcher (90/300); +5 Speed and Stealth Advantage."],
+		]) {
+			staged.control.value = model;
+			staged.control._handlers.change();
+			expect(staged.previewLine.textContent).toBe(preview);
+		}
+		expect(state.toJson()).toEqual(before);
+	});
+
+	it("renders a native labeled full-width select with described current, preview, and disabled states", () => {
 		const {state} = seedEfaArmorer();
 		state.clearEfaArcaneArmorBinding();
 		const {rest} = makeRest(state);
@@ -431,7 +487,9 @@ describe("EFA Armorer Armor Model rest switching", () => {
 		expect(staged.control.tag).toBe("select");
 		expect(staged.control._clazz).toContain("w-100");
 		expect(staged.label.htmlFor).toBe(staged.control.id);
-		expect(staged.control.ariaDescribedBy).toBe(`${staged.currentLine.id} ${staged.statusLine.id}`);
+		expect(staged.previewLine.id).toBeTruthy();
+		expect(staged.control.ariaDescribedBy)
+			.toBe(`${staged.currentLine.id} ${staged.previewLine.id} ${staged.statusLine.id}`);
 		expect(staged.control.disabled).toBe(true);
 		expect(staged.statusLine.textContent).toContain("Bind Arcane Armor");
 	});

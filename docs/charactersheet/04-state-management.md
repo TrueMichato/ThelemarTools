@@ -368,7 +368,9 @@ the canonical decision/receipt as one rollback-backed transaction. The rest's
 full pre-mutation snapshot therefore makes Undo Rest restore the prior model,
 binding, and active generated row. If prerequisites become stale while the
 dialog is open, the rest still completes but the model remains unchanged and a
-warning names the failed prerequisite.
+warning names the failed prerequisite. The selector previews each model's
+weapon and signature benefit in durable text as the selection changes, while
+successful rest feedback names the old model, new model, and bound armor.
 
 Model damage, range, Intelligence substitution, riders, target/resource
 tracking, Perfected Armor, and Armor Replication remain deferred. Those

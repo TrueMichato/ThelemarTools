@@ -5117,21 +5117,9 @@ class CharacterSheetClassUtils {
 				if (canonicalDecision) {
 					canonicalDecision.selection = [choice];
 					canonicalDecision.status = "resolved";
-					canonicalDecision.receipt = {
-						version: 1,
-						sourceDecisionKey: semanticKey,
-						effects: [{
-							type: "materialized",
-							features: [{
-								id: appliedFeature.id,
-								name: appliedFeature.name,
-								source: appliedFeature.source,
-							}],
-							feats: [],
-							resources: [],
-							modifiers: [],
-						}],
-					};
+					// The previous receipt describes the removed option. Invalidate it
+					// so the canonical sync rebuilds every live effect generically.
+					canonicalDecision.receipt = null;
 				}
 			}
 

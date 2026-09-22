@@ -13,6 +13,11 @@ const {e_, ee} = /** @type {*} */ (globalThis);
 class CharacterSheetRest {
 	static _UNDO_REST_BTN_ID = "charsheet-btn-undo-rest";
 	static _EFA_ARMOR_MODEL_NAMES = ["Dreadnaught", "Guardian", "Infiltrator"];
+	static _EFA_ARMOR_MODEL_PREVIEWS = {
+		Dreadnaught: "Force Demolisher (melee, Reach); Giant Stature",
+		Guardian: "Thunder Pulse (melee); Defensive Field while Bloodied",
+		Infiltrator: "Lightning Launcher (90/300); +5 Speed and Stealth Advantage",
+	};
 
 	constructor (page) {
 		this._page = page;
@@ -1496,6 +1501,7 @@ class CharacterSheetRest {
 				changed: false,
 				oldLabel: null,
 				newLabel: null,
+				boundName: null,
 				error: {
 					code: "efa-armorer-unavailable",
 					message: "An exact Artificer|EFA Armorer with a canonical Armor Model is required.",
@@ -1510,6 +1516,7 @@ class CharacterSheetRest {
 				changed: false,
 				oldLabel,
 				newLabel: oldLabel,
+				boundName: context.boundName,
 				error: {
 					code: "armor-model-option-invalid",
 					message: "Choose an exact EFA Armor Model option.",
@@ -1517,10 +1524,10 @@ class CharacterSheetRest {
 			};
 		}
 		if (newOption.name === oldLabel) {
-			return {changed: false, oldLabel, newLabel: oldLabel, error: null};
+			return {changed: false, oldLabel, newLabel: oldLabel, boundName: context.boundName, error: null};
 		}
 		if (!context.canSwitch) {
-			return {changed: false, oldLabel, newLabel: oldLabel, error: context.error};
+			return {changed: false, oldLabel, newLabel: oldLabel, boundName: context.boundName, error: context.error};
 		}
 
 		const history = (this._state.getLevelHistory?.() || []).find(entry =>
@@ -1547,6 +1554,7 @@ class CharacterSheetRest {
 				changed: false,
 				oldLabel,
 				newLabel: oldLabel,
+				boundName: context.boundName,
 				error: {
 					code: "armor-model-history-unavailable",
 					message: "The canonical Armor Model history is unavailable; reload the character before switching.",
@@ -1588,12 +1596,13 @@ class CharacterSheetRest {
 				syncCanonical: true,
 			});
 			this._state.reconcileEfaArmorerState?.({cause: "rest-model-switch"});
-			return {changed: true, oldLabel, newLabel: newOption.name, error: null};
+			return {changed: true, oldLabel, newLabel: newOption.name, boundName: context.boundName, error: null};
 		} catch (error) {
 			return {
 				changed: false,
 				oldLabel,
 				newLabel: oldLabel,
+				boundName: context.boundName,
 				error: {
 					code: "armor-model-transaction-failed",
 					message: error?.message || "Armor Model could not be switched.",
@@ -1607,7 +1616,7 @@ class CharacterSheetRest {
 	 * Opening or changing the selector is read-only; `apply()` revalidates and
 	 * commits through the canonical structured-choice transaction.
 	 * @param {{restType:"short"|"long"}} opts
-	 * @returns {{section:HTMLElement, control:HTMLSelectElement, label:HTMLLabelElement, currentLine:HTMLElement, statusLine:HTMLElement, apply:function}|null}
+	 * @returns {{section:HTMLElement, control:HTMLSelectElement, label:HTMLLabelElement, currentLine:HTMLElement, previewLine:HTMLElement, statusLine:HTMLElement, apply:function}|null}
 	 */
 	_buildEfaArmorModelSection ({restType} = {}) {
 		const options = this._getEfaArmorModelOptions();
@@ -1617,6 +1626,7 @@ class CharacterSheetRest {
 		const idBase = `charsheet-${restType || "rest"}-armor-model`;
 		const selectId = `${idBase}-select`;
 		const currentId = `${idBase}-current`;
+		const previewId = `${idBase}-preview`;
 		const statusId = `${idBase}-status`;
 
 		const section = e_({tag: "div", clazz: "charsheet__rest-section"});
@@ -1627,8 +1637,8 @@ class CharacterSheetRest {
 		label.htmlFor = selectId;
 		const control = e_({tag: "select", clazz: "form-control input-sm w-100"});
 		control.id = selectId;
-		control.setAttribute("aria-describedby", `${currentId} ${statusId}`);
-		control.ariaDescribedBy = `${currentId} ${statusId}`;
+		control.setAttribute("aria-describedby", `${currentId} ${previewId} ${statusId}`);
+		control.ariaDescribedBy = `${currentId} ${previewId} ${statusId}`;
 		options.forEach(option => {
 			const opt = e_({tag: "option", val: option.name, txt: option.name});
 			opt.value = option.name;
@@ -1637,15 +1647,26 @@ class CharacterSheetRest {
 		});
 		control.value = context.model.name;
 		control.disabled = !context.canSwitch;
+		const previewLine = e_({tag: "p", clazz: "ve-small mt-1 mb-0"});
+		previewLine.id = previewId;
+		const updatePreview = () => {
+			const preview = CharacterSheetRest._EFA_ARMOR_MODEL_PREVIEWS[control.value];
+			previewLine.textContent = preview
+				? `Selected model: ${control.value}. ${preview}.`
+				: "Selected model preview unavailable.";
+		};
+		control.onChange(updatePreview);
+		updatePreview();
 		const statusLine = e_({tag: "p", clazz: "ve-muted ve-small mt-1 mb-0", txt: context.statusText});
 		statusLine.id = statusId;
 
-		section.append(title, currentLine, label, control, statusLine);
+		section.append(title, currentLine, label, control, previewLine, statusLine);
 		return {
 			section,
 			control,
 			label,
 			currentLine,
+			previewLine,
 			statusLine,
 			apply: () => this._applyEfaArmorModelSelection({
 				selectedName: control.value,
@@ -1657,7 +1678,7 @@ class CharacterSheetRest {
 	static getEfaArmorModelRestFeedback (outcome) {
 		if (outcome?.changed) {
 			return {
-				successSuffix: ` Armor Model set to ${outcome.newLabel}.`,
+				successSuffix: ` Armor Model changed from ${outcome.oldLabel} to ${outcome.newLabel} on ${outcome.boundName || "bound armor"}.`,
 				warning: null,
 			};
 		}

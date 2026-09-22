@@ -803,12 +803,16 @@ Short and Long Rest use one `_buildEfaArmorModelSection()` staged selector. It
 surfaces only for the exact `Artificer|EFA` Armorer with a canonical model, reads
 the three exact level-3 EFA model definitions, and keeps the selector disabled
 with prerequisite-specific text when binding or tools are missing. Doffed armor
-remains switchable. `apply()` revalidates, then routes through
+remains switchable. A durable text preview follows the native select and updates
+on change without mutating state. `apply()` revalidates, then routes through
 `CharacterSheetClassUtils.replaceStructuredFeatureChoice()` with canonical
-decision synchronization before save/render. Its structured outcome drives the
-success suffix or stale-prerequisite warning. Because application occurs after
-the full pre-rest snapshot, Undo Rest restores every durable choice store and
-the previously active stable generated row.
+decision synchronization before save/render. The previous decision receipt is
+invalidated so progression synchronization rebuilds all live receipt effects
+instead of reducing them to the materialized feature. The structured outcome
+drives a full old-model/new-model/bound-armor success suffix or the unchanged
+stale-prerequisite warning. Because application occurs after the full pre-rest
+snapshot, Undo Rest restores every durable choice store and the previously
+active stable generated row.
 
 ### Usable adventuring gear
 
