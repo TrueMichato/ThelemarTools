@@ -270,6 +270,10 @@ source prunes the receipt.
   matching Reaction receipts. The stable ID lets teardown use exact
   owner/source/action pruning without refunding a sibling; the defender
   reaction never consumes the summoner's Reaction.
+- EFA Battle Smith Arcane Jolt, with one exact subclass/feature key shared by
+  summoner magic-weapon hits and committed EFA Steel Defender Rend hits.
+  `combatRound` is never consulted, so switching trigger source cannot bypass
+  the once-per-turn gate.
 
 Load migration is idempotent. A current-round legacy `resourceTurnUsage`
 entry becomes a receipt only when it represented the live combat turn; stale
@@ -278,6 +282,88 @@ descriptor's `oncePerRoundKey` migrate to the exact deferred-rider receipt.
 `deferredFlatDamageRiderTurnUsage` likewise migrates only when it represented
 the current combat turn. All legacy fields are removed after migration, so
 they never remain a second source of truth.
+
+## EFA Battle Smith Arcane Jolt
+
+The exact runtime identities are:
+
+```javascript
+classUid = "Artificer|EFA";
+subclassUid = "Battle Smith|Artificer|EFA|EFA";
+featureUid = "Arcane Jolt|Artificer|EFA|Battle Smith|EFA|9|EFA";
+```
+
+`_ensureEfaArcaneJoltResource()` maintains one exact resource with a Long Rest
+recharge and `max(1, INT modifier)` uses. The resource persists `spentUses`
+separately from the current maximum. Reconciliation therefore preserves three
+spent uses when the maximum falls below three, then restores only the
+unexpended uses if the maximum later rises. Load migration derives
+`spentUses` once from a legacy exact pool's `max - current`; repeated reads,
+load, level changes, and Respec do not refill it. Source loss removes only this
+exact pool and prunes only its receipt. Same-label TCE, RHW, and unrelated
+resources remain isolated.
+
+The public runtime surface is:
+
+```javascript
+state.getEfaArcaneJoltStatus();
+state.getEfaArcaneJoltTriggerStatus(trigger);
+state.canOfferEfaArcaneJoltForAttack(attack);
+await state.pUseEfaArcaneJolt({
+    trigger,
+    effect: "destructive" | "restorative",
+    target,
+    cancelled?,
+    rolls: {effectDice},
+    publishResult?,
+});
+```
+
+The player trigger is
+`{type: "summonerMagicWeaponHit", hitConfirmed: true, attack}`. The attack must
+carry a live exact `sourceItem.id`; State resolves the inventory row and calls
+the canonical magic-weapon classifier. The defender trigger is
+`{type: "steelDefenderRend", operationResult}`. State revalidates the complete
+M4 contract: `ok`, `committed`, exact owner/source/operation UIDs, confirmed
+attack hit, damage result, and a live exact EFA defender. Callers must not
+replace either check with name or damage-type inference.
+
+A committed result has this shape:
+
+```javascript
+{
+    ok: true,
+    committed: true,
+    effect,
+    featureUid,
+    classUid,
+    subclassUid,
+    trigger: {type, attackId?, sourceItemId?, companionId?, operationUid?, targetName?},
+    resource: {id, cost: 1, before, after, max},
+    turnReceipt,
+    rolls: {effect: {dice, dieRoll, total, type}},
+    target,
+    damage: {target, amount, dice, type: "force", originatingHit} | null,
+    hp: {type, before, after, max, requested, actual, manualApplication?} | null,
+    rollback: null,
+    error: null,
+}
+```
+
+Cancellation and preflight failures return `committed: false` and spend
+nothing. The transaction commits the shared receipt and resource together,
+then applies modeled healing and optional publication. A late failure returns
+`reason: "transactionRolledBack"` plus explicit `rollback.resource`,
+`rollback.turnReceipt`, and `rollback.hp` results. Restorative range is measured
+from the attack target, not the summoner. External creature/object targets are
+manual; dead/vanished modeled companions are rejected without implementing
+revival.
+
+Long Rest uses the existing generic resource recovery path, resetting this
+exact pool's `spentUses` to zero. It does not heal/revive registry-backed Steel
+Defenders. Improved Defender changes only Arcane Jolt's `2d6` to `4d6` and
+preserves EFA Deflect retaliation at `1d4 + INT` Force damage; EFA gains no AC
+increase, while the separate TCE rules remain unchanged.
 
 ## Committed Feature Uses and EFA Flash of Genius
 

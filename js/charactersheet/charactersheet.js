@@ -22195,12 +22195,268 @@ class CharacterSheetPage {
 		return {...selected.target, name: String(name).trim()};
 	}
 
+	async _publishEfaArcaneJoltResult (result) {
+		const roll = result?.rolls?.effect;
+		if (!result?.ok || !roll) return false;
+		if (result.effect === "destructive") {
+			this._showDiceResult(
+				"Arcane Jolt — Destructive Energy",
+				roll.total,
+				`${roll.dice} Force damage to ${result.target.name}`,
+			);
+			this._playMode?._logActivity?.(
+				"combat",
+				`Arcane Jolt dealt ${roll.total} Force damage to ${result.target.name}`,
+			);
+			return true;
+		}
+
+		const targetName = result.target?.name || "the recipient";
+		const healingNote = result.hp?.manualApplication
+			? `Apply ${roll.total} HP manually to ${targetName}.`
+			: `${targetName}: ${result.hp.before} → ${result.hp.after} HP.`;
+		this._showDiceResult(
+			"Arcane Jolt — Restorative Energy",
+			roll.total,
+			`${roll.dice} healing — ${healingNote}`,
+		);
+		this._playMode?._logActivity?.(
+			"combat",
+			`Arcane Jolt restored ${roll.total} HP to ${targetName}${result.hp?.manualApplication ? " (manual target)" : ""}`,
+		);
+		return true;
+	}
+
+	async pOfferEfaArcaneJolt ({
+		trigger,
+		rollFollowup = null,
+		focusRestoreTarget = null,
+	} = {}) {
+		const triggerStatus = this._state.getEfaArcaneJoltTriggerStatus?.(trigger);
+		if (!triggerStatus?.available) {
+			return {
+				ok: false,
+				committed: false,
+				reason: triggerStatus?.reason || "featureUnavailable",
+				message: triggerStatus?.message || "Arcane Jolt is unavailable.",
+				rollback: null,
+				error: null,
+			};
+		}
+
+		const escapeHtml = value => String(value ?? "")
+			.replace(/&/g, "&amp;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#39;");
+		const modeledTargets = (this._state.getCompanions?.() || [])
+			.filter(companion =>
+				companion.active !== false
+				&& !["dead", "vanished"].includes(companion.lifecycle?.status)
+				&& (Number(companion.hp?.current) || 0) > 0,
+			)
+			.map(companion => {
+				const isObject = String(companion.creatureType || "").toLowerCase() === "object";
+				return {
+					value: `${isObject ? "object" : "companion"}:${companion.id}`,
+					label: `${companion.customName || companion.name} (${companion.hp.current}/${companion.hp.max} HP)`,
+				};
+			});
+		const targetOptions = [
+			{value: "character", label: `${this._state.getName?.() || "Character"} (self)`},
+			...modeledTargets,
+			{value: "external:creature", label: "External creature (manual HP)"},
+			{value: "external:object", label: "External object (manual HP)"},
+		];
+		const attackTargetName = triggerStatus.originatingHit?.targetName || "";
+		const statusText = `${triggerStatus.resource.current}/${triggerStatus.resource.max} uses`
+			+ ` · ${triggerStatus.usedThisTurn ? "used this turn" : "available this turn"}`
+			+ ` · ${triggerStatus.damageDice} damage / ${triggerStatus.healingDice} healing`;
+
+		let resolveOuter = null;
+		let isResolved = false;
+		const modalOptions = {
+			title: "Arcane Jolt",
+			isMinHeight0: true,
+			focusRestoreTarget,
+			cbClose: () => {
+				if (!resolveOuter || isResolved) return;
+				isResolved = true;
+				resolveOuter({
+					ok: false,
+					committed: false,
+					reason: "cancelled",
+					message: "Arcane Jolt skipped before any resource or receipt was spent.",
+					rollback: null,
+					error: null,
+				});
+			},
+		};
+		const modal = rollFollowup
+			? await CharacterSheetModal.pGetRollFollowup({...modalOptions, rollFollowup})
+			: await CharacterSheetModal.pGetShow(modalOptions);
+		const {eleModalInner: modalInner, doClose} = modal;
+		modalInner.classList.add("cs-combat-target-modal");
+		modalInner.style.maxHeight = "calc(100dvh - 2rem)";
+		modalInner.style.overflowY = "auto";
+		modalInner.style.boxSizing = "border-box";
+		modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
+
+		return new Promise(resolve => {
+			resolveOuter = resolve;
+			const finish = result => {
+				if (isResolved) return;
+				isResolved = true;
+				resolve(result);
+			};
+			modalInner.innerHTML = `
+				<div class="ve-flex-col">
+					<div class="ve-small ve-muted mb-2">${escapeHtml(statusText)}</div>
+					<label class="mb-2">
+						<span class="ve-small bold">Target hit by the attack</span>
+						<input class="form-control input-sm w-100" type="text" data-jolt-attack-target value="${escapeHtml(attackTargetName)}" autocomplete="off">
+					</label>
+					<div class="ve-flex-col mb-2">
+						<span class="ve-small bold">Restorative recipient</span>
+						<select class="form-control input-sm w-100" data-jolt-recipient>
+							${targetOptions.map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}
+						</select>
+						<input class="form-control input-sm w-100 mt-1" type="text" data-jolt-external-name placeholder="External target name" autocomplete="off" style="display: none;">
+						<label class="ve-flex-v-center mt-1">
+							<input type="checkbox" data-jolt-visible>
+							<span class="ml-1">I can see the recipient</span>
+						</label>
+						<label class="ve-flex-v-center mt-1">
+							<span class="mr-1">Distance from the attack target</span>
+							<input class="form-control input-sm" type="number" min="0" max="30" inputmode="numeric" data-jolt-distance style="width: 6rem;">
+							<span class="ml-1">ft.</span>
+						</label>
+					</div>
+					<div class="ve-small text-danger mb-2" data-jolt-error role="alert" aria-live="polite"></div>
+					<div class="ve-flex-v-center ve-flex-wrap">
+						<button type="button" class="ve-btn ve-btn-default mr-2 mb-1" data-jolt-action="skip">Skip</button>
+						<button type="button" class="ve-btn ve-btn-danger mr-2 mb-1" data-jolt-action="destructive">Destructive</button>
+						<button type="button" class="ve-btn ve-btn-success mb-1" data-jolt-action="restorative">Restorative</button>
+					</div>
+				</div>
+			`;
+
+			const attackTargetEl = modalInner.querySelector("[data-jolt-attack-target]");
+			const recipientEl = modalInner.querySelector("[data-jolt-recipient]");
+			const externalNameEl = modalInner.querySelector("[data-jolt-external-name]");
+			const visibleEl = modalInner.querySelector("[data-jolt-visible]");
+			const distanceEl = modalInner.querySelector("[data-jolt-distance]");
+			const errorEl = modalInner.querySelector("[data-jolt-error]");
+			const buttons = [...modalInner.querySelectorAll("[data-jolt-action]")];
+			let isBusy = false;
+			const setBusy = value => {
+				isBusy = value;
+				buttons.forEach(button => { button.disabled = value; });
+			};
+			const showError = message => {
+				errorEl.textContent = message || "";
+			};
+			const updateRecipientUi = () => {
+				externalNameEl.style.display = recipientEl.value.startsWith("external:") ? "" : "none";
+			};
+			recipientEl.addEventListener("change", updateRecipientUi);
+			updateRecipientUi();
+			queueMicrotask(() => attackTargetEl.focus());
+
+			const resolveUse = async effect => {
+				if (isBusy) return;
+				showError("");
+				const attackTarget = String(attackTargetEl.value || "").trim();
+				if (!attackTarget) {
+					showError("Name the target hit by the triggering attack.");
+					attackTargetEl.focus();
+					return;
+				}
+
+				let target;
+				if (effect === "destructive") {
+					target = {type: "attackTarget", name: attackTarget};
+				} else {
+					const selected = String(recipientEl.value || "");
+					const distanceFeet = Number(distanceEl.value);
+					if (visibleEl.checked !== true) {
+						showError("Confirm that the Artificer can see the restorative recipient.");
+						visibleEl.focus();
+						return;
+					}
+					if (!Number.isFinite(distanceFeet) || distanceFeet < 0 || distanceFeet > 30) {
+						showError("Enter a target-relative distance from 0 to 30 feet.");
+						distanceEl.focus();
+						return;
+					}
+					if (selected === "character") {
+						target = {type: "character", visible: true, distanceFeet};
+					} else if (selected.startsWith("companion:") || selected.startsWith("object:")) {
+						const [type, companionId] = selected.split(":");
+						target = {type, companionId, visible: true, distanceFeet};
+					} else {
+						const [, kind] = selected.split(":");
+						const name = String(externalNameEl.value || "").trim();
+						if (!name) {
+							showError("Name the external restorative recipient.");
+							externalNameEl.focus();
+							return;
+						}
+						target = {type: "external", kind, name, visible: true, distanceFeet};
+					}
+				}
+
+				setBusy(true);
+				const dice = effect === "destructive" ? triggerStatus.damageDice : triggerStatus.healingDice;
+				const diceCount = Number(String(dice).match(/^(\d+)d6$/)?.[1]) || 0;
+				const result = await this._state.pUseEfaArcaneJolt({
+					trigger,
+					effect,
+					target,
+					rolls: {effectDice: this.rollDice(diceCount, 6)},
+					publishResult: published => this._publishEfaArcaneJoltResult(published),
+				});
+				if (!result.ok) {
+					setBusy(false);
+					showError(result.message || "Arcane Jolt could not be resolved.");
+					return;
+				}
+				await this.saveCharacter();
+				this._renderResources?.();
+				this._features?._renderResources?.();
+				this._combat?.renderCombatResources?.();
+				this._renderCompanions?.();
+				if (this._state.getViewMode?.() === "play") this._playMode?.render();
+				finish(result);
+				doClose();
+			};
+
+			modalInner.querySelector("[data-jolt-action=\"skip\"]").addEventListener("click", () => {
+				finish({
+					ok: false,
+					committed: false,
+					reason: "cancelled",
+					message: "Arcane Jolt skipped before any resource or receipt was spent.",
+					rollback: null,
+					error: null,
+				});
+				doClose();
+			});
+			modalInner.querySelector("[data-jolt-action=\"destructive\"]").addEventListener("click", () => void resolveUse("destructive"));
+			modalInner.querySelector("[data-jolt-action=\"restorative\"]").addEventListener("click", () => void resolveUse("restorative"));
+		});
+	}
+
 	async pUseCompanionOperation ({
 		companionId,
 		operation,
 		actionKey = null,
 		commandMethod = null,
 	} = {}) {
+		const operationFocusTarget = typeof document !== "undefined"
+			? document.activeElement?.closest?.("button, [role=button]")
+			: null;
 		const initialAvailability = this.getCompanionOperationAvailability(companionId, operation, {actionKey});
 		if (!initialAvailability.available) {
 			JqueryUtil.doToast({type: "warning", content: initialAvailability.message || "That companion operation is unavailable."});
@@ -22307,6 +22563,16 @@ class CharacterSheetPage {
 			await this.saveCharacter();
 			this._renderCompanions();
 			if (this._state.getViewMode?.() === "play") this._playMode?.render();
+			const arcaneJoltTrigger = {
+				type: "steelDefenderRend",
+				operationResult: result,
+			};
+			if (this._state.getEfaArcaneJoltTriggerStatus?.(arcaneJoltTrigger)?.available) {
+				await this.pOfferEfaArcaneJolt({
+					trigger: arcaneJoltTrigger,
+					focusRestoreTarget: operationFocusTarget,
+				});
+			}
 		}
 		return result;
 	}

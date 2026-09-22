@@ -12,7 +12,10 @@
  *    never on ranged, gated by the toggle.
  */
 
+import {jest} from "@jest/globals";
+
 import "./setup.js";
+import {CharacterSheetModal} from "../../../js/charactersheet/charactersheet-modal.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
 
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
@@ -25,6 +28,7 @@ function makeCombat (stateOverrides = {}) {
 		getArcaneShotRemaining: () => 0,
 		getKnownArcaneShots: () => [],
 		useArcaneShot: () => false,
+		canOfferEfaArcaneJoltForAttack: () => false,
 		getFeatureCalculations: () => ({}),
 		...stateOverrides,
 	};
@@ -127,6 +131,59 @@ describe("_getPostAttackHooks — Arcane Shot predicate gating", () => {
 			getKnownArcaneShots: () => [{name: "Grasping Arrow", source: "XGE"}],
 		});
 		expect(predicateFor(combat)({isRanged: true, attack: {name: "Hand Crossbow", isRanged: true}})).toBe(false);
+	});
+});
+
+describe("_getPostAttackHooks — EFA Arcane Jolt", () => {
+	const attack = {
+		id: "auto-magic-weapon",
+		name: "Magic Sword",
+		sourceItem: {id: "magic-weapon", name: "Magic Sword", source: "EFA"},
+	};
+
+	function getHook (combat) {
+		return combat._getPostAttackHooks().find(hook => hook.id === "efaArcaneJolt");
+	}
+
+	it("uses the State's canonical live-magic-weapon gate and excludes fumbles", () => {
+		const canOffer = jest.fn(() => true);
+		const combat = makeCombat({canOfferEfaArcaneJoltForAttack: canOffer});
+		const hook = getHook(combat);
+
+		expect(hook.predicate({attack, isFumble: false})).toBe(true);
+		expect(canOffer).toHaveBeenCalledWith(attack);
+		expect(hook.predicate({attack, isFumble: true})).toBe(false);
+	});
+
+	it("does not open the shared Jolt flow for a miss", async () => {
+		const combat = makeCombat({canOfferEfaArcaneJoltForAttack: () => true});
+		combat._page.pOfferEfaArcaneJolt = jest.fn();
+		const confirm = jest.spyOn(CharacterSheetModal, "pGetUserBoolean").mockResolvedValue(false);
+
+		await getHook(combat).handler({attack, rollFollowup: {label: "Magic Sword Attack"}});
+
+		expect(combat._page.pOfferEfaArcaneJolt).not.toHaveBeenCalled();
+		confirm.mockRestore();
+	});
+
+	it("passes one confirmed player-hit trigger into the shared Page flow", async () => {
+		const combat = makeCombat({canOfferEfaArcaneJoltForAttack: () => true});
+		combat._page.pOfferEfaArcaneJolt = jest.fn(async () => ({ok: true}));
+		const confirm = jest.spyOn(CharacterSheetModal, "pGetUserBoolean").mockResolvedValue(true);
+		const rollFollowup = {label: "Magic Sword Attack"};
+
+		await getHook(combat).handler({attack, rollFollowup});
+
+		expect(combat._page.pOfferEfaArcaneJolt).toHaveBeenCalledWith({
+			trigger: {
+				type: "summonerMagicWeaponHit",
+				hitConfirmed: true,
+				attack,
+			},
+			rollFollowup,
+			focusRestoreTarget: null,
+		});
+		confirm.mockRestore();
 	});
 });
 

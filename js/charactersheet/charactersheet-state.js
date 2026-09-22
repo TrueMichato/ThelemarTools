@@ -4378,6 +4378,7 @@ class CharacterSheetState {
 	static EFA_SPELLCASTING_TOOLS_RULE_ID = "efa-artificer-tools-required";
 	static EFA_BATTLE_READY_FOCUS_RULE_ID = "efa-battle-ready-tools-or-proficient-weapon";
 	static EFA_BATTLE_SMITH_SUBCLASS_UID = "Battle Smith|Artificer|EFA|EFA";
+	static EFA_STEEL_DEFENDER_UID = "Steel Defender|EFA";
 	static EFA_BATTLE_SMITH_FEATURE_UIDS = Object.freeze({
 		TOOLS_OF_THE_TRADE: "Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA",
 		BATTLE_READY: "Battle Ready|Artificer|EFA|Battle Smith|EFA|3|EFA",
@@ -6464,6 +6465,7 @@ class CharacterSheetState {
 		this._migrateEfaFlashOfGeniusResource();
 		this._syncAdventurersAtlasEligibility();
 		this._syncCharacterDeathConsequences();
+		this._migrateEfaArcaneJoltResource();
 	}
 
 	_migrateAdventurersAtlasState () {
@@ -36228,6 +36230,7 @@ class CharacterSheetState {
 		this._syncCombatMethodConditionalModifiers();
 		this.reconcileTargetEffects();
 		this._pruneGuidedPrecisionTurnReceipt();
+		this._ensureEfaArcaneJoltResource();
 
 		return appliedEffects;
 	}
@@ -47746,6 +47749,633 @@ class CharacterSheetState {
 		return true;
 	}
 
+	_getEfaArcaneJoltFeature () {
+		const featureUid = CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.ARCANE_JOLT.toLowerCase();
+		return (this._data.features || []).find(feature =>
+			CharacterSheetState.getSourceAwareFeatureUid(feature).toLowerCase() === featureUid,
+		) || null;
+	}
+
+	_isEfaArcaneJoltResource (resource) {
+		if (!resource) return false;
+		if (resource.featureUid === CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.ARCANE_JOLT) return true;
+		const feature = this._getEfaArcaneJoltFeature();
+		if (feature?.id && resource.featureId === feature.id) return true;
+		return (resource.name || "").toLowerCase() === "arcane jolt"
+			&& String(resource.classUid || "").toLowerCase() === CharacterSheetState.EFA_ARTIFICER_CLASS_UID.toLowerCase()
+			&& String(resource.subclassUid || "").toLowerCase() === CharacterSheetState.EFA_BATTLE_SMITH_SUBCLASS_UID.toLowerCase();
+	}
+
+	_getEfaArcaneJoltTurnReceiptDescriptor () {
+		const ownerUid = CharacterSheetState.EFA_BATTLE_SMITH_SUBCLASS_UID;
+		const sourceUid = CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.ARCANE_JOLT;
+		return {
+			key: `arcane-jolt:${ownerUid.toLowerCase()}:${sourceUid.toLowerCase()}`,
+			ownerUid,
+			sourceUid,
+			actionUid: `Arcane Jolt|${ownerUid}`,
+		};
+	}
+
+	_pruneEfaArcaneJoltTurnReceipt () {
+		return this.pruneTurnReceipts(this._getEfaArcaneJoltTurnReceiptDescriptor());
+	}
+
+	_syncEfaArcaneJoltFeatureUses (resource) {
+		const feature = this._getEfaArcaneJoltFeature();
+		if (!feature) return;
+		if (!resource) {
+			if (feature.uses) delete feature.uses;
+			return;
+		}
+		feature.uses = {
+			current: resource.current,
+			max: resource.max,
+			recharge: "long",
+		};
+	}
+
+	_ensureEfaArcaneJoltResource () {
+		const calc = this.getFeatureCalculations();
+		const candidates = (this._data.resources || []).filter(resource => this._isEfaArcaneJoltResource(resource));
+		if (!calc.hasEfaArcaneJolt) {
+			if (candidates.length) {
+				this._data.resources = (this._data.resources || []).filter(resource => !this._isEfaArcaneJoltResource(resource));
+			}
+			this._syncEfaArcaneJoltFeatureUses(null);
+			this._pruneEfaArcaneJoltTurnReceipt();
+			return null;
+		}
+
+		const desiredMax = Math.max(1, Number(calc.efaArcaneJoltUses) || 1);
+		let resource = candidates.find(it => it.featureUid === CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.ARCANE_JOLT)
+			|| candidates[0]
+			|| null;
+		const spentUses = candidates.length
+			? Math.max(...candidates.map(candidate => {
+				const persisted = Number(candidate.spentUses);
+				if (Number.isFinite(persisted) && persisted >= 0) return Math.floor(persisted);
+				const previousMax = Math.max(0, Number(candidate.max) || 0);
+				const previousCurrent = Math.max(0, Math.min(Number(candidate.current) || 0, previousMax));
+				return previousMax - previousCurrent;
+			}))
+			: 0;
+
+		if (!resource) {
+			resource = {
+				id: CryptUtil.uid(),
+				name: "Arcane Jolt",
+				current: desiredMax,
+				max: desiredMax,
+				recharge: "long",
+				spentUses: 0,
+			};
+			(this._data.resources ||= []).push(resource);
+		}
+
+		resource.name = "Arcane Jolt";
+		resource.max = desiredMax;
+		resource.spentUses = spentUses;
+		resource.current = Math.max(0, desiredMax - spentUses);
+		resource.recharge = "long";
+		resource.contextualOnly = true;
+		resource.actionLabel = "On Hit";
+		resource.featureUid = CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.ARCANE_JOLT;
+		resource.classUid = CharacterSheetState.EFA_ARTIFICER_CLASS_UID;
+		resource.subclassUid = CharacterSheetState.EFA_BATTLE_SMITH_SUBCLASS_UID;
+		resource.source = "EFA";
+		resource.mirrorsFeatureUses = true;
+		const feature = this._getEfaArcaneJoltFeature();
+		if (feature?.id) resource.featureId = feature.id;
+		else delete resource.featureId;
+
+		this._data.resources = (this._data.resources || [])
+			.filter(candidate => candidate === resource || !this._isEfaArcaneJoltResource(candidate));
+		this._syncEfaArcaneJoltFeatureUses(resource);
+		return resource;
+	}
+
+	_migrateEfaArcaneJoltResource () {
+		const flags = (this._data.migrationFlags ||= {});
+		if (flags.efaArcaneJoltResourceV1) return false;
+		this._ensureEfaArcaneJoltResource();
+		flags.efaArcaneJoltResourceV1 = true;
+		return true;
+	}
+
+	getEfaArcaneJoltStatus () {
+		const resource = this._ensureEfaArcaneJoltResource();
+		const receiptDescriptor = this._getEfaArcaneJoltTurnReceiptDescriptor();
+		const turnReceipt = this.queryTurnReceipt(receiptDescriptor.key);
+		let reason = null;
+		if (!resource) reason = "featureUnavailable";
+		else if ((Number(resource.current) || 0) <= 0) reason = "resourceUnavailable";
+		else if (turnReceipt.used) reason = "alreadyUsedThisTurn";
+		return {
+			available: !reason,
+			reason,
+			featureUid: CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.ARCANE_JOLT,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			subclassUid: CharacterSheetState.EFA_BATTLE_SMITH_SUBCLASS_UID,
+			resource: resource ? {
+				id: resource.id,
+				name: resource.name,
+				current: resource.current,
+				max: resource.max,
+				recharge: resource.recharge,
+			} : null,
+			oncePerTurn: true,
+			usedThisTurn: turnReceipt.used,
+			turnReceipt: turnReceipt.receipt,
+			receiptDescriptor: {...receiptDescriptor},
+			damageDice: resource ? this.getFeatureCalculations().efaArcaneJoltDamage : null,
+			healingDice: resource ? this.getFeatureCalculations().efaArcaneJoltHealing : null,
+			healingRangeFeet: resource ? this.getFeatureCalculations().efaArcaneJoltHealingRange : null,
+		};
+	}
+
+	_getEfaArcaneJoltSummonerAttackOrigin (attack) {
+		if (!attack || attack.isSpell || attack.spell) {
+			return {ok: false, reason: "invalidAttack", message: "Arcane Jolt requires a weapon attack."};
+		}
+		const itemId = String(attack.sourceItem?.id || "").trim();
+		if (!itemId) return {ok: false, reason: "sourceItemRequired", message: "The attack has no live source item."};
+		const item = this.getItemRaw(itemId);
+		if (!item || (Number(item.quantity) || 0) <= 0) {
+			return {ok: false, reason: "sourceItemUnavailable", message: "The attack's source item is no longer available."};
+		}
+		if (
+			attack.sourceItem?.name
+			&& String(attack.sourceItem.name).toLowerCase() !== String(item.name || "").toLowerCase()
+		) {
+			return {ok: false, reason: "sourceItemMismatch", message: "The attack no longer matches its source item."};
+		}
+		if (
+			attack.sourceItem?.source
+			&& String(attack.sourceItem.source).toLowerCase() !== String(item.source || "").toLowerCase()
+		) {
+			return {ok: false, reason: "sourceItemMismatch", message: "The attack no longer matches its source item."};
+		}
+		if (!this.isMagicWeapon(item)) {
+			return {ok: false, reason: "magicWeaponRequired", message: "Arcane Jolt requires a canonically classified magic weapon."};
+		}
+		return {
+			ok: true,
+			originatingHit: {
+				type: "summonerMagicWeaponHit",
+				attackId: attack.id || null,
+				attackName: attack.name || item.name,
+				sourceItemId: itemId,
+				sourceItemUid: `${item.name}|${item.source}`,
+			},
+		};
+	}
+
+	canOfferEfaArcaneJoltForAttack (attack) {
+		const status = this.getEfaArcaneJoltStatus();
+		return status.available && this._getEfaArcaneJoltSummonerAttackOrigin(attack).ok;
+	}
+
+	_getEfaArcaneJoltTriggerOrigin (trigger) {
+		if (trigger?.type === "summonerMagicWeaponHit") {
+			if (trigger.hitConfirmed !== true) {
+				return {ok: false, reason: "attackNotHit", message: "Confirm the magic-weapon attack hit before using Arcane Jolt."};
+			}
+			return this._getEfaArcaneJoltSummonerAttackOrigin(trigger.attack);
+		}
+		if (trigger?.type !== "steelDefenderRend") {
+			return {ok: false, reason: "invalidTrigger", message: "Arcane Jolt requires a supported hit trigger."};
+		}
+
+		const result = trigger.operationResult;
+		if (
+			result?.ok !== true
+			|| result?.committed !== true
+			|| result?.operation !== "forceEmpoweredRend"
+			|| result?.ownerUid !== CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER
+			|| result?.sourceUid !== CharacterSheetState.EFA_STEEL_DEFENDER_UID
+			|| result?.operationUid !== `Force-Empowered Rend|${CharacterSheetState.EFA_STEEL_DEFENDER_UID}`
+			|| result?.rolls?.attack?.hitConfirmed !== true
+			|| !result?.rolls?.damage
+		) {
+			return {ok: false, reason: "invalidDefenderHit", message: "Arcane Jolt requires a committed hit from the exact EFA Steel Defender's Rend."};
+		}
+		const companion = this.getCompanion(result.companionId);
+		if (
+			!companion
+			|| companion.featureGrant?.uid !== CharacterSheetState.EFA_BATTLE_SMITH_FEATURE_UIDS.STEEL_DEFENDER
+			|| String(companion.source || "").toUpperCase() !== "EFA"
+		) {
+			return {ok: false, reason: "defenderUnavailable", message: "The exact owned EFA Steel Defender is no longer available."};
+		}
+		if (
+			companion.active === false
+			|| companion.lifecycle?.status === "vanished"
+			|| companion.lifecycle?.status === "dead"
+			|| (Number(companion.hp?.current) || 0) <= 0
+		) {
+			return {ok: false, reason: "defenderInactive", message: "A dead or inactive Steel Defender cannot trigger Arcane Jolt."};
+		}
+		return {
+			ok: true,
+			originatingHit: {
+				type: "steelDefenderRend",
+				companionId: companion.id,
+				companionName: companion.customName || companion.name,
+				operationUid: result.operationUid,
+				attackName: result.operationUid.split("|")[0],
+				targetName: String(result.target?.name || "").trim() || null,
+				attackTotal: result.rolls.attack.total,
+				baseDamage: result.rolls.damage.total,
+			},
+		};
+	}
+
+	getEfaArcaneJoltTriggerStatus (trigger) {
+		const status = this.getEfaArcaneJoltStatus();
+		if (!status.available) return {...status, originatingHit: null};
+		const triggerResult = this._getEfaArcaneJoltTriggerOrigin(trigger);
+		if (!triggerResult.ok) {
+			return {
+				...status,
+				available: false,
+				reason: triggerResult.reason,
+				message: triggerResult.message,
+				originatingHit: null,
+			};
+		}
+		return {
+			...status,
+			originatingHit: MiscUtil.copyFast(triggerResult.originatingHit),
+		};
+	}
+
+	_getEfaArcaneJoltTargetPreflight ({effect, target, originatingHit}) {
+		if (effect === "destructive") {
+			const targetName = String(target?.name || originatingHit?.targetName || "").trim();
+			if (target?.type !== "attackTarget" || !targetName) {
+				return {ok: false, reason: "attackTargetRequired", message: "Name the target hit by the triggering attack."};
+			}
+			if (
+				originatingHit?.targetName
+				&& originatingHit.targetName.toLowerCase() !== targetName.toLowerCase()
+			) {
+				return {ok: false, reason: "attackTargetMismatch", message: "Destructive Energy must damage the target hit by the triggering attack."};
+			}
+			return {
+				ok: true,
+				target: {type: "attackTarget", name: targetName},
+				hpSnapshot: null,
+			};
+		}
+
+		if (target?.visible !== true) {
+			return {ok: false, reason: "targetNotVisible", message: "Confirm the restorative recipient is visible from the Artificer."};
+		}
+		const distanceFeet = Number(target?.distanceFeet);
+		if (!Number.isFinite(distanceFeet) || distanceFeet < 0 || distanceFeet > 30) {
+			return {ok: false, reason: "targetOutOfRange", message: "The restorative recipient must be within 30 feet of the attack target."};
+		}
+
+		if (target.type === "character") {
+			const before = this.getCurrentHp();
+			const max = this.getMaxHp();
+			return {
+				ok: true,
+				target: {
+					type: "character",
+					name: String(target.name || this._data.name || "Character").trim(),
+					visible: true,
+					distanceFeet,
+					distanceFrom: "attackTarget",
+				},
+				hpSnapshot: {
+					type: "character",
+					before,
+					max,
+					deathSaves: MiscUtil.copyFast(this._data.deathSaves),
+				},
+			};
+		}
+
+		if (target.type === "companion" || target.type === "object") {
+			const companion = this.getCompanion(target.companionId);
+			if (!companion) return {ok: false, reason: "targetUnavailable", message: "The modeled restorative recipient no longer exists."};
+			const creatureType = String(companion.creatureType || "").toLowerCase();
+			if (target.type === "object" && creatureType !== "object") {
+				return {ok: false, reason: "invalidTargetType", message: "The selected modeled target is not an object."};
+			}
+			if (target.type === "companion" && creatureType === "object") {
+				return {ok: false, reason: "invalidTargetType", message: "Choose the modeled object target type for this recipient."};
+			}
+			if (
+				companion.active === false
+				|| ["dead", "vanished"].includes(companion.lifecycle?.status)
+				|| (Number(companion.hp?.current) || 0) <= 0
+			) {
+				return {ok: false, reason: "targetDeadOrUnavailable", message: "Arcane Jolt cannot revive a dead or vanished companion."};
+			}
+			return {
+				ok: true,
+				target: {
+					type: target.type,
+					companionId: companion.id,
+					name: companion.customName || companion.name,
+					visible: true,
+					distanceFeet,
+					distanceFrom: "attackTarget",
+				},
+				hpSnapshot: {
+					type: target.type,
+					companionId: companion.id,
+					hp: MiscUtil.copyFast(companion.hp),
+				},
+			};
+		}
+
+		if (target.type === "external") {
+			const kind = String(target.kind || "").toLowerCase();
+			const name = String(target.name || "").trim();
+			if (!["creature", "object"].includes(kind) || !name) {
+				return {ok: false, reason: "invalidTargetType", message: "Choose an external creature or object and name it."};
+			}
+			return {
+				ok: true,
+				target: {
+					type: "external",
+					kind,
+					name,
+					visible: true,
+					distanceFeet,
+					distanceFrom: "attackTarget",
+					manualApplication: true,
+				},
+				hpSnapshot: null,
+			};
+		}
+
+		return {ok: false, reason: "invalidTargetType", message: "Choose a character, companion, object, or external recipient."};
+	}
+
+	_restoreEfaArcaneJoltResourceSnapshot (resourceSnapshot) {
+		const resource = (this._data.resources || []).find(it => it.id === resourceSnapshot?.id);
+		if (!resource) return {ok: false, reason: "resourceMissing"};
+		resource.current = resourceSnapshot.current;
+		resource.max = resourceSnapshot.max;
+		resource.spentUses = resourceSnapshot.spentUses;
+		this._syncEfaArcaneJoltFeatureUses(resource);
+		return {
+			ok: true,
+			resourceId: resource.id,
+			current: resource.current,
+			max: resource.max,
+			spentUses: resource.spentUses,
+		};
+	}
+
+	_restoreEfaArcaneJoltHpSnapshot (hpSnapshot) {
+		if (!hpSnapshot) return null;
+		if (hpSnapshot.type === "character") {
+			this._data.hp.current = hpSnapshot.before;
+			this._data.deathSaves = MiscUtil.copyFast(hpSnapshot.deathSaves);
+			this._updateBloodiedCondition();
+			return {ok: true, type: "character", current: this._data.hp.current};
+		}
+		const companion = this.getCompanion(hpSnapshot.companionId);
+		if (!companion) return {ok: false, reason: "rollbackTargetMissing"};
+		companion.hp = MiscUtil.copyFast(hpSnapshot.hp);
+		return {ok: true, type: hpSnapshot.type, companionId: companion.id, hp: MiscUtil.copyFast(companion.hp)};
+	}
+
+	async pUseEfaArcaneJolt ({
+		trigger,
+		effect,
+		target,
+		cancelled = false,
+		rolls = {},
+		publishResult = null,
+	} = {}) {
+		if (cancelled) {
+			return {
+				ok: false,
+				committed: false,
+				effect: effect || null,
+				reason: "cancelled",
+				message: "Arcane Jolt skipped before any resource or receipt was spent.",
+				rollback: null,
+				error: null,
+			};
+		}
+		if (!["destructive", "restorative"].includes(effect)) {
+			return {ok: false, committed: false, effect: effect || null, reason: "invalidEffect", message: "Choose Destructive or Restorative Energy.", rollback: null, error: null};
+		}
+
+		const triggerResult = this._getEfaArcaneJoltTriggerOrigin(trigger);
+		if (!triggerResult.ok) {
+			return {...triggerResult, committed: false, effect, rollback: null, error: null};
+		}
+		const targetResult = this._getEfaArcaneJoltTargetPreflight({
+			effect,
+			target,
+			originatingHit: triggerResult.originatingHit,
+		});
+		if (!targetResult.ok) {
+			return {...targetResult, committed: false, effect, rollback: null, error: null};
+		}
+
+		const status = this.getEfaArcaneJoltStatus();
+		if (!status.available) {
+			return {
+				ok: false,
+				committed: false,
+				effect,
+				reason: status.reason,
+				message: status.reason === "alreadyUsedThisTurn"
+					? "Arcane Jolt has already been used this turn."
+					: status.reason === "featureUnavailable"
+						? "The exact EFA Arcane Jolt feature is unavailable."
+						: "Arcane Jolt has no uses remaining.",
+				rollback: null,
+				error: null,
+			};
+		}
+
+		const dice = effect === "destructive" ? status.damageDice : status.healingDice;
+		const diceCount = Number(String(dice || "").match(/^(\d+)d6$/)?.[1]) || 0;
+		const dieRoll = Number(rolls.effectDice);
+		if (!diceCount || !Number.isFinite(dieRoll) || dieRoll < diceCount || dieRoll > diceCount * 6) {
+			return {
+				ok: false,
+				committed: false,
+				effect,
+				reason: "invalidEffectRoll",
+				message: `A valid ${dice || "Arcane Jolt"} roll is required.`,
+				rollback: null,
+				error: null,
+			};
+		}
+
+		const resource = (this._data.resources || []).find(it => it.id === status.resource.id);
+		const resourceSnapshot = {
+			id: resource.id,
+			current: resource.current,
+			max: resource.max,
+			spentUses: resource.spentUses,
+		};
+		let turnReceipt = null;
+		let hp = null;
+		const rollback = {resource: null, turnReceipt: null, hp: null};
+		const doRollback = () => {
+			rollback.hp = this._restoreEfaArcaneJoltHpSnapshot(targetResult.hpSnapshot);
+			rollback.resource = this._restoreEfaArcaneJoltResourceSnapshot(resourceSnapshot);
+			if (turnReceipt) rollback.turnReceipt = this.rollbackTurnReceipt(turnReceipt);
+			return rollback;
+		};
+
+		try {
+			const receiptResult = this.commitTurnReceipt({
+				...status.receiptDescriptor,
+				metadata: {
+					triggerType: triggerResult.originatingHit.type,
+					effect,
+					target: targetResult.target,
+				},
+			});
+			if (!receiptResult.committed || !receiptResult.receipt) {
+				return {
+					ok: false,
+					committed: false,
+					effect,
+					reason: receiptResult.reason || "receiptCommitFailed",
+					message: "Arcane Jolt could not reserve its once-per-turn use.",
+					turnReceipt: receiptResult.receipt,
+					rollback: null,
+					error: null,
+				};
+			}
+			turnReceipt = receiptResult.receipt;
+			this.setResourceCurrent(resource.id, resource.current - 1);
+			if (resource.current !== resourceSnapshot.current - 1) throw new Error("Arcane Jolt resource state did not commit.");
+
+			if (effect === "restorative" && targetResult.target.type === "character") {
+				const before = this.getCurrentHp();
+				const max = this.getMaxHp();
+				this.heal(dieRoll, {supernatural: true});
+				const after = this.getCurrentHp();
+				if (after <= before && before < max) throw new Error("Arcane Jolt healing could not be applied to the character.");
+				hp = {
+					type: "character",
+					before,
+					after,
+					max,
+					requested: dieRoll,
+					actual: after - before,
+				};
+			} else if (effect === "restorative" && ["companion", "object"].includes(targetResult.target.type)) {
+				const companion = this.getCompanion(targetResult.target.companionId);
+				const before = companion.hp.current;
+				const actual = this.healCompanion(companion.id, dieRoll);
+				if (actual <= 0 && before < companion.hp.max) throw new Error("Arcane Jolt healing could not be applied to the modeled recipient.");
+				hp = {
+					type: targetResult.target.type,
+					companionId: companion.id,
+					before,
+					after: companion.hp.current,
+					max: companion.hp.max,
+					requested: dieRoll,
+					actual,
+				};
+			} else if (effect === "restorative") {
+				hp = {
+					type: "external",
+					before: null,
+					after: null,
+					max: null,
+					requested: dieRoll,
+					actual: null,
+					manualApplication: true,
+				};
+			}
+
+			const result = {
+				ok: true,
+				committed: true,
+				effect,
+				featureUid: status.featureUid,
+				classUid: status.classUid,
+				subclassUid: status.subclassUid,
+				trigger: MiscUtil.copyFast(triggerResult.originatingHit),
+				resource: {
+					id: resource.id,
+					cost: 1,
+					before: resourceSnapshot.current,
+					after: resource.current,
+					max: resource.max,
+				},
+				turnReceipt,
+				rolls: {
+					effect: {
+						dice,
+						dieRoll,
+						total: dieRoll,
+						type: effect === "destructive" ? "force" : "healing",
+					},
+				},
+				target: MiscUtil.copyFast(targetResult.target),
+				damage: effect === "destructive"
+					? {
+						target: MiscUtil.copyFast(targetResult.target),
+						amount: dieRoll,
+						dice,
+						type: "force",
+						originatingHit: MiscUtil.copyFast(triggerResult.originatingHit),
+					}
+					: null,
+				hp,
+				rollback: null,
+				error: null,
+			};
+			if (publishResult) {
+				const published = await publishResult(MiscUtil.copyFast(result));
+				if (published === false) throw new Error("Arcane Jolt result publication failed.");
+			}
+			return result;
+		} catch (error) {
+			return {
+				ok: false,
+				committed: false,
+				effect,
+				featureUid: status.featureUid,
+				classUid: status.classUid,
+				subclassUid: status.subclassUid,
+				trigger: MiscUtil.copyFast(triggerResult.originatingHit),
+				resource: {
+					id: resourceSnapshot.id,
+					cost: 0,
+					before: resourceSnapshot.current,
+					after: resourceSnapshot.current,
+					max: resourceSnapshot.max,
+				},
+				turnReceipt,
+				rolls: {
+					effect: {
+						dice,
+						dieRoll,
+						total: dieRoll,
+						type: effect === "destructive" ? "force" : "healing",
+					},
+				},
+				target: MiscUtil.copyFast(targetResult.target),
+				damage: null,
+				hp: null,
+				reason: "transactionRolledBack",
+				message: "Arcane Jolt failed and every committed mutation was rolled back.",
+				rollback: doRollback(),
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
 	/**
 	 * Register a runtime-only follow-up for a committed use of one source-qualified feature.
 	 * The hook runs after the action and resource costs are committed.
@@ -48088,6 +48718,7 @@ class CharacterSheetState {
 		this._ensureEfaFlashOfGeniusResource();
 		this._ensureEfaGiantStatureResource();
 		this._ensureEfaEldritchCannonCreationResource();
+		this._ensureEfaArcaneJoltResource();
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
@@ -52465,7 +53096,14 @@ class CharacterSheetState {
 		}
 		const resource = this._data.resources.find(r => r.id === resourceId);
 		if (resource) {
+			const previousCurrent = resource.current;
 			resource.current = Math.max(0, Math.min(current, resource.max));
+			if (
+				this._isEfaArcaneJoltResource(resource)
+				&& (resource.current !== previousCurrent || resource.current === resource.max)
+			) {
+				resource.spentUses = Math.max(0, resource.max - resource.current);
+			}
 			// Sync back to the linked feature if one exists
 			if (resource.featureId) {
 				const feature = this._data.features.find(f => f.id === resource.featureId);
@@ -52480,6 +53118,7 @@ class CharacterSheetState {
 				const innate = this._data.spellcasting?.innateSpells?.find(s => s.id === resource.linkedInnateSpellId);
 				if (innate?.uses) innate.uses.current = resource.current;
 			}
+			if (this._isEfaArcaneJoltResource(resource)) this._syncEfaArcaneJoltFeatureUses(resource);
 		}
 	}
 
@@ -52556,7 +53195,9 @@ class CharacterSheetState {
 						},
 					};
 				}
+				if (this._isEfaArcaneJoltResource(r)) r.spentUses = 0;
 			}
+			if (this._isEfaArcaneJoltResource(r)) this._syncEfaArcaneJoltFeatureUses(r);
 		});
 
 		// Also recover feature uses directly

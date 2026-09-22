@@ -1938,6 +1938,16 @@ class CharacterSheetCombat {
 				handler: (ctx) => this._pOfferCritWeaponRiders(ctx),
 			},
 			{
+				// EFA Battle Smith Arcane Jolt. The cheap gate proves exact feature
+				// ownership, remaining uses, the shared once-per-turn receipt, and a
+				// live canonically-classified magic-weapon source. The handler then asks
+				// whether the attack actually hit before opening the shared Page flow.
+				id: "efaArcaneJolt",
+				predicate: (ctx) => !ctx.isFumble
+					&& this._state.canOfferEfaArcaneJoltForAttack?.(ctx.attack) === true,
+				handler: (ctx) => this._pOfferEfaArcaneJolt(ctx),
+			},
+			{
 				// Illrigger Baleful Interdict: on a weapon-attack hit, once per turn, offer
 				// to place a seal (no action). Non-blocking and purely additive — it never
 				// alters the attack/damage math. Spell attacks are excluded (weapon only).
@@ -2004,6 +2014,30 @@ class CharacterSheetCombat {
 				handler: (ctx) => this._pOfferMaterialInstability(ctx),
 			},
 		];
+	}
+
+	async _pOfferEfaArcaneJolt (ctx) {
+		const didHit = await CharacterSheetModal.pGetUserBoolean({
+			title: `${ctx.attack?.name || "Magic weapon"} — Arcane Jolt`,
+			htmlDescription: "Did this magic-weapon attack hit? Arcane Jolt is available only after a confirmed hit.",
+			textYes: "Hit",
+			textNo: "Miss",
+			rollFollowup: ctx.rollFollowup,
+		});
+		if (!didHit) return;
+		const focusRestoreTarget = csGetAttackFocusTrigger(ctx.attack)
+			|| (typeof document !== "undefined"
+				? document.activeElement?.closest?.("button, [role=button]")
+				: null);
+		await this._page.pOfferEfaArcaneJolt?.({
+			trigger: {
+				type: "summonerMagicWeaponHit",
+				hitConfirmed: true,
+				attack: ctx.attack,
+			},
+			rollFollowup: ctx.rollFollowup,
+			focusRestoreTarget,
+		});
 	}
 
 	/**

@@ -228,6 +228,46 @@ Guide (2024) brew in `homebrew/index.json`. The mastery is linked only when
 that source is loaded; otherwise its name stays visible without a broken hover.
 The sheet does not substitute another mastery effect or automate Entangling.
 
+### EFA Battle Smith Arcane Jolt
+
+Arcane Jolt is one source-qualified post-hit transaction shared by the
+summoner's attacks and Steel Defender operations. Combat registers one
+`efaArcaneJolt` entry in `_getPostAttackHooks()`. Its predicate accepts only a
+live inventory attack whose exact `sourceItem.id` resolves to a magic weapon
+through `CharacterSheetState.isMagicWeapon()`. Spell attacks, mundane weapons,
+removed items, and generated rows with stale, malformed, or wrong-owner
+provenance fail closed. Because the sheet does not know the target's AC, the
+handler first asks whether the attack hit; a miss never opens or spends Arcane
+Jolt.
+
+The defender route begins only after
+`CharacterSheetPage.pUseCompanionOperation()` returns a committed,
+hit-confirmed `forceEmpoweredRend` result for the exact owned EFA Steel
+Defender. Desktop and Play Mode already delegate to that Page method, so both
+routes call the same `pOfferEfaArcaneJolt()` modal rather than maintaining
+renderer-specific decisions.
+
+The compact modal shows remaining uses and the once-per-turn status, then
+offers **Skip**, **Destructive**, and **Restorative**:
+
+- **Destructive Energy** rolls `2d6` Force damage, or `4d6` at EFA Artificer
+  15, against the target hit by the originating attack. It returns a separate
+  damage result and never edits or rerolls the base hit.
+- **Restorative Energy** requires an explicit character, companion, object, or
+  external target; visibility confirmation; and a distance of at most 30 feet
+  measured from the attack target. Character/companion/object HP is mutated and
+  clamped atomically. External creatures/objects return a manual-application
+  result. Dead or vanished companions are rejected; Arcane Jolt never revives
+  or changes lifecycle state.
+
+`CharacterSheetState.pUseEfaArcaneJolt()` preflights the effect, trigger,
+target acknowledgement, roll, exact resource, and shared per-turn receipt
+before mutation. It commits one use and one receipt. A later modeled-HP or
+publication failure restores the resource snapshot, target HP snapshot, and
+exact receipt and returns the explicit rollback outcomes. Both trigger sources
+use the same key, so a summoner Jolt blocks a defender Jolt and vice versa until
+`resetTurnEconomy()`; changing `combatRound` does nothing.
+
 ### Rolling Attacks
 
 Attack rolls support advantage/disadvantage via modifier keys:

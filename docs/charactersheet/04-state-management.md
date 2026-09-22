@@ -396,8 +396,14 @@ Constitution modifier, staged by the existing Short Rest dialog, and never
 touch player Hit Dice. A long rest restores EFA Repair and half companion Hit
 Dice (rounded up) without healing or resurrecting the defender.
 
-Death/revival/replacement transitions, Arcane Jolt, Battle Ready weapon
-substitution, PDF/export, and E2E remain outside this milestone.
+Arcane Jolt consumes the committed Rend result through the shared
+`CharacterSheetPage.pOfferEfaArcaneJolt()` post-hit flow; it does not add state
+to the companion operation result or duplicate the companion receipt store.
+Battle Ready weapon substitution uses the shared item classifier and attack
+identity described in `06-combat-system.md`.
+
+Death/revival/replacement transitions, PDF/export, and E2E remain outside this
+milestone.
 
 The Reanimated Companion R3 boundary is state/lifecycle only. It does not apply
 Strange/Macabre/Superior modification choices, Improved Reanimation,

@@ -631,4 +631,63 @@ describe("Battle Smith companion atomicity, persistence, and isolation", () => {
 		});
 		expect(playMode._refreshOpenDrawer).toHaveBeenCalledWith("companions");
 	});
+
+	test("attaches the shared Arcane Jolt Page flow only after a committed hit-confirmed EFA Rend", async () => {
+		const run = async outcome => {
+			const {state, companionId} = getState({level: 9});
+			const page = Object.create(CharacterSheetPage.prototype);
+			page._state = state;
+			page._combat = null;
+			page._playMode = null;
+			page.saveCharacter = jest.fn(async () => {});
+			page._renderCompanions = jest.fn();
+			page._showCompanionOperationResult = jest.fn();
+			page._pGetCompanionCommandMethod = jest.fn(async () => "bonusAction");
+			page.pOfferEfaArcaneJolt = jest.fn(async () => ({ok: true, committed: true}));
+			page.rollDice = jest.fn()
+				.mockReturnValueOnce(14)
+				.mockReturnValueOnce(6);
+
+			const originalString = globalThis.InputUiUtil.pGetUserString;
+			const originalBoolean = globalThis.InputUiUtil.pGetUserBoolean;
+			const originalEnum = globalThis.InputUiUtil.pGetUserEnum;
+			globalThis.InputUiUtil.pGetUserString = jest.fn(async () => "Training Dummy");
+			globalThis.InputUiUtil.pGetUserBoolean = jest.fn(async () => true);
+			globalThis.InputUiUtil.pGetUserEnum = jest.fn(async () => outcome);
+			try {
+				const result = await page.pUseCompanionOperation({
+					companionId,
+					operation: "forceEmpoweredRend",
+				});
+				return {page, result};
+			} finally {
+				globalThis.InputUiUtil.pGetUserString = originalString;
+				globalThis.InputUiUtil.pGetUserBoolean = originalBoolean;
+				globalThis.InputUiUtil.pGetUserEnum = originalEnum;
+			}
+		};
+
+		const hit = await run("hit");
+		expect(hit.result).toMatchObject({
+			ok: true,
+			committed: true,
+			operation: "forceEmpoweredRend",
+			rolls: {attack: {hitConfirmed: true}, damage: {total: expect.any(Number)}},
+		});
+		expect(hit.page.pOfferEfaArcaneJolt).toHaveBeenCalledWith({
+			trigger: {
+				type: "steelDefenderRend",
+				operationResult: hit.result,
+			},
+			focusRestoreTarget: null,
+		});
+
+		const miss = await run("miss");
+		expect(miss.result).toMatchObject({
+			ok: true,
+			committed: true,
+			rolls: {attack: {hitConfirmed: false}, damage: null},
+		});
+		expect(miss.page.pOfferEfaArcaneJolt).not.toHaveBeenCalled();
+	});
 });
