@@ -313,6 +313,7 @@ describe("Reanimator R5a descriptor-driven Manager", () => {
 		const state = makeState({level: 9});
 		addTool(state);
 		const companion = await createCompanion(state, ["arcaneConduit", "bloated"]);
+		companion.scaling.resolved.operations.command.status = "deferredR4b";
 		companion.turnUsage = {action: true, reaction: false};
 		const page = makePage(state);
 		page.getCompanionOperationAvailability = jest.fn();
