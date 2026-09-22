@@ -4625,6 +4625,28 @@ class CharacterSheetState {
 		const definition = CharacterSheetState.getFixedProficiencyFallbackDefinition(featureOrUid);
 		return definition ? `fixed-proficiency-fallback:${definition.ownerUid.toLowerCase()}` : "";
 	}
+	static EFA_ALCHEMIST_SUBCLASS_UID = "Alchemist|Artificer|EFA|EFA";
+	static EFA_ALCHEMIST_INNATE_SPELL_GRANTS = Object.freeze([
+		Object.freeze({
+			grantId: "subclass-innate:alchemist|artificer|efa|efa:lesser-restoration|xphb",
+			innateSpellId: "subclass-innate-spell:alchemist|artificer|efa|efa:lesser-restoration|xphb",
+			resourceId: "subclass-innate-resource:alchemist|artificer|efa|efa:lesser-restoration|xphb",
+			spellUid: "Lesser Restoration|XPHB",
+			requiredLevel: 9,
+			sourceFeature: "Restorative Reagents",
+			maxMode: "abilityMod",
+			maxAbility: "int",
+		}),
+		Object.freeze({
+			grantId: "subclass-innate:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
+			innateSpellId: "subclass-innate-spell:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
+			resourceId: "subclass-innate-resource:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
+			spellUid: "Tasha's Bubbling Cauldron|XPHB",
+			requiredLevel: 15,
+			sourceFeature: "Chemical Mastery",
+			max: 1,
+		}),
+	]);
 
 	static EFA_ARTILLERIST_SUBCLASS_UID = "Artillerist|Artificer|EFA|EFA";
 	static EFA_ELDRITCH_CANNON_TEMPLATE_UID = "Eldritch Cannon|EFA";
