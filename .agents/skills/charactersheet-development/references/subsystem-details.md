@@ -1336,6 +1336,20 @@ whose exact owner, creature source, resolved identity, or modification receipt
 does not match the descriptor renders an explicit invalid/setup diagnostic; do
 not hide or name-adopt it.
 
+Derive `isOverviewOnly` structurally: a registry-backed companion with no
+dedicated safe `_getFeatureCompanionOperationUiModel()` must not reach the
+legacy generic card's direct HP/dismiss/`usedAction` handlers. Do not key this
+to `resolved.operations.command.status`; R4b replaces the deferred marker.
+EFA/TCE Steel Defenders keep their supported operation card, while RHW stays
+Manager-only until a dedicated safe UI exists. Name-only ordinary companions
+have no descriptor and continue through the generic card.
+
+For an executable runtime, read Manager Action/Reaction status from
+`getCompanionOperationAvailability(id, "action", {actionKey: "dodge"}).status`
+so canonical turn receipts outrank stale `turnUsage`. Use legacy `turnUsage`
+only as an explicit R4a/deferred fallback when no executable runtime or
+canonical status exists; lifecycle-invalid companions remain unavailable.
+
 RHW creation UI must consume, never reproduce,
 `getFeatureCompanionCreationBoundary()` and `pCreateFeatureCompanion()`. If the
 live boundary has one tool, one payment, and zero required modification

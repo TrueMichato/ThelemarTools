@@ -2441,6 +2441,46 @@ class CharacterSheetPage {
 		return messages[reason] || fallback || "Companion creation is not currently available.";
 	}
 
+	_getFeatureCompanionReadiness ({
+		companion,
+		status,
+		expectedOwnerUid,
+		hasExecutableRuntime,
+	}) {
+		if (status.key !== "active") {
+			return {
+				readiness: {action: "Unavailable", reaction: "Unavailable"},
+				source: "lifecycle",
+			};
+		}
+
+		const fallback = {
+			readiness: {
+				action: companion.turnUsage?.action ? "Used" : "Available",
+				reaction: companion.turnUsage?.reaction ? "Used" : "Available",
+			},
+			source: "legacyTurnUsage",
+		};
+		if (!hasExecutableRuntime || typeof this._state?.getCompanionOperationAvailability !== "function") return fallback;
+
+		const availability = this.getCompanionOperationAvailability(companion.id, "action", {actionKey: "dodge"});
+		const canonicalStatus = availability?.status;
+		const ownerMatches = String(availability?.ownerUid || "").toLowerCase() === String(expectedOwnerUid || "").toLowerCase();
+		if (
+			!ownerMatches
+			|| typeof canonicalStatus?.actionAvailable !== "boolean"
+			|| typeof canonicalStatus?.reactionAvailable !== "boolean"
+		) return fallback;
+
+		return {
+			readiness: {
+				action: canonicalStatus.actionAvailable ? "Available" : "Unavailable",
+				reaction: canonicalStatus.reactionAvailable ? "Available" : "Unavailable",
+			},
+			source: "canonicalOperationStatus",
+		};
+	}
+
 	_getFeatureCompanionManagerModel (companion) {
 		const descriptor = this._getFeatureCompanionDescriptor(companion);
 		if (!descriptor) return null;
@@ -2528,8 +2568,13 @@ class CharacterSheetPage {
 				.map(([sense, range]) => `${sense.toTitleCase()} ${range} ft.`)
 				.join(", ") || "—";
 		const hitDice = companion.hitDice || {};
-		const actionAvailable = status.key === "active" && !companion.turnUsage?.action;
-		const reactionAvailable = status.key === "active" && !companion.turnUsage?.reaction;
+		const operationUi = this._getFeatureCompanionOperationUiModel(companion, descriptor);
+		const readiness = this._getFeatureCompanionReadiness({
+			companion,
+			status,
+			expectedOwnerUid,
+			hasExecutableRuntime: !!operationUi || resolved.operations?.command?.status === "executable",
+		});
 
 		return {
 			companion,
@@ -2557,11 +2602,9 @@ class CharacterSheetPage {
 				appearance: companion.setup?.appearance || "",
 				generation: Number(companion.lifecycle?.generation) || 1,
 			},
-			readiness: {
-				action: actionAvailable ? "Available" : status.key === "active" ? "Used" : "Unavailable",
-				reaction: reactionAvailable ? "Available" : status.key === "active" ? "Used" : "Unavailable",
-			},
-			isOverviewOnly: resolved.operations?.command?.status === "deferredR4b",
+			readiness: readiness.readiness,
+			readinessSource: readiness.source,
+			isOverviewOnly: !operationUi,
 		};
 	}
 

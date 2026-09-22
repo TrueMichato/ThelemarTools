@@ -32,6 +32,7 @@ const FEATURE_UID = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW";
 const CLASS_UID = "Artificer|EFA";
 const SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
 const EFA_STEEL_UID = "Steel Defender|Artificer|EFA|Battle Smith|EFA|3|EFA";
+const TCE_STEEL_UID = "Steel Defender|Artificer|TCE|Battle Smith|TCE|3|TCE";
 
 const copy = value => JSON.parse(JSON.stringify(value));
 
@@ -175,12 +176,40 @@ function makeBoundCreationSurfaceStub (ownerUid = FEATURE_UID) {
 	};
 }
 
+function makeFeatureCompanionRecord ({id, ownerUid, descriptor, resolved}) {
+	return {
+		id,
+		type: "class_summon",
+		name: descriptor.identity.name,
+		source: descriptor.identity.source,
+		creatureName: descriptor.identity.name,
+		creatureSource: descriptor.identity.source,
+		active: true,
+		featureGrant: {uid: ownerUid},
+		scaling: {featureUid: ownerUid, resolved},
+		lifecycle: {status: "active", generation: 1},
+		hp: {current: 30, max: 30},
+		ac: resolved.statistics?.ac || 15,
+		hitDice: {current: 5, max: 5, die: "d8"},
+		speed: {walk: 40},
+		senses: ["darkvision 60 ft."],
+		turnUsage: {action: false, reaction: false},
+		setup: {appearance: ""},
+	};
+}
+
 describe("Reanimator R5a descriptor-driven Manager", () => {
 	test("renders exact RHW identity, dense status/provenance, and no Steel Defender copy", async () => {
 		const state = makeState({level: 9, intelligence: 18});
 		addTool(state);
 		const companion = await createCompanion(state, ["arcaneConduit", "bloated"]);
+		companion.scaling.resolved.operations.command.status = "executable";
 		const page = makePage(state);
+		page.getCompanionOperationAvailability = jest.fn().mockReturnValue({
+			companionId: companion.id,
+			ownerUid: FEATURE_UID,
+			status: {actionAvailable: true, reactionAvailable: true},
+		});
 
 		const model = page._getFeatureCompanionManagerModel(companion);
 		const html = page._getFeatureCompanionManagerHtml(model, 0);
@@ -202,8 +231,11 @@ describe("Reanimator R5a descriptor-driven Manager", () => {
 				appearance: "A stitched brass hound",
 			},
 			readiness: {action: "Available", reaction: "Available"},
+			readinessSource: "canonicalOperationStatus",
 			isOverviewOnly: true,
 		});
+		expect(page.getCompanionOperationAvailability)
+			.toHaveBeenCalledWith(companion.id, "action", {actionKey: "dodge"});
 		expect(html).toContain("Reanimated Companion (RHW)");
 		expect(html).not.toContain("Steel Defender operations");
 		expect(html).toContain(`role="group" aria-label="Read-only turn availability"`);
@@ -238,29 +270,124 @@ describe("Reanimator R5a descriptor-driven Manager", () => {
 			expect.stringMatching(/Expected companion source RHW/),
 			expect.stringMatching(/different source-qualified owner/),
 		]));
+		expect(model.isOverviewOnly).toBe(true);
 		expect(makePage(state)._getFeatureCompanionManagerHtml(model, 0)).toContain("Source or setup mismatch");
 	});
 
-	test("keeps Battle Smith command copy descriptor-driven and source-correct", () => {
-		const descriptor = CharacterSheetCompanionRules.getDescriptor(EFA_STEEL_UID);
-		const resolved = CharacterSheetCompanionRules.resolve(EFA_STEEL_UID, {
-			artificerLevel: 5,
-			intelligenceModifier: 4,
-			proficiencyBonus: 3,
-			spellAttackBonus: 7,
-		});
-		const page = makePage(makeState());
-		const operationUi = page._getFeatureCompanionOperationUiModel({scaling: {resolved}}, descriptor);
+	test("derives executable readiness from canonical receipts instead of legacy turn flags", async () => {
+		const state = makeState({withSpellSlots: false});
+		addTool(state);
+		const companion = await createCompanion(state);
+		companion.scaling.resolved.operations.command.status = "executable";
+		companion.turnUsage = {action: false, reaction: true};
+		state.startCombat();
 
-		expect(operationUi).toEqual({
-			heading: "Steel Defender command status",
-			summary: "Uncommanded action: Dodge; movement and reaction are autonomous.",
-			rendLabel: "Force-Empowered Rend",
-			repairLabel: "Repair",
-			deflectLabel: "Deflect Attack",
+		const committed = state.commandCompanionAction({
+			companionId: companion.id,
+			actionKey: "dodge",
 		});
+		expect(committed).toMatchObject({ok: true, committed: true});
+		expect(state.getCompanionOperationAvailability(companion.id, "action", {actionKey: "dodge"}))
+			.toMatchObject({
+				reason: "companionActionSpent",
+				status: {actionAvailable: false, reactionAvailable: true},
+			});
+
+		const page = makePage(makeState());
+		page._state = state;
+		expect(page._getFeatureCompanionManagerModel(companion)).toMatchObject({
+			readiness: {action: "Unavailable", reaction: "Available"},
+			readinessSource: "canonicalOperationStatus",
+		});
+		expect(companion.turnUsage).toEqual({action: false, reaction: true});
+
+		state.resetTurnEconomy();
+		expect(page._getFeatureCompanionManagerModel(companion)).toMatchObject({
+			readiness: {action: "Available", reaction: "Available"},
+			readinessSource: "canonicalOperationStatus",
+		});
+		expect(companion.turnUsage).toEqual({action: false, reaction: true});
+	});
+
+	test("keeps deferred R4a readiness on the explicit legacy fallback", async () => {
+		const state = makeState({level: 9});
+		addTool(state);
+		const companion = await createCompanion(state, ["arcaneConduit", "bloated"]);
+		companion.turnUsage = {action: true, reaction: false};
+		const page = makePage(state);
+		page.getCompanionOperationAvailability = jest.fn();
+
+		expect(page._getFeatureCompanionManagerModel(companion)).toMatchObject({
+			readiness: {action: "Used", reaction: "Available"},
+			readinessSource: "legacyTurnUsage",
+			isOverviewOnly: true,
+		});
+		expect(page.getCompanionOperationAvailability).not.toHaveBeenCalled();
+	});
+
+	test("keeps exact EFA/TCE Battle Smith operation cards source-isolated", () => {
+		const page = makePage(makeState());
+		page.getCompanionOperationAvailability = jest.fn((companionId, _operation, _options) => ({
+			companionId,
+			ownerUid: companionId === "efa-defender" ? EFA_STEEL_UID : TCE_STEEL_UID,
+			status: {actionAvailable: true, reactionAvailable: true},
+		}));
+		for (const [id, ownerUid, expectedSource] of [
+			["efa-defender", EFA_STEEL_UID, "EFA"],
+			["tce-defender", TCE_STEEL_UID, "TCE"],
+		]) {
+			const descriptor = CharacterSheetCompanionRules.getDescriptor(ownerUid);
+			const resolved = CharacterSheetCompanionRules.resolve(ownerUid, {
+				artificerLevel: 5,
+				intelligenceModifier: 4,
+				proficiencyBonus: 3,
+				spellAttackBonus: 7,
+			});
+			const companion = makeFeatureCompanionRecord({id, ownerUid, descriptor, resolved});
+			const operationUi = page._getFeatureCompanionOperationUiModel(companion, descriptor);
+			const model = page._getFeatureCompanionManagerModel(companion);
+
+			expect(operationUi).toEqual({
+				heading: "Steel Defender command status",
+				summary: "Uncommanded action: Dodge; movement and reaction are autonomous.",
+				rendLabel: "Force-Empowered Rend",
+				repairLabel: "Repair",
+				deflectLabel: "Deflect Attack",
+			});
+			expect(model).toMatchObject({
+				expectedOwnerUid: ownerUid,
+				source: expectedSource,
+				readinessSource: "canonicalOperationStatus",
+				isOverviewOnly: false,
+			});
+		}
+		const sameNameOnly = makeFeatureCompanionRecord({
+			id: "name-only",
+			ownerUid: EFA_STEEL_UID,
+			descriptor: CharacterSheetCompanionRules.getDescriptor(EFA_STEEL_UID),
+			resolved: CharacterSheetCompanionRules.resolve(EFA_STEEL_UID, {
+				artificerLevel: 5,
+				intelligenceModifier: 4,
+				proficiencyBonus: 3,
+				spellAttackBonus: 7,
+			}),
+		});
+		delete sameNameOnly.featureGrant;
+		delete sameNameOnly.scaling.featureUid;
+		expect(page._getFeatureCompanionManagerModel(sameNameOnly)).toBeNull();
 		expect(CharacterSheetPage.prototype._getFeatureCompanionOperationUiModel.toString())
 			.not.toContain("\"Steel Defender");
+	});
+
+	test("routes overview-only registry companions away from legacy direct handlers", () => {
+		const source = CharacterSheetPage.prototype._renderCompanions.toString();
+		const guard = source.indexOf("if (featureCompanionModel?.isOverviewOnly) return;");
+		expect(guard).toBeGreaterThan(-1);
+		for (const legacyHandler of [
+			"this._state.removeCompanion?.(companion.id)",
+			"this._state.setCompanionHp?.(companion.id, newHp)",
+			"this._useCompanionAction(companion, action)",
+		]) expect(source.indexOf(legacyHandler)).toBeGreaterThan(guard);
 	});
 });
 

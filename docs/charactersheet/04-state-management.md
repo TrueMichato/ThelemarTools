@@ -540,6 +540,19 @@ movement/senses, immutable modifications, creation tool/payment provenance,
 and read-only Action/Reaction availability. Owner, creature source, resolved
 identity, and modification-receipt mismatches render as explicit invalid/setup
 diagnostics; the UI never name-adopts a same-label or wrong-source record.
+Registry companions without a dedicated safe operation UI model are
+overview-only and never fall through to the legacy generic companion card's
+direct HP, dismissal, or `usedAction` handlers. This is structural rather than
+keyed to a transient runtime status: EFA/TCE Steel Defenders retain their
+supported operation card, while RHW remains Manager-only before and after R4b.
+
+When an executable companion runtime exists, Manager readiness reads the
+canonical status returned by
+`getCompanionOperationAvailability(id, "action", {actionKey: "dodge"})`.
+Deferred R4a records fall back explicitly to legacy `turnUsage`;
+inactive/dead/invalid lifecycle state remains unavailable. Canonical status
+takes precedence over stale legacy flags, and `resetTurnEconomy()` restores the
+displayed availability.
 
 RHW creation remains a distinct R3 transaction. It does **not** use Battle
 Smith's persisted `featureCompanionSetups` record or
