@@ -180,7 +180,7 @@ function makeRespecPage (state) {
 		getClasses: () => [EFA_ARTIFICER],
 		getClassFeatures: () => ARTIFICER_DATA.classFeature,
 		getSubclassFeatures: () => ARTIFICER_DATA.subclassFeature,
-		getOptionalFeatures: () => [],
+		getOptionalFeatures: () => ARTIFICER_DATA.optionalfeature || [],
 		getItems: () => PLAN_ITEMS,
 		filterByAllowedSources: values => values,
 		getSpells: () => XPHB_SPELLS,
@@ -202,7 +202,7 @@ function resolveFixtureOnlyRespecDecisions (engine) {
 			const identity = CharacterSheetArtificerPlans.getSelectionIdentity(option);
 			return identity && !used.has(identity);
 		});
-		if (!selection) throw new Error("No legal unique Artificer plan remained for the Facilitated Revival Respec fixture.");
+		if (!selection) throw new Error("No legal unique Artificer plan remained for the Reanimator Respec fixture.");
 		used.add(CharacterSheetArtificerPlans.getSelectionIdentity(selection));
 		engine.stageGraphMutation(decision.id, selection);
 	}

@@ -358,6 +358,8 @@ describe("RHW Reanimator R2a progression descriptors", () => {
 			companionUid: "Reanimated Companion|RHW",
 			ownershipOnly: false,
 			creationImplemented: true,
+			setupChoiceTransactionImplemented: true,
+			activeCompanion: null,
 		});
 		expect(calculations.reanimatorModificationFeatureUid).toBe(REFINED_REANIMATION_UID);
 		expect(calculations.improvedReanimationFeatureUid).toBe(IMPROVED_REANIMATION_UID);

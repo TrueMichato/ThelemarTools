@@ -116,6 +116,23 @@ function getFocusReference (state, id = "reanimator-tool") {
 	return state.getSpellCastFocusReference(row);
 }
 
+function getSetupChoices (state, selectedOptionIds = null) {
+	const boundary = state.getFeatureCompanionCreationBoundary(FEATURE_UID, {
+		classUid: CLASS_UID,
+		subclassUid: SUBCLASS_UID,
+		payment: {type: "freeCreation"},
+	});
+	const transaction = boundary.setupChoices?.transaction;
+	if (!transaction) return null;
+	const selectedIds = selectedOptionIds || transaction.options
+		.slice(0, transaction.requiredCount)
+		.map(option => option.id);
+	return {
+		transactionId: transaction.transactionId,
+		selectedOptions: selectedIds.map(id => transaction.options.find(option => option.id === id)),
+	};
+}
+
 function getCreateInput (state, overrides = {}) {
 	return {
 		featureUid: FEATURE_UID,
@@ -123,6 +140,7 @@ function getCreateInput (state, overrides = {}) {
 		subclassUid: SUBCLASS_UID,
 		focusReference: getFocusReference(state),
 		payment: {type: "freeCreation"},
+		setupChoices: getSetupChoices(state),
 		appearance: "A brass-and-bone hound",
 		...overrides,
 	};
@@ -191,6 +209,7 @@ describe("RHW Reanimator R3 creation transaction", () => {
 			classUid: CLASS_UID,
 			subclassUid: SUBCLASS_UID,
 			payment: {type: "freeCreation"},
+			setupChoices: getSetupChoices(state),
 		});
 		expect(boundary).toMatchObject({
 			available: true,
@@ -231,6 +250,16 @@ describe("RHW Reanimator R3 creation transaction", () => {
 					inventoryItemId: "reanimator-tool",
 					itemUid: "Tinker's Tools|XPHB",
 				},
+				setupChoices: {
+					modifications: {
+						version: 1,
+						ownerUid: FEATURE_UID,
+						rulesVersion: 2,
+						acquisitionLevel: 15,
+						requiredCount: 3,
+						selectedOptionIds: ["arcaneConduit", "ferocity", "bloated"],
+					},
+				},
 			},
 		});
 		expect(state.isActionTypeAvailable("action")).toBe(false);
@@ -253,7 +282,19 @@ describe("RHW Reanimator R3 creation transaction", () => {
 				subclassSource: "RHW",
 				level: 3,
 			},
-			setup: {appearance: "A brass-and-bone hound"},
+			setup: {
+				appearance: "A brass-and-bone hound",
+				choices: {
+					modifications: {
+						version: 1,
+						ownerUid: FEATURE_UID,
+						rulesVersion: 2,
+						acquisitionLevel: 15,
+						requiredCount: 3,
+						selectedOptionIds: ["arcaneConduit", "ferocity", "bloated"],
+					},
+				},
+			},
 			hp: {max: 80, current: 80, temp: 0},
 			ac: 14,
 			hitDice: {die: "d8", current: 15, max: 15},
@@ -266,7 +307,7 @@ describe("RHW Reanimator R3 creation transaction", () => {
 				kind: "featureCompanion",
 				featureUid: FEATURE_UID,
 				registryFeatureUid: LEGACY_FEATURE_UID,
-				deferSetupChoices: true,
+				deferSetupChoices: false,
 				resolved: {
 					identity: {
 						classUid: CLASS_UID,
@@ -276,15 +317,21 @@ describe("RHW Reanimator R3 creation transaction", () => {
 					actions: {
 						dreadfulSwipe: {
 							attackBonus: 9,
-							damage: {dice: "1d4", flat: 4, type: "necrotic", ignoresResistance: false},
+							damage: {dice: "1d6", flat: 4, type: "necrotic", ignoresResistance: true},
 						},
 					},
 					traits: {
 						deathBurst: {
-							damage: {dice: "2d4", flat: 0, type: "necrotic", ignoresResistance: false},
+							damage: {dice: "4d4", flat: 4, type: "necrotic", ignoresResistance: true},
 						},
 					},
-					modifications: {deferred: true, requiredCount: 3, selected: [], effects: {}},
+					modifications: {
+						deferred: false,
+						rulesVersion: 2,
+						acquisitionLevel: 15,
+						requiredCount: 3,
+						selected: ["arcaneConduit", "ferocity", "bloated"],
+					},
 				},
 			},
 		});
@@ -727,7 +774,7 @@ describe("RHW Reanimator R3 persistence, level sync, and source isolation", () =
 		});
 	});
 
-	it("updates derived maxima across deferred-modification levels without healing or corrupting payment", async () => {
+	it("updates current-level formulas while preserving creation modifications without healing or corrupting payment", async () => {
 		const state = makeState({level: 15, intelligence: 18});
 		const created = await createCompanion(state);
 		const companion = state.getCompanion(created.companionId);
@@ -740,11 +787,17 @@ describe("RHW Reanimator R3 persistence, level sync, and source isolation", () =
 			hp: {max: 85, current: 7},
 			hitDice: {die: "d8", current: 2, max: 16},
 			scaling: {
-				deferSetupChoices: true,
+				deferSetupChoices: false,
 				resolved: {
-					actions: {dreadfulSwipe: {damage: {dice: "1d4", flat: 4}}},
-					traits: {deathBurst: {damage: {dice: "2d4", flat: 0}}},
-					modifications: {deferred: true, requiredCount: 3, selected: []},
+					actions: {dreadfulSwipe: {damage: {dice: "1d6", flat: 4, ignoresResistance: true}}},
+					traits: {deathBurst: {damage: {dice: "4d4", flat: 4, ignoresResistance: true}}},
+					modifications: {
+						deferred: false,
+						acquisitionLevel: 15,
+						requiredCount: 3,
+						currentRequiredCount: 3,
+						selected: ["arcaneConduit", "ferocity", "bloated"],
+					},
 				},
 			},
 		});
@@ -755,6 +808,18 @@ describe("RHW Reanimator R3 persistence, level sync, and source isolation", () =
 		expect(state.getCompanion(created.companionId)).toMatchObject({
 			hp: {max: 20, current: 7},
 			hitDice: {die: "d8", current: 2, max: 3},
+			scaling: {
+				resolved: {
+					actions: {dreadfulSwipe: {damage: {dice: "1d6", flat: 4, ignoresResistance: false}}},
+					traits: {deathBurst: {damage: {dice: "2d4", flat: 4, ignoresResistance: false}}},
+					modifications: {
+						acquisitionLevel: 15,
+						requiredCount: 3,
+						currentRequiredCount: 0,
+						selected: ["arcaneConduit", "ferocity", "bloated"],
+					},
+				},
+			},
 		});
 		expect(getCreationResource(state).current).toBe(0);
 	});

@@ -723,6 +723,42 @@ companion Constitution modifier and never touch player Hit Dice. Long rest
 restores descriptor-owned `longRest` Repair uses and half the companion Hit
 Dice (rounded up) without healing or resurrecting the feature companion.
 
+RHW Reanimated Companion uses the same generic creation boundary but has no
+pending incomplete creature. `getFeatureCompanionCreationBoundary()` publishes
+a versioned choice transaction derived from the pure rules; the caller returns
+that transaction ID plus exact `{id,name,source}` option references.
+`pCreateFeatureCompanion()` validates the transaction, count, uniqueness,
+unlock level, source/name identity, and resolver output before action/payment/
+tool commit. The canonical receipt is stored on the created generation:
+
+```javascript
+setup.choices.modifications = {
+    version: 1,
+    transactionId,
+    ownerUid,
+    rulesVersion,
+    acquisitionLevel,
+    requiredCount,
+    selectedOptionIds,
+}
+```
+
+The same receipt is copied into `lifecycle.creationReceipt.setupChoices`.
+Reconciliation always validates selected options against the immutable
+acquisition level while recalculating current HP/Hit Dice maxima, INT/PB/DC,
+and the current-level Improved Reanimation feature. It preserves companion ID,
+HP, Hit Dice current, uses, turn flags, payment/tool/action/lifecycle receipts,
+and the selected IDs. Legacy R3 deferred generations stay explicit and are
+never assigned invented options.
+
+`scaling.resolved` is the runtime metadata surface for later Manager/Play work.
+Arcane Conduit carries its spell-origin rules and a stable per-generation
+turn-receipt key template with exact owner/source/action UIDs, but no receipt is
+committed in R4a. Ferocity, Bloated, Gaunt, Moist, Improved Reanimation, Death
+Burst, and Lightning Absorption likewise expose calculations/status only.
+Command/Dodge, attacks, pushes, aura saves, reaction damage, casting, healing,
+Death Burst resolution, and Life Transfer execution are deferred to R4b.
+
 ## Source-qualified Spell Focus and Committed Cast Receipts
 
 Stored player/class/subclass spell attribution carries

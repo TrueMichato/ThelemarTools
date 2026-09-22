@@ -14,7 +14,7 @@
 - Attack Rider Notes
 - Subclass Cantrip Choice Slots
 - EFA/TCE Artificer Source Separation
-- RHW Reanimator R2a Projection
+- RHW Reanimator Projection
 
 ## Overview
 
@@ -216,7 +216,7 @@ Purity/Fire Shield at 13, and Banishing Smite/Mass Cure Wounds at 17. Call
 remove with `removeSubclassSpells(owner)`; never remove by the display label
 when EFA and TCE owners can coexist.
 
-## RHW Reanimator R2a Projection
+## RHW Reanimator Projection
 
 Reanimator calculations activate only for the complete mixed-source identity
 `Artificer|EFA` + `Reanimator|Artificer|EFA|RHW`. A same-named subclass from
@@ -244,13 +244,21 @@ six-part registry UID and canonical seven-part runtime owner
 `Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW`.
 
 R3 implements generic State creation and lifecycle transactions for that exact
-owner. The boundary uses the shared inventory-focus resolver, one free creation
-per Long Rest or a selected level 1+ spell slot, detached pure-rule snapshots,
-and exact-owner source-loss/Respec cleanup. The R3 resolver option defers setup
-choices so high-level companions retain only base AC/HP/Hit Dice, spell attack,
-Dreadful Swipe, and Death Burst formulas. Modification effects, Improved
-Reanimation, command combat behavior, action execution, Life Transfer, and UI
-remain later milestones.
+owner. R4a extends the same boundary with atomic, versioned setup-choice
+validation and persists the immutable creation receipt with the companion.
+Level 3 records zero choices; levels 5/9/15 require 1/2/3 exact unique choices.
+The active generation is projected at
+`reanimatedCompanion.activeCompanion`, including its creation-level receipt and
+the detached `scaling.resolved` rules snapshot. Current level, Intelligence,
+PB, spell attack, and spell DC can reconcile without healing or repicking.
+Improved Reanimation is current-level global scaling; Superior Modifications
+changes only new generations.
+
+Arcane Conduit, Ferocity, Bloated, Gaunt, and Moist publish their complete
+derived metadata through the pure resolver. Arcane Conduit includes the exact
+RHW owner/source/action identities needed by the shared turn-receipt API, but
+R4a never commits that receipt. Command combat behavior, attack/push/aura/
+reaction/cast/damage execution, Life Transfer, UI, and Play Mode remain R4b+.
 
 Jolt to Life uses the exact EFA Artificer level, not total character level. Its
 calculation exposes uses `max(0, current INT modifier)`, exact

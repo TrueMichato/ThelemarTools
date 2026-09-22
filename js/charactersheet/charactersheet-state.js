@@ -47156,6 +47156,22 @@ class CharacterSheetState {
 		const toolsTransaction = this.getFixedProficiencyFallbackTransaction(
 			CharacterSheetState.RHW_REANIMATOR_TOOL_OWNER_UID,
 		);
+		const activeCompanion = this._getExactFeatureOwnedCompanions(featureUids.COMPANION_OWNER)
+			.find(CharacterSheetState._isFeatureOwnedCompanionActive) || null;
+		const activeCompanionProjection = activeCompanion
+			? {
+				companionId: activeCompanion.id,
+				generation: Number(activeCompanion.lifecycle?.generation) || 1,
+				lifecycleStatus: activeCompanion.lifecycle?.status || "active",
+				setupStatus: activeCompanion.scaling?.deferSetupChoices ? "legacyDeferred" : "complete",
+				choiceReceipt: activeCompanion.setup?.choices?.modifications
+					? MiscUtil.copyFast(activeCompanion.setup.choices.modifications)
+					: null,
+				resolved: activeCompanion.scaling?.resolved
+					? MiscUtil.copyFast(activeCompanion.scaling.resolved)
+					: null,
+			}
+			: null;
 		const calculations = {
 			hasReanimatorSpells: true,
 			reanimatorSpells: {
@@ -47199,6 +47215,8 @@ class CharacterSheetState {
 				companionUid: "Reanimated Companion|RHW",
 				ownershipOnly: false,
 				creationImplemented: true,
+				setupChoiceTransactionImplemented: true,
+				activeCompanion: activeCompanionProjection,
 			},
 		};
 
@@ -47239,6 +47257,7 @@ class CharacterSheetState {
 			};
 			calculations.hasLifeTransfer = true;
 			calculations.lifeTransferFeatureUid = featureUids.REFINED_REANIMATION;
+			calculations.lifeTransferStatus = "deferredR4b";
 		}
 
 		return calculations;
@@ -78814,6 +78833,7 @@ class CharacterSheetState {
 	static FEATURE_COMPANION_MIGRATION_KEY = "featureCompanionLegacyV1";
 	static FEATURE_COMPANION_CREATION_RESOURCE_VERSION = 1;
 	static FEATURE_COMPANION_LIFECYCLE_RECEIPT_VERSION = 1;
+	static FEATURE_COMPANION_SETUP_CHOICE_VERSION = 1;
 
 	static _isCompanionSchemaObject (value) {
 		return value != null && typeof value === "object" && !Array.isArray(value);
@@ -79142,12 +79162,201 @@ class CharacterSheetState {
 			: {ok: false, reason: "unavailablePayment"};
 	}
 
+	static _getFeatureCompanionSetupChoiceTransactionId ({
+		ownerUid,
+		rulesVersion,
+		acquisitionLevel,
+		requiredCount,
+		options,
+	}) {
+		return [
+			`feature-companion-setup-v${CharacterSheetState.FEATURE_COMPANION_SETUP_CHOICE_VERSION}`,
+			ownerUid,
+			`rules:${rulesVersion}`,
+			`level:${acquisitionLevel}`,
+			`count:${requiredCount}`,
+			`options:${options.map(option => `${option.id}:${option.name}:${option.source}`).join(",")}`,
+		].join("|");
+	}
+
+	_getFeatureCompanionSetupChoiceTransaction (featureUid, descriptor, summonerContext) {
+		if (!descriptor?.modifications) return null;
+		const deferred = this.resolveFeatureCompanionRules(
+			featureUid,
+			summonerContext,
+			null,
+			{deferSetupChoices: true},
+		);
+		const availableIds = deferred.modifications?.available || [];
+		const options = availableIds.map(id => {
+			const option = descriptor.modifications.options?.[id];
+			if (!option?.name) throw new Error(`Feature companion setup option "${id}" is invalid.`);
+			return {
+				id,
+				name: option.name,
+				source: descriptor.identity.source,
+				unlockArtificerLevel: option.unlockArtificerLevel,
+			};
+		});
+		const transaction = {
+			version: CharacterSheetState.FEATURE_COMPANION_SETUP_CHOICE_VERSION,
+			ownerUid: featureUid,
+			rulesVersion: deferred.schemaVersion,
+			acquisitionLevel: summonerContext.artificerLevel,
+			requiredCount: deferred.modifications.requiredCount,
+			options,
+		};
+		transaction.transactionId =
+			CharacterSheetState._getFeatureCompanionSetupChoiceTransactionId(transaction);
+		return transaction;
+	}
+
+	_validateFeatureCompanionSetupChoices ({
+		featureUid,
+		descriptor,
+		summonerContext,
+		setupChoices,
+	}) {
+		let transaction;
+		try {
+			transaction = this._getFeatureCompanionSetupChoiceTransaction(
+				featureUid,
+				descriptor,
+				summonerContext,
+			);
+		} catch (error) {
+			return {
+				ok: false,
+				reason: "resolverRejected",
+				error: error instanceof Error ? error.message : String(error),
+				transaction: null,
+			};
+		}
+		if (!transaction) {
+			try {
+				return {
+					ok: true,
+					transaction: null,
+					receipt: null,
+					setup: {},
+					resolved: this.resolveFeatureCompanionRules(featureUid, summonerContext),
+				};
+			} catch (error) {
+				return {
+					ok: false,
+					reason: "resolverRejected",
+					error: error instanceof Error ? error.message : String(error),
+					transaction: null,
+				};
+			}
+		}
+
+		const isChoiceObject = setupChoices != null
+			&& typeof setupChoices === "object"
+			&& !Array.isArray(setupChoices);
+		if (setupChoices != null && !isChoiceObject) {
+			return {ok: false, reason: "invalidChoice", transaction};
+		}
+		if (setupChoices == null && transaction.requiredCount > 0) {
+			return {ok: false, reason: "missingChoice", transaction};
+		}
+		if (setupChoices == null) setupChoices = {};
+
+		if (setupChoices.transactionId == null && transaction.requiredCount > 0) {
+			return {ok: false, reason: "missingChoiceTransaction", transaction};
+		}
+		if (
+			setupChoices.transactionId != null
+			&& setupChoices.transactionId !== transaction.transactionId
+		) {
+			return {ok: false, reason: "staleChoiceTransaction", transaction};
+		}
+
+		const selectedOptions = setupChoices.selectedOptions ?? [];
+		if (!Array.isArray(selectedOptions)) {
+			return {ok: false, reason: "invalidChoice", transaction};
+		}
+		if (selectedOptions.length < transaction.requiredCount) {
+			return {
+				ok: false,
+				reason: selectedOptions.length ? "tooFewChoices" : "missingChoice",
+				transaction,
+			};
+		}
+		if (selectedOptions.length > transaction.requiredCount) {
+			return {ok: false, reason: "tooManyChoices", transaction};
+		}
+
+		const optionById = new Map(transaction.options.map(option => [option.id, option]));
+		const selectedIds = [];
+		const seen = new Set();
+		for (const selectedOption of selectedOptions) {
+			if (
+				selectedOption == null
+				|| typeof selectedOption !== "object"
+				|| Array.isArray(selectedOption)
+			) return {ok: false, reason: "invalidChoice", transaction};
+			const option = descriptor.modifications.options?.[selectedOption.id];
+			if (!option) return {ok: false, reason: "unknownChoice", transaction};
+			if (selectedOption.name !== option.name) {
+				return {ok: false, reason: "invalidChoiceName", transaction};
+			}
+			if (selectedOption.source !== descriptor.identity.source) {
+				return {ok: false, reason: "invalidChoiceSource", transaction};
+			}
+			if (!optionById.has(selectedOption.id)) {
+				return {ok: false, reason: "unavailableChoice", transaction};
+			}
+			if (seen.has(selectedOption.id)) {
+				return {ok: false, reason: "duplicateChoice", transaction};
+			}
+			seen.add(selectedOption.id);
+			selectedIds.push(selectedOption.id);
+		}
+		selectedIds.sort((a, b) =>
+			transaction.options.findIndex(option => option.id === a)
+			- transaction.options.findIndex(option => option.id === b));
+
+		const receipt = {
+			version: transaction.version,
+			transactionId: transaction.transactionId,
+			ownerUid: transaction.ownerUid,
+			rulesVersion: transaction.rulesVersion,
+			acquisitionLevel: transaction.acquisitionLevel,
+			requiredCount: transaction.requiredCount,
+			selectedOptionIds: selectedIds,
+		};
+		const setup = {choices: {modifications: receipt}};
+		try {
+			return {
+				ok: true,
+				transaction,
+				receipt,
+				setup,
+				resolved: this.resolveFeatureCompanionRules(
+					featureUid,
+					summonerContext,
+					setup,
+					{deferSetupChoices: false},
+				),
+			};
+		} catch (error) {
+			return {
+				ok: false,
+				reason: "resolverRejected",
+				error: error instanceof Error ? error.message : String(error),
+				transaction,
+			};
+		}
+	}
+
 	getFeatureCompanionCreationBoundary (
 		featureUid,
 		{
 			classUid = null,
 			subclassUid = null,
 			payment = null,
+			setupChoices = null,
 		} = {},
 	) {
 		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
@@ -79181,6 +79390,12 @@ class CharacterSheetState {
 				ownerUid,
 			};
 		}
+		const setupChoiceValidation = this._validateFeatureCompanionSetupChoices({
+			featureUid: ownerUid,
+			descriptor,
+			summonerContext: contextResult.context,
+			setupChoices,
+		});
 		const activeCompanions = this._getExactFeatureOwnedCompanions(ownerUid)
 			.filter(CharacterSheetState._isFeatureOwnedCompanionActive);
 		const resource = this._getFeatureCompanionCreationResource(ownerUid);
@@ -79197,11 +79412,13 @@ class CharacterSheetState {
 			: (paymentOptions.freeCreation?.current > 0 || paymentOptions.spellSlots.length > 0);
 		const reason = activeCompanions.length
 			? "activeCompanion"
-			: !eligibleToolReferences.length
-				? "toolUnavailable"
-				: !hasPayment
-					? (selectedPayment?.reason || "unavailablePayment")
-					: null;
+			: !setupChoiceValidation.ok
+				? setupChoiceValidation.reason
+				: !eligibleToolReferences.length
+					? "toolUnavailable"
+					: !hasPayment
+						? (selectedPayment?.reason || "unavailablePayment")
+						: null;
 
 		return {
 			available: true,
@@ -79222,6 +79439,17 @@ class CharacterSheetState {
 			},
 			paymentOptions,
 			selectedPayment: selectedPayment?.ok ? MiscUtil.copyFast(selectedPayment.option) : null,
+			setupChoices: {
+				status: setupChoiceValidation.ok ? "ready" : "invalid",
+				reason: setupChoiceValidation.ok ? null : setupChoiceValidation.reason,
+				error: setupChoiceValidation.error || null,
+				transaction: setupChoiceValidation.transaction
+					? MiscUtil.copyFast(setupChoiceValidation.transaction)
+					: null,
+				receipt: setupChoiceValidation.receipt
+					? MiscUtil.copyFast(setupChoiceValidation.receipt)
+					: null,
+			},
 		};
 	}
 
@@ -79231,6 +79459,7 @@ class CharacterSheetState {
 		subclassUid,
 		focusReference,
 		payment,
+		setupChoices = null,
 		appearance = null,
 		cancelled = false,
 		context = {},
@@ -79240,6 +79469,7 @@ class CharacterSheetState {
 			classUid,
 			subclassUid,
 			payment,
+			setupChoices,
 		});
 		if (!boundary.available || !boundary.executable) {
 			return {
@@ -79271,6 +79501,23 @@ class CharacterSheetState {
 		);
 		if (!paymentValidation.ok) {
 			return {ok: false, committed: false, reason: paymentValidation.reason, featureUid, classUid, subclassUid};
+		}
+		const setupChoiceValidation = this._validateFeatureCompanionSetupChoices({
+			featureUid,
+			descriptor,
+			summonerContext: boundary.context,
+			setupChoices,
+		});
+		if (!setupChoiceValidation.ok) {
+			return {
+				ok: false,
+				committed: false,
+				reason: setupChoiceValidation.reason,
+				error: setupChoiceValidation.error || null,
+				featureUid,
+				classUid,
+				subclassUid,
+			};
 		}
 
 		const dataSnapshot = MiscUtil.copyFast(this._data);
@@ -79323,13 +79570,11 @@ class CharacterSheetState {
 			const summonerContext = this.getFeatureCompanionSummonerContext(featureUid);
 			const setup = {
 				...(typeof appearance === "string" && appearance.trim() ? {appearance: appearance.trim()} : {}),
+				...(setupChoiceValidation.receipt
+					? {choices: {modifications: MiscUtil.copyFast(setupChoiceValidation.receipt)}}
+					: {}),
 			};
-			const resolved = this.resolveFeatureCompanionRules(
-				featureUid,
-				summonerContext,
-				setup,
-				{deferSetupChoices: true},
-			);
+			const resolved = setupChoiceValidation.resolved;
 			const previousGeneration = Math.max(
 				0,
 				...this._getExactFeatureOwnedCompanions(featureUid)
@@ -79354,6 +79599,9 @@ class CharacterSheetState {
 				},
 				payment: paymentReceipt,
 				tool: this.getSpellCastFocusReference(liveFocus),
+				setupChoices: setupChoiceValidation.receipt
+					? {modifications: MiscUtil.copyFast(setupChoiceValidation.receipt)}
+					: {},
 				context: MiscUtil.copyFast(context),
 			};
 			const companionId = this.addCompanion({
@@ -79380,14 +79628,14 @@ class CharacterSheetState {
 					kind: "featureCompanion",
 					featureUid,
 					registryFeatureUid: descriptor.identity.featureUid,
-					deferSetupChoices: true,
+					deferSetupChoices: false,
 				},
 			});
 			const companion = this.reconcileFeatureOwnedCompanion(companionId, {
 				featureUid,
 				summonerContext,
 				setup,
-				deferSetupChoices: true,
+				deferSetupChoices: false,
 			});
 			if (
 				!companion
@@ -79790,6 +80038,18 @@ class CharacterSheetState {
 		return MiscUtil.copyFast(result.context);
 	}
 
+	static _projectFeatureCompanionRuntimeMetadata (companion, ownerUid, resolved) {
+		const out = MiscUtil.copyFast(resolved);
+		const turnReceipt = out.modifications?.effects?.arcaneConduit?.damageRider?.turnReceipt;
+		if (turnReceipt?.actionUid) {
+			const generation = Math.max(1, Number(companion.lifecycle?.generation) || 1);
+			turnReceipt.companionId = companion.id;
+			turnReceipt.generation = generation;
+			turnReceipt.key = `${ownerUid}:${companion.id}:generation:${generation}:${turnReceipt.actionUid}`;
+		}
+		return out;
+	}
+
 	/**
 	 * Refresh an existing feature-owned companion without replacing its identity or
 	 * live state. Current HP is preserved exactly and only clamped downward when the
@@ -79826,14 +80086,23 @@ class CharacterSheetState {
 		const resolvedSetup = setup || companion.setup || null;
 		const isDeferredSetup = deferSetupChoices ??
 			companion.scaling?.deferSetupChoices ??
-			(!!descriptor.modifications && !Array.isArray(resolvedSetup?.modifications));
-		const resolved = this.resolveFeatureCompanionRules(
+			(
+				!!descriptor.modifications
+				&& !resolvedSetup?.choices?.modifications
+				&& !Array.isArray(resolvedSetup?.modifications)
+			);
+		const resolvedRules = this.resolveFeatureCompanionRules(
 			requestedFeatureUid,
 			context,
 			resolvedSetup,
 			{deferSetupChoices: isDeferredSetup},
 		);
 		const owner = CharacterSheetState._getFeatureCompanionOwnerMetadata(requestedFeatureUid, descriptor);
+		const resolved = CharacterSheetState._projectFeatureCompanionRuntimeMetadata(
+			companion,
+			owner.uid,
+			resolvedRules,
+		);
 
 		companion.featureGrant = {
 			...(companion.featureGrant || {}),
@@ -79857,7 +80126,7 @@ class CharacterSheetState {
 		companion.creatureSource = resolved.identity.source;
 		companion.abilities = {...(companion.abilities || {}), ...(statistics.abilityScores || {})};
 		companion.ac = Number(statistics.ac) || 10;
-		companion.speed = {...(companion.speed || {}), ...(statistics.speed || {})};
+		companion.speed = {...(statistics.speed || {})};
 		companion.senses = Object.entries(statistics.senses || {})
 			.map(([sense, distance]) => `${sense} ${distance} ft.`);
 		companion.passive = Number(statistics.passivePerception) || 10;

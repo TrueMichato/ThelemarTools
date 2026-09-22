@@ -18,10 +18,23 @@ const CharacterSheetProgression = globalThis.CharacterSheetProgression;
 const CharacterSheetQuickBuild = globalThis.CharacterSheetQuickBuild;
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
 const CharacterSheetState = globalThis.CharacterSheetState;
+const CharacterSheetArtificerPlans = globalThis.CharacterSheetArtificerPlans;
 const CharacterSheetRespecEngine = globalThis.CharacterSheetRespecEngine;
 
 const ARTIFICER_DATA = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
 const XPHB_SPELLS = JSON.parse(fs.readFileSync("data/spells/spells-xphb.json", "utf8")).spell;
+const ITEM_DATA = JSON.parse(fs.readFileSync("data/items.json", "utf8"));
+const MAGIC_VARIANT_DATA = JSON.parse(fs.readFileSync("data/magicvariants.json", "utf8"));
+const PLAN_ITEMS = [
+	...ITEM_DATA.item,
+	...MAGIC_VARIANT_DATA.magicvariant.map(variant => ({
+		...variant,
+		source: variant.source || variant.inherits?.source,
+	})),
+	{name: "+1 Shield", source: "XDMG"},
+	{name: "Armor of Resistance", source: "XDMG"},
+	{name: "+2 Shield", source: "XDMG"},
+];
 const EFA_ARTIFICER = ARTIFICER_DATA.class.find(cls => cls.name === "Artificer" && cls.source === "EFA");
 const REANIMATOR = ARTIFICER_DATA.subclass.find(subclass =>
 	subclass.name === "Reanimator"
@@ -502,6 +515,21 @@ const SURFACES = [
 ];
 
 function resolveFixtureOnlyRespecDecisions (engine) {
+	const used = new Set();
+	while (true) {
+		const decision = engine.manifest.decisions.find(it =>
+			it.type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE
+			&& it.required
+			&& it.selection == null);
+		if (!decision) break;
+		const selection = decision.options.find(option => {
+			const identity = CharacterSheetArtificerPlans.getSelectionIdentity(option);
+			return identity && !used.has(identity);
+		});
+		if (!selection) throw new Error("No legal unique Artificer plan remained for the Reanimator Respec fixture.");
+		used.add(CharacterSheetArtificerPlans.getSelectionIdentity(selection));
+		engine.stageGraphMutation(decision.id, selection);
+	}
 	for (const decision of engine.manifest.decisions) decision.status = "resolved";
 	expect(engine.getValidation().errors).toEqual([]);
 }
@@ -513,6 +541,8 @@ function makeRespecPage (state) {
 		getClassFeatures: () => ARTIFICER_DATA.classFeature,
 		getSubclassFeatures: () => ARTIFICER_DATA.subclassFeature,
 		getOptionalFeatures: () => ARTIFICER_DATA.optionalfeature || [],
+		getItems: () => PLAN_ITEMS,
+		filterByAllowedSources: values => values,
 		getFeats: () => [],
 		getSkillsList: () => [],
 		getSpells: () => XPHB_SPELLS,

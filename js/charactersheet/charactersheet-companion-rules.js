@@ -10,6 +10,9 @@ const COMPANION_FEATURE_UIDS = Object.freeze({
 	RHW_REANIMATED_COMPANION: "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3",
 	TCE_STEEL_DEFENDER: "Steel Defender|Artificer|TCE|Battle Smith|TCE|3",
 });
+const RHW_REANIMATED_COMPANION_RUNTIME_OWNER_UID = "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW";
+const RHW_STRANGE_MODIFICATIONS_UID = "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW";
+const FEATURE_COMPANION_CHOICE_RECEIPT_VERSION = 1;
 
 const ABILITIES = Object.freeze(["str", "dex", "con", "int", "wis", "cha"]);
 const STEEL_DEFENDER_ABILITY_SCORES = Object.freeze({
@@ -181,7 +184,7 @@ const COMPANION_RULES = deepFreeze({
 		},
 	},
 	[COMPANION_FEATURE_UIDS.RHW_REANIMATED_COMPANION]: {
-		schemaVersion: 1,
+		schemaVersion: 2,
 		identity: {
 			name: "Reanimated Companion",
 			source: "RHW",
@@ -189,6 +192,7 @@ const COMPANION_RULES = deepFreeze({
 			classUid: "Artificer|EFA",
 			subclassUid: "Reanimator|Artificer|EFA|RHW",
 			featureUid: COMPANION_FEATURE_UIDS.RHW_REANIMATED_COMPANION,
+			runtimeOwnerUid: RHW_REANIMATED_COMPANION_RUNTIME_OWNER_UID,
 		},
 		minimumArtificerLevel: 3,
 		requiredSummonerContext: [
@@ -347,7 +351,17 @@ const COMPANION_RULES = deepFreeze({
 						spellSchools: ["evocation", "necromancy"],
 						trigger: "spellDealsDamage",
 						damageRollBonusFormula: "intelligenceModifier",
+						turnReceipt: {
+							version: 1,
+							ownerUid: RHW_REANIMATED_COMPANION_RUNTIME_OWNER_UID,
+							sourceUid: RHW_STRANGE_MODIFICATIONS_UID,
+							actionUid: "arcane-conduit:damage-rider",
+							keyScope: "companionGeneration",
+							executionStatus: "deferredR4b",
+							committed: false,
+						},
 					},
+					executionStatus: "metadataOnly",
 				},
 				ferocity: {
 					id: "ferocity",
@@ -363,6 +377,7 @@ const COMPANION_RULES = deepFreeze({
 					dreadfulSwipePush: {
 						distanceFeet: 10,
 						maximumTargetSize: "L",
+						executionStatus: "deferredR4b",
 					},
 					deathBurstDamageBonusFormula: "intelligenceModifier",
 				},
@@ -384,6 +399,7 @@ const COMPANION_RULES = deepFreeze({
 							condition: "frightened",
 							duration: "untilStartOfCreatureNextTurn",
 						},
+						executionStatus: "deferredR4b",
 					},
 				},
 				moist: {
@@ -402,6 +418,7 @@ const COMPANION_RULES = deepFreeze({
 							flatFormula: "intelligenceModifier",
 							type: "acid",
 						},
+						executionStatus: "deferredR4b",
 					},
 				},
 			},
@@ -613,9 +630,36 @@ function normalizeModificationSetup (descriptor, context, setup) {
 		throw new TypeError("Companion resolver setup must be an object.");
 	}
 
-	const rawModifications = setup && Object.prototype.hasOwnProperty.call(setup, "modifications")
-		? setup.modifications
-		: [];
+	const persistedChoice = setup?.choices?.modifications;
+	if (persistedChoice != null && (typeof persistedChoice !== "object" || Array.isArray(persistedChoice))) {
+		throw new TypeError("Companion modification choice receipt must be an object.");
+	}
+	if (persistedChoice) {
+		if (persistedChoice.version !== FEATURE_COMPANION_CHOICE_RECEIPT_VERSION) {
+			throw new RangeError(`Unsupported companion modification choice receipt version "${persistedChoice.version}".`);
+		}
+		if (persistedChoice.rulesVersion !== descriptor.schemaVersion) {
+			throw new RangeError(`Companion modification rules version "${persistedChoice.rulesVersion}" does not match "${descriptor.schemaVersion}".`);
+		}
+		if (persistedChoice.ownerUid !== descriptor.identity.runtimeOwnerUid) {
+			throw new RangeError(`Companion modification choice owner "${persistedChoice.ownerUid}" is invalid.`);
+		}
+		if (typeof persistedChoice.transactionId !== "string" || !persistedChoice.transactionId.trim()) {
+			throw new TypeError("Companion modification choice transaction ID must be a non-blank string.");
+		}
+	}
+
+	const acquisitionLevel = persistedChoice
+		? Number(persistedChoice.acquisitionLevel)
+		: context.artificerLevel;
+	if (!Number.isInteger(acquisitionLevel) || acquisitionLevel < descriptor.minimumArtificerLevel) {
+		throw new RangeError(`Companion modification acquisition level "${acquisitionLevel}" is invalid.`);
+	}
+	const rawModifications = persistedChoice
+		? persistedChoice.selectedOptionIds
+		: setup && Object.prototype.hasOwnProperty.call(setup, "modifications")
+			? setup.modifications
+			: [];
 	if (!Array.isArray(rawModifications)) throw new TypeError("Companion modifications must be an array.");
 
 	const optionEntries = Object.entries(descriptor.modifications.options);
@@ -630,20 +674,31 @@ function normalizeModificationSetup (descriptor, context, setup) {
 	for (const id of selected) {
 		const option = descriptor.modifications.options[id];
 		if (!option) throw new RangeError(`Unknown companion modification "${id}".`);
-		if (context.artificerLevel < option.unlockArtificerLevel) {
-			throw new RangeError(`Companion modification "${id}" is locked at Artificer level ${context.artificerLevel}.`);
+		if (acquisitionLevel < option.unlockArtificerLevel) {
+			throw new RangeError(`Companion modification "${id}" is locked at Artificer level ${acquisitionLevel}.`);
 		}
 	}
 
-	const requiredCount = getRequiredModificationCount(descriptor, context.artificerLevel);
+	const requiredCount = getRequiredModificationCount(descriptor, acquisitionLevel);
 	if (selected.length !== requiredCount) {
-		throw new RangeError(`Companion requires exactly ${requiredCount} modification selection${requiredCount === 1 ? "" : "s"} at Artificer level ${context.artificerLevel}; received ${selected.length}.`);
+		throw new RangeError(`Companion requires exactly ${requiredCount} modification selection${requiredCount === 1 ? "" : "s"} at Artificer level ${acquisitionLevel}; received ${selected.length}.`);
+	}
+	if (persistedChoice && Number(persistedChoice.requiredCount) !== requiredCount) {
+		throw new RangeError(`Companion modification receipt required count "${persistedChoice.requiredCount}" does not match "${requiredCount}".`);
 	}
 
 	return {
+		receiptVersion: persistedChoice?.version || null,
+		rulesVersion: persistedChoice?.rulesVersion || descriptor.schemaVersion,
+		transactionId: persistedChoice?.transactionId || null,
+		acquisitionLevel,
 		requiredCount,
+		currentRequiredCount: getRequiredModificationCount(descriptor, context.artificerLevel),
 		selected: [...selected].sort((a, b) => optionOrder.get(a) - optionOrder.get(b)),
 		available: optionEntries
+			.filter(([, option]) => acquisitionLevel >= option.unlockArtificerLevel)
+			.map(([id]) => id),
+		currentlyAvailable: optionEntries
 			.filter(([, option]) => context.artificerLevel >= option.unlockArtificerLevel)
 			.map(([id]) => id),
 	};
@@ -820,9 +875,17 @@ function resolveRhwReanimatedCompanion (descriptor, context, setup, {deferSetupC
 	const modificationSetup = deferSetupChoices
 		? {
 			deferred: true,
+			receiptVersion: null,
+			rulesVersion: descriptor.schemaVersion,
+			transactionId: null,
+			acquisitionLevel: null,
 			requiredCount: getRequiredModificationCount(descriptor, context.artificerLevel),
+			currentRequiredCount: getRequiredModificationCount(descriptor, context.artificerLevel),
 			selected: [],
 			available: Object.entries(descriptor.modifications.options)
+				.filter(([, option]) => context.artificerLevel >= option.unlockArtificerLevel)
+				.map(([id]) => id),
+			currentlyAvailable: Object.entries(descriptor.modifications.options)
 				.filter(([, option]) => context.artificerLevel >= option.unlockArtificerLevel)
 				.map(([id]) => id),
 		}
@@ -832,8 +895,8 @@ function resolveRhwReanimatedCompanion (descriptor, context, setup, {deferSetupC
 		};
 	const selected = new Set(modificationSetup.selected);
 	const abilityScores = cloneJson(descriptor.statistics.abilityScores);
-	const improvedReanimationAvailable = !deferSetupChoices
-		&& context.artificerLevel >= descriptor.damageRules.necrotic.unlockArtificerLevel;
+	const improvedReanimationAvailable =
+		context.artificerLevel >= descriptor.damageRules.necrotic.unlockArtificerLevel;
 	const hasBloated = selected.has("bloated");
 	const hasGaunt = selected.has("gaunt");
 	const hasMoist = selected.has("moist");
@@ -925,10 +988,28 @@ function resolveRhwReanimatedCompanion (descriptor, context, setup, {deferSetupC
 		},
 		modifications: {
 			deferred: modificationSetup.deferred,
+			receiptVersion: modificationSetup.receiptVersion,
+			rulesVersion: modificationSetup.rulesVersion,
+			transactionId: modificationSetup.transactionId,
+			acquisitionLevel: modificationSetup.acquisitionLevel,
 			requiredCount: modificationSetup.requiredCount,
+			currentRequiredCount: modificationSetup.currentRequiredCount,
 			selected: modificationSetup.selected,
 			available: modificationSetup.available,
+			currentlyAvailable: modificationSetup.currentlyAvailable,
 			effects: getResolvedReanimatorModificationEffects(descriptor, context, modificationSetup.selected),
+		},
+		operations: {
+			command: {status: "deferredR4b"},
+			dreadfulSwipe: {status: "metadataOnly"},
+			deathBurst: {status: "metadataOnly"},
+			lightningAbsorption: {status: "metadataOnly"},
+			arcaneConduitDamageRider: {
+				status: selected.has("arcaneConduit") ? "metadataOnly" : "unavailable",
+			},
+			bloatedPush: {status: selected.has("bloated") ? "metadataOnly" : "unavailable"},
+			gauntFearAura: {status: selected.has("gaunt") ? "metadataOnly" : "unavailable"},
+			moistAcidRetaliation: {status: selected.has("moist") ? "metadataOnly" : "unavailable"},
 		},
 	};
 }

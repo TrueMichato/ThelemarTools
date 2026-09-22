@@ -144,6 +144,7 @@ describe("RHW Reanimated Companion rules", () => {
 				classUid: "Artificer|EFA",
 				subclassUid: "Reanimator|Artificer|EFA|RHW",
 				featureUid: RHW_UID,
+				runtimeOwnerUid: RHW_DATA_UID,
 			});
 			expect(resolved.statistics).toMatchObject({
 				size: ["M"],
@@ -308,7 +309,17 @@ describe("RHW Reanimated Companion rules", () => {
 					spellSchools: ["evocation", "necromancy"],
 					trigger: "spellDealsDamage",
 					damageRollBonus: 4,
+					turnReceipt: {
+						version: 1,
+						ownerUid: RHW_DATA_UID,
+						sourceUid: "Strange Modifications|Artificer|EFA|Reanimator|RHW|5|RHW",
+						actionUid: "arcane-conduit:damage-rider",
+						keyScope: "companionGeneration",
+						executionStatus: "deferredR4b",
+						committed: false,
+					},
 				},
+				executionStatus: "metadataOnly",
 			});
 		});
 

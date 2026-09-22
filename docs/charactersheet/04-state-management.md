@@ -294,6 +294,11 @@ registry UID remains the pure-rule lookup key, but cannot open a creation
 transaction or match exact RHW teardown. Creation is exposed through
 `getFeatureCompanionCreationBoundary()` and `pCreateFeatureCompanion()`:
 
+- a versioned setup-choice transaction is derived from the pure companion rules
+  before any action, payment, or tool receipt can commit;
+- submitted modification options must match the transaction's exact ID, name,
+  and `RHW` source, required count, uniqueness, unlock level, rules version, and
+  acquisition level; stale or rejected transactions spend nothing;
 - the Magic action is tracked only when combat action economy is active;
 - payment is one persisted free creation per Long Rest or one selected level
   1+ spell/pact slot;
@@ -313,12 +318,43 @@ spell-slot payment; free-paid or unknown active instances infer it as spent.
 
 An active Reanimated Companion persists a stable companion ID, generation,
 current/max HP, Hit Dice, optional `setup.appearance`, exact `featureGrant`,
-detached resolved rules, and `lifecycle.creationReceipt`. The receipt includes
-stable owner identity, payment before/after values, Magic-action status, and
-the shared inventory wrapper/entity tool reference. R3 resolves through
-`CharacterSheetCompanionRules` with deferred setup choices, retaining the base
-AC, HP, Hit Dice, spell attack, Dreadful Swipe, and Death Burst formulas without
-applying modification or Improved Reanimation effects.
+detached resolved rules, and `lifecycle.creationReceipt`. R4a stores the
+canonical modification receipt at both
+`setup.choices.modifications` and
+`lifecycle.creationReceipt.setupChoices.modifications`:
+
+```javascript
+{
+    version: 1,
+    transactionId: "feature-companion-setup-v1|...",
+    ownerUid: "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW",
+    rulesVersion: 2,
+    acquisitionLevel: 9,
+    requiredCount: 2,
+    selectedOptionIds: ["arcaneConduit", "bloated"],
+}
+```
+
+The acquisition level and selected IDs are immutable for that generation.
+Reconciliation can change current-level HP/Hit Dice maxima, spell attack/DC,
+PB/INT-derived numbers, and Improved Reanimation, but it never adds, drops, or
+repicks a modification. Level 15 therefore affects an existing level-9
+generation's global formulas without silently granting its third choice; a new
+level-15 generation receives a fresh three-choice transaction.
+
+The receipt also includes stable owner identity, payment before/after values,
+Magic-action status, and the shared inventory wrapper/entity tool reference.
+R3 deferred saves remain explicitly `legacyDeferred` rather than receiving
+invented choices. They still receive current-level Improved Reanimation because
+that feature scales independently of the creation choice.
+
+All five modification effects are projected from
+`CharacterSheetCompanionRules` into `companion.scaling.resolved`: Arcane
+Conduit origin/range/school/INT and future turn-receipt metadata, Ferocity's
+`d6`, Bloated size/push/Death Burst INT, Gaunt movement/climbing/fear aura, and
+Moist swimming/squeezing/acid retaliation. The exact active snapshot is also
+available at
+`getFeatureCalculations().reanimatedCompanion.activeCompanion`.
 
 Lifecycle APIs are `killFeatureOwnedCompanion()`,
 `pDismissFeatureOwnedCompanion()`, `handleFeatureCompanionSummonerDeath()`, and
@@ -405,10 +441,13 @@ identity described in `06-combat-system.md`.
 Death/revival/replacement transitions, PDF/export, and E2E remain outside this
 milestone.
 
-The Reanimated Companion R3 boundary is state/lifecycle only. It does not apply
-Strange/Macabre/Superior modification choices, Improved Reanimation,
-Lightning Absorption runtime, Dreadful Swipe execution/riders, command/Dodge or
-Bonus Action combat behavior, Life Transfer, UI/Play Mode, or E2E behavior.
+The Reanimated Companion R4a boundary is creation/setup and persisted derived
+state only. It does not execute command/default Dodge/Bonus Action behavior,
+Dreadful Swipe attacks or pushes, start-turn fear saves, Moist reaction damage,
+Lightning Absorption healing, Arcane Conduit casting or turn-receipt commits,
+Death Burst targets/saves/damage, or Life Transfer. Those entries are
+`metadataOnly`/`deferredR4b`; UI, Play Mode, and E2E behavior also remain later
+milestones.
 Other feature companions still do not gain acquisition or lifecycle behavior
 unless their registry policies explicitly support it.
 
