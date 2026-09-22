@@ -39728,21 +39728,78 @@ class CharacterSheetState {
 		));
 	}
 
+	_getExplicitSpellCastFocusRequirement ({spell, castMeta, castingClass}) {
+		const raw = [castMeta, spell]
+			.map(value => value?.spellcastingFocusRequirement)
+			.find(requirement => requirement?.required === true);
+		if (!raw) return null;
+
+		const rawItemUids = Array.isArray(raw.filter?.itemUids)
+			? raw.filter.itemUids
+			: [];
+		const itemUids = [...new Set(
+			rawItemUids
+				.map(uid => String(uid || "").trim())
+				.filter(uid => {
+					const parts = uid.split("|");
+					return parts.length === 2 && parts.every(Boolean);
+				}),
+		)];
+		const itemNames = itemUids.map(uid => uid.split("|")[0]);
+		const itemLabel = itemNames.length
+			? itemNames.join(", ")
+			: "the configured spellcasting focus";
+
+		return {
+			ruleId: String(raw.ruleId || "explicit-spellcasting-focus"),
+			classUid: castingClass.uid,
+			castingClass,
+			addsMaterialComponent: raw.addsMaterialComponent === true,
+			filter: {
+				itemUids,
+				itemNames: [],
+				itemTypes: [],
+				requiresProficiency: raw.filter?.requiresProficiency === true,
+			},
+			ui: {
+				title: String(raw.ui?.title || "Choose Spellcasting Focus"),
+				description: String(raw.ui?.description || `Choose the equipped ${itemLabel} you are using as the spellcasting focus.`),
+				unavailableMessage: String(raw.ui?.unavailableMessage || `This cast requires an equipped ${itemLabel}.`),
+			},
+		};
+	}
+
 	/**
 	 * Resolve any extra focus rule contributed by the exact casting class.
 	 * @param {*} spell
 	 * @param {*} [castMeta]
-	 * @returns {{ruleId: string, classUid: string, castingClass: *, addsMaterialComponent: boolean}|null}
+	 * @returns {{ruleId: string, classUid: string, castingClass: *, addsMaterialComponent: boolean, filter: *, ui: *}|null}
 	 */
 	getSpellCastFocusRequirement (spell, castMeta = null) {
 		const castingClass = this.resolveSpellCastingClassIdentity(spell);
-		if (!castingClass || castingClass.uid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return null;
+		if (!castingClass) return null;
+
+		const explicitRequirement = this._getExplicitSpellCastFocusRequirement({spell, castMeta, castingClass});
+		if (explicitRequirement) return explicitRequirement;
+
+		if (castingClass.uid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return null;
 		if (this.isSpellCastMaterialComponentWaived(spell, castMeta)) return null;
 		return {
 			ruleId: CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID,
 			classUid: castingClass.uid,
 			castingClass,
 			addsMaterialComponent: true,
+			filter: {
+				itemUids: [],
+				itemNames: ["Thieves' Tools", "Tinker's Tools"],
+				itemTypes: ["AT"],
+				requiresProficiency: true,
+			},
+			ui: {
+				title: "Choose Artificer Spellcasting Focus",
+				description: "Choose the equipped, proficient tool or active Arcane Armor you are using as the material focus for this spell.",
+				unavailableMessage: "EFA Artificer spells require an equipped spellcasting focus: Thieves' Tools, Tinker's Tools, a proficient Artisan's Tool, or active Arcane Armor.",
+			},
 		};
 	}
 
@@ -39752,19 +39809,27 @@ class CharacterSheetState {
 	 * @returns {Array<*>}
 	 */
 	getEligibleSpellCastFocusInventoryRows (requirement) {
-		if (requirement?.ruleId !== CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID) return [];
-		const armorStatus = this.getEfaArcaneArmorBindingStatus();
+		if (!requirement?.filter) return [];
+		const itemUids = new Set((requirement.filter.itemUids || []).map(uid => String(uid).toLowerCase()));
+		const itemNames = new Set((requirement.filter.itemNames || []).map(name => CharacterSheetState.normalizeToolKey(name)));
+		const itemTypes = new Set((requirement.filter.itemTypes || []).map(type => String(type).toUpperCase()));
+		if (!itemUids.size && !itemNames.size && !itemTypes.size) return [];
+		const armorStatus = requirement.ruleId === CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID
+			? this.getEfaArcaneArmorBindingStatus()
+			: null;
 		return (this._data.inventory || []).filter(wrapper => {
 			if (!wrapper?.id || !wrapper.equipped || Number(wrapper.quantity ?? 1) <= 0) return false;
-			if (armorStatus.active && armorStatus.boundItemId === wrapper.id) return true;
+			if (armorStatus?.active && armorStatus.boundItemId === wrapper.id) return true;
 			const item = wrapper.item;
 			if (!item?.name || !item.source) return false;
 			const normalizedName = CharacterSheetState.normalizeToolKey(item.name);
 			const baseType = String(item.type || "").split("|")[0].toUpperCase();
-			const isEligibleEntity = normalizedName === CharacterSheetState.normalizeToolKey("Thieves' Tools")
-				|| normalizedName === CharacterSheetState.normalizeToolKey("Tinker's Tools")
-				|| baseType === "AT";
-			return isEligibleEntity && this.hasToolProficiency(item.name);
+			const itemUid = `${item.name}|${item.source}`.toLowerCase();
+			const isEligibleEntity = itemUids.has(itemUid)
+				|| itemNames.has(normalizedName)
+				|| itemTypes.has(baseType);
+			if (!isEligibleEntity) return false;
+			return !requirement.filter.requiresProficiency || this.hasToolProficiency(item.name);
 		});
 	}
 
@@ -44530,7 +44595,6 @@ class CharacterSheetState {
 		if (!castingClass) return null;
 
 		const focusRequirement = this.getSpellCastFocusRequirement(spell, cast);
-		if (castingClass.uid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID && !focusRequirement) return null;
 
 		let focus = null;
 		if (focusRequirement) {

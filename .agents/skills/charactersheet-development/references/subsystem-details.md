@@ -243,8 +243,34 @@ receipt APIs. This applies even when the spell's source data has no `M` componen
 `ignoresMaterialComponents`,
 `ignoreMaterialComponents`, `waiveMaterialComponents`, or
 `materialComponentsRequired: false` are explicit cast-vehicle waivers for
-innate/item magic. Generic focuses, pouches, unheld tools, and ambiguous
-`sourceClass: "Artificer"` rows never satisfy or activate the EFA rule.
+innate/item magic. A waiver suppresses the ordinary EFA tools requirement but
+does not suppress committed exact-class receipt publication. Generic focuses,
+pouches, unheld tools, and ambiguous `sourceClass: "Artificer"` rows never
+satisfy or activate the EFA rule.
+
+Cast metadata can replace the ordinary class focus rule with an exact,
+source-qualified focus requirement:
+
+```javascript
+spellcastingFocusRequirement: {
+    required: true,
+    ruleId: "feature-focus-rule",
+    filter: {
+        itemUids: ["Alchemist's Supplies|XPHB"],
+        requiresProficiency: true,
+    },
+    ui: {
+        title: "Choose Spellcasting Focus",
+        description: "Choose the equipped focus used for this cast.",
+        unavailableMessage: "This cast requires equipped Alchemist's Supplies.",
+    },
+}
+```
+
+The override is evaluated before the material-component waiver, so a feature
+can waive ordinary Material components while still requiring its named focus.
+The inventory filter matches exact `name|source` UIDs; the wrapper must be
+equipped and have positive quantity. `requiresProficiency` defaults to false.
 
 Callers select from the live wrappers returned by
 `getEligibleSpellCastFocusInventoryRows(requirement)` before any slot,
@@ -288,8 +314,10 @@ receipt can re-resolve its live focus after export/import with
 id and item UID.
 
 Hooks are runtime-only and keyed by exact class UID (or `"*"`). A cancelled,
-blocked, refunded, source-ambiguous, or explicitly component-waived EFA cast
-publishes no EFA receipt. Hook errors are captured in `followUps`; they leave
+blocked, refunded, or source-ambiguous cast publishes no receipt. A committed,
+exactly attributed EFA cast with waived components publishes a receipt with
+null focus identity unless an explicit focus override selected a legal live
+wrapper. Hook errors are captured in `followUps`; they leave
 `ok: true, committed: true`, set `followUpFailed: true`, and never roll back the
 valid cast.
 ## Active States / Toggle Abilities

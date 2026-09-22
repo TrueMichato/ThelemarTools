@@ -24,6 +24,19 @@ const CURE_WOUNDS = {
 	components: {v: true, s: true},
 	duration: [{type: "instant"}],
 };
+const WAIVED_MATERIAL_SPELL = {
+	...CURE_WOUNDS,
+	name: "Waived Material Spell",
+	components: {
+		v: true,
+		s: true,
+		m: {
+			text: "a source-qualified test component worth 100 gp, which the spell consumes",
+			cost: 10000,
+			consume: true,
+		},
+	},
+};
 
 function makeState ({source = "EFA", subclass = null} = {}) {
 	const state = new CharacterSheetState();
@@ -306,7 +319,7 @@ describe("EFA committed cast receipts", () => {
 		}));
 	});
 
-	it("supports exact EFA-attributed item casts while explicit component waivers remain unaffected", async () => {
+	it("supports exact EFA-attributed item casts and publishes waived casts with null focus", async () => {
 		const state = makeState();
 		addTool(state, {id: "tinkers", name: "Tinker's Tools", type: "AT"});
 		state.addItem({id: "item-source", name: "Prototype Wand", source: "EFA", _isCustom: true});
@@ -333,22 +346,120 @@ describe("EFA committed cast receipts", () => {
 		}));
 
 		const stateWaived = makeState();
-		const waivedSpells = makeSpellsManager(stateWaived, [CURE_WOUNDS]);
+		const waivedSpells = makeSpellsManager(stateWaived, [WAIVED_MATERIAL_SPELL]);
 		const waivedConsumer = jest.fn();
 		stateWaived.registerCommittedSpellCastHook("Artificer|EFA", waivedConsumer);
 		const waived = await waivedSpells.pCastItemSpell({
 			id: "waived",
 			itemId: "missing-item",
 			itemName: "Innate Device",
-			spellName: "Cure Wounds",
+			spellName: WAIVED_MATERIAL_SPELL.name,
 			spellSource: "XPHB",
 			sourceClass: "Artificer",
 			sourceClassSource: "EFA",
 			ignoresMaterialComponents: true,
 		});
-		expect(waived).toBe(true);
+		expect(waived).toEqual(expect.objectContaining({
+			ok: true,
+			committed: true,
+			castingClassUid: "Artificer|EFA",
+			castType: "item",
+			focusInventoryItemId: null,
+			focusItemUid: null,
+			focus: null,
+		}));
 		expect(waivedSpells._showCastResult).toHaveBeenCalledTimes(1);
-		expect(waivedConsumer).not.toHaveBeenCalled();
+		expect(waivedConsumer).toHaveBeenCalledWith(waived);
+	});
+
+	it("supports a waived cast with an exact source-qualified explicit focus override", async () => {
+		const state = makeState();
+		addTool(state, {
+			id: "alchemist-supplies",
+			name: "Alchemist's Supplies",
+			source: "XPHB",
+			type: "AT",
+		});
+		state.addItem({id: "feature-source", name: "Conjured Cauldron", source: "EFA", _isCustom: true});
+		const spells = makeSpellsManager(state, [WAIVED_MATERIAL_SPELL]);
+		const consumer = jest.fn();
+		state.registerCommittedSpellCastHook("Artificer|EFA", consumer, {hookId: "explicit-focus"});
+
+		const receipt = await spells.pCastItemSpell({
+			id: "conjured-cauldron-cast",
+			itemId: "feature-source",
+			itemName: "Conjured Cauldron",
+			spellName: WAIVED_MATERIAL_SPELL.name,
+			spellSource: "XPHB",
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+			ignoresMaterialComponents: true,
+			spellcastingFocusRequirement: {
+				required: true,
+				ruleId: "conjured-cauldron-focus",
+				filter: {
+					itemUids: ["Alchemist's Supplies|XPHB"],
+					requiresProficiency: true,
+				},
+			},
+		}, {decision: {focusInventoryItemId: "alchemist-supplies"}});
+
+		expect(receipt).toEqual(expect.objectContaining({
+			ok: true,
+			committed: true,
+			castingClassUid: "Artificer|EFA",
+			focusInventoryItemId: "alchemist-supplies",
+			focusItemUid: "Alchemist's Supplies|XPHB",
+			focus: {
+				inventoryItemId: "alchemist-supplies",
+				itemUid: "Alchemist's Supplies|XPHB",
+				name: "Alchemist's Supplies",
+				source: "XPHB",
+			},
+		}));
+		expect(spells._showCastResult).toHaveBeenCalledWith(
+			expect.any(Object),
+			1,
+			false,
+			false,
+			expect.objectContaining({
+				ignoresMaterialComponents: true,
+				spellcastingFocus: expect.objectContaining({inventoryItemId: "alchemist-supplies"}),
+			}),
+		);
+		expect(consumer).toHaveBeenCalledWith(receipt);
+	});
+
+	it("blocks an explicit focus override with the wrong item source before cast commit", async () => {
+		const state = makeState();
+		addTool(state, {
+			id: "wrong-source-supplies",
+			name: "Alchemist's Supplies",
+			source: "PHB",
+			type: "AT",
+		});
+		const spells = makeSpellsManager(state, [WAIVED_MATERIAL_SPELL]);
+		const consumer = jest.fn();
+		state.registerCommittedSpellCastHook("Artificer|EFA", consumer);
+
+		const result = await spells.pCastItemSpell({
+			id: "explicit-focus",
+			itemId: "feature-source",
+			itemName: "Focus Feature",
+			spellName: WAIVED_MATERIAL_SPELL.name,
+			spellSource: "XPHB",
+			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
+			ignoresMaterialComponents: true,
+			spellcastingFocusRequirement: {
+				required: true,
+				filter: {itemUids: ["Alchemist's Supplies|XPHB"]},
+			},
+		});
+
+		expect(result).toBe(false);
+		expect(spells._showCastResult).not.toHaveBeenCalled();
+		expect(consumer).not.toHaveBeenCalled();
 	});
 
 	it("defers an item-cast receipt until the item-power transaction commits", async () => {

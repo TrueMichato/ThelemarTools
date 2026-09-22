@@ -2363,12 +2363,14 @@ class CharacterSheetSpells {
 			...(power.ignoresMaterialComponents === true ? {ignoresMaterialComponents: true} : {}),
 			...(power.ignoreMaterialComponents === true ? {ignoreMaterialComponents: true} : {}),
 			...(power.materialComponentsRequired === false ? {materialComponentsRequired: false} : {}),
+			...(power.spellcastingFocusRequirement ? {spellcastingFocusRequirement: MiscUtil.copyFast(power.spellcastingFocusRequirement)} : {}),
 		};
 		const focusRequirement = this._state.getSpellCastFocusRequirement?.(spell, power) || null;
 		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: !!focusRequirement})) return false;
 		const castMeta = {
 			sourceItem: power.itemName,
 			...(this._state.isSpellCastMaterialComponentWaived?.(spell, power) ? {ignoresMaterialComponents: true} : {}),
+			...(power.spellcastingFocusRequirement ? {spellcastingFocusRequirement: MiscUtil.copyFast(power.spellcastingFocusRequirement)} : {}),
 		};
 		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
 		if (focusSelection.cancelled) return false;
@@ -2386,7 +2388,7 @@ class CharacterSheetSpells {
 		}
 		const castResult = await this._showCastResult(spell, slotLevel, false, false, castMeta);
 		if (castResult?.cancelled) return false;
-		if (focusRequirement) {
+		if (focusRequirement?.addsMaterialComponent) {
 			await this._pConsumeMaterialComponent({
 				spell,
 				spellData,
@@ -3454,9 +3456,10 @@ class CharacterSheetSpells {
 		if (classFocusRequirement) {
 			const eligibleRows = this._state.getEligibleSpellCastFocusInventoryRows?.(classFocusRequirement) || [];
 			if (!eligibleRows.length) {
-				return `Cannot cast ${spell.name} — EFA Artificer spells require an equipped spellcasting focus: Thieves' Tools, Tinker's Tools, a proficient Artisan's Tool, or active Arcane Armor.`;
+				return `Cannot cast ${spell.name} — ${classFocusRequirement.ui?.unavailableMessage || "the required spellcasting focus is unavailable"}`;
 			}
 		}
+		if (this._state.isSpellCastMaterialComponentWaived?.(spell)) return null;
 
 		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
 			|| this._state.getSpellMaterialComponentInfo?.(spell);
@@ -3506,7 +3509,7 @@ class CharacterSheetSpells {
 		if (!candidates.length) {
 			JqueryUtil.doToast({
 				type: "warning",
-				content: "EFA Artificer spells require an equipped spellcasting focus: Thieves' Tools, Tinker's Tools, a proficient Artisan's Tool, or active Arcane Armor.",
+				content: requirement.ui?.unavailableMessage || "The required spellcasting focus is unavailable.",
 			});
 			return {cancelled: true, requirement, reason: "focusUnavailable"};
 		}
@@ -3519,8 +3522,8 @@ class CharacterSheetSpells {
 		if (!focusInventoryRow && candidates.length === 1) focusInventoryRow = candidates[0];
 		if (!focusInventoryRow) {
 			focusInventoryRow = await CharacterSheetModal.pGetUserEnum({
-				title: "Choose Artificer Spellcasting Focus",
-				htmlDescription: "Choose the equipped tool or active Arcane Armor you are using as the material focus for this spell.",
+				title: requirement.ui?.title || "Choose Spellcasting Focus",
+				htmlDescription: requirement.ui?.description || "Choose the equipped focus you are using to cast this spell.",
 				values: candidates,
 				fnDisplay: row => `${row.item.name} (${row.item.source})`,
 				isResolveItem: true,
@@ -3562,6 +3565,7 @@ class CharacterSheetSpells {
 	async _pConsumeMaterialComponent ({spell, spellData, decision = null, variantUsed = false}) {
 		if (variantUsed) return {consumed: null};
 		if (this._state.getSettings?.()?.ignoreSpellcastingRestrictions) return {consumed: null};
+		if (this._state.isSpellCastMaterialComponentWaived?.(spell)) return {consumed: null};
 
 		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
 			|| this._state.getSpellMaterialComponentInfo?.(spell);
