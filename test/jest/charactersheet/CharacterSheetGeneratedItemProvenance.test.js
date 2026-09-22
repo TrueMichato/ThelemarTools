@@ -11,11 +11,22 @@ const getOwner = ({
 	classSource = "EFA",
 	subclassName = "Alchemist",
 	subclassSource = "EFA",
+	featureSource = subclassSource,
 	level = 3,
+	isLegacySubclassFeatureUid = false,
 } = {}) => ({
-	featureUid: `${featureName}|Artificer|${classSource}|${subclassName}|${subclassSource}|${level}`,
+	featureUid: [
+		featureName,
+		"Artificer",
+		classSource,
+		subclassName,
+		subclassSource,
+		level,
+		...(!isLegacySubclassFeatureUid ? [featureSource] : []),
+	].join("|"),
 	classUid: `Artificer|${classSource}`,
 	subclassUid: `${subclassName}|Artificer|${classSource}|${subclassSource}`,
+	...(!isLegacySubclassFeatureUid ? {featureSource} : {}),
 });
 
 const getItem = (name = "Experimental Elixir") => ({
@@ -88,16 +99,29 @@ describe("Generated feature item provenance", () => {
 				classUid: "Artificer|TCE",
 			},
 		})).toEqual({ok: false, code: "invalid-generated-item-owner"});
+
+		expect(state.createGeneratedFeatureItem({
+			item: getItem(),
+			owner: {
+				...owner,
+				featureSource: "TCE",
+			},
+		})).toEqual({ok: false, code: "invalid-generated-item-owner"});
 	});
 
 	it("isolates exact owner sources, same-named customs, and other EFA features", () => {
 		const efaOwner = getOwner();
-		const tceOwner = getOwner({subclassSource: "TCE"});
+		const tceOwner = getOwner({classSource: "TCE", subclassSource: "TCE"});
+		const trailingSourceOwner = getOwner({featureSource: "TCE"});
 		const otherFeatureOwner = getOwner({featureName: "Alchemical Homunculus"});
 		const efa = state.createGeneratedFeatureItem({item: getItem(), owner: efaOwner});
 		const tce = state.createGeneratedFeatureItem({
 			item: {...getItem(), source: "TCE"},
 			owner: tceOwner,
+		});
+		const trailingSource = state.createGeneratedFeatureItem({
+			item: {...getItem(), source: "TCE"},
+			owner: trailingSourceOwner,
 		});
 		const otherFeature = state.createGeneratedFeatureItem({item: getItem(), owner: otherFeatureOwner});
 		state.addItem({...getItem(), _isCustom: true});
@@ -106,8 +130,8 @@ describe("Generated feature item provenance", () => {
 			&& item.source === "EFA"
 			&& !item._isGeneratedFeatureItem);
 
-		// Negative-control tripwire: weakening the real owner-key comparison to ignore
-		// class/subclass/feature source makes this assertion fail at the public filter call.
+		// Negative-control tripwire: dropping the seventh (feature-source) segment from
+		// the real owner key makes this public filter admit `trailingSource`.
 		expect(state.getGeneratedFeatureItemRows(efaOwner).map(row => row.id)).toEqual([efa.itemId]);
 
 		const removeSpy = jest.spyOn(state, "removeItem");
@@ -116,9 +140,36 @@ describe("Generated feature item provenance", () => {
 		expect(removeSpy).toHaveBeenCalledWith(efa.itemId);
 		expect(state.getItems().map(item => item.id)).toEqual(expect.arrayContaining([
 			tce.itemId,
+			trailingSource.itemId,
 			otherFeature.itemId,
 			custom.id,
 		]));
+	});
+
+	it("preserves legacy six-part subclass feature UIDs as stale repair-required rows", () => {
+		const canonicalOwner = getOwner();
+		const legacyOwner = getOwner({isLegacySubclassFeatureUid: true});
+		const created = state.createGeneratedFeatureItem({item: getItem(), owner: canonicalOwner});
+		const wrapper = state.getInventory().find(row => row.id === created.itemId);
+		wrapper.item._generatedItemProvenance.owner = legacyOwner;
+
+		expect(state.createGeneratedFeatureItem({item: getItem(), owner: legacyOwner}))
+			.toEqual({ok: false, code: "invalid-generated-item-owner"});
+		expect(state.classifyGeneratedFeatureItem(wrapper)).toMatchObject({
+			status: "stale",
+			repairRequired: true,
+			reason: "legacy-subclass-feature-uid",
+			generatedItemId: created.generatedItemId,
+		});
+		expect(state.getGeneratedFeatureItemRows(canonicalOwner)).toEqual([]);
+		expect(state.removeGeneratedFeatureItemsByOwner(canonicalOwner)).toEqual([]);
+
+		state.replaceItem(created.itemId, {
+			name: "Legacy Elixir",
+			source: "EFA",
+			type: "P",
+		});
+		expect(state.getItemRaw(created.itemId)._generatedItemProvenance.owner).toEqual(legacyOwner);
 	});
 
 	it("surfaces unsupported versions as stale and never lists or removes them", () => {

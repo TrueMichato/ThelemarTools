@@ -35657,7 +35657,7 @@ class CharacterSheetState {
 	// #region Inventory
 	static GENERATED_FEATURE_ITEM_PROVENANCE_VERSION = 1;
 
-	static _normalizeGeneratedFeatureItemOwner (owner) {
+	static _normalizeGeneratedFeatureItemOwner (owner, {isLegacySubclassFeatureUid = false} = {}) {
 		if (!owner || typeof owner !== "object" || Array.isArray(owner)) return null;
 
 		const getParts = (uid, count) => {
@@ -35670,9 +35670,9 @@ class CharacterSheetState {
 
 		const classParts = getParts(owner.classUid, 2);
 		const subclassParts = owner.subclassUid == null ? null : getParts(owner.subclassUid, 4);
-		const featureParts = getParts(owner.featureUid, subclassParts ? 6 : 4);
+		const featureParts = getParts(owner.featureUid, subclassParts ? (isLegacySubclassFeatureUid ? 6 : 7) : 4);
 		if (!classParts || !featureParts || (owner.subclassUid != null && !subclassParts)) return null;
-		const featureLevel = Number(featureParts.at(-1));
+		const featureLevel = Number(featureParts[subclassParts ? 5 : 3]);
 		if (!Number.isSafeInteger(featureLevel) || featureLevel < 1) return null;
 
 		if (!equals(featureParts[1], classParts[0]) || !equals(featureParts[2], classParts[1])) return null;
@@ -35682,11 +35682,22 @@ class CharacterSheetState {
 			|| !equals(subclassParts[1], classParts[0])
 			|| !equals(subclassParts[2], classParts[1])
 		)) return null;
+		if (
+			subclassParts
+			&& !isLegacySubclassFeatureUid
+			&& owner.featureSource != null
+			&& (
+				typeof owner.featureSource !== "string"
+				|| !owner.featureSource.trim()
+				|| !equals(featureParts[6], owner.featureSource.trim())
+			)
+		) return null;
 
 		return {
 			featureUid: featureParts.join("|"),
 			classUid: classParts.join("|"),
 			subclassUid: subclassParts ? subclassParts.join("|") : null,
+			...(subclassParts && !isLegacySubclassFeatureUid ? {featureSource: featureParts[6]} : {}),
 		};
 	}
 
@@ -35744,9 +35755,24 @@ class CharacterSheetState {
 			};
 		}
 
-		const owner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(provenance.owner);
 		const isMetadataValid = provenance.metadata == null
 			|| (typeof provenance.metadata === "object" && !Array.isArray(provenance.metadata));
+		const owner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(provenance.owner);
+		if (!owner && isMetadataValid && provenance.owner?.subclassUid != null) {
+			const legacyOwner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(
+				provenance.owner,
+				{isLegacySubclassFeatureUid: true},
+			);
+			if (legacyOwner) {
+				return {
+					status: "stale",
+					repairRequired: true,
+					reason: "legacy-subclass-feature-uid",
+					generatedItemId,
+					provenance: MiscUtil.copyFast(provenance),
+				};
+			}
+		}
 		if (!owner || !isMetadataValid) {
 			return {status: "ordinary", repairRequired: false, reason: "malformed-generated-metadata"};
 		}

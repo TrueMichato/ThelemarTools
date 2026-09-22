@@ -1032,7 +1032,8 @@ New transient generated items use the versioned
 	_generatedItemProvenance: {
 		version: 1,
 		owner: {
-			featureUid: "Feature|Class|ClassSource|Subclass|SubclassSource|Level",
+			featureUid: "Feature|Class|ClassSource|Subclass|SubclassSource|Level|FeatureSource",
+			featureSource: "FeatureSource",
 			classUid: "Class|ClassSource",
 			subclassUid: "Subclass|Class|ClassSource|SubclassSource",
 		},
@@ -1041,8 +1042,15 @@ New transient generated items use the versioned
 }
 ```
 
-The owner UIDs are validated together and matched case-insensitively as complete
-UIDs; display names or partial source matches never establish ownership.
+The canonical subclass-feature identity is the seven-part source-aware UID
+returned by `CharacterSheetState._getSourceAwareSubclassFeatureUid()`. Owner
+UIDs are validated together, the trailing feature source is checked against an
+optional `featureSource` receipt, and matching is case-insensitive over the
+complete UIDs; display names or partial source matches never establish
+ownership. The standard six-part 5etools subclass-feature UID is accepted only
+when reading provenance written by the first generic-contract revision: it is
+classified `stale`/repair-required, preserved through editing, and is never
+listed or removed as an exact owner. New writes require the seven-part form.
 `createGeneratedFeatureItem()` creates one `_isCustom` quantity-1 row with
 separate stable wrapper and generated-instance IDs, so repeated calls never
 stack. `classifyGeneratedFeatureItem()` returns `valid`, `stale`, or `ordinary`;
