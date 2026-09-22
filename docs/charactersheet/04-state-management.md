@@ -372,9 +372,32 @@ warning names the failed prerequisite. The selector previews each model's
 weapon and signature benefit in durable text as the selection changes, while
 successful rest feedback names the old model, new model, and bound armor.
 
-Model damage, range, Intelligence substitution, riders, target/resource
-tracking, Perfected Armor, and Armor Replication remain deferred. Those
-mechanics must extend the stable rows rather than replace them.
+The active selected row supplies the EFA level-3 weapon baseline:
+
+- Force Demolisher: Simple Melee, Reach, `1d10` Force, 10-foot normal reach.
+- Thunder Pulse: Simple Melee, `1d8` Thunder, 5-foot normal reach.
+- Lightning Launcher: Simple Ranged, `1d6` Lightning, 90/300-foot range.
+
+All three default to Intelligence for attack and damage. Infiltrator's active
+row also contributes Powered Steps (`+5` walking speed) and Dampening Field
+(Stealth advantage) through the ordinary item-effect/named-modifier pipeline,
+so armor disadvantage cancels it normally. Smith's Tools remain prerequisites
+for the transformation/bind operation (and model switching), not ongoing
+requirements after a binding is active.
+
+Generated mechanics use `_generatedItemBase` snapshots. Reconciliation updates
+only fields that are absent or still equal to the previous generated base;
+player renames, wrapper IDs/notes, bonuses, entries, effects, metadata, and
+direct mechanical overrides survive model switches and save/load. Managed
+passive effects have stable `_generatedEffectId` values so generated updates can
+coexist with player-authored effects.
+
+Deferred Armorer work includes Giant Stature activation/resources, Force
+Demolisher push/pull resolution, Thunder Pulse's target rider, Defensive Field,
+Lightning Launcher's once-per-turn extra damage, Improved Arsenal, level 9/15,
+Armor Replication, binding UI, and E2E coverage. Arcane Armor's general Strength
+requirement removal, quick don/doff, and spellcasting-focus benefits are also
+deferred rather than approximated.
 
 ### Active States & Conditions
 

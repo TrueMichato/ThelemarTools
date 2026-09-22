@@ -31111,6 +31111,35 @@ class CharacterSheetState {
 							multiplier: 0.5,
 							filter: {itemTypes: ["LA", "MA", "HA"]},
 						});
+
+						const status = this._getEfaArcaneArmorStatusSnapshot();
+						calculations.hasArcaneArmor = true;
+						calculations.hasEfaArmorer = true;
+						calculations.efaArmorerSource = "EFA";
+						calculations.efaArmorerModel = status.model?.name || null;
+						calculations.efaArmorerBindingActive = status.active;
+						calculations.efaArmorerBindingSuspended = status.suspended;
+						calculations.efaArmorerBindingReasons = [...status.reasons];
+						calculations.efaArmorerModelWeaponActive = status.active && !!status.model;
+						calculations.efaArmorerModelWeaponId = status.active ? status.model?.id || null : null;
+
+						if (status.active) {
+							switch (status.model?.name) {
+								case "Dreadnaught":
+									calculations.hasEfaForceDemolisher = true;
+									break;
+								case "Guardian":
+									calculations.hasEfaThunderPulse = true;
+									break;
+								case "Infiltrator":
+									calculations.hasEfaLightningLauncher = true;
+									calculations.hasEfaPoweredSteps = true;
+									calculations.hasEfaDampeningField = true;
+									calculations.efaArmorerSpeedBonus = 5;
+									break;
+							}
+						}
+
 						if (level >= 5) {
 							calculations.hasExtraAttack = true;
 							calculations.attacksPerAction = 2;
@@ -31170,37 +31199,35 @@ class CharacterSheetState {
 								break;
 							}
 							case "armorer": {
-								// Arcane Armor (level 3+)
+								const classSource = `${cls.source ?? ""}`.toUpperCase();
+								const subclassSource = `${effectiveSubclass?.source ?? ""}`.toUpperCase();
+								const isTceArmorer = classSource === "TCE" && subclassSource === "TCE";
+
+								if (!isTceArmorer) break;
+
+								// Preserve the legacy TCE calculation surface explicitly. These
+								// fields predate model-choice/binding state and intentionally remain
+								// available together for existing TCE characters and renderers.
 								calculations.hasArcaneArmor = true;
-
-								// Guardian model: Thunder Gauntlets (1d8 thunder)
 								calculations.thunderGauntletsDamage = "1d8";
-								// Defensive Field: temp HP = artificer level
 								calculations.defensiveFieldTempHp = level;
-
-								// Infiltrator model: Lightning Launcher (1d6 lightning, +1d6 once/turn)
 								calculations.lightningLauncherDamage = "1d6";
 								calculations.lightningLauncherBonusDamage = "1d6";
 								calculations.infiltratorSpeedBonus = 5;
 
-								// Extra Attack (level 5+)
 								if (level >= 5) {
 									calculations.hasExtraAttack = true;
 									calculations.attacksPerAction = 2;
 								}
 
-								// Armor Modifications (level 9+): +2 infusion slots for armor
 								if (level >= 9) {
 									calculations.hasArmorModifications = true;
 									calculations.armorInfusionBonus = 2;
 								}
 
-								// Perfected Armor (level 15+)
 								if (level >= 15) {
 									calculations.hasPerfectedArmor = true;
-									// Guardian: pull creatures up to 30 ft
 									calculations.guardianPullRange = 30;
-									// Infiltrator: impose disadvantage via glimmer
 									calculations.hasInfiltratorGlimmer = true;
 								}
 								break;
@@ -69538,6 +69565,12 @@ class CharacterSheetState {
 			name: "Force Demolisher",
 			type: "M",
 			isMelee: true,
+			dmg1: "1d10",
+			dmgType: "O",
+			property: ["R"],
+			range: "10 ft.",
+			abilityMod: "int",
+			effects: [],
 		},
 		{
 			model: "Guardian",
@@ -69545,6 +69578,12 @@ class CharacterSheetState {
 			name: "Thunder Pulse",
 			type: "M",
 			isMelee: true,
+			dmg1: "1d8",
+			dmgType: "T",
+			property: [],
+			range: "5 ft.",
+			abilityMod: "int",
+			effects: [],
 		},
 		{
 			model: "Infiltrator",
@@ -69552,8 +69591,64 @@ class CharacterSheetState {
 			name: "Lightning Launcher",
 			type: "R",
 			isMelee: false,
+			dmg1: "1d6",
+			dmgType: "L",
+			property: [],
+			range: "90/300",
+			abilityMod: "int",
+			effects: [
+				{
+					_generatedEffectId: "efa-armorer:infiltrator:powered-steps",
+					name: "Powered Steps",
+					type: "speed:walk",
+					value: 5,
+				},
+				{
+					_generatedEffectId: "efa-armorer:infiltrator:dampening-field",
+					name: "Dampening Field",
+					type: "skill:stealth",
+					value: 0,
+					advantage: true,
+				},
+			],
 		},
 	];
+
+	_getEfaArmorerModelWeaponTemplate (def) {
+		const managedBase = {
+			type: def.type,
+			weaponCategory: "simple",
+			isMelee: def.isMelee,
+			dmg1: def.dmg1,
+			dmgType: def.dmgType,
+			property: def.property,
+			range: def.range,
+			abilityMod: def.abilityMod,
+			effects: def.effects,
+		};
+		return {
+			name: def.name,
+			source: "EFA",
+			weapon: true,
+			...MiscUtil.copyFast(managedBase),
+			sourceFeature: "Armor Model",
+			_isCustom: true,
+			_isGeneratedFeatureItem: true,
+			_generatedItemId: def.id,
+			_efaArmorerWeaponId: def.id,
+			_generatedItemProvenance: {
+				sourceType: "subclassFeature",
+				sourceFeature: "Armor Model",
+				source: "EFA",
+				className: "Artificer",
+				classSource: "EFA",
+				subclassShortName: "Armorer",
+				subclassSource: "EFA",
+				level: 3,
+			},
+			_generatedItemBase: MiscUtil.copyFast(managedBase),
+		};
+	}
 
 	_getEfaArmorerClass () {
 		const eq = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").toLowerCase();
@@ -69810,49 +69905,76 @@ class CharacterSheetState {
 				this._unregisterItemEffects(duplicate.id);
 				this._data.inventory = this._data.inventory.filter(wrapper => wrapper.id !== duplicate.id);
 			}
+			const template = this._getEfaArmorerModelWeaponTemplate(def);
 			if (!keeper) {
-				this.addItem({
-					name: def.name,
-					source: "EFA",
-					type: def.type,
-					weapon: true,
-					weaponCategory: "simple",
-					isMelee: def.isMelee,
-					sourceFeature: "Armor Model",
-					_isCustom: true,
-					_isGeneratedFeatureItem: true,
-					_generatedItemId: def.id,
-					_efaArmorerWeaponId: def.id,
-					_generatedItemProvenance: {
-						sourceType: "subclassFeature",
-						sourceFeature: "Armor Model",
-						source: "EFA",
-						className: "Artificer",
-						classSource: "EFA",
-						subclassShortName: "Armorer",
-						subclassSource: "EFA",
-						level: 3,
-					},
-				}, 1, true, false);
+				this.addItem(template, 1, true, false);
 				keeper = (this._data.inventory || []).find(wrapper => wrapper.item?._efaArmorerWeaponId === def.id) || null;
 			}
 			if (!keeper) continue;
-			keeper.item._efaArmorerWeaponId = def.id;
-			keeper.item._generatedItemId = def.id;
-			keeper.item._isGeneratedFeatureItem = true;
-			keeper.item._generatedItemProvenance = {
-				...(keeper.item._generatedItemProvenance || {}),
-				sourceType: "subclassFeature",
-				sourceFeature: "Armor Model",
-				source: "EFA",
-				className: "Artificer",
-				classSource: "EFA",
-				subclassShortName: "Armorer",
-				subclassSource: "EFA",
-				level: 3,
+
+			const item = keeper.item;
+			const previousBase = item._generatedItemBase;
+			const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+			const copy = value => value == null ? value : MiscUtil.copyFast(value);
+			const updateManaged = key => {
+				if (item[key] == null || (previousBase && same(item[key], previousBase[key]))) {
+					item[key] = copy(template[key]);
+				}
 			};
-			if (keeper.item.weapon === undefined) keeper.item.weapon = true;
-			if (!keeper.item.type) keeper.item.type = def.type;
+			["type", "weaponCategory", "isMelee", "dmg1", "dmgType", "property", "range", "abilityMod"]
+				.forEach(updateManaged);
+
+			const currentEffects = Array.isArray(item.effects) ? item.effects : [];
+			const previousEffects = Array.isArray(previousBase?.effects) ? previousBase.effects : null;
+			const nextEffects = template.effects || [];
+			if (!previousEffects) {
+				const currentIds = new Set(currentEffects.map(effect => effect?._generatedEffectId).filter(Boolean));
+				item.effects = [
+					...currentEffects,
+					...nextEffects
+						.filter(effect => !currentIds.has(effect._generatedEffectId))
+						.map(copy),
+				];
+			} else {
+				const previousById = new Map(previousEffects
+					.filter(effect => effect?._generatedEffectId)
+					.map(effect => [effect._generatedEffectId, effect]));
+				const nextById = new Map(nextEffects
+					.filter(effect => effect?._generatedEffectId)
+					.map(effect => [effect._generatedEffectId, effect]));
+				const seenIds = new Set();
+				const reconciled = [];
+				for (const effect of currentEffects) {
+					const id = effect?._generatedEffectId;
+					if (!id || !previousById.has(id)) {
+						reconciled.push(effect);
+						if (id) seenIds.add(id);
+						continue;
+					}
+					seenIds.add(id);
+					const next = nextById.get(id);
+					if (!next) {
+						if (!same(effect, previousById.get(id))) reconciled.push(effect);
+						continue;
+					}
+					reconciled.push(same(effect, previousById.get(id)) ? copy(next) : effect);
+				}
+				for (const next of nextEffects) {
+					const id = next?._generatedEffectId;
+					if (!id || seenIds.has(id) || previousById.has(id)) continue;
+					reconciled.push(copy(next));
+				}
+				item.effects = reconciled;
+			}
+
+			item.weapon = true;
+			item.source ||= "EFA";
+			item.sourceFeature = "Armor Model";
+			item._efaArmorerWeaponId = def.id;
+			item._generatedItemId = def.id;
+			item._isGeneratedFeatureItem = true;
+			item._generatedItemProvenance = MiscUtil.copyFast(template._generatedItemProvenance);
+			item._generatedItemBase = MiscUtil.copyFast(template._generatedItemBase);
 		}
 	}
 
@@ -70003,10 +70125,11 @@ class CharacterSheetState {
 			id: this.getItemAttackId(item),
 			name: overrides.name ?? item.name ?? attack.name,
 			isMelee: overrides.isMelee ?? !isRanged,
-			abilityMod: overrides.abilityMod ?? (isAlwaysThrown ? (hasFinesse ? "finesse" : "str") : isRanged ? "dex" : hasFinesse ? "finesse" : "str"),
+			abilityMod: overrides.abilityMod ?? item.abilityMod ?? (isAlwaysThrown ? (hasFinesse ? "finesse" : "str") : isRanged ? "dex" : hasFinesse ? "finesse" : "str"),
 			attackBonus: Number(damage.attackBonus || 0) + Number(item.customAttackBonus || 0),
+			weaponCategory: overrides.weaponCategory ?? item.weaponCategory ?? attack.weaponCategory,
 			range,
-			reach: overrides.reach ?? (reachMatch ? Number(reachMatch[1]) : attack.reach),
+			reach: overrides.reach ?? item.reach ?? (reachMatch ? Number(reachMatch[1]) : attack.reach),
 			reachBonus: 0,
 			damage: overrides.damage ?? damage.dice ?? attack.damage,
 			damageType: overrides.damageType ?? damage.damageType ?? attack.damageType,

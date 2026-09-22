@@ -814,6 +814,18 @@ stale-prerequisite warning. Because application occurs after the full pre-rest
 snapshot, Undo Rest restores every durable choice store and the previously
 active stable generated row.
 
+The three EFA model rows store their level-3 weapon baseline in
+`_generatedItemBase`: Force Demolisher (`1d10` Force, Reach, 10 ft.), Thunder
+Pulse (`1d8` Thunder, 5 ft.), and Lightning Launcher (`1d6` Lightning, 90/300
+ft.). Each is Simple and defaults to Intelligence for both attack and damage.
+Reconciliation advances untouched generated fields while preserving any field
+that differs from the previous base. Stable `_generatedEffectId` entries apply
+Infiltrator's `speed:walk +5` and `skill:stealth` advantage through the ordinary
+equipped-item effect pipeline; switching model, doffing, clearing the binding,
+death, source loss, or ambiguous model evidence unregisters them immediately.
+This is why armor-imposed Stealth disadvantage cancels Dampening Field instead
+of being removed.
+
 ### Usable adventuring gear
 
 `getUsableGear()` is the canonical read API for type-`G` items whose entries declare an

@@ -12,6 +12,41 @@ const MODEL_IDS = {
 	Guardian: "efa-armorer:guardian:thunder-pulse",
 	Infiltrator: "efa-armorer:infiltrator:lightning-launcher",
 };
+const MODEL_STATS = {
+	Dreadnaught: {
+		name: "Force Demolisher",
+		type: "M",
+		isMelee: true,
+		damage: "1d10",
+		damageType: "force",
+		dmgType: "O",
+		properties: ["R"],
+		range: "10 ft.",
+		reach: 10,
+	},
+	Guardian: {
+		name: "Thunder Pulse",
+		type: "M",
+		isMelee: true,
+		damage: "1d8",
+		damageType: "thunder",
+		dmgType: "T",
+		properties: [],
+		range: "5 ft.",
+		reach: 5,
+	},
+	Infiltrator: {
+		name: "Lightning Launcher",
+		type: "R",
+		isMelee: false,
+		damage: "1d6",
+		damageType: "lightning",
+		dmgType: "L",
+		properties: [],
+		range: "90/300",
+		reach: null,
+	},
+};
 
 const copy = value => JSON.parse(JSON.stringify(value));
 
@@ -145,6 +180,30 @@ function getGeneratedRows (state) {
 		.sort((a, b) => a._efaArmorerWeaponId.localeCompare(b._efaArmorerWeaponId));
 }
 
+function getActiveModelAttack (state) {
+	const attacks = state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId);
+	expect(attacks).toHaveLength(1);
+	return attacks[0];
+}
+
+function getAttackRollCalculations (state, attack) {
+	return {
+		ability: state.resolveAttackAbilityKey(attack.abilityMod),
+		attackBonus: state.getWeaponAbilityMod(attack) + state.getProficiencyBonus() + (attack.attackBonus || 0),
+		damageBonus: state.getWeaponAbilityMod(attack) + state.getWeaponDisplayDamageBonus(attack),
+	};
+}
+
+function setHeavyArmorStealthSnapshot (state) {
+	state.setArmor({
+		name: "Plate Armor",
+		source: "XPHB",
+		ac: 18,
+		type: "heavy",
+		stealth: true,
+	});
+}
+
 describe("EFA Armorer Arcane Armor binding", () => {
 	it("binds one eligible equipped armor wrapper and exposes an explicit active status", () => {
 		const {state, armor} = buildState();
@@ -187,8 +246,12 @@ describe("EFA Armorer Arcane Armor binding", () => {
 	});
 
 	it("keeps Arcane Armor active after the transformation tools are no longer available", () => {
-		const {state, armor, tools} = buildState();
+		const {state, armor, tools} = buildState({model: "Infiltrator"});
+		state.setAbilityBase("str", 16);
+		const baseSpeed = state.getWalkSpeed();
 		expect(state.bindEfaArcaneArmor(armor.id)).toMatchObject({ok: true});
+		expect(state.getWalkSpeed()).toBe(baseSpeed + 5);
+		expect(state.getAdvantageState("skill:stealth").advantage).toBe(true);
 
 		state.removeItem(tools.id);
 		state.removeToolProficiency("Smith's Tools");
@@ -199,7 +262,11 @@ describe("EFA Armorer Arcane Armor binding", () => {
 			suspended: false,
 			reasons: [],
 		});
-		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toHaveLength(1);
+		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toEqual([
+			expect.objectContaining({id: MODEL_IDS.Infiltrator}),
+		]);
+		expect(state.getWalkSpeed()).toBe(baseSpeed + 5);
+		expect(state.getAdvantageState("skill:stealth").advantage).toBe(true);
 		expect(state.getEfaArcaneArmorEligibleItems()).toEqual([]);
 	});
 
@@ -361,9 +428,29 @@ describe("EFA Armorer stable generated model weapons", () => {
 		expect(initial.map(item => item._efaArmorerWeaponId)).toEqual(Object.values(MODEL_IDS).sort());
 		expect(new Set(initial.map(item => item.id)).size).toBe(3);
 		for (const item of initial) {
-			expect(item).not.toHaveProperty("dmg1");
-			expect(item).not.toHaveProperty("range");
-			expect(item).not.toHaveProperty("abilityMod");
+			const model = MODEL_NAMES.find(name => MODEL_IDS[name] === item._efaArmorerWeaponId);
+			const expected = MODEL_STATS[model];
+			expect(item).toMatchObject({
+				type: expected.type,
+				weapon: true,
+				weaponCategory: "simple",
+				isMelee: expected.isMelee,
+				dmg1: expected.damage,
+				dmgType: expected.dmgType,
+				property: expected.properties,
+				range: expected.range,
+				abilityMod: "int",
+				_generatedItemBase: {
+					type: expected.type,
+					weaponCategory: "simple",
+					isMelee: expected.isMelee,
+					dmg1: expected.damage,
+					dmgType: expected.dmgType,
+					property: expected.properties,
+					range: expected.range,
+					abilityMod: "int",
+				},
+			});
 		}
 		state.addItem({
 			...initial[0],
@@ -382,6 +469,45 @@ describe("EFA Armorer stable generated model weapons", () => {
 			id: item.id,
 			stableId: item._efaArmorerWeaponId,
 		})));
+	});
+
+	it("upgrades accepted stat-less rows without replacing custom names or effects", () => {
+		const {state} = buildState({model: "Infiltrator"});
+		for (const wrapper of state._data.inventory.filter(row => row.item?._efaArmorerWeaponId)) {
+			delete wrapper.item._generatedItemBase;
+			delete wrapper.item.dmg1;
+			delete wrapper.item.dmgType;
+			delete wrapper.item.property;
+			delete wrapper.item.range;
+			delete wrapper.item.abilityMod;
+			delete wrapper.item.effects;
+		}
+		const guardian = state._data.inventory.find(row => row.item?._efaArmorerWeaponId === MODEL_IDS.Guardian);
+		guardian.item.name = "Player-Named Thunder Fist";
+		guardian.item.effects = [{type: "ac", value: 1, name: "Player Effect"}];
+
+		state.getFeatureCalculations();
+
+		for (const model of MODEL_NAMES) {
+			const item = getGeneratedRows(state).find(row => row._efaArmorerWeaponId === MODEL_IDS[model]);
+			const expected = MODEL_STATS[model];
+			expect(item).toMatchObject({
+				dmg1: expected.damage,
+				dmgType: expected.dmgType,
+				property: expected.properties,
+				range: expected.range,
+				abilityMod: "int",
+			});
+		}
+		expect(getGeneratedRows(state).find(row => row._efaArmorerWeaponId === MODEL_IDS.Guardian)).toMatchObject({
+			name: "Player-Named Thunder Fist",
+			effects: [{type: "ac", value: 1, name: "Player Effect"}],
+		});
+		expect(getGeneratedRows(state).find(row => row._efaArmorerWeaponId === MODEL_IDS.Infiltrator).effects)
+			.toEqual(expect.arrayContaining([
+				expect.objectContaining({_generatedEffectId: "efa-armorer:infiltrator:powered-steps"}),
+				expect.objectContaining({_generatedEffectId: "efa-armorer:infiltrator:dampening-field"}),
+			]));
 	});
 
 	it("preserves each model row and customization across model switches and save/load", () => {
@@ -408,6 +534,77 @@ describe("EFA Armorer stable generated model weapons", () => {
 		expect(getGeneratedRows(restored).find(item => item._efaArmorerWeaponId === MODEL_IDS.Guardian)).toMatchObject({
 			name: "Customized Thunder Knuckle",
 			customAttackBonus: 2,
+		});
+	});
+
+	it("preserves direct mechanical overrides, notes, bonuses, effects, and wrapper identity", () => {
+		const {state, armor} = buildState({model: "Guardian"});
+		state.setAbilityBase("cha", 16);
+		state.bindEfaArcaneArmor(armor.id);
+		const guardian = getGeneratedRows(state).find(item => item._efaArmorerWeaponId === MODEL_IDS.Guardian);
+		state.replaceItem(guardian.id, {
+			...guardian,
+			name: "Resonant Diplomat",
+			weaponCategory: "martial",
+			dmg1: "2d8",
+			dmgType: "R",
+			property: ["F"],
+			range: "15 ft.",
+			abilityMod: "cha",
+			customAttackBonus: 2,
+			customDamageBonus: 3,
+			entries: ["A player-authored note on the weapon."],
+			effects: [{type: "ac", value: 2, name: "Player Effect"}],
+			playerMetadata: {keep: true},
+		});
+		state.updateItemNote(guardian.id, "Wrapper note survives");
+
+		setCanonicalModel(state, "Dreadnaught");
+		expect(state.getCustomModifier("ac")).toBe(0);
+		setCanonicalModel(state, "Guardian");
+
+		let attack = getActiveModelAttack(state);
+		expect(attack).toMatchObject({
+			id: MODEL_IDS.Guardian,
+			name: "Resonant Diplomat",
+			weaponCategory: "martial",
+			abilityMod: "cha",
+			attackBonus: 2,
+			damage: "2d8",
+			damageType: "radiant",
+			damageBonus: 3,
+			properties: ["F"],
+			range: "15 ft.",
+			reach: 15,
+		});
+		expect(state.getCustomModifier("ac")).toBe(2);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(copy(state.toJson()));
+		const restoredGuardian = getGeneratedRows(restored).find(item => item._efaArmorerWeaponId === MODEL_IDS.Guardian);
+		expect(restoredGuardian).toMatchObject({
+			id: guardian.id,
+			name: "Resonant Diplomat",
+			weaponCategory: "martial",
+			dmg1: "2d8",
+			dmgType: "R",
+			property: ["F"],
+			range: "15 ft.",
+			abilityMod: "cha",
+			customAttackBonus: 2,
+			customDamageBonus: 3,
+			entries: ["A player-authored note on the weapon."],
+			effects: [{type: "ac", value: 2, name: "Player Effect"}],
+			playerMetadata: {keep: true},
+		});
+		expect(restored.getItemNote(guardian.id)).toBe("Wrapper note survives");
+		attack = getActiveModelAttack(restored);
+		expect(attack.id).toBe(MODEL_IDS.Guardian);
+		expect(restored.getCustomModifier("ac")).toBe(2);
+		expect(getAttackRollCalculations(restored, attack)).toEqual({
+			ability: "cha",
+			attackBonus: 7,
+			damageBonus: 6,
 		});
 	});
 
@@ -444,6 +641,204 @@ describe("EFA Armorer stable generated model weapons", () => {
 				_efaArmorerWeaponId: MODEL_IDS[model],
 			}),
 		]);
+	});
+
+	it.each(MODEL_NAMES)("resolves exact active-bound %s descriptors and Intelligence roll math", model => {
+		const {state, armor} = buildState({model});
+		state.setAbilityBase("int", 18);
+		state.setAbilityBase("str", 20);
+		state.setAbilityBase("dex", 20);
+		state.bindEfaArcaneArmor(armor.id);
+
+		const attack = getActiveModelAttack(state);
+		const expected = MODEL_STATS[model];
+		expect(attack).toMatchObject({
+			id: MODEL_IDS[model],
+			_efaArmorerWeaponId: MODEL_IDS[model],
+			name: expected.name,
+			isMelee: expected.isMelee,
+			weaponCategory: "simple",
+			abilityMod: "int",
+			attackBonus: 0,
+			damage: expected.damage,
+			damageType: expected.damageType,
+			damageBonus: 0,
+			properties: expected.properties,
+			range: expected.range,
+		});
+		expect(state.getAttackReach(attack)).toBe(expected.reach);
+		expect(getAttackRollCalculations(state, attack)).toEqual({
+			ability: "int",
+			attackBonus: 6,
+			damageBonus: 4,
+		});
+
+		const calc = state.getFeatureCalculations();
+		expect(calc).toMatchObject({
+			hasArcaneArmor: true,
+			hasEfaArmorer: true,
+			efaArmorerSource: "EFA",
+			efaArmorerModel: model,
+			efaArmorerBindingActive: true,
+			efaArmorerModelWeaponActive: true,
+			efaArmorerModelWeaponId: MODEL_IDS[model],
+		});
+		expect(!!calc.hasEfaForceDemolisher).toBe(model === "Dreadnaught");
+		expect(!!calc.hasEfaThunderPulse).toBe(model === "Guardian");
+		expect(!!calc.hasEfaLightningLauncher).toBe(model === "Infiltrator");
+		expect(!!calc.hasEfaPoweredSteps).toBe(model === "Infiltrator");
+		expect(!!calc.hasEfaDampeningField).toBe(model === "Infiltrator");
+		expect(calc).not.toHaveProperty("improvedArsenalBonus");
+	});
+
+	it("applies Infiltrator speed and Stealth advantage only while the binding is active", () => {
+		const {state, armor} = buildState({model: "Infiltrator"});
+		state.setAbilityBase("str", 16);
+		const baseSpeed = state.getWalkSpeed();
+
+		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
+			advantage: false,
+			disadvantage: false,
+		});
+		state.bindEfaArcaneArmor(armor.id);
+		expect(state.getWalkSpeed()).toBe(baseSpeed + 5);
+		expect(state.getSpeed("walk")).toBe(baseSpeed + 5);
+		expect(state.getSpeedBreakdown("walk").components).toEqual(expect.arrayContaining([
+			expect.objectContaining({name: expect.stringContaining("Powered Steps"), value: 5}),
+		]));
+		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
+			advantage: true,
+			disadvantage: false,
+			cancelled: false,
+		});
+
+		setHeavyArmorStealthSnapshot(state);
+		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
+			advantage: false,
+			disadvantage: false,
+			cancelled: true,
+			sources: expect.arrayContaining(["Armor"]),
+		});
+
+		state.setItemEquipped(armor.id, false);
+		expect(state.getEfaArcaneArmorBindingStatus()).toMatchObject({
+			boundItemId: armor.id,
+			active: false,
+			suspended: true,
+		});
+		expect(state.getWalkSpeed()).toBe(baseSpeed);
+		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
+			advantage: false,
+			disadvantage: true,
+			cancelled: false,
+		});
+		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toEqual([]);
+
+		state.setItemEquipped(armor.id, true);
+		state.clearEfaArcaneArmorBinding();
+		expect(state.getWalkSpeed()).toBe(baseSpeed);
+		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
+			advantage: false,
+			disadvantage: true,
+		});
+	});
+
+	it("switches attack and passive mechanics without activating multiple models", () => {
+		const {state, armor} = buildState({model: "Infiltrator"});
+		state.setAbilityBase("str", 16);
+		state.bindEfaArcaneArmor(armor.id);
+		const baseSpeed = state.getWalkSpeed() - 5;
+		expect(getActiveModelAttack(state).id).toBe(MODEL_IDS.Infiltrator);
+		expect(state.getAdvantageState("skill:stealth").advantage).toBe(true);
+
+		setCanonicalModel(state, "Guardian");
+
+		expect(state.getWalkSpeed()).toBe(baseSpeed);
+		expect(state.getAdvantageState("skill:stealth").advantage).toBe(false);
+		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toEqual([
+			expect.objectContaining({id: MODEL_IDS.Guardian}),
+		]);
+		const calc = state.getFeatureCalculations();
+		expect(calc.hasEfaThunderPulse).toBe(true);
+		expect(calc.hasEfaLightningLauncher).toBeUndefined();
+		expect(calc.hasEfaPoweredSteps).toBeUndefined();
+		expect(calc.hasEfaDampeningField).toBeUndefined();
+	});
+
+	it.each([
+		["death", state => state.setDeathSaveFailures(3)],
+		["subclass loss", state => state.removeClass("Artificer", "EFA")],
+		["model ambiguity", state => {
+			state._data.chosenSubfeatures.push({
+				parent: "Armor Model",
+				parentSource: "EFA",
+				parentClass: "Artificer",
+				parentClassSource: "EFA",
+				level: 3,
+				name: "Guardian",
+				source: "EFA",
+			});
+			state.getFeatureCalculations();
+		}],
+	])("removes active attacks and passives on %s", (_label, deactivate) => {
+		const {state, armor} = buildState({model: "Infiltrator"});
+		state.setAbilityBase("str", 16);
+		const baseSpeed = state.getWalkSpeed();
+		state.bindEfaArcaneArmor(armor.id);
+		expect(state.getWalkSpeed()).toBe(baseSpeed + 5);
+
+		deactivate(state);
+
+		expect(state.getWalkSpeed()).toBe(baseSpeed);
+		expect(state.getAdvantageState("skill:stealth").advantage).toBe(false);
+		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toEqual([]);
+	});
+
+	it("round-trips the active Infiltrator attack and passive mechanics", () => {
+		const {state, armor} = buildState({model: "Infiltrator"});
+		state.setAbilityBase("str", 16);
+		const baseSpeed = state.getWalkSpeed();
+		state.bindEfaArcaneArmor(armor.id);
+		const ids = Object.fromEntries(getGeneratedRows(state).map(item => [item._efaArmorerWeaponId, item.id]));
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(copy(state.toJson()));
+
+		expect(Object.fromEntries(getGeneratedRows(restored).map(item => [item._efaArmorerWeaponId, item.id]))).toEqual(ids);
+		expect(getActiveModelAttack(restored).id).toBe(MODEL_IDS.Infiltrator);
+		expect(restored.getWalkSpeed()).toBe(baseSpeed + 5);
+		expect(restored.getAdvantageState("skill:stealth").advantage).toBe(true);
+	});
+
+	it("keeps TCE and mixed-source Armorer mechanics isolated from EFA binding", () => {
+		const tce = buildState({
+			classSource: "TCE",
+			subclassSource: "TCE",
+			model: null,
+		});
+		const tceCalc = tce.state.getFeatureCalculations();
+		expect(tceCalc).toMatchObject({
+			hasArcaneArmor: true,
+			thunderGauntletsDamage: "1d8",
+			defensiveFieldTempHp: 3,
+			lightningLauncherDamage: "1d6",
+			lightningLauncherBonusDamage: "1d6",
+			infiltratorSpeedBonus: 5,
+		});
+		expect(tceCalc.hasEfaArmorer).toBeUndefined();
+		expect(getGeneratedRows(tce.state)).toEqual([]);
+
+		const mixed = buildState({
+			classSource: "EFA",
+			subclassSource: "TCE",
+			model: "Guardian",
+		});
+		expect(mixed.state.bindEfaArcaneArmor(mixed.armor.id)).toMatchObject({
+			ok: false,
+			code: "efa-armorer-unavailable",
+		});
+		expect(mixed.state.getFeatureCalculations().hasEfaArmorer).toBeUndefined();
+		expect(getGeneratedRows(mixed.state)).toEqual([]);
 	});
 
 	it.each([

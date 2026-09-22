@@ -10,14 +10,15 @@ While the character sheet has extensive functionality and test coverage, several
 
 ## Implementation Status
 
-### Fully Implemented Subclasses ✅
+### Implemented and Partial Subclasses
 
-The following classes have **complete** mechanical calculations for all subclasses:
+The following classes have substantial mechanical calculations. Entries marked
+partial still have explicitly deferred runtime mechanics.
 
-#### Artificer Subclasses ✅
-The four core Artificer subclasses are fully implemented with mechanical calculations:
+#### Artificer Subclasses
 - **Alchemist**: `experimentalElixirCount`, `alchemicalSavantBonus`, `restorativeReagentsUses`, `restorativeReagentsTempHp`
-- **Armorer**: `thunderGauntletsDamage`, `defensiveFieldTempHp`, `lightningLauncherDamage`, `infiltratorSpeedBonus`
+- **Armorer (TCE legacy calculations)**: `thunderGauntletsDamage`, `defensiveFieldTempHp`, `lightningLauncherDamage`, `infiltratorSpeedBonus`
+- **Armorer (EFA, partial)**: active-bound level-3 model weapon stats and Intelligence substitution; Infiltrator `+5` Speed and Stealth advantage. Deferred: model riders/resources, Improved Arsenal, level 9/15, Armor Replication, Arcane Armor general benefits, binding UI, and E2E.
 - **Artillerist**: `eldritchCannonHp`, `flamethrowerDamage`, `forceBallistaDamage`, `protectorTempHp`, `maxCannons`, `arcaneFirearmDamage`
 - **Battle Smith**: `steelDefenderHp`, `arcaneJoltDamage`, `arcaneJoltUses`, `deflectAttackDamage`
 - **Cartographer (EFA), Adventurer's Atlas milestone**: versioned persistent
