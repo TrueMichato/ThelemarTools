@@ -8550,7 +8550,7 @@ class CharacterSheetSpells {
 				</div>
 				<div class="charsheet__spell-item-actions">
 					${usageInfo}
-					${!spell.atWill ? `
+					${!spell.atWill && !spell.castExecutionBlocked ? `
 						<button class="ve-btn ve-btn-sm ve-btn-primary charsheet__innate-cast" title="Cast">
 							<span class="glyphicon glyphicon-flash"></span>
 						</button>
@@ -8592,7 +8592,7 @@ class CharacterSheetSpells {
 	 */
 	async _castInnateSpell (spellId) {
 		const spell = this._state.getInnateSpells().find(s => s.id === spellId);
-		if (!spell) return;
+		if (!spell || spell.castExecutionBlocked) return;
 
 		// Get full spell data for constraint checks
 		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source) || spell;

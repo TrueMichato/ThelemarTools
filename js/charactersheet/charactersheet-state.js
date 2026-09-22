@@ -4392,6 +4392,28 @@ class CharacterSheetState {
 		};
 		return freeze(copied);
 	}
+	static EFA_ALCHEMIST_SUBCLASS_UID = "Alchemist|Artificer|EFA|EFA";
+	static EFA_ALCHEMIST_INNATE_SPELL_GRANTS = Object.freeze([
+		Object.freeze({
+			grantId: "subclass-innate:alchemist|artificer|efa|efa:lesser-restoration|xphb",
+			innateSpellId: "subclass-innate-spell:alchemist|artificer|efa|efa:lesser-restoration|xphb",
+			resourceId: "subclass-innate-resource:alchemist|artificer|efa|efa:lesser-restoration|xphb",
+			spellUid: "Lesser Restoration|XPHB",
+			requiredLevel: 9,
+			sourceFeature: "Restorative Reagents",
+			maxMode: "abilityMod",
+			maxAbility: "int",
+		}),
+		Object.freeze({
+			grantId: "subclass-innate:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
+			innateSpellId: "subclass-innate-spell:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
+			resourceId: "subclass-innate-resource:alchemist|artificer|efa|efa:tashas-bubbling-cauldron|xphb",
+			spellUid: "Tasha's Bubbling Cauldron|XPHB",
+			requiredLevel: 15,
+			sourceFeature: "Chemical Mastery",
+			max: 1,
+		}),
+	]);
 	static RHW_REANIMATOR_SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
 	static RHW_REANIMATOR_TOOL_OWNER_UID = "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW";
 	static RHW_REANIMATOR_FEATURE_UIDS = Object.freeze({
@@ -4930,7 +4952,10 @@ class CharacterSheetState {
 		if (!sc) return;
 		for (const arrKey of ["spellsKnown", "cantripsKnown", "innateSpells"]) {
 			if (!Array.isArray(sc[arrKey])) continue;
-			sc[arrKey] = this._reconcileSameGrantEditions(this._coalesceSpellDuplicates(sc[arrKey]));
+			sc[arrKey] = this._reconcileSameGrantEditions(this._coalesceSpellDuplicates(
+				sc[arrKey],
+				{isInnate: arrKey === "innateSpells"},
+			));
 		}
 	}
 
@@ -4939,15 +4964,23 @@ class CharacterSheetState {
 	 * survivor is the richest entry; metadata and grant/prepared flags from the others are
 	 * merged into it. Order-stable.
 	 * @param {Array} arr
+	 * @param {{isInnate?: boolean}} [opts]
 	 * @returns {Array}
 	 * @private
 	 */
-	_coalesceSpellDuplicates (arr) {
+	_coalesceSpellDuplicates (arr, {isInnate = false} = {}) {
 		if (!Array.isArray(arr) || arr.length < 2) return arr;
 		const byKey = new Map();
 		const order = [];
 		for (const entry of arr) {
-			const key = this._spellIdentityKey(entry);
+			const key = isInnate && entry?.grantId
+				? `grant:${String(entry.grantId).trim().toLowerCase()}`
+				: isInnate
+					&& entry?.sourceType === "subclassInnateSpell"
+					&& entry?.ownerUid
+					&& entry?.spellUid
+					? `owner:${String(entry.ownerUid).trim().toLowerCase()}:${String(entry.spellUid).trim().toLowerCase()}`
+					: this._spellIdentityKey(entry);
 			if (!byKey.has(key)) { byKey.set(key, entry); order.push(key); continue; }
 			const kept = byKey.get(key);
 			const provenanceKeys = ["sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"];
@@ -5693,6 +5726,7 @@ class CharacterSheetState {
 	}
 
 	toJson () {
+		this._reconcileEfaAlchemistInnateSpellGrants();
 		this._ensureBattleMasterSuperiorityDice();
 		if ((this._data.targetEffects || []).some(it => String(it?.source || "").toLowerCase() === "chained-fury")) {
 			this.reconcileTargetEffects();
@@ -11965,10 +11999,12 @@ class CharacterSheetState {
 	// #region Ability Scores
 	setAbilityBase (ability, score) {
 		this._data.abilities[ability] = score;
+		if (ability === "int") this._reconcileEfaAlchemistInnateSpellGrants();
 	}
 
 	setAbilityBonus (ability, bonus) {
 		this._data.abilityBonuses[ability] = bonus;
+		if (ability === "int") this._reconcileEfaAlchemistInnateSpellGrants();
 	}
 
 	getAbilityScore (ability) {
@@ -19972,7 +20008,13 @@ class CharacterSheetState {
 
 					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(spells)) {
 						const parsed = this._parseSpellReference(spellRef);
-						if (parsed) {
+						const isEfaAlchemistOwnedInnateGrant = cls.name === "Artificer"
+							&& cls.source === "EFA"
+							&& subclassData.name === "Alchemist"
+							&& subclassData.source === "EFA"
+							&& CharacterSheetState.EFA_ALCHEMIST_INNATE_SPELL_GRANTS
+								.some(definition => definition.spellUid.toLowerCase() === `${parsed?.name}|${parsed?.source}`.toLowerCase());
+						if (parsed && !isEfaAlchemistOwnedInnateGrant) {
 							result.push(this._buildSubclassSpellEntry(parsed, subclassData, cls, hasNamedChoice ? {isSubclassChoiceSpell: true} : undefined));
 						}
 					}
@@ -20433,6 +20475,122 @@ class CharacterSheetState {
 		}
 
 		return totalAdded;
+	}
+
+	_getEfaAlchemistClassEntry () {
+		return (this._data.classes || []).find(cls => {
+			if (`${cls?.name || ""}|${cls?.source || ""}` !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return false;
+			const subclass = this.getEffectiveSubclassForClass(cls);
+			return subclass?.name === "Alchemist" && subclass?.source === "EFA";
+		}) || null;
+	}
+
+	_getEfaAlchemistInnateSpellGrantMax (definition) {
+		if (definition.maxMode === "abilityMod") {
+			return this._computeAbilityModResourceMax(definition.maxAbility);
+		}
+		return Math.max(0, Number(definition.max) || 0);
+	}
+
+	_getEfaAlchemistInnateSpellGrantSpentUses (innateSpells, resources) {
+		const spent = [];
+		for (const spell of innateSpells) {
+			const max = Number(spell?.uses?.max ?? spell?.maxUses);
+			const current = Number(spell?.uses?.current);
+			if (Number.isFinite(max) && Number.isFinite(current)) spent.push(Math.max(0, max - current));
+		}
+		for (const resource of resources) {
+			const max = Number(resource?.max);
+			const current = Number(resource?.current);
+			if (Number.isFinite(max) && Number.isFinite(current)) spent.push(Math.max(0, max - current));
+		}
+		return spent.length ? Math.max(...spent) : 0;
+	}
+
+	_isEfaAlchemistOwnedInnateSpell (spell, definition) {
+		if (!spell) return false;
+		if (spell.grantId === definition.grantId) return true;
+		return spell.sourceType === "subclassInnateSpell"
+			&& spell.ownerUid === CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID
+			&& spell.spellUid === definition.spellUid;
+	}
+
+	_isEfaAlchemistOwnedInnateResource (resource, definition) {
+		if (!resource) return false;
+		if (resource.grantId === definition.grantId) return true;
+		return resource.sourceType === "subclassInnateSpell"
+			&& resource.ownerUid === CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID
+			&& resource.spellUid === definition.spellUid;
+	}
+
+	_reconcileEfaAlchemistInnateSpellGrant (definition, classEntry) {
+		if (!Array.isArray(this._data.spellcasting.innateSpells)) this._data.spellcasting.innateSpells = [];
+		if (!Array.isArray(this._data.resources)) this._data.resources = [];
+
+		const ownedSpells = this._data.spellcasting.innateSpells
+			.filter(spell => this._isEfaAlchemistOwnedInnateSpell(spell, definition));
+		const ownedResources = this._data.resources
+			.filter(resource => this._isEfaAlchemistOwnedInnateResource(resource, definition));
+		const spentUses = this._getEfaAlchemistInnateSpellGrantSpentUses(ownedSpells, ownedResources);
+
+		this._data.spellcasting.innateSpells = this._data.spellcasting.innateSpells
+			.filter(spell => !this._isEfaAlchemistOwnedInnateSpell(spell, definition));
+		this._data.resources = this._data.resources
+			.filter(resource => !this._isEfaAlchemistOwnedInnateResource(resource, definition));
+
+		if (!classEntry || (Number(classEntry.level) || 0) < definition.requiredLevel) return;
+
+		const [spellName, spellSource] = definition.spellUid.split("|");
+		const max = this._getEfaAlchemistInnateSpellGrantMax(definition);
+		const current = Math.max(0, max - spentUses);
+		const commonMetadata = {
+			grantId: definition.grantId,
+			ownerUid: CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			subclassUid: CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID,
+			spellUid: definition.spellUid,
+			sourceType: "subclassInnateSpell",
+			sourceFeature: definition.sourceFeature,
+			requiredLevel: definition.requiredLevel,
+		};
+		const derivedMaxMetadata = definition.maxMode === "abilityMod"
+			? {maxMode: definition.maxMode, maxAbility: definition.maxAbility}
+			: {};
+
+		this.addInnateSpell({
+			id: definition.innateSpellId,
+			name: spellName,
+			source: spellSource,
+			spellcastingAbility: "int",
+			uses: current,
+			maxUses: max,
+			recharge: "long",
+			linkedResourceId: definition.resourceId,
+			ignoresPreparation: true,
+			ignoresMaterialComponents: true,
+			castExecutionBlocked: true,
+			...commonMetadata,
+			...derivedMaxMetadata,
+		});
+		this.addResource({
+			id: definition.resourceId,
+			name: `${spellName} (${definition.sourceFeature})`,
+			current,
+			max,
+			recharge: "long",
+			source: CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID,
+			linkedInnateSpellId: definition.innateSpellId,
+			...commonMetadata,
+			...derivedMaxMetadata,
+		});
+		this.setResourceCurrent(definition.resourceId, current);
+	}
+
+	_reconcileEfaAlchemistInnateSpellGrants () {
+		const classEntry = this._getEfaAlchemistClassEntry();
+		for (const definition of CharacterSheetState.EFA_ALCHEMIST_INNATE_SPELL_GRANTS) {
+			this._reconcileEfaAlchemistInnateSpellGrant(definition, classEntry);
+		}
 	}
 
 	/**
@@ -21119,6 +21277,7 @@ class CharacterSheetState {
 	// Innate spell management
 	getInnateSpells () {
 		this.reconcileDeferredFeatureSpells();
+		this._reconcileEfaAlchemistInnateSpellGrants();
 		return [...(this._data.spellcasting.innateSpells || [])];
 	}
 
@@ -21129,12 +21288,14 @@ class CharacterSheetState {
 
 		spell = this._enrichSpellInput(spell);
 
-		// Case-insensitive, edition-exact dedup; coalesce metadata into the existing entry
-		// (preserving its resource link / use tracking) rather than silently dropping.
+		// Stable source-owned grants coexist with independent copies of the same spell.
+		// Legacy/non-owned innate spells retain name|source coalescing.
 		const key = this._spellIdentityKey(spell);
-		const existing = this._data.spellcasting.innateSpells.find(
-			s => this._spellIdentityKey(s) === key,
-		);
+		const existing = spell.grantId
+			? this._data.spellcasting.innateSpells.find(s => s.grantId === spell.grantId)
+			: this._data.spellcasting.innateSpells.find(
+				s => !s.grantId && this._spellIdentityKey(s) === key,
+			);
 		if (existing) {
 			// Normalize a numeric caller-supplied `uses` to the stored `{current,max}` shape
 			// (and infer recharge/atWill) so `_mergeSpellMetadata` can fold it in.
@@ -21143,11 +21304,11 @@ class CharacterSheetState {
 				spell = {...spell, uses: {current: n, max: n}, recharge: spell.recharge || "long"};
 			}
 			this._mergeSpellMetadata(existing, spell);
-			return;
+			return existing.id;
 		}
 
 		const innateSpell = {
-			id: CryptUtil.uid(),
+			id: spell.id || CryptUtil.uid(),
 			name: spell.name,
 			source: spell.source || Parser.SRC_PHB,
 			level: spell.level,
@@ -21179,17 +21340,38 @@ class CharacterSheetState {
 		// Preserve a link to a backing resource pool (e.g. an innate spell whose uses are
 		// tracked by a shared feature resource) so coalescing/merge can keep it.
 		if (spell.linkedResourceId != null) innateSpell.linkedResourceId = spell.linkedResourceId;
+		for (const metadataKey of [
+			"grantId",
+			"ownerUid",
+			"classUid",
+			"subclassUid",
+			"spellUid",
+			"sourceType",
+			"requiredLevel",
+			"ignoresPreparation",
+			"ignoresMaterialComponents",
+			"castExecutionBlocked",
+			"maxMode",
+			"maxAbility",
+		]) {
+			if (spell[metadataKey] != null) innateSpell[metadataKey] = spell[metadataKey];
+		}
 
 		// Add uses tracking if not at-will
-		if (!spell.atWill && spell.uses) {
+		if (!spell.atWill && spell.uses != null) {
+			const usesCurrent = typeof spell.uses === "object"
+				? Number(spell.uses.current ?? spell.uses.max) || 0
+				: Number(spell.uses) || 0;
+			const usesMax = Number(spell.maxUses ?? (typeof spell.uses === "object" ? spell.uses.max : spell.uses)) || 0;
 			innateSpell.uses = {
-				current: spell.uses,
-				max: spell.uses,
+				current: Math.max(0, Math.min(usesCurrent, usesMax)),
+				max: usesMax,
 			};
 			innateSpell.recharge = spell.recharge || "long";
 		}
 
 		this._data.spellcasting.innateSpells.push(innateSpell);
+		return innateSpell.id;
 	}
 
 	removeInnateSpell (spellIdOrName, source) {
@@ -21209,7 +21391,7 @@ class CharacterSheetState {
 	}
 
 	useInnateSpell (spellId) {
-		if (!this._data.spellcasting.innateSpells) return;
+		if (!this._data.spellcasting.innateSpells) return false;
 		const spell = this._data.spellcasting.innateSpells.find(s => s.id === spellId);
 		if (spell?.uses && spell.uses.current > 0) {
 			spell.uses.current--;
@@ -21219,7 +21401,9 @@ class CharacterSheetState {
 				const resource = this._data.resources?.find(r => r.id === spell.linkedResourceId);
 				if (resource) resource.current = Math.max(0, Math.min(spell.uses.current, resource.max));
 			}
+			return true;
 		}
+		return false;
 	}
 
 	// (Bug 4 follow-up) Restore a single innate-spell use (e.g. clicking a "used" pip in the
@@ -34756,6 +34940,7 @@ class CharacterSheetState {
 		// Populate subclass spells (domain spells, patron spells, origin spells, etc.)
 		this.populateSubclassSpells();
 		this._reconcileRhwReanimatorState();
+		this._reconcileEfaAlchemistInnateSpellGrants();
 		// Populate class-level always-prepared spells (base CLASS additionalSpells —
 		// e.g. TGTT Cleric Ceremony/Thaumaturgy, Ranger Hunter's Mark). Catalog-gated
 		// + idempotent reconcile; no-ops until setClassCatalog has run.
@@ -45105,6 +45290,7 @@ class CharacterSheetState {
 	}
 
 	getResources () {
+		this._reconcileEfaAlchemistInnateSpellGrants();
 		this._ensureFeatRegistryResources();
 		this._reconcileRhwReanimatorState();
 		this._ensureEfaFlashOfGeniusResource();
@@ -49000,12 +49186,16 @@ class CharacterSheetState {
 
 	addResource (resource) {
 		const sourceDecisionKey = resource.sourceDecisionKey || null;
-		const existing = this._data.resources.find(existingResource =>
-			existingResource.name === resource.name
-				&& (sourceDecisionKey
-					? existingResource.sourceDecisionKey === sourceDecisionKey
-					: !existingResource.sourceDecisionKey),
-		);
+		const existing = resource.id
+			? this._data.resources.find(existingResource => existingResource.id === resource.id)
+			: resource.grantId
+				? this._data.resources.find(existingResource => existingResource.grantId === resource.grantId)
+				: this._data.resources.find(existingResource =>
+					existingResource.name === resource.name
+						&& (sourceDecisionKey
+							? existingResource.sourceDecisionKey === sourceDecisionKey
+							: !existingResource.sourceDecisionKey),
+				);
 		if (existing) {
 			const current = Number(existing.current);
 			Object.assign(existing, resource, {

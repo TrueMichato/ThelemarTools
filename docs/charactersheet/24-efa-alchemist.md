@@ -9,6 +9,11 @@ This guide explains what full support must mean for the 2024 EFA Alchemist,
 including how the sheet distinguishes it from the legacy TCE Alchemist, what
 state must be saved, and what the player-facing controls must do.
 
+> **Innate-grant milestone status:** canonical source-owned grant/resource
+> metadata and lifecycle state now ship for `Lesser Restoration|XPHB` and
+> `Tasha's Bubbling Cauldron|XPHB`. Exact-focus validation and cast execution
+> remain blocked on Base M1B; this milestone does not expose a cast action.
+
 ## 1. Identity comes before feature names
 
 The word "Alchemist" is not enough to identify the rules. The data contains
