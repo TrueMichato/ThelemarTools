@@ -567,7 +567,7 @@ describe("EFA Armorer Arcane Armor inventory powers and while-worn benefits", ()
 		expect(state.getArmorStrengthRequirement()).toEqual({required: 15, current: 10, met: false});
 	});
 
-	it("scopes the worn armor focus to Artificer|EFA spells and reports the editable item name/source", () => {
+	it("routes worn Arcane Armor through the exact Artificer|EFA focus receipt path", async () => {
 		const {state, armor} = buildState();
 		state.replaceItem(armor.id, {
 			...getBaseItem("Plate Armor"),
@@ -582,6 +582,7 @@ describe("EFA Armorer Arcane Armor inventory powers and while-worn benefits", ()
 			name: "Cure Wounds",
 			source: "XPHB",
 			sourceClass: "Artificer",
+			sourceClassSource: "EFA",
 			components: {m: "a healer's kit"},
 		};
 		const wizardSpell = {
@@ -596,21 +597,34 @@ describe("EFA Armorer Arcane Armor inventory powers and while-worn benefits", ()
 			sourceClassSource: "TCE",
 		};
 
-		expect(state.getSpellcastingFocusStatus({spell: artificerSpell})).toMatchObject({
-			ok: true,
-			source: "Arcane Armor",
-			itemName: "Aegis of the Last Watch",
-			itemSource: "XPHB",
-			isClassScoped: true,
+		const requirement = state.getSpellCastFocusRequirement(artificerSpell);
+		expect(state.getEligibleSpellCastFocusInventoryRows(requirement)).toEqual([
+			expect.objectContaining({
+				id: armor.id,
+				item: expect.objectContaining({
+					name: "Aegis of the Last Watch",
+					source: "XPHB",
+				}),
+			}),
+		]);
+		const resolved = await spells._pResolveSpellCastFocus({spell: artificerSpell});
+		expect(resolved).toMatchObject({
+			cancelled: false,
+			focusReference: {
+				inventoryItemId: armor.id,
+				itemUid: "Aegis of the Last Watch|XPHB",
+				name: "Aegis of the Last Watch",
+				source: "XPHB",
+			},
 		});
 		expect(spells._getMaterialComponentBlock(artificerSpell, artificerSpell)).toBeNull();
-		expect(spells._getSpellFocusNote(artificerSpell, artificerSpell)).toBe("Aegis of the Last Watch (XPHB) — Arcane Armor");
-		expect(state.getSpellcastingFocusStatus({spell: wizardSpell}).ok).toBe(false);
-		expect(state.getSpellcastingFocusStatus({spell: tceArtificerSpell}).ok).toBe(false);
+		expect(spells._getSpellFocusNote(artificerSpell, artificerSpell, {focusReference: resolved.focusReference})).toBe("Aegis of the Last Watch");
+		expect(state.getSpellCastFocusRequirement(wizardSpell)).toBeNull();
+		expect(state.getSpellCastFocusRequirement(tceArtificerSpell)).toBeNull();
 		expect(spells._getMaterialComponentBlock(wizardSpell, wizardSpell)).toContain("Cannot cast Identify");
 
 		state.invokeItemPower(armor.id, getArcaneArmorPower(state, armor.id, "doff").id);
-		expect(state.getSpellcastingFocusStatus({spell: artificerSpell}).ok).toBe(false);
+		expect(state.getEligibleSpellCastFocusInventoryRows(requirement)).toEqual([]);
 		expect(spells._getMaterialComponentBlock(artificerSpell, artificerSpell)).toContain("Cannot cast Cure Wounds");
 	});
 

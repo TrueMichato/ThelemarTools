@@ -225,7 +225,72 @@ Load migration adopts only exact owner evidence. A resolved exact-owner
 translated; a markerless save that already contains the fixed proficiency is
 left as a pending fallback rather than guessing whether that proficiency was
 pre-existing or feature-owned.
+## Source-qualified Spell Focus and Committed Cast Receipts
 
+Stored player/class/subclass spell attribution carries
+`sourceClassSource` and `sourceSubclassSource` beside the existing display
+names. `resolveSpellCastingClassIdentity(spell)` only returns an owner when the
+class name **and** source resolve to a current class entry. Name-only legacy
+rows remain ambiguous by design and do not activate source-specific casting
+rules.
+
+`getSpellCastFocusRequirement(spell, castMeta)` currently contributes one
+source-specific rule: every exact `Artificer|EFA` spell gains a material
+component and requires an equipped, proficient Thieves' Tools, Tinker's Tools,
+or Artisan's Tools inventory wrapper. An active EFA Armorer Arcane Armor binding
+is another eligible wrapper and flows through the same focus selection and cast
+receipt APIs. This applies even when the spell's source data has no `M` component.
+`ignoresMaterialComponents`,
+`ignoreMaterialComponents`, `waiveMaterialComponents`, or
+`materialComponentsRequired: false` are explicit cast-vehicle waivers for
+innate/item magic. Generic focuses, pouches, unheld tools, and ambiguous
+`sourceClass: "Artificer"` rows never satisfy or activate the EFA rule.
+
+Callers select from the live wrappers returned by
+`getEligibleSpellCastFocusInventoryRows(requirement)` before any slot,
+resource, metamagic, or component mutation. The cast-result metadata stores
+only `getSpellCastFocusReference(wrapper)`:
+
+```javascript
+{
+    inventoryItemId, // stable inventory wrapper id
+    itemUid,         // exact "name|source" entity uid
+    name,
+    source,
+}
+```
+
+After target cancellation/refund handling and all core costs have committed,
+the cast path calls:
+
+```javascript
+const unsubscribe = state.registerCommittedSpellCastHook(
+    "Artificer|EFA",
+    async receipt => { /* exact-source consumer */ },
+    {hookId: "stable-consumer-id"},
+);
+
+const receipt = await state.pPublishCommittedSpellCast({
+    spell,
+    spellData,
+    focusInventoryRow,
+    cast: {type, slotLevel, resourceId, itemInventoryId, itemUid},
+});
+```
+
+The serializable receipt contains `receiptVersion`, `receiptId`,
+`castingClassUid`, `castingSubclassUid`, `spellEntryId`, `spellUid`,
+`spell`, `castType`, `slotLevel`, `cast`, `focusInventoryItemId`,
+`focusItemUid`, `focus`, `followUps`, and `followUpFailed`. It never stores a
+DOM node or live data object. A saved receipt can re-resolve its live focus
+after export/import with `resolveCommittedSpellCastReceiptFocus(receipt)`,
+which verifies both wrapper id and item UID.
+
+Hooks are runtime-only and keyed by exact class UID (or `"*"`). A cancelled,
+blocked, refunded, source-ambiguous, or explicitly component-waived EFA cast
+publishes no EFA receipt. Hook errors are captured in `followUps`; they leave
+`ok: true, committed: true`, set `followUpFailed: true`, and never roll back the
+valid cast.
 ## Active States / Toggle Abilities
 
 ### ACTIVE_STATE_TYPES

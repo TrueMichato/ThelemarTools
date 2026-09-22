@@ -4943,6 +4943,7 @@ class CharacterSheetLevelUp {
 			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(newSpell, {
 				sourceFeature: "Spells Known",
 				sourceClass: classEntry.name,
+				sourceClassSource: classEntry.source,
 			}));
 		}
 
@@ -4952,6 +4953,7 @@ class CharacterSheetLevelUp {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Wizard Spellbook",
 					sourceClass: "Wizard",
+					sourceClassSource: classEntry.source,
 					inSpellbook: true,
 				}));
 			});
@@ -4965,6 +4967,7 @@ class CharacterSheetLevelUp {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Spells Known",
 					sourceClass: classEntry.name,
+					sourceClassSource: classEntry.source,
 				}));
 			});
 		}
@@ -4975,6 +4978,7 @@ class CharacterSheetLevelUp {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Spells Known",
 					sourceClass: classEntry.name,
+					sourceClassSource: classEntry.source,
 				}));
 			});
 		}
@@ -4990,6 +4994,7 @@ class CharacterSheetLevelUp {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Prepared Spells",
 					sourceClass: classEntry.name,
+					sourceClassSource: classEntry.source,
 					prepared: true,
 				}));
 			});
@@ -5001,6 +5006,7 @@ class CharacterSheetLevelUp {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Prepared Spells",
 					sourceClass: classEntry.name,
+					sourceClassSource: classEntry.source,
 				}));
 			});
 		}
@@ -6212,6 +6218,7 @@ class CharacterSheetLevelUp {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: isWizard ? "Wizard Spellbook" : (selectedClass.preparedSpellsProgression ? "Prepared Spells" : "Spells Known"),
 					sourceClass: selectedClass.name,
+					sourceClassSource: selectedClass.source,
 					inSpellbook: isWizard,
 				}));
 			});
@@ -6226,6 +6233,7 @@ class CharacterSheetLevelUp {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(cantrip, {
 					sourceFeature: "Cantrips Known",
 					sourceClass: selectedClass.name,
+					sourceClassSource: selectedClass.source,
 				}));
 			});
 		}

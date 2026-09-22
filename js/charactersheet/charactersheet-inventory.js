@@ -5683,6 +5683,7 @@ class CharacterSheetInventory {
 
 	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null} = {}) {
 		const power = this._state.getItemPower?.(itemId, powerId);
+		let pendingSpellCast = null;
 		const selectedChargesCost = chargesCost == null ? power?.chargesCost : Number(chargesCost);
 		if (power?.chargesCostMax && (
 			selectedChargesCost < power.chargesCost
@@ -5701,8 +5702,12 @@ class CharacterSheetInventory {
 			const castLevel = power.isVariableChargeCast && power.castLevel
 				? power.castLevel + selectedChargesCost - power.chargesCost
 				: power.castLevel;
-			const cast = await this._page?._spells?.pCastItemSpell?.({...power, castLevel});
+			const cast = await this._page?._spells?.pCastItemSpell?.(
+				{...power, castLevel},
+				{deferCommit: true},
+			);
 			if (!cast) return false;
+			pendingSpellCast = cast.pendingSpellCast || null;
 		}
 		let result = this._state.invokeItemPower?.(itemId, powerId, {chargesCost, ...(destructiveSpellConfirmed ? {confirmed: true} : {})});
 		if (result?.needsConfirmation) {
@@ -5736,6 +5741,11 @@ class CharacterSheetInventory {
 		this._page?._combat?.renderCombatItemPowers?.();
 		this._page?._combat?.renderCombatActionEconomy?.();
 		this._page?._playMode?._renderActionsHub?.();
+		if (pendingSpellCast) {
+			const receipt = await this._page?._spells?.pCommitPendingSpellCast?.(pendingSpellCast);
+			this._page?._saveCurrentCharacter?.();
+			return receipt || true;
+		}
 		this._page?._saveCurrentCharacter?.();
 		return true;
 	}

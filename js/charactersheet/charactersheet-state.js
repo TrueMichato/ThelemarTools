@@ -4346,6 +4346,7 @@ globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 class CharacterSheetState {
 	static EFA_ARTIFICER_CLASS_UID = "Artificer|EFA";
 	static EFA_FLASH_OF_GENIUS_UID = "Flash of Genius|Artificer|EFA";
+	static EFA_SPELLCASTING_TOOLS_RULE_ID = "efa-artificer-tools-required";
 	static EFA_BATTLE_SMITH_SUBCLASS_UID = "Battle Smith|Artificer|EFA|EFA";
 	static EFA_BATTLE_SMITH_FEATURE_UIDS = Object.freeze({
 		TOOLS_OF_THE_TRADE: "Tools of the Trade|Artificer|EFA|Battle Smith|EFA|3|EFA",
@@ -4561,6 +4562,7 @@ class CharacterSheetState {
 		// Runtime-only seam for deterministic Gambler tests. Never serialized.
 		this._gamblerRollSource = null;
 		this._committedFeatureUseHooks = new Map();
+		this._committedSpellCastHooks = new Map();
 		// Optional full spell database, injected by the controller after data
 		// load (`setSpellData`). Used to enrich subclass/feature-granted spells
 		// with their real level/school/metadata so they render and persist
@@ -4785,7 +4787,14 @@ class CharacterSheetState {
 			&& Array.isArray(src.subschools) && src.subschools.length) {
 			target.subschools = src.subschools;
 		}
-		const provenanceKeys = ["sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"];
+		const provenanceKeys = [
+			"sourceFeature",
+			"sourceClass",
+			"sourceClassSource",
+			"sourceSubclass",
+			"sourceSubclassSource",
+			"spellcastingAbility",
+		];
 		const hasOwnershipAttribution = provenanceKeys.some(key => target[key] != null && target[key] !== "");
 		const hasIncomingOwnershipAttribution = provenanceKeys.some(key => src[key] != null && src[key] !== "");
 		if (!hasOwnershipAttribution && hasIncomingOwnershipAttribution) {
@@ -5677,6 +5686,7 @@ class CharacterSheetState {
 		// Runtime-only seam for deterministic Gambler tests. Never serialized.
 		this._gamblerRollSource = null;
 		this._committedFeatureUseHooks = new Map();
+		this._committedSpellCastHooks = new Map();
 	}
 
 	toJson () {
@@ -19994,6 +20004,9 @@ class CharacterSheetState {
 			prepared: true,
 			sourceFeature: `${subclassData.name} Spells`,
 			sourceClass: cls.name,
+			sourceClassSource: cls.source || null,
+			sourceSubclass: subclassData.shortName || subclassData.name,
+			sourceSubclassSource: subclassData.source || null,
 			...extra,
 		};
 	}
@@ -20033,7 +20046,15 @@ class CharacterSheetState {
 
 			const original = spell.subclassChoiceOriginalMetadata;
 			if (!original) return false;
-			for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) delete spell[key];
+			for (const key of [
+				"alwaysPrepared",
+				"prepared",
+				"sourceFeature",
+				"sourceClass",
+				"sourceClassSource",
+				"sourceSubclass",
+				"sourceSubclassSource",
+			]) delete spell[key];
 			Object.assign(spell, original);
 			delete spell.isSubclassChoiceSpell;
 			delete spell.subclassChoiceClass;
@@ -20048,7 +20069,15 @@ class CharacterSheetState {
 	_addSubclassChoiceSpellOwner (spell, cls) {
 		if (!spell.isSubclassChoiceSpell) {
 			const original = {};
-			for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) {
+			for (const key of [
+				"alwaysPrepared",
+				"prepared",
+				"sourceFeature",
+				"sourceClass",
+				"sourceClassSource",
+				"sourceSubclass",
+				"sourceSubclassSource",
+			]) {
 				if (Object.hasOwn(spell, key)) original[key] = spell[key];
 			}
 			spell.subclassChoiceOriginalMetadata = original;
@@ -20066,7 +20095,7 @@ class CharacterSheetState {
 	 * coexist across class/subclass sources.
 	 * @param {*} cls
 	 * @param {*} spell
-	 * @returns {{key: string, sourceFeature: string, sourceClass: string, isCantrip: boolean}}
+	 * @returns {{key: string, sourceFeature: string, sourceClass: string, sourceClassSource: string|null, sourceSubclass: string|null, sourceSubclassSource: string|null, isCantrip: boolean}}
 	 */
 	getSubclassSpellGrantOwner (cls, spell) {
 		const baseKey = this._getSubclassSpellGrantBaseKey(cls);
@@ -20081,6 +20110,9 @@ class CharacterSheetState {
 			key: grantOwnerUid ? `${baseKey}|owner:${String(grantOwnerUid).toLowerCase()}` : baseKey,
 			sourceFeature: spell.sourceFeature,
 			sourceClass: spell.sourceClass || cls.name,
+			sourceClassSource: spell.sourceClassSource || cls.source || null,
+			sourceSubclass: spell.sourceSubclass || cls.subclass?.shortName || cls.subclass?.name || null,
+			sourceSubclassSource: spell.sourceSubclassSource || cls.subclass?.source || null,
 			isCantrip: !!spell.isCantrip,
 			...(grantOwnerUid ? {grantOwnerUid} : {}),
 			...(spell.alternateCast ? {alternateCast: MiscUtil.copyFast(spell.alternateCast)} : {}),
@@ -20097,7 +20129,15 @@ class CharacterSheetState {
 	}
 
 	_captureSubclassSpellGrantOriginalMetadata (spell) {
-		const keys = ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"];
+		const keys = [
+			"alwaysPrepared",
+			"prepared",
+			"sourceFeature",
+			"sourceClass",
+			"sourceClassSource",
+			"sourceSubclass",
+			"sourceSubclassSource",
+		];
 		return {
 			present: keys.filter(key => Object.hasOwn(spell, key)),
 			values: Object.fromEntries(keys
@@ -20110,7 +20150,15 @@ class CharacterSheetState {
 		const original = spell.subclassSpellGrantOriginalMetadata;
 		if (original == null) return false;
 
-		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) delete spell[key];
+		for (const key of [
+			"alwaysPrepared",
+			"prepared",
+			"sourceFeature",
+			"sourceClass",
+			"sourceClassSource",
+			"sourceSubclass",
+			"sourceSubclassSource",
+		]) delete spell[key];
 		for (const key of (original.present || [])) spell[key] = original.values?.[key];
 		delete spell.subclassSpellGrantOwners;
 		delete spell.subclassSpellGrantOriginalMetadata;
@@ -20119,7 +20167,15 @@ class CharacterSheetState {
 
 	_reapplySubclassSpellGrantOwners (spell) {
 		const owners = Array.isArray(spell.subclassSpellGrantOwners) ? spell.subclassSpellGrantOwners : [];
-		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) delete spell[key];
+		for (const key of [
+			"alwaysPrepared",
+			"prepared",
+			"sourceFeature",
+			"sourceClass",
+			"sourceClassSource",
+			"sourceSubclass",
+			"sourceSubclassSource",
+		]) delete spell[key];
 		const original = spell.subclassSpellGrantOriginalMetadata;
 		for (const key of (original?.present || [])) spell[key] = original.values?.[key];
 		if (!owners.length) return original != null;
@@ -20138,6 +20194,9 @@ class CharacterSheetState {
 		if (!preservesPlayerAttribution) {
 			spell.sourceFeature = owner.sourceFeature;
 			spell.sourceClass = owner.sourceClass;
+			spell.sourceClassSource = owner.sourceClassSource;
+			spell.sourceSubclass = owner.sourceSubclass;
+			spell.sourceSubclassSource = owner.sourceSubclassSource;
 		}
 		return true;
 	}
@@ -20470,6 +20529,7 @@ class CharacterSheetState {
 			grantedByClass: true,
 			sourceFeature: CharacterSheetState.classSpellsSourceFeature(className),
 			sourceClass: className,
+			sourceClassSource: cls.source || null,
 		};
 	}
 
@@ -20480,7 +20540,7 @@ class CharacterSheetState {
 	_captureClassSpellGrantOriginalMetadata (spell) {
 		if (Object.hasOwn(spell, "classGrantOriginalMetadata")) return;
 		const original = {};
-		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"]) {
+		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass", "sourceClassSource", "sourceSubclass", "spellcastingAbility"]) {
 			if (Object.hasOwn(spell, key)) original[key] = spell[key];
 		}
 		spell.classGrantOriginalMetadata = original;
@@ -20489,7 +20549,7 @@ class CharacterSheetState {
 	_restoreClassSpellGrantOriginalMetadata (spell) {
 		if (!Object.hasOwn(spell, "classGrantOriginalMetadata")) return;
 		const original = spell.classGrantOriginalMetadata || {};
-		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"]) delete spell[key];
+		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass", "sourceClassSource", "sourceSubclass", "spellcastingAbility"]) delete spell[key];
 		Object.assign(spell, original);
 		delete spell.classGrantOriginalMetadata;
 		delete spell.classGrantOwners;
@@ -20505,6 +20565,7 @@ class CharacterSheetState {
 		const original = {
 			sourceFeature: incoming.sourceFeature,
 			sourceClass: incoming.sourceClass ?? null,
+			sourceClassSource: incoming.sourceClassSource ?? null,
 		};
 		for (const key of ["sourceSubclass", "spellcastingAbility"]) {
 			if (Object.hasOwn(incoming, key)) original[key] = incoming[key];
@@ -20531,6 +20592,7 @@ class CharacterSheetState {
 			|| !Object.hasOwn(spell, "classGrantOriginalMetadata")
 			|| !spell.classGrantOriginalMetadata?.sourceClass) {
 			spell.sourceClass = primary.sourceClass;
+			spell.sourceClassSource = primary.sourceClassSource;
 		}
 
 		if (!isCantrip) {
@@ -20581,6 +20643,7 @@ class CharacterSheetState {
 				target.get(spellKey).owners.set(ownerKey, {
 					sourceFeature: spell.sourceFeature,
 					sourceClass: spell.sourceClass,
+					sourceClassSource: spell.sourceClassSource,
 				});
 			}
 		}
@@ -20963,7 +21026,9 @@ class CharacterSheetState {
 				components: spell.components || "",
 				sourceFeature: spell.sourceFeature || null,
 				sourceClass: spell.sourceClass || null,
+				sourceClassSource: spell.sourceClassSource || spell.classSource || null,
 				sourceSubclass: spell.sourceSubclass || null,
+				sourceSubclassSource: spell.sourceSubclassSource || spell.subclassSource || null,
 				subschools: spell.subschools || [],
 				spellcastingAbility: spell.spellcastingAbility || null,
 				isDivineSoulAffinity: spell.isDivineSoulAffinity || false,
@@ -20997,7 +21062,9 @@ class CharacterSheetState {
 				components: spell.components || "",
 				sourceFeature: spell.sourceFeature || null,
 				sourceClass: spell.sourceClass || null,
+				sourceClassSource: spell.sourceClassSource || spell.classSource || null,
 				sourceSubclass: spell.sourceSubclass || null,
+				sourceSubclassSource: spell.sourceSubclassSource || spell.subclassSource || null,
 				spellcastingAbility: spell.spellcastingAbility || null,
 				subschools: spell.subschools || [],
 				isSubclassChoiceSpell: spell.isSubclassChoiceSpell || false,
@@ -21063,6 +21130,9 @@ class CharacterSheetState {
 			atWill: spell.atWill || false,
 			sourceFeature: spell.sourceFeature,
 			sourceClass: spell.sourceClass || null,
+			sourceClassSource: spell.sourceClassSource || spell.classSource || null,
+			sourceSubclass: spell.sourceSubclass || null,
+			sourceSubclassSource: spell.sourceSubclassSource || spell.subclassSource || null,
 			subschools: spell.subschools || [],
 			castingTime: spell.castingTime || "",
 			range: spell.range || "",
@@ -39589,52 +39659,137 @@ class CharacterSheetState {
 		return null;
 	}
 
-	_getClassScopedSpellcastingFocusCandidates () {
-		const status = this.getEfaArcaneArmorBindingStatus();
-		if (!status.active || !status.boundItem) return [];
-		return [{
-			source: "Arcane Armor",
-			itemName: status.boundItem.name,
-			itemSource: status.boundItem.source,
-			isClassScoped: true,
-			classScopes: [{name: "Artificer", source: "EFA"}],
-		}];
-	}
+	/**
+	 * Resolve the exact class entity which owns a stored/cast spell.
+	 *
+	 * Legacy name-only attribution is intentionally unresolved: a row which says only
+	 * `sourceClass: "Artificer"` cannot safely distinguish the EFA and TCE classes.
+	 * @param {*} spell
+	 * @returns {{name: string, source: string, uid: string, subclassName: string|null, subclassSource: string|null, subclassUid: string|null}|null}
+	 */
+	resolveSpellCastingClassIdentity (spell) {
+		if (!spell || typeof spell !== "object") return null;
 
-	_getSpellClassScope (spell) {
-		if (!spell) return null;
-		const rawSourceClass = typeof spell.sourceClass === "object"
-			? String(spell.sourceClass?.name || "").trim()
-			: String(spell.sourceClass || "").trim();
-		const [name, uidSource = ""] = rawSourceClass.split("|");
-		if (!name) return null;
+		const encodedClassUid = typeof spell.castingClassUid === "string" && spell.castingClassUid.includes("|")
+			? spell.castingClassUid
+			: (typeof spell.sourceClass === "string" && spell.sourceClass.includes("|") ? spell.sourceClass : null);
+		const encodedParts = encodedClassUid?.split("|") || [];
+		const sourceClassObject = spell.sourceClass && typeof spell.sourceClass === "object"
+			? spell.sourceClass
+			: null;
+		const className = sourceClassObject?.name
+			|| spell.castingClassName
+			|| (encodedClassUid ? encodedParts[0] : spell.sourceClass)
+			|| null;
+		const classSource = sourceClassObject?.source
+			|| spell.castingClassSource
+			|| spell.sourceClassSource
+			|| spell.classSource
+			|| (encodedClassUid ? encodedParts[1] : null)
+			|| null;
+		if (!className || !classSource) return null;
+
+		const matchedClass = (this._data.classes || []).find(cls =>
+			String(cls?.name || "").toLowerCase() === String(className).toLowerCase()
+			&& String(cls?.source || "").toLowerCase() === String(classSource).toLowerCase(),
+		);
+		if (!matchedClass) return null;
+
+		const sourceSubclassObject = spell.sourceSubclass && typeof spell.sourceSubclass === "object"
+			? spell.sourceSubclass
+			: null;
+		const subclassName = sourceSubclassObject?.name || spell.sourceSubclass || null;
+		const subclassSource = sourceSubclassObject?.source
+			|| spell.sourceSubclassSource
+			|| spell.subclassSource
+			|| null;
+		const hasExactSubclass = !!subclassName && !!subclassSource && [
+			matchedClass.subclass?.name,
+			matchedClass.subclass?.shortName,
+		].some(name => String(name || "").toLowerCase() === String(subclassName).toLowerCase())
+			&& String(matchedClass.subclass?.source || "").toLowerCase() === String(subclassSource).toLowerCase();
+
 		return {
-			name,
-			source: String(
-				(typeof spell.sourceClass === "object" ? spell.sourceClass?.source : null)
-				|| spell.sourceClassSource
-				|| spell.classSource
-				|| uidSource
-				|| "",
-			).trim(),
+			name: matchedClass.name,
+			source: matchedClass.source,
+			uid: `${matchedClass.name}|${matchedClass.source}`,
+			subclassName: hasExactSubclass ? String(subclassName) : null,
+			subclassSource: hasExactSubclass ? String(subclassSource) : null,
+			subclassUid: hasExactSubclass ? `${subclassName}|${subclassSource}` : null,
 		};
 	}
 
-	_spellMatchesClassScopedFocus (spell, candidate) {
-		const spellScope = this._getSpellClassScope(spell);
-		if (!spellScope) return false;
-		return (candidate.classScopes || []).some(scope => {
-			if (String(scope.name || "").toLowerCase() !== spellScope.name.toLowerCase()) return false;
-			if (!scope.source) return true;
-			if (spellScope.source) return String(scope.source).toLowerCase() === spellScope.source.toLowerCase();
-			const matchingOwners = (this._data.classes || []).filter(cls =>
-				String(cls.name || "").toLowerCase() === spellScope.name.toLowerCase());
-			return matchingOwners.length === 1
-				&& String(matchingOwners[0].source || "").toLowerCase() === String(scope.source).toLowerCase();
+	isSpellCastMaterialComponentWaived (spell, castMeta = null) {
+		return [spell, castMeta].some(value => value && typeof value === "object" && (
+			value.ignoresMaterialComponents === true
+			|| value.ignoreMaterialComponents === true
+			|| value.waiveMaterialComponents === true
+			|| value.materialComponentsRequired === false
+		));
+	}
+
+	/**
+	 * Resolve any extra focus rule contributed by the exact casting class.
+	 * @param {*} spell
+	 * @param {*} [castMeta]
+	 * @returns {{ruleId: string, classUid: string, castingClass: *, addsMaterialComponent: boolean}|null}
+	 */
+	getSpellCastFocusRequirement (spell, castMeta = null) {
+		const castingClass = this.resolveSpellCastingClassIdentity(spell);
+		if (!castingClass || castingClass.uid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return null;
+		if (this.isSpellCastMaterialComponentWaived(spell, castMeta)) return null;
+		return {
+			ruleId: CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID,
+			classUid: castingClass.uid,
+			castingClass,
+			addsMaterialComponent: true,
+		};
+	}
+
+	/**
+	 * Return live inventory wrappers eligible for a resolved spell-cast focus rule.
+	 * @param {*} requirement
+	 * @returns {Array<*>}
+	 */
+	getEligibleSpellCastFocusInventoryRows (requirement) {
+		if (requirement?.ruleId !== CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID) return [];
+		const armorStatus = this.getEfaArcaneArmorBindingStatus();
+		return (this._data.inventory || []).filter(wrapper => {
+			if (!wrapper?.id || !wrapper.equipped || Number(wrapper.quantity ?? 1) <= 0) return false;
+			if (armorStatus.active && armorStatus.boundItemId === wrapper.id) return true;
+			const item = wrapper.item;
+			if (!item?.name || !item.source) return false;
+			const normalizedName = CharacterSheetState.normalizeToolKey(item.name);
+			const baseType = String(item.type || "").split("|")[0].toUpperCase();
+			const isEligibleEntity = normalizedName === CharacterSheetState.normalizeToolKey("Thieves' Tools")
+				|| normalizedName === CharacterSheetState.normalizeToolKey("Tinker's Tools")
+				|| baseType === "AT";
+			return isEligibleEntity && this.hasToolProficiency(item.name);
 		});
 	}
 
-	getSpellcastingFocusStatus ({spell = null} = {}) {
+	getSpellCastFocusReference (wrapper) {
+		if (!wrapper?.id || !wrapper.item?.name || !wrapper.item?.source) return null;
+		return {
+			inventoryItemId: wrapper.id,
+			itemUid: `${wrapper.item.name}|${wrapper.item.source}`,
+			name: wrapper.item.name,
+			source: wrapper.item.source,
+		};
+	}
+
+	resolveSpellCastFocusReference (reference) {
+		if (!reference?.inventoryItemId || !reference.itemUid) return null;
+		const wrapper = (this._data.inventory || []).find(it => it.id === reference.inventoryItemId);
+		if (!wrapper?.item?.name || !wrapper.item?.source) return null;
+		return `${wrapper.item.name}|${wrapper.item.source}` === reference.itemUid ? wrapper : null;
+	}
+
+	resolveCommittedSpellCastReceiptFocus (receipt) {
+		return this.resolveSpellCastFocusReference(receipt?.focus);
+	}
+
+	getSpellcastingFocusStatus () {
 		const inv = this._data.inventory || [];
 		const baseType = it => {
 			const rawType = typeof it.typeCode === "string" ? it.typeCode : it.type;
@@ -39690,10 +39845,6 @@ class CharacterSheetState {
 		if (this._isBard() && has((i, it) => baseType(it) === "INS" && this._isProficientMusicalInstrument(it.name || i.name))) {
 			return {ok: true, source: "musical instrument", itemName: matched.name};
 		}
-
-		const classScopedFocus = this._getClassScopedSpellcastingFocusCandidates()
-			.find(candidate => this._spellMatchesClassScopedFocus(spell, candidate));
-		if (classScopedFocus) return {ok: true, ...classScopedFocus};
 
 		return {ok: false, source: null, itemName: null};
 	}
@@ -44339,6 +44490,118 @@ class CharacterSheetState {
 		}
 
 		return committedResult;
+	}
+
+	/**
+	 * Subscribe to fully committed spell casts for one exact casting-class UID.
+	 * Subscriber failures are captured in the returned receipt and never roll back
+	 * the valid cast which has already crossed its transaction boundary.
+	 * @param {string} classUid Exact `name|source` class UID, or `"*"` for all exact casts.
+	 * @param {Function} hook
+	 * @param {{hookId?: string}} [opts]
+	 * @returns {Function} unregister callback
+	 */
+	registerCommittedSpellCastHook (classUid, hook, {hookId = CryptUtil.uid()} = {}) {
+		if (typeof hook !== "function") throw new TypeError("Committed spell-cast hook must be a function.");
+		const key = classUid === "*" ? "*" : String(classUid || "").trim().toLowerCase();
+		if (!key) throw new TypeError("Committed spell-cast hook requires an exact class UID.");
+		const hooks = this._committedSpellCastHooks.get(key) || new Map();
+		hooks.set(hookId, hook);
+		this._committedSpellCastHooks.set(key, hooks);
+		return () => {
+			const liveHooks = this._committedSpellCastHooks.get(key);
+			if (!liveHooks) return;
+			liveHooks.delete(hookId);
+			if (!liveHooks.size) this._committedSpellCastHooks.delete(key);
+		};
+	}
+
+	/**
+	 * Publish a stable receipt after a spell cast has fully committed.
+	 *
+	 * The caller must invoke this only after cancellation/refund handling. Source
+	 * attribution and the selected focus are revalidated here so subscribers never
+	 * need to repeat EFA focus legality.
+	 * @param {*} input
+	 * @returns {Promise<*|null>} Receipt, or null when exact ownership cannot be proven.
+	 */
+	async pPublishCommittedSpellCast ({spell, spellData = null, focusInventoryRow = null, cast = {}} = {}) {
+		const castingClass = this.resolveSpellCastingClassIdentity(spell);
+		if (!castingClass) return null;
+
+		const focusRequirement = this.getSpellCastFocusRequirement(spell, cast);
+		if (castingClass.uid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID && !focusRequirement) return null;
+
+		let focus = null;
+		if (focusRequirement) {
+			const legalRows = this.getEligibleSpellCastFocusInventoryRows(focusRequirement);
+			const selectedId = focusInventoryRow?.id || cast?.focusInventoryItemId || null;
+			const selectedRow = legalRows.find(row => row.id === selectedId) || null;
+			if (!selectedRow) return null;
+			focus = this.getSpellCastFocusReference(selectedRow);
+			if (!focus) return null;
+		}
+
+		const spellName = spellData?.name || spell?.name || null;
+		const spellSource = spellData?.source || spell?.source || null;
+		if (!spellName || !spellSource) return null;
+		const spellEntryId = spell?.id || cast?.spellEntryId || null;
+		const spellUid = `${spellName}|${spellSource}`;
+		const castDescriptor = {
+			type: cast?.type || (Number(spellData?.level ?? spell?.level) === 0 ? "cantrip" : "spell"),
+			slotLevel: cast?.slotLevel == null ? null : Number(cast.slotLevel),
+			isRitual: cast?.isRitual === true,
+			isPactSlot: cast?.isPactSlot === true,
+			resourceId: cast?.resourceId || null,
+			itemInventoryId: cast?.itemInventoryId || null,
+			itemUid: cast?.itemUid || null,
+			innateSpellId: cast?.innateSpellId || null,
+		};
+
+		const receipt = {
+			receiptVersion: 1,
+			receiptId: `spell-cast-${CryptUtil.uid()}`,
+			ok: true,
+			committed: true,
+			castingClassUid: castingClass.uid,
+			castingSubclassUid: castingClass.subclassUid,
+			spellEntryId,
+			spellUid,
+			spell: {
+				name: spellName,
+				source: spellSource,
+				level: Number(spellData?.level ?? spell?.level ?? 0),
+			},
+			castType: castDescriptor.type,
+			slotLevel: castDescriptor.slotLevel,
+			cast: castDescriptor,
+			focusInventoryItemId: focus?.inventoryItemId || null,
+			focusItemUid: focus?.itemUid || null,
+			focus,
+			followUps: [],
+			followUpFailed: false,
+		};
+
+		const hookGroups = [
+			this._committedSpellCastHooks.get(castingClass.uid.toLowerCase()),
+			this._committedSpellCastHooks.get("*"),
+		].filter(Boolean);
+		for (const hooks of hookGroups) {
+			for (const [hookId, hook] of hooks.entries()) {
+				try {
+					const value = await hook(receipt);
+					receipt.followUps.push({hookId, ok: true, value});
+				} catch (error) {
+					receipt.followUps.push({
+						hookId,
+						ok: false,
+						error: error instanceof Error ? error.message : String(error),
+					});
+					receipt.followUpFailed = true;
+				}
+			}
+		}
+		return receipt;
 	}
 
 	async pUseFlashOfGenius ({

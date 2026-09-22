@@ -5139,10 +5139,12 @@ class CharacterSheetQuickBuild {
 
 		// Apply spellbook spells
 		if (this._selections.spellbookSpells.length > 0) {
+			const wizardClass = this._classAllocations.find(a => a.className === "Wizard");
 			this._selections.spellbookSpells.forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Wizard Spellbook",
 					sourceClass: "Wizard",
+					sourceClassSource: wizardClass?.classSource || null,
 					inSpellbook: true,
 				}));
 			});
@@ -5152,26 +5154,28 @@ class CharacterSheetQuickBuild {
 
 		// Apply known spells (Sorcerer, Bard, Ranger, Warlock, etc.)
 		if (this._selections.knownSpells.length > 0) {
-			const knownClassName = this._classAllocations.find(a =>
+			const knownClass = this._classAllocations.find(a =>
 				CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "known",
-			)?.className;
+			);
 			this._selections.knownSpells.forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Spells Known",
-					sourceClass: knownClassName || "",
+					sourceClass: knownClass?.className || "",
+					sourceClassSource: knownClass?.classSource || null,
 				}));
 			});
 		}
 
 		// Apply known cantrips
 		if (this._selections.knownCantrips.length > 0) {
-			const knownClassName = this._classAllocations.find(a =>
+			const knownClass = this._classAllocations.find(a =>
 				CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "known",
-			)?.className;
+			);
 			this._selections.knownCantrips.forEach(spell => {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Cantrips Known",
-					sourceClass: knownClassName || "",
+					sourceClass: knownClass?.className || "",
+					sourceClassSource: knownClass?.classSource || null,
 				}));
 			});
 		}
@@ -5186,14 +5190,15 @@ class CharacterSheetQuickBuild {
 
 		// Apply prepared spells (XPHB Warlock, etc.)
 		if (this._selections.preparedSpells?.length > 0) {
-			const prepClassName = this._classAllocations.find(a =>
+			const prepClass = this._classAllocations.find(a =>
 				a.classData?.preparedSpellsProgression
 				&& CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "prepared",
-			)?.className;
+			);
 			this._selections.preparedSpells.forEach(spell => {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Prepared Spells",
-					sourceClass: prepClassName || "",
+					sourceClass: prepClass?.className || "",
+					sourceClassSource: prepClass?.classSource || null,
 					prepared: true,
 				}));
 			});
@@ -5201,14 +5206,15 @@ class CharacterSheetQuickBuild {
 
 		// Apply prepared cantrips
 		if (this._selections.preparedCantrips?.length > 0) {
-			const prepClassName = this._classAllocations.find(a =>
+			const prepClass = this._classAllocations.find(a =>
 				a.classData?.preparedSpellsProgression
 				&& CharacterSheetClassUtils.getClassSpellcastingModel({name: a.className, source: a.classSource, classData: a.classData}) === "prepared",
-			)?.className;
+			);
 			this._selections.preparedCantrips.forEach(spell => {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Prepared Spells",
-					sourceClass: prepClassName || "",
+					sourceClass: prepClass?.className || "",
+					sourceClassSource: prepClass?.classSource || null,
 				}));
 			});
 		}

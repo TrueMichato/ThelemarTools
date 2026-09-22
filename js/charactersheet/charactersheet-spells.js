@@ -2244,7 +2244,9 @@ class CharacterSheetSpells {
 			subschools: spell.subschools || [], // Include rarity/legality tags
 			...(attribution.sourceFeature ? {sourceFeature: attribution.sourceFeature} : {}),
 			...(attribution.sourceClass ? {sourceClass: attribution.sourceClass} : {}),
+			...(attribution.sourceClassSource ? {sourceClassSource: attribution.sourceClassSource} : {}),
 			...(attribution.sourceSubclass ? {sourceSubclass: attribution.sourceSubclass} : {}),
+			...(attribution.sourceSubclassSource ? {sourceSubclassSource: attribution.sourceSubclassSource} : {}),
 		});
 
 		this._renderSpellList();
@@ -2339,7 +2341,7 @@ class CharacterSheetSpells {
 		return `${dur.duration?.amount || ""} ${dur.duration?.type || ""}`.trim();
 	}
 
-	async pCastItemSpell (power) {
+	async pCastItemSpell (power, {deferCommit = false, decision = null} = {}) {
 		const spellData = this._allSpells.find(spell =>
 			spell.name?.toLowerCase() === power?.spellName?.toLowerCase()
 			&& spell.source?.toLowerCase() === power?.spellSource?.toLowerCase());
@@ -2353,7 +2355,24 @@ class CharacterSheetSpells {
 			id: `item:${power.itemId}:${power.id}`,
 			level: slotLevel,
 			sourceItem: power.itemName,
+			...(power.sourceClass ? {sourceClass: power.sourceClass} : {}),
+			...(power.sourceClassSource ? {sourceClassSource: power.sourceClassSource} : {}),
+			...(power.sourceSubclass ? {sourceSubclass: power.sourceSubclass} : {}),
+			...(power.sourceSubclassSource ? {sourceSubclassSource: power.sourceSubclassSource} : {}),
+			...(power.castingClassUid ? {castingClassUid: power.castingClassUid} : {}),
+			...(power.ignoresMaterialComponents === true ? {ignoresMaterialComponents: true} : {}),
+			...(power.ignoreMaterialComponents === true ? {ignoreMaterialComponents: true} : {}),
+			...(power.materialComponentsRequired === false ? {materialComponentsRequired: false} : {}),
 		};
+		const focusRequirement = this._state.getSpellCastFocusRequirement?.(spell, power) || null;
+		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: !!focusRequirement})) return false;
+		const castMeta = {
+			sourceItem: power.itemName,
+			...(this._state.isSpellCastMaterialComponentWaived?.(spell, power) ? {ignoresMaterialComponents: true} : {}),
+		};
+		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
+		if (focusSelection.cancelled) return false;
+		if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
 		const requiresConcentration = spellData.duration?.some?.(duration => duration.concentration);
 		if (requiresConcentration && this._state.isConcentrating?.()) {
 			const current = this._state.getConcentration?.();
@@ -2365,15 +2384,51 @@ class CharacterSheetSpells {
 			}));
 			if (!confirmed) return false;
 		}
-		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: false})) return false;
-		const castResult = await this._showCastResult(spell, slotLevel, false, false, {sourceItem: power.itemName});
+		const castResult = await this._showCastResult(spell, slotLevel, false, false, castMeta);
 		if (castResult?.cancelled) return false;
+		if (focusRequirement) {
+			await this._pConsumeMaterialComponent({
+				spell,
+				spellData,
+				decision,
+				variantUsed: false,
+			});
+		}
+		if (requiresConcentration && this._state.isConcentrating?.()) this._state.breakConcentration?.();
 		if (requiresConcentration) {
 			this._state.setConcentration?.({name: spell.name, level: slotLevel, source: spell.source || spellData.source});
 			this._updateConcentrationUI();
 		}
 		this._state.consumeStatesEndingOnSpellCast?.();
-		return true;
+		this._state.applyCommittedSpellCastTriggers?.(spellData, castMeta);
+		const item = this._state.getItemRaw?.(power.itemId);
+		const pendingSpellCast = {
+			spell,
+			spellData,
+			focusReference: focusSelection.focusReference,
+			cast: {
+				type: "item",
+				slotLevel,
+				itemInventoryId: power.itemId || null,
+				itemUid: item?.name && item?.source ? `${item.name}|${item.source}` : null,
+				focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+			},
+		};
+		if (deferCommit) return {ok: true, pendingSpellCast};
+		return await this.pCommitPendingSpellCast(pendingSpellCast) || true;
+	}
+
+	async pCommitPendingSpellCast (pendingSpellCast) {
+		if (!pendingSpellCast?.spell) return null;
+		const focusInventoryRow = pendingSpellCast.focusReference
+			? this._state.resolveSpellCastFocusReference?.(pendingSpellCast.focusReference)
+			: null;
+		return this._state.pPublishCommittedSpellCast?.({
+			spell: pendingSpellCast.spell,
+			spellData: pendingSpellCast.spellData,
+			focusInventoryRow,
+			cast: pendingSpellCast.cast,
+		});
 	}
 
 	async _pResolveGamblerCastReceipt (resolution) {
@@ -2489,7 +2544,9 @@ class CharacterSheetSpells {
 		// that didn't account for different spell versions (e.g., PHB vs XPHB)
 		const requiresConcentration = spellData?.duration?.some?.(d => d.concentration);
 
-		// If concentrating on another spell, ask to break concentration first
+		// Ask up front, but delay the mutation until every focus picker/choice has
+		// succeeded so cancelling cast setup remains a complete no-op.
+		let shouldBreakExistingConcentration = false;
 		if (requiresConcentration && this._state.isConcentrating?.()) {
 			const currentConc = this._state.getConcentration?.();
 			const confirmed = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
@@ -2499,6 +2556,7 @@ class CharacterSheetSpells {
 				textNo: "Cancel",
 			}));
 			if (!confirmed) return;
+			shouldBreakExistingConcentration = true;
 		}
 
 		// Cantrips don't use slots
@@ -2529,6 +2587,9 @@ class CharacterSheetSpells {
 					...(activeMetamagicChoice?.feywildShard ? {feywildShard: true} : {}),
 				},
 			});
+			const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
+			if (focusSelection.cancelled) return;
+			if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
 
 			if (
 				weaponChannelChoice
@@ -2553,6 +2614,7 @@ class CharacterSheetSpells {
 				JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
 				return;
 			}
+			if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
 			if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 			const castResult = weaponChannelChoice
@@ -2575,8 +2637,19 @@ class CharacterSheetSpells {
 				this._updateConcentrationUI();
 			}
 			this._state.consumeStatesEndingOnSpellCast?.();
+			this._state.applyCommittedSpellCastTriggers?.(spellData, castMeta);
+			const receipt = await this._state.pPublishCommittedSpellCast?.({
+				spell,
+				spellData,
+				focusInventoryRow: focusSelection.focusInventoryRow,
+				cast: {
+					type: "cantrip",
+					slotLevel: 0,
+					focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+				},
+			});
 			this._page.saveCharacter();
-			return;
+			return receipt;
 		}
 
 		// Check if spell can be cast as a ritual (no slot needed, +10 min casting time)
@@ -2633,6 +2706,15 @@ class CharacterSheetSpells {
 						...(activeMetamagicChoice?.feywildShard ? {feywildShard: true} : {}),
 					},
 				});
+				const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
+				if (focusSelection.cancelled) return;
+				if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
+				if (!this._spendMetamagicCost(activeMetamagicChoice?.metamagic)) {
+					JqueryUtil.doToast({type: "warning", content: "Not enough sorcery points for that metamagic."});
+					return;
+				}
+				if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
+				if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 				// Ritual cast: no slot consumed
 				const castResult = await this._showCastResult(spell, spell.level, false, true, castMeta); // ritual = true
@@ -2652,8 +2734,20 @@ class CharacterSheetSpells {
 					this._updateConcentrationUI();
 				}
 				this._state.consumeStatesEndingOnSpellCast?.();
+				this._state.applyCommittedSpellCastTriggers?.(spellData, castMeta);
+				const receipt = await this._state.pPublishCommittedSpellCast?.({
+					spell,
+					spellData,
+					focusInventoryRow: focusSelection.focusInventoryRow,
+					cast: {
+						type: "ritual",
+						slotLevel: spell.level,
+						isRitual: true,
+						focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+					},
+				});
 				this._page.saveCharacter();
-				return;
+				return receipt;
 			}
 			// Otherwise fall through to normal slot-consuming cast
 		}
@@ -2764,6 +2858,9 @@ class CharacterSheetSpells {
 				...(selectedSlot.isWizardCapstone ? {freeCastSource: selectedSlot.capstoneType === "mastery" ? "Spell Mastery" : "Signature Spells"} : {}),
 			},
 		});
+		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta, decision});
+		if (focusSelection.cancelled) return;
+		if (focusSelection.focusReference) castMeta.spellcastingFocus = focusSelection.focusReference;
 		const isGamblerSpell = this._state.isTgttGamblerSpell?.(spell) === true;
 		let gamblerCastResolution = null;
 		if (isGamblerSpell && this._state.getFeatureCalculations?.().hasGamblerSpellcasting && !selectedSlot.isWizardCapstone) {
@@ -2797,6 +2894,7 @@ class CharacterSheetSpells {
 			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
 			return;
 		}
+		if (shouldBreakExistingConcentration) this._state.breakConcentration?.();
 		if (activeMetamagicChoice?.metamagic) this._refreshSorceryPointUI();
 
 		// Handle variant component slot modifications (noSlot / lowerSlot)
@@ -2968,6 +3066,22 @@ class CharacterSheetSpells {
 		// on-cast triggers fire against the committed cast.
 		this._state.consumeStatesEndingOnSpellCast?.();
 		const triggeredFeatures = this._state.applyCommittedSpellCastTriggers?.(spell) || [];
+		const receipt = gamblerCastResolution && gamblerCastResolution.status !== "committed"
+			? null
+			: await this._state.pPublishCommittedSpellCast?.({
+				spell,
+				spellData,
+				focusInventoryRow: focusSelection.focusInventoryRow,
+				cast: {
+					type: selectedSlot.isNoSlotResource
+						? "noSlotResource"
+						: (selectedSlot.isWizardCapstone ? "classFeature" : "slot"),
+					slotLevel: selectedSlot.level,
+					isPactSlot: !!selectedSlot.isPact,
+					resourceId: selectedSlot.isNoSlotResource ? selectedSlot.resourceId : null,
+					focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+				},
+			});
 
 		this.renderSlots();
 		this._page._renderQuickSpells(); // Update overview spell slots
@@ -2977,6 +3091,7 @@ class CharacterSheetSpells {
 			this._page._renderActiveStates?.();
 		}
 		this._page.saveCharacter();
+		return receipt;
 	}
 
 	/**
@@ -3315,7 +3430,8 @@ class CharacterSheetSpells {
 	 * @param {boolean} [opts.variantUsed] A variant spell component was used (it shows its own line).
 	 * @returns {string|null}
 	 */
-	_getSpellFocusNote (spell, spellData, {variantUsed = false} = {}) {
+	_getSpellFocusNote (spell, spellData, {variantUsed = false, focusReference = null} = {}) {
+		if (focusReference?.name) return focusReference.name;
 		if (variantUsed) return null;
 		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
 			|| this._state.getSpellMaterialComponentInfo?.(spell);
@@ -3334,6 +3450,14 @@ class CharacterSheetSpells {
 	}
 
 	_getMaterialComponentBlock (spell, spellData) {
+		const classFocusRequirement = this._state.getSpellCastFocusRequirement?.(spell);
+		if (classFocusRequirement) {
+			const eligibleRows = this._state.getEligibleSpellCastFocusInventoryRows?.(classFocusRequirement) || [];
+			if (!eligibleRows.length) {
+				return `Cannot cast ${spell.name} — EFA Artificer spells require an equipped spellcasting focus: Thieves' Tools, Tinker's Tools, a proficient Artisan's Tool, or active Arcane Armor.`;
+			}
+		}
+
 		const info = this._state.getSpellMaterialComponentInfo?.(spellData)
 			|| this._state.getSpellMaterialComponentInfo?.(spell);
 		if (!info) return null;
@@ -3353,6 +3477,7 @@ class CharacterSheetSpells {
 		if ((this._state.getMatchingVariantComponents?.(spell, spellData) || []).length) return null;
 
 		if (info.requiresFocus) {
+			if (classFocusRequirement) return null;
 			const focus = this._state.getSpellcastingFocusStatus?.({spell}) || {ok: false};
 			if (focus.ok) return null;
 			// Bards can use a musical instrument as a focus, so surface that option too.
@@ -3368,6 +3493,47 @@ class CharacterSheetSpells {
 		if (candidates.length) return null;
 		const gp = Math.floor(info.cost / 100);
 		return `Cannot cast ${spell.name} — requires a material component worth at least ${gp} gp${info.consume ? " (consumed by the spell)" : ""} that you don't have. Add it to your inventory, or enable "Ignore spellcasting restrictions" in settings.`;
+	}
+
+	async _pResolveSpellCastFocus ({spell, castMeta = null, decision = null} = {}) {
+		if (this._state.getSettings?.().ignoreSpellcastingRestrictions) {
+			return {cancelled: false, requirement: null, focusInventoryRow: null, focusReference: null};
+		}
+		const requirement = this._state.getSpellCastFocusRequirement?.(spell, castMeta) || null;
+		if (!requirement) return {cancelled: false, requirement: null, focusInventoryRow: null, focusReference: null};
+
+		const candidates = this._state.getEligibleSpellCastFocusInventoryRows?.(requirement) || [];
+		if (!candidates.length) {
+			JqueryUtil.doToast({
+				type: "warning",
+				content: "EFA Artificer spells require an equipped spellcasting focus: Thieves' Tools, Tinker's Tools, a proficient Artisan's Tool, or active Arcane Armor.",
+			});
+			return {cancelled: true, requirement, reason: "focusUnavailable"};
+		}
+
+		const requestedId = decision?.focusInventoryItemId || decision?.spellcastingFocusItemId || null;
+		let focusInventoryRow = requestedId
+			? candidates.find(row => row.id === requestedId) || null
+			: null;
+		if (requestedId && !focusInventoryRow) return {cancelled: true, requirement, reason: "invalidFocusSelection"};
+		if (!focusInventoryRow && candidates.length === 1) focusInventoryRow = candidates[0];
+		if (!focusInventoryRow) {
+			focusInventoryRow = await CharacterSheetModal.pGetUserEnum({
+				title: "Choose Artificer Spellcasting Focus",
+				htmlDescription: "Choose the equipped tool or active Arcane Armor you are using as the material focus for this spell.",
+				values: candidates,
+				fnDisplay: row => `${row.item.name} (${row.item.source})`,
+				isResolveItem: true,
+			});
+			if (!focusInventoryRow) return {cancelled: true, requirement, reason: "cancelled"};
+		}
+
+		return {
+			cancelled: false,
+			requirement,
+			focusInventoryRow,
+			focusReference: this._state.getSpellCastFocusReference?.(focusInventoryRow) || null,
+		};
 	}
 
 	/**
@@ -4592,7 +4758,10 @@ class CharacterSheetSpells {
 
 		// Detail the spellcasting focus (or component pouch / substitution) used to
 		// satisfy a no-cost material component.
-		const focusNote = this._getSpellFocusNote(spell, spellData, {variantUsed: !!normalizedCastMeta.variantComponent});
+		const focusNote = this._getSpellFocusNote(spell, spellData, {
+			variantUsed: !!normalizedCastMeta.variantComponent,
+			focusReference: normalizedCastMeta.spellcastingFocus || null,
+		});
 		if (focusNote) {
 			toastContent += `<br><span class="text-info">🔮 Focus: ${focusNote}</span>`;
 		}
@@ -8415,15 +8584,38 @@ class CharacterSheetSpells {
 		if (!spell) return;
 
 		// Get full spell data for constraint checks
-		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source);
+		const spellData = this._allSpells.find(s => s.name === spell.name && s.source === spell.source) || spell;
 
 		// Check for conditions that prevent spellcasting
-		if (!await this._pHandleCastingConstraints(spell, spellData)) return;
+		const focusRequirement = this._state.getSpellCastFocusRequirement?.(spell, spell) || null;
+		if (!await this._pHandleCastingConstraints(spell, spellData, null, {enforceMaterial: !!focusRequirement})) return;
+		const focusSelection = await this._pResolveSpellCastFocus({spell, castMeta: spell});
+		if (focusSelection.cancelled) return;
+		const focusText = focusSelection.focusReference?.name ? ` using ${focusSelection.focusReference.name}` : "";
+		if (focusRequirement) {
+			await this._pConsumeMaterialComponent({
+				spell,
+				spellData,
+				variantUsed: false,
+			});
+		}
 
 		if (spell.atWill) {
 			// At-will spells can always be cast
-			JqueryUtil.doToast({type: "info", content: `Cast ${spell.name} (at will)`});
-			return;
+			JqueryUtil.doToast({type: "info", content: `Cast ${spell.name}${focusText} (at will)`});
+			const receipt = await this._state.pPublishCommittedSpellCast?.({
+				spell,
+				spellData,
+				focusInventoryRow: focusSelection.focusInventoryRow,
+				cast: {
+					type: "innate",
+					slotLevel: spell.level || 0,
+					innateSpellId: spell.id,
+					focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+				},
+			});
+			this._page.saveCharacter();
+			return receipt;
 		}
 
 		if (!spell.uses || spell.uses.current <= 0) {
@@ -8432,8 +8624,22 @@ class CharacterSheetSpells {
 		}
 
 		this._state.useInnateSpell(spellId);
-		JqueryUtil.doToast({type: "info", content: `Cast ${spell.name} (${spell.uses.current}/${spell.uses.max} remaining)`});
+		JqueryUtil.doToast({type: "info", content: `Cast ${spell.name}${focusText} (${spell.uses.current}/${spell.uses.max} remaining)`});
+		const receipt = await this._state.pPublishCommittedSpellCast?.({
+			spell,
+			spellData,
+			focusInventoryRow: focusSelection.focusInventoryRow,
+			cast: {
+				type: "innate",
+				slotLevel: spell.level || 0,
+				innateSpellId: spell.id,
+				resourceId: spell.linkedResourceId || null,
+				focusInventoryItemId: focusSelection.focusReference?.inventoryItemId || null,
+			},
+		});
+		this._page.saveCharacter();
 		this._renderSpellList();
+		return receipt;
 	}
 
 	/**

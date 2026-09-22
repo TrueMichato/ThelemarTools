@@ -9707,6 +9707,7 @@ class CharacterSheetBuilder {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature: "Wizard Spellbook",
 					sourceClass: knownInfo.className,
+					sourceClassSource: knownInfo.classSource,
 					prepared: true,
 					inSpellbook: true,
 				}));
@@ -9721,6 +9722,7 @@ class CharacterSheetBuilder {
 				this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 					sourceFeature,
 					sourceClass: knownInfo.className,
+					sourceClassSource: knownInfo.classSource,
 					prepared: true,
 				}));
 			}
@@ -9731,6 +9733,7 @@ class CharacterSheetBuilder {
 			this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(cantrip, {
 				sourceFeature: "Cantrips Known",
 				sourceClass: knownInfo.className,
+				sourceClassSource: knownInfo.classSource,
 			}));
 		}
 

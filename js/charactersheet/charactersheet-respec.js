@@ -2123,10 +2123,12 @@ class CharacterSheetRespec {
 					? CharacterSheetClassUtils.buildCantripStateObject(spell, {
 						sourceFeature: decision.provenance?.ownerUid || decision.label,
 						sourceClass: decision.className,
+						sourceClassSource: decision.classSource,
 					})
 					: CharacterSheetClassUtils.buildSpellStateObject(spell, {
 						sourceFeature: decision.provenance?.ownerUid || decision.label,
 						sourceClass: decision.className,
+						sourceClassSource: decision.classSource,
 						prepared: decision.meta?.spellMode === "prepared",
 					});
 				if (isCantrip) this._state.addCantrip(built);
@@ -2310,6 +2312,7 @@ class CharacterSheetRespec {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Cantrips Known",
 					sourceClass: decision.className,
+					sourceClassSource: decision.classSource,
 				}));
 				return;
 			}
@@ -2317,6 +2320,7 @@ class CharacterSheetRespec {
 			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 				sourceFeature: decision.type === "spellbookSpells" ? "Wizard Spellbook" : (decision.type === "preparedSpells" ? "Prepared Spells" : "Spells Known"),
 				sourceClass: decision.className,
+				sourceClassSource: decision.classSource,
 				prepared: decision.type === "preparedSpells",
 				inSpellbook: decision.type === "spellbookSpells",
 			}));
@@ -2803,12 +2807,14 @@ class CharacterSheetRespec {
 				this._state.addCantrip(CharacterSheetClassUtils.buildCantripStateObject(spell, {
 					sourceFeature: "Cantrips Known",
 					sourceClass: decision.className,
+					sourceClassSource: decision.classSource,
 				}));
 				return;
 			}
 			this._state.addSpell(CharacterSheetClassUtils.buildSpellStateObject(spell, {
 				sourceFeature: "Spells Known",
 				sourceClass: decision.className,
+				sourceClassSource: decision.classSource,
 			}));
 		};
 

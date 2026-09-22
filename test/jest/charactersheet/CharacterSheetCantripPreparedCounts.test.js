@@ -350,7 +350,13 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 				classes: [{name: "Druid"}, {name: "Ranger"}],
 				targetClass: {name: "Druid", source: "XPHB"},
 			});
-			expect(r).toMatchObject({sourceFeature: "Prepared Spells", sourceClass: "Druid", sourceSubclass: null});
+			expect(r).toMatchObject({
+				sourceFeature: "Prepared Spells",
+				sourceClass: "Druid",
+				sourceClassSource: "XPHB",
+				sourceSubclass: null,
+				sourceSubclassSource: null,
+			});
 		});
 
 		it("Ranger known leveled spell → 'Spells Known' / 'Ranger' even when Wizard is present", () => {
@@ -382,7 +388,12 @@ describe("pickAddedSpellAttribution — Add-Spell modal stamps source so new spe
 				classes: [{name: "Rogue", source: "TGTT", subclass: {name: "Gambler", source: "TGTT"}}],
 				targetClass: {name: "Rogue", source: "TGTT", subclass: {name: "Gambler", source: "TGTT"}},
 			});
-			expect(r).toMatchObject({sourceClass: "Gambler", sourceSubclass: "Gambler"});
+			expect(r).toMatchObject({
+				sourceClass: "Gambler",
+				sourceClassSource: "TGTT",
+				sourceSubclass: "Gambler",
+				sourceSubclassSource: "TGTT",
+			});
 		});
 
 		it("cantrip with targetClass → 'Cantrips Known' for that class", () => {

@@ -2435,10 +2435,18 @@ class CharacterSheetClassUtils {
 	 * @param {object|null} opts.info    - The spellcasting info from `getSpellcastingInfo()`.
 	 * @param {Array<*>|null} [opts.classes] - Optional `getClasses()` snapshot for wizard/spellbook detection.
 	 * @param {object|null} [opts.targetClass] - Authoritative class entry the spell is being added for (per-class card or multiclass picker prompt).
-	 * @returns {{sourceFeature: string|null, sourceClass: string|null, sourceSubclass: string|null}}
+	 * @returns {{sourceFeature: string|null, sourceClass: string|null, sourceClassSource: string|null, sourceSubclass: string|null, sourceSubclassSource: string|null}}
 	 */
 	static pickAddedSpellAttribution (/** @type {*} */ {spell, info, classes = null, targetClass = null} = {}) {
-		if (!spell) return {sourceFeature: null, sourceClass: null, sourceSubclass: null};
+		if (!spell) {
+			return {
+				sourceFeature: null,
+				sourceClass: null,
+				sourceClassSource: null,
+				sourceSubclass: null,
+				sourceSubclassSource: null,
+			};
+		}
 
 		const isCantrip = spell.level === 0;
 
@@ -2451,7 +2459,11 @@ class CharacterSheetClassUtils {
 				&& /^tgtt$/i.test(targetClass.subclass?.source || "");
 			const isWizardTarget = /^wizard$/i.test(targetClass.name || "");
 			const sourceClass = isGamblerTarget ? "Gambler" : (targetClass.name || null);
+			const sourceClassSource = isGamblerTarget
+				? (targetClass.subclass?.source || targetClass.source || null)
+				: (targetClass.source || null);
 			const sourceSubclass = isGamblerTarget ? "Gambler" : null;
+			const sourceSubclassSource = isGamblerTarget ? (targetClass.subclass?.source || null) : null;
 
 			let sourceFeature;
 			if (isCantrip) sourceFeature = "Cantrips Known";
@@ -2463,10 +2475,18 @@ class CharacterSheetClassUtils {
 				const castingType = entry?.type || info?.type;
 				sourceFeature = castingType === "known" ? "Spells Known" : "Prepared Spells";
 			}
-			return {sourceFeature, sourceClass, sourceSubclass};
+			return {sourceFeature, sourceClass, sourceClassSource, sourceSubclass, sourceSubclassSource};
 		}
 
-		if (!info) return {sourceFeature: null, sourceClass: null, sourceSubclass: null};
+		if (!info) {
+			return {
+				sourceFeature: null,
+				sourceClass: null,
+				sourceClassSource: null,
+				sourceSubclass: null,
+				sourceSubclassSource: null,
+			};
+		}
 
 		let sourceClass = null;
 		const byClass = Array.isArray(info.byClass) ? info.byClass : null;
@@ -2488,14 +2508,19 @@ class CharacterSheetClassUtils {
 		// any Wizard leveled spell on a Wizard/Gambler character got mis-stamped
 		// as a Gambler spell (and rolled Gambler dice at cast time).
 		let sourceSubclass = null;
-		const resolvedEntry = classes?.find(c => (c?.name || "").toLowerCase() === (sourceClass || "").toLowerCase());
+		const resolvedEntries = classes?.filter(c => (c?.name || "").toLowerCase() === (sourceClass || "").toLowerCase()) || [];
+		const resolvedEntry = resolvedEntries.length === 1 ? resolvedEntries[0] : null;
+		let sourceClassSource = resolvedEntry?.source || null;
+		let sourceSubclassSource = null;
 		if (resolvedEntry
 			&& /^rogue$/i.test(resolvedEntry.name || "")
 			&& /^tgtt$/i.test(resolvedEntry.source || "")
 			&& /^gambler$/i.test(resolvedEntry.subclass?.name || "")
 			&& /^tgtt$/i.test(resolvedEntry.subclass?.source || "")) {
 			sourceClass = "Gambler";
+			sourceClassSource = resolvedEntry.subclass.source || resolvedEntry.source || null;
 			sourceSubclass = "Gambler";
+			sourceSubclassSource = resolvedEntry.subclass.source || null;
 		}
 
 		let sourceFeature = null;
@@ -2509,7 +2534,7 @@ class CharacterSheetClassUtils {
 			sourceFeature = castingType === "known" ? "Spells Known" : "Prepared Spells";
 		}
 
-		return {sourceFeature, sourceClass, sourceSubclass};
+		return {sourceFeature, sourceClass, sourceClassSource, sourceSubclass, sourceSubclassSource};
 	}
 
 	/**
@@ -7722,7 +7747,16 @@ class CharacterSheetClassUtils {
 	 * @param {boolean} [opts.inSpellbook=false] - Whether spell is in spellbook
 	 * @returns {*} Spell state object
 	 */
-	static buildSpellStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass, prepared = false, inSpellbook = false, ability = null}) {
+	static buildSpellStateObject (/** @type {*} */ spell, {
+		sourceFeature,
+		sourceClass,
+		sourceClassSource = null,
+		sourceSubclass = null,
+		sourceSubclassSource = null,
+		prepared = false,
+		inSpellbook = false,
+		ability = null,
+	}) {
 		return {
 			name: spell.name,
 			source: spell.source,
@@ -7734,6 +7768,9 @@ class CharacterSheetClassUtils {
 			inSpellbook,
 			sourceFeature,
 			sourceClass,
+			sourceClassSource,
+			sourceSubclass,
+			sourceSubclassSource,
 			spellcastingAbility: ability || null,
 			castingTime: CharacterSheetClassUtils.getSpellCastingTime(spell),
 			range: CharacterSheetClassUtils.getSpellRange(spell),
@@ -7752,13 +7789,23 @@ class CharacterSheetClassUtils {
 	 * @param {string|null} [opts.ability] - Per-cantrip spellcasting ability override (e.g. a racial cantrip whose ability is chosen by the player)
 	 * @returns {*} Cantrip state object
 	 */
-	static buildCantripStateObject (/** @type {*} */ spell, {sourceFeature, sourceClass, ability = null}) {
+	static buildCantripStateObject (/** @type {*} */ spell, {
+		sourceFeature,
+		sourceClass,
+		sourceClassSource = null,
+		sourceSubclass = null,
+		sourceSubclassSource = null,
+		ability = null,
+	}) {
 		return {
 			name: spell.name,
 			source: spell.source,
 			school: spell.school,
 			sourceFeature,
 			sourceClass,
+			sourceClassSource,
+			sourceSubclass,
+			sourceSubclassSource,
 			spellcastingAbility: ability || null,
 			castingTime: CharacterSheetClassUtils.getSpellCastingTime(spell),
 			range: CharacterSheetClassUtils.getSpellRange(spell),
