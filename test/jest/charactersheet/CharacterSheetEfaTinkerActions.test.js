@@ -172,6 +172,53 @@ function createReplica (state, itemUid, resolvedItemUid = null) {
 	return result.created[0];
 }
 
+function enableFontOfMagic (state, {current = 10, max = 10} = {}) {
+	state.hasFontOfMagic = () => true;
+	state._data.resources.push({
+		id: "test-sorcery-points",
+		name: "Sorcery Points",
+		current,
+		max,
+		recharge: "long",
+	});
+}
+
+function makeSpellCastHarness (state, {showCastResult}) {
+	const spellData = {
+		name: "Cure Wounds",
+		source: "XPHB",
+		level: 1,
+		duration: [{type: "instant"}],
+		components: {v: true, s: true},
+	};
+	state.addSpell(spellData, true);
+	const spell = state.getSpells().find(it => it.name === spellData.name && it.source === spellData.source);
+	const spells = Object.create(Spells.prototype);
+	spells._state = state;
+	spells._allSpells = [spellData];
+	spells._page = {
+		saveCharacter: jest.fn(),
+		_renderQuickSpells: jest.fn(),
+	};
+	spells._resolveMetamagicChoice = jest.fn(async () => ({cancelled: false, metamagic: null}));
+	spells._pHandleCastingConstraints = jest.fn(async () => true);
+	spells._resolveVariantComponentChoice = jest.fn(async () => ({cancelled: false}));
+	spells._pResolveSpellCastFocus = jest.fn(async () => ({
+		cancelled: false,
+		focusInventoryRow: null,
+		focusReference: null,
+		requirement: null,
+	}));
+	spells._pResolveGamblerCastReceipt = jest.fn(async () => ({cancelled: false, resolution: null, deferCast: false}));
+	spells._spendMetamagicCost = jest.fn(() => true);
+	spells._getNormalizedCastMeta = jest.fn(() => ({}));
+	spells._showCastResult = showCastResult;
+	spells._pConsumeMaterialComponent = jest.fn(async () => {});
+	spells.renderSlots = jest.fn();
+	state.pPublishCommittedSpellCast = jest.fn(async () => null);
+	return {spell, spells};
+}
+
 function makeInventory (state) {
 	const page = {
 		getState: () => state,
@@ -800,38 +847,9 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		state.setSpellSlots(2, state.getSpellSlotsMax(2), state.getSpellSlotsCurrent(2) - 1);
 		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
 
-		const spellData = {
-			name: "Cure Wounds",
-			source: "XPHB",
-			level: 1,
-			duration: [{type: "instant"}],
-			components: {v: true, s: true},
-		};
-		state.addSpell(spellData, true);
-		const spell = state.getSpells().find(it => it.name === spellData.name && it.source === spellData.source);
-		const spells = Object.create(Spells.prototype);
-		spells._state = state;
-		spells._allSpells = [spellData];
-		spells._page = {
-			saveCharacter: jest.fn(),
-			_renderQuickSpells: jest.fn(),
-		};
-		spells._resolveMetamagicChoice = jest.fn(async () => ({cancelled: false, metamagic: null}));
-		spells._pHandleCastingConstraints = jest.fn(async () => true);
-		spells._resolveVariantComponentChoice = jest.fn(async () => ({cancelled: false}));
-		spells._pResolveSpellCastFocus = jest.fn(async () => ({
-			cancelled: false,
-			focusInventoryRow: null,
-			focusReference: null,
-			requirement: null,
-		}));
-		spells._pResolveGamblerCastReceipt = jest.fn(async () => ({cancelled: false, resolution: null, deferCast: false}));
-		spells._spendMetamagicCost = jest.fn(() => true);
-		spells._getNormalizedCastMeta = jest.fn(() => ({}));
-		spells._showCastResult = jest.fn(async () => ({cancelled: false}));
-		spells._pConsumeMaterialComponent = jest.fn(async () => {});
-		spells.renderSlots = jest.fn();
-		state.pPublishCommittedSpellCast = jest.fn(async () => null);
+		const {spell, spells} = makeSpellCastHarness(state, {
+			showCastResult: jest.fn(async () => ({cancelled: false})),
+		});
 
 		await spells._castSpell(spell.id, {
 			withMetamagic: false,
@@ -842,6 +860,55 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
 		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
 		state.reconcileEfaArtificerTinker({reason: "test-cast-level-loss"});
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
+	});
+
+	test("a cancelled real cast restores both the temporary Drain slot and its availability marker", async () => {
+		const {state} = buildState();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		const {spell, spells} = makeSpellCastHarness(state, {
+			showCastResult: jest.fn(async () => ({cancelled: true})),
+		});
+
+		await spells._castSpell(spell.id, {
+			withMetamagic: false,
+			decision: {slotLevel: 1, castAsRitual: false, skipComponentPrompt: true},
+		});
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 3}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
+		state.reconcileEfaArtificerTinker({reason: "test-cancelled-cast-level-loss"});
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
+	});
+
+	test("a thrown real cast result restores the exact Drain expenditure before rethrowing", async () => {
+		const {state} = buildState();
+		state.setSpellSlotCurrent(1, 2);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		const castError = new Error("test-cast-result-failure");
+		const {spell, spells} = makeSpellCastHarness(state, {
+			showCastResult: jest.fn(async () => { throw castError; }),
+		});
+
+		await expect(spells._castSpell(spell.id, {
+			withMetamagic: false,
+			decision: {slotLevel: 1, castAsRitual: false, skipComponentPrompt: true},
+		})).rejects.toBe(castError);
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 3}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
+		state.reconcileEfaArtificerTinker({reason: "test-failed-cast-level-loss"});
 		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 2}});
 	});
 
@@ -917,16 +984,72 @@ describe("EFA Tinker's Magic and Magic Item Tinker transactions", () => {
 			operation: "drain",
 			itemId: sorceryReplica.itemId,
 		}).ok).toBe(true);
-		state.hasFontOfMagic = () => true;
-		state._data.resources.push({
-			id: "test-sorcery-points",
-			name: "Sorcery Points",
-			current: 0,
-			max: 10,
-			recharge: "long",
-		});
+		enableFontOfMagic(state, {current: 0});
 		expect(state.convertSlotToSorceryPoints(1)).toBe(true);
 		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
+	});
+
+	test("Font-created above-max slots survive adding and level-loss cleanup of an unspent Drain slot", () => {
+		const {state} = buildState();
+		enableFontOfMagic(state);
+		expect(state.convertSorceryPointsToSlot(1)).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 5}});
+
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 6}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+
+		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").level = 5;
+		state.reconcileEfaArtificerTinker({reason: "test-font-then-drain-level-loss"});
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 5}});
+		expect(state.getBonusSpellSlotsForLevel(1)).toBe(0);
+	});
+
+	test("source-loss cleanup removes only Drain when Font creates a slot afterward", () => {
+		const {state} = buildState();
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 5}});
+
+		enableFontOfMagic(state);
+		expect(state.convertSorceryPointsToSlot(1)).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 6}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(true);
+
+		state._data.classes.find(cls => cls.name === "Artificer" && cls.source === "EFA").source = "HB";
+		state.reconcileEfaArtificerTinker({reason: "test-drain-then-font-source-loss"});
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 5}});
+		expect(state.getBonusSpellSlotsForLevel(1)).toBe(0);
+		state.recoverSpellSlots();
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 4}});
+	});
+
+	test("the M4 long-rest transition removes Drain without clamping Font before normal rest recovery", () => {
+		const {state} = buildState();
+		enableFontOfMagic(state);
+		expect(state.convertSorceryPointsToSlot(1)).toBe(true);
+		const replica = createReplica(state, "Clockwork Trinket|EFA");
+		expect(state.commitEfaArtificerTinkerTransaction({
+			operation: "drain",
+			itemId: replica.itemId,
+		}).ok).toBe(true);
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 5, current: 6}});
+
+		state.applyEfaArtificerTinkerLongRestTransition();
+
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 5}});
+		expect(state.toJson().efaArtificerTinker.drainSlotAvailable).toBe(false);
+		state.recoverSpellSlots();
+		expect(state.getSpellSlots()).toMatchObject({1: {max: 4, current: 4}});
 	});
 
 	test("Unearthly Countenance spends canonically at another level without consuming the Drain marker", () => {

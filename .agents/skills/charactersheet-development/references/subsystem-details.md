@@ -469,7 +469,14 @@ manual pips, feature-use conversions, slot-to-Stamina, and
 slot-to-sorcery-points use that mode. Recalculation, maximum clamping,
 rest/recovery, refunds, progression, Drain cleanup, and slot creation
 explicitly use the non-consuming mode, so they neither spend nor re-arm the
-marker. Mutations at other slot levels leave it intact.
+marker. Mutations at other slot levels leave it intact. Genuine expenditures
+return an ephemeral ordinary-slot receipt; the Spells-tab cast flow uses that
+receipt to restore both current and `drainSlotAvailable` after target
+cancellation or a thrown result failure. Only the matching receipt can re-arm
+the marker, so ordinary recovery/refund calls remain non-consuming. Derived
+maximum recalculation separately preserves `max(0, current - oldMax)` temporary
+availability (for example a Font of Magic-created slot), preventing Drain
+addition or cleanup from clamping an unrelated above-max slot away.
 `applyEfaArtificerTinkerLongRestTransition()` is idempotent and is called by
 both `state.onLongRest()` and the active Finish Long Rest controller after its
 undo snapshot. A committed long rest therefore removes all exact-owner

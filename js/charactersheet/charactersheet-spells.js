@@ -3337,6 +3337,7 @@ class CharacterSheetSpells {
 		// A no-slot resource (e.g. Star Map) is the player's chosen cast vehicle,
 		// so it is always spent — a variant component's "noSlot" effect waives
 		// spell *slots*, not feature resources.
+		let ordinarySlotExpenditure = null;
 		if (selectedSlot.isWizardCapstone) {
 			if (selectedSlot.capstoneType === "signature" && !this._state.useSignatureSpell?.(spell)) {
 				this._rollbackSpellCastingEconomy(economyTransaction);
@@ -3356,7 +3357,7 @@ class CharacterSheetSpells {
 				this._state.setPactSlotsCurrent(pactSlots.current - 1);
 			} else {
 				const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
-				this._state.setSpellSlots(
+				ordinarySlotExpenditure = this._state.setSpellSlots(
 					selectedSlot.level,
 					this._state.getSpellSlotsMax(selectedSlot.level),
 					current - 1,
@@ -3364,6 +3365,28 @@ class CharacterSheetSpells {
 				);
 			}
 		}
+
+		const refundCastPayment = () => {
+			this._rollbackSpellCastingEconomy(economyTransaction);
+			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
+			this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
+			if (selectedSlot.isWizardCapstone) {
+				if (selectedSlot.capstoneType === "signature") this._state.restoreSignatureSpellUse?.(spell);
+			} else if (selectedSlot.isNoSlotResource) {
+				const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
+				if (res) this._state.setResourceCurrent(selectedSlot.resourceId, (res.current || 0) + 1);
+			} else if (!skipSlotConsumption) {
+				if (selectedSlot.isPact) {
+					// getPactSlots() returns the live object, so `pactSlots.current`
+					// was already decremented by the spend above — read it fresh and +1.
+					const slots = this._state.getPactSlots();
+					this._state.setPactSlotsCurrent((slots.current ?? 0) + 1);
+				} else if (!this._state.restoreOrdinarySpellSlotExpenditure?.(ordinarySlotExpenditure)) {
+					const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
+					this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
+				}
+			}
+		};
 
 		const effectiveSlotLevel = this._state.getDaemonologistEffectiveCastLevel?.(spell, selectedSlot.level) ?? selectedSlot.level;
 		let castResult;
@@ -3382,32 +3405,14 @@ class CharacterSheetSpells {
 							: {}),
 					},
 				);
-		} catch (e) {
-			this._rollbackSpellCastingEconomy(economyTransaction);
-			throw e;
+		} catch (error) {
+			refundCastPayment();
+			throw error;
 		}
 
 		// If user cancelled (e.g. target selection), refund the slot / resource
 		if (castResult?.cancelled) {
-			this._rollbackSpellCastingEconomy(economyTransaction);
-			if (gamblerCastResolution) this._state.cancelGamblerCastResolution?.(gamblerCastResolution.resolutionId);
-			this._refundMetamagicCost(activeMetamagicChoice?.metamagic);
-			if (selectedSlot.isWizardCapstone) {
-				if (selectedSlot.capstoneType === "signature") this._state.restoreSignatureSpellUse?.(spell);
-			} else if (selectedSlot.isNoSlotResource) {
-				const res = this._state.getResources().find(r => r.id === selectedSlot.resourceId);
-				if (res) this._state.setResourceCurrent(selectedSlot.resourceId, (res.current || 0) + 1);
-			} else if (!skipSlotConsumption) {
-				if (selectedSlot.isPact) {
-					// getPactSlots() returns the live object, so `pactSlots.current`
-					// was already decremented by the spend above — read it fresh and +1.
-					const slots = this._state.getPactSlots();
-					this._state.setPactSlotsCurrent((slots.current ?? 0) + 1);
-				} else {
-					const current = this._state.getSpellSlotsCurrent(selectedSlot.level);
-					this._state.setSpellSlots(selectedSlot.level, this._state.getSpellSlotsMax(selectedSlot.level), current + 1);
-				}
-			}
+			refundCastPayment();
 			return;
 		}
 		if (variantComponentChoice?.variantComponent) {
