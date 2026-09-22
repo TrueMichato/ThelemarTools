@@ -18322,6 +18322,120 @@ class CharacterSheetState {
 		spell.isSubclassChoiceSpell = true;
 	}
 
+	_getSubclassSpellGrantOwner (cls, spell) {
+		return {
+			key: [
+				cls.name,
+				cls.source,
+				cls.subclass?.name,
+				cls.subclass?.source,
+			].map(part => String(part || "").toLowerCase()).join("|"),
+			sourceFeature: spell.sourceFeature,
+			sourceClass: spell.sourceClass || cls.name,
+			isCantrip: !!spell.isCantrip,
+		};
+	}
+
+	_captureSubclassSpellGrantOriginalMetadata (spell) {
+		const keys = ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"];
+		return {
+			present: keys.filter(key => Object.hasOwn(spell, key)),
+			values: Object.fromEntries(keys
+				.filter(key => Object.hasOwn(spell, key))
+				.map(key => [key, spell[key]])),
+		};
+	}
+
+	_restoreSubclassSpellGrantOriginalMetadata (spell) {
+		const original = spell.subclassSpellGrantOriginalMetadata;
+		if (original == null) return false;
+
+		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) delete spell[key];
+		for (const key of (original.present || [])) spell[key] = original.values?.[key];
+		delete spell.subclassSpellGrantOwners;
+		delete spell.subclassSpellGrantOriginalMetadata;
+		return true;
+	}
+
+	_applySubclassSpellGrantOwner (spell, owner) {
+		if (!owner.isCantrip) {
+			spell.alwaysPrepared = true;
+			spell.prepared = true;
+		}
+		spell.sourceFeature = owner.sourceFeature;
+		spell.sourceClass = owner.sourceClass;
+	}
+
+	_addSubclassSpellGrantOwner (spell, cls, grant, {wasExisting = true} = {}) {
+		if (!Array.isArray(spell.subclassSpellGrantOwners)) {
+			spell.subclassSpellGrantOwners = [];
+			spell.subclassSpellGrantOriginalMetadata = wasExisting
+				? this._captureSubclassSpellGrantOriginalMetadata(spell)
+				: null;
+		}
+
+		const owner = this._getSubclassSpellGrantOwner(cls, grant);
+		const isNewOwner = !spell.subclassSpellGrantOwners.some(it => it.key === owner.key);
+		if (isNewOwner) spell.subclassSpellGrantOwners.push(owner);
+		this._applySubclassSpellGrantOwner(spell, owner);
+		return isNewOwner;
+	}
+
+	_removeSubclassSpellGrantOwner (spell, predicate) {
+		if (!Array.isArray(spell.subclassSpellGrantOwners)) return null;
+
+		const remaining = spell.subclassSpellGrantOwners.filter(owner => !predicate(owner));
+		if (remaining.length === spell.subclassSpellGrantOwners.length) return null;
+
+		spell.subclassSpellGrantOwners = remaining;
+		if (remaining.length) {
+			this._applySubclassSpellGrantOwner(spell, remaining.at(-1));
+			return true;
+		}
+
+		return this._restoreSubclassSpellGrantOriginalMetadata(spell);
+	}
+
+	_reconcileFixedSubclassSpellGrants (cls, desiredSpells) {
+		const ownerKey = this._getSubclassSpellGrantOwner(cls, {isCantrip: false}).key;
+		const desiredIds = new Set(desiredSpells.map(spell => this._spellIdentityKey(spell)));
+		const sourceFeature = cls.subclass ? `${cls.subclass.name} Spells` : null;
+		const authoredIds = new Set();
+		for (const spellBlock of (cls.subclass?.additionalSpells || [])) {
+			for (const category of ["prepared", "known", "innate"]) {
+				for (const levelValue of Object.values(spellBlock[category] || {})) {
+					for (const spellRef of CharacterSheetState._flattenAdditionalSpellsLevelValue(levelValue)) {
+						const parsed = this._parseSpellReference(spellRef);
+						if (parsed) authoredIds.add(this._spellIdentityKey(parsed));
+					}
+				}
+			}
+		}
+
+		const reconcile = (spell, {isCantrip = false} = {}) => {
+			const spellId = this._spellIdentityKey(spell);
+			const ownerResult = this._removeSubclassSpellGrantOwner(
+				spell,
+				owner => owner.key === ownerKey && !desiredIds.has(spellId),
+			);
+			if (ownerResult != null) return ownerResult;
+
+			// Remove an old-format grant only when the current subclass data proves the
+			// spell belongs to a locked tier. Saves whose subclass snapshot omitted
+			// `additionalSpells` cannot be reconciled safely and are left intact.
+			if (sourceFeature
+				&& spell.sourceFeature === sourceFeature
+				&& authoredIds.has(spellId)
+				&& !desiredIds.has(spellId)) {
+				if (isCantrip || spell.alwaysPrepared) return false;
+			}
+			return true;
+		};
+
+		this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(spell => reconcile(spell));
+		this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(spell => reconcile(spell, {isCantrip: true}));
+	}
+
 	/**
 	 * Populate subclass spells as always-prepared for all classes.
 	 * Call this after class/subclass changes to ensure domain/oath/circle spells are populated.
@@ -18334,6 +18448,8 @@ class CharacterSheetState {
 			const spells = this.getSubclassAlwaysPreparedSpells(cls);
 			if (CharacterSheetClassUtils.hasNamedSubclassChoice(cls.subclass)) {
 				this._reconcileSubclassChoiceSpellGrants(cls, spells);
+			} else {
+				this._reconcileFixedSubclassSpellGrants(cls, spells);
 			}
 
 			// Bug #5: reconcile stale auto-grants. If this subclass previously auto-granted a
@@ -18382,16 +18498,20 @@ class CharacterSheetState {
 							isSubclassChoiceSpell: spell.isSubclassChoiceSpell || false,
 							...(spell.isSubclassChoiceSpell ? {subclassChoiceClass: cls.name, subclassChoiceGrantOwners: [cls.name]} : {}),
 						});
+						const addedCantrip = this._data.spellcasting.cantripsKnown.find(
+							s => this._spellIdentityKey(s) === this._spellIdentityKey(spell),
+						);
+						if (!spell.isSubclassChoiceSpell && addedCantrip) {
+							this._addSubclassSpellGrantOwner(addedCantrip, cls, spell, {wasExisting: false});
+						}
 						totalAdded++;
 					} else {
 						if (spell.isSubclassChoiceSpell) this._addSubclassChoiceSpellOwner(existingCantrip, cls);
-						if (spell.sourceFeature && !existingCantrip.sourceFeature) {
-						// A cantrip that was previously added without attribution (e.g.
-						// player-picked before the subclass was chosen) is now granted by
-						// the subclass — stamp it so it's recognised as feature-granted and
-						// stops counting against the cantrip cap.
-							existingCantrip.sourceFeature = spell.sourceFeature;
-							existingCantrip.sourceClass = spell.sourceClass || cls.name;
+						else {
+							const isLegacyGrant = existingCantrip.sourceFeature === spell.sourceFeature;
+							if (this._addSubclassSpellGrantOwner(existingCantrip, cls, spell, {wasExisting: !isLegacyGrant})) {
+								totalAdded++;
+							}
 						}
 					}
 					continue;
@@ -18405,13 +18525,11 @@ class CharacterSheetState {
 
 				if (existing) {
 					if (spell.isSubclassChoiceSpell) this._addSubclassChoiceSpellOwner(existing, cls);
-					// Mark as always prepared if not already
-					if (!existing.alwaysPrepared) {
-						existing.alwaysPrepared = true;
-						existing.prepared = true;
-						existing.sourceFeature = spell.sourceFeature;
-						existing.sourceClass = spell.sourceClass || cls.name;
-						totalAdded++;
+					else {
+						const isLegacyGrant = existing.alwaysPrepared && existing.sourceFeature === spell.sourceFeature;
+						if (this._addSubclassSpellGrantOwner(existing, cls, spell, {wasExisting: !isLegacyGrant})) {
+							totalAdded++;
+						}
 					}
 					// Stamp the Divine Soul affinity flag onto pre-existing/legacy
 					// entries so old saves gain the Swap affordance on load without an
@@ -18433,6 +18551,12 @@ class CharacterSheetState {
 						alwaysPrepared: true,
 						...(spell.isSubclassChoiceSpell ? {subclassChoiceClass: cls.name, subclassChoiceGrantOwners: [cls.name]} : {}),
 					}, true); // prepared = true
+					if (!spell.isSubclassChoiceSpell) {
+						const addedSpell = this._data.spellcasting.spellsKnown.find(
+							s => this._spellIdentityKey(s) === this._spellIdentityKey(spell),
+						);
+						if (addedSpell) this._addSubclassSpellGrantOwner(addedSpell, cls, spell, {wasExisting: false});
+					}
 					totalAdded++;
 				}
 			}
@@ -18836,6 +18960,8 @@ class CharacterSheetState {
 	removeSubclassSpells (sourceFeature) {
 		if (!sourceFeature) return;
 		this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(s => {
+			const ownerResult = this._removeSubclassSpellGrantOwner(s, owner => owner.sourceFeature === sourceFeature);
+			if (ownerResult != null) return ownerResult;
 			// Keep if not from this source, or if player also manually added it
 			if (s.sourceFeature !== sourceFeature) return true;
 			if (!s.alwaysPrepared) return true;
@@ -18844,7 +18970,11 @@ class CharacterSheetState {
 		// Also remove subclass-granted cantrips (e.g. Sun Bloodline's innate Light).
 		// Cantrips don't carry `alwaysPrepared`, so match purely on sourceFeature —
 		// without this, swapping subclasses leaves the old subclass's cantrip behind.
-		this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(c => c.sourceFeature !== sourceFeature);
+		this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(c => {
+			const ownerResult = this._removeSubclassSpellGrantOwner(c, owner => owner.sourceFeature === sourceFeature);
+			if (ownerResult != null) return ownerResult;
+			return c.sourceFeature !== sourceFeature;
+		});
 	}
 
 	/**
