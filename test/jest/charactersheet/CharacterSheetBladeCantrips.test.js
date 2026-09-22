@@ -359,6 +359,13 @@ describe("resolveSelfTargetingMode (apply-to-self gating)", () => {
 		expect(CharacterSheetSpells.resolveSelfTargetingMode({selfOnly: false}, {})).toBe("none");
 		expect(CharacterSheetSpells.resolveSelfTargetingMode({selfOnly: false}, {damage: {dice: "8d6"}})).toBe("none");
 	});
+
+	it("does not treat an inflicted condition as a beneficial self-targeting payload", () => {
+		expect(CharacterSheetSpells.resolveSelfTargetingMode(
+			{selfOnly: false},
+			{damage: {dice: "2d8"}, conditions: ["poisoned"]},
+		)).toBe("none");
+	});
 });
 
 // --- Apply-to-self toast replace-don't-stack (Bug #7 note 1) -------------------

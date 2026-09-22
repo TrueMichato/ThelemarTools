@@ -7302,7 +7302,6 @@ class CharacterSheetSpells {
 			effects?.healing
 			|| effects?.buffs?.length > 0
 			|| effects?.tempHp
-			|| effects?.conditions?.length > 0
 			|| effects?.registryEffects?.length > 0
 		);
 		if (!targetInfo?.selfOnly && hasBeneficial) return "offer";

@@ -202,6 +202,26 @@ describe("EFA Alchemical Savant committed cast roll modifier", () => {
 		expect(receipt.cast.rolls.filter(roll => roll.alchemicalSavant)).toHaveLength(1);
 	});
 
+	it("keeps damage evidence for a damaging spell that can inflict a condition", async () => {
+		const spellData = {
+			...damageSpell("poison", {name: "Ray of Sickness"}),
+			conditionInflict: ["poisoned"],
+		};
+		const {receipt} = await castSpell({spellData});
+
+		expect(receipt.cast.rolls).toEqual([
+			expect.objectContaining({
+				kind: "damage",
+				damageType: "poison",
+				alchemicalSavant: expect.objectContaining({bonus: 3}),
+			}),
+		]);
+		expect(receipt.damageEvidence).toMatchObject({
+			resolution: "unavailable",
+			damage: [expect.objectContaining({damageType: "poison"})],
+		});
+	});
+
 	it("does not apply to necrotic damage", async () => {
 		const {receipt} = await castSpell({spellData: damageSpell("necrotic")});
 
