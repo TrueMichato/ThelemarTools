@@ -590,6 +590,104 @@ describe("EFA Spell-Storing Item use transaction", () => {
 		expect(state.getEfaSpellStoringItem()).toMatchObject({storage: {usesCurrent: 7}});
 	});
 
+	test("reserves the final shared use across different holders before either effect resolves", async () => {
+		const state = makeState();
+		state.startCombat();
+		state.commitEfaSpellStoringItemAtLongRest({
+			hostItemId: "host-longsword",
+			spellUid: "Cure Wounds|XPHB",
+		});
+		state._data.inventory.find(row => row.id === "host-longsword").item._spellStorage.usesCurrent = 1;
+		const spells = makeSpells(state);
+		let releaseFirst;
+		spells._showCastResult.mockImplementationOnce(() => new Promise(resolve => { releaseFirst = resolve; }));
+
+		const first = spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "external:ally-a", label: "Ally A"},
+		});
+		await Promise.resolve();
+		const second = spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "external:ally-b", label: "Ally B"},
+		});
+
+		await expect(second).resolves.toMatchObject({ok: false, committed: false, reason: "uses-reserved"});
+		expect(spells._showCastResult).toHaveBeenCalledTimes(1);
+		releaseFirst({cancelled: false});
+		await expect(first).resolves.toMatchObject({ok: true, committed: true, usesCurrent: 0});
+	});
+
+	test("allows different holders to resolve concurrently when two shared uses remain", async () => {
+		const state = makeState();
+		state.startCombat();
+		state.commitEfaSpellStoringItemAtLongRest({
+			hostItemId: "host-longsword",
+			spellUid: "Cure Wounds|XPHB",
+		});
+		state._data.inventory.find(row => row.id === "host-longsword").item._spellStorage.usesCurrent = 2;
+		const spells = makeSpells(state);
+		const releases = [];
+		spells._showCastResult.mockImplementation(() => new Promise(resolve => releases.push(resolve)));
+
+		const first = spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "external:ally-a", label: "Ally A"},
+		});
+		await Promise.resolve();
+		const second = spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "external:ally-b", label: "Ally B"},
+		});
+		await Promise.resolve();
+
+		expect(spells._showCastResult).toHaveBeenCalledTimes(2);
+		releases.forEach(resolve => resolve({cancelled: false}));
+		await expect(Promise.all([first, second])).resolves.toEqual([
+			expect.objectContaining({ok: true, committed: true}),
+			expect.objectContaining({ok: true, committed: true}),
+		]);
+		expect(state.getEfaSpellStoringItem()).toMatchObject({storage: {usesCurrent: 0}});
+	});
+
+	test.each([
+		["cancellation", resolve => resolve({cancelled: true}), false],
+		["thrown effect failure", (_resolve, reject) => reject(new Error("targeting failed")), true],
+	])("%s releases shared capacity for a different holder", async (_label, settleFirst, shouldReject) => {
+		const state = makeState();
+		state.commitEfaSpellStoringItemAtLongRest({
+			hostItemId: "host-longsword",
+			spellUid: "Cure Wounds|XPHB",
+		});
+		state._data.inventory.find(row => row.id === "host-longsword").item._spellStorage.usesCurrent = 1;
+		const spells = makeSpells(state);
+		let resolveFirst;
+		let rejectFirst;
+		spells._showCastResult.mockImplementationOnce(() => new Promise((resolve, reject) => {
+			resolveFirst = resolve;
+			rejectFirst = reject;
+		}));
+
+		const first = spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "external:ally-a", label: "Ally A"},
+		});
+		await Promise.resolve();
+		await expect(spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "external:ally-b", label: "Ally B"},
+		})).resolves.toMatchObject({ok: false, committed: false, reason: "uses-reserved"});
+
+		settleFirst(resolveFirst, rejectFirst);
+		if (shouldReject) await expect(first).rejects.toThrow("targeting failed");
+		else await expect(first).resolves.toMatchObject({ok: false, committed: false, reason: "cancelled"});
+
+		await expect(spells.pUseEfaSpellStoringItem({
+			itemId: "host-longsword",
+			holder: {uid: "external:ally-b", label: "Ally B"},
+		})).resolves.toMatchObject({ok: true, committed: true, usesCurrent: 0});
+	});
+
 	test("releases the pre-effect reservation when effect resolution throws", async () => {
 		const state = makeState();
 		state.commitEfaSpellStoringItemAtLongRest({

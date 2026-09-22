@@ -599,12 +599,15 @@ without `_spellStorage` need no migration.
 The stored spell projects through the normal item-power API as
 `kind: "storedSpell"`. Its use is an effect-first transaction with a
 runtime-only pre-effect reservation for the exact storage/host/holder. A
-concurrent duplicate returns `use-in-progress`; cancellation or effect failure
-releases the reservation. After the core effect resolves with the stored
-Artificer statistics, the exact item use and in-combat holder turn receipt
-commit. This is an item effect, not a class spell cast, so it does not publish
-committed-cast hooks, consume a slot/component, invoke the focus gate, or
-apply/consume cast-sensitive damage or on-cast riders.
+concurrent duplicate holder returns `use-in-progress`; reservations from every
+holder count against the host storage's shared remaining uses, so the final use
+cannot resolve twice. Cancellation or effect failure releases only that exact
+reservation. When capacity permits, different holders may resolve in parallel.
+After the core effect resolves with the stored Artificer statistics, the exact
+item use and in-combat holder turn receipt commit. This is an item effect, not
+a class spell cast, so it does not publish committed-cast hooks, consume a
+slot/component, invoke the focus gate, or apply/consume cast-sensitive damage
+or on-cast riders.
 
 The acting holder is carried into targeting. Self-only stored effects used by
 an external holder return an explicit external-resolution descriptor and do

@@ -288,15 +288,18 @@ Use `getEfaSpellStoringItemOptions()`,
 `reserveEfaSpellStoringItemUse()`,
 `releaseEfaSpellStoringItemUseReservation()`, and
 `commitEfaSpellStoringItemUse()`. The runtime-only reservation serializes the
-exact storage/host/holder while target/effect resolution is pending. It is
-released on cancellation or failure; the persisted use and turn receipt still
-commit only after the effect succeeds. Reuse replaces prior storage and prunes
-only its exact current-turn receipts. Host removal, host identity replacement,
-or loss of exact EFA level/source ownership cleans storage. Generated hosts
-must still resolve their full accepted focus reference: generated id, exact
-owner, catalog item, and creation receipt. Missing catalogs, unsupported
-versions, malformed owner/casting identities, and generated identity mismatch
-remain visible as stale repair states and are never guessed.
+exact storage/host/holder while target/effect resolution is pending, while all
+holders' active reservations count against the shared remaining-use capacity.
+The exact holder remains separate for per-turn receipts and effect ownership.
+Reservations are released on cancellation or failure; the persisted use and
+turn receipt still commit only after the effect succeeds. Reuse replaces prior
+storage and prunes only its exact current-turn receipts. Host removal, host
+identity replacement, or loss of exact EFA level/source ownership cleans
+storage. Generated hosts must still resolve their full accepted focus
+reference: generated id, exact owner, catalog item, and creation receipt.
+Missing catalogs, unsupported versions, malformed owner/casting identities,
+and generated identity mismatch remain visible as stale repair states and are
+never guessed.
 
 The stored effect is projected as a generic `kind: "storedSpell"` item power.
 `CharacterSheetSpells.pUseEfaSpellStoringItem()` resolves the normal core spell

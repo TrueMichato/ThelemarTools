@@ -39805,7 +39805,7 @@ class CharacterSheetState {
 		};
 	}
 
-	prepareEfaSpellStoringItemUse ({itemId, holder} = {}) {
+	prepareEfaSpellStoringItemUse ({itemId, holder, reservationId = null} = {}) {
 		const holderUid = String(holder?.uid || "").trim();
 		if (!holderUid) return {ok: false, committed: false, reason: "holder-required"};
 		const current = this.getEfaSpellStoringItem();
@@ -39827,6 +39827,39 @@ class CharacterSheetState {
 					turnReceipt: turnState.receipt,
 				};
 			}
+		}
+		const reservationKey = this._getEfaSpellStoringItemUseReservationKey({
+			itemId,
+			storageId: current.storage.storageId,
+			holderUid,
+		});
+		const activeReservations = [...this._getEfaSpellStoringItemUseReservationStore().values()]
+			.filter(reservation => reservation.id !== reservationId);
+		const exactReservation = activeReservations.find(reservation => reservation.key === reservationKey);
+		if (exactReservation) {
+			return {
+				ok: false,
+				committed: false,
+				reason: "use-in-progress",
+				storage: current.storage,
+				holder: MiscUtil.copyFast(holder),
+				reservation: MiscUtil.copyFast(exactReservation),
+			};
+		}
+		const reservedUses = activeReservations
+			.filter(reservation =>
+				reservation.itemId === itemId
+				&& reservation.storageId === current.storage.storageId)
+			.length;
+		if (current.storage.usesCurrent - reservedUses <= 0) {
+			return {
+				ok: false,
+				committed: false,
+				reason: "uses-reserved",
+				storage: current.storage,
+				holder: MiscUtil.copyFast(holder),
+				reservedUses,
+			};
 		}
 		return {
 			ok: true,
@@ -39899,7 +39932,7 @@ class CharacterSheetState {
 		if (!reservationEntry) return {ok: false, committed: false, reason: "use-not-reserved"};
 		const [reservationKey, reservation] = reservationEntry;
 		const releaseReservation = () => reservations.delete(reservationKey);
-		const prepared = this.prepareEfaSpellStoringItemUse({itemId, holder});
+		const prepared = this.prepareEfaSpellStoringItemUse({itemId, holder, reservationId});
 		if (!prepared.ok) {
 			releaseReservation();
 			return prepared;
