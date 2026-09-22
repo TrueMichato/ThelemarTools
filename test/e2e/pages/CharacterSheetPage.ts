@@ -42,6 +42,24 @@ export interface FeatureCompanionReplacementProbeOptions {
 	assertPdf?: boolean;
 }
 
+export interface StateTransactionExpectation {
+	path?: string;
+	exact?: unknown;
+	min?: number;
+	contains?: string;
+	isNull?: boolean;
+	truthy?: boolean;
+	equalsRef?: string;
+	delta?: number;
+}
+
+export interface StateTransactionStep {
+	method: string;
+	args?: unknown[];
+	saveAs?: string;
+	expect?: StateTransactionExpectation[];
+}
+
 /**
  * Page Object Model for the Character Sheet page
  * Provides common navigation and interaction methods
@@ -1036,6 +1054,134 @@ export class CharacterSheetPage {
 		if (options.assertPdf) {
 			await this._expectFeatureCompanionLifecyclePdf(identity, setup, roundTrip);
 		}
+	}
+
+	async hasClassFeatureUid (uid: string): Promise<boolean> {
+		return this.page.evaluate((featureUid) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const [name, className, classSource, rawLevel, featureSource] = String(featureUid).split("|");
+			const level = Number(rawLevel);
+			const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
+			return (state?.getFeatures?.() || []).some((feature: any) =>
+				norm(feature?.name) === norm(name)
+				&& norm(feature?.className) === norm(className)
+				&& norm(feature?.classSource) === norm(classSource)
+				&& Number(feature?.level) === level
+				&& norm(feature?.source || feature?.classSource) === norm(featureSource || classSource),
+			);
+		}, uid);
+	}
+
+	async getMaxAttunement (): Promise<number> {
+		return this.page.evaluate(() => {
+			const state: any = (globalThis as any).charSheet?._state;
+			return Number(state?.getMaxAttunement?.() ?? 0);
+		});
+	}
+
+	async runStateTransaction (
+		steps: StateTransactionStep[],
+		{restore = true}: {restore?: boolean} = {},
+	): Promise<void> {
+		const result = await this.page.evaluate(async ({transactionSteps, shouldRestore}) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			if (!state) return {ok: false, error: "character state is unavailable"};
+
+			const snapshot = shouldRestore && typeof state.toJson === "function"
+				? structuredClone(state.toJson())
+				: null;
+			const captures: Record<string, any> = {};
+			const readPath = (root: any, path = "") => {
+				if (!path) return root;
+				let cursor = root;
+				for (const segment of path.split(".")) {
+					if (cursor == null) return null;
+					cursor = cursor[segment];
+				}
+				return cursor;
+			};
+			const resolveRef = (path: string) => {
+				const [captureName, ...segments] = path.split(".");
+				if (!Object.prototype.hasOwnProperty.call(captures, captureName)) {
+					throw new Error(`unknown transaction reference "${captureName}"`);
+				}
+				return readPath(captures[captureName], segments.join("."));
+			};
+			const resolveValue = (value: any): any => {
+				if (Array.isArray(value)) return value.map(resolveValue);
+				if (!value || typeof value !== "object") return value;
+				if (Object.keys(value).length === 1 && typeof value.$ref === "string") {
+					return structuredClone(resolveRef(value.$ref));
+				}
+				return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, resolveValue(child)]));
+			};
+			const render = (value: any) => {
+				try { return JSON.stringify(value); } catch { return String(value); }
+			};
+			const isDeepEqual = (left: any, right: any) => {
+				if (Object.is(left, right)) return true;
+				return render(left) === render(right);
+			};
+
+			let error: string | null = null;
+			try {
+				for (const [index, step] of transactionSteps.entries()) {
+					const method = state?.[step.method];
+					if (typeof method !== "function") throw new Error(`step ${index + 1}: state.${step.method} is not a function`);
+					const args = resolveValue(step.args || []);
+					const returned = await method.apply(state, args);
+					if (step.saveAs) captures[step.saveAs] = structuredClone(returned);
+					for (const expectation of step.expect || []) {
+						const actual = readPath(returned, expectation.path || "");
+						const label = `step ${index + 1} ${step.method}${expectation.path ? `.${expectation.path}` : ""}`;
+						if (expectation.isNull !== undefined && (actual == null) !== expectation.isNull) {
+							throw new Error(`${label}=${render(actual)}, expected ${expectation.isNull ? "null" : "non-null"}`);
+						}
+						if (expectation.truthy !== undefined && !!actual !== expectation.truthy) {
+							throw new Error(`${label}=${render(actual)}, expected truthy=${expectation.truthy}`);
+						}
+						if (expectation.exact !== undefined && !isDeepEqual(actual, expectation.exact)) {
+							throw new Error(`${label}=${render(actual)}, expected ${render(expectation.exact)}`);
+						}
+						if (expectation.min !== undefined && (!(typeof actual === "number") || actual < expectation.min)) {
+							throw new Error(`${label}=${render(actual)}, expected >= ${expectation.min}`);
+						}
+						if (expectation.contains !== undefined) {
+							const haystack = Array.isArray(actual)
+								? actual.map(render).join("\n")
+								: render(actual);
+							if (!haystack.toLowerCase().includes(expectation.contains.toLowerCase())) {
+								throw new Error(`${label}=${render(actual)}, expected to contain ${render(expectation.contains)}`);
+							}
+						}
+						if (expectation.equalsRef !== undefined) {
+							const referenced = resolveRef(expectation.equalsRef);
+							const wanted = typeof referenced === "number" && expectation.delta != null
+								? referenced + expectation.delta
+								: referenced;
+							if (!isDeepEqual(actual, wanted)) {
+								throw new Error(`${label}=${render(actual)}, expected ref(${expectation.equalsRef})${expectation.delta ? ` + ${expectation.delta}` : ""} = ${render(wanted)}`);
+							}
+						}
+					}
+				}
+			} catch (err: any) {
+				error = err?.message || String(err);
+			} finally {
+				if (snapshot) {
+					try {
+						await state.loadFromJson(snapshot);
+						cs?._renderCharacter?.();
+						cs?.render?.();
+					} catch (restoreError: any) {
+						error = `${error ? `${error}; ` : ""}restore failed: ${restoreError?.message || String(restoreError)}`;
+					}
+				}
+			}
+			return error ? {ok: false, error} : {ok: true, error: null};
+		}, {transactionSteps: steps, shouldRestore: restore});
+		if (!result.ok) throw new Error(`stateTransaction: ${result.error}`);
 	}
 
 	async goto (): Promise<void> {

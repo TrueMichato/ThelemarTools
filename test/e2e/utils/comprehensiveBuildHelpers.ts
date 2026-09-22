@@ -1,5 +1,6 @@
 import {Page, expect} from "@playwright/test";
 import {CharacterSheetPage} from "../pages/CharacterSheetPage";
+import type {StateTransactionStep} from "../pages/CharacterSheetPage";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -708,6 +709,8 @@ export interface FeatureCheck {
 	untilLevel?: number;
 	/** Display name on the sheet (regex preferred for resilience). */
 	name: string | RegExp;
+	/** Exact source-qualified class-feature UID, when source identity is load-bearing. */
+	featureUid?: string;
 	/** Check kind. */
 	kind: "toggle" | "resource" | "spells" | "passive" | "pick";
 	/**
@@ -756,6 +759,8 @@ export interface FeatureCheck {
 	 * handler so a feature that's not even present fails fast.
 	 */
 	effects?: EffectCheck[];
+	/** Explicit standard-#22 reason for a deliberately existence-only narrative row. */
+	effectReason?: string;
 	/**
 	 * Active-state ids that must be ON before this entry's TOGGLE effects can
 	 * be probed, for toggles declaring `requiresStates` in `ACTIVE_STATE_TYPES`
@@ -825,6 +830,7 @@ export type EffectCheck = _EffectCommon & (
 	| {kind: "speed"; type?: SpeedType; min?: number; exact?: number}
 	| {kind: "speedEquals"; left: SpeedType; right: SpeedType}
 	| {kind: "initiative"; min?: number; exact?: number}
+	| {kind: "attunementCap"; exact: number}
 	| {kind: "combatActionEconomyText"; includes: string[]}
 	| {kind: "featureCalculation"; property: string; min?: number; exact?: number | string | boolean; isNull?: boolean}
 	// Assert a `getFeatureCalculations()` number is DERIVED from a live
@@ -835,7 +841,7 @@ export type EffectCheck = _EffectCommon & (
 	//   spellSaveDc       → getSpellSaveDcForAbility(ability)
 	//   spellAttackBonus  → getSpellAttackBonusForAbility(ability)
 	//   proficiencyBonus  → getProficiencyBonus()
-	| {kind: "featureCalculationDerivedFrom"; property: string; equals: "abilityMod" | "spellSaveDc" | "spellAttackBonus" | "proficiencyBonus"; ability?: AblKey; offset?: number}
+	| {kind: "featureCalculationDerivedFrom"; property: string; equals: "abilityMod" | "spellSaveDc" | "spellAttackBonus" | "proficiencyBonus"; ability?: AblKey; multiplier?: number; offset?: number}
 	// Generic escape hatch: call a `CharacterSheetState` method and assert on the
 	// returned value. Use when a feature's mechanic is exposed through a bespoke
 	// state API rather than a flat calculation field (e.g. a computed cost, a
@@ -864,6 +870,7 @@ export type EffectCheck = _EffectCommon & (
 		 */
 		isNull?: boolean;
 	}
+	| {kind: "stateTransaction"; steps: StateTransactionStep[]; restore?: boolean}
 	| {kind: "gamblerProbe"; probe: "tools" | "folly" | "extraLuck" | "masterFortune" | "ui"}
 	| {
 		kind: "cartographerProbe";
@@ -1369,7 +1376,7 @@ function _hasDamageType (list: string[], dt: string): boolean {
 	return list.some(x => x.toLowerCase().includes(t));
 }
 
-async function _runPassiveOrRollEffect (
+export async function runEffectCheck (
 	charSheet: CharacterSheetPage,
 	e: EffectCheck,
 	currentLevel?: number,
@@ -1440,6 +1447,11 @@ async function _runPassiveOrRollEffect (
 		case "initiative": {
 			const v = await charSheet.getInitiativeBonusFromState();
 			_checkNumeric(v, e, `init`);
+			return;
+		}
+		case "attunementCap": {
+			const cap = await charSheet.getMaxAttunement();
+			if (cap !== e.exact) throw new Error(`attunement cap=${cap}, expected ${e.exact}`);
 			return;
 		}
 		case "featureCalculation": {
@@ -1604,9 +1616,9 @@ async function _runPassiveOrRollEffect (
 				return {err: null as string | null, actual: calc[cfg.property], expected};
 			}, {property: e.property, equals: e.equals, ability: e.ability});
 			if (res.err) throw new Error(`featureCalculationDerivedFrom: ${res.err}`);
-			const want = Number(res.expected) + (e.offset ?? 0);
+			const want = Number(res.expected) * (e.multiplier ?? 1) + (e.offset ?? 0);
 			if (Number(res.actual) !== want) {
-				throw new Error(`featureCalculation.${e.property}=${res.actual}, expected ${e.equals}(${e.ability ?? ""})${e.offset ? ` + ${e.offset}` : ""} = ${want}`);
+				throw new Error(`featureCalculation.${e.property}=${res.actual}, expected ${e.equals}(${e.ability ?? ""})${e.multiplier && e.multiplier !== 1 ? ` × ${e.multiplier}` : ""}${e.offset ? ` + ${e.offset}` : ""} = ${want}`);
 			}
 			return;
 		}
@@ -1764,6 +1776,9 @@ async function _runPassiveOrRollEffect (
 			}
 			return;
 		}
+		case "stateTransaction":
+			await charSheet.runStateTransaction(e.steps, {restore: e.restore !== false});
+			return;
 		case "gamblerProbe": {
 			// The MEGA matrix rechecks the L3 row at every later level. Run the
 			// expensive real-browser lifecycle once per matrix invocation; later
@@ -3555,6 +3570,9 @@ export async function assertFeaturesMatrix (
 		const visibleToggleable = fc.requiresStates?.length ? gatedToggleable : toggleable;
 
 		try {
+			if (fc.featureUid && !await charSheet.hasClassFeatureUid(fc.featureUid)) {
+				throw new Error(`source-qualified feature UID "${fc.featureUid}" not present`);
+			}
 			switch (fc.kind) {
 				case "passive": {
 					if (!visibleFeatures.some(f => re.test(f))) {
@@ -3871,7 +3889,7 @@ export async function assertFeaturesMatrix (
 				const toggleEffects = expandedEffects.filter(e => _TOGGLE_EFFECT_KINDS.has(e.kind));
 
 				for (const eff of passiveOrRoll) {
-					try { await _runPassiveOrRollEffect(charSheet, eff, currentLevel); }
+					try { await runEffectCheck(charSheet, eff, currentLevel); }
 					catch (eErr: any) { errors.push(`${label} effect ${eff.kind}: ${eErr.message}`); }
 				}
 

@@ -108,6 +108,9 @@ The sheet itself.  Most probes go through this.
 - `switchToTab(tab)` — pass one of the locators (`tabFeatures`,
   `tabSpells`, `tabInventory`, etc.) defined as fields.
 - `expectCharacterName(name)` / `expectLevel(level)`.
+- `hasClassFeatureUid(uid): boolean` — verifies an exact source-qualified
+  class-feature identity instead of accepting a same-name feature from another
+  source.
 
 ### Core stats
 
@@ -152,6 +155,17 @@ The sheet itself.  Most probes go through this.
 - `getPactSlots(): {current, max, level}`.
 - `castSpellAtSlot(level): {ok, remaining}`.
 - `useResourceByName(name, amount = 1): {ok, remaining}`.
+- `getMaxAttunement(): number` — reads the live attunement cap through the
+  state API.
+
+### Generic state transactions
+
+- `runStateTransaction(steps, {restore = true})` — executes reusable state
+  method descriptors, captures results for later `$ref` arguments, supports
+  exact/min/contains/null/truthy/reference-delta expectations, and restores the
+  pre-probe character snapshot by default. Use it for composed causal probes
+  that have no stable UI boundary; descriptors must name methods and values,
+  never branch on a class name in the dispatcher.
 
 ### Rests
 

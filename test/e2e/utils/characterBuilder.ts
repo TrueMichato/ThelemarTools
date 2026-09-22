@@ -29,8 +29,12 @@ export interface CharacterPreset {
 	name: string;
 	quickBuildTargetLevel?: number;
 	skillCount?: number;
+	/** Exact class-skill choices to make before filling any remaining required slots. */
+	preferredSkills?: string[];
 	masteryCount?: number;
 	optFeatCount?: number;
+	/** Starting-equipment branch. Defaults to gold for historical presets. */
+	equipmentOption?: "equipment" | "gold";
 	divineSoulAffinity?: string;
 	namedSubclassChoice?: {title: string; name: string};
 	/** Subclass to select on level-up (e.g. "Bladesinging"). */
@@ -63,6 +67,63 @@ export interface CharacterPreset {
 	abilityPriority?: string[];
 	/** Additional homebrew JSON URLs required by this build. */
 	homebrewUrls?: string[];
+}
+
+export const EFA_ARTIFICER_BASE_PRESET_CONFIG = Object.freeze({
+	className: "Artificer",
+	classSource: "EFA",
+	prioritySources: ["EFA"],
+	skillCount: 2,
+	preferredSkills: ["Arcana", "Investigation"],
+	equipmentOption: "equipment" as const,
+	abilityPriority: ["int", "con", "dex", "wis", "str", "cha"],
+	signatureSpells: ["Acid Splash", "Cure Wounds"],
+});
+
+export type EfaArtificerSubclassPresetInput =
+	& Pick<CharacterPreset, "race" | "raceSource" | "background" | "bgSource" | "name">
+	& Required<Pick<CharacterPreset, "subclassName" | "subclassSource">>
+	& Partial<Omit<CharacterPreset,
+		| "race"
+		| "raceSource"
+		| "background"
+		| "bgSource"
+		| "name"
+		| "subclassName"
+		| "subclassSource"
+		| "className"
+		| "classSource"
+	>>;
+
+/**
+ * Source-safe EFA Artificer base preset for a real subclass consumer.
+ *
+ * Requiring the subclass identity is intentional: the EFA chassis gains its
+ * subclass at level 3, so this helper must not be used to publish a
+ * subclass-free comprehensive L1→20 build.
+ */
+export function buildEfaArtificerPreset (input: EfaArtificerSubclassPresetInput): CharacterPreset {
+	if (!input?.subclassName || !input?.subclassSource) {
+		throw new Error("buildEfaArtificerPreset requires an accepted EFA subclass name and source.");
+	}
+	return {
+		...EFA_ARTIFICER_BASE_PRESET_CONFIG,
+		...input,
+		className: "Artificer",
+		classSource: "EFA",
+		prioritySources: [...new Set([
+			...EFA_ARTIFICER_BASE_PRESET_CONFIG.prioritySources,
+			...(input.prioritySources || []),
+			input.raceSource,
+			input.bgSource,
+			input.subclassSource,
+		])],
+		skillCount: EFA_ARTIFICER_BASE_PRESET_CONFIG.skillCount,
+		preferredSkills: [...EFA_ARTIFICER_BASE_PRESET_CONFIG.preferredSkills],
+		equipmentOption: EFA_ARTIFICER_BASE_PRESET_CONFIG.equipmentOption,
+		abilityPriority: [...EFA_ARTIFICER_BASE_PRESET_CONFIG.abilityPriority],
+		signatureSpells: [...EFA_ARTIFICER_BASE_PRESET_CONFIG.signatureSpells],
+	};
 }
 
 // NOTE: All legacy PRESETs use `classSource: "TGTT"` because the character-sheet
@@ -1342,8 +1403,14 @@ export async function createCharacterViaWizard (
 	if (preset.subclassName && await builder.hasLevel1SubclassSelection()) {
 		await builder.selectLevel1Subclass(preset.subclassName, preset.subclassSource);
 	}
+	if (preset.preferredSkills?.length) {
+		for (const skill of preset.preferredSkills.slice(0, preset.skillCount ?? preset.preferredSkills.length)) {
+			await builder.selectSkillProficiency(skill);
+		}
+	}
 	if (preset.skillCount) {
-		await builder.selectFirstAvailableSkills(preset.skillCount);
+		const remainingSkillCount = Math.max(0, preset.skillCount - (preset.preferredSkills?.length ?? 0));
+		if (remainingSkillCount) await builder.selectFirstAvailableSkills(remainingSkillCount);
 	}
 	// Presets' `skillCount` can under-count what the class grants; top up from
 	// the live counter so the picker never silently gates Next.
@@ -1388,8 +1455,9 @@ export async function createCharacterViaWizard (
 	await builder.assignStandardArrayDefaults(preset.abilityPriority);
 	await builder.clickNext();
 
-	// Step 5: Equipment — take gold (simplest)
-	await builder.selectEquipmentOption("gold");
+	// Step 5: Equipment — historical presets take gold; feature probes can
+	// opt into the class package when an exact starting tool/item is load-bearing.
+	await builder.selectEquipmentOption(preset.equipmentOption ?? "gold");
 	await builder.clickNext();
 
 	// Step 6: Spells (renders for every class; only spellcasters have a
