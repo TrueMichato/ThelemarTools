@@ -34,8 +34,6 @@ const CARTOGRAPHER_FEATURES_MATRIX: FeatureCheck[] = [
 				kind: "spellInList",
 				spell: "Mending",
 				level: 0,
-				skip: true,
-				skipReason: "CS-BUG-173: Tinker's Magic does not add its authored Mending|XPHB cantrip to the live spellbook",
 			},
 		],
 	},
@@ -115,8 +113,6 @@ const CARTOGRAPHER_FEATURES_MATRIX: FeatureCheck[] = [
 			{
 				kind: "cartographerProbe",
 				probe: "toolPersistence",
-				skip: true,
-				skipReason: "CS-BUG-175: fulfilled replacement-tool decisions reopen after save/load in the real Level Up flow",
 			},
 		],
 	},
@@ -188,8 +184,6 @@ const CARTOGRAPHER_FEATURES_MATRIX: FeatureCheck[] = [
 			{
 				kind: "cartographerProbe",
 				probe: "guidedPrecisionSpell",
-				skip: true,
-				skipReason: "CS-BUG-174: the live class catalog cannot resolve Cartographer additionalSpells for Guided Precision's spell route",
 			},
 		],
 	},
