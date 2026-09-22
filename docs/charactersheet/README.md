@@ -27,7 +27,7 @@ Welcome to the 5etools Character Sheet system documentation. This comprehensive 
 | [Item Materials](./21-item-materials.md) | Thelemar item materials: the 72 `itemMaterial` entities, the six axes, the read-time projection, the damage die ladder, and the picker/custom-item/craft entry points |
 | [Beastheart](./22-beastheart.md) | MCDM Beastheart (`BST`): the companion-as-`_data.companions[]` decision, Ferocity on the companion record rather than in the resource pool, `ScaleClassSummonedCreature` reuse, derived pick counts, and all five Companion Bonds |
 | [EFA Alchemist](./24-efa-alchemist.md) | Planned full `Alchemist|EFA` support: exact-source identity, spell grants, Experimental Elixirs, crafting, save/respec ownership, Operate-mode UX, and acceptance criteria |
-| [EFA Battle Smith Support](./efa-battle-smith-support.md) | Exact-source Steel Defender lifecycle surfaces, revival, Long Rest replacement, PDF output, and shared Page/State contracts |
+| [EFA Battle Smith Support](./efa-battle-smith-support.md) | Complete exact-source subclass support: spells, tools, Battle Ready, Steel Defender setup/operations/lifecycle, Arcane Jolt, persistence, output, and E2E contracts |
 
 ## System at a Glance
 
