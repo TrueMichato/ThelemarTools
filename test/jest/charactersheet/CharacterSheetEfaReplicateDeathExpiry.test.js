@@ -200,12 +200,15 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			source: "XGE",
 			uses: {current: 1, max: 1, recharge: "long"},
 		});
-		state.takeDamage(40);
-		expect(state.getPendingZeroHpIntervention()).not.toBeNull();
+		state.takeDamage(20);
+		const pending = MiscUtil.copyFast(state._data._pendingZeroHpIntervention);
+		state._data.massiveDamageDeath = true;
+		const payload = state.toJson();
+		payload._pendingZeroHpIntervention = pending;
 		expect(getExpiry(state, created.itemId)).toBeNull();
 
 		const loaded = new State();
-		expect(loaded.loadFromJson(state.toJson())).not.toBe(false);
+		expect(loaded.loadFromJson(payload)).not.toBe(false);
 		expect(getExpiry(loaded, created.itemId)?.daysRemaining).toBe(4);
 		expect(loaded.toJson()._pendingZeroHpIntervention).toBeUndefined();
 		expect(randomise).toHaveBeenCalledTimes(1);
@@ -456,7 +459,7 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			source: "XGE",
 			uses: {current: 1, max: 1, recharge: "long"},
 		});
-		state.takeDamage(40);
+		state.takeDamage(20);
 		expect(state.getPendingZeroHpIntervention()).not.toBeNull();
 
 		expect(JSON.parse(state.serialize()).data._pendingZeroHpIntervention).toBeUndefined();
@@ -472,8 +475,10 @@ describe("EFA Replicate Magic Item death expiry", () => {
 			source: "XGE",
 			uses: {current: 1, max: 1, recharge: "long"},
 		});
-		state.takeDamage(40);
+		state.takeDamage(20);
 		const pending = MiscUtil.copyFast(state._data._pendingZeroHpIntervention);
+		state.setDeathSaveFailures(3);
+		expect(getExpiry(state, created.itemId)).toBeNull();
 		const payload = JSON.parse(state.serialize());
 		payload.data._pendingZeroHpIntervention = pending;
 

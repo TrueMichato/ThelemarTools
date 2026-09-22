@@ -874,14 +874,7 @@ describe("Cartographer — Superior Atlas Safe Haven", () => {
 			available: false,
 			unavailableReason: "Safe Haven is unavailable because the Cartographer has no Atlas map.",
 		});
-		const pending = dropToZero(state);
-		expect(pending.interventions.find(intervention =>
-			intervention.id === CharacterSheetState.SAFE_HAVEN_ZERO_HP_INTERVENTION_ID,
-		)).toMatchObject({
-			available: false,
-			unavailableReason: "Safe Haven is unavailable because the Cartographer has no Atlas map.",
-		});
-		expect(pending.chooser.options).toEqual([]);
+		expect(dropToZero(state)).toBeNull();
 
 		const result = state.resolveAdventurersAtlasSafeHavenForExternalHolder(thorn.id, {
 			confirmedReducedToZero: true,
