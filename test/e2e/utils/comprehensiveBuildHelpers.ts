@@ -26,6 +26,8 @@ import {CharacterSheetPage} from "../pages/CharacterSheetPage";
 export interface InventoryItemRef {
 	name: string;
 	source?: string;
+	/** If true, do not fall back to an equivalent item from another edition/source. */
+	strictSource?: boolean;
 	/** If true, equip the item after adding it. */
 	equipped?: boolean;
 	/** If true and the item has charges, treat as attuned magic item. */
@@ -44,7 +46,7 @@ export interface InventoryItemRef {
 export async function addInventoryItems (page: Page, items: InventoryItemRef[]): Promise<void> {
 	for (const item of items) {
 		if (page.isClosed()) throw new Error("addInventoryItems: page closed mid-loop (earlier failure?)");
-		const result = await page.evaluate(async ({name, source, equipped, attune}) => {
+		const result = await page.evaluate(async ({name, source, strictSource, equipped, attune}) => {
 			const cs: any = (globalThis as any).charSheet;
 			if (!cs?._state) return {ok: false, reason: "charSheet not initialised"};
 
@@ -59,11 +61,13 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 
 			// Try DMG ↔ XDMG fallback for magic items that moved books.
 			const sourceVariants = new Set<string>([source || "PHB"]);
-			if (!source) sourceVariants.add("XPHB");
-			else if (source.toUpperCase() === "DMG") sourceVariants.add("XDMG");
-			else if (source.toUpperCase() === "XDMG") sourceVariants.add("DMG");
-			else if (source.toUpperCase() === "PHB") sourceVariants.add("XPHB");
-			else if (source.toUpperCase() === "XPHB") sourceVariants.add("PHB");
+			if (!strictSource) {
+				if (!source) sourceVariants.add("XPHB");
+				else if (source.toUpperCase() === "DMG") sourceVariants.add("XDMG");
+				else if (source.toUpperCase() === "XDMG") sourceVariants.add("DMG");
+				else if (source.toUpperCase() === "PHB") sourceVariants.add("XPHB");
+				else if (source.toUpperCase() === "XPHB") sourceVariants.add("PHB");
+			}
 
 			// Attempt 1: use the public addItemByUid helper if available.
 			if (typeof cs._state.addItemByName === "function") {
@@ -94,9 +98,22 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 			if (!entry) {
 				// Fall back to scanning the global brew + site combined cache
 				const all = await DL.pCacheAndGetAllSite?.("item").catch(() => []) || [];
-				for (const nm of nameVariants) {
-					entry = all.find((it: any) => it.name?.toLowerCase() === nm.toLowerCase());
-					if (entry) break;
+				if (!strictSource) {
+					for (const nm of nameVariants) {
+						entry = all.find((it: any) => it.name?.toLowerCase() === nm.toLowerCase());
+						if (entry) break;
+					}
+				} else {
+					for (const src of sourceVariants) {
+						for (const nm of nameVariants) {
+							entry = all.find((it: any) =>
+								it.name?.toLowerCase() === nm.toLowerCase()
+								&& it.source?.toUpperCase() === src.toUpperCase(),
+							);
+							if (entry) break;
+						}
+						if (entry) break;
+					}
 				}
 			}
 			if (!entry) return {ok: false, reason: `item not found: ${[...nameVariants].join("/")}|${[...sourceVariants].join("/")}`};
@@ -147,7 +164,13 @@ export async function addInventoryItems (page: Page, items: InventoryItemRef[]):
 			cs._state.markChanged?.();
 			cs.render?.();
 			return {ok: true, via: "manual-push"};
-		}, {name: item.name, source: item.source, equipped: item.equipped, attune: item.attune});
+		}, {
+			name: item.name,
+			source: item.source,
+			strictSource: item.strictSource,
+			equipped: item.equipped,
+			attune: item.attune,
+		});
 
 		if (!result?.ok) {
 			throw new Error(`addInventoryItems: failed to add "${item.name}|${item.source || "*"}" — ${result?.reason}`);

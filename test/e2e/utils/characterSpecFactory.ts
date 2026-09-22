@@ -4,8 +4,12 @@ import {fileURLToPath} from "url";
 import {test, expect, TestInfo, Page} from "@playwright/test";
 import {
 	CharacterSheetPage,
+	FeatureCompanionDeathRevivalProbeOptions,
 	FeatureCompanionIdentity,
+	FeatureCompanionIsolationCompanion,
 	FeatureCompanionOperationProbe,
+	FeatureCompanionReplacementProbeOptions,
+	FeatureCompanionSetupExpectation,
 } from "../pages/CharacterSheetPage";
 import {FeatureCompanionSetupOptions} from "../pages/LevelUpPage";
 import {gotoWithThelemar, clearHomebrewStorage} from "./homebrewLoader";
@@ -25,15 +29,18 @@ import {
 	InventoryItemRef,
 } from "./comprehensiveBuildHelpers";
 
-/**
- * Reserved M8B seam. Core specs can declare the intended lifecycle surfaces
- * now without M8A pretending death/revival/replacement/vanished UI is covered.
- * The factory intentionally does not execute these fields yet.
- */
 export interface FeatureCompanionLifecycleExtension {
-	deathAndRevival?: {spellSlotLevel: number};
-	replacement?: {toolUid: string};
+	deathAndRevival?: {
+		spellSlotLevel?: number;
+		probeUnknownLegacyTiming?: boolean;
+	};
+	replacement?: {
+		toolUid: string;
+		excludedToolUids?: string[];
+	};
 	vanishedState?: boolean;
+	isolationCompanions?: FeatureCompanionIsolationCompanion[];
+	pdfExport?: boolean;
 }
 
 export interface FeatureCompanionSpec {
@@ -263,6 +270,13 @@ export function describeCharacter (spec: CharacterSpec): void {
 		signatureSpells: preset.signatureSpells,
 		featureCompanionSetup: featureCompanion?.setup,
 	};
+	const featureCompanionSetupExpectation: FeatureCompanionSetupExpectation | null = featureCompanion
+		? {
+			nickname: featureCompanion.setup.nickname || "",
+			appearance: featureCompanion.setup.appearance,
+			locomotion: featureCompanion.setup.locomotion,
+		}
+		: null;
 
 	test.describe(`${displayName} — comprehensive build`, () => {
 		test.beforeEach(async ({page}) => {
@@ -333,6 +347,49 @@ export function describeCharacter (spec: CharacterSpec): void {
 				}
 			}
 		});
+
+		if (featureCompanion?.lifecycle?.deathAndRevival && featureCompanionSetupExpectation) {
+			test(`L3 companion lifecycle: death, revival, timing, and owner death`, async ({page}) => {
+				test.setTimeout(L7_TIMEOUT_MS);
+				const {charSheet} = await createCharacterViaWizard(page, preset);
+				await levelUpTo(page, 3, progressionOpts);
+				await charSheet.expectLevel(3);
+				const lifecycle = featureCompanion.lifecycle!;
+				const probe: FeatureCompanionDeathRevivalProbeOptions = {
+					setup: featureCompanionSetupExpectation,
+					preferredSpellSlotLevel: lifecycle.deathAndRevival?.spellSlotLevel,
+					probeUnknownLegacyTiming: lifecycle.deathAndRevival?.probeUnknownLegacyTiming === true,
+					assertOwnerVanishing: lifecycle.vanishedState === true,
+					isolationCompanions: lifecycle.isolationCompanions,
+				};
+				await charSheet.probeFeatureCompanionDeathAndRevival(featureCompanion.identity, probe);
+			});
+		}
+
+		if (featureCompanion?.lifecycle?.replacement && featureCompanionSetupExpectation) {
+			test(`L3 companion lifecycle: Long Rest replacement, undo, round-trip, and PDF`, async ({page}) => {
+				test.setTimeout(L7_TIMEOUT_MS);
+				const {charSheet} = await createCharacterViaWizard(page, preset);
+				await levelUpTo(page, 3, progressionOpts);
+				await charSheet.expectLevel(3);
+				const lifecycle = featureCompanion.lifecycle!;
+				const replacement = lifecycle.replacement!;
+				const inventoryUids = [replacement.toolUid, ...(replacement.excludedToolUids || [])];
+				await addInventoryItems(page, inventoryUids.map(uid => {
+					const [name, source] = uid.split("|");
+					if (!name || !source) throw new Error(`Feature companion replacement item UID must be name|source, got "${uid}"`);
+					return {name, source, strictSource: true};
+				}));
+				const probe: FeatureCompanionReplacementProbeOptions = {
+					setup: featureCompanionSetupExpectation,
+					toolUid: replacement.toolUid,
+					excludedToolUids: replacement.excludedToolUids,
+					isolationCompanions: lifecycle.isolationCompanions,
+					assertPdf: lifecycle.pdfExport === true,
+				};
+				await charSheet.probeFeatureCompanionReplacementPersistence(featureCompanion.identity, probe);
+			});
+		}
 
 		// ── Mid-tier loadout & toggle delta ────────────────────────────
 		// Targets L5 — the same tier where Extra Attack and 3rd-level

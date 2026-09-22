@@ -459,8 +459,37 @@ describeCharacter({
 			commandMethod: "bonusAction",
 			expectedOperationUid: "Force-Empowered Rend|Steel Defender|EFA",
 		},
-		// M8B extends the typed `lifecycle` field with death/revival,
-		// long-rest replacement, and vanished-state UI probes.
+		lifecycle: {
+			deathAndRevival: {
+				spellSlotLevel: 1,
+				probeUnknownLegacyTiming: true,
+			},
+			replacement: {
+				toolUid: "Smith's Tools|XPHB",
+				excludedToolUids: ["Smith's Tools|PHB"],
+			},
+			vanishedState: true,
+			pdfExport: true,
+			isolationCompanions: [
+				{
+					id: "m8b-tce-steel-defender",
+					name: "Steel Defender",
+					source: "TCE",
+					ownerUid: TCE_STEEL_DEFENDER_UID,
+				},
+				{
+					id: "m8b-rhw-reanimated-companion",
+					name: "Reanimated Companion",
+					source: "RHW",
+					ownerUid: RHW_REANIMATED_COMPANION_UID,
+				},
+				{
+					id: "m8b-name-only-steel-defender",
+					name: "Steel Defender",
+					source: "EFA",
+				},
+			],
+		},
 	},
 	signatureToggleSkip: {
 		skip: true,
@@ -526,6 +555,9 @@ describeCharacter({
  *  slot restore; #11 Arcana roll; #12 explicit no-short-rest-pool skip;
  *  #13 Heroism concentration; #14 death saves; #15 poisoned condition;
  *  #16 explicit no-active-feat skip; #17 export round-trip.
+ *  M8B opt-in companion lifecycle extensions additionally cover exact
+ *  source-owned death/revival, one-hour timing, owner-death vanishing,
+ *  Long Rest replacement/undo, lifecycle export/import, and PDF rendering.
  *
  *  #18 N/A: this is an exact single-class EFA build, not a multiclass spec.
  *  #19 N/A: EFA Artificer has no TGTT Specialty progression.

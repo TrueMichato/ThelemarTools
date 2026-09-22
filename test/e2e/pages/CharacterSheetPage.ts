@@ -13,6 +13,35 @@ export interface FeatureCompanionOperationProbe {
 	expectedOperationUid: string;
 }
 
+export interface FeatureCompanionSetupExpectation {
+	nickname: string;
+	appearance: string;
+	locomotion: string;
+}
+
+export interface FeatureCompanionIsolationCompanion {
+	id: string;
+	name: string;
+	source: string;
+	ownerUid?: string;
+}
+
+export interface FeatureCompanionDeathRevivalProbeOptions {
+	setup: FeatureCompanionSetupExpectation;
+	preferredSpellSlotLevel?: number;
+	probeUnknownLegacyTiming?: boolean;
+	assertOwnerVanishing?: boolean;
+	isolationCompanions?: FeatureCompanionIsolationCompanion[];
+}
+
+export interface FeatureCompanionReplacementProbeOptions {
+	setup: FeatureCompanionSetupExpectation;
+	toolUid: string;
+	excludedToolUids?: string[];
+	isolationCompanions?: FeatureCompanionIsolationCompanion[];
+	assertPdf?: boolean;
+}
+
 /**
  * Page Object Model for the Character Sheet page
  * Provides common navigation and interaction methods
@@ -152,7 +181,10 @@ export class CharacterSheetPage {
 		expect(result.count, `companions owned by ${ownerUid} before its grant`).toBe(0);
 	}
 
-	async expectFeatureCompanionReady (identity: FeatureCompanionIdentity): Promise<{id: string}> {
+	async expectFeatureCompanionReady (
+		identity: FeatureCompanionIdentity,
+		setupExpectation?: FeatureCompanionSetupExpectation,
+	): Promise<{id: string}> {
 		const result = await this.page.evaluate((expected) => {
 			const state: any = (globalThis as any).charSheet?._state;
 			const setup = state?.getFeatureCompanionSetupRecord?.(expected.ownerUid) || null;
@@ -166,8 +198,10 @@ export class CharacterSheetPage {
 					name: companion.name,
 					source: companion.source,
 					ownerUid: companion.featureGrant?.uid,
+					customName: companion.customName,
 					appearance: companion.setup?.appearance,
 					locomotion: companion.setup?.locomotion,
+					setup: companion.setup || null,
 				} : null,
 			};
 		}, identity);
@@ -179,6 +213,17 @@ export class CharacterSheetPage {
 			ownerUid: identity.ownerUid,
 		});
 		expect(result.companion?.id, "feature companion should have a stable persisted id").toBeTruthy();
+		expect(result.setup?.companionId, "setup record should point at the persisted companion").toBe(result.companion?.id);
+		if (setupExpectation) {
+			const expectedSetup = {
+				nickname: setupExpectation.nickname,
+				appearance: setupExpectation.appearance,
+				locomotion: setupExpectation.locomotion,
+			};
+			expect(result.setup?.choices, `persisted setup choices for ${identity.ownerUid}`).toMatchObject(expectedSetup);
+			expect(result.companion?.customName, "companion nickname should match the configured setup").toBe(setupExpectation.nickname);
+			expect(result.companion?.setup, "companion setup should match the persisted setup record").toMatchObject(expectedSetup);
+		}
 		return {id: result.companion!.id};
 	}
 
@@ -270,6 +315,727 @@ export class CharacterSheetPage {
 		expect(result?.operationUid).toBe(probe.expectedOperationUid);
 		if (probe.commandMethod) expect(result?.commandMethod).toBe(probe.commandMethod);
 		return result as Record<string, unknown>;
+	}
+
+	async seedFeatureCompanionLifecycleIsolation (companions: FeatureCompanionIsolationCompanion[] = []): Promise<void> {
+		if (!companions.length) return;
+		await this.page.evaluate((specs) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			if (!state) throw new Error("Character Sheet state is unavailable");
+			for (const spec of specs) {
+				if (state.getCompanion?.(spec.id)) continue;
+				const generatedId = state.addCompanion({
+					name: spec.name,
+					source: spec.source,
+					type: state.constructor.COMPANION_TYPES.CLASS_SUMMON,
+					origin: "M8B lifecycle isolation sentinel",
+					creatureType: spec.name === "Reanimated Companion" ? "undead" : "construct",
+					hp: {current: 17, max: 17, temp: 0},
+					...(spec.ownerUid ? {featureGrant: {uid: spec.ownerUid}} : {}),
+					...(spec.ownerUid ? {lifecycle: {status: "alive", generation: 7}} : {}),
+				});
+				const added = state.getCompanion?.(generatedId);
+				if (!added) throw new Error(`Could not seed lifecycle isolation sentinel ${spec.id}`);
+				added.id = spec.id;
+			}
+			cs?._renderCharacter?.();
+		}, companions);
+		const seeded = await this._getFeatureCompanionIsolationSnapshots(companions.map(companion => companion.id));
+		expect(seeded).toHaveLength(companions.length);
+		for (const [ix, companion] of companions.entries()) {
+			expect(seeded[ix], `lifecycle isolation sentinel ${companion.id} should exist exactly`).toMatchObject({
+				id: companion.id,
+				name: companion.name,
+				source: companion.source,
+				ownerUid: companion.ownerUid || null,
+			});
+		}
+	}
+
+	async getFeatureCompanionLifecycleSnapshot (
+		identity: FeatureCompanionIdentity,
+	): Promise<any> {
+		return this.page.evaluate((expected) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			const setup = state?.getFeatureCompanionSetupRecord?.(expected.ownerUid) || null;
+			const companion = (state?.getFeatureOwnedCompanions?.(expected.ownerUid) || [])
+				.find((candidate: any) =>
+					candidate?.featureGrant?.uid === expected.ownerUid
+					&& candidate?.name === expected.name
+					&& candidate?.source === expected.source,
+				) || null;
+			return {
+				gameTimeMinute: state?.getGameTimeMinutes?.() ?? null,
+				actionEconomy: state?.getActionEconomyState?.() ?? null,
+				spellSlots: structuredClone(state?._data?.spellcasting?.spellSlots || {}),
+				pactSlots: structuredClone(state?.getPactSlots?.() || null),
+				setup: structuredClone(setup),
+				companion: companion ? {
+					id: companion.id,
+					name: companion.name,
+					source: companion.source,
+					ownerUid: companion.featureGrant?.uid || null,
+					customName: companion.customName || null,
+					setup: structuredClone(companion.setup || null),
+					active: companion.active !== false,
+					hp: structuredClone(companion.hp || null),
+					repair: structuredClone(companion.uses?.repair || null),
+					hitDice: structuredClone(companion.hitDice || null),
+					turnUsage: structuredClone(companion.turnUsage || null),
+					conditions: structuredClone(companion.conditions || []),
+					lifecycle: structuredClone(companion.lifecycle || null),
+				} : null,
+			};
+		}, identity);
+	}
+
+	private async _getFeatureCompanionIsolationSnapshots (ids: string[]): Promise<any[]> {
+		return this.page.evaluate((companionIds) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			return companionIds.map(id => {
+				const companion = state?.getCompanion?.(id) || null;
+				return companion ? {
+					id: companion.id,
+					name: companion.name,
+					source: companion.source || null,
+					ownerUid: companion.featureGrant?.uid || null,
+					active: companion.active !== false,
+					hp: structuredClone(companion.hp || null),
+					lifecycle: structuredClone(companion.lifecycle || null),
+				} : null;
+			});
+		}, ids);
+	}
+
+	private async _getFeatureCompanionInventorySnapshots (uids: string[]): Promise<any[]> {
+		return this.page.evaluate((itemUids) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			return itemUids.map(uid => {
+				const [name, source] = uid.split("|");
+				const rows = (state?._data?.inventory || [])
+					.filter((row: any) =>
+						row?.item?.name === name
+						&& row?.item?.source === source,
+					)
+					.map((row: any) => ({
+						id: row.id,
+						name: row.item.name,
+						source: row.item.source,
+						quantity: row.quantity,
+						equipped: row.equipped === true,
+						attuned: row.attuned === true,
+					}));
+				return {uid, rows};
+			});
+		}, uids);
+	}
+
+	private async _expectDesktopFeatureCompanionLifecycle (
+		companionId: string,
+		{
+			label,
+			blocked = true,
+		}: {
+			label: RegExp;
+			blocked?: boolean;
+		},
+	): Promise<Locator> {
+		await this.exitPlayMode();
+		await this.switchToTab(this.tabCompanions);
+		const card = this.page.locator(`.charsheet__companion-card[data-companion-id="${companionId}"]`);
+		await expect(card).toBeVisible();
+		const lifecycle = card.locator(".charsheet__feature-companion-lifecycle");
+		await expect(lifecycle.locator("strong").first()).toHaveText(label);
+		if (blocked) {
+			const reason = lifecycle.locator(".charsheet__feature-companion-lifecycle-disabled-reason");
+			await expect(reason).toBeVisible();
+			await expect(reason).not.toHaveText("");
+			for (const operation of ["forceEmpoweredRend", "repair", "deflectAttack"]) {
+				const button = card.locator(`[data-operation="${operation}"]`);
+				await expect(button).toBeDisabled();
+				const describedBy = (await button.getAttribute("aria-describedby") || "")
+					.split(/\s+/)
+					.filter(Boolean);
+				expect(describedBy.length, `${operation} should reference its lifecycle-aware status and reasons`).toBeGreaterThan(0);
+				const describedText: string[] = [];
+				for (const id of describedBy) {
+					const description = card.locator(`[id="${id}"]`);
+					await expect(description).toHaveCount(1);
+					describedText.push((await description.textContent()) || "");
+				}
+				expect(describedText.join(" "), `${operation} should expose a lifecycle reason`)
+					.not.toContain("All listed operations are available.");
+			}
+		}
+		return card;
+	}
+
+	private async _openPlayModeFeatureCompanionCard (companionId: string): Promise<Locator> {
+		await this.enterPlayMode();
+		await this.page.locator(".pm-status__tool-btn").filter({hasText: /^More$/}).click();
+		await this.page.locator(".pm-context-menu__item").filter({hasText: /^Companions$/}).click();
+		const drawer = this.page.locator(".pm-drawer.pm-drawer--open");
+		await expect(drawer).toBeVisible();
+		await expect(drawer.locator(".pm-drawer__title")).toHaveText("Companions");
+		const card = drawer.locator(`[data-companion-id="${companionId}"]`);
+		await expect(card).toBeVisible();
+		return card;
+	}
+
+	async killFeatureCompanion (
+		identity: FeatureCompanionIdentity,
+		setup: FeatureCompanionSetupExpectation,
+	): Promise<any> {
+		const {id} = await this.expectFeatureCompanionReady(identity, setup);
+		const result = await this.page.evaluate((companionId) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			const companion = state?.getCompanion?.(companionId);
+			if (!companion) throw new Error(`Feature companion ${companionId} is unavailable`);
+			const receipt = state.damageCompanion(companionId, companion.hp.current);
+			cs?._renderCharacter?.();
+			return receipt;
+		}, id);
+		expect(result?.droppedToZero, `damageCompanion(${id}) should cross positive HP to zero`).toBe(true);
+		const dead = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(dead.companion).toMatchObject({
+			id,
+			ownerUid: identity.ownerUid,
+			name: identity.name,
+			source: identity.source,
+			active: false,
+			hp: {current: 0},
+			lifecycle: {
+				status: "dead",
+				timingKnown: true,
+				diedAtGameMinute: dead.gameTimeMinute,
+			},
+		});
+		await this.expectFeatureCompanionReady(identity, setup);
+		await this._expectDesktopFeatureCompanionLifecycle(id, {label: /^Dead$/i});
+		return dead;
+	}
+
+	private async _readFeatureCompanionRevivalUiState (
+		companionId: string,
+		preferredSpellSlotLevel?: number,
+		selectedSpellSlot?: {kind: "normal" | "pact"; level: number},
+	): Promise<any> {
+		return this.page.evaluate(({id, preferredLevel, selectedChoice}) => {
+			const state: any = (globalThis as any).charSheet?._state;
+			const availability = state?.getFeatureCompanionRevivalAvailability?.(id, {
+				touchConfirmed: true,
+				deathWithinHourConfirmed: true,
+			}) || {};
+			const slots = availability.spellSlots || [];
+			const selected = slots.find((slot: any) => slot.kind === "normal" && slot.level === preferredLevel)
+				|| slots[0]
+				|| selectedChoice
+				|| null;
+			const current = selected?.kind === "pact"
+				? state?.getPactSlots?.()?.current
+				: selected ? state?._data?.spellcasting?.spellSlots?.[selected.level]?.current : null;
+			const companion = state?.getCompanion?.(id) || null;
+			return {
+				actionAvailable: state?.getActionEconomyState?.()?.action ?? null,
+				currentMinute: state?.getGameTimeMinutes?.() ?? null,
+				slots: structuredClone(slots),
+				selected: structuredClone(selected),
+				selectedCurrent: current,
+				companion: companion ? {
+					hp: structuredClone(companion.hp),
+					lifecycle: structuredClone(companion.lifecycle),
+				} : null,
+			};
+		}, {
+			id: companionId,
+			preferredLevel: preferredSpellSlotLevel ?? null,
+			selectedChoice: selectedSpellSlot || null,
+		});
+	}
+
+	private async _beginFeatureCompanionRevivalThroughUi (
+		companionId: string,
+		button: Locator,
+		{
+			preferredSpellSlotLevel,
+			expectUnknownTiming = false,
+		}: {
+			preferredSpellSlotLevel?: number;
+			expectUnknownTiming?: boolean;
+		} = {},
+	): Promise<any> {
+		await this.page.evaluate(() => {
+			(globalThis as any).charSheet?._state?.resetTurnEconomy?.();
+		});
+		const before = await this._readFeatureCompanionRevivalUiState(companionId, preferredSpellSlotLevel);
+		expect(before.actionAvailable, "owner Action should be available before revival").toBe(true);
+		expect(before.selected, "State should provide an eligible normal or Pact Magic slot").toBeTruthy();
+
+		await button.click();
+		const modal = this._visibleModal(/Revive Steel Defender/i);
+		await expect(modal).toBeVisible();
+		const slotValue = before.selected.kind === "pact" ? "pact" : `normal:${before.selected.level}`;
+		await modal.locator("[data-role='spell-slot']").selectOption(slotValue);
+
+		await modal.getByRole("button", {name: /^Begin revival$/i}).click();
+		await expect(modal.locator("[role='alert']")).toContainText(/touching the Steel Defender/i);
+		let rejected = await this._readFeatureCompanionRevivalUiState(companionId, preferredSpellSlotLevel);
+		expect(rejected.actionAvailable, "missing touch confirmation must not spend the Action").toBe(true);
+		expect(rejected.selectedCurrent, "missing touch confirmation must not spend a slot").toBe(before.selectedCurrent);
+		expect(rejected.companion.lifecycle.status).toBe("dead");
+		await modal.locator("[data-role='touch']").check();
+
+		const deathWindow = modal.locator("[data-role='death-window']");
+		if (expectUnknownTiming) {
+			await expect(deathWindow).toBeVisible();
+			await modal.getByRole("button", {name: /^Begin revival$/i}).click();
+			await expect(modal.locator("[role='alert']")).toContainText(/died within the last hour/i);
+			rejected = await this._readFeatureCompanionRevivalUiState(companionId, preferredSpellSlotLevel);
+			expect(rejected.actionAvailable, "missing legacy timing confirmation must not spend the Action").toBe(true);
+			expect(rejected.selectedCurrent, "missing legacy timing confirmation must not spend a slot").toBe(before.selectedCurrent);
+			expect(rejected.companion.lifecycle.status).toBe("dead");
+			await deathWindow.check();
+		} else {
+			await expect(deathWindow).toHaveCount(0);
+		}
+
+		await modal.getByRole("button", {name: /^Begin revival$/i}).click();
+		await expect(modal).toBeHidden();
+		const pending = await this._readFeatureCompanionRevivalUiState(
+			companionId,
+			preferredSpellSlotLevel,
+			before.selected,
+		);
+		expect(pending.actionAvailable, "revival should atomically spend the owner's Action").toBe(false);
+		expect(pending.selectedCurrent, "revival should atomically spend exactly one selected slot").toBe(before.selectedCurrent - 1);
+		expect(pending.companion).toMatchObject({
+			hp: {current: 0},
+			lifecycle: {
+				status: "revivalPending",
+				revivalPending: {
+					startedAtGameMinute: before.currentMinute,
+					dueAtGameMinute: before.currentMinute + 1,
+					spellSlot: {
+						kind: before.selected.kind,
+						level: before.selected.level,
+					},
+				},
+			},
+		});
+		return {before, pending};
+	}
+
+	private async _completeFeatureCompanionRevivalThroughManager (
+		identity: FeatureCompanionIdentity,
+		setup: FeatureCompanionSetupExpectation,
+	): Promise<any> {
+		const before = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		const card = await this._expectDesktopFeatureCompanionLifecycle(before.companion.id, {label: /Revival pending/i});
+		const complete = card.getByRole("button", {name: /Complete revival \(\+1 minute\)/i});
+		await expect(complete).toBeEnabled();
+		await complete.click();
+		await this.page.waitForTimeout(150);
+		const after = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(after.gameTimeMinute, "canonical game time should advance exactly one minute").toBe(before.gameTimeMinute + 1);
+		expect(after.companion).toMatchObject({
+			id: before.companion.id,
+			active: true,
+			hp: {current: before.companion.hp.max, max: before.companion.hp.max},
+			lifecycle: {
+				status: "alive",
+				generation: before.companion.lifecycle.generation,
+				lastRevival: {completedAtGameMinute: after.gameTimeMinute},
+			},
+		});
+		await this.expectFeatureCompanionReady(identity, setup);
+		return after;
+	}
+
+	private async _restoreFeatureCompanionLifecycleJson (json: any): Promise<void> {
+		await this.page.evaluate((snapshot) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.loadFromJson?.(snapshot);
+			cs?._renderCharacter?.();
+		}, json);
+		await this.page.waitForTimeout(100);
+	}
+
+	async probeFeatureCompanionDeathAndRevival (
+		identity: FeatureCompanionIdentity,
+		options: FeatureCompanionDeathRevivalProbeOptions,
+	): Promise<void> {
+		const {setup, isolationCompanions = []} = options;
+		await this.seedFeatureCompanionLifecycleIsolation(isolationCompanions);
+		const isolationIds = isolationCompanions.map(companion => companion.id);
+		const isolationBefore = await this._getFeatureCompanionIsolationSnapshots(isolationIds);
+
+		const initial = await this.expectFeatureCompanionReady(identity, setup);
+		const dead = await this.killFeatureCompanion(identity, setup);
+		expect(await this._getFeatureCompanionIsolationSnapshots(isolationIds), "foreign companions must not share exact EFA lifecycle ownership")
+			.toEqual(isolationBefore);
+
+		const playCard = await this._openPlayModeFeatureCompanionCard(initial.id);
+		const playLifecycle = playCard.locator(".pm-companion-lifecycle");
+		await expect(playLifecycle.locator("strong").first()).toHaveText(/^Dead$/i);
+		await expect(playLifecycle.locator(".pm-companion-lifecycle__disabled-reason")).not.toHaveText("");
+		for (const label of ["Heal", "Damage"]) {
+			const control = playCard.getByRole("button", {name: new RegExp(label, "i")}).first();
+			await expect(control).toBeDisabled();
+			expect(await control.getAttribute("aria-describedby"), `${label} should describe the lifecycle block`)
+				.toContain("disabled-reason");
+		}
+		const beginInPlay = playLifecycle.getByRole("button", {name: /^Begin revival$/i});
+		await expect(beginInPlay).toBeEnabled();
+		await this._beginFeatureCompanionRevivalThroughUi(initial.id, beginInPlay, {
+			preferredSpellSlotLevel: options.preferredSpellSlotLevel,
+		});
+		await this._completeFeatureCompanionRevivalThroughManager(identity, setup);
+		expect(await this._getFeatureCompanionIsolationSnapshots(isolationIds)).toEqual(isolationBefore);
+
+		const aliveJson = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.toJson?.());
+		expect(aliveJson, "alive lifecycle snapshot").toBeTruthy();
+
+		if (options.probeUnknownLegacyTiming) {
+			await this.killFeatureCompanion(identity, setup);
+			await this.page.evaluate((companionId) => {
+				const cs: any = (globalThis as any).charSheet;
+				const json = cs?._state?.toJson?.();
+				const companion = json?.companions?.find((candidate: any) => candidate.id === companionId);
+				if (!companion) throw new Error("Could not create an unknown-time legacy lifecycle fixture");
+				companion.lifecycle.diedAtGameMinute = null;
+				companion.lifecycle.timingKnown = false;
+				cs._state.loadFromJson(json);
+				cs._state.resetTurnEconomy?.();
+				cs._renderCharacter?.();
+			}, initial.id);
+			const unknownCard = await this._expectDesktopFeatureCompanionLifecycle(initial.id, {label: /^Dead$/i});
+			await expect(unknownCard.locator(".charsheet__feature-companion-lifecycle")).toContainText(/saved death time is unknown/i);
+			await this._beginFeatureCompanionRevivalThroughUi(
+				initial.id,
+				unknownCard.getByRole("button", {name: /^Begin revival$/i}),
+				{
+					preferredSpellSlotLevel: options.preferredSpellSlotLevel,
+					expectUnknownTiming: true,
+				},
+			);
+			await this._completeFeatureCompanionRevivalThroughManager(identity, setup);
+			await this._restoreFeatureCompanionLifecycleJson(aliveJson);
+			await this.expectFeatureCompanionReady(identity, setup);
+		}
+
+		await this.page.evaluate(() => (globalThis as any).charSheet?._state?.resetTurnEconomy?.());
+		const boundaryDead = await this.killFeatureCompanion(identity, setup);
+		const diedAt = boundaryDead.companion.lifecycle.diedAtGameMinute;
+		const boundaryDeadJson = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.toJson?.());
+		expect(boundaryDeadJson, "known-death boundary snapshot").toBeTruthy();
+		await this.page.evaluate((companionId) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.advanceGameTimeMinutes?.(60, {reason: "m8b-revival-boundary", identity: companionId});
+			cs?._renderCharacter?.();
+		}, initial.id);
+		const minute60 = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(minute60.gameTimeMinute).toBe(diedAt + 60);
+		expect(minute60.companion.lifecycle.status).toBe("dead");
+		const legalCard = await this._expectDesktopFeatureCompanionLifecycle(initial.id, {label: /^Dead$/i});
+		await expect(legalCard.locator(".charsheet__feature-companion-lifecycle")).toContainText(/0 minutes remaining/i);
+		const legalBegin = legalCard.getByRole("button", {name: /^Begin revival$/i});
+		await expect(legalBegin).toBeEnabled();
+		await this._beginFeatureCompanionRevivalThroughUi(initial.id, legalBegin, {
+			preferredSpellSlotLevel: options.preferredSpellSlotLevel,
+		});
+		const revivedAtBoundary = await this._completeFeatureCompanionRevivalThroughManager(identity, setup);
+		expect(revivedAtBoundary.gameTimeMinute).toBe(diedAt + 61);
+		expect(revivedAtBoundary.companion.lifecycle.status).toBe("alive");
+
+		await this._restoreFeatureCompanionLifecycleJson(boundaryDeadJson);
+		await this.page.evaluate((companionId) => {
+			const cs: any = (globalThis as any).charSheet;
+			cs?._state?.advanceGameTimeMinutes?.(61, {reason: "m8b-revival-expiration", identity: companionId});
+			cs?._renderCharacter?.();
+		}, initial.id);
+		const expired = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(expired.gameTimeMinute).toBe(diedAt + 61);
+		expect(expired.companion.lifecycle).toMatchObject({
+			status: "expired",
+			expiredAtGameMinute: diedAt + 61,
+		});
+		const expiredCard = await this._expectDesktopFeatureCompanionLifecycle(initial.id, {label: /Revival window expired/i});
+		await expect(expiredCard.getByRole("button", {name: /^Begin revival$/i})).toHaveCount(0);
+		await this._restoreFeatureCompanionLifecycleJson(aliveJson);
+
+		if (options.assertOwnerVanishing) {
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				cs?._state?.setDeathSaveFailures?.(3);
+				cs?._renderCharacter?.();
+			});
+			const vanished = await this.getFeatureCompanionLifecycleSnapshot(identity);
+			expect(vanished.companion).toMatchObject({
+				id: initial.id,
+				active: false,
+				hp: {current: 0},
+				lifecycle: {
+					status: "vanished",
+					vanishedReason: "summonerDeath",
+				},
+			});
+			await this._expectDesktopFeatureCompanionLifecycle(initial.id, {label: /^Vanished$/i});
+			expect(await this._getFeatureCompanionIsolationSnapshots(isolationIds), "owner death must not vanish foreign/source-only companions")
+				.toEqual(isolationBefore);
+
+			await this.page.evaluate(() => {
+				const cs: any = (globalThis as any).charSheet;
+				const state: any = cs?._state;
+				state?.setDeathSaveFailures?.(0);
+				state?.setExhaustion?.(0);
+				const hp = state?.getHp?.();
+				state?.setHp?.(hp.max, hp.max, 0);
+				cs?._renderCharacter?.();
+			});
+			const recovered = await this.getFeatureCompanionLifecycleSnapshot(identity);
+			expect(recovered.companion).toMatchObject({
+				id: initial.id,
+				active: false,
+				hp: {current: 0},
+				lifecycle: {status: "vanished", vanishedReason: "summonerDeath"},
+			});
+			await this.expectFeatureCompanionReady(identity, setup);
+		}
+	}
+
+	private async _completeLongRestWithFeatureCompanionReplacement (
+		toolUid: string,
+		{
+			confirmInHand,
+			excludedToolUids = [],
+		}: {
+			confirmInHand: boolean;
+			excludedToolUids?: string[];
+		},
+	): Promise<void> {
+		await this.exitPlayMode();
+		await this.switchToTab(this.tabOverview);
+		await this.btnLongRest.click({timeout: 5000});
+		const modal = this._visibleModal(/Long Rest/i);
+		await expect(modal).toBeVisible();
+		const section = modal.locator(".charsheet__steel-defender-replacement");
+		await expect(section).toBeVisible();
+		await expect(section).toContainText(/Optional Replacement/i);
+		const select = section.locator("select");
+		const options = await select.locator("option").allTextContents();
+		await expect(select.locator("option").first()).toHaveText(/Do not replace the defender/i);
+		const [toolName, toolSource] = toolUid.split("|");
+		const selectedText = options.find(text =>
+			text.includes(toolName)
+			&& text.includes(`(${toolSource})`),
+		);
+		expect(selectedText, `Long Rest should offer the exact persisted ${toolUid} row`).toBeTruthy();
+		for (const excludedUid of excludedToolUids) {
+			const [excludedName, excludedSource] = excludedUid.split("|");
+			expect(
+				options.some(text => text.includes(excludedName) && text.includes(`(${excludedSource})`)),
+				`Long Rest must not offer excluded replacement row ${excludedUid}`,
+			).toBe(false);
+		}
+		await select.selectOption({label: selectedText!});
+		const inHand = section.locator(".charsheet__steel-defender-replacement-confirm input");
+		await expect(inHand).toBeEnabled();
+		if (confirmInHand) await inHand.check();
+		else await expect(inHand).not.toBeChecked();
+		await modal.getByRole("button", {name: /Finish Long Rest/i}).click();
+		await expect(modal).toBeHidden();
+	}
+
+	private async _prepareFeatureCompanionReplacementUndoState (
+		companionId: string,
+	): Promise<any> {
+		await this.page.evaluate((id) => {
+			const cs: any = (globalThis as any).charSheet;
+			const state: any = cs?._state;
+			const companion = state?.getCompanion?.(id);
+			if (!companion) throw new Error(`Feature companion ${id} is unavailable`);
+			state.setCompanionHp(id, Math.min(7, Math.max(1, companion.hp.max - 1)));
+			if (companion.uses?.repair) companion.uses.repair.current = Math.min(1, companion.uses.repair.max);
+			if (companion.hitDice) companion.hitDice.current = Math.min(1, companion.hitDice.max);
+			companion.turnUsage = {action: true, reaction: true, flags: {m8b: true}};
+			companion.conditions = ["poisoned"];
+			cs?._renderCharacter?.();
+		}, companionId);
+		return this.page.evaluate((id) => {
+			const companion: any = (globalThis as any).charSheet?._state?.getCompanion?.(id);
+			return {
+				id: companion.id,
+				active: companion.active !== false,
+				hp: structuredClone(companion.hp),
+				repair: structuredClone(companion.uses?.repair || null),
+				hitDice: structuredClone(companion.hitDice || null),
+				turnUsage: structuredClone(companion.turnUsage || null),
+				conditions: structuredClone(companion.conditions || []),
+				lifecycle: structuredClone(companion.lifecycle || null),
+				setup: structuredClone(companion.setup || null),
+				customName: companion.customName || null,
+			};
+		}, companionId);
+	}
+
+	private async _expectFeatureCompanionLifecyclePdf (
+		identity: FeatureCompanionIdentity,
+		setup: FeatureCompanionSetupExpectation,
+		snapshot: any,
+	): Promise<void> {
+		await this.exitPlayMode();
+		const secondaryHeader = this.page.locator("#charsheet-header-secondary");
+		if (await secondaryHeader.evaluate(el => el.classList.contains("charsheet__header-row--collapsed"))) {
+			await this.page.locator("#charsheet-btn-more").click({timeout: 5000});
+			await expect(secondaryHeader).not.toHaveClass(/charsheet__header-row--collapsed/);
+		}
+		await this.btnExport.click({force: true, timeout: 5000});
+		const modal = this._visibleModal(/Export Character/i);
+		await expect(modal).toBeVisible();
+		await modal.getByRole("button", {name: /^Print \/ PDF$/i}).click({timeout: 5000});
+		const popupPromise = this.page.waitForEvent("popup", {timeout: 10000});
+		await modal.getByRole("button", {name: /Open Print View/i}).first().click({timeout: 5000});
+		const popup = await popupPromise;
+		await popup.waitForLoadState("domcontentloaded");
+		await popup.emulateMedia({media: "print"});
+		const lifecycleBlock = popup.locator(".pdf-companion--efa-steel-defender")
+			.filter({hasText: `${identity.name} • ${identity.source}`});
+		await expect(lifecycleBlock).toBeVisible();
+		await expect(lifecycleBlock).toContainText(setup.nickname);
+		await expect(lifecycleBlock).toContainText(`Appearance ${setup.appearance}`);
+		await expect(lifecycleBlock).toContainText("Body Four legs");
+		const status = String(snapshot.companion.lifecycle.status || "");
+		const statusLabel = status === "revivalPending"
+			? "Revival pending"
+			: `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+		const lifecycleRow = lifecycleBlock.locator(".pdf-comp__details > div")
+			.filter({hasText: new RegExp(`^Lifecycle\\s+${statusLabel}$`, "i")});
+		await expect(lifecycleRow).toBeVisible();
+		await expect(lifecycleBlock).toContainText(`Generation ${snapshot.companion.lifecycle.generation}`);
+		await expect(lifecycleBlock).toContainText(`Death minute ${snapshot.companion.lifecycle.diedAtGameMinute}`);
+		await expect(lifecycleBlock).toContainText(`Repair ${snapshot.companion.repair.current}/${snapshot.companion.repair.max} uses`);
+		await expect(lifecycleBlock).toContainText(`Hit Dice ${snapshot.companion.hitDice.current}/${snapshot.companion.hitDice.max}`);
+		const pdf = await popup.pdf({printBackground: true});
+		expect(pdf.byteLength, "print view should produce a non-empty PDF buffer").toBeGreaterThan(1000);
+		await popup.close();
+		await modal.locator("button").filter({hasText: /^Close$/}).click({timeout: 5000});
+		await expect(modal).toBeHidden();
+	}
+
+	async probeFeatureCompanionReplacementPersistence (
+		identity: FeatureCompanionIdentity,
+		options: FeatureCompanionReplacementProbeOptions,
+	): Promise<void> {
+		const {setup, toolUid, excludedToolUids = [], isolationCompanions = []} = options;
+		await this.seedFeatureCompanionLifecycleIsolation(isolationCompanions);
+		const isolationIds = isolationCompanions.map(companion => companion.id);
+		const isolationBefore = await this._getFeatureCompanionIsolationSnapshots(isolationIds);
+		const inventoryUids = [toolUid, ...excludedToolUids];
+		const inventoryBefore = await this._getFeatureCompanionInventorySnapshots(inventoryUids);
+		const {id} = await this.expectFeatureCompanionReady(identity, setup);
+		const initial = await this.getFeatureCompanionLifecycleSnapshot(identity);
+
+		await this._completeLongRestWithFeatureCompanionReplacement(toolUid, {
+			confirmInHand: false,
+			excludedToolUids,
+		});
+		const optional = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(optional.companion).toMatchObject({
+			id,
+			customName: setup.nickname,
+			setup,
+			lifecycle: {
+				status: initial.companion.lifecycle.status,
+				generation: initial.companion.lifecycle.generation,
+			},
+		});
+		await this.expectFeatureCompanionReady(identity, setup);
+		expect(await this._getFeatureCompanionIsolationSnapshots(isolationIds)).toEqual(isolationBefore);
+		expect(await this._getFeatureCompanionInventorySnapshots(inventoryUids)).toEqual(inventoryBefore);
+
+		const preRest = await this._prepareFeatureCompanionReplacementUndoState(id);
+		await this._completeLongRestWithFeatureCompanionReplacement(toolUid, {
+			confirmInHand: true,
+			excludedToolUids,
+		});
+		const replaced = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(replaced.companion).toMatchObject({
+			id,
+			customName: setup.nickname,
+			setup,
+			active: true,
+			hp: {current: replaced.companion.hp.max, max: replaced.companion.hp.max, temp: 0},
+			repair: {current: replaced.companion.repair.max, max: replaced.companion.repair.max},
+			hitDice: {current: replaced.companion.hitDice.max, max: replaced.companion.hitDice.max},
+			lifecycle: {
+				status: "alive",
+				generation: preRest.lifecycle.generation + 1,
+				generationHistory: expect.arrayContaining([
+					expect.objectContaining({
+						generation: preRest.lifecycle.generation,
+						status: "vanished",
+						reason: "longRestReplacement",
+					}),
+				]),
+			},
+		});
+		await this.expectFeatureCompanionReady(identity, setup);
+		expect(await this._getFeatureCompanionIsolationSnapshots(isolationIds)).toEqual(isolationBefore);
+		expect(await this._getFeatureCompanionInventorySnapshots(inventoryUids)).toEqual(inventoryBefore);
+
+		const undo = this.page.locator("#charsheet-btn-undo-rest");
+		await expect(undo).toBeVisible();
+		await undo.click();
+		await expect(undo).toHaveCount(0);
+		const restored = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(restored.companion).toMatchObject(preRest);
+		await this.expectFeatureCompanionReady(identity, setup);
+		expect(await this._getFeatureCompanionIsolationSnapshots(isolationIds)).toEqual(isolationBefore);
+		expect(await this._getFeatureCompanionInventorySnapshots(inventoryUids)).toEqual(inventoryBefore);
+
+		await this._completeLongRestWithFeatureCompanionReplacement(toolUid, {
+			confirmInHand: true,
+			excludedToolUids,
+		});
+		await this.page.evaluate((companionId) => {
+			const cs: any = (globalThis as any).charSheet;
+			const companion = cs?._state?.getCompanion?.(companionId);
+			if (companion?.uses?.repair) companion.uses.repair.current = Math.min(1, companion.uses.repair.max);
+			if (companion?.hitDice) companion.hitDice.current = Math.min(1, companion.hitDice.max);
+			cs?._renderCharacter?.();
+		}, id);
+		await this.killFeatureCompanion(identity, setup);
+		const beforeRoundTrip = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(beforeRoundTrip.companion.lifecycle).toMatchObject({
+			status: "dead",
+			timingKnown: true,
+			generation: preRest.lifecycle.generation + 1,
+			generationHistory: expect.arrayContaining([
+				expect.objectContaining({
+					generation: preRest.lifecycle.generation,
+					status: "vanished",
+					reason: "longRestReplacement",
+				}),
+			]),
+		});
+		expect(beforeRoundTrip.companion.repair.current).toBe(1);
+		expect(beforeRoundTrip.companion.hitDice.current).toBe(1);
+
+		const exported = await this.page.evaluate(() => (globalThis as any).charSheet?._state?.toJson?.());
+		expect(exported, "feature companion export payload").toBeTruthy();
+		await this._restoreFeatureCompanionLifecycleJson(exported);
+		const roundTrip = await this.getFeatureCompanionLifecycleSnapshot(identity);
+		expect(roundTrip.companion).toEqual(beforeRoundTrip.companion);
+		expect(roundTrip.setup).toEqual(beforeRoundTrip.setup);
+		await this.expectFeatureCompanionReady(identity, setup);
+		expect(await this._getFeatureCompanionIsolationSnapshots(isolationIds)).toEqual(isolationBefore);
+		expect(await this._getFeatureCompanionInventorySnapshots(inventoryUids)).toEqual(inventoryBefore);
+		if (options.assertPdf) {
+			await this._expectFeatureCompanionLifecyclePdf(identity, setup, roundTrip);
+		}
 	}
 
 	async goto (): Promise<void> {
@@ -2976,9 +3742,14 @@ export class CharacterSheetPage {
 	async exitPlayMode (): Promise<void> {
 		const root = this.page.locator(".charsheet-page");
 		if (await root.evaluate(el => el.classList.contains("charsheet--play-mode"))) {
+			const closeDrawer = this.page.getByRole("button", {name: /^Close drawer$/i}).last();
+			if (await closeDrawer.isVisible().catch(() => false)) {
+				await closeDrawer.click({timeout: 5000});
+				await expect(this.page.locator(".pm-drawer.pm-drawer--open")).toHaveCount(0);
+			}
 			const fullSheet = this.page.locator(".pm-status__tool-btn").filter({hasText: /^Full Sheet$/}).first();
-			if (await fullSheet.isVisible().catch(() => false)) await fullSheet.click();
-			else await this.page.locator("#charsheet-btn-playmode").click({force: true});
+			if (await fullSheet.isVisible().catch(() => false)) await fullSheet.click({timeout: 5000});
+			else await this.page.locator("#charsheet-btn-playmode").click({force: true, timeout: 5000});
 		}
 		await expect(root).not.toHaveClass(/charsheet--play-mode/);
 	}
