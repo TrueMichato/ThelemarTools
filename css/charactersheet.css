@@ -8727,6 +8727,25 @@ body[data-font="readable"] {
 	font-size: var(--cs-text-sm, 0.875rem);
 }
 
+.charsheet__atlas-magic {
+	margin-bottom: var(--cs-space-md, 0.75rem);
+	padding: var(--cs-space-md, 0.75rem);
+	background: var(--cs-bg-base);
+	border: 1px solid var(--cs-border);
+	border-radius: var(--cs-radius-md, 10px);
+}
+
+.charsheet__atlas-magic-title {
+	margin: 0;
+	font-size: var(--cs-text-base, 1rem);
+}
+
+.charsheet__atlas-magic-copy,
+.charsheet__atlas-magic-detail {
+	color: var(--cs-text-muted);
+	font-size: var(--cs-text-sm, 0.875rem);
+}
+
 .charsheet__atlas-card-safe-haven-copy {
 	margin: 0 0 var(--cs-space-sm, 0.5rem);
 }
@@ -8751,6 +8770,57 @@ body[data-font="readable"] {
 	font-weight: 700;
 }
 
+.charsheet__atlas-magic-copy {
+	margin: var(--cs-space-xs, 0.25rem) 0 var(--cs-space-md, 0.75rem);
+	max-width: 72ch;
+}
+
+.charsheet__atlas-magic-actions {
+	display: grid;
+	gap: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__atlas-magic-action {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--cs-space-md, 0.75rem);
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-surface);
+	border: 1px solid var(--cs-border);
+	border-radius: var(--cs-radius-sm, 6px);
+}
+
+.charsheet__atlas-magic-action--unavailable {
+	background: var(--cs-bg-elevated);
+}
+
+.charsheet__atlas-magic-action-copy {
+	min-width: 0;
+}
+
+.charsheet__atlas-magic-action-heading {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: var(--cs-space-xs, 0.25rem) var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__atlas-magic-action-heading h5,
+.charsheet__atlas-magic-detail {
+	margin: 0;
+}
+
+.charsheet__atlas-magic-action-heading h5 {
+	font-size: var(--cs-text-base, 1rem);
+}
+
+.charsheet__atlas-magic-meta {
+	color: var(--cs-text-secondary);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 700;
+}
+
 .charsheet__atlas-card-safe-haven-field select {
 	min-height: 40px;
 }
@@ -8761,6 +8831,20 @@ body[data-font="readable"] {
 
 .charsheet__atlas-card-safe-haven-status--unavailable {
 	color: var(--cs-danger);
+}
+
+.charsheet__atlas-magic-detail {
+	margin-top: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__atlas-magic-button {
+	flex-shrink: 0;
+	min-height: 40px;
+}
+
+.charsheet__atlas-magic-button:focus-visible {
+	outline: 3px solid var(--cs-primary-glow);
+	outline-offset: 2px;
 }
 
 .charsheet__atlas-card-footer {

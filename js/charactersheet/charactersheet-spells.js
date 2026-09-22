@@ -2557,6 +2557,108 @@ class CharacterSheetSpells {
 		});
 	}
 
+	async pCastFeatureSpellGrant (grantId) {
+		const grant = this._state.getFeatureSpellCastGrant?.(grantId);
+		if (!grant?.available) {
+			JqueryUtil.doToast({type: "warning", content: grant?.reason || "That feature-granted spell is not available."});
+			return {ok: false, cancelled: false, reason: "feature-spell-unavailable"};
+		}
+		const spellData = this._allSpells.find(spell =>
+			spell.name?.toLowerCase() === grant.spell.name.toLowerCase()
+			&& spell.source?.toUpperCase() === grant.spell.source.toUpperCase());
+		if (!spellData) {
+			JqueryUtil.doToast({type: "warning", content: `Spell data for ${grant.spell.name}|${grant.spell.source} is unavailable.`});
+			return {ok: false, cancelled: false, reason: "spell-data-unavailable"};
+		}
+		const spell = {
+			...spellData,
+			id: `feature:${grant.id}`,
+			level: grant.spell.castLevel,
+			prepared: false,
+			sourceClass: "Artificer",
+			sourceSubclass: "Cartographer",
+			sourceFeature: grant.label,
+			sourceFeatureUid: grant.sourceFeatureUid,
+			spellcastingAbility: grant.castingAbility,
+		};
+		const requiresConcentration = spellData.duration?.some?.(duration => duration.concentration);
+		let shouldBreakConcentration = false;
+		if (requiresConcentration && this._state.isConcentrating?.()) {
+			const current = this._state.getConcentration?.();
+			shouldBreakConcentration = await InputUiUtil.pGetUserBoolean(/** @type {*} */ ({
+				title: "Break Concentration?",
+				htmlDescription: `You are currently concentrating on <strong>${current?.spellName || "a spell"}</strong>. Casting <strong>${spell.name}</strong> with ${grant.label} will break that concentration.`,
+				textYes: "Cast and break concentration",
+				textNo: "Cancel",
+			}));
+			if (!shouldBreakConcentration) return {ok: false, cancelled: true, reason: "concentration-cancelled"};
+		}
+
+		const componentWaivers = [...grant.componentWaivers];
+		const waivesMaterial = componentWaivers.includes("m");
+		if (!await this._pHandleCastingConstraints(spell, spellData, null, {
+			enforceArmor: true,
+			enforceMaterial: true,
+			componentWaivers,
+		})) {
+			return {ok: false, cancelled: true, reason: "casting-constraint"};
+		}
+
+		const committed = this._state.commitFeatureSpellCast?.(grant.id);
+		if (!committed?.ok) {
+			JqueryUtil.doToast({type: "warning", content: committed?.error || "That feature-granted cast could not be committed."});
+			return {ok: false, cancelled: false, reason: committed?.reason || "feature-spell-commit-failed"};
+		}
+
+		let castResult;
+		try {
+			castResult = await this._showCastResult(
+				spell,
+				grant.spell.castLevel,
+				false,
+				false,
+				{
+					freeCastSource: grant.label,
+					sourceFeatureUid: grant.sourceFeatureUid,
+					componentWaivers: [...grant.componentWaivers],
+					castingEconomy: MiscUtil.copyFast(grant.economy),
+				},
+			);
+		} catch (e) {
+			this._state.rollbackFeatureSpellCast?.(committed.receipt);
+			throw e;
+		}
+		if (castResult?.cancelled) {
+			this._state.rollbackFeatureSpellCast?.(committed.receipt);
+			return {ok: false, cancelled: true, reason: "cast-cancelled"};
+		}
+
+		if (shouldBreakConcentration) this._state.breakConcentration?.();
+		if (requiresConcentration) {
+			this._state.setConcentration?.({
+				name: spell.name,
+				level: grant.spell.castLevel,
+				source: spell.source,
+				sourceFeatureUid: grant.sourceFeatureUid,
+			});
+			this._updateConcentrationUI();
+		}
+		if (!waivesMaterial) await this._pConsumeMaterialComponent({spell, spellData});
+		this._state.consumeStatesEndingOnSpellCast?.();
+		const triggeredFeatures = this._state.applyCommittedSpellCastTriggers?.(spell) || [];
+		this.renderSlots?.();
+		this._page._renderQuickSpells?.();
+		this._page._renderResources?.();
+		this._page._features?.render?.();
+		if (triggeredFeatures.length) {
+			this._page._updateAllCalculations?.();
+			this._page._renderActiveStates?.();
+		}
+		this._page._combat?.renderCombatActionEconomy?.();
+		this._page.saveCharacter?.();
+		return {ok: true, cancelled: false, receipt: committed.receipt, spell, grant};
+	}
+
 	async _pResolveGamblerCastReceipt (resolution) {
 		if (!resolution) return {resolution, cancelled: false};
 		let current = resolution;
@@ -3450,6 +3552,10 @@ class CharacterSheetSpells {
 	 *        (gold-cost item possessed / spellcasting focus or pouch for no-cost materials).
 	 *        Off by default so innate / item-granted casting (which ignores material
 	 *        components) is never blocked.
+	 * @param {boolean} [opts.enforceArmor] - When true, enforce armor/shield proficiency.
+	 *        Defaults to `enforceMaterial` to preserve existing callers.
+	 * @param {string[]} [opts.componentWaivers] - Lowercase component keys (`v`, `s`, `m`)
+	 *        explicitly waived by the cast's source.
 	 * @returns {{block: string|null, checks: string[]}} block = hard block message, checks = conditions requiring one concentration check
 	 */
 	_checkCastingConstraints (spell, spellData, appliedMetamagic = null, opts = {}) {
@@ -3461,11 +3567,12 @@ class CharacterSheetSpells {
 			return {block: null, checks: []};
 		}
 
+		const componentWaivers = new Set((opts.componentWaivers || []).map(it => `${it}`.toLowerCase()));
+		const enforceArmor = opts.enforceArmor ?? opts.enforceMaterial;
+
 		// RAW: wearing armor / wielding a shield you lack proficiency with prevents
-		// spellcasting. Gated on enforceMaterial so it applies to player-initiated
-		// slot/cantrip/ritual casting from the Spells tab (which all pass it) but not
-		// to innate / item-granted casting (which needs no components and never opts in).
-		if (opts.enforceMaterial && this._state.isSpellcastingBlockedByArmor?.()) {
+		// spellcasting independently of whether a particular component is waived.
+		if (enforceArmor && this._state.isSpellcastingBlockedByArmor?.()) {
 			return {
 				block: `Cannot cast ${spell.name} — you can't cast spells while wearing armor or wielding a shield you lack proficiency with.`,
 				checks: [],
@@ -3484,8 +3591,8 @@ class CharacterSheetSpells {
 		// Get spell components
 		const components = spellData?.components || spell.components || {};
 		const isSubtleSpell = appliedMetamagic?.key === "subtle";
-		const hasVerbal = !isSubtleSpell && components.v;
-		const hasSomatic = !isSubtleSpell && components.s;
+		const hasVerbal = !isSubtleSpell && !componentWaivers.has("v") && components.v;
+		const hasSomatic = !isSubtleSpell && !componentWaivers.has("s") && components.s;
 
 		// Aggregate casting constraints from all active conditions
 		const constraints = this._state.getCastingConstraints?.() || {verbal: [], somatic: []};
@@ -3511,7 +3618,7 @@ class CharacterSheetSpells {
 
 		// Material component requirement (only when the caller opts in — i.e. normal/ritual
 		// slot/cantrip casting, never innate/item casting which ignores materials).
-		if (opts.enforceMaterial) {
+		if (opts.enforceMaterial && !componentWaivers.has("m")) {
 			const matBlock = this._getMaterialComponentBlock(spell, spellData);
 			if (matBlock) return {block: matBlock, checks: []};
 		}
@@ -4973,6 +5080,15 @@ class CharacterSheetSpells {
 
 		// Build the toast message
 		let toastContent = `Cast ${spell.name}${upcast}${slotType}`;
+		if (normalizedCastMeta.freeCastSource) {
+			toastContent += `<br><span class="text-info">Feature cast: ${normalizedCastMeta.freeCastSource} (no spell slot)</span>`;
+		}
+		if (normalizedCastMeta.castingEconomy?.type === "casting-time") {
+			toastContent += `<br><span class="ve-muted">Casting time: ${normalizedCastMeta.castingEconomy.label || "special"}; track the full casting time at the table.</span>`;
+		}
+		if (normalizedCastMeta.componentWaivers?.length) {
+			toastContent += `<br><span class="ve-muted">Components waived: ${normalizedCastMeta.componentWaivers.map(it => it.toUpperCase()).join(", ")}</span>`;
+		}
 		if (normalizedCastMeta.appliedMetamagic) {
 			toastContent += `<br><span class="ve-muted">Metamagic: ${normalizedCastMeta.appliedMetamagic.name} (-${normalizedCastMeta.appliedMetamagic.cost} SP)</span>`;
 		}
@@ -4984,10 +5100,12 @@ class CharacterSheetSpells {
 
 		// Detail the spellcasting focus (or component pouch / substitution) used to
 		// satisfy a no-cost material component.
-		const focusNote = this._getSpellFocusNote(spell, spellData, {
-			variantUsed: !!normalizedCastMeta.variantComponent,
-			focusReference: normalizedCastMeta.spellcastingFocus || null,
-		});
+		const focusNote = normalizedCastMeta.componentWaivers?.includes("m")
+			? null
+			: this._getSpellFocusNote(spell, spellData, {
+				variantUsed: !!normalizedCastMeta.variantComponent,
+				focusReference: normalizedCastMeta.spellcastingFocus || null,
+			});
 		if (focusNote) {
 			toastContent += `<br><span class="text-info">🔮 Focus: ${focusNote}</span>`;
 		}

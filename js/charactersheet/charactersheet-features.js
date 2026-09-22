@@ -1229,6 +1229,7 @@ class CharacterSheetFeatures {
 			? this._state.getAdventurersAtlasSafeHavenExternalHolderOptions?.() || []
 			: [];
 		const safeHavenHolders = safeHavenOptions.filter(holder => holder.available);
+		const mappingMagic = this._state.getCartographerMappingMagicSnapshot?.() || null;
 		const reasonLabels = {
 			"character-death": "Character death",
 			"subclass-removed": "Cartographer subclass removed",
@@ -1249,6 +1250,7 @@ class CharacterSheetFeatures {
 			destroyedHolders: atlas.holders.filter(holder => holder.status === "destroyed"),
 			selfStatus: !selfHolder ? "Not mapped" : selfHolder.status === "active" ? "Active map" : "Map destroyed",
 			awarenessLabel: initiativeDie ? `${initiativeDie.dice} to Initiative` : "Inactive",
+			mappingMagic,
 			hasTools: this._state.hasCartographersToolsForAtlas(),
 			actionLabel: atlas.generation ? "Plan Atlas recreation" : "Plan Atlas creation",
 			safeHaven: this._state.hasAdventurersAtlasSafeHavenFeature?.()
@@ -1304,6 +1306,171 @@ class CharacterSheetFeatures {
 		return result;
 	}
 
+	_queueAdventurersAtlasActionFocus (actionId) {
+		const restore = () => document.querySelector(`[data-atlas-action="${actionId}"]`)?.focus();
+		if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+		else setTimeout(restore, 0);
+	}
+
+	async _pCastCartographerFeatureSpell (grantId, actionId) {
+		if (!this._page._spells?.pCastFeatureSpellGrant) {
+			JqueryUtil.doToast({type: "warning", content: "The spellcasting controller is not available."});
+			return;
+		}
+		await this._page._spells.pCastFeatureSpellGrant(grantId);
+		this._queueAdventurersAtlasActionFocus(actionId);
+	}
+
+	async _pUseCartographerPortalJump () {
+		const portal = this._state.getCartographerPortalJumpState?.();
+		if (!portal?.available) {
+			JqueryUtil.doToast({type: "warning", content: portal?.reason || "Portal Jump is not available."});
+			return;
+		}
+		const directLabel = "Visible unoccupied space within 10 feet";
+		const holderLabel = "Space within 5 feet of an active map holder";
+		const values = [directLabel];
+		if (portal.destinations.holder.holders.length) values.push(holderLabel);
+		const modeChoice = await InputUiUtil.pGetUserEnum({
+			title: "Portal Jump — Destination",
+			htmlDescription: `<div>Spend <strong>${portal.movementCost} feet</strong> of movement (half your current Speed of ${portal.speed}, rounded down).</div><div class="ve-muted ve-small mt-1">Choose a legal destination. The sheet records your confirmation; it does not invent coordinates or line of sight.</div>`,
+			values,
+			fnDisplay: value => value,
+			isResolveItem: true,
+		});
+		if (modeChoice == null) {
+			this._queueAdventurersAtlasActionFocus("portal-jump");
+			return;
+		}
+
+		let holder = null;
+		if (modeChoice === holderLabel) {
+			const duplicateNames = new Set(portal.destinations.holder.holders
+				.filter((holder, ix, holders) => holders.findIndex(it => it.name === holder.name) !== ix)
+				.map(holder => holder.name));
+			const holderOptions = portal.destinations.holder.holders.map((holder, ix) => ({
+				holder,
+				label: duplicateNames.has(holder.name) ? `${holder.name} — map ${ix + 1}` : holder.name,
+			}));
+			const holderChoice = await InputUiUtil.pGetUserEnum({
+				title: "Portal Jump — Map Holder",
+				htmlDescription: "Choose the active mapped creature whose position anchors the destination.",
+				values: holderOptions.map(it => it.label),
+				fnDisplay: value => value,
+				isResolveItem: true,
+			});
+			if (holderChoice == null) {
+				this._queueAdventurersAtlasActionFocus("portal-jump");
+				return;
+			}
+			holder = holderOptions.find(it => it.label === holderChoice)?.holder || null;
+			if (!holder) {
+				JqueryUtil.doToast({type: "warning", content: "That Atlas holder is no longer active."});
+				this._queueAdventurersAtlasActionFocus("portal-jump");
+				return;
+			}
+		}
+
+		const isDirect = modeChoice === directLabel;
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: "Confirm Portal Jump",
+			htmlDescription: isDirect
+				? `<div>Confirm the destination is <strong>unoccupied</strong>, <strong>visible to you</strong>, and <strong>within 10 feet</strong>.</div><div class="ve-muted ve-small mt-1">${portal.movementCost} feet of movement is spent only after confirmation.</div>`
+				: `<div>Confirm <strong>${holder.name}</strong> is an active Atlas holder within <strong>30 feet</strong>, and the destination is an <strong>unoccupied</strong> space within <strong>5 feet</strong> of them.</div><div class="ve-muted ve-small mt-1">This route does not add a sight requirement. ${portal.movementCost} feet of movement is spent only after confirmation.</div>`,
+			textYes: `Teleport and spend ${portal.movementCost} ft`,
+			textNo: "Cancel",
+		});
+		if (!confirmed) {
+			this._queueAdventurersAtlasActionFocus("portal-jump");
+			return;
+		}
+
+		const result = this._state.useCartographerPortalJump({
+			destinationMode: isDirect ? "direct" : "holder",
+			holderId: holder?.id || null,
+			confirmedVisible: isDirect,
+			confirmedWithin10Feet: isDirect,
+			confirmedHolderWithin30Feet: !isDirect,
+			confirmedWithin5FeetOfHolder: !isDirect,
+			confirmedUnoccupied: true,
+		});
+		if (!result.ok) {
+			JqueryUtil.doToast({type: "warning", content: result.error || result.reason || "Portal Jump could not be committed."});
+			this._queueAdventurersAtlasActionFocus("portal-jump");
+			return;
+		}
+		this._page.saveCharacter?.();
+		this.render();
+		this._page._combat?.renderCombatMovement?.();
+		JqueryUtil.doToast({
+			type: "info",
+			content: isDirect
+				? `Portal Jump: teleported to the confirmed visible space; spent ${result.movementCost} feet of movement.`
+				: `Portal Jump: teleported beside ${result.destination.holder.name}; spent ${result.movementCost} feet of movement.`,
+		});
+		this._queueAdventurersAtlasActionFocus("portal-jump");
+	}
+
+	async _pResolveCartographerPositioning () {
+		const positioning = this._state.getCartographerMappingMagicSnapshot?.().positioning;
+		if (!positioning?.available) {
+			JqueryUtil.doToast({type: "warning", content: positioning?.reason || "Positioning is not available."});
+			return;
+		}
+		const duplicateNames = new Set(positioning.holders
+			.filter((holder, ix, holders) => holders.findIndex(it => it.name === holder.name) !== ix)
+			.map(holder => holder.name));
+		const holderOptions = positioning.holders.map((holder, ix) => ({
+			holder,
+			label: duplicateNames.has(holder.name) ? `${holder.name} — map ${ix + 1}` : holder.name,
+		}));
+		const holderChoice = await InputUiUtil.pGetUserEnum({
+			title: "Positioning — Atlas Holder",
+			htmlDescription: "Choose the active external map holder you want to target with a spell or other effect.",
+			values: holderOptions.map(it => it.label),
+			fnDisplay: value => value,
+			isResolveItem: true,
+		});
+		if (holderChoice == null) {
+			this._queueAdventurersAtlasActionFocus("positioning");
+			return;
+		}
+		const holder = holderOptions.find(it => it.label === holderChoice)?.holder || null;
+		if (!holder) {
+			JqueryUtil.doToast({type: "warning", content: "That Atlas holder is no longer active."});
+			this._queueAdventurersAtlasActionFocus("positioning");
+			return;
+		}
+		const confirmed = await InputUiUtil.pGetUserBoolean({
+			title: `Use Positioning on ${holder.name}?`,
+			htmlDescription: `<div>Confirm <strong>${holder.name}</strong> is on the <strong>same plane</strong>, remains <strong>within the effect's normal range</strong>, and is otherwise an <strong>eligible target</strong>.</div><div class="ve-muted ve-small mt-1">Positioning bypasses only sight and cover. It does not extend range or waive components, target type, or other casting requirements.</div>`,
+			textYes: "Confirm sight and cover exception",
+			textNo: "Cancel",
+		});
+		if (!confirmed) {
+			this._queueAdventurersAtlasActionFocus("positioning");
+			return;
+		}
+		const result = this._state.resolveTargetingException({
+			descriptorId: positioning.id,
+			targetHolderId: holder.id,
+			effectRequiresSight: true,
+			confirmedSamePlane: true,
+			confirmedWithinRange: true,
+			confirmedTargetEligibility: true,
+		});
+		if (!result.ok || !result.applies) {
+			JqueryUtil.doToast({type: "warning", content: result.error || result.reason || "Positioning could not be confirmed."});
+			this._queueAdventurersAtlasActionFocus("positioning");
+			return;
+		}
+		JqueryUtil.doToast({
+			type: "info",
+			content: `Positioning confirmed for ${holder.name}: ignore sight and cover; normal range and all other targeting rules still apply.`,
+		});
+		this._queueAdventurersAtlasActionFocus("positioning");
+	}
+
 	_renderAdventurersAtlasCard () {
 		const model = this._getAdventurersAtlasCardModel();
 		if (!model) return null;
@@ -1332,7 +1499,7 @@ class CharacterSheetFeatures {
 		card.append(e_({
 			tag: "p",
 			clazz: "charsheet__atlas-card-summary",
-			txt: "The Atlas records its map holders and freezes its capacity when created. An active self map grants Awareness.",
+			txt: "The Atlas records its map holders and freezes its capacity when created. An active self map grants Awareness and enables the current-sheet Mapping Magic controls below.",
 		}));
 
 		const facts = e_({tag: "dl", clazz: "charsheet__atlas-card-facts"});
@@ -1462,6 +1629,97 @@ class CharacterSheetFeatures {
 					|| "The selected map is consumed only after confirmation. This sheet reports the result but does not move or edit the external creature.",
 			}));
 			card.append(safeHaven);
+		}
+
+		if (model.mappingMagic) {
+			const magic = e_({
+				tag: "section",
+				clazz: "charsheet__atlas-magic",
+				attrs: {"aria-labelledby": "charsheet-atlas-magic-title"},
+			});
+			magic.append(
+				e_({tag: "h4", clazz: "charsheet__atlas-magic-title", attrs: {id: "charsheet-atlas-magic-title"}, txt: "Mapping Magic"}),
+				e_({
+					tag: "p",
+					clazz: "charsheet__atlas-magic-copy",
+					txt: "Operate from the Atlas: cast its exact feature spells, spend live movement for Portal Jump, or confirm Positioning without inventing geometry.",
+				}),
+			);
+			const actions = e_({tag: "div", clazz: "charsheet__atlas-magic-actions"});
+			const appendAction = ({id, title, meta, detail, available, reason, buttonLabel, onClick}) => {
+				const detailId = `charsheet-atlas-magic-${id}-detail`;
+				const row = e_({tag: "article", clazz: `charsheet__atlas-magic-action${available ? "" : " charsheet__atlas-magic-action--unavailable"}`});
+				const copy = e_({tag: "div", clazz: "charsheet__atlas-magic-action-copy"});
+				copy.append(
+					e_({
+						tag: "div",
+						clazz: "charsheet__atlas-magic-action-heading",
+						children: [
+							e_({tag: "h5", txt: title}),
+							e_({tag: "span", clazz: "charsheet__atlas-magic-meta", txt: meta}),
+						],
+					}),
+					e_({tag: "p", clazz: "charsheet__atlas-magic-detail", attrs: {id: detailId}, txt: available ? detail : reason}),
+				);
+				const button = e_({
+					tag: "button",
+					clazz: `ve-btn ${available ? "ve-btn-primary" : "ve-btn-default"} charsheet__atlas-magic-button`,
+					attrs: {
+						type: "button",
+						"aria-describedby": detailId,
+						"data-atlas-action": id,
+					},
+					txt: buttonLabel,
+				});
+				button.disabled = !available;
+				button.addEventListener("click", onClick);
+				row.append(copy, button);
+				actions.append(row);
+			};
+
+			const {illuminatedCartography, portalJump, positioning, unerringPath} = model.mappingMagic;
+			appendAction({
+				id: "illuminated-cartography",
+				title: "Illuminated Cartography",
+				meta: `${illuminatedCartography.usesCurrent}/${illuminatedCartography.usesMax} use · Long Rest`,
+				detail: "Cast Faerie Fire|XPHB with Intelligence as an action. No preparation or spell slot.",
+				available: illuminatedCartography.available,
+				reason: illuminatedCartography.reason,
+				buttonLabel: "Cast Faerie Fire",
+				onClick: () => void this._pCastCartographerFeatureSpell(illuminatedCartography.id, "illuminated-cartography"),
+			});
+			appendAction({
+				id: "portal-jump",
+				title: "Portal Jump",
+				meta: `${portalJump.movementCost} ft cost · ${portalJump.movementRemaining} ft left`,
+				detail: "Teleport to a confirmed visible space within 10 feet, or beside an active holder within 30 feet.",
+				available: portalJump.available,
+				reason: portalJump.reason,
+				buttonLabel: "Choose destination",
+				onClick: () => void this._pUseCartographerPortalJump(),
+			});
+			appendAction({
+				id: "positioning",
+				title: "Positioning",
+				meta: `${positioning.holders.length} external holder${positioning.holders.length === 1 ? "" : "s"}`,
+				detail: "Confirm a same-plane holder in normal range, then bypass sight and cover only.",
+				available: positioning.available,
+				reason: positioning.reason,
+				buttonLabel: "Confirm target",
+				onClick: () => void this._pResolveCartographerPositioning(),
+			});
+			appendAction({
+				id: "unerring-path",
+				title: "Unerring Path",
+				meta: `${unerringPath.usesCurrent}/${unerringPath.usesMax} use · Long Rest`,
+				detail: "Cast Find the Path|XPHB with Intelligence. No preparation, slot, or components; casting time remains 1 minute.",
+				available: unerringPath.available,
+				reason: unerringPath.reason,
+				buttonLabel: "Cast Find the Path",
+				onClick: () => void this._pCastCartographerFeatureSpell(unerringPath.id, "unerring-path"),
+			});
+			magic.append(actions);
+			card.append(magic);
 		}
 
 		const footer = e_({tag: "footer", clazz: "charsheet__atlas-card-footer"});

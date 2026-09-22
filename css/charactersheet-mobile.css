@@ -1832,13 +1832,18 @@
 		grid-template-columns: 1fr;
 	}
 
-	.charsheet__atlas-card-safe-haven-controls {
+	.charsheet__atlas-card-safe-haven-controls,
+	.charsheet__atlas-magic-action {
 		align-items: stretch;
 		flex-direction: column;
 	}
 
 	.charsheet__atlas-card-safe-haven-field {
 		max-width: none;
+	}
+
+	.charsheet__atlas-magic-button {
+		width: 100%;
 	}
 
 	.charsheet__atlas-card-action {

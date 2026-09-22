@@ -650,6 +650,33 @@ claiming coordinates/occupancy were resolved. The teleport anchors are the
 Cartographer (even for an ally-only Atlas) and other active holders, excluding
 the creature whose map is consumed.
 
+### Feature-Granted Spell Transactions and Targeting Exceptions
+
+Feature-owned casts which are not prepared spells use immutable descriptors from
+`getFeatureSpellCastGrant()` and the atomic
+`commitFeatureSpellCast()` / `rollbackFeatureSpellCast()` receipt contract. The
+Spells controller still resolves the canonical spell entity and owns casting
+constraints, targeting/effects, concentration, and committed-cast triggers. It
+commits the feature use and action before resolving the spell, then rolls both
+back when targeting is cancelled or resolution throws. This keeps feature casts
+distinct from spell slots while preserving the real spell's source, casting
+ability, duration, and concentration.
+
+EFA Cartographer Mapping Magic is the first consumer. Its state is versioned in
+`cartographerMappingMagic`; Long Rest resets both limited casts, and full rest
+snapshot undo restores the prior uses/receipts. Portal Jump spends
+`Math.floor(liveSpeed / 2)` through `spendMovement()` with a structured
+destination receipt, so save/load and `resetTurnEconomy()` use the same movement
+ledger as every other movement feature.
+
+Targeting rules which waive only selected requirements use
+`getTargetingExceptionDescriptors()` / `resolveTargetingException()`. Positioning
+requires an active self-held Atlas map plus explicit same-plane, normal-range,
+and otherwise-eligible-target confirmations. Its resolver waives sight and cover
+only; range, target eligibility, components, and other casting requirements remain
+intact. The sheet records adjudication facts but does not invent coordinates,
+line of sight, planes, or DM Screen/Journey state.
+
 ### Subclass-Scoped State Effects
 
 `getActiveStateEffects()` can append state-specific supplemental effects

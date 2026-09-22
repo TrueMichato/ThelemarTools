@@ -4389,6 +4389,15 @@ class CharacterSheetState {
 	static ADVENTURERS_ATLAS_INITIATIVE_DIE = "1d4";
 	static ADVENTURERS_ATLAS_HOLDER_STATUSES = new Set(["active", "destroyed"]);
 	static _adventurersAtlasHolderIdSeq = 0;
+	static CARTOGRAPHER_MAPPING_MAGIC_VERSION = 1;
+	static CARTOGRAPHER_MAPPING_MAGIC_RECEIPT_VERSION = 1;
+	static CARTOGRAPHER_MAPPING_MAGIC_FEATURE_UID = "Mapping Magic|Artificer|EFA|Cartographer|EFA|3|EFA";
+	static CARTOGRAPHER_ATLAS_FEATURE_UID = "Adventurer's Atlas|Artificer|EFA|Cartographer|EFA|3|EFA";
+	static CARTOGRAPHER_SUPERIOR_ATLAS_FEATURE_UID = "Superior Atlas|Artificer|EFA|Cartographer|EFA|15|EFA";
+	static CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID = "efa-cartographer:illuminated-cartography";
+	static CARTOGRAPHER_UNERRING_PATH_GRANT_ID = "efa-cartographer:unerring-path";
+	static CARTOGRAPHER_POSITIONING_DESCRIPTOR_ID = "efa-cartographer:positioning";
+	static CARTOGRAPHER_PORTAL_JUMP_SOURCE = "efa-cartographer:portal-jump";
 	static GUIDED_PRECISION_FEATURE_UID = "Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA";
 	static GUIDED_PRECISION_FAERIE_FIRE_UID = "faerie fire|xphb";
 	static INGENIOUS_MOVEMENT_FEATURE_UID = "Ingenious Movement|Artificer|EFA|Cartographer|EFA|9|EFA";
@@ -4406,6 +4415,15 @@ class CharacterSheetState {
 			capacityAtCreation: null,
 			invalidatedReason: null,
 			holders: [],
+		};
+	}
+
+	static _getEmptyCartographerMappingMagic () {
+		return {
+			version: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_VERSION,
+			illuminatedCartographyUses: 0,
+			unerringPathUses: 0,
+			castReceipts: [],
 		};
 	}
 
@@ -5381,6 +5399,7 @@ class CharacterSheetState {
 			features: [], // [{name, source, description, uses: {current, max, recharge}}]
 			feats: [], // [{name, source}]
 			adventurersAtlas: CharacterSheetState._getEmptyAdventurersAtlas(),
+			cartographerMappingMagic: CharacterSheetState._getEmptyCartographerMappingMagic(),
 
 			// Weapon Masteries (2024 rules)
 			weaponMasteries: [], // ["Longsword|XPHB", "Shortsword|XPHB"] - weapon keys (name|source)
@@ -5884,6 +5903,7 @@ class CharacterSheetState {
 		this._data.customModifiers.speed = {...this._getDefaultState().customModifiers.speed, ...this._data.customModifiers.speed};
 		this._data.customModifiers.senses = {...this._getDefaultState().customModifiers.senses, ...this._data.customModifiers.senses};
 		this._migrateAdventurersAtlasState();
+		this._migrateCartographerMappingMagicState();
 
 		// Divine Favor (TGTT) — backward-compatible nested-merge so old saves get defaults
 		this._data.divineFavor = {...this._getDefaultState().divineFavor, ...this._data.divineFavor};
@@ -6381,6 +6401,66 @@ class CharacterSheetState {
 		this._data.adventurersAtlas = this._normalizeAdventurersAtlasState(this._data.adventurersAtlas);
 	}
 
+	_migrateCartographerMappingMagicState () {
+		this._data.cartographerMappingMagic = this._normalizeCartographerMappingMagicState(this._data.cartographerMappingMagic);
+	}
+
+	_normalizeCartographerMappingMagicState (rawState) {
+		const getEmpty = () => CharacterSheetState._getEmptyCartographerMappingMagic();
+		if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) return getEmpty();
+		if (rawState.version !== CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_VERSION) return getEmpty();
+		const illuminatedCartographyUses = Number(rawState.illuminatedCartographyUses);
+		const unerringPathUses = Number(rawState.unerringPathUses);
+		if (
+			!Number.isInteger(illuminatedCartographyUses)
+			|| illuminatedCartographyUses < 0
+			|| illuminatedCartographyUses > 1
+			|| !Number.isInteger(unerringPathUses)
+			|| unerringPathUses < 0
+			|| unerringPathUses > 1
+		) return getEmpty();
+		const castReceipts = [];
+		const seenReceiptIds = new Set();
+		for (const rawReceipt of Array.isArray(rawState.castReceipts) ? rawState.castReceipts : []) {
+			if (!rawReceipt || typeof rawReceipt !== "object" || Array.isArray(rawReceipt)) continue;
+			const id = typeof rawReceipt.id === "string" ? rawReceipt.id.trim() : "";
+			const grantId = typeof rawReceipt.grantId === "string" ? rawReceipt.grantId.trim() : "";
+			const sourceFeatureUid = typeof rawReceipt.sourceFeatureUid === "string" ? rawReceipt.sourceFeatureUid.trim() : "";
+			const spellUid = typeof rawReceipt.spellUid === "string" ? rawReceipt.spellUid.trim().toLowerCase() : "";
+			const createdAt = Number(rawReceipt.createdAt);
+			const actionType = rawReceipt.actionType == null ? null : `${rawReceipt.actionType}`.trim();
+			if (
+				rawReceipt.version !== CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_RECEIPT_VERSION
+				|| !id
+				|| seenReceiptIds.has(id)
+				|| !grantId
+				|| !sourceFeatureUid
+				|| !spellUid
+				|| !Number.isFinite(createdAt)
+				|| createdAt <= 0
+				|| ![null, "action", "bonus", "reaction"].includes(actionType)
+				|| typeof rawReceipt.actionConsumed !== "boolean"
+			) continue;
+			seenReceiptIds.add(id);
+			castReceipts.push({
+				version: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_RECEIPT_VERSION,
+				id,
+				grantId,
+				sourceFeatureUid,
+				spellUid,
+				actionType,
+				actionConsumed: rawReceipt.actionConsumed,
+				createdAt,
+			});
+		}
+		return {
+			version: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_VERSION,
+			illuminatedCartographyUses,
+			unerringPathUses,
+			castReceipts: castReceipts.slice(-20),
+		};
+	}
+
 	_normalizeAdventurersAtlasState (rawAtlas) {
 		const getEmpty = () => CharacterSheetState._getEmptyAdventurersAtlas();
 		if (!rawAtlas || typeof rawAtlas !== "object" || Array.isArray(rawAtlas)) return getEmpty();
@@ -6505,11 +6585,18 @@ class CharacterSheetState {
 		return "active";
 	}
 
+	_getEfaCartographerClassEntry ({minLevel = 3} = {}) {
+		return this._data.classes.find(cls =>
+			cls?.name?.toLowerCase() === "artificer"
+			&& cls?.source?.toUpperCase() === "EFA"
+			&& Number(cls?.level || 0) >= minLevel
+			&& cls?.subclass?.name?.toLowerCase() === "cartographer"
+			&& cls?.subclass?.source?.toUpperCase() === "EFA",
+		) || null;
+	}
+
 	hasAdventurersAtlasFeature () {
-		return this._data.classes.some(cls => {
-			if (cls?.name?.toLowerCase() !== "artificer" || cls?.source?.toUpperCase() !== "EFA" || Number(cls?.level || 0) < 3) return false;
-			return cls?.subclass?.name?.toLowerCase() === "cartographer" && cls?.subclass?.source?.toUpperCase() === "EFA";
-		});
+		return !!this._getEfaCartographerClassEntry();
 	}
 
 	hasCartographersToolsForAtlas () {
@@ -7084,6 +7171,317 @@ class CharacterSheetState {
 			hp: availability.hitPoints,
 			consumption,
 			postApplication,
+		});
+	}
+
+	_getCartographerFeatureSpellGrantDefinitions () {
+		return [
+			{
+				id: CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID,
+				label: "Illuminated Cartography",
+				sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_FEATURE_UID,
+				minLevel: 5,
+				stateKey: "illuminatedCartographyUses",
+				spell: {name: "Faerie Fire", source: "XPHB", castLevel: 1},
+				castingAbility: "int",
+				economy: {type: "action"},
+				requiresPreparation: false,
+				expendsSpellSlot: false,
+				componentWaivers: [],
+			},
+			{
+				id: CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID,
+				label: "Unerring Path",
+				sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_SUPERIOR_ATLAS_FEATURE_UID,
+				minLevel: 15,
+				stateKey: "unerringPathUses",
+				spell: {name: "Find the Path", source: "XPHB", castLevel: 6},
+				castingAbility: "int",
+				economy: {type: "casting-time", label: "1 minute", tracked: false},
+				requiresPreparation: false,
+				expendsSpellSlot: false,
+				componentWaivers: ["v", "s", "m"],
+			},
+		];
+	}
+
+	_getCartographerOperationalContext ({minLevel = 3, requiresSelfMap = true} = {}) {
+		const classEntry = this._getEfaCartographerClassEntry({minLevel});
+		const atlas = this._data.adventurersAtlas || CharacterSheetState._getEmptyAdventurersAtlas();
+		const activeSelfHolder = atlas.holders.find(holder => holder.isSelf && holder.status === "active") || null;
+		const externalHolders = atlas.holders.filter(holder => !holder.isSelf && holder.status === "active");
+		let reason = null;
+		if (!classEntry) reason = `Requires Cartographer|EFA level ${minLevel}.`;
+		else if (this.isDead()) reason = "The Adventurer's Atlas ends when its creator dies.";
+		else if (!atlas.generation) reason = "Create an Adventurer's Atlas during a Long Rest.";
+		else if (atlas.invalidatedReason) reason = "The Adventurer's Atlas is invalidated.";
+		else if (requiresSelfMap && !activeSelfHolder) reason = "Requires an active self-held Adventurer's Atlas map.";
+		return {classEntry, atlas, activeSelfHolder, externalHolders, reason};
+	}
+
+	_getCartographerFeatureSpellGrantSnapshot (definition) {
+		const context = this._getCartographerOperationalContext({minLevel: definition.minLevel});
+		const state = this._data.cartographerMappingMagic || CharacterSheetState._getEmptyCartographerMappingMagic();
+		const usesSpent = Number(state[definition.stateKey]) || 0;
+		const usesMax = 1;
+		const usesCurrent = Math.max(0, usesMax - usesSpent);
+		let reason = context.reason;
+		if (!reason && this.isIncapacitated()) {
+			reason = `${definition.label} cannot be cast while incapacitated.`;
+		}
+		if (!reason && usesCurrent <= 0) reason = `${definition.label} is expended until the next Long Rest.`;
+		if (!reason && ["action", "bonus", "reaction"].includes(definition.economy.type) && !this.isActionTypeAvailable(definition.economy.type)) {
+			reason = `Your ${definition.economy.type} is already used this turn.`;
+		}
+		return {
+			...MiscUtil.copyFast(definition),
+			available: !reason,
+			reason,
+			usesCurrent,
+			usesMax,
+			recharge: "long",
+		};
+	}
+
+	getCartographerPortalJumpState () {
+		const context = this._getCartographerOperationalContext({minLevel: 9});
+		const movement = this.getMovementEconomyState();
+		const movementCost = Math.floor(movement.speed / 2);
+		let reason = context.reason;
+		if (!reason && movement.speed <= 0) reason = "Portal Jump cannot be used while Speed is 0.";
+		if (!reason && movementCost <= 0) reason = "Portal Jump needs a positive movement cost.";
+		if (!reason && movement.remaining < movementCost) reason = `Portal Jump needs ${movementCost} feet of movement; ${movement.remaining} feet remain.`;
+		return CharacterSheetState._copyAndFreeze({
+			id: "portal-jump",
+			label: "Portal Jump",
+			sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_FEATURE_UID,
+			available: !reason,
+			reason,
+			speed: movement.speed,
+			movementCost,
+			movementRemaining: movement.remaining,
+			destinations: {
+				direct: {
+					maximumDistance: 10,
+					requiresVisible: true,
+					requiresUnoccupied: true,
+				},
+				holder: {
+					holderMaximumDistance: 30,
+					destinationMaximumDistanceFromHolder: 5,
+					requiresVisible: false,
+					requiresUnoccupied: true,
+					holders: context.externalHolders.map(holder => ({id: holder.id, name: holder.name})),
+				},
+			},
+		});
+	}
+
+	_getCartographerPositioningSnapshot () {
+		const context = this._getCartographerOperationalContext({minLevel: 9});
+		return {
+			id: CharacterSheetState.CARTOGRAPHER_POSITIONING_DESCRIPTOR_ID,
+			label: "Positioning",
+			sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_ATLAS_FEATURE_UID,
+			available: !context.reason && context.externalHolders.length > 0,
+			reason: context.reason || (!context.externalHolders.length ? "No active external Atlas holder is available." : null),
+			targetKind: "active-atlas-holder",
+			bypass: {sight: true, cover: true, range: false},
+			preservedRequirements: ["range", "target eligibility", "casting requirements", "spell components"],
+			requiresConfirmation: ["same plane", "within range", "target otherwise eligible"],
+			holders: context.externalHolders.map(holder => ({id: holder.id, name: holder.name})),
+		};
+	}
+
+	getCartographerMappingMagicSnapshot () {
+		const grants = this._getCartographerFeatureSpellGrantDefinitions()
+			.map(definition => this._getCartographerFeatureSpellGrantSnapshot(definition));
+		const illuminatedCartography = grants.find(grant => grant.id === CharacterSheetState.CARTOGRAPHER_ILLUMINATED_CARTOGRAPHY_GRANT_ID);
+		const unerringPath = grants.find(grant => grant.id === CharacterSheetState.CARTOGRAPHER_UNERRING_PATH_GRANT_ID);
+		const context = this._getCartographerOperationalContext();
+		return CharacterSheetState._copyAndFreeze({
+			version: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_VERSION,
+			activeSelfMap: !!context.activeSelfHolder && !context.reason,
+			selfHolder: context.activeSelfHolder ? {id: context.activeSelfHolder.id, name: context.activeSelfHolder.name} : null,
+			externalHolders: context.externalHolders.map(holder => ({id: holder.id, name: holder.name})),
+			illuminatedCartography,
+			portalJump: this.getCartographerPortalJumpState(),
+			positioning: this._getCartographerPositioningSnapshot(),
+			unerringPath,
+			featureSpellGrants: grants,
+			castReceipts: this._data.cartographerMappingMagic?.castReceipts || [],
+		});
+	}
+
+	getFeatureSpellCastGrant (grantId) {
+		const id = typeof grantId === "string" ? grantId.trim() : "";
+		if (!id) return null;
+		const grant = this.getCartographerMappingMagicSnapshot().featureSpellGrants.find(it => it.id === id);
+		return grant || null;
+	}
+
+	commitFeatureSpellCast (grantId) {
+		const definition = this._getCartographerFeatureSpellGrantDefinitions().find(it => it.id === grantId);
+		if (!definition) return CharacterSheetState._copyAndFreeze({ok: false, reason: "unknown-feature-spell-grant"});
+		const grant = this._getCartographerFeatureSpellGrantSnapshot(definition);
+		if (!grant.available) return CharacterSheetState._copyAndFreeze({ok: false, reason: "feature-spell-unavailable", error: grant.reason});
+
+		const actionType = ["action", "bonus", "reaction"].includes(definition.economy.type)
+			? definition.economy.type
+			: null;
+		const actionConsumed = actionType ? this.consumeActionType(actionType) : false;
+		if (actionType && !actionConsumed) {
+			return CharacterSheetState._copyAndFreeze({ok: false, reason: "action-unavailable", error: `Your ${actionType} is already used this turn.`});
+		}
+
+		const mappingState = this._data.cartographerMappingMagic;
+		if ((Number(mappingState[definition.stateKey]) || 0) >= 1) {
+			if (actionConsumed) this.restoreActionType(actionType);
+			return CharacterSheetState._copyAndFreeze({ok: false, reason: "feature-spell-expended"});
+		}
+		mappingState[definition.stateKey] = 1;
+		const receipt = {
+			version: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_RECEIPT_VERSION,
+			id: `feature-spell:${CryptUtil.uid()}`,
+			grantId: definition.id,
+			sourceFeatureUid: definition.sourceFeatureUid,
+			spellUid: `${definition.spell.name}|${definition.spell.source}`.toLowerCase(),
+			actionType,
+			actionConsumed,
+			createdAt: Date.now(),
+		};
+		mappingState.castReceipts = [...(mappingState.castReceipts || []), receipt].slice(-20);
+		return CharacterSheetState._copyAndFreeze({ok: true, grant: this._getCartographerFeatureSpellGrantSnapshot(definition), receipt});
+	}
+
+	rollbackFeatureSpellCast (receiptOrId) {
+		const id = typeof receiptOrId === "string" ? receiptOrId.trim() : receiptOrId?.id;
+		if (!id) return CharacterSheetState._copyAndFreeze({ok: false, reason: "invalid-feature-spell-receipt"});
+		const mappingState = this._data.cartographerMappingMagic;
+		const ixReceipt = (mappingState.castReceipts || []).findIndex(receipt => receipt.id === id);
+		if (ixReceipt < 0) return CharacterSheetState._copyAndFreeze({ok: false, reason: "feature-spell-receipt-not-found"});
+		const [receipt] = mappingState.castReceipts.splice(ixReceipt, 1);
+		const definition = this._getCartographerFeatureSpellGrantDefinitions().find(it => it.id === receipt.grantId);
+		if (!definition) return CharacterSheetState._copyAndFreeze({ok: false, reason: "unknown-feature-spell-grant"});
+		mappingState[definition.stateKey] = Math.max(0, (Number(mappingState[definition.stateKey]) || 0) - 1);
+		if (receipt.actionConsumed && receipt.actionType) this.restoreActionType(receipt.actionType);
+		return CharacterSheetState._copyAndFreeze({ok: true, receipt, grant: this._getCartographerFeatureSpellGrantSnapshot(definition)});
+	}
+
+	restoreCartographerMappingMagicUses () {
+		const mappingState = this._data.cartographerMappingMagic || CharacterSheetState._getEmptyCartographerMappingMagic();
+		mappingState.illuminatedCartographyUses = 0;
+		mappingState.unerringPathUses = 0;
+		mappingState.castReceipts = [];
+		this._data.cartographerMappingMagic = mappingState;
+		return this.getCartographerMappingMagicSnapshot();
+	}
+
+	useCartographerPortalJump ({
+		destinationMode,
+		holderId = null,
+		confirmedVisible = false,
+		confirmedWithin10Feet = false,
+		confirmedHolderWithin30Feet = false,
+		confirmedWithin5FeetOfHolder = false,
+		confirmedUnoccupied = false,
+	} = {}) {
+		const portal = this.getCartographerPortalJumpState();
+		if (!portal.available) return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-unavailable", error: portal.reason});
+		const mode = `${destinationMode || ""}`.trim().toLowerCase();
+		let destination;
+		if (mode === "direct") {
+			if (!confirmedVisible || !confirmedWithin10Feet || !confirmedUnoccupied) {
+				return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-confirmation-required"});
+			}
+			destination = {
+				mode,
+				visible: true,
+				within10Feet: true,
+				unoccupied: true,
+			};
+		} else if (mode === "holder") {
+			const holder = portal.destinations.holder.holders.find(it => it.id === holderId);
+			if (!holder) return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-holder-unavailable"});
+			if (!confirmedHolderWithin30Feet || !confirmedWithin5FeetOfHolder || !confirmedUnoccupied) {
+				return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-confirmation-required"});
+			}
+			destination = {
+				mode,
+				holder,
+				holderWithin30Feet: true,
+				within5FeetOfHolder: true,
+				unoccupied: true,
+			};
+		} else {
+			return CharacterSheetState._copyAndFreeze({ok: false, reason: "portal-jump-destination-required"});
+		}
+
+		const spend = this.spendMovement(portal.movementCost, {
+			source: CharacterSheetState.CARTOGRAPHER_PORTAL_JUMP_SOURCE,
+			scope: "cartographer-portal-jump",
+			metadata: {
+				version: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_RECEIPT_VERSION,
+				sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_FEATURE_UID,
+				speedAtCommit: portal.speed,
+				movementCost: portal.movementCost,
+				destination,
+			},
+		});
+		if (!spend.ok) return CharacterSheetState._copyAndFreeze({...spend, error: "Portal Jump movement could not be committed."});
+		return CharacterSheetState._copyAndFreeze({
+			ok: true,
+			sourceFeatureUid: CharacterSheetState.CARTOGRAPHER_MAPPING_MAGIC_FEATURE_UID,
+			speedAtCommit: portal.speed,
+			movementCost: portal.movementCost,
+			movementRemaining: spend.movement.remaining,
+			destination,
+			receipt: spend.receipt,
+		});
+	}
+
+	getTargetingExceptionDescriptors () {
+		const positioning = this._getCartographerPositioningSnapshot();
+		return CharacterSheetState._copyAndFreeze(positioning.available ? [positioning] : []);
+	}
+
+	resolveTargetingException ({
+		descriptorId,
+		targetHolderId,
+		effectRequiresSight = false,
+		confirmedSamePlane = false,
+		confirmedWithinRange = false,
+		confirmedTargetEligibility = false,
+	} = {}) {
+		if (descriptorId !== CharacterSheetState.CARTOGRAPHER_POSITIONING_DESCRIPTOR_ID) {
+			return CharacterSheetState._copyAndFreeze({ok: false, applies: false, reason: "targeting-exception-not-found"});
+		}
+		const positioning = this._getCartographerPositioningSnapshot();
+		if (!positioning.available) {
+			return CharacterSheetState._copyAndFreeze({ok: false, applies: false, reason: "targeting-exception-unavailable", error: positioning.reason});
+		}
+		const holder = positioning.holders.find(it => it.id === targetHolderId);
+		if (!holder) return CharacterSheetState._copyAndFreeze({ok: false, applies: false, reason: "target-holder-unavailable"});
+		if (!effectRequiresSight) {
+			return CharacterSheetState._copyAndFreeze({ok: true, applies: false, reason: "effect-does-not-require-sight", holder});
+		}
+		if (!confirmedSamePlane || !confirmedWithinRange || !confirmedTargetEligibility) {
+			return CharacterSheetState._copyAndFreeze({ok: false, applies: false, reason: "targeting-confirmation-required", holder});
+		}
+		return CharacterSheetState._copyAndFreeze({
+			ok: true,
+			applies: true,
+			descriptorId: positioning.id,
+			sourceFeatureUid: positioning.sourceFeatureUid,
+			holder,
+			bypass: {sight: true, cover: true, range: false},
+			waivedRequirements: ["sight", "cover"],
+			preservedRequirements: [...positioning.preservedRequirements],
+			confirmations: {
+				samePlane: true,
+				withinRange: true,
+				targetOtherwiseEligible: true,
+			},
 		});
 	}
 
@@ -32455,6 +32853,7 @@ class CharacterSheetState {
 						calculations.adventurersAtlasCapacity = Math.max(2, 1 + intMod);
 						calculations.hasAdventurersAtlasAwareness = true;
 						if (level >= 5) {
+							calculations.hasIlluminatedCartography = true;
 							calculations.hasGuidedPrecision = true;
 							calculations.guidedPrecisionSourceFeatureUid = CharacterSheetState.GUIDED_PRECISION_FEATURE_UID;
 						}
@@ -32462,11 +32861,14 @@ class CharacterSheetState {
 							calculations.hasIngeniousMovement = true;
 							calculations.ingeniousMovementRange = CharacterSheetState.INGENIOUS_MOVEMENT_RANGE_FEET;
 							calculations.ingeniousMovementSourceFeatureUid = CharacterSheetState.INGENIOUS_MOVEMENT_FEATURE_UID;
+							calculations.hasPortalJump = true;
+							calculations.hasAdventurersAtlasPositioning = true;
 						}
 						if (level >= 15) {
 							calculations.hasSuperiorAtlasSafeHaven = true;
 							calculations.safeHavenHitPoints = 2 * level;
 							calculations.safeHavenSourceFeatureUid = CharacterSheetState.SAFE_HAVEN_FEATURE_UID;
+							calculations.hasUnerringPath = true;
 						}
 					}
 
@@ -79999,6 +80401,7 @@ class CharacterSheetState {
 		// Lunar Sorcery: free lunar casts return, the shed moonlight goes out, and the
 		// phase becomes re-choosable for free.
 		this._onLongRestLunarSorcery();
+		this.restoreCartographerMappingMagicUses();
 
 		// Clear all temporary attacks (from variant components, etc.)
 		this.clearTemporaryAttacks();

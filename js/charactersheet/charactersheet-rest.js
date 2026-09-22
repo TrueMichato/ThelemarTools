@@ -931,6 +931,8 @@ class CharacterSheetRest {
 			// Restore long-rest and short-rest resources
 			this._restoreResources("long");
 			this._state.restoreSignatureSpells?.();
+			this._state.restoreCartographerMappingMagicUses?.();
+			this._state.resetTurnEconomy?.({round: null});
 
 			// Clear one level of exhaustion using the dedicated exhaustion tracker
 			if (cbClearExhaustion.checked) {

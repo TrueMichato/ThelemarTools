@@ -21,19 +21,23 @@ partial still have explicitly deferred runtime mechanics.
 - **Armorer (EFA, partial)**: active-bound level-3 model weapon stats and Intelligence substitution; Infiltrator `+5` Speed and Stealth advantage. Deferred: model riders/resources, Improved Arsenal, level 9/15, Armor Replication, Arcane Armor general benefits, binding UI, and E2E.
 - **Artillerist**: `eldritchCannonHp`, `flamethrowerDamage`, `forceBallistaDamage`, `protectorTempHp`, `maxCannons`, `arcaneFirearmDamage`
 - **Battle Smith**: `steelDefenderHp`, `arcaneJoltDamage`, `arcaneJoltUses`, `deflectAttackDamage`
-- **Cartographer (EFA), Adventurer's Atlas milestone**: versioned persistent
+- **Cartographer (EFA), Adventurer's Atlas + Mapping Magic milestones**: versioned persistent
   Atlas state, Long Rest creation/recreation with held-tool confirmation,
   creation-time capacity freezing, death/subclass invalidation, rest undo,
   authoritative Features rendering, ally-only or optional-self rosters, and the
   self-holder Awareness initiative die are supported. External holder initiative
-  is exposed through an immutable integration snapshot. Superior Atlas — Safe
-  Haven now uses the generic zero-HP transaction for the Cartographer's own map
-  and an explicit Features-card resolver for external holders; both destroy the
-  exact map, return the `2 × Artificer level` HP result plus placement
-  requirements, and leave coordinates/external-sheet mutation to the table.
-  Cartographer spells, Portal Jump/movement, Positioning, Ingenious Movement,
-  Unerring Path, and the other Superior Atlas benefits remain outside this
-  bounded milestone.
+  is exposed through an immutable integration snapshot. The Atlas card now owns
+  Illuminated Cartography (`Faerie Fire|XPHB`, no slot/preparation, Intelligence,
+  Intelligence-modifier uses per Long Rest), Portal Jump (live-Speed movement receipts), Positioning (confirmed
+  same-plane/range targeting that bypasses only sight and cover), and Unerring
+  Path (`Find the Path|XPHB`, no slot/preparation/components, 1/Long Rest).
+  Guided Precision uses its source-isolated shared turn receipt, and Ingenious
+  Movement follows only a committed EFA Flash of Genius transaction. Superior
+  Atlas — Safe Haven uses the generic zero-HP transaction for the Cartographer's
+  own map and an explicit resolver for external holders; both destroy the exact
+  map and return the `2 × Artificer level` HP result plus placement requirements.
+  Cross-sheet mutation, coordinates, and DM Screen/Journey map geometry remain
+  table/integration boundaries rather than simulated Character Sheet state.
 
 #### Druid Circles ✅
 All Druid circles are fully implemented:
