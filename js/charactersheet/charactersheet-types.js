@@ -430,7 +430,18 @@ void globalThis;
  *   skills?: string[],
  *   optionalFeatures?: Array<{name: string, source: SourceCode, type?: string}>,
  *   featureChoices?: Array<{featureName: string, choice: *}>,
- *   expertise?: string[]
+ *   expertise?: string[],
+ *   artificerPlans?: Array<{
+ *     opportunityId: string,
+ *     slotId: string,
+ *     acquisitionLevel: number,
+ *     selection: ArtificerPlanSelection
+ *   }>,
+ *   artificerPlanReplacements?: Array<{
+ *     opportunityId: string,
+ *     replacementLevel: number,
+ *     selection: ArtificerPlanReplacementSelection
+ *   }>
  * }} [choices]
  * @property {number} [ledgerVersion]
  * @property {number} [manifestVersion]
@@ -455,6 +466,53 @@ void globalThis;
  * }>} [decisions]
  * @property {boolean} [complete]
  * @property {number} [timestamp]
+ */
+
+/**
+ * Exact Replicate Magic Item plan identity. `itemUid`/`planUid` identify the
+ * plan; they are not inventory wrapper IDs.
+ *
+ * @typedef {object} ArtificerPlanSelection
+ * @property {1} version
+ * @property {string} planUid
+ * @property {string} itemUid
+ * @property {string} name
+ * @property {SourceCode} source
+ * @property {"fixed"|"wildcard"} planKind
+ * @property {string} catalogEntryId
+ * @property {string|null} categoryId
+ * @property {string|null} categoryLabel
+ * @property {number} tableLevel
+ * @property {boolean} repeatableCategory
+ * @property {string} displayName
+ */
+
+/**
+ * Optional every-Artificer-level replacement receipt.
+ *
+ * @typedef {object} ArtificerPlanReplacementSelection
+ * @property {string} targetSlotId
+ * @property {ArtificerPlanSelection} previousPlan
+ * @property {ArtificerPlanSelection} nextPlan
+ * @property {string|null} priorReplacementSemanticKey
+ */
+
+/**
+ * Configuration-only progression receipt for an acquired or replaced plan.
+ *
+ * @typedef {object} ArtificerPlanDecisionReceipt
+ * @property {1} version
+ * @property {"artificer-plan"} family
+ * @property {string|null} sourceDecisionKey
+ * @property {string|null} opportunityId
+ * @property {object|null} owner
+ * @property {number|null} decisionLevel
+ * @property {number|null} acquisitionLevel
+ * @property {number|null} replacementLevel
+ * @property {string|null} slotId
+ * @property {ArtificerPlanSelection} selection
+ * @property {{previousPlan: ArtificerPlanSelection, nextPlan: ArtificerPlanSelection, priorReplacementSemanticKey: string|null}|null} lineage
+ * @property {Array<{type: "configuration", key: "artificer-plan", value: "acquisition"|"replacement"}>} effects
  */
 
 /**

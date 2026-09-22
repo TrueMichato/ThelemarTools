@@ -1,4 +1,5 @@
 import {CharacterSheetClassUtils} from "./charactersheet-class-utils.js";
+import {CharacterSheetArtificerPlans} from "./charactersheet-artificer-plans.js";
 
 /**
  * Shared progression analysis and history-ledger helpers.
@@ -39,6 +40,8 @@ class CharacterSheetProgression {
 		scholar: {discovery: "class-features", editor: "scholar", validation: "skill-option", mechanics: "skill-expertise", projection: ["choices.scholarSkill"]},
 		spellMastery: {discovery: "class-features", editor: "spell-mastery", validation: "spell-mastery-levels", mechanics: "spell-mastery", projection: ["choices.spellMasterySpells"]},
 		signatureSpells: {discovery: "class-features", editor: "signature-spells", validation: "signature-spell-levels", mechanics: "signature-spells", projection: ["choices.signatureSpells"]},
+		artificerPlan: {discovery: "class-catalog", editor: "class-plan", validation: "artificer-plan", mechanics: "configuration", projection: ["choices.artificerPlans"]},
+		artificerPlanReplacement: {discovery: "class-catalog", editor: "class-plan", validation: "artificer-plan-replacement", mechanics: "configuration", projection: ["choices.artificerPlanReplacements"]},
 		hp: {discovery: "class-level", editor: "hit-points", validation: "hit-point-method", mechanics: "hit-points", projection: ["choices.hpRoll"]},
 		nestedEntity: {discovery: "nested-descriptor", editor: "nested-choice", validation: "entity-option", mechanics: "nested-entity", projection: []},
 		nestedSkill: {discovery: "nested-descriptor", editor: "nested-choice", validation: "option-count", mechanics: "skill-proficiencies", projection: []},
@@ -97,6 +100,7 @@ class CharacterSheetProgression {
 			scholar: "_editManifestOptions",
 			"spell-mastery": "_editManifestOptions",
 			"signature-spells": "_editManifestOptions",
+			"class-plan": "_editArtificerPlanDecision",
 			"hit-points": "_editHpDecision",
 			"nested-choice": "_editManifestOptions",
 		};
@@ -446,6 +450,14 @@ class CharacterSheetProgression {
 		if (type === "signatureSpells") {
 			if (!Array.isArray(selection) || selection.length !== 2) return false;
 			if (!selection.every(spell => Number(spell.level) === 3)) return false;
+		}
+		if (type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE) {
+			return CharacterSheetArtificerPlans.isExactSelection(selection);
+		}
+		if (type === CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE) {
+			return !!selection?.targetSlotId
+				&& CharacterSheetArtificerPlans.isExactSelection(selection?.previousPlan)
+				&& CharacterSheetArtificerPlans.isExactSelection(selection?.nextPlan);
 		}
 		if (!Array.isArray(options) || !options.length) return true;
 		options = options.filter(option => option?._selectable !== false);
@@ -2003,6 +2015,8 @@ class CharacterSheetProgression {
 			spellSwap: ["spellSwap"],
 			spellMastery: ["spellMasterySpells"],
 			signatureSpells: ["signatureSpells"],
+			artificerPlan: [CharacterSheetArtificerPlans.CHOICE_KEY_ACQUIRE],
+			artificerPlanReplacement: [CharacterSheetArtificerPlans.CHOICE_KEY_REPLACE],
 			scholar: ["scholarSkill"],
 			hp: ["hpRoll"],
 		};
@@ -2055,6 +2069,21 @@ class CharacterSheetProgression {
 				case "spellSwap": choices.spellSwap = CharacterSheetProgression._copy(selection); break;
 				case "spellMastery": choices.spellMasterySpells = CharacterSheetProgression._copy(selection); break;
 				case "signatureSpells": choices.signatureSpells = CharacterSheetProgression._copy(selection); break;
+				case "artificerPlan":
+					append(CharacterSheetArtificerPlans.CHOICE_KEY_ACQUIRE, [{
+						opportunityId: decision.meta?.opportunityId,
+						slotId: decision.meta?.slotId,
+						acquisitionLevel: decision.classLevel,
+						selection,
+					}]);
+					break;
+				case "artificerPlanReplacement":
+					append(CharacterSheetArtificerPlans.CHOICE_KEY_REPLACE, [{
+						opportunityId: decision.meta?.opportunityId,
+						replacementLevel: decision.classLevel,
+						selection,
+					}]);
+					break;
 				case "scholar": choices.scholarSkill = selection; break;
 				case "hp":
 					if (selection.method === "roll" && Number.isFinite(Number(selection.value))) choices.hpRoll = Number(selection.value);
@@ -2187,6 +2216,20 @@ class CharacterSheetProgression {
 			case "spellSwap": return choices.spellSwap || null;
 			case "spellMastery": return choices.spellMasterySpells || null;
 			case "signatureSpells": return choices.signatureSpells || null;
+			case "artificerPlan": {
+				const values = choices[CharacterSheetArtificerPlans.CHOICE_KEY_ACQUIRE] || [];
+				const matched = values.find(value =>
+					value?.opportunityId === sourceKey
+						|| value?.slotId === sourceKey
+						|| Number(value?.slot) === Number(slot),
+				);
+				return matched?.selection || matched || null;
+			}
+			case "artificerPlanReplacement": {
+				const values = choices[CharacterSheetArtificerPlans.CHOICE_KEY_REPLACE] || [];
+				const matched = values.find(value => value?.opportunityId === sourceKey);
+				return matched?.selection || matched || null;
+			}
 			case "scholar": return choices.scholarSkill || null;
 			case "hp": return choices.hpRoll != null ? {method: "roll", value: choices.hpRoll} : {method: "average"};
 			default: return null;
@@ -2599,6 +2642,10 @@ class CharacterSheetProgression {
 		decisions.push(...base.decisions);
 		const spellPools = CharacterSheetProgression._getClassSpellPools(state, page, normalizedHistory);
 		const spellPoolCursors = new Map();
+		const artificerPlanCatalog = CharacterSheetArtificerPlans.parseCatalog({
+			feature: CharacterSheetArtificerPlans.findFeature({classFeatures: page?.getClassFeatures?.() || []}),
+			items: page?.getItems?.() || [],
+		});
 
 		const addDecision = (levelInfo, config) => {
 			const semanticKey = CharacterSheetProgression.getSemanticKey({
@@ -2757,6 +2804,37 @@ class CharacterSheetProgression {
 				isValid: !multiclassRequirementIssues.length,
 				meta: {multiclassRequirementIssues},
 			});
+
+			for (const opportunity of CharacterSheetArtificerPlans.getProgressionOpportunities({
+				className: classData.name,
+				classSource: classData.source,
+				classLevel: levelInfo.classLevel,
+			})) {
+				const options = CharacterSheetArtificerPlans.getEligibleCandidates({
+					catalog: artificerPlanCatalog,
+					classLevel: levelInfo.classLevel,
+					constraints: opportunity.constraints,
+				});
+				addDecision(levelInfo, {
+					type: opportunity.kind === "replacement"
+						? CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE
+						: CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE,
+					label: opportunity.kind === "replacement" ? "Replace a Magic Item Plan" : "Magic Item Plan",
+					sourceKey: opportunity.opportunityId,
+					slot: opportunity.slot,
+					required: opportunity.required,
+					count: 1,
+					options,
+					meta: {
+						kind: opportunity.kind,
+						opportunityId: opportunity.opportunityId,
+						slotId: opportunity.slotId || null,
+						owner: opportunity.owner,
+						constraints: opportunity.constraints || {},
+						catalogVersion: artificerPlanCatalog.version,
+					},
+				});
+			}
 
 			if (levelInfo.classLevel === 1) {
 				const isFirstClass = levelInfo.characterLevel === 1;
@@ -3420,6 +3498,66 @@ class CharacterSheetProgression {
 			storedBasePool: baseStoredPool,
 		});
 
+		const artificerPlanDecisions = decisions
+			.filter(decision => [
+				CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE,
+				CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE,
+			].includes(decision.type))
+			.map(decision => ({
+				...decision,
+				kind: decision.meta?.kind,
+				opportunityId: decision.meta?.opportunityId,
+				slotId: decision.meta?.slotId,
+				owner: decision.meta?.owner,
+				constraints: decision.meta?.constraints || {},
+			}));
+		for (const decision of artificerPlanDecisions) {
+			const plan = decision.type === CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE
+				? decision.selection?.nextPlan
+				: decision.selection;
+			if (decision.selection != null && !CharacterSheetArtificerPlans.isExactSelection(plan)) {
+				const original = decisions.find(it => it.id === decision.id);
+				original.status = "ambiguous";
+				decision.status = "ambiguous";
+				original.meta = {
+					...(original.meta || {}),
+					validationMessage: "This legacy plan choice lacks an exact source-qualified catalog identity. Repair it in Respec.",
+				};
+			}
+		}
+		const planValidation = CharacterSheetArtificerPlans.validateDraft({
+			catalog: artificerPlanCatalog,
+			decisions: artificerPlanDecisions.filter(decision => decision.status !== "ambiguous"),
+		});
+		for (const issue of planValidation.issues) {
+			const original = decisions.find(decision => decision.meta?.opportunityId === issue.opportunityId);
+			if (original) {
+				original.status = "invalid";
+				original.meta = {...(original.meta || {}), validationMessage: issue.message};
+			}
+			issues.push({
+				level: original?.characterLevel || 0,
+				severity: "error",
+				code: issue.code,
+				message: issue.message,
+				decisionId: original?.id,
+				semanticKey: original?.semanticKey,
+			});
+		}
+		const hasEfaPlanProgression = resolvedTimeline.some(entry =>
+			CharacterSheetArtificerPlans.isExactOwner(entry) && Number(entry.classLevel) >= 2,
+		);
+		if (hasEfaPlanProgression) {
+			for (const issue of artificerPlanCatalog.issues || []) {
+				issues.push({
+					level: 0,
+					severity: "error",
+					code: issue.code,
+					message: issue.message,
+				});
+			}
+		}
+
 		return {
 			version: CharacterSheetProgression.MANIFEST_VERSION,
 			base,
@@ -3563,6 +3701,19 @@ class CharacterSheetProgression {
 		};
 		for (const decision of manifest.decisions || []) {
 			if (decision.selection == null || decision.receipt) continue;
+			if ([
+				CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE,
+				CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE,
+			].includes(decision.type)) {
+				decision.receipt = CharacterSheetArtificerPlans.getDecisionReceipt({
+					...decision,
+					kind: decision.meta?.kind,
+					opportunityId: decision.meta?.opportunityId,
+					slotId: decision.meta?.slotId,
+					owner: decision.meta?.owner,
+				});
+				continue;
+			}
 			decision.receipt = {
 				version: 1,
 				sourceDecisionKey: decision.semanticKey,
@@ -3660,6 +3811,12 @@ class CharacterSheetProgression {
 			}).join(", ");
 		}
 		if (typeof selection === "object") {
+			if (decision?.type === CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE) {
+				return `${selection.previousPlan?.name || "Unknown plan"} → ${selection.nextPlan?.name || "Unknown plan"}`;
+			}
+			if (decision?.type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE) {
+				return `${selection.name || "Unknown plan"}${selection.source ? ` (${selection.source})` : ""}`;
+			}
 			if (selection.mode === "asi") {
 				return Object.entries(selection.asi || {}).map(([ability, amount]) => `${ability.toUpperCase()} +${amount}`).join(", ");
 			}

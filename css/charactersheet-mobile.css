@@ -1663,6 +1663,32 @@
 		min-width: 0;
 	}
 
+	.charsheet__artificer-plan-picker {
+		grid-template-columns: 1fr;
+		min-height: 0;
+	}
+
+	.charsheet__artificer-plan-opportunities {
+		max-height: 12rem;
+		border-right: 0;
+		border-bottom: 1px solid var(--cs-border, var(--rgb-border-grey));
+		padding-right: 0;
+		padding-bottom: var(--cs-space-sm, 0.5rem);
+	}
+
+	.charsheet__artificer-plan-filters {
+		grid-template-columns: 1fr;
+	}
+
+	.charsheet__artificer-plan-results {
+		grid-template-columns: 1fr;
+		max-height: 42vh;
+	}
+
+	.charsheet__artificer-plan-actions {
+		bottom: calc(var(--charsheet-mobile-nav-height, 56px) + env(safe-area-inset-bottom));
+	}
+
 	.charsheet__level-history {
 		padding: var(--cs-space-md, 0.75rem);
 	}

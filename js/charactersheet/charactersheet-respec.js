@@ -1544,6 +1544,7 @@ class CharacterSheetRespec {
 			scholar: () => this._editManifestOptions(level, history, choice, closeParentModal),
 			"spell-mastery": () => this._editManifestOptions(level, history, choice, closeParentModal),
 			"signature-spells": () => this._editManifestOptions(level, history, choice, closeParentModal),
+			"class-plan": () => this._editArtificerPlanDecision(level, history, choice, closeParentModal),
 			"hit-points": () => this._editHpDecision(level, history, choice, closeParentModal),
 			asi: () => this._editAsi(level, history, closeParentModal, choice),
 			feat: () => this._editFeat(level, history, closeParentModal, choice),
@@ -1560,6 +1561,76 @@ class CharacterSheetRespec {
 			return;
 		}
 		await edit();
+	}
+
+	async _editArtificerPlanDecision (level, history, choice, closeParentModal) {
+		const decision = choice.decision;
+		const picker = globalThis.CharacterSheetArtificerPlanPicker;
+		const plans = globalThis.CharacterSheetArtificerPlans;
+		if (!decision || !picker || !plans) {
+			JqueryUtil.doToast({type: "danger", content: "The Replicate Magic Item plan editor is unavailable."});
+			return;
+		}
+		const ordered = (this._engine?.manifest?.decisions || [])
+			.filter(candidate => [
+				plans.DECISION_TYPE_ACQUIRE,
+				plans.DECISION_TYPE_REPLACE,
+			].includes(candidate.type))
+			.sort((a, b) =>
+				Number(a.classLevel) - Number(b.classLevel)
+				|| Number(a.type === plans.DECISION_TYPE_REPLACE) - Number(b.type === plans.DECISION_TYPE_REPLACE)
+				|| Number(a.slot) - Number(b.slot),
+			);
+		const activeIndex = ordered.findIndex(candidate => candidate.semanticKey === decision.semanticKey);
+		const toPlanDraft = candidate => ({
+			...candidate,
+			kind: candidate.meta?.kind,
+			opportunityId: candidate.meta?.opportunityId,
+			slotId: candidate.meta?.slotId,
+		});
+		const projectedBefore = plans.projectDecisions({
+			decisions: ordered.slice(0, Math.max(0, activeIndex)).map(toPlanDraft),
+		}).slots;
+		const projectedCurrent = plans.projectDecisions({
+			decisions: ordered.map(toPlanDraft),
+		}).slots;
+		const initialSlots = decision.type === plans.DECISION_TYPE_ACQUIRE
+			? projectedCurrent.filter(slot => slot.slotId !== decision.meta?.slotId)
+			: projectedBefore;
+		const opportunity = {
+			version: 1,
+			kind: decision.meta?.kind,
+			required: decision.required,
+			className: decision.className,
+			classSource: decision.classSource,
+			classLevel: decision.classLevel,
+			characterLevel: decision.characterLevel,
+			slot: decision.slot,
+			slotId: decision.meta?.slotId,
+			opportunityId: decision.meta?.opportunityId,
+			owner: decision.meta?.owner,
+			constraints: decision.meta?.constraints || {},
+		};
+		const result = await picker.pGetUserDecisions({
+			page: this._page,
+			state: this._state,
+			opportunities: [opportunity],
+			initialSlots,
+			initialSelections: decision.selection
+				? {[opportunity.opportunityId]: decision.selection}
+				: {},
+			title: `${decision.label} · Level ${level}`,
+		});
+		if (result == null) return;
+		const selection = result[0]?.selection || null;
+		await this._engine.stageGraphMutation(decision.id, selection, {
+			status: selection == null && !decision.required ? "deferred" : null,
+			reverseParent: true,
+			apply: () => ({selection}),
+		});
+		closeParentModal?.();
+		this.render();
+		JqueryUtil.doToast({type: "success", content: `${decision.label} staged in the Respec draft.`});
 	}
 
 	_getDecisionOptions (decision) {
@@ -1891,6 +1962,10 @@ class CharacterSheetRespec {
 		const normalizeSkill = value => this._state.normalizeSkillProficiencyKey?.(valueName(value))
 			|| String(valueName(value) || "").toLowerCase().replace(/\s+/g, "");
 		const normalizeValue = value => String(valueName(value) || "").trim().toLowerCase();
+		if ([
+			globalThis.CharacterSheetArtificerPlans?.DECISION_TYPE_ACQUIRE,
+			globalThis.CharacterSheetArtificerPlans?.DECISION_TYPE_REPLACE,
+		].includes(decision.type)) return;
 		const removeSetValue = (type, value, remove) => {
 			release(type, value, remove);
 		};

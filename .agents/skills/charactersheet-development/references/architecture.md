@@ -99,6 +99,11 @@ CharacterSheetPage (charactersheet.js, ~6,500 lines)
 │   validation, mechanics, and projection; manifest construction rejects missing
 │   adapters so new progression families cannot become silently read-only.
 │
+├── CharacterSheetArtificerPlans / CharacterSheetArtificerPlanPicker
+│   Authoritative EFA Replicate Magic Item plan-table parser, stable plan-slot
+│   projection, validation/receipt contract, and shared searchable picker.
+│   These modules own plan decisions only and never mutate inventory.
+│
 ├── CharacterSheetRespecEngine (charactersheet-respec-engine.js)
 │   Isolated candidate transaction: validate, review, atomic Apply/rollback,
 │   Cancel, and one-step Undo.
@@ -627,6 +632,17 @@ and persists the resulting manifest once. State ownership is source-keyed so
 overlapping manual, origin, and progression grants survive unrelated edits;
 materialized features, modifiers, spells, resources, and configuration are
 covered by receipts.
+
+Exact `Artificer|EFA` Replicate Magic Item choices use the same graph. The
+`artificerPlan` family creates stable acquisition slots at class levels
+2/6/10/14/18; `artificerPlanReplacement` creates an optional opportunity at
+every Artificer level from 2 onward and records old/new lineage. The catalog is
+parsed from the loaded class feature tables and item catalog. Fixed tag aliases
+are display-only, wildcard categories bind exact item UIDs, and source-less
+legacy evidence remains ambiguous. Public state projections are
+`getEfaArtificerPlanDecisions()`, `getEfaArtificerPlanProjection()`, and
+`getEfaArtificerPlans()`. Inventory materialization is explicitly outside this
+contract.
 
 ### Item Hover Routing
 

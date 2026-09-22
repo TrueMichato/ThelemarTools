@@ -143,6 +143,50 @@ prototypes, including the concrete editor and family-specific apply/reverse
 entry points. A module which is not loaded cannot make the closure check pass
 vacuously.
 
+### EFA Artificer Replicate Magic Item plans
+
+Exact `Artificer|EFA` Replicate Magic Item plans are normal progression
+decisions, not inventory entries. `charactersheet-artificer-plans.js` parses the
+authoritative feature tables from `data/class/class-artificer.json`:
+
+- fixed `{@item ...}` rows use the tag's canonical `name|source` identity;
+  display aliases do not change identity;
+- the starred level-2 common-item, level-10 uncommon-Wondrous-Item, and level-14
+  rare-Wondrous-Item rows are repeatable wildcard categories;
+- every wildcard pick still binds one exact source-qualified item, and that
+  exact item cannot occupy another known-plan slot;
+- stable acquisition slots are created at Artificer levels 2/6/10/14/18 for
+  cumulative totals 4/5/6/7/8;
+- an optional replacement opportunity exists at every Artificer level from
+  level 2 onward. It records the target slot, previous plan, next plan, and
+  prior replacement semantic key.
+
+The decision types are `artificerPlan` and `artificerPlanReplacement`. Their
+compatibility projections are `choices.artificerPlans[]` and
+`choices.artificerPlanReplacements[]`. Each persisted receipt uses
+`family: "artificer-plan"` and contains the opportunity, exact owner,
+`decisionLevel`, acquisition-only `acquisitionLevel`, replacement-only
+`replacementLevel`, stable slot, source-qualified plan selection, and
+replacement lineage. Its only effect is a `configuration` receipt; Respec
+apply/reverse is intentionally inventory-free.
+
+Builder's higher-level handoff, Level Up, Quick Build, and Respec all use
+`CharacterSheetArtificerPlanPicker`. The picker keeps edits local until
+validation succeeds, supports search and fixed/wildcard filtering, disables
+duplicate exact items, shows source/eligibility badges, and presents the old
+and new plan together before a replacement commit. Cancel and invalid commit
+paths do not change live or candidate state.
+
+Legacy plan evidence with no exact source-qualified catalog identity is
+preserved as `ambiguous` and remains repairable in Respec. It is never guessed
+from a display name. `CharacterSheetState.getEfaArtificerPlanDecisions()`,
+`getEfaArtificerPlanProjection()`, and `getEfaArtificerPlans()` expose the
+ledger and current stable-slot projection for later consumers.
+
+This milestone stops at plan decisions. It does not create, grant, mutate,
+remove, or expire replicated inventory items; those item-instance effects are
+reserved for the separate M3 transaction layer.
+
 Pending feature/spell queues remain compatibility caches, not a second ledger.
 An item which existed when a draft opened but is not yet represented by a
 decision is preserved and shown as a warning. A mutation which creates a new

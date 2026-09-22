@@ -274,7 +274,48 @@ The Reanimator calculation descriptor exposes the live transaction without
 mutating it: exact owner UID, acquisition `mode`, `status`, fixed proficiency,
 selection, and pending/resolved booleans. It never activates for
 `Artificer|TCE`, a non-RHW Reanimator, or a name-only feature.
+## EFA Replicate Magic Item Plan Decisions
 
+`CharacterSheetArtificerPlans` is the shared class-catalog contract for exact
+`Artificer|EFA` Replicate Magic Item plans. It recursively parses the
+authoritative level-gated tables rather than duplicating plan names:
+
+- fixed rows keep the canonical item-tag `name|source`; aliases are display
+  text only;
+- only the three starred filter rows are repeatable wildcard categories;
+- a wildcard repetition selects a different exact source-qualified item;
+- fixed and wildcard routes share exact item uniqueness;
+- cumulative known-plan counts are 4/5/6/7/8 at levels 2/6/10/14/18.
+
+Progression emits required `artificerPlan` acquisition decisions and optional
+`artificerPlanReplacement` decisions at every Artificer level from 2 onward.
+Selections persist acquisition level, stable slot/opportunity IDs, catalog and
+category provenance, exact item UID, and replacement lineage. Receipts use the
+`artificer-plan` family with `decisionLevel`, mutually exclusive
+`acquisitionLevel`/`replacementLevel`, and a configuration-only effect.
+
+Public APIs:
+
+- `CharacterSheetArtificerPlans.parseCatalog({feature, items})`
+- `getProgressionOpportunities({className, classSource, classLevel, extensions})`
+- `getEligibleCandidates({catalog, classLevel, constraints})`
+- `validateDraft({catalog, decisions, initialSlots})`
+- `projectDecisions({decisions, initialSlots})`
+- `toHistoryChoices(decisions)`
+- `getExtensionDescriptor(...)` for independently sourced future class/subclass
+  consumers
+- `state.getEfaArtificerPlanDecisions()`
+- `state.getEfaArtificerPlanProjection()`
+- `state.getEfaArtificerPlans()`
+
+The extension descriptor keeps class, subclass, and feature sources independent;
+it never assumes `subclassSource === classSource`. The shared picker is used by
+Level Up, Quick Build (including Builder handoff), and Respec. Cancellation and
+invalid validation paths are non-mutating.
+
+This contract distinguishes a known plan from a replicated item instance.
+Milestone 2 has no item creation, inventory mutation, or expiration behavior;
+those effects belong to Milestone 3.
 ## Fixed Proficiency with Fallback Transactions
 
 Features whose rule is "gain fixed proficiency X; if already proficient, choose

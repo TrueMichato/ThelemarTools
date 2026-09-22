@@ -11432,6 +11432,53 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Return the exact source-qualified EFA Replicate Magic Item progression
+	 * decisions. These are plan receipts only; they never represent inventory
+	 * instances.
+	 * @returns {Array}
+	 */
+	getEfaArtificerPlanDecisions () {
+		return this.getLevelHistory()
+			.flatMap(entry => entry.decisions || [])
+			.filter(decision => [
+				globalThis.CharacterSheetArtificerPlans?.DECISION_TYPE_ACQUIRE,
+				globalThis.CharacterSheetArtificerPlans?.DECISION_TYPE_REPLACE,
+			].includes(decision.type))
+			.map(decision => CharacterSheetProgression._copy(decision));
+	}
+
+	/**
+	 * Project the currently-known plans by applying replacement lineage over
+	 * stable acquisition slots. This is read-only and has no inventory effects.
+	 * @returns {{slots: Array, unresolved: Array}}
+	 */
+	getEfaArtificerPlanProjection () {
+		const service = globalThis.CharacterSheetArtificerPlans;
+		if (!service) return {slots: [], unresolved: []};
+		return service.projectDecisions({
+			decisions: this.getEfaArtificerPlanDecisions().map(decision => ({
+				...decision,
+				kind: decision.meta?.kind,
+				opportunityId: decision.meta?.opportunityId,
+				slotId: decision.meta?.slotId,
+			})),
+		});
+	}
+
+	/**
+	 * Public compact current-plan list for later M3 consumers.
+	 * @returns {Array}
+	 */
+	getEfaArtificerPlans () {
+		return this.getEfaArtificerPlanProjection().slots.map(slot => ({
+			slotId: slot.slotId,
+			acquisitionLevel: slot.acquisitionLevel,
+			selection: CharacterSheetProgression._copy(slot.selection),
+			lineage: CharacterSheetProgression._copy(slot.lineage || []),
+		}));
+	}
+
+	/**
 	 * Get history entry for a specific level
 	 * @param {number} level - The character level
 	 * @returns {object|null} The history entry or null

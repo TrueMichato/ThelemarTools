@@ -5,6 +5,7 @@
 
 import {CharacterSheetModal} from "./charactersheet-modal.js";
 import {CharacterSheetPowerPicker} from "./charactersheet-power-picker.js";
+import {CharacterSheetArtificerPlanPicker} from "./charactersheet-artificer-plan-picker.js";
 
 // Project globals — destructured from globalThis so the TypeScript checkJs
 // language service has typed names to reference. Zero runtime impact.
@@ -20,6 +21,17 @@ class CharacterSheetLevelUp {
 		/** @type {*} */ this._state = page.getState();
 		/** @type {Object<string, *>} */ this._selectedFeatureSkillChoices = {};
 		/** @type {*} */ this._selectedClass = null; // For specialty features that require skill/expertise choices
+	}
+
+	getArtificerPlanOpportunities ({classEntry, newLevel}) {
+		return CharacterSheetArtificerPlanPicker.getOpportunitiesForLevels({
+			levels: [{
+				characterLevel: this._state.getTotalLevel() + 1,
+				className: classEntry.name,
+				classSource: classEntry.source,
+				classLevel: newLevel,
+			}],
+		});
 	}
 
 	/**
@@ -173,6 +185,8 @@ class CharacterSheetLevelUp {
 		/** @type {*} */ let selectedSpellbookSpells = [];
 		/** @type {*} */ let selectedSpellMasterySpells = [];
 		/** @type {*} */ let selectedSignatureSpells = [];
+		const artificerPlanOpportunities = this.getArtificerPlanOpportunities({classEntry, newLevel});
+		/** @type {*[]|null} */ let selectedArtificerPlanDecisions = null;
 		let rerenderWizardCapstones = null;
 		// Subclass-granted combat traditions (pre-seeded during subclass selection)
 		let subclassGrantedTraditionCodes = /** @type {*[]} */ ([]);
@@ -472,6 +486,53 @@ class CharacterSheetLevelUp {
 			progress.querySelector(".charsheet__levelup-progress-text").textContent =
 				percent === 100 ? "✓ Ready to level up!" : `${percent}% complete`;
 		};
+
+		// ========== REPLICATE MAGIC ITEM PLANS ==========
+		if (artificerPlanOpportunities.length) {
+			const requiredPlanCount = artificerPlanOpportunities.filter(opportunity => opportunity.required).length;
+			summaryItems.append(createSummaryItem("artificer-plans", "🛠️", "Magic Item Plans", {required: requiredPlanCount > 0}));
+			const content = e_({tag: "div", clazz: "charsheet__levelup-choice-section"});
+			const summary = e_({tag: "div", clazz: "ve-muted mb-2"});
+			const choose = e_({tag: "button", clazz: "ve-btn ve-btn-primary", txt: "Choose or Replace Plans"});
+			choose.type = "button";
+			const updatePlanSummary = () => {
+				const selectedById = new Map((selectedArtificerPlanDecisions || []).map(decision => [decision.opportunityId, decision.selection]));
+				const selectedRequired = artificerPlanOpportunities.filter(opportunity =>
+					opportunity.required && selectedById.get(opportunity.opportunityId),
+				).length;
+				const replacement = artificerPlanOpportunities.find(opportunity =>
+					opportunity.kind === "replacement" && selectedById.get(opportunity.opportunityId),
+				);
+				summary.textContent = `${selectedRequired}/${requiredPlanCount} required selected${replacement ? "; optional replacement staged" : "; keeping current plans"}.`;
+				const complete = selectedRequired === requiredPlanCount;
+				accordions["artificer-plans"]?.setComplete(complete, complete ? `${selectedRequired} selected` : "");
+				summaryItemEls["artificer-plans"]?.setStatus(complete, complete ? summary.textContent : "");
+			};
+			choose.addEventListener("click", async () => {
+				const initialSelections = Object.fromEntries((selectedArtificerPlanDecisions || [])
+					.filter(decision => decision.selection)
+					.map(decision => [decision.opportunityId, decision.selection]));
+				const result = await CharacterSheetArtificerPlanPicker.pGetUserDecisions({
+					page: this._page,
+					state: this._state,
+					opportunities: artificerPlanOpportunities,
+					initialSelections,
+					title: `Artificer Level ${newLevel}: Magic Item Plans`,
+				});
+				if (result == null) return;
+				selectedArtificerPlanDecisions = result;
+				updatePlanSummary();
+			});
+			content.append(summary, choose);
+			main.append(createAccordion(
+				"artificer-plans",
+				"🛠️",
+				"Replicate Magic Item Plans",
+				content,
+				{required: requiredPlanCount > 0, startExpanded: requiredPlanCount > 0},
+			));
+			updatePlanSummary();
+		}
 
 		// ========== 1. SUBCLASS SECTION ==========
 		if (needsSubclass) {
@@ -1303,6 +1364,16 @@ class CharacterSheetLevelUp {
 		footer.querySelector(".ve-btn-default").addEventListener("click", () => doClose(false));
 		footer.querySelector(".ve-btn-primary").addEventListener("click", async () => {
 			// ========== VALIDATION ==========
+			const selectedPlanById = new Map((selectedArtificerPlanDecisions || []).map(decision => [decision.opportunityId, decision.selection]));
+			const missingRequiredPlan = artificerPlanOpportunities.find(opportunity =>
+				opportunity.required && !selectedPlanById.get(opportunity.opportunityId),
+			);
+			if (missingRequiredPlan) {
+				JqueryUtil.doToast({type: "warning", content: "Choose every required Replicate Magic Item plan before leveling up."});
+				accordions["artificer-plans"]?.el.classList.add("expanded");
+				accordions["artificer-plans"]?.el.scrollIntoView({behavior: "smooth"});
+				return;
+			}
 			if (needsSubclass && !selectedSubclass) {
 				JqueryUtil.doToast({type: "warning", content: "Please select a subclass."});
 				const el = accordions.subclass.el;
@@ -1515,6 +1586,7 @@ class CharacterSheetLevelUp {
 				selectedSpellbookSpells,
 				selectedSpellMasterySpells,
 				selectedSignatureSpells,
+				selectedArtificerPlanDecisions,
 				selectedKnownSpells,
 				selectedKnownCantrips,
 				selectedPreparedSpells,
@@ -4563,7 +4635,7 @@ class CharacterSheetLevelUp {
 
 	/** @param {*} arg */
 
-	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedWeaponMasteries, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, forkedTongueLevelUpPick, selectedScholarSkill, selectedSpellbookSpells, selectedSpellMasterySpells, selectedSignatureSpells, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
+	async _applyLevelUp ({classEntry, newLevel, asiChoices, selectedFeat, selectedSubclass, selectedSubclassChoice, selectedOptionalFeatures, selectedCombatTraditions, selectedWeaponMasteries, selectedFeatureOptions, selectedClassFeatProgression, selectedExpertise, selectedLanguages, languageGrants, forkedTongueLevelUpPick, selectedScholarSkill, selectedSpellbookSpells, selectedSpellMasterySpells, selectedSignatureSpells, selectedArtificerPlanDecisions, selectedKnownSpells, selectedKnownCantrips, selectedPreparedSpells, selectedPreparedCantrips, stagedSpellSwap, newFeatures, hpMethod, classData}) {
 		const prevCombatTraditions = this._state.getCombatTraditions?.() || [];
 		const prevWeaponMasteries = this._state.getWeaponMasteries?.() || [];
 
@@ -5329,6 +5401,12 @@ class CharacterSheetLevelUp {
 		}
 		if (selectedSignatureSpells?.length) {
 			historyEntry.choices.signatureSpells = selectedSignatureSpells.map(spell => ({name: spell.name, source: spell.source, level: spell.level}));
+		}
+		if (selectedArtificerPlanDecisions?.length) {
+			Object.assign(
+				historyEntry.choices,
+				globalThis.CharacterSheetArtificerPlans.toHistoryChoices(selectedArtificerPlanDecisions),
+			);
 		}
 
 		// Record the history entry

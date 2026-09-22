@@ -10343,6 +10343,154 @@ body.has-quickbuild-overlay .toast__container {
 	padding: 1px;
 }
 
+/* Replicate Magic Item plan picker */
+.charsheet__artificer-plan-picker {
+	display: grid;
+	grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr);
+	gap: var(--cs-space-lg, 1rem);
+	min-height: min(68vh, 46rem);
+}
+
+.charsheet__artificer-plan-opportunities {
+	display: flex;
+	flex-direction: column;
+	gap: var(--cs-space-xs, 0.25rem);
+	border-right: 1px solid var(--cs-border, var(--rgb-border-grey));
+	padding-right: var(--cs-space-md, 0.75rem);
+	overflow-y: auto;
+}
+
+.charsheet__artificer-plan-count {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	padding: var(--cs-space-sm, 0.5rem);
+	background: var(--cs-bg-surface, var(--rgb-bg));
+	font-weight: 700;
+}
+
+.charsheet__artificer-plan-opportunity {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.15rem;
+	width: 100%;
+	padding: var(--cs-space-sm, 0.5rem);
+	text-align: left;
+	border: 1px solid transparent;
+	background: transparent;
+}
+
+.charsheet__artificer-plan-opportunity:hover,
+.charsheet__artificer-plan-opportunity:focus-visible {
+	border-color: var(--cs-primary, #6366f1);
+}
+
+.charsheet__artificer-plan-opportunity.active {
+	border-color: var(--cs-primary, #6366f1);
+	background: color-mix(in srgb, var(--cs-primary, #6366f1) 12%, transparent);
+}
+
+.charsheet__artificer-plan-opportunity.complete::after {
+	content: "Selected";
+	color: var(--cs-success, #22c55e);
+	font-size: 0.75rem;
+	font-weight: 700;
+}
+
+.charsheet__artificer-plan-editor {
+	min-width: 0;
+}
+
+.charsheet__artificer-plan-filters {
+	display: grid;
+	grid-template-columns: minmax(12rem, 1fr) minmax(9rem, 12rem);
+	gap: var(--cs-space-sm, 0.5rem);
+	margin-bottom: var(--cs-space-sm, 0.5rem);
+}
+
+.charsheet__artificer-plan-results {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+	gap: var(--cs-space-sm, 0.5rem);
+	max-height: min(50vh, 34rem);
+	overflow-y: auto;
+	padding: 1px;
+}
+
+.charsheet__artificer-plan-result {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	justify-content: space-between;
+	gap: var(--cs-space-sm, 0.5rem);
+	min-height: 5.2rem;
+	padding: var(--cs-space-md, 0.75rem);
+	text-align: left;
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	background: var(--cs-bg-surface, var(--rgb-bg));
+}
+
+.charsheet__artificer-plan-result:hover:not(:disabled),
+.charsheet__artificer-plan-result:focus-visible {
+	border-color: var(--cs-primary, #6366f1);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--cs-primary, #6366f1) 24%, transparent);
+}
+
+.charsheet__artificer-plan-result.selected {
+	border-color: var(--cs-primary, #6366f1);
+	background: color-mix(in srgb, var(--cs-primary, #6366f1) 10%, transparent);
+}
+
+.charsheet__artificer-plan-result:disabled {
+	opacity: 0.52;
+	cursor: not-allowed;
+}
+
+.charsheet__artificer-plan-result-main {
+	display: flex;
+	flex-direction: column;
+}
+
+.charsheet__artificer-plan-badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+}
+
+.charsheet__artificer-plan-review {
+	min-height: 2rem;
+}
+
+.charsheet__artificer-plan-feedback {
+	min-height: 1.25rem;
+	margin-top: var(--cs-space-xs, 0.25rem);
+	color: var(--cs-danger, #ef4444);
+}
+
+.charsheet__artificer-plan-actions {
+	position: sticky;
+	bottom: 0;
+	z-index: 2;
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--cs-space-sm, 0.5rem);
+	width: 100%;
+	padding: var(--cs-space-sm, 0.5rem) 0;
+	background: var(--cs-bg-surface, var(--rgb-bg));
+}
+
+.charsheet__artificer-plan-quick-summary {
+	display: grid;
+	gap: var(--cs-space-xs, 0.25rem);
+}
+
+.charsheet__artificer-plan-quick-row {
+	padding: var(--cs-space-sm, 0.5rem);
+	border: 1px solid var(--cs-border, var(--rgb-border-grey));
+	border-radius: var(--cs-radius-sm, 4px);
+}
+
 .charsheet__respec-option {
 	display: flex;
 	align-items: center;
