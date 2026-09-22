@@ -514,13 +514,20 @@ const SURFACES = [
 	["Quick Build", makeQuickBuildSurface],
 ];
 
-function resolveFixtureOnlyRespecDecisions (engine) {
+function resolveFixtureOnlyRespecDecisions (
+	engine,
+	{
+		omitRequiredPlanSlotId = null,
+		expectValid = true,
+	} = {},
+) {
 	const used = new Set();
 	while (true) {
 		const decision = engine.manifest.decisions.find(it =>
 			it.type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE
 			&& it.required
-			&& it.selection == null);
+			&& it.selection == null
+			&& it.meta?.slotId !== omitRequiredPlanSlotId);
 		if (!decision) break;
 		const selection = decision.options.find(option => {
 			const identity = CharacterSheetArtificerPlans.getSelectionIdentity(option);
@@ -530,8 +537,16 @@ function resolveFixtureOnlyRespecDecisions (engine) {
 		used.add(CharacterSheetArtificerPlans.getSelectionIdentity(selection));
 		engine.stageGraphMutation(decision.id, selection);
 	}
-	for (const decision of engine.manifest.decisions) decision.status = "resolved";
-	expect(engine.getValidation().errors).toEqual([]);
+	for (const decision of engine.manifest.decisions) {
+		if ([
+			CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE,
+			CharacterSheetArtificerPlans.DECISION_TYPE_REPLACE,
+		].includes(decision.type)) continue;
+		decision.status = "resolved";
+	}
+	const validation = engine.getValidation();
+	if (expectValid) expect(validation.errors).toEqual([]);
+	return validation;
 }
 
 function makeRespecPage (state) {
@@ -843,6 +858,37 @@ describe("RHW Reanimator R2b multiclass provenance", () => {
 });
 
 describe("RHW Reanimator R2b Respec atomicity", () => {
+	it("keeps required Base Artificer plans authoritative in the Respec fixture", () => {
+		const omittedSlotId = "efa-replicate-plan-1";
+		const liveState = makeResolvedFallbackState();
+		const engine = new CharacterSheetRespecEngine({page: makeRespecPage(liveState), state: liveState});
+
+		engine.begin();
+		const validation = resolveFixtureOnlyRespecDecisions(engine, {
+			omitRequiredPlanSlotId: omittedSlotId,
+			expectValid: false,
+		});
+		const omittedDecision = engine.manifest.decisions.find(decision =>
+			decision.type === CharacterSheetArtificerPlans.DECISION_TYPE_ACQUIRE
+			&& decision.meta?.slotId === omittedSlotId,
+		);
+		const omittedPlanErrors = validation.errors.filter(error => error.decisionId === omittedDecision.id);
+
+		expect(validation.errors).toEqual(omittedPlanErrors);
+		expect(omittedPlanErrors).toEqual([
+			expect.objectContaining({
+				code: "missing-plan",
+				decisionId: omittedDecision.id,
+				message: "Choose a plan for this required opportunity.",
+			}),
+			expect.objectContaining({
+				code: "decision-invalid",
+				decisionId: omittedDecision.id,
+				message: "Choose a plan for this required opportunity.",
+			}),
+		]);
+	});
+
 	it("edits in the candidate, Cancel discards it, Apply persists it, and Undo restores exact state", async () => {
 		const liveState = makeResolvedFallbackState();
 		const before = JSON.stringify(getR2bAtomicState(liveState));
