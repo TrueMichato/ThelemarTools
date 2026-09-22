@@ -835,7 +835,7 @@ class CharacterSheetProgression {
 					ownerUid: CharacterSheetProgression.getEntityUid(entity),
 				});
 			}
-			const descriptorAcquisitionKey = acquisitionKey || CharacterSheetProgression.getAcquisitionKey({
+			const descriptorAcquisitionKey = descriptor.rules?.acquisitionKey || acquisitionKey || CharacterSheetProgression.getAcquisitionKey({
 				ownerType: "feature",
 				ownerUid: CharacterSheetProgression.getEntityUid(entity),
 				classLevel: levelInfo?.classLevel,
@@ -864,7 +864,7 @@ class CharacterSheetProgression {
 			const nextVisited = new Set(visited);
 			nextVisited.add(visitedKey);
 			const type = CharacterSheetProgression.getDecisionTypeForDescriptor(descriptor);
-			const parentSemanticKey = parentDecision?.semanticKey || null;
+			const parentSemanticKey = parentDecision?.semanticKey || descriptor.rules?.parentSemanticKey || null;
 			const semanticKey = CharacterSheetProgression.getNestedSemanticKey({
 				parentSemanticKey,
 				acquisitionKey: descriptorAcquisitionKey,
@@ -902,12 +902,12 @@ class CharacterSheetProgression {
 				meta: {descriptorRules: descriptor.rules},
 				scope,
 				parentSemanticKey,
-				rootSemanticKey: rootSemanticKey || semanticKey,
+				rootSemanticKey: rootSemanticKey || descriptor.rules?.rootSemanticKey || parentSemanticKey || semanticKey,
 				depth,
 				semanticKeyOverride: semanticKey,
 				provenance: {
 					ownerType: parentEntity?.featureType || "classFeature",
-					ownerUid: CharacterSheetProgression.getEntityUid(entity),
+					ownerUid: descriptor.rules?.ownerUid || CharacterSheetProgression.getEntityUid(entity),
 					acquisitionKey: descriptorAcquisitionKey,
 					selectedGrantKey: selectedKeys.join("|") || null,
 					grantKind: descriptor.kind,

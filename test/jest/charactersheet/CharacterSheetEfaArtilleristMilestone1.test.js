@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {jest} from "@jest/globals";
 
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
@@ -6,11 +7,13 @@ import "../../../js/charactersheet/charactersheet-progression.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-crafting.js";
 import "../../../js/charactersheet/charactersheet-respec.js";
+import "../../../js/charactersheet/charactersheet-respec-engine.js";
 
 const CharacterSheetClassUtils = globalThis.CharacterSheetClassUtils;
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCrafting = globalThis.CharacterSheetCrafting;
 const CharacterSheetRespec = globalThis.CharacterSheetRespec;
+const CharacterSheetRespecEngine = globalThis.CharacterSheetRespecEngine;
 
 const artificerData = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
 
@@ -208,6 +211,28 @@ describe("EFA Artillerist Tools of the Trade", () => {
 		expect(restored.getPendingFeatureChoices().filter(choice => choice.featureName === "Tools of the Trade")).toHaveLength(0);
 	});
 
+	test("reconstructs the replacement entitlement for a pre-M1 exact-source save", () => {
+		const state = new CharacterSheetState();
+		state.addToolProficiency("Woodcarver's Tools");
+		state.addFeature(makeToolsFeature());
+		const legacySave = state.toJson();
+		const legacyFeature = legacySave.features.find(feature =>
+			CharacterSheetState._getSourceAwareSubclassFeatureUid(feature) ===
+			"Tools of the Trade|Artificer|EFA|Artillerist|EFA|3|EFA");
+		delete legacyFeature._requiresArtisanToolReplacement;
+		delete legacyFeature._sourceAwareFeatureUid;
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(legacySave);
+
+		const restoredFeature = restored.getFeature("Tools of the Trade");
+		expect(restoredFeature._sourceAwareFeatureUid).toBe("Tools of the Trade|Artificer|EFA|Artillerist|EFA|3|EFA");
+		expect(restoredFeature._requiresArtisanToolReplacement).toBe(true);
+		const [choice] = restored.getPendingFeatureChoices().filter(it => it.featureName === "Tools of the Trade");
+		expect(choice.featureUid).toBe(restoredFeature._sourceAwareFeatureUid);
+		expect(choice.options).not.toContain("Woodcarver's Tools");
+	});
+
 	test("persists a source-aware replacement artisan-tool decision and lets Respec edit it", () => {
 		const state = new CharacterSheetState();
 		state.addToolProficiency("Woodcarver's Tools");
@@ -271,6 +296,111 @@ describe("EFA Artillerist Tools of the Trade", () => {
 		expect(CharacterSheetCrafting.getCraftingWorkweeks(wandRecipe, {state: efa, items: [wand]})).toBe(2);
 		expect(CharacterSheetCrafting.getCraftingWorkweeks(wandRecipe, {state: tce, items: [wand]})).toBe(4);
 		expect(CharacterSheetCrafting.getCraftingWorkweeks(staffRecipe, {state: efa, items: [staff]})).toBe(4);
+	});
+
+	test("uses the resolved item value for a production-shaped recipe with no value field", () => {
+		const craftingData = JSON.parse(fs.readFileSync("data/crafting.json", "utf8"));
+		const recipe = craftingData.craftingRecipe.find(it => it.itemUid === "+1 dragon wand|hhhvi");
+		const item = {
+			name: "+1 Dragon Wand",
+			source: "HHHVI",
+			typeCode: "WD|HHHVI",
+			value: 20000,
+		};
+		const efa = makeArtilleristState({source: "EFA", level: 3});
+
+		expect(recipe.value).toBeUndefined();
+		expect(CharacterSheetCrafting.getCraftingWorkweeks(recipe, {state: efa, items: [item]})).toBe(2);
+	});
+
+	test("completes a real Respec transaction into EFA Artillerist with a persisted replacement tool", async () => {
+		const oldSubclass = {name: "Alchemist", shortName: "Alchemist", source: "EFA"};
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 3,
+			subclass: oldSubclass,
+		});
+		state.addToolProficiency("Woodcarver's Tools");
+		for (let level = 1; level <= 3; level++) {
+			state.recordLevelChoice({
+				level,
+				class: {name: "Artificer", source: "EFA"},
+				classLevel: level,
+				choices: level === 3 ? {subclass: oldSubclass} : {},
+			});
+		}
+
+		const classData = {
+			name: "Artificer",
+			source: "EFA",
+			hd: {number: 1, faces: 8},
+			classFeatures: [],
+			subclasses: [oldSubclass, EFA_ARTILLERIST],
+		};
+		const page = {
+			getClasses: () => [classData],
+			getClassFeatures: () => [],
+			getSubclassFeatures: () => artificerData.subclassFeature,
+			getOptionalFeatures: () => [],
+			getFeats: () => [],
+			getSkillsList: () => [],
+			saveCharacter: jest.fn().mockResolvedValue(undefined),
+			renderCharacter: jest.fn(),
+		};
+		const engine = new CharacterSheetRespecEngine({page, state});
+		engine.begin();
+		const respec = Object.create(CharacterSheetRespec.prototype);
+		respec._page = page;
+		respec._engine = engine;
+		respec._state = engine.state;
+
+		const subclassDecision = engine.manifest.decisions.find(decision =>
+			decision.type === "subclass"
+			&& decision.characterLevel === 3);
+		const history = engine.state.getLevelHistoryEntry(3);
+		await engine.stageCandidateMutation(async ({state: candidate}) => {
+			respec._state = candidate;
+			await respec._applySubclassChange(3, history, oldSubclass, EFA_ARTILLERIST);
+		});
+
+		const [pending] = engine.state.getPendingFeatureChoices().filter(choice => choice.featureName === "Tools of the Trade");
+		expect(pending.sourceDecisionKey).toBe(subclassDecision.semanticKey);
+		const nestedTool = engine.manifest.decisions.find(decision =>
+			decision.type === "nestedTool"
+			&& decision.parentSemanticKey === subclassDecision.semanticKey);
+		expect(nestedTool).toEqual(expect.objectContaining({
+			status: "missing",
+			required: true,
+			provenance: expect.objectContaining({
+				ownerUid: "Tools of the Trade|Artificer|EFA|Artillerist|EFA|3|EFA",
+			}),
+		}));
+
+		await engine.stageGraphMutation(nestedTool.id, ["Smith's Tools"], {
+			reverseParent: true,
+			apply: ({state: candidate}) =>
+				respec._applyDecisionMechanicsProficiencies(nestedTool, ["Smith's Tools"], nestedTool.options, candidate),
+		});
+		expect(engine.state.getPendingFeatureChoices().filter(choice => choice.featureName === "Tools of the Trade")).toHaveLength(0);
+		expect(engine.getValidation().isValid).toBe(true);
+
+		await engine.apply();
+		expect(state.getClasses()[0].subclass).toEqual(expect.objectContaining({
+			name: "Artillerist",
+			source: "EFA",
+		}));
+		expect(state.hasToolProficiency("Smith's Tools")).toBe(true);
+		expect(state.getPendingFeatureChoices().filter(choice => choice.featureName === "Tools of the Trade")).toHaveLength(0);
+		expect(state.getLevelHistoryEntry(3).decisions).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				type: "nestedTool",
+				selection: ["Smith's Tools"],
+				parentSemanticKey: subclassDecision.semanticKey,
+			}),
+		]));
+		expect(page.saveCharacter).toHaveBeenCalledTimes(1);
 	});
 });
 

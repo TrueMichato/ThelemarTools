@@ -5887,6 +5887,7 @@ class CharacterSheetState {
 
 		// Migrate features: infer featureType for old saves that don't have it
 		this._migrateFeatures();
+		this._migrateEfaArtilleristToolsOfTheTrade();
 
 		// Repair old saves whose entries-only features predate use/resource parsing.
 		// Runs after subclass repair + featureType migration and is idempotent.
@@ -8491,6 +8492,15 @@ class CharacterSheetState {
 
 			return f;
 		});
+	}
+
+	_migrateEfaArtilleristToolsOfTheTrade () {
+		for (const feature of this._data.features || []) {
+			if (!CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature(feature)) continue;
+			feature._sourceAwareFeatureUid ||= CharacterSheetState._getSourceAwareSubclassFeatureUid(feature);
+			if (typeof feature._requiresArtisanToolReplacement === "boolean") continue;
+			feature._requiresArtisanToolReplacement = this.hasToolProficiency("Woodcarver's Tools");
+		}
 	}
 
 	/**
@@ -21298,6 +21308,7 @@ class CharacterSheetState {
 				: String(config.selection),
 			occurrence: Number(config.provenance?.occurrence) || 0,
 			slot: Number(config.provenance?.pickSlot) || 0,
+			identityMode: config.provenance?.identityMode,
 		});
 		const target = characterLevel === 0
 			? this.getCharacterBase()
@@ -21495,6 +21506,7 @@ class CharacterSheetState {
 					sourcePath: choice.featureUid || choice.featureName || choice.kind,
 					occurrence: 0,
 					pickSlot: 0,
+					...(choice.featureUid ? {identityMode: "opportunity"} : {}),
 				},
 			});
 			if (decision && choice.kind === "tool") {

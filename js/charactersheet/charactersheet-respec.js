@@ -2037,6 +2037,13 @@ class CharacterSheetRespec {
 			return;
 		}
 		if (nestedSet) {
+			const pendingFeatureChoice = decision.type === "nestedTool" && decision.parentSemanticKey
+				? this._state._data?.pendingFeatureChoices?.find(choice =>
+					choice.kind === "tool"
+						&& choice.sourceDecisionKey === decision.parentSemanticKey
+						&& (!decision.provenance?.ownerUid || choice.featureUid === decision.provenance.ownerUid),
+				)
+				: null;
 			const beforeLevels = Object.fromEntries(
 				[...previous, ...next].map(value => {
 					const skill = ["nestedSkill", "nestedExpertise"].includes(decision.type)
@@ -2046,6 +2053,10 @@ class CharacterSheetRespec {
 				}),
 			);
 			applySetChoice(nestedSet.type, nestedSet.add, nestedSet.remove);
+			if (pendingFeatureChoice) {
+				this._state._recordFulfilledFeatureToolChoice?.(pendingFeatureChoice);
+				this._state.removePendingFeatureChoice?.(pendingFeatureChoice.id);
+			}
 			if (decision.meta?.unplacedFeatChoice && ["nestedSkill", "nestedExpertise"].includes(decision.type)) {
 				const parent = this._engine?.manifest?.decisions?.find(candidate =>
 					candidate.semanticKey === decision.rootSemanticKey,
@@ -4867,6 +4878,14 @@ class CharacterSheetRespec {
 			c.name === history.class.name
 			&& (!history.class.source || c.source === history.class.source));
 		const classLevel = classEntry?.level || 1;
+		const subclassSourceDecisionKey = this._engine?.manifest?.decisions?.find(decision =>
+			decision.type === "subclass"
+				&& decision.characterLevel === Number(history.level ?? level)
+				&& decision.className === history.class.name
+				&& decision.classSource === history.class.source,
+		)?.semanticKey
+			|| history.decisions?.find(decision => decision.type === "subclass")?.semanticKey
+			|| null;
 
 		// Remove old subclass features using proper API (scoped to the changed class)
 		const featuresToRemove = this._getSubclassFeatures(oldSubclass, history.class);
@@ -4942,7 +4961,7 @@ class CharacterSheetRespec {
 					entries: f.entries,
 					description: f.entries ? Renderer.get().render({entries: f.entries}) : "",
 					isSubclassFeature: true,
-				});
+				}, {sourceDecisionKey: subclassSourceDecisionKey});
 			});
 		}
 

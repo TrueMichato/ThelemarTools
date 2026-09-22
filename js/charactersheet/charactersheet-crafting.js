@@ -128,9 +128,10 @@ class CharacterSheetCrafting {
 	 * @returns {number|null}
 	 */
 	static getCraftingWorkweeks (recipe, {state = null, items = []} = {}) {
-		if (recipe?.value == null) return null;
-		const baseWorkweeks = Math.max(1, Math.round(recipe.value / 100 / 50));
 		const item = CharacterSheetCrafting._resolveRecipeItem(recipe, items);
+		const value = recipe?.value ?? item?.value;
+		if (value == null) return null;
+		const baseWorkweeks = Math.max(1, Math.round(value / 100 / 50));
 		const multiplier = state?.getCraftingTimeMultiplier?.({item}) ?? 1;
 		return baseWorkweeks * multiplier;
 	}
