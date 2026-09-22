@@ -9,6 +9,23 @@ import "../../../js/charactersheet/charactersheet-respec-engine.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetRespecEngine = globalThis.CharacterSheetRespecEngine;
+let CharacterSheetPage;
+const savedWindow = globalThis.window;
+
+beforeAll(async () => {
+	globalThis.window = {
+		...(savedWindow || {}),
+		addEventListener: () => {},
+		location: {search: ""},
+		matchMedia: () => ({matches: false, addEventListener: () => {}}),
+	};
+	await import("../../../js/charactersheet/charactersheet.js");
+	CharacterSheetPage = globalThis.CharacterSheetPage;
+});
+
+afterAll(() => {
+	globalThis.window = savedWindow;
+});
 
 const artificerData = JSON.parse(fs.readFileSync("data/class/class-artificer.json", "utf8"));
 const objectData = JSON.parse(fs.readFileSync("data/objects.json", "utf8")).object;
@@ -248,6 +265,27 @@ describe("EFA Artillerist generated class-summon contract", () => {
 		expect(state.toJson().companions[0]).not.toHaveProperty("exhaustion");
 	});
 
+	test("enforces carried and deployed mobility invariants at creation and reconciliation", () => {
+		const state = makeState();
+		expect(createCannon(state, {mobility: null})).toMatchObject({ok: false, reason: "invalidState"});
+		expect(createCannon(state, {
+			placement: "carried",
+			mobility: "legs",
+			distanceFromOwnerFt: 0,
+		})).toMatchObject({ok: false, reason: "invalidState"});
+		expect(state.listEfaEldritchCannons()).toEqual([]);
+
+		state._data.companions.push(makeRawCannon({
+			overrides: {placement: "deployed", mobility: null},
+		}));
+		expect(state.reconcileClassSummons()).toEqual([
+			expect.objectContaining({action: "retired", reason: "invalidState"}),
+		]);
+		expect(state.listEfaEldritchCannons()).toEqual([]);
+
+		expect(createCannon(state, {mobility: "legs"})).toMatchObject({ok: true});
+	});
+
 	test("increments the ownership-slot revision after retirement across save/load", () => {
 		const state = makeState();
 		const first = createCannon(state);
@@ -448,6 +486,108 @@ describe("EFA cannon reconciliation", () => {
 });
 
 describe("EFA cannon integration boundaries", () => {
+	test("isolates compact summons from generic companion render and mutation paths", () => {
+		const state = makeState();
+		const {instanceId} = createCannon(state);
+		const familiarId = state.addCompanion({
+			name: "Owl",
+			type: CharacterSheetState.COMPANION_TYPES.FAMILIAR,
+			hp: {max: 12, current: 12},
+			abilities: {dex: 14},
+		});
+		const dancingItemId = state.addCompanion({
+			name: "Dancing Item",
+			source: "TCE",
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			hp: {max: 20, current: 20},
+			abilities: {dex: 18},
+		});
+
+		expect(state.getCompanions().map(it => it.id)).toEqual([familiarId, dancingItemId]);
+		expect(state.getActiveCompanions().map(it => it.id)).toEqual([familiarId, dancingItemId]);
+		expect(state.getCompanionsByType(CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON).map(it => it.id)).toEqual([dancingItemId]);
+		expect(state.getCompanion(instanceId)).toBeNull();
+		expect(state.getCompanionConditions(instanceId)).toEqual([]);
+		expect(state.getCompanionInitiative(instanceId)).toBe(0);
+		expect(state.damageCompanion(instanceId, 5)).toEqual({
+			remaining: 0,
+			tempAbsorbed: 0,
+			hpLost: 0,
+			droppedToZero: false,
+		});
+		expect(state.healCompanion(instanceId, 5)).toBe(0);
+		expect(state.updateCompanion(instanceId, {name: "Leaked"})).toBe(false);
+		expect(state.updateCompanionNote(instanceId, "Leaked")).toBe(false);
+		expect(state.removeCompanion(instanceId)).toBe(false);
+		expect(state.getClassSummon(instanceId)).toMatchObject({instanceId, currentHp: 15});
+
+		expect(state.getCompanionInitiative(familiarId)).toBe(2);
+		state.addCompanionCondition(familiarId, "Prone");
+		expect(state.getCompanionConditions(familiarId)).toEqual(["Prone"]);
+		expect(state.damageCompanion(familiarId, 5)).toMatchObject({hpLost: 5, droppedToZero: false});
+		expect(state.getCompanion(familiarId).hp.current).toBe(7);
+
+		expect(state.removeCompanionsByType(CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON)).toBe(1);
+		expect(state.getCompanion(dancingItemId)).toBeNull();
+		expect(state.getClassSummon(instanceId)).not.toBeNull();
+		expect(state.toJson().companions.map(it => it.id)).toEqual([instanceId, familiarId]);
+	});
+
+	test("keeps compact summons out of the normal CharacterSheet companion renderer", () => {
+		const state = makeState();
+		const {instanceId} = createCannon(state);
+		const previousDocument = globalThis.document;
+		const list = {innerHTML: ""};
+		globalThis.document = {
+			getElementById: id => id === "charsheet-companions-list" ? list : null,
+		};
+		const page = Object.create(CharacterSheetPage.prototype);
+		page._state = state;
+		page._ensureBeastheartCompanionBonded = jest.fn();
+		page._renderCompanionButtons = jest.fn();
+		page._renderCompanionsOverviewIndicator = jest.fn();
+
+		try {
+			expect(() => page._renderCompanions()).not.toThrow();
+			expect(list.innerHTML).toContain("No active companions");
+			expect(list.innerHTML).not.toContain("Eldritch Cannon");
+			expect(state.getClassSummon(instanceId)).not.toBeNull();
+		} finally {
+			globalThis.document = previousDocument;
+		}
+	});
+
+	test("leaves TCE Artillerists and non-generated class summons on legacy companion paths", () => {
+		const state = makeState({source: "TCE", level: 3});
+		const dancingItemId = state.addCompanion({
+			name: "Dancing Item",
+			source: "TCE",
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			hp: {max: 25, current: 25},
+			abilities: {dex: 16},
+		});
+		const before = state.toJson();
+
+		expect(state.reconcileClassSummons()).toEqual([]);
+		expect(state.advanceClassSummonGameTime(10)).toEqual([]);
+		expect(state.createEfaEldritchCannon({
+			form: "forceBallista",
+			size: "S",
+			placement: "deployed",
+			mobility: "wheels",
+			distanceFromOwnerFt: 5,
+			createdWith: "freeUse",
+		})).toMatchObject({ok: false, reason: "sourceMismatch"});
+		expect(state.setClassSummonCurrentHp(dancingItemId, 1)).toMatchObject({ok: false, reason: "notFound"});
+		expect(state.retireClassSummon(dancingItemId, "dismissed")).toMatchObject({ok: false, reason: "notFound"});
+		expect(state.toJson()).toEqual(before);
+
+		expect(state.getCompanions().map(it => it.id)).toEqual([dancingItemId]);
+		expect(state.getCompanionInitiative(dancingItemId)).toBe(3);
+		expect(state.damageCompanion(dancingItemId, 5)).toMatchObject({hpLost: 5, droppedToZero: false});
+		expect(state.getCompanion(dancingItemId).hp.current).toBe(20);
+	});
+
 	test("keeps Respec source changes candidate-isolated and restores the cannon on undo", async () => {
 		const state = makeState({level: 3});
 		const {instanceId} = createCannon(state);

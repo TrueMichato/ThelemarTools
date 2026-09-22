@@ -1144,6 +1144,14 @@ owner class/subclass/level changes: it retires invalid/source-crossed/ownerless
 records, removes stale slot 1 below level 15, deduplicates each ownership slot
 by newest legal revision, and clamps HP down without healing.
 
+Compact generated records are intentionally hidden from generic companion
+listing/getter/render APIs. Generic companion controls assume a full legacy
+statblock and must not expose or mutate a generated summon; lifecycle reads and
+retirement go through the dedicated class-summon APIs. Serialization still
+keeps the compact record in `_data.companions[]`. Carried cannons require
+`mobility: null` and zero owner distance; deployed cannons require either
+`"legs"` or `"wheels"`.
+
 Duration is game time, not wall time. `advanceClassSummonGameTime(minutes)`
 reduces the persisted 60-minute duration and retires at zero. Milestone 2 only
 projects form damage and Protector temporary-HP formulas; applying damage,

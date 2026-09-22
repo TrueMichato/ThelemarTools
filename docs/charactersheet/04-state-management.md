@@ -55,6 +55,13 @@ template/source identity, owner/subclass eligibility, slot ceilings, legal
 runtime values, deduplication, zero-HP/duration retirement, and HP clamping
 without healing.
 
+Generic companion access (`getCompanions()`, `getActiveCompanions()`,
+`getCompanion()`, generic render controls, and generic removal) excludes
+generated records. Those APIs require the full legacy companion shape and
+would otherwise expose unsupported controls or persist fake derived fields.
+Dedicated class-summon APIs remain the only read/mutation surface, while
+`toJson()` continues to serialize the compact record from `_data.companions[]`.
+
 ### Basic Information
 
 ```javascript

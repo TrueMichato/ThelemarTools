@@ -59765,7 +59765,7 @@ class CharacterSheetState {
 	 * @returns {boolean} True if companion was found and updated
 	 */
 	updateCompanionNote (companionId, note) {
-		const companion = this._data.companions.find(c => c.id === companionId);
+		const companion = this.getCompanion(companionId);
 		if (!companion) return false;
 		companion.note = note || "";
 		return true;
@@ -59777,7 +59777,7 @@ class CharacterSheetState {
 	 * @returns {string} The note content or empty string
 	 */
 	getCompanionNote (companionId) {
-		const companion = this._data.companions.find(c => c.id === companionId);
+		const companion = this.getCompanion(companionId);
 		return companion?.note || "";
 	}
 
@@ -76291,6 +76291,11 @@ class CharacterSheetState {
 	static EFA_ELDRITCH_CANNON_PLACEMENTS = Object.freeze(["carried", "deployed"]);
 	static EFA_ELDRITCH_CANNON_MOBILITY = Object.freeze(["legs", "wheels"]);
 
+	static _isGeneratedClassSummonRecord (record) {
+		return record?.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
+			&& !!record.generatedClassSummon;
+	}
+
 	static _isSameClassSummonUid (a, b) {
 		return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 	}
@@ -76490,8 +76495,9 @@ class CharacterSheetState {
 			: record.createdWith === "spellSlot"
 				&& Number.isInteger(record.createdWithSlotLevel)
 				&& record.createdWithSlotLevel > 0;
-		const isPlacementRuntimeValid = record.placement !== "carried"
-			|| (record.mobility == null && record.distanceFromOwnerFt === 0);
+		const isPlacementRuntimeValid = record.placement === "carried"
+			? record.mobility == null && record.distanceFromOwnerFt === 0
+			: CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(record.mobility);
 		if (!isFormValid
 			|| !isSizeValid
 			|| !isPlacementValid
@@ -76591,10 +76597,8 @@ class CharacterSheetState {
 	 * @returns {Array<{instanceId:string|null, action:"kept"|"retired"|"clamped", reason:string|null, details?:object}>}
 	 */
 	reconcileClassSummons () {
-		const records = (this._data.companions || []).filter(record =>
-			record?.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
-			&& record.generatedClassSummon,
-		);
+		const records = (this._data.companions || [])
+			.filter(record => CharacterSheetState._isGeneratedClassSummonRecord(record));
 		const results = [];
 		const legalByOwnership = new Map();
 
@@ -76741,8 +76745,7 @@ class CharacterSheetState {
 	getClassSummon (instanceId) {
 		const record = (this._data.companions || []).find(companion =>
 			companion?.id === instanceId
-			&& companion.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
-			&& companion.generatedClassSummon,
+			&& CharacterSheetState._isGeneratedClassSummonRecord(companion),
 		);
 		return record ? this._projectGeneratedClassSummon(record) : null;
 	}
@@ -76754,7 +76757,7 @@ class CharacterSheetState {
 		ownerFeatureUid = null,
 	} = {}) {
 		return (this._data.companions || [])
-			.filter(companion => companion?.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON && companion.generatedClassSummon)
+			.filter(companion => CharacterSheetState._isGeneratedClassSummonRecord(companion))
 			.filter(companion => !templateUid || CharacterSheetState._isSameClassSummonUid(companion.generatedClassSummon.templateUid, templateUid))
 			.filter(companion => !ownerClassUid || CharacterSheetState._isSameClassSummonUid(companion.generatedClassSummon.ownerClassUid, ownerClassUid))
 			.filter(companion => !ownerSubclassUid || CharacterSheetState._isSameClassSummonUid(companion.generatedClassSummon.ownerSubclassUid, ownerSubclassUid))
@@ -76796,7 +76799,9 @@ class CharacterSheetState {
 			&& (mobility == null || CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(mobility))
 			&& Number.isFinite(distanceFromOwnerFt)
 			&& distanceFromOwnerFt >= 0
-			&& (placement !== "carried" || (mobility == null && distanceFromOwnerFt === 0))
+			&& (placement === "carried"
+				? mobility == null && distanceFromOwnerFt === 0
+				: CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(mobility))
 			&& paymentValid;
 		if (!runtimeValid) {
 			return {ok: false, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE};
@@ -76879,8 +76884,7 @@ class CharacterSheetState {
 		}
 		const record = (this._data.companions || []).find(companion =>
 			companion?.id === instanceId
-			&& companion.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
-			&& companion.generatedClassSummon,
+			&& CharacterSheetState._isGeneratedClassSummonRecord(companion),
 		);
 		if (!record) return {ok: false, instanceId, reason: "notFound"};
 		return {ok: true, ...this._retireClassSummonRecord(record, reason)};
@@ -76904,8 +76908,7 @@ class CharacterSheetState {
 		}
 		const record = (this._data.companions || []).find(companion =>
 			companion?.id === instanceId
-			&& companion.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
-			&& companion.generatedClassSummon,
+			&& CharacterSheetState._isGeneratedClassSummonRecord(companion),
 		);
 		if (!record) return {ok: false, instanceId, reason: "notFound"};
 		if (currentHp === 0) return this.destroyClassSummon(instanceId);
@@ -76932,10 +76935,8 @@ class CharacterSheetState {
 			throw new RangeError("Class-summon game time must be a non-negative finite number.");
 		}
 		const results = [];
-		const records = (this._data.companions || []).filter(companion =>
-			companion?.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
-			&& companion.generatedClassSummon,
-		);
+		const records = (this._data.companions || [])
+			.filter(companion => CharacterSheetState._isGeneratedClassSummonRecord(companion));
 		for (const record of records) {
 			record.durationRemainingMinutes = Math.max(0, record.durationRemainingMinutes - minutes);
 			if (record.durationRemainingMinutes === 0) {
@@ -77011,7 +77012,8 @@ class CharacterSheetState {
 	 * @returns {Array} Copy of the companions array
 	 */
 	getCompanions () {
-		return [...(this._data.companions || [])];
+		return (this._data.companions || [])
+			.filter(companion => !CharacterSheetState._isGeneratedClassSummonRecord(companion));
 	}
 
 	/**
@@ -77019,7 +77021,7 @@ class CharacterSheetState {
 	 * @returns {Array} Active companions
 	 */
 	getActiveCompanions () {
-		return (this._data.companions || []).filter(c => c.active !== false);
+		return this.getCompanions().filter(companion => companion.active !== false);
 	}
 
 	/**
@@ -77028,7 +77030,7 @@ class CharacterSheetState {
 	 * @returns {object|null} The companion data, or null
 	 */
 	getCompanion (companionId) {
-		return (this._data.companions || []).find(c => c.id === companionId) || null;
+		return this.getCompanions().find(companion => companion.id === companionId) || null;
 	}
 
 	/**
@@ -77037,7 +77039,7 @@ class CharacterSheetState {
 	 * @returns {Array} Matching companions
 	 */
 	getCompanionsByType (type) {
-		return (this._data.companions || []).filter(c => c.type === type);
+		return this.getCompanions().filter(companion => companion.type === type);
 	}
 
 	/**
@@ -77252,6 +77254,8 @@ class CharacterSheetState {
 	 * @returns {boolean} True if removed
 	 */
 	removeCompanion (companionId) {
+		const companion = (this._data.companions || []).find(it => it.id === companionId);
+		if (!companion || CharacterSheetState._isGeneratedClassSummonRecord(companion)) return false;
 		const before = this._data.companions.length;
 		this._data.companions = this._data.companions.filter(c => c.id !== companionId);
 		return this._data.companions.length < before;
@@ -77264,7 +77268,10 @@ class CharacterSheetState {
 	 */
 	removeCompanionsByType (type) {
 		const before = this._data.companions.length;
-		this._data.companions = this._data.companions.filter(c => c.type !== type);
+		this._data.companions = this._data.companions.filter(companion =>
+			companion.type !== type
+			|| CharacterSheetState._isGeneratedClassSummonRecord(companion),
+		);
 		return before - this._data.companions.length;
 	}
 
@@ -77634,7 +77641,7 @@ class CharacterSheetState {
 	endCompanionCombat (companionId = null) {
 		const targets = companionId
 			? [this.getCompanion(companionId)].filter(Boolean)
-			: (this._data.companions || []);
+			: this.getCompanions();
 
 		return targets.map(companion => {
 			const ferocitySpent = companion.ferocity || 0;
@@ -78375,7 +78382,7 @@ class CharacterSheetState {
 	 */
 	dismissConcentrationCompanions () {
 		let count = 0;
-		(this._data.companions || []).forEach(c => {
+		this.getCompanions().forEach(c => {
 			if (c.concentrationLinked && c.active) {
 				c.active = false;
 				count++;
@@ -78484,7 +78491,6 @@ class CharacterSheetState {
 	recalculateCompanion (companionId) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return;
-		if (companion.generatedClassSummon) return;
 
 		const calculations = this.getFeatureCalculations();
 		const profBonus = this.getProficiencyBonus();
@@ -78575,7 +78581,7 @@ class CharacterSheetState {
 	 * Recalculate all companions' stats (called on level up, ability score change, etc.)
 	 */
 	recalculateAllCompanions () {
-		(this._data.companions || []).forEach(c => this.recalculateCompanion(c.id));
+		this.getCompanions().forEach(companion => this.recalculateCompanion(companion.id));
 	}
 
 	/**
@@ -79253,7 +79259,7 @@ class CharacterSheetState {
 	 */
 	restCompanions (restType) {
 		(this._data.companions || []).forEach(companion => {
-			if (companion.generatedClassSummon) return;
+			if (CharacterSheetState._isGeneratedClassSummonRecord(companion)) return;
 			// A rest means the encounter is over, so settle the end-of-combat ferocity
 			// rule first: the companion banks the HP its fury earned it, then the track
 			// clears. Idempotent when combat was already ended explicitly.
