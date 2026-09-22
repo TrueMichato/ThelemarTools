@@ -152,3 +152,33 @@ describe("CS-BUG-017 builder option-pool parity", () => {
 		expect(builderSrc).toMatch(/featureChoiceReplay\.push\(CharacterSheetClassUtils\.buildHistoryFeatureSnapshot\(materialized/);
 	});
 });
+
+describe("conditional tool-choice acquisition parity", () => {
+	const sources = {
+		Builder: readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-builder.js"), "utf8"),
+		"Level Up": readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-levelup.js"), "utf8"),
+		"Quick Build": readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet-quickbuild.js"), "utf8"),
+	};
+
+	test.each(Object.entries(sources))("%s adds features through state and drains the shared pending-choice queue", (name, source) => {
+		expect(source).toMatch(/\.(?:addFeature|_state\.addFeature)\s*\(/);
+		expect(source).toMatch(/processPendingFeatureChoices\s*\(/);
+	});
+});
+
+describe("pending tool picker canonical multi-select contract", () => {
+	const sheetSrc = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+	const method = sheetSrc.match(/async _pPickFeatureChoice \([\s\S]*?\n\t\}/)?.[0] || "";
+
+	test("canonicalizes tool options instead of constructing object-shaped selections", () => {
+		expect(method).toMatch(/CharacterSheetClassUtils\.getCanonicalToolChoiceValue\s*\(/);
+		expect(method).toMatch(/finalize\(isTool \? \[value\] : value\)/);
+		expect(method).not.toMatch(/finalize\(isSkill \? opt : \{name: opt\.name/);
+	});
+
+	test("requires an exact number of distinct selected options before confirming", () => {
+		expect(method).toMatch(/const selected = new Set\(\)/);
+		expect(method).toMatch(/selected\.size !== count/);
+		expect(method).toMatch(/if \(selected\.size >= count\) return/);
+	});
+});

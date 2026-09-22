@@ -11047,35 +11047,40 @@ class CharacterSheetState {
 					};
 				}
 			}
-			if (decision.type === "nestedSkill" && decision.selection != null && !decision.receipt) {
-				const evidence = CharacterSheetProgression.getLegacyTrackedFeatureChoiceEvidence({
-					state: this,
-					ownerUid: decision.provenance?.ownerUid,
-					options: decision.options,
-					selection: decision.selection,
-				});
-				if (evidence) {
+			const isConditionalToolDecision = decision.type === "nestedTool"
+				&& (decision.provenance?.grantKey || decision.provenance?.sourceKey) === "conditionalToolGrant.tools";
+			if ((decision.type === "nestedSkill" || isConditionalToolDecision) && decision.selection != null && !decision.receipt) {
+				const ownershipType = decision.type === "nestedTool" ? "tools" : "skills";
+				const selectedValues = Array.isArray(decision.selection) ? decision.selection : [decision.selection];
+				const evidence = selectedValues
+					.map(selection => CharacterSheetProgression.getLegacyTrackedFeatureChoiceEvidence({
+						state: this,
+						ownerUid: decision.provenance?.ownerUid,
+						options: decision.options,
+						selection,
+						type: ownershipType,
+					}))
+					.filter(Boolean);
+				if (evidence.length === selectedValues.length) {
 					decision.receipt = {
 						version: 1,
 						sourceDecisionKey: decision.semanticKey,
 						effects: [{
 							type: "ownership",
-							ownership: [{type: evidence.type, value: CharacterSheetProgression._copy(evidence.value)}],
+							ownership: evidence.map(item => ({
+								type: item.type,
+								value: CharacterSheetProgression._copy(item.value),
+							})),
 						}],
 					};
-					const sources = this._data.grantedProficiencies?.[evidence.type]?.[
-						this._getProgressionOwnershipKey(evidence.type, evidence.value)
-					];
-					if (sources) {
-						const remaining = sources.filter(source => source !== evidence.sourceId);
+					for (const item of evidence) {
+						const sources = this._data.grantedProficiencies?.[item.type]?.[item.trackedKey];
+						if (!sources) continue;
+						const remaining = sources.filter(source => source !== item.sourceId);
 						if (remaining.length) {
-							this._data.grantedProficiencies[evidence.type][
-								this._getProgressionOwnershipKey(evidence.type, evidence.value)
-							] = remaining;
+							this._data.grantedProficiencies[item.type][item.trackedKey] = remaining;
 						} else {
-							delete this._data.grantedProficiencies[evidence.type][
-								this._getProgressionOwnershipKey(evidence.type, evidence.value)
-							];
+							delete this._data.grantedProficiencies[item.type][item.trackedKey];
 						}
 					}
 				}
@@ -11454,8 +11459,15 @@ class CharacterSheetState {
 			if (type === "skills") {
 				const expertise = this._getProgressionOwnershipEntry("expertise", value);
 				if (!expertise?.preserved && !expertise?.sources?.length) this.setSkillProficiency(this._getProgressionOwnershipKey(type, value), 0);
-			} else if (type === "tools") this.removeToolProficiency(value);
-			else if (type === "languages") this.removeLanguage(value);
+			} else if (type === "tools") {
+				const targetKey = this._getProgressionOwnershipKey("tools", value);
+				const hasTrackedSource = Object.entries(this._data.grantedProficiencies?.tools || {})
+					.some(([tool, sources]) =>
+						this._getProgressionOwnershipKey("tools", tool) === targetKey
+						&& sources?.length,
+					);
+				if (!hasTrackedSource) this.removeToolProficiency(value);
+			} else if (type === "languages") this.removeLanguage(value);
 			else if (type === "saves") this.removeSaveProficiency(value);
 			else if (type === "weapons") this.removeWeaponProficiency(value);
 			else if (type === "armor") this.removeArmorProficiency(value);
@@ -22210,6 +22222,74 @@ class CharacterSheetState {
 		this._ensureStudentOfWarChoices();
 		this._ensureFixedProficiencyFallbackChoices();
 		this._ensureHagAncestorChoice();
+		this._ensureConditionalToolGrantChoices();
+	}
+
+	_ensureConditionalToolGrantChoices () {
+		(this._data.features || []).forEach(feature => {
+			const grant = feature?._conditionalToolGrant;
+			if (!grant?.requiredCount || grant.selections?.length === grant.requiredCount) return;
+			this._queueConditionalToolGrantChoice(feature);
+		});
+	}
+
+	_getConditionalToolDecisionSemanticKey (feature) {
+		const progression = globalThis.CharacterSheetProgression;
+		if (!progression) return null;
+		const acquisitionKey = progression.getAcquisitionKey({
+			ownerType: feature.isSubclassFeature ? "subclassFeature" : "classFeature",
+			ownerUid: progression.getEntityUid(feature),
+			classLevel: Number(feature.level) || 0,
+			sourcePath: feature.name,
+			occurrence: 0,
+		});
+		return progression.getNestedSemanticKey({
+			parentSemanticKey: null,
+			acquisitionKey,
+			grantKey: "conditionalToolGrant.tools",
+			identityMode: "opportunity",
+		});
+	}
+
+	_queueConditionalToolGrantChoice (feature) {
+		const grant = feature?._conditionalToolGrant;
+		if (!grant?.requiredCount) return;
+		this.addPendingFeatureChoice({
+			featureName: feature.name,
+			featureId: feature.id,
+			featureSource: feature.source,
+			featureClass: feature.className,
+			featureClassSource: feature.classSource,
+			level: feature.level,
+			kind: "tool",
+			options: CharacterSheetClassUtils.getConditionalToolChoiceOptions(grant),
+			count: grant.requiredCount,
+			unique: true,
+			semanticKey: this._getConditionalToolDecisionSemanticKey(feature),
+			sourcePath: `${feature.name}.conditionalToolGrant.tools`,
+			grantKey: "conditionalToolGrant.tools",
+		});
+	}
+
+	syncConditionalToolGrantSelection (decision, selection) {
+		if (decision?.type !== "nestedTool") return false;
+		const ownerUid = decision.provenance?.ownerUid;
+		const grantKey = decision.provenance?.grantKey || decision.provenance?.sourceKey;
+		if (!ownerUid || grantKey !== "conditionalToolGrant.tools") return false;
+		const feature = this._data.features.find(it =>
+			it?._conditionalToolGrant
+			&& CharacterSheetProgression.getEntityUid(it) === ownerUid,
+		);
+		if (!feature) return false;
+		const tools = CharacterSheetClassUtils.getNormalizedToolChoiceSelection(selection, {
+			count: feature._conditionalToolGrant.requiredCount,
+			options: CharacterSheetClassUtils.getConditionalToolChoiceOptions(feature._conditionalToolGrant),
+		});
+		if (!tools) return false;
+		feature._conditionalToolGrant.selections = [...tools];
+		feature.choices ||= {};
+		feature.choices.tools = [...tools];
+		return true;
 	}
 
 	_ensureStudentOfWarChoices () {
@@ -22289,6 +22369,9 @@ class CharacterSheetState {
 			...(choice.expertiseIfProficient ? {expertiseIfProficient: true} : {}),
 			...(choice.sourceDecisionKey ? {sourceDecisionKey: choice.sourceDecisionKey} : {}),
 			...(choice.acquisitionKey ? {acquisitionKey: choice.acquisitionKey} : {}),
+			...(choice.semanticKey ? {semanticKey: choice.semanticKey} : {}),
+			...(choice.sourcePath ? {sourcePath: choice.sourcePath} : {}),
+			...(choice.grantKey ? {grantKey: choice.grantKey} : {}),
 		});
 		return true;
 	}
@@ -22356,9 +22439,11 @@ class CharacterSheetState {
 				occurrence: Number(config.provenance?.occurrence) || 0,
 			}),
 			grantKey: config.provenance?.grantKey || config.label || config.type,
-			selectedGrantKey: typeof config.selection === "object"
-				? (config.selection.name || config.selection.value || "")
-				: String(config.selection),
+			selectedGrantKey: Array.isArray(config.selection)
+				? config.selection.join("|")
+				: (typeof config.selection === "object"
+					? (config.selection.name || config.selection.value || "")
+					: String(config.selection)),
 			occurrence: Number(config.provenance?.occurrence) || 0,
 			slot: Number(config.provenance?.pickSlot) || 0,
 			identityMode: config.provenance?.identityMode,
@@ -22395,9 +22480,11 @@ class CharacterSheetState {
 				ownerType: "feature",
 				ownerUid: config.label || config.type,
 				acquisitionKey: semanticKey,
-				selectedGrantKey: typeof config.selection === "object"
-					? config.selection.name || config.selection.value || null
-					: String(config.selection),
+				selectedGrantKey: Array.isArray(config.selection)
+					? config.selection.join("|")
+					: (typeof config.selection === "object"
+						? config.selection.name || config.selection.value || null
+						: String(config.selection)),
 				grantKind: config.type,
 				grantKey: config.label || config.type,
 				sourcePath: config.label || config.type,
@@ -22411,7 +22498,11 @@ class CharacterSheetState {
 	}
 
 	_featureChoiceSignature (choice) {
-		const opts = (choice.options || []).map(o => (typeof o === "string" ? o : `${o.name}|${o.source}`).toLowerCase()).sort().join(",");
+		const opts = (choice.options || []).map(o => (
+			choice.kind === "tool"
+				? CharacterSheetClassUtils.getCanonicalToolChoiceValue(o)
+				: (typeof o === "string" ? o : `${o.name}|${o.source}`)
+		).toLowerCase()).sort().join(",");
 		// Include level so recurring same-named choices (e.g. Specialties at L3/7/11/15/20)
 		// with an identical remaining option pool are still queued as distinct picks, and
 		// class so a same-named choice on a different multiclass class stays distinct.
@@ -22422,7 +22513,7 @@ class CharacterSheetState {
 			|| choice.featureId
 			|| choice.featureName
 			|| "";
-		return `${String(owner).toLowerCase()}${cls}${lvl}|${choice.kind}|${opts}`;
+		return `${String(owner).toLowerCase()}${cls}${lvl}|${choice.kind}|${Number(choice.count) || 1}|${opts}`;
 	}
 
 	/**
@@ -22471,7 +22562,8 @@ class CharacterSheetState {
 	fulfillFeatureChoice (choiceId, selection, allSpells = null) {
 		const choice = this._data.pendingFeatureChoices?.find(c => c.id === choiceId);
 		if (!choice) return false;
-		let progressionSelection = selection;
+		const sourceFeature = this._data.features.find(it => it.id === choice.featureId) || null;
+		let normalizedSelection = selection;
 
 		if (choice.kind === "skill") {
 			const skillKey = String(selection).toLowerCase().replace(/\s+/g, "");
@@ -22494,26 +22586,33 @@ class CharacterSheetState {
 			// this marker is the only durable proof of fulfillment.
 			this._recordFulfilledFeatureSkillChoice(choice.featureName);
 		} else if (choice.kind === "tool") {
-			const selectedName = typeof selection === "string" ? selection : selection?.name;
-			const tool = choice.options.find(option =>
-				CharacterSheetState.normalizeToolKey(typeof option === "string" ? option : option?.name) ===
-					CharacterSheetState.normalizeToolKey(selectedName));
-			if (!tool) return false;
-			const toolName = typeof tool === "string" ? tool : tool.name;
+			const tools = CharacterSheetClassUtils.getNormalizedToolChoiceSelection(selection, {
+				count: Number(choice.count) || 1,
+				options: choice.options || [],
+			});
+			if (!tools) return false;
 			const fallbackOwnerUid = this._getFixedProficiencyFallbackOwnerUid(choice);
 			if (fallbackOwnerUid) {
-				if (!this.setFixedProficiencyFallbackSelection(fallbackOwnerUid, toolName)) return false;
+				if (tools.length !== 1 || !this.setFixedProficiencyFallbackSelection(fallbackOwnerUid, tools[0])) return false;
+				normalizedSelection = tools[0];
 			} else {
-				const toolKey = CharacterSheetState.normalizeToolKey(toolName);
 				const trackSource = `feature-choice:${choice.featureId || choice.featureName}`;
-				if (this.hasToolProficiency(toolName) && !this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
-					this._trackGrantedProficiency("tools", toolKey, "base");
+				tools.forEach(tool => {
+					const toolKey = CharacterSheetState.normalizeToolKey(tool);
+					if (this.hasToolProficiency(tool) && !this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
+						this._trackGrantedProficiency("tools", toolKey, "base");
+					}
+					this.addToolProficiency(tool);
+					this._trackGrantedProficiency("tools", toolKey, trackSource);
+				});
+				normalizedSelection = tools;
+				if (sourceFeature?._conditionalToolGrant) {
+					sourceFeature._conditionalToolGrant.selections = [...tools];
+					sourceFeature.choices ||= {};
+					sourceFeature.choices.tools = [...tools];
 				}
-				this.addToolProficiency(toolName);
-				this._trackGrantedProficiency("tools", toolKey, trackSource);
 				this._recordFulfilledFeatureToolChoice(choice);
 			}
-			progressionSelection = toolName;
 		} else if (choice.kind === "cantrip") {
 			const sel = typeof selection === "string"
 				? choice.options.find(o => o.name?.toLowerCase() === selection.toLowerCase())
@@ -22542,46 +22641,81 @@ class CharacterSheetState {
 		}
 
 		if (choice.kind !== "subfeature") {
-			const normalizedSelection = choice.kind === "cantrip"
+			normalizedSelection = choice.kind === "cantrip"
 				? (typeof selection === "string" ? {name: selection, source: choice.featureSource || "XPHB"} : selection)
-				: progressionSelection;
+				: normalizedSelection;
+			const progressionSelection = choice.kind === "tool"
+				&& Array.isArray(normalizedSelection)
+				&& normalizedSelection.length === 1
+				&& !sourceFeature?._conditionalToolGrant
+				? normalizedSelection[0]
+				: normalizedSelection;
 			const characterLevel = this._getFeatureChoiceCharacterLevel(choice);
-			const decision = this.recordProgressionDecision?.({
+			const progressionDecision = this.recordProgressionDecision?.({
 				type: choice.kind === "skill" ? "nestedSkill"
 					: choice.kind === "tool" ? "nestedTool"
 						: "nestedCantrip",
-				selection: normalizedSelection,
+				selection: progressionSelection,
 				level: choice.level,
 				characterLevel,
 				className: choice.featureClass || "Acquisition",
 				classSource: choice.featureClassSource || choice.featureSource || "",
 				sourceDecisionKey: choice.sourceDecisionKey || null,
+				semanticKey: choice.semanticKey || null,
 				label: choice.featureName || `Feature ${choice.kind}`,
 				provenance: {
 					ownerType: "feature",
-					ownerUid: choice.featureUid || choice.featureId || choice.featureName || choice.kind,
+					ownerUid: choice.featureUid || (sourceFeature && globalThis.CharacterSheetProgression
+						? CharacterSheetProgression.getEntityUid(sourceFeature)
+						: (choice.featureId || choice.featureName || choice.kind)),
 					acquisitionKey: choice.acquisitionKey
 						|| choice.featureUid
 						|| choice.sourceDecisionKey
 						|| `${choice.featureId || choice.featureName || choice.kind}|${choice.level || 0}`,
-					selectedGrantKey: typeof normalizedSelection === "object"
-						? normalizedSelection.name || normalizedSelection.value || ""
-						: String(normalizedSelection),
+					selectedGrantKey: Array.isArray(progressionSelection)
+						? progressionSelection.join("|")
+						: (typeof progressionSelection === "object"
+							? progressionSelection.name || progressionSelection.value || ""
+							: String(progressionSelection)),
 					grantKind: choice.kind,
-					grantKey: choice.featureName || choice.kind,
-					sourcePath: choice.featureUid || choice.featureName || choice.kind,
+					grantKey: choice.grantKey || choice.featureName || choice.kind,
+					sourcePath: choice.sourcePath || choice.featureUid || choice.featureName || choice.kind,
 					occurrence: 0,
 					pickSlot: 0,
 					...(choice.featureUid ? {identityMode: "opportunity"} : {}),
 				},
 			});
-			if (decision && choice.kind === "tool") {
-				decision.options = MiscUtil.copyFast(choice.options || []);
-				this.claimProgressionOwnership("tools", normalizedSelection, decision.semanticKey);
+			if (choice.kind === "tool" && progressionDecision) {
+				progressionDecision.options = MiscUtil.copyFast(choice.options || []);
+				const selectedTools = Array.isArray(normalizedSelection) ? normalizedSelection : [normalizedSelection];
 				const fallbackOwnerUid = this._getFixedProficiencyFallbackOwnerUid(choice);
+				if (sourceFeature?._conditionalToolGrant) {
+					const featureChoiceSource = `feature-choice:${choice.featureId || choice.featureName}`;
+					for (const tool of selectedTools) {
+						this.claimProgressionOwnership("tools", tool, progressionDecision.semanticKey);
+						const trackedKey = CharacterSheetState.normalizeToolKey(tool);
+						const sources = this._data.grantedProficiencies?.tools?.[trackedKey];
+						if (!sources) continue;
+						const remaining = sources.filter(source => source !== featureChoiceSource);
+						if (remaining.length) this._data.grantedProficiencies.tools[trackedKey] = remaining;
+						else delete this._data.grantedProficiencies.tools[trackedKey];
+					}
+					progressionDecision.receipt = {
+						version: 1,
+						sourceDecisionKey: progressionDecision.semanticKey,
+						effects: [{
+							type: "ownership",
+							ownership: selectedTools.map(value => ({type: "tools", value})),
+						}],
+					};
+				} else {
+					for (const tool of selectedTools) {
+						this.claimProgressionOwnership("tools", tool, progressionDecision.semanticKey);
+					}
+				}
 				if (fallbackOwnerUid) {
 					const transaction = this._getFixedProficiencyFallbackStore()[fallbackOwnerUid.toLowerCase()];
-					if (transaction) transaction.decisionSemanticKey = decision.semanticKey;
+					if (transaction) transaction.decisionSemanticKey = progressionDecision.semanticKey;
 				}
 			}
 		}
@@ -51741,6 +51875,10 @@ class CharacterSheetState {
 				);
 			}
 		}
+		const conditionalToolGrant = typeof CharacterSheetClassUtils !== "undefined"
+			&& CharacterSheetClassUtils.isExactEfaAlchemistToolsOfTheTrade(feature)
+			? CharacterSheetClassUtils.getConditionalToolProficiencyGrant(feature, this)
+			: null;
 
 		const featureData = {
 			id: CryptUtil.uid(),
@@ -51748,6 +51886,7 @@ class CharacterSheetState {
 			...(opts.sourceDecisionKey || feature.sourceDecisionKey
 				? {sourceDecisionKey: opts.sourceDecisionKey || feature.sourceDecisionKey}
 				: {}),
+			...(conditionalToolGrant ? {_conditionalToolGrant: conditionalToolGrant} : {}),
 		};
 		const fixedProficiencyFallback = this._beginFixedProficiencyFallbackTransaction(featureData);
 
@@ -51760,7 +51899,30 @@ class CharacterSheetState {
 				...(uses.shortRestRecovery != null ? {shortRestRecovery: uses.shortRestRecovery} : {}),
 			};
 		}
+		if (conditionalToolGrant) {
+			featureData.choices = {...(featureData.choices || {}), tools: []};
+		}
 		this._data.features.push(featureData);
+		if (conditionalToolGrant) {
+			const source = `feature:${featureData.id}`;
+			conditionalToolGrant.fixedTools.forEach(tool => {
+				const toolKey = tool.name.toLowerCase();
+				if (this.hasToolProficiency(tool.name)) {
+					if (!this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
+						this._trackGrantedProficiency("tools", toolKey, "base");
+					}
+				} else {
+					this.addToolProficiency(tool.name);
+				}
+				this._trackGrantedProficiency("tools", toolKey, source);
+			});
+			featureData._conditionalToolGrant.receipt = {
+				source,
+				fixedGrants: [...conditionalToolGrant.fixedGrants],
+				requiredReplacementCount: conditionalToolGrant.requiredCount,
+			};
+			this._queueConditionalToolGrantChoice(featureData);
+		}
 
 		// Process resistances/immunities/vulnerabilities granted by the feature
 		if (feature.resistances) {
@@ -54318,6 +54480,20 @@ class CharacterSheetState {
 		}
 	}
 
+	_removeConditionalToolGrantDecision (feature) {
+		if (!feature?._conditionalToolGrant) return;
+		const semanticKey = this._getConditionalToolDecisionSemanticKey(feature);
+		if (!semanticKey) return;
+		const matching = (this._data.levelHistory || [])
+			.flatMap(entry => entry.decisions || [])
+			.filter(decision => decision.semanticKey === semanticKey);
+		for (const decision of matching) this.reverseProgressionDecisionReceipt(decision);
+		for (const entry of this._data.levelHistory || []) {
+			entry.decisions = (entry.decisions || []).filter(decision => decision.semanticKey !== semanticKey);
+		}
+		this.removePendingProgressionChoicesBySourceDecision(semanticKey);
+	}
+
 	removeFeature (featureIdOrName, source) {
 		// Find the feature first to get its id
 		const feature = this._data.features.find(f =>
@@ -54327,6 +54503,7 @@ class CharacterSheetState {
 		// Remove associated resource if it was auto-added
 		if (feature) {
 			this._removeFixedProficiencyFallbackTransaction(feature);
+			this._removeConditionalToolGrantDecision(feature);
 			for (const trackedSource of [`feature-choice:${feature.id}`, `feature:${feature.id}`]) {
 				for (const [type, remove] of [
 					["skills", name => this.setSkillProficiency(name, 0)],

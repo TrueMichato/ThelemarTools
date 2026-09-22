@@ -2071,6 +2071,7 @@ class CharacterSheetRespec {
 				this._state._recordFulfilledFeatureToolChoice?.(pendingFeatureChoice);
 				this._state.removePendingFeatureChoice?.(pendingFeatureChoice.id);
 			}
+			if (decision.type === "nestedTool") this._state.syncConditionalToolGrantSelection?.(decision, next);
 			if (decision.meta?.unplacedFeatChoice && ["nestedSkill", "nestedExpertise"].includes(decision.type)) {
 				const parent = this._engine?.manifest?.decisions?.find(candidate =>
 					candidate.semanticKey === decision.rootSemanticKey,

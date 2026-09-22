@@ -16407,22 +16407,27 @@ class CharacterSheetPage {
 	}
 
 	/**
-	 * Show a small modal asking the player to pick ONE option for a pending feature
-	 * choice. Returns the selection (skill key string for kind "skill", or a
-	 * `{name, source}` object for kind "cantrip"/"subfeature"), or `null` if deferred.
+	 * Show a small modal asking the player to resolve a pending feature
+	 * choice. Tool choices return canonical name arrays so one- and multi-pick
+	 * decisions share the same durable shape.
 	 * @param {{id: string, featureName?: string, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array}} choice
-	 * @returns {Promise<string|{name: string, source: string}|null>}
+	 * @returns {Promise<string|Array<string>|{name: string, source: string}|null>}
 	 */
 	async _pPickFeatureChoice (choice) {
 		if (!choice || !Array.isArray(choice.options) || !choice.options.length) return null;
+		const count = Number(choice.count) || 1;
 		const isSkill = choice.kind === "skill";
 		const isTool = choice.kind === "tool";
 		const isSubfeature = choice.kind === "subfeature";
-		const kindLabel = isSkill ? "a Skill Proficiency" : isTool ? "an Artisan's Tool" : isSubfeature ? "an Option" : "a Cantrip";
+		const kindLabel = isSkill ? ["a Skill Proficiency", "Skill Proficiencies"]
+			: isTool ? ["an Artisan's Tool", "Artisan's Tools"]
+				: isSubfeature ? ["an Option", "Options"]
+					: ["a Cantrip", "Cantrips"];
+		const choiceLabel = count === 1 ? kindLabel[0] : `${count} ${kindLabel[1]}`;
 
 		const optionLabel = (opt) => {
 			if (isSkill) return this._formatSkillKeyLabel(opt);
-			if (isTool) return String(opt);
+			if (isTool) return CharacterSheetClassUtils.getCanonicalToolChoiceValue(opt);
 			const src = opt.source ? ` <span class="ve-muted ve-small">(${(Parser.sourceJsonToAbv?.(opt.source) || opt.source)})</span>` : "";
 			// Subfeature options carry a short description (Divine Order roles, specialties,
 			// principles, …) — surface it beneath the name so the pick is informed.
@@ -16430,6 +16435,11 @@ class CharacterSheetPage {
 				return `<span class="bold">${(opt.name || "")}</span>${src}<br><span class="ve-muted ve-small">${opt.description}</span>`;
 			}
 			return `${(opt.name || "")}${src}`;
+		};
+		const optionValue = opt => {
+			if (isSkill) return opt;
+			if (isTool) return CharacterSheetClassUtils.getCanonicalToolChoiceValue(opt);
+			return opt;
 		};
 
 		let resolveOuter = null;
@@ -16440,7 +16450,7 @@ class CharacterSheetPage {
 		// 10000+ values the QuickBuild flow uses for its own modals.
 		const isOverlayUp = typeof document !== "undefined" && document.body?.classList?.contains("has-quickbuild-overlay");
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
-			title: `${choice.featureName || "Feature"} — Choose ${kindLabel}`,
+			title: `${choice.featureName || "Feature"} — Choose ${choiceLabel}`,
 			isMinHeight0: true,
 			...(isOverlayUp ? {zIndex: 10001} : {}),
 			cbClose: () => {
@@ -16461,26 +16471,58 @@ class CharacterSheetPage {
 					${optionLabel(opt)}
 				</button>
 			`).join("");
+			const confirmHtml = count > 1
+				? `<button class="ve-btn ve-btn-primary" data-act="confirm" disabled>Choose 0/${count}</button>`
+				: "";
 
 			modalInner.innerHTML = `
 				<div class="charsheet__feature-choice">
 					<p class="ve-small ve-muted charsheet__feature-choice__lede">
-						This feature lets you choose ${kindLabel}. Pick one option below.
+						This feature lets you choose ${choiceLabel}. ${count > 1 ? "Pick distinct options, then confirm." : "Pick one option below."}
 					</p>
 					<div class="charsheet__feature-choice__opts">${btnsHtml}</div>
 					<div class="ve-flex-h-right" style="gap: 8px; margin-top: 12px;">
 						<button class="ve-btn ve-btn-default" data-act="defer">Decide later</button>
+						${confirmHtml}
 					</div>
 				</div>
 			`;
 
+			const selected = new Set();
+			const confirm = modalInner.querySelector(`[data-act="confirm"]`);
+			const updateConfirm = () => {
+				if (!confirm) return;
+				confirm.disabled = selected.size !== count;
+				confirm.textContent = `Choose ${selected.size}/${count}`;
+			};
 			modalInner.querySelectorAll(".charsheet__feature-choice-opt").forEach((/** @type {*} */ el) => {
 				el.addEventListener("click", () => {
 					const idx = Number(el.getAttribute("data-idx"));
 					const opt = choice.options[idx];
-					finalize(isSkill || isTool ? opt : {name: opt.name, source: opt.source});
-					doClose();
+					if (count === 1) {
+						const value = optionValue(opt);
+						finalize(isTool ? [value] : value);
+						doClose();
+						return;
+					}
+					if (selected.has(idx)) {
+						selected.delete(idx);
+						el.classList.remove("ve-btn-primary");
+						el.classList.add("ve-btn-default");
+					} else {
+						if (selected.size >= count) return;
+						selected.add(idx);
+						el.classList.remove("ve-btn-default");
+						el.classList.add("ve-btn-primary");
+					}
+					updateConfirm();
 				});
+			});
+			confirm?.addEventListener("click", () => {
+				if (selected.size !== count) return;
+				const values = [...selected].map(idx => optionValue(choice.options[idx]));
+				finalize(values);
+				doClose();
 			});
 			modalInner.querySelector(`[data-act="defer"]`).addEventListener("click", () => {
 				finalize(null);

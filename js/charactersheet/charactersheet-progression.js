@@ -563,6 +563,7 @@ class CharacterSheetProgression {
 					featureId: feature.id,
 					sourceId,
 					type,
+					trackedKey: value,
 				});
 			}
 		}
@@ -570,6 +571,9 @@ class CharacterSheetProgression {
 	}
 
 	static _getSelectedDescriptorValue ({descriptor, entity, state, parentDecision = null, legacyChoices = null}) {
+		if (descriptor?.rules?.selectedValues != null) {
+			return CharacterSheetProgression._copy(descriptor.rules.selectedValues);
+		}
 		const values = [];
 		const choices = [
 			legacyChoices,

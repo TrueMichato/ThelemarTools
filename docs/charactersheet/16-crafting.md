@@ -88,6 +88,13 @@ structural `WD` item type. TCE Artillerists, non-wand items, and unresolved reci
 their unmodified duration. This uses the same exact-owner descriptor channel as Armorer, not a
 parallel crafting ledger or timer.
 
+`Tools of the Trade|Artificer|EFA|Alchemist|EFA|3|EFA` contributes a separate `0.5` multiplier
+only for `recipeCategory: "potion"`. The exact EFA class, subclass, and active feature must all be
+present, so changing subclass, removing the feature, or using the TCE Alchemist removes the
+modifier. The shared XDMG baseline is derived first and the feature multiplier is applied after it:
+an uncommon value-less potion is 1 workweek after the XDMG consumable adjustment and 0.5
+workweeks for this Alchemist. Preview and committed outcome render that same calculation object.
+
 ## The two invariants
 
 ### 1. Materials are inventory items, not a parallel ledger

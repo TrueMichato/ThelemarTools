@@ -432,9 +432,10 @@ types. `SC` Spell Scrolls, unsupported recipe categories, and unrecognized rarit
 duration.
 
 The EFA Armorer's Tools of the Trade descriptor is source-gated to Artificer `EFA` + Armorer `EFA`
-at level 3 and filters on `LA`/`MA`/`HA`. `S` shields are deliberately separate. Future features
-such as an Alchemist potion discount use the same channel with
-`filter: {recipeCategories: ["potion"]}`.
+at level 3 and filters on `LA`/`MA`/`HA`. `S` shields are deliberately separate. The EFA
+Alchemist's same-named feature uses the same channel with
+`filter: {recipeCategories: ["potion"]}` and also requires the exact active EFA feature, so feature
+removal/respec disables the contribution immediately. Same-named TCE subclasses never qualify.
 
 The EFA Battle Smith's Tools of the Trade descriptor is source-gated to Artificer `EFA` +
 Battle Smith `EFA` at level 3, is owned by

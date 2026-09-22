@@ -54,6 +54,114 @@ class CharacterSheetClassUtils {
 		];
 	}
 
+	static getCanonicalToolChoiceValue (value) {
+		if (value == null) return "";
+		const raw = typeof value === "object"
+			? (value.name || value.uid || value.value || value.label || "")
+			: value;
+		return `${raw}`.split("|")[0].trim();
+	}
+
+	static getNormalizedToolChoiceSelection (selection, {count = 1, options = []} = {}) {
+		const values = (Array.isArray(selection) ? selection : [selection])
+			.map(it => this.getCanonicalToolChoiceValue(it))
+			.filter(Boolean);
+		const uniqueValues = [...new Map(values.map(it => [it.toLowerCase(), it])).values()];
+		const legalOptions = new Map(
+			(options || [])
+				.map(it => this.getCanonicalToolChoiceValue(it))
+				.filter(Boolean)
+				.map(it => [it.toLowerCase(), it]),
+		);
+
+		if (uniqueValues.length !== Number(count || 1)) return null;
+		if (legalOptions.size && uniqueValues.some(it => !legalOptions.has(it.toLowerCase()))) return null;
+		return uniqueValues.map(it => legalOptions.get(it.toLowerCase()) || it);
+	}
+
+	static _getEntryStrings (value, out = []) {
+		if (typeof value === "string") out.push(value);
+		else if (Array.isArray(value)) value.forEach(it => this._getEntryStrings(it, out));
+		else if (value && typeof value === "object") Object.values(value).forEach(it => this._getEntryStrings(it, out));
+		return out;
+	}
+
+	static getConditionalToolProficiencyGrant (feature, state) {
+		const text = this._getEntryStrings(feature?.entries).join(" ");
+		const duplicateClause = /If you already have (?:proficiency with (?:either|the) tool|one of these proficiencies|this (?:tool )?proficiency)/i;
+		if (!duplicateClause.test(text)) return null;
+		if (!/(?:different|one other) type of (?:\{@item )?Artisan'?s Tools/i.test(text)) return null;
+
+		const fixedSection = text.match(/gain proficiency with (.+?)\.\s*If you already have (?:proficiency|one of these proficiencies|this (?:tool )?proficiency)/i)?.[1] || "";
+		const catalogByName = new Map(this.getChoiceToolCatalog().map(it => [it.toLowerCase(), it]));
+		const fixedTools = [...fixedSection.matchAll(/\{@item ([^|}]+)(?:\|([^|}]+))?/gi)]
+			.map(([, name, source]) => ({
+				name: catalogByName.get(this.getCanonicalToolChoiceValue(name).toLowerCase()) || this.getCanonicalToolChoiceValue(name),
+				source: `${source || "XPHB"}`.trim(),
+			}))
+			.filter(it => it.name && !/^Artisan'?s Tools$/i.test(it.name));
+		if (!fixedTools.length) return null;
+
+		const currentToolProficiencies = state?.getToolProficiencies?.() || [];
+		const currentByName = new Set(
+			currentToolProficiencies
+				.map(it => this.getCanonicalToolChoiceValue(it).toLowerCase())
+				.filter(Boolean),
+		);
+		const acquisitionFacts = Object.fromEntries(
+			fixedTools.map(it => [`${it.name}|${it.source}`, currentByName.has(it.name.toLowerCase())]),
+		);
+		const requiredCount = Object.values(acquisitionFacts).filter(Boolean).length;
+		const excludedTools = [...new Set([
+			...currentToolProficiencies.map(it => this.getCanonicalToolChoiceValue(it)),
+			...fixedTools.map(it => it.name),
+		].filter(Boolean))];
+
+		return {
+			version: 1,
+			fixedTools,
+			fixedGrants: fixedTools.map(it => `${it.name}|${it.source}`),
+			acquisitionFacts,
+			excludedTools,
+			requiredCount,
+			selections: [],
+		};
+	}
+
+	static getConditionalToolChoiceOptions (grant) {
+		const excluded = new Set(
+			(grant?.excludedTools || [])
+				.map(it => this.getCanonicalToolChoiceValue(it).toLowerCase())
+				.filter(Boolean),
+		);
+		return this.CHOICE_TOOL_CATALOGS.artisan.filter(it => !excluded.has(it.toLowerCase()));
+	}
+
+	static isExactEfaAlchemistToolsOfTheTrade (feature) {
+		return `${feature?.name || ""}`.toLowerCase() === "tools of the trade"
+			&& `${feature?.source || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.className || ""}`.toLowerCase() === "artificer"
+			&& `${feature?.classSource || ""}`.toUpperCase() === "EFA"
+			&& `${feature?.subclassShortName || feature?.subclassName || ""}`.toLowerCase() === "alchemist"
+			&& `${feature?.subclassSource || ""}`.toUpperCase() === "EFA"
+			&& Number(feature?.level) === 3;
+	}
+
+	static _isSameFeatureIdentity (a, b) {
+		const norm = value => `${value || ""}`.trim().toLowerCase();
+		return norm(a?.name) === norm(b?.name)
+			&& norm(a?.source) === norm(b?.source)
+			&& norm(a?.className) === norm(b?.className)
+			&& norm(a?.classSource) === norm(b?.classSource)
+			&& norm(a?.subclassShortName || a?.subclassName) === norm(b?.subclassShortName || b?.subclassName)
+			&& norm(a?.subclassSource) === norm(b?.subclassSource)
+			&& Number(a?.level || 0) === Number(b?.level || 0);
+	}
+
+	static getRuntimeFeature (feature, state) {
+		return state?.getFeatures?.().find(it => this._isSameFeatureIdentity(feature, it)) || null;
+	}
+
 	static getChoiceSkillCatalog () {
 		return [
 			"acrobatics", "animal handling", "arcana", "athletics", "deception",
@@ -3951,7 +4059,7 @@ class CharacterSheetClassUtils {
 	 * than silently presenting a read-only row.
 	 *
 	 * @param {*} entity
-	 * @param {{sourcePath?: string, occurrenceStart?: number, className?: string, classSource?: string}} [opts]
+	 * @param {{sourcePath?: string, occurrenceStart?: number, className?: string, classSource?: string, state?: object}} [opts]
 	 * @returns {Array<object>}
 	 */
 	static getChoiceDescriptors (/** @type {*} */ entity, /** @type {*} */ opts = {}) {
@@ -4087,6 +4195,25 @@ class CharacterSheetClassUtils {
 			`${String(entity?.name || "")} ${String(opts.sourcePath || "")}`,
 		);
 		const hasStructuredSpellGrants = entity.additionalSpells != null;
+		const runtimeFeature = this.getRuntimeFeature(entity, opts.state);
+		const conditionalToolGrant = entity?._conditionalToolGrant || runtimeFeature?._conditionalToolGrant;
+		if (conditionalToolGrant?.requiredCount > 0) {
+			add({
+				kind: "tool",
+				type: "nestedTool",
+				label: "Replacement Artisan's Tools",
+				count: conditionalToolGrant.requiredCount,
+				options: this.getConditionalToolChoiceOptions(conditionalToolGrant),
+				sourcePath: `${sourcePath || entity.name}.conditionalToolGrant.tools`,
+				grantKey: "conditionalToolGrant.tools",
+				rules: {
+					identityMode: "opportunity",
+					fixedGrants: [...(conditionalToolGrant.fixedGrants || [])],
+					acquisitionFacts: {...(conditionalToolGrant.acquisitionFacts || {})},
+					selectedValues: [...(conditionalToolGrant.selections || [])],
+				},
+			});
+		}
 		const addProseDescriptors = (node, path) => {
 			const text = getText(node.entries || node.entry || "");
 			const lower = text.toLowerCase();

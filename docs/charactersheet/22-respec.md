@@ -404,6 +404,17 @@ source-keyed receipt. Legal catalogs are recomputed transiently; they are never
 stored in the ledger. Origin nodes are stored under `characterBase.decisions`,
 while class and subclass nodes remain in their level-history entry.
 
+Conditional fixed proficiency grants capture their duplicate facts before any
+fixed grant is applied. EFA Alchemist `Tools of the Trade` records whether
+`Alchemist's Supplies|XPHB` and `Herbalism Kit|XPHB` were already owned, gives
+both fixed tools under the feature's source receipt, and creates exactly zero,
+one, or two replacement Artisan's Tool opportunities from that acquisition-time
+snapshot. Replacement selections are canonical tool-name arrays even for one
+pick; two-pick decisions require distinct legal values. Fixed and replacement
+sources reverse independently, preserving any pre-existing proficiency.
+Removing and replaying the subclass recomputes the duplicate snapshot from the
+candidate state rather than reusing stale counts.
+
 The descriptor census covers structured options, unions, recurring pools,
 object and string spell filters, `featProgression`, and reviewed prose
 fallbacks. Runtime-only data is classified separately from supported

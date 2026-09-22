@@ -2,6 +2,7 @@ import fs from "node:fs";
 import {jest} from "@jest/globals";
 
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-crafting.js";
 
@@ -41,6 +42,11 @@ const REAL_POTION_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "Dra-
 const REAL_AMMUNITION_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "+1 Dragon Arrow" && recipe.source === "HHHVI");
 const REAL_MELEE_WEAPON_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "Chain of Command" && recipe.source === "HHHVI");
 const REAL_RANGED_WEAPON_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "Demon Cannon" && recipe.source === "HHHVIII");
+const REAL_UNCOMMON_POTION_RECIPE = CRAFTING_RECIPES.find(recipe =>
+	recipe.recipeCategory === "potion"
+	&& recipe.rarity === "uncommon"
+	&& recipe.value == null,
+);
 const REAL_DISH_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.recipeCategory === "dish");
 const REAL_MATERIAL = CRAFTING_DATA.craftingMaterial[0];
 
@@ -72,6 +78,36 @@ const addEfaBattleSmith = (state, {level = 3, classSource = "EFA", subclassSourc
 			classSource,
 		},
 	});
+};
+
+const addEfaAlchemist = (state, {classSource = "EFA", subclassSource = "EFA", featureSource = "EFA"} = {}) => {
+	state.addClass({
+		name: "Artificer",
+		source: classSource,
+		level: 3,
+		subclass: {
+			name: "Alchemist",
+			shortName: "Alchemist",
+			source: subclassSource,
+			className: "Artificer",
+			classSource,
+		},
+	});
+	state.addFeature({
+		name: "Tools of the Trade",
+		source: featureSource,
+		className: "Artificer",
+		classSource,
+		subclassShortName: "Alchemist",
+		subclassSource,
+		level: 3,
+		isSubclassFeature: true,
+		featureType: "Subclass",
+		entries: [
+			"You gain proficiency with {@item Alchemist's Supplies|XPHB} and the {@item Herbalism Kit|XPHB}. If you already have one of these proficiencies, you gain proficiency with one other type of {@item Artisan's Tools|XPHB} of your choice (or with two other types if you have both).",
+		],
+	});
+	return state.getFeatures().find(feature => feature.name === "Tools of the Trade");
 };
 
 const calculate = (state, {
@@ -462,29 +498,55 @@ describe("Character Sheet crafting-time modifiers", () => {
 		expect(result.sourceBreakdown[0].uid).toBe("Tools of the Trade|Artificer|EFA|Armorer|EFA|3|EFA");
 	});
 
-	it("lets a synthetic Alchemist descriptor halve a real generated value-less potion recipe", () => {
-		expect(REAL_POTION_RECIPE).toMatchObject({recipeCategory: "potion", itemType: "P", rarity: "rare"});
-		expect(REAL_POTION_RECIPE).not.toHaveProperty("value");
+	it("halves a real generated value-less potion recipe for the exact EFA Alchemist feature", () => {
+		expect(REAL_UNCOMMON_POTION_RECIPE).toMatchObject({recipeCategory: "potion", rarity: "uncommon"});
+		expect(REAL_UNCOMMON_POTION_RECIPE).not.toHaveProperty("value");
 
 		const state = new CharacterSheetState();
-		const potionModifier = {
-			id: "test-alchemist-tools-of-the-trade-potions",
-			owner: {
-				kind: "subclassFeature",
-				name: "Tools of the Trade",
-				source: "EFA",
-				uid: "Tools of the Trade|Artificer|EFA|Alchemist|EFA|3|EFA",
-			},
-			multiplier: 0.5,
-			filter: {recipeCategories: ["potion"]},
-		};
-		jest.spyOn(state, "getFeatureCalculations").mockReturnValue({craftingTimeModifiers: [potionModifier]});
+		addEfaAlchemist(state);
+		const result = state.getCraftingTimeCalculation({recipe: REAL_UNCOMMON_POTION_RECIPE});
 
-		const result = state.getCraftingTimeCalculation({recipe: REAL_POTION_RECIPE});
+		expect(result.baselineWorkweeks).toBe(1);
+		expect(result.effectiveWorkweeks).toBe(0.5);
+		expect(result.multiplier).toBe(0.5);
+		expect(result.sourceBreakdown).toEqual([expect.objectContaining({
+			id: "efa-alchemist-tools-of-the-trade-potion-crafting",
+			uid: "Tools of the Trade|Artificer|EFA|Alchemist|EFA|3|EFA",
+		})]);
+	});
 
-		expect(result.baselineWorkweeks).toBe(5);
-		expect(result.effectiveWorkweeks).toBe(2.5);
-		expect(result.sourceBreakdown.map(it => it.uid)).toEqual([potionModifier.owner.uid]);
+	it("leaves a real generated item recipe unchanged for the EFA Alchemist", () => {
+		const state = new CharacterSheetState();
+		addEfaAlchemist(state);
+		const result = state.getCraftingTimeCalculation({recipe: REAL_ARMOR_RECIPE});
+
+		expect(result.baselineWorkweeks).toBe(10);
+		expect(result.effectiveWorkweeks).toBe(10);
+		expect(result.sourceBreakdown).toEqual([]);
+	});
+
+	it("drops the Alchemist modifier when the exact source feature is removed", () => {
+		const state = new CharacterSheetState();
+		const feature = addEfaAlchemist(state);
+		expect(state.getCraftingTimeCalculation({recipe: REAL_UNCOMMON_POTION_RECIPE}).effectiveWorkweeks).toBe(0.5);
+
+		state.removeFeature(feature.id);
+
+		expect(state.getCraftingTimeCalculation({recipe: REAL_UNCOMMON_POTION_RECIPE}).effectiveWorkweeks).toBe(1);
+	});
+
+	it.each([
+		["TCE class", {classSource: "TCE"}],
+		["TCE subclass", {subclassSource: "TCE"}],
+		["TCE same-named feature", {featureSource: "TCE"}],
+	])("does not apply the Alchemist modifier for a %s", (_label, sources) => {
+		const state = new CharacterSheetState();
+		addEfaAlchemist(state, sources);
+
+		const result = state.getCraftingTimeCalculation({recipe: REAL_UNCOMMON_POTION_RECIPE});
+		expect(result.baselineWorkweeks).toBe(1);
+		expect(result.effectiveWorkweeks).toBe(1);
+		expect(result.sourceBreakdown).toEqual([]);
 	});
 
 	it("lets a second generic descriptor target potions without Armorer-specific code", () => {
@@ -600,6 +662,38 @@ describe("Character Sheet crafting-time modifiers", () => {
 			expect(html).toContain("10 workweeks");
 			expect(html).toContain("XDMG p. 221");
 			expect(html).toContain("Rare magic item");
+			expect(html).toContain("Tools of the Trade [EFA] \u00d70.5");
+		}
+	});
+
+	it("renders one shared fractional Alchemist duration in confirmation and committed outcome", async () => {
+		const state = new CharacterSheetState();
+		addEfaAlchemist(state);
+
+		const page = {
+			getItems: () => [{
+				name: REAL_UNCOMMON_POTION_RECIPE.name,
+				source: REAL_UNCOMMON_POTION_RECIPE.source,
+				type: REAL_UNCOMMON_POTION_RECIPE.itemType || "P",
+				rarity: REAL_UNCOMMON_POTION_RECIPE.rarity,
+			}],
+			saveCharacter: jest.fn(),
+			_inventory: {render: jest.fn()},
+		};
+		const crafting = new CharacterSheetCrafting(page, state);
+		const modal = jest.spyOn(crafting, "_pThreeWay")
+			.mockResolvedValueOnce("secondary")
+			.mockResolvedValueOnce("primary");
+
+		await crafting.pCommitCraft(REAL_UNCOMMON_POTION_RECIPE, null);
+
+		const confirmationHtml = modal.mock.calls[0][0].html;
+		const outcomeHtml = modal.mock.calls[1][0].html;
+		for (const html of [confirmationHtml, outcomeHtml]) {
+			expect(html).toContain("½ workweeks");
+			expect(html).toContain("baseline");
+			expect(html).toContain("1 workweek");
+			expect(html).toContain("XDMG p. 221");
 			expect(html).toContain("Tools of the Trade [EFA] \u00d70.5");
 		}
 	});
