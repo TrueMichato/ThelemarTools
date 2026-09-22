@@ -173,6 +173,12 @@ creation and use. Its source rules cover Long Rest production, slot-funded
 creation, Bonus Action consumption, and all five effects
 ([`data/class/class-artificer.json:2889-2955`](../../data/class/class-artificer.json#L2889-L2955)).
 
+> **Core state milestone:** the exact-owner generated-vial contract, pure d6
+> batch planner, creation-time scaling snapshots, atomic batch replacement,
+> save/load reconciliation, and source-loss cleanup are implemented. Rest UI,
+> slot/action spending, consumption, active effects, and undo remain later
+> milestones.
+
 ### 4.1 Long Rest batch
 
 | Artificer level | Elixirs when production is chosen |

@@ -4605,6 +4605,22 @@ class CharacterSheetState {
 	}
 	static EFA_ALCHEMIST_SUBCLASS_UID = "Alchemist|Artificer|EFA|EFA";
 	static EFA_ALCHEMIST_SUPPLIES_UID = "Alchemist's Supplies|XPHB";
+	static EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID = "Experimental Elixir|Artificer|EFA|Alchemist|EFA|3|EFA";
+	static EFA_EXPERIMENTAL_ELIXIR_METADATA_VERSION = 1;
+	static EFA_EXPERIMENTAL_ELIXIR_BATCH_PLAN_VERSION = 1;
+	static EFA_EXPERIMENTAL_ELIXIR_OWNER = Object.freeze({
+		featureUid: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID,
+		featureSource: "EFA",
+		classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+		subclassUid: CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID,
+	});
+	static EFA_EXPERIMENTAL_ELIXIR_EFFECTS = Object.freeze({
+		1: Object.freeze({key: "healing", label: "Healing"}),
+		2: Object.freeze({key: "swiftness", label: "Swiftness"}),
+		3: Object.freeze({key: "resilience", label: "Resilience"}),
+		4: Object.freeze({key: "boldness", label: "Boldness"}),
+		5: Object.freeze({key: "flight", label: "Flight"}),
+	});
 	static EFA_ALCHEMIST_INNATE_SPELL_GRANTS = Object.freeze([
 		Object.freeze({
 			grantId: "subclass-innate:alchemist|artificer|efa|efa:lesser-restoration|xphb",
@@ -6009,6 +6025,7 @@ class CharacterSheetState {
 
 	toJson () {
 		this._reconcileEfaAlchemistInnateSpellGrants();
+		this.reconcileEfaExperimentalElixirs({cause: "serialize"});
 		this._ensureBattleMasterSuperiorityDice();
 		if ((this._data.targetEffects || []).some(it => String(it?.source || "").toLowerCase() === "chained-fury")) {
 			this.reconcileTargetEffects();
@@ -21856,6 +21873,428 @@ class CharacterSheetState {
 		}) || null;
 	}
 
+	static getEfaExperimentalElixirBatchSizeForLevel (artificerLevel) {
+		const level = Number(artificerLevel);
+		if (!Number.isInteger(level) || level < 3 || level > 20) return 0;
+		if (level >= 15) return 5;
+		if (level >= 9) return 4;
+		if (level >= 5) return 3;
+		return 2;
+	}
+
+	getEfaExperimentalElixirBatchSize () {
+		return CharacterSheetState.getEfaExperimentalElixirBatchSizeForLevel(
+			this._getEfaAlchemistClassEntry()?.level,
+		);
+	}
+
+	static getEfaExperimentalElixirEffectSnapshot (effectKey, artificerLevel) {
+		const level = Number(artificerLevel);
+		if (!Number.isInteger(level) || level < 3 || level > 20) return null;
+		const tier = level >= 15 ? 3 : level >= 9 ? 2 : 1;
+		const duration = (amount, unit) => ({
+			amount,
+			unit,
+			endsOnShortRest: unit === "minute" || (unit === "hour" && amount <= 1),
+			endsOnLongRest: true,
+		});
+
+		switch (effectKey) {
+			case "healing":
+				return {
+					healing: {
+						dice: `${tier + 1}d8`,
+						diceCount: tier + 1,
+						dieFaces: 8,
+						ability: "int",
+						abilityModifierTiming: "consume",
+					},
+					duration: null,
+					value: null,
+				};
+			case "swiftness":
+				return {
+					healing: null,
+					duration: duration(1, "hour"),
+					value: {kind: "walkingSpeedBonusFeet", amount: [10, 15, 20][tier - 1]},
+				};
+			case "resilience":
+				return {
+					healing: null,
+					duration: tier === 1 ? duration(10, "minute") : duration(tier === 2 ? 1 : 8, "hour"),
+					value: {kind: "acBonus", amount: 1},
+				};
+			case "boldness":
+				return {
+					healing: null,
+					duration: tier === 1 ? duration(1, "minute") : duration(tier === 2 ? 10 : 1, tier === 2 ? "minute" : "hour"),
+					value: {kind: "rollBonusDice", dice: "1d4", appliesTo: ["attack", "savingThrow"]},
+				};
+			case "flight":
+				return {
+					healing: null,
+					duration: duration(10, "minute"),
+					value: {kind: "flySpeedFeet", amount: [10, 20, 30][tier - 1]},
+				};
+			default:
+				return null;
+		}
+	}
+
+	static _isEfaExperimentalElixirOwnerLike (owner, {allowLegacyFeatureUid = false} = {}) {
+		if (!owner || typeof owner !== "object" || Array.isArray(owner)) return false;
+		const eq = (a, b) => typeof a === "string"
+			&& typeof b === "string"
+			&& a.trim().toLowerCase() === b.trim().toLowerCase();
+		const legacyFeatureUid = CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID
+			.split("|")
+			.slice(0, 6)
+			.join("|");
+		const featureUidMatches = eq(owner.featureUid, CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_FEATURE_UID)
+			|| (allowLegacyFeatureUid && eq(owner.featureUid, legacyFeatureUid));
+		return featureUidMatches
+			&& eq(owner.classUid, CharacterSheetState.EFA_ARTIFICER_CLASS_UID)
+			&& eq(owner.subclassUid, CharacterSheetState.EFA_ALCHEMIST_SUBCLASS_UID)
+			&& (owner.featureSource == null ? allowLegacyFeatureUid : eq(owner.featureSource, "EFA"));
+	}
+
+	static _isEfaExperimentalElixirSnapshotEqual (actual, expected) {
+		if (actual === expected) return true;
+		if (!actual || !expected || typeof actual !== "object" || typeof expected !== "object") return false;
+		if (Array.isArray(actual) || Array.isArray(expected)) {
+			return Array.isArray(actual)
+				&& Array.isArray(expected)
+				&& actual.length === expected.length
+				&& actual.every((value, ix) => CharacterSheetState._isEfaExperimentalElixirSnapshotEqual(value, expected[ix]));
+		}
+		const actualKeys = Object.keys(actual).sort();
+		const expectedKeys = Object.keys(expected).sort();
+		return actualKeys.length === expectedKeys.length
+			&& actualKeys.every((key, ix) =>
+				key === expectedKeys[ix]
+				&& CharacterSheetState._isEfaExperimentalElixirSnapshotEqual(actual[key], expected[key]),
+			);
+	}
+
+	static _validateEfaExperimentalElixirMetadata (metadata) {
+		if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+			return {ok: false, reason: "invalid-efa-experimental-elixir-metadata"};
+		}
+		if (metadata.metadataSchemaVersion !== CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_METADATA_VERSION) {
+			return {ok: false, reason: "unsupported-efa-experimental-elixir-metadata-version"};
+		}
+		const effect = Object.values(CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_EFFECTS)
+			.find(it => it.key === metadata.effectKey);
+		if (!effect) return {ok: false, reason: "invalid-efa-experimental-elixir-effect"};
+		if (!["longRest", "spellSlot"].includes(metadata.origin)) {
+			return {ok: false, reason: "invalid-efa-experimental-elixir-origin"};
+		}
+		if (typeof metadata.batchId !== "string" || !metadata.batchId.trim()) {
+			return {ok: false, reason: "invalid-efa-experimental-elixir-batch"};
+		}
+		if (
+			!Number.isInteger(metadata.creationArtificerLevel)
+			|| metadata.creationArtificerLevel < 3
+			|| metadata.creationArtificerLevel > 20
+		) {
+			return {ok: false, reason: "invalid-efa-experimental-elixir-creation-level"};
+		}
+		if (
+			metadata.origin === "spellSlot"
+			&& (
+				!Number.isInteger(metadata.spentSlotLevel)
+				|| metadata.spentSlotLevel < 1
+				|| metadata.spentSlotLevel > 9
+			)
+		) {
+			return {ok: false, reason: "invalid-efa-experimental-elixir-slot-level"};
+		}
+		if (metadata.origin === "longRest" && metadata.spentSlotLevel != null) {
+			return {ok: false, reason: "invalid-efa-experimental-elixir-slot-level"};
+		}
+		const expectedSnapshot = CharacterSheetState.getEfaExperimentalElixirEffectSnapshot(
+			metadata.effectKey,
+			metadata.creationArtificerLevel,
+		);
+		const actualSnapshot = {
+			healing: metadata.healing ?? null,
+			duration: metadata.duration ?? null,
+			value: metadata.value ?? null,
+		};
+		if (!CharacterSheetState._isEfaExperimentalElixirSnapshotEqual(actualSnapshot, expectedSnapshot)) {
+			return {ok: false, reason: "invalid-efa-experimental-elixir-snapshot"};
+		}
+		return {ok: true, effect};
+	}
+
+	_buildEfaExperimentalElixirMetadata ({
+		effectKey,
+		origin,
+		batchId,
+		creationArtificerLevel,
+		spentSlotLevel = null,
+	} = {}) {
+		const snapshot = CharacterSheetState.getEfaExperimentalElixirEffectSnapshot(effectKey, creationArtificerLevel);
+		if (!snapshot) return null;
+		const metadata = {
+			metadataSchemaVersion: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_METADATA_VERSION,
+			effectKey,
+			origin,
+			batchId,
+			creationArtificerLevel,
+			...(origin === "spellSlot" ? {spentSlotLevel} : {}),
+			...snapshot,
+		};
+		return CharacterSheetState._validateEfaExperimentalElixirMetadata(metadata).ok ? metadata : null;
+	}
+
+	planEfaExperimentalElixirBatch ({rolls, row6Choices = [], batchId = null} = {}) {
+		const classEntry = this._getEfaAlchemistClassEntry();
+		const artificerLevel = Number(classEntry?.level) || 0;
+		const batchSize = CharacterSheetState.getEfaExperimentalElixirBatchSizeForLevel(artificerLevel);
+		if (!batchSize) return {ok: false, code: "efa-experimental-elixir-unavailable"};
+		if (!Array.isArray(rolls) || rolls.length !== batchSize) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-roll-count"};
+		}
+		if (!rolls.every(roll => Number.isInteger(roll) && roll >= 1 && roll <= 6)) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-roll"};
+		}
+		if (!Array.isArray(row6Choices)) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-row-6-choices"};
+		}
+		const row6Count = rolls.filter(roll => roll === 6).length;
+		if (
+			row6Choices.length !== row6Count
+			|| !row6Choices.every(choice => Number.isInteger(choice) && choice >= 1 && choice <= 5)
+		) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-row-6-choices"};
+		}
+		const resolvedBatchId = batchId == null ? CryptUtil.uid() : String(batchId).trim();
+		if (!resolvedBatchId) return {ok: false, code: "invalid-efa-experimental-elixir-batch"};
+
+		let choiceIx = 0;
+		const vials = rolls.map(roll => {
+			const row6Choice = roll === 6 ? row6Choices[choiceIx++] : null;
+			const resolvedRow = row6Choice || roll;
+			const effect = CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_EFFECTS[resolvedRow];
+			return {
+				roll,
+				row6Choice,
+				resolvedRow,
+				effectKey: effect.key,
+				metadata: this._buildEfaExperimentalElixirMetadata({
+					effectKey: effect.key,
+					origin: "longRest",
+					batchId: resolvedBatchId,
+					creationArtificerLevel: artificerLevel,
+				}),
+			};
+		});
+
+		return {
+			ok: true,
+			code: "efa-experimental-elixir-batch-planned",
+			plan: {
+				planVersion: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_BATCH_PLAN_VERSION,
+				origin: "longRest",
+				batchId: resolvedBatchId,
+				artificerLevel,
+				vials,
+			},
+		};
+	}
+
+	_validateEfaExperimentalElixirBatchPlan (plan) {
+		if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-plan"};
+		}
+		const classEntry = this._getEfaAlchemistClassEntry();
+		const artificerLevel = Number(classEntry?.level) || 0;
+		const batchSize = CharacterSheetState.getEfaExperimentalElixirBatchSizeForLevel(artificerLevel);
+		if (!batchSize) return {ok: false, code: "efa-experimental-elixir-unavailable"};
+		if (
+			plan.planVersion !== CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_BATCH_PLAN_VERSION
+			|| plan.origin !== "longRest"
+			|| plan.artificerLevel !== artificerLevel
+			|| typeof plan.batchId !== "string"
+			|| !plan.batchId.trim()
+			|| !Array.isArray(plan.vials)
+			|| plan.vials.length !== batchSize
+		) {
+			return {ok: false, code: "invalid-efa-experimental-elixir-plan"};
+		}
+
+		for (const vial of plan.vials) {
+			if (!Number.isInteger(vial?.roll) || vial.roll < 1 || vial.roll > 6) {
+				return {ok: false, code: "invalid-efa-experimental-elixir-plan"};
+			}
+			const resolvedRow = vial.roll === 6 ? vial.row6Choice : vial.roll;
+			if (
+				!Number.isInteger(resolvedRow)
+				|| resolvedRow < 1
+				|| resolvedRow > 5
+				|| vial.resolvedRow !== resolvedRow
+				|| (vial.roll !== 6 && vial.row6Choice != null)
+			) {
+				return {ok: false, code: "invalid-efa-experimental-elixir-plan"};
+			}
+			const effect = CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_EFFECTS[resolvedRow];
+			const metadataValidation = CharacterSheetState._validateEfaExperimentalElixirMetadata(vial.metadata);
+			if (
+				vial.effectKey !== effect.key
+				|| !metadataValidation.ok
+				|| vial.metadata.effectKey !== effect.key
+				|| vial.metadata.origin !== "longRest"
+				|| vial.metadata.batchId !== plan.batchId
+				|| vial.metadata.creationArtificerLevel !== artificerLevel
+			) {
+				return {ok: false, code: "invalid-efa-experimental-elixir-plan"};
+			}
+		}
+
+		return {ok: true, plan: MiscUtil.copyFast(plan)};
+	}
+
+	_createEfaExperimentalElixirVialFromMetadata (metadata) {
+		const validation = CharacterSheetState._validateEfaExperimentalElixirMetadata(metadata);
+		if (!validation.ok) return {ok: false, code: validation.reason};
+		const item = {
+			name: `Experimental Elixir (${validation.effect.label})`,
+			source: "EFA",
+			type: "P",
+			entries: [`A generated Experimental Elixir with the ${validation.effect.label} effect.`],
+		};
+		const created = this.createGeneratedFeatureItem({
+			item,
+			owner: CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER,
+			metadata,
+		});
+		return created.ok
+			? {...created, metadata: MiscUtil.copyFast(metadata)}
+			: created;
+	}
+
+	createEfaExperimentalElixirSpellSlotVial ({effectKey, batchId = null, spentSlotLevel} = {}) {
+		const classEntry = this._getEfaAlchemistClassEntry();
+		const creationArtificerLevel = Number(classEntry?.level) || 0;
+		if (!CharacterSheetState.getEfaExperimentalElixirBatchSizeForLevel(creationArtificerLevel)) {
+			return {ok: false, code: "efa-experimental-elixir-unavailable"};
+		}
+		const resolvedBatchId = batchId == null ? CryptUtil.uid() : String(batchId).trim();
+		const metadata = this._buildEfaExperimentalElixirMetadata({
+			effectKey,
+			origin: "spellSlot",
+			batchId: resolvedBatchId,
+			creationArtificerLevel,
+			spentSlotLevel,
+		});
+		if (!metadata) return {ok: false, code: "invalid-efa-experimental-elixir-metadata"};
+		return this._createEfaExperimentalElixirVialFromMetadata(metadata);
+	}
+
+	classifyEfaExperimentalElixir (itemOrWrapper) {
+		const item = itemOrWrapper?.item || itemOrWrapper;
+		const rawOwner = item?._generatedItemProvenance?.owner;
+		if (!CharacterSheetState._isEfaExperimentalElixirOwnerLike(rawOwner, {allowLegacyFeatureUid: true})) {
+			return {status: "ordinary", repairRequired: false, reason: "not-efa-experimental-elixir"};
+		}
+		const generatedClassification = this.classifyGeneratedFeatureItem(itemOrWrapper);
+		if (generatedClassification.status !== "valid") return generatedClassification;
+		const ownerKey = CharacterSheetState._getGeneratedFeatureItemOwnerKey(
+			CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER,
+		);
+		if (generatedClassification.ownerKey !== ownerKey) {
+			return {status: "ordinary", repairRequired: false, reason: "not-efa-experimental-elixir"};
+		}
+		const metadataValidation = CharacterSheetState._validateEfaExperimentalElixirMetadata(
+			generatedClassification.provenance.metadata,
+		);
+		if (!metadataValidation.ok) {
+			return {
+				status: "stale",
+				repairRequired: true,
+				reason: metadataValidation.reason,
+				generatedItemId: generatedClassification.generatedItemId,
+				provenance: generatedClassification.provenance,
+			};
+		}
+		return {
+			...generatedClassification,
+			reason: "supported-efa-experimental-elixir",
+			metadata: MiscUtil.copyFast(generatedClassification.provenance.metadata),
+		};
+	}
+
+	getEfaExperimentalElixirRows () {
+		return this.getGeneratedFeatureItemRows(CharacterSheetState.EFA_EXPERIMENTAL_ELIXIR_OWNER)
+			.filter(row => this.classifyEfaExperimentalElixir(row).status === "valid");
+	}
+
+	_removeEfaExperimentalElixirRows () {
+		const itemIds = this.getEfaExperimentalElixirRows().map(row => row.id);
+		itemIds.forEach(itemId => this.removeItem(itemId));
+		return itemIds;
+	}
+
+	commitEfaExperimentalElixirBatch ({decision, plan = null} = {}) {
+		if (decision === "cancel") {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-batch-cancelled"};
+		}
+		if (!["produce", "decline"].includes(decision)) {
+			return {ok: false, committed: false, code: "invalid-efa-experimental-elixir-decision"};
+		}
+		if (!this.getEfaExperimentalElixirBatchSize()) {
+			return {ok: false, committed: false, code: "efa-experimental-elixir-unavailable"};
+		}
+		const validated = decision === "produce"
+			? this._validateEfaExperimentalElixirBatchPlan(plan)
+			: {ok: true, plan: null};
+		if (!validated.ok) return {...validated, committed: false};
+
+		const dataSnapshot = MiscUtil.copyFast(this._data);
+		try {
+			const expiredItemIds = this._removeEfaExperimentalElixirRows();
+			const created = [];
+			for (const vial of validated.plan?.vials || []) {
+				const result = this._createEfaExperimentalElixirVialFromMetadata(vial.metadata);
+				if (!result.ok) throw new Error(result.code);
+				created.push(result);
+			}
+			return {
+				ok: true,
+				committed: true,
+				code: decision === "produce"
+					? "efa-experimental-elixir-batch-replaced"
+					: "efa-experimental-elixir-batch-declined",
+				expiredItemIds,
+				createdItemIds: created.map(it => it.itemId),
+				batchId: validated.plan?.batchId || null,
+			};
+		} catch (error) {
+			this._data = dataSnapshot;
+			return {
+				ok: false,
+				committed: false,
+				code: "efa-experimental-elixir-batch-commit-failed",
+				error: error?.message || "Unable to commit Experimental Elixir batch.",
+			};
+		}
+	}
+
+	reconcileEfaExperimentalElixirs ({cause = "unknown"} = {}) {
+		const staleItemIds = (this._data.inventory || [])
+			.filter(row => this.classifyEfaExperimentalElixir(row).status === "stale")
+			.map(row => row.id);
+		const classEntry = this._getEfaAlchemistClassEntry();
+		const removedItemIds = classEntry ? [] : this._removeEfaExperimentalElixirRows();
+		return {
+			cause,
+			activeItemIds: this.getEfaExperimentalElixirRows().map(row => row.id),
+			staleItemIds,
+			removedItemIds,
+		};
+	}
+
 	_getEfaAlchemistInnateSpellGrantMax (definition) {
 		if (definition.maxMode === "abilityMod") {
 			return this._computeAbilityModResourceMax(definition.maxAbility);
@@ -36714,6 +37153,7 @@ class CharacterSheetState {
 		this.populateSubclassSpells();
 		this._reconcileRhwReanimatorState();
 		this._reconcileEfaAlchemistInnateSpellGrants();
+		this.reconcileEfaExperimentalElixirs({cause: "class-feature-effects"});
 		// Populate class-level always-prepared spells (base CLASS additionalSpells —
 		// e.g. TGTT Cleric Ceremony/Thaumaturgy, Ranger Hunter's Mark). Catalog-gated
 		// + idempotent reconcile; no-ops until setClassCatalog has run.
