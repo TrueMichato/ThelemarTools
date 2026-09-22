@@ -218,7 +218,7 @@ describe("EFA held tool-focus resolution", () => {
 		});
 
 		expect(globalThis.InputUiUtil.pGetUserEnum).toHaveBeenCalledWith(expect.objectContaining({
-			title: "Choose Artificer Spellcasting Focus",
+			title: "Choose Artificer Spellcasting Tools",
 			isResolveItem: true,
 		}));
 		expect(selected.focusInventoryRow).toBe(tinkers);

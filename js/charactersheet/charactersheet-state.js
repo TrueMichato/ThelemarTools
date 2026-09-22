@@ -22002,27 +22002,6 @@ class CharacterSheetState {
 		}
 	}
 
-	_getFeatureToolChoiceFulfillmentKey (featureOrChoice) {
-		const featureUid = featureOrChoice?.featureUid
-			|| featureOrChoice?._sourceAwareFeatureUid
-			|| "";
-		if (featureUid) return `uid:${featureUid.toLowerCase()}`;
-		const name = featureOrChoice?.featureName || featureOrChoice?.name || featureOrChoice;
-		return name ? String(name).toLowerCase() : "";
-	}
-
-	hasFulfilledFeatureToolChoice (featureOrChoice) {
-		const key = this._getFeatureToolChoiceFulfillmentKey(featureOrChoice);
-		return !!key && (this._data.fulfilledFeatureToolChoices || []).includes(key);
-	}
-
-	_recordFulfilledFeatureToolChoice (featureOrChoice) {
-		const key = this._getFeatureToolChoiceFulfillmentKey(featureOrChoice);
-		if (!key) return;
-		if (!Array.isArray(this._data.fulfilledFeatureToolChoices)) this._data.fulfilledFeatureToolChoices = [];
-		if (!this._data.fulfilledFeatureToolChoices.includes(key)) this._data.fulfilledFeatureToolChoices.push(key);
-	}
-
 	/**
 	 * Queue a prose-parsed feature choice. Deduped by featureId + kind + option
 	 * signature so respec/level-up replays don't stack duplicate prompts.
@@ -39800,21 +39779,32 @@ class CharacterSheetState {
 
 		if (castingClass.uid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) return null;
 		if (this.isSpellCastMaterialComponentWaived(spell, castMeta)) return null;
+		const arcaneArmorStatus = this.getEfaArcaneArmorBindingStatus();
+		const arcaneArmorInventoryItemIds = arcaneArmorStatus.active && arcaneArmorStatus.boundItemId
+			? [arcaneArmorStatus.boundItemId]
+			: [];
 		return {
 			ruleId: CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID,
 			classUid: castingClass.uid,
 			castingClass,
 			addsMaterialComponent: true,
 			filter: {
+				inventoryItemIds: arcaneArmorInventoryItemIds,
 				itemUids: [],
 				itemNames: ["Thieves' Tools", "Tinker's Tools"],
 				itemTypes: ["AT"],
 				requiresProficiency: true,
 			},
 			ui: {
-				title: "Choose Artificer Spellcasting Focus",
-				description: "Choose the equipped, proficient tool or active Arcane Armor you are using as the material focus for this spell.",
-				unavailableMessage: "EFA Artificer spells require an equipped spellcasting focus: Thieves' Tools, Tinker's Tools, a proficient Artisan's Tool, or active Arcane Armor.",
+				title: arcaneArmorInventoryItemIds.length
+					? "Choose Artificer Spellcasting Focus"
+					: "Choose Artificer Spellcasting Tools",
+				description: arcaneArmorInventoryItemIds.length
+					? "Choose your worn Arcane Armor or an equipped, proficient tool as the spellcasting focus."
+					: "Choose the equipped, proficient tool you are using as the material focus for this spell.",
+				unavailableMessage: arcaneArmorInventoryItemIds.length
+					? "EFA Artificer spells require worn Arcane Armor or an equipped, proficient spellcasting tool."
+					: "EFA Artificer spells require equipped Thieves' Tools, Tinker's Tools, or proficient Artisan's Tools.",
 			},
 		};
 	}
@@ -39826,18 +39816,16 @@ class CharacterSheetState {
 	 */
 	getEligibleSpellCastFocusInventoryRows (requirement) {
 		if (!requirement?.filter) return [];
+		const inventoryItemIds = new Set(requirement.filter.inventoryItemIds || []);
 		const itemUids = new Set((requirement.filter.itemUids || []).map(uid => String(uid).toLowerCase()));
 		const itemNames = new Set((requirement.filter.itemNames || []).map(name => CharacterSheetState.normalizeToolKey(name)));
 		const itemTypes = new Set((requirement.filter.itemTypes || []).map(type => String(type).toUpperCase()));
-		if (!itemUids.size && !itemNames.size && !itemTypes.size) return [];
-		const armorStatus = requirement.ruleId === CharacterSheetState.EFA_SPELLCASTING_TOOLS_RULE_ID
-			? this.getEfaArcaneArmorBindingStatus()
-			: null;
+		if (!inventoryItemIds.size && !itemUids.size && !itemNames.size && !itemTypes.size) return [];
 		return (this._data.inventory || []).filter(wrapper => {
 			if (!wrapper?.id || !wrapper.equipped || Number(wrapper.quantity ?? 1) <= 0) return false;
-			if (armorStatus?.active && armorStatus.boundItemId === wrapper.id) return true;
 			const item = wrapper.item;
 			if (!item?.name || !item.source) return false;
+			if (inventoryItemIds.has(wrapper.id)) return true;
 			const normalizedName = CharacterSheetState.normalizeToolKey(item.name);
 			const baseType = String(item.type || "").split("|")[0].toUpperCase();
 			const itemUid = `${item.name}|${item.source}`.toLowerCase();
