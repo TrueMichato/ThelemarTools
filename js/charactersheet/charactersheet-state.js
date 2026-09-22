@@ -5433,6 +5433,9 @@ class CharacterSheetState {
 				speedEmojiLabels: true,
 				// Show the redundant top-level "Abilities" tab (Overview already shows scores). Default OFF.
 				showAbilitiesTab: false,
+				// Chained Fury target bookkeeping is optional. Spectral Chains attacks and
+				// riders remain usable when this is off; only named target records are gated.
+				chainedFuryTargetTracking: false,
 
 				// Crafting, harvesting and cooking. The master toggle is ON — the flows are
 				// opt-in by nature (a character who never harvests never opens them) and hiding
@@ -5505,6 +5508,9 @@ class CharacterSheetState {
 
 	toJson () {
 		this._ensureBattleMasterSuperiorityDice();
+		if ((this._data.targetEffects || []).some(it => String(it?.source || "").toLowerCase() === "chained-fury")) {
+			this.reconcileTargetEffects();
+		}
 		return MiscUtil.copyFast(this._data);
 	}
 
@@ -23183,10 +23189,6 @@ class CharacterSheetState {
 								calculations.chainDamageDie = chainStats.damage;
 								calculations.chainRange = chainStats.range;
 								calculations.chainCount = level >= 14 ? 4 : 2;
-								// Escape DC is the character's current grapple/method DC. Keep
-								// this separate from Chain Imprisonment's STR save DC.
-								calculations.chainGrappleDc = calculations.combatMethodDc
-									|| (8 + profBonus + Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex")));
 								// "You count as 1 size category larger" (2 at L10) when grappling
 								// or moving a grappled creature. Fed to getGrappleSizeCategory().
 								calculations.chainGrappleSizeBonus = level >= 10 ? 2 : 1;
@@ -23224,12 +23226,15 @@ class CharacterSheetState {
 								// resolved after the attack lands, via the generic post-attack
 								// `featureOnHitOptions` hook.
 								const onHit = (calculations.attackOnHitOptions ||= []);
+								const isTargetTracking = this.isChainedFuryTargetTrackingEnabled();
 								onHit.push({
 									id: "chains-grapple",
 									name: "Grapple with the chains",
 									attackSourceFeature: "Manifest Chains",
-									targetAware: true,
-									targetEffect: {source: "chained-fury", effect: "grapple"},
+									...(isTargetTracking ? {
+										targetAware: true,
+										targetEffect: {source: "chained-fury", effect: "grapple"},
+									} : {}),
 									requiresState: "manifestChains",
 									requiresStates: ["rage", "manifestChains"],
 									description: `Grapple the target in addition to dealing damage. You count as ${calculations.chainGrappleSizeBonus} size ${calculations.chainGrappleSizeBonus === 1 ? "category" : "categories"} larger for the grapple.`,
@@ -23238,8 +23243,6 @@ class CharacterSheetState {
 									id: "chains-shove",
 									name: "Shove with the chains",
 									attackSourceFeature: "Manifest Chains",
-									targetAware: true,
-									targetEffect: {source: "chained-fury", effect: "shove"},
 									requiresState: "manifestChains",
 									requiresStates: ["rage", "manifestChains"],
 									description: "Shove the target in addition to dealing damage.",
@@ -23251,12 +23254,16 @@ class CharacterSheetState {
 									calculations.chainsAreMagical = true;
 									calculations.chainRestrainDc = 8 + profBonus + conMod;
 									calculations.chainRestrainDamage = level; // force damage per turn
+									calculations.chainImprisonmentSaveDc = calculations.chainRestrainDc;
+									calculations.chainRecurringDamage = calculations.chainRestrainDamage;
 									onHit.push({
 										id: "chains-restrain",
 										name: "Chain Imprisonment (restrain)",
 										attackSourceFeature: "Manifest Chains",
-										targetAware: true,
-										targetEffect: {source: "chained-fury", effect: "restrain"},
+										...(isTargetTracking ? {
+											targetAware: true,
+											targetEffect: {source: "chained-fury", effect: "restrain"},
+										} : {}),
 										requiresState: "manifestChains",
 										requiresStates: ["rage", "manifestChains"],
 										description: `On a successful grapple, the target must succeed on a Strength saving throw or be restrained until the grapple ends, taking ${level} force damage at the start of each of its turns.`,
@@ -23273,8 +23280,10 @@ class CharacterSheetState {
 										id: "chains-control-shove",
 										name: "Chain Control (10 ft. reposition)",
 										attackSourceFeature: "Manifest Chains",
-										targetAware: true,
-										targetEffect: {source: "chained-fury", effect: "control-shove"},
+										...(isTargetTracking ? {
+											targetAware: true,
+											targetEffect: {source: "chained-fury", effect: "control-shove"},
+										} : {}),
 										requiresState: "manifestChains",
 										requiresStates: ["rage", "manifestChains"],
 										description: "On a successful grapple, immediately shove the target 10 feet in any direction, provided it ends within the chains' reach.",
@@ -29440,6 +29449,40 @@ class CharacterSheetState {
 				if (hasSpellDcOverride) {
 					calculations.combatMethodDc = Math.max(calculations.combatMethodDc, calculations.spellSaveDc);
 					calculations.combatMethodDcUsesSpellcasting = true;
+				}
+			}
+		}
+
+		// Manifest Chains uses the finalized Combat Method DC. This must run after
+		// spellcasting-aware Combat Method resolution (e.g. Hexblade/Bladesinger).
+		if (calculations.hasManifestChains) {
+			const physicalChainDc = 8
+				+ profBonus
+				+ Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex"))
+				- exhaustionPenalty;
+			calculations.chainGrappleDc = Number(calculations.combatMethodDc) || physicalChainDc;
+
+			const targetTrackingSuffix = this.isChainedFuryTargetTrackingEnabled()
+				? " If the target fails, you can record it in the optional chain tracker."
+				: "";
+			const movementReminder = calculations.chainFreeMovement
+				? " You can move a creature held by your chains without spending extra movement."
+				: " You can move it without moving yourself by spending your movement, and can use your bonus action to double that movement for this purpose.";
+
+			for (const option of calculations.attackOnHitOptions || []) {
+				switch (option.id) {
+					case "chains-grapple":
+						option.description = `The target chooses Strength or Dexterity and makes a save against DC ${calculations.chainGrappleDc}. On a failure, it is grappled by your chains.${movementReminder}${targetTrackingSuffix}`;
+						break;
+					case "chains-shove":
+						option.description = `The target chooses Strength or Dexterity and makes a save against DC ${calculations.chainGrappleDc}. On a failure, shove it as normal.`;
+						break;
+					case "chains-restrain":
+						option.description = `First resolve the grapple against DC ${calculations.chainGrappleDc}. If the target is grappled, it then makes a DC ${calculations.chainImprisonmentSaveDc} Strength save; on a failure, it is restrained and takes ${calculations.chainRecurringDamage} force damage at the start of each of its turns.${targetTrackingSuffix}`;
+						break;
+					case "chains-control-shove":
+						option.description = `The target chooses Strength or Dexterity and makes a save against DC ${calculations.chainGrappleDc}. On a failure, it is grappled and you can move it up to 10 feet in a direction of your choice.${targetTrackingSuffix}`;
+						break;
 				}
 			}
 		}
@@ -35643,6 +35686,9 @@ class CharacterSheetState {
 	}
 
 	removeItem (itemId) {
+		const removedItem = this._findInventoryRow(itemId);
+		const isChainedFuryChain = removedItem?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+			|| removedItem?.item?._isChainedFuryChain;
 		// Remove any effects/modifiers this item contributed BEFORE it leaves the inventory
 		// (defensive-trait cleanup needs to read the item's effects[] while it is still present).
 		this._unregisterItemEffects(itemId);
@@ -35657,6 +35703,10 @@ class CharacterSheetState {
 		}
 
 		this._data.inventory = this._data.inventory.filter(i => i.id !== itemId);
+		if (isChainedFuryChain) {
+			this.clearTargetEffects("chained-fury");
+			this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		}
 		this._recalculateItemBonuses();
 
 		// A stone (or a host) leaving the inventory must not leave a dangling seat behind,
@@ -35766,6 +35816,13 @@ class CharacterSheetState {
 			if (!equipped) {
 				const host = this.getIounHostOfStone(itemId);
 				if (host) this.unsetIounStone(host.id, itemId);
+				if (
+					item.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+					|| item.item?._isChainedFuryChain
+				) {
+					this.clearTargetEffects("chained-fury");
+					this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+				}
 			}
 			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
 		}
@@ -35813,6 +35870,13 @@ class CharacterSheetState {
 		const item = this._findInventoryRow(itemId);
 		if (item) {
 			item.equipped = false;
+			if (
+				item.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+				|| item.item?._isChainedFuryChain
+			) {
+				this.clearTargetEffects("chained-fury");
+				this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+			}
 			// A set stone is by definition functioning, so taking it out of use must also take
 			// it out of its setting — otherwise the host keeps its +1 for a dormant stone.
 			const host = this.getIounHostOfStone(itemId);
@@ -40019,6 +40083,17 @@ class CharacterSheetState {
 		if (key === "enableMaterials" && previous !== value && (value === false || this._itemMaterialCatalog?.length)) {
 			this._onItemMaterialChanged();
 		}
+	}
+
+	isChainedFuryTargetTrackingEnabled () {
+		return this._data.settings?.chainedFuryTargetTracking === true;
+	}
+
+	setChainedFuryTargetTrackingEnabled (isEnabled) {
+		this.setSetting("chainedFuryTargetTracking", !!isEnabled);
+		if (isEnabled) return;
+		this.clearTargetEffects("chained-fury");
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
 	}
 
 	/** Whether the optional top-level "Abilities" tab is shown (default false). */
@@ -65243,7 +65318,10 @@ class CharacterSheetState {
 		}
 		// Chained Fury targets are sustained by Rage + Manifest Chains. Ending
 		// either source tears down every persisted chain effect immediately.
-		if (stateTypeId === "rage" || stateTypeId === "manifestChains") this.clearTargetEffects("chained-fury");
+		if (stateTypeId === "rage" || stateTypeId === "manifestChains") {
+			this.clearTargetEffects("chained-fury");
+			this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		}
 	}
 
 	_deactivateStatesForEndCondition ({conditionName = null, armorType = null, isIncapacitated = false, isDead = false} = {}) {
@@ -66831,7 +66909,7 @@ class CharacterSheetState {
 			source: "chained-fury",
 			effect,
 			range,
-			prompt: "Record the creature affected by the spectral chains. The target remains until the source releases it or its active requirements end.",
+			prompt: "Optional bookkeeping: record the creature only after it fails the relevant save.",
 		};
 	}
 
@@ -66883,11 +66961,13 @@ class CharacterSheetState {
 
 	getChainedTargetState () {
 		const calc = this.getFeatureCalculations() || {};
+		const occupants = this.getChainedTargetOccupants();
 		return {
+			trackingEnabled: this.isChainedFuryTargetTrackingEnabled(),
 			available: this.isStateTypeActive("manifestChains") && this.isStateTypeActive("rage"),
 			capacity: calc.chainCount || 0,
-			used: this.getChainedTargetOccupants().length,
-			availableChains: Math.max(0, (calc.chainCount || 0) - this.getChainedTargetOccupants().length),
+			used: occupants.length,
+			availableChains: Math.max(0, (calc.chainCount || 0) - occupants.length),
 			range: calc.chainRange || 0,
 			grappleDc: calc.chainGrappleDc || null,
 			restraintDc: calc.chainRestrainDc || null,
@@ -66997,7 +67077,14 @@ class CharacterSheetState {
 			.some(state => state.stateTypeId === "manifestChains");
 		const hasTargetEffects = (this._data.targetEffects || [])
 			.some(effect => String(effect.source || "").toLowerCase() === "chained-fury");
-		if (!ownedIds.size && !hasManifestState && !hasTargetEffects) return;
+		const hasMovementUsage = !!this._data.chainedMovementUsage
+			&& (
+				this._data.chainedMovementUsage.round != null
+				|| Number(this._data.chainedMovementUsage.movementUsed) > 0
+				|| this._data.chainedMovementUsage.bonusActionUsed
+				|| this._data.chainedMovementUsage.doubled
+			);
+		if (!ownedIds.size && !hasManifestState && !hasTargetEffects && !hasMovementUsage) return;
 
 		if (ownedIds.size) {
 			for (const itemId of ownedIds) this._unregisterItemEffects?.(itemId);
@@ -67007,6 +67094,7 @@ class CharacterSheetState {
 		this._data.activeStates = (this._data.activeStates || [])
 			.filter(state => state.stateTypeId !== "manifestChains");
 		this.clearTargetEffects?.("chained-fury");
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
 	}
 
 	_reconcileChainedFuryChainItem () {
@@ -67125,13 +67213,23 @@ class CharacterSheetState {
 	}
 
 	applyChainedTargetEffect ({
-		targetId, targetName, name, size = "medium", distance = null, effect = "grapple",
-		riderId, restraintSaveTotal = null, shoveDistance = null, grappleSaveTotal = null,
-		grappleSaveAbility = "str", finalDistance = null, shoveDirection = null,
+		targetId, targetName, name, effect = "grapple",
+		riderId, restraintSaveTotal = null, grappleSaveTotal = null,
+		grappleSaveFailed = null, restraintSaveFailed = null, grappleSaveAbility = "str",
 		source = "chained-fury", targetEffect = null,
 	} = {}) {
+		if (!this.isChainedFuryTargetTrackingEnabled()) return {ok: false, reason: "tracking-disabled"};
 		const calc = this.getFeatureCalculations() || {};
-		if (!calc.hasManifestChains || !this.isStateTypeActive("rage") || !this.isStateTypeActive("manifestChains")) {
+		const chainItem = (this._data.inventory || []).find(it =>
+			it?.item?._isChainedFuryChain
+			|| it?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID,
+		);
+		if (
+			!calc.hasManifestChains
+			|| !this.isStateTypeActive("rage")
+			|| !this.isStateTypeActive("manifestChains")
+			|| !chainItem?.equipped
+		) {
 			return {ok: false, reason: "chains-inactive"};
 		}
 		const normalizedSource = String(source || "chained-fury").trim().toLowerCase();
@@ -67153,144 +67251,122 @@ class CharacterSheetState {
 		if (riderId && riderEffects[riderId] && normalizedEffect !== riderEffects[riderId]) {
 			return {ok: false, reason: "effect-metadata-mismatch"};
 		}
-		if (riderId && !riderEffects[riderId] && !["target", "none", "track"].includes(normalizedEffect)) {
+		if (riderId && !riderEffects[riderId]) {
 			return {ok: false, reason: "effect-unavailable"};
 		}
-		const allowedEffects = new Set(["target", "none", "track", "grapple", "shove", "shove-only", "restrain", "control-shove"]);
+		const allowedEffects = new Set(["grapple", "shove", "shove-only", "restrain", "control-shove"]);
 		if (!allowedEffects.has(normalizedEffect)) return {ok: false, reason: "effect-unavailable"};
-		if (["restrain"].includes(normalizedEffect) && !calc.hasChainImprisonment) {
+		if (normalizedEffect === "restrain" && !calc.hasChainImprisonment) {
 			return {ok: false, reason: "effect-unavailable", requiredLevel: 6};
 		}
-		if (["control-shove"].includes(normalizedEffect) && !calc.hasChainControl) {
+		if (normalizedEffect === "control-shove" && !calc.hasChainControl) {
 			return {ok: false, reason: "effect-unavailable", requiredLevel: 10};
 		}
+
+		if (["shove", "shove-only"].includes(normalizedEffect)) {
+			return {
+				ok: true,
+				tracked: false,
+				target: null,
+				grappled: false,
+				restrained: false,
+				shoved: true,
+				shoveDistance: Number(calc.chainShoveDistance) || 0,
+			};
+		}
+
 		const existing = targetId ? this._data.targetEffects.find(it => it.id === targetId) : null;
 		const existingGrapple = !!existing?.effects?.grapple?.active || !!existing?.grappled;
-		const wantsGrapple = !["target", "none", "track", "shove", "shove-only"].includes(normalizedEffect);
-		if (!existingGrapple && wantsGrapple && this.getChainedTargetOccupants().length >= (calc.chainCount || 0)) return {ok: false, reason: "chain-capacity"};
-		const maxSize = this.getGrappleSizeCategory()?.maxTargetSize;
-		const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(size).toLowerCase());
-		const maxRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(maxSize || "gargantuan").toLowerCase());
-		if (wantsGrapple && !calc.grappleSizeUnlimited && maxRank >= 0 && sizeRank > maxRank) return {ok: false, reason: "target-too-large", maxSize};
-		const range = Number(calc.chainRange) || 0;
-		if (distance != null && (Number(distance) < 0 || Number(distance) > range)) return {ok: false, reason: "out-of-range", range};
 
-		const id = targetId || `chain-target-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 		const isRestrain = normalizedEffect === "restrain";
 		const isControlShove = normalizedEffect === "control-shove";
-		const isShove = ["shove", "control-shove"].includes(normalizedEffect);
 		const grappleAbility = grappleSaveAbility === "dex" ? "dex" : grappleSaveAbility === "str" ? "str" : null;
-		if (wantsGrapple && !grappleAbility) return {ok: false, reason: "invalid-save-ability"};
+		if (!grappleAbility) return {ok: false, reason: "invalid-save-ability"};
 		const grappleDc = Number(calc.chainGrappleDc) || null;
-		const grappleSucceeded = !wantsGrapple || grappleSaveTotal == null || Number(grappleSaveTotal) < grappleDc;
-		const grappled = wantsGrapple && grappleSucceeded;
-		const restraintDc = calc.chainRestrainDc || null;
-		const restraintSuccess = isRestrain && grappled
-			&& (restraintSaveTotal == null || Number(restraintSaveTotal) < restraintDc);
-		const finalShoveDistance = shoveDistance == null ? (isShove ? (calc.chainShoveDistance || 0) : 0) : Number(shoveDistance);
-		const currentDistance = Number(distance ?? existing?.distance ?? 0);
-		const direction = shoveDirection || existing?.shoveDirection || null;
-		const inferredFinalDistance = direction === "toward"
-			? currentDistance - finalShoveDistance
-			: direction === "lateral"
-				? currentDistance
-				: currentDistance + finalShoveDistance;
-		const declaredFinalDistance = finalDistance == null ? inferredFinalDistance : Number(finalDistance);
-		const expectedFinalDistance = direction === "toward"
-			? currentDistance - finalShoveDistance
-			: direction === "lateral"
-				? currentDistance
-				: currentDistance + finalShoveDistance;
-		if (isControlShove && !grappled) {
-			// Chain Control is explicitly contingent on the initial grapple. Keep
-			// the target record for the player's confirmed outcome, but never apply
-			// a shove or occupy a chain after a successful save.
-			const target = this.upsertTargetEffect({
-				id,
-				source: "chained-fury",
-				effectType: normalizedEffect,
-				targetName: targetName || name || existing?.targetName || "Target",
-				size,
-				grappled: false,
-				restrained: false,
-				shoved: false,
-				distance: currentDistance,
-				declaredDistance: currentDistance,
-				chainIndex: null,
-				escapeDc: grappleDc,
-				restraintDc,
-				effects: {
-					grapple: {active: false, ability: grappleAbility || "str", dc: grappleDc},
-					shove: {active: false, distance: 0},
-					restraint: {active: false, dc: restraintDc},
-				},
-			});
+
+		const getSaveFailed = (explicit, total, dc) => {
+			if (explicit != null) return explicit === true;
+			if (total == null) return null;
+			return Number(total) < dc;
+		};
+		const didFailGrappleSave = getSaveFailed(grappleSaveFailed, grappleSaveTotal, grappleDc);
+		if (didFailGrappleSave == null) return {ok: false, reason: "outcome-required", outcome: "grapple"};
+		if (!didFailGrappleSave) {
 			return {
-				ok: !!target,
-				target,
+				ok: true,
+				tracked: false,
+				target: null,
 				grappled: false,
 				restrained: false,
 				shoved: false,
-				grappleSaveSuccess: false,
+				grappleSaveSuccess: true,
+				grappleSaveFailed: false,
 				grappleDc,
 				grappleSaveAbility: grappleAbility,
-				restraintSaveSuccess: false,
-				saveDc: restraintDc,
+				restraintSaveSuccess: null,
+				restraintSaveFailed: null,
 				controlApplied: false,
 			};
 		}
-		if (isControlShove && (
-			!["away", "toward", "lateral"].includes(direction)
-			|| finalShoveDistance !== 10
-			|| !Number.isFinite(declaredFinalDistance)
-			|| declaredFinalDistance < 0
-			|| declaredFinalDistance > range
-			|| Math.abs(declaredFinalDistance - expectedFinalDistance) > 0.001
-		)) {
-			return {ok: false, reason: "shove-out-of-range", range, finalDistance: declaredFinalDistance};
+		if (!existingGrapple && this.getChainedTargetOccupants().length >= (calc.chainCount || 0)) {
+			return {ok: false, reason: "chain-capacity"};
 		}
+
+		const restraintDc = Number(calc.chainImprisonmentSaveDc || calc.chainRestrainDc) || null;
+		const didFailRestraintSave = isRestrain
+			? getSaveFailed(restraintSaveFailed, restraintSaveTotal, restraintDc)
+			: false;
+		if (isRestrain && didFailRestraintSave == null) return {ok: false, reason: "outcome-required", outcome: "restraint"};
+
+		const resolvedName = String(targetName || name || existing?.targetName || "").trim();
+		if (!resolvedName) return {ok: false, reason: "target-name-required"};
+		const restrained = isRestrain && didFailRestraintSave;
+		const id = targetId || `chain-target-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 		const target = this.upsertTargetEffect({
 			id,
 			source: "chained-fury",
-			effectType: normalizedEffect,
-			targetName: targetName || name || existing?.targetName || "Target",
-			size,
-			grappled,
-			restrained: isRestrain && restraintSuccess,
-			shoved: isShove && (!isControlShove || grappled),
-			shoveDistance: finalShoveDistance,
-			shoveDirection: direction,
-			declaredDistance: declaredFinalDistance,
-			distance: isShove && (!isControlShove || grappled) ? declaredFinalDistance : (distance == null && existing ? existing.distance : (distance == null ? 0 : distance)),
-			recurringDamage: isRestrain && restraintSuccess && calc.chainRestrainDamage
+			effectType: restrained ? "restrain" : "grapple",
+			targetName: resolvedName,
+			size: existing?.size || "medium",
+			grappled: true,
+			restrained,
+			shoved: false,
+			shoveDistance: 0,
+			shoveDirection: null,
+			declaredDistance: existing?.declaredDistance ?? 0,
+			distance: existing?.distance ?? 0,
+			recurringDamage: restrained && (calc.chainRecurringDamage || calc.chainRestrainDamage)
 				? {
-					amount: calc.chainRestrainDamage,
+					amount: Number(calc.chainRecurringDamage || calc.chainRestrainDamage),
 					type: "force",
 					when: "start of each of its turns",
 				}
 				: null,
-			chainIndex: grappled ? (existing?.chainIndex ?? this.getChainedTargetOccupants().length) : null,
+			chainIndex: existing?.chainIndex ?? this.getChainedTargetOccupants().length,
 			escapeDc: grappleDc,
 			restraintDc,
 			effects: {
-				grapple: {active: grappled, ability: grappleAbility || "str", dc: grappleDc},
-				shove: {active: isShove && (!isControlShove || grappled), distance: isShove && (!isControlShove || grappled) ? finalShoveDistance : 0},
-				restraint: {active: restraintSuccess, dc: restraintDc},
+				grapple: {active: true, ability: grappleAbility, dc: grappleDc},
+				shove: {active: false, distance: 0},
+				restraint: {active: restrained, dc: restraintDc},
 			},
 		});
 		return {
 			ok: !!target,
+			tracked: !!target,
 			target,
-			grappled,
+			grappled: true,
 			restrained: !!target?.restrained,
-			grappleSaveSuccess: grappleSucceeded,
+			shoved: false,
+			grappleSaveSuccess: false,
+			grappleSaveFailed: true,
 			grappleDc,
 			grappleSaveAbility: grappleAbility,
-			restraintSaveSuccess: restraintSuccess,
+			restraintSaveSuccess: isRestrain ? !didFailRestraintSave : null,
+			restraintSaveFailed: isRestrain ? didFailRestraintSave : null,
 			saveDc: restraintDc,
-			finalDistance: declaredFinalDistance,
-			shoveDirection: direction,
-			controlApplied: isControlShove && grappled,
+			shoveDistance: isControlShove ? 10 : 0,
+			controlApplied: isControlShove,
 		};
 	}
 
@@ -67436,67 +67512,68 @@ class CharacterSheetState {
 	}
 
 	reconcileTargetEffects () {
+		if (!Array.isArray(this._data.targetEffects)) this._data.targetEffects = [];
+		const hasChainedTargets = this._data.targetEffects
+			.some(it => String(it?.source || "").toLowerCase() === "chained-fury");
+		if (!hasChainedTargets) return;
+
 		const calc = this.getFeatureCalculations() || {};
-		const legal = calc.hasManifestChains && this.isStateTypeActive("rage") && this.isStateTypeActive("manifestChains");
+		const chainItem = (this._data.inventory || []).find(it =>
+			it?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+			|| it?.item?._isChainedFuryChain,
+		);
+		const legal = this.isChainedFuryTargetTrackingEnabled()
+			&& !!calc.hasManifestChains
+			&& this.isStateTypeActive("rage")
+			&& this.isStateTypeActive("manifestChains")
+			&& !!chainItem?.equipped;
 		if (!legal) {
 			this.clearTargetEffects("chained-fury");
 			const manifest = this._data.activeStates.find(state => state.stateTypeId === "manifestChains");
 			if (manifest?.active && !this._getChainedFuryClass()) manifest.active = false;
-		} else {
-			const max = Number(calc.chainRange) || 0;
-			const maxSize = this.getGrappleSizeCategory()?.maxTargetSize;
-			const maxRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(maxSize || "gargantuan").toLowerCase());
-			const capacity = Number(calc.chainCount) || 0;
-			const occupants = [...this._data.targetEffects]
-				.filter(it => it.source === "chained-fury" && it.effects?.grapple?.active && it.chainIndex != null)
-				.sort((a, b) => Number(a.chainIndex) - Number(b.chainIndex));
-			for (const target of [...this._data.targetEffects]) {
-				if (target.source !== "chained-fury") continue;
-				const grappled = !!target.effects?.grapple?.active;
-				if (target.distance != null && target.distance > max) {
-					this._releaseChainedTargetEffect(target);
-					continue;
-				}
-				const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(target.size || "medium").toLowerCase());
-				if (grappled && (!calc.grappleSizeUnlimited && maxRank >= 0 && sizeRank > maxRank)) {
-					this._releaseChainedTargetEffect(target);
-					continue;
-				}
-				if (grappled && occupants.indexOf(target) >= capacity) {
-					this._releaseChainedTargetEffect(target);
-					continue;
-				}
-				if (grappled) {
-					target.chainIndex = occupants.indexOf(target);
-				}
-				if (!grappled) target.chainIndex = null;
-				target.grappled = grappled;
-				target.effects.grapple.active = grappled;
-				target.escapeDc = calc.chainGrappleDc || null;
-				target.effects.grapple.dc = calc.chainGrappleDc || null;
-				target.restraintDc = calc.chainRestrainDc || null;
-				target.effects.restraint.dc = calc.chainRestrainDc || null;
-				// Ordinary grapples never carry the restraint layer. This also
-				// repairs saves written by the earlier implementation, which
-				// accidentally marked every grapple as restrained.
-				if (target.effectType !== "restrain") {
-					target.restrained = false;
-					target.effects.restraint.active = false;
-					target.recurringDamage = null;
-				} else if (target.restrained && (!grappled || !calc.hasChainImprisonment)) {
-					this._releaseChainedTargetEffect(target);
-				} else if (target.restrained) {
-					target.effects.restraint.active = true;
-					target.recurringDamage = {
-						amount: Number(calc.chainRestrainDamage) || 0,
-						type: "force",
-						when: "start of each of its turns",
-					};
-				}
-				target.restrained = !!target.effects.restraint.active && grappled && target.effectType === "restrain";
-				target.shoved = !!target.effects.shove.active;
-			}
+			return;
 		}
+
+		const capacity = Math.max(0, Number(calc.chainCount) || 0);
+		const chained = this._data.targetEffects
+			.filter(it => String(it?.source || "").toLowerCase() === "chained-fury")
+			.sort((a, b) => (Number(a.chainIndex) || 0) - (Number(b.chainIndex) || 0) || (a.createdAt || 0) - (b.createdAt || 0));
+		const keptIds = new Set();
+		for (const target of chained) {
+			const grappled = !!target.effects?.grapple?.active || !!target.grappled;
+			if (!grappled || keptIds.size >= capacity) continue;
+
+			target.grappled = true;
+			target.chainIndex = keptIds.size;
+			target.escapeDc = Number(calc.chainGrappleDc) || null;
+			target.effects ||= {};
+			target.effects.grapple = {
+				active: true,
+				ability: target.effects.grapple?.ability === "dex" ? "dex" : "str",
+				dc: Number(calc.chainGrappleDc) || null,
+			};
+			target.effects.shove = {active: false, distance: 0};
+			target.shoved = false;
+			target.shoveDistance = 0;
+			target.shoveDirection = null;
+
+			const remainsRestrained = !!target.restrained && !!calc.hasChainImprisonment;
+			target.restrained = remainsRestrained;
+			target.effectType = remainsRestrained ? "restrain" : "grapple";
+			target.restraintDc = Number(calc.chainImprisonmentSaveDc || calc.chainRestrainDc) || null;
+			target.effects.restraint = {active: remainsRestrained, dc: target.restraintDc};
+			target.recurringDamage = remainsRestrained
+				? {
+					amount: Number(calc.chainRecurringDamage || calc.chainRestrainDamage) || 0,
+					type: "force",
+					when: "start of each of its turns",
+				}
+				: null;
+			keptIds.add(target.id);
+		}
+
+		this._data.targetEffects = this._data.targetEffects
+			.filter(it => String(it?.source || "").toLowerCase() !== "chained-fury" || keptIds.has(it.id));
 	}
 
 	getChainedFuryTargets () { return this.getChainedTargets(); }

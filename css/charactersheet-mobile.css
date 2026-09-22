@@ -2087,29 +2087,34 @@
 	}
 }
 @media (max-width: 600px) {
-	.charsheet__chained-target-row,
-	.pm-chained-target {
-		display: grid;
-		grid-template-columns: 1fr;
+	.charsheet__chain-tracker-optin,
+	.pm-chain-tracker__optin {
+		flex-direction: column;
 		align-items: stretch;
-		gap: .5rem;
-		padding: .65rem 0;
+		gap: .65rem;
 	}
 
-	.charsheet__chained-target-row > *,
-	.pm-chained-target > * {
-		margin-left: 0 !important;
-		width: 100% !important;
-		min-width: 0;
+	.charsheet__chain-tracker-toggle,
+	.pm-chain-tracker__toggle {
+		justify-content: center;
+		width: 100%;
+	}
+
+	.charsheet__chained-target-row,
+	.pm-chained-target {
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: .65rem;
+		padding: .75rem 0;
 	}
 
 	.charsheet__chained-target-row button,
-	.charsheet__chained-target-row input,
-	.charsheet__chained-target-row select,
-	.pm-chained-target button,
-	.pm-chained-target input,
-	.pm-chained-target select {
+	.pm-chained-target button {
 		min-height: 44px;
+	}
+
+	.charsheet__chained-target-release,
+	.pm-chained-target__release {
+		margin-left: 0 !important;
 	}
 
 	.cs-combat-target-effect {
@@ -2138,8 +2143,7 @@
 		gap: .25rem;
 	}
 
-	.cs-combat-target-modal .cs-combat-target-effect .form-control,
-	.cs-combat-target-modal .cs-combat-target-effect input[type="number"] {
+	.cs-combat-target-modal .cs-combat-target-effect .form-control {
 		width: 100% !important;
 		min-width: 0;
 		min-height: 44px;

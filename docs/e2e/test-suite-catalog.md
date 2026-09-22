@@ -29,7 +29,7 @@ the skill reference at
 | 6 | `tgtt-child-of-sun-sorcerer-hochling.spec.ts` | Child of the Sun Sorcerer · Hochling | 1–20 | Sun bloodline radiant rider, sorcery points, full slot table to L9. |
 | 7 | `tgtt-chronurgy-wizard-nyuidj.spec.ts` | Chronurgy Wizard · Nyuidj | 1–20 | Chronurgy temporal abilities, full caster, signature toggle on derived stats. |
 | 8 | `tgtt-surrealism-bard-yuanti.spec.ts` | College of Surrealism Bard · Yuan-Ti | 1–20 | Surrealism subclass effects, Bardic Inspiration short-rest restore, full caster. |
-| 9 | `tgtt-chained-fury-barbarian-minotaur.spec.ts` | Chained Fury Barbarian · Minotaur | 1–20 | Rage toggle, Rage breaks concentration, weapon mastery + chained fury riders. |
+| 9 | `tgtt-chained-fury-barbarian-minotaur.spec.ts` | Chained Fury Barbarian · Minotaur | 1–20 | Rage toggle, Rage breaks concentration, weapon mastery, reminder-first riders, and optional compact chain bookkeeping. |
 | 10 | `tgtt-time-domain-cleric.spec.ts` | Time Domain Cleric | 1–20 | Channel Divinity scaling (1→2→3 by L18), full divine slot table, time-domain features at L1/3/6/8/17. |
 | 11 | `tgtt-gambler-rogue-clairnian.spec.ts` | Gambler Rogue · Clairnian Children | 1–20 | All six Gambler features with real `EffectCheck`s — Tools (3 injected weapons equipped + half-cover rider), Folly (bet odds + Gambling Table), Spellcasting (published slot table pinned L3/5/11/17/20, rolled DC/attack dice), Extra Luck (PB/long-rest pool + d20 intervention), Versatile Gambler (2d4/3d6), Master of Fortune (roll-twice choice + nat-1→nat-20); plus Sneak Attack scaling, Cunning Action use, weapon mastery. |
 | 12 | `tgtt-belly-dancer-rogue-jaknian.spec.ts` | Belly Dancer Rogue · Jaknian Children | 1–20 | Dance of the Country / Tantalizing Shivers / Fluid Step, Sneak Attack, Cunning Action, expertise pipeline. |
@@ -75,6 +75,13 @@ the skill reference at
    match.
 
 
-### Chained Fury target lifecycle
+### Chained Fury optional bookkeeping
 
-`tgtt-chained-fury-barbarian-minotaur.spec.ts` drives the real Combat-tab Spectral Chains attack, hit confirmation, target-aware effect picker, target-only and resisted-save branches, persisted target controls, movement/doubling, recurring damage with duplicate/repeat checks, Play Mode Escape and manual Release, out-of-range release, and Rage teardown. The shared page object owns the player-facing attack/modal, Combat target rows, and Play Mode target controls; the state API is used only for the save/load round-trip and compact activation setup.
+`tgtt-chained-fury-barbarian-minotaur.spec.ts` drives the real Combat-tab
+Spectral Chains attack and hit picker first with tracking off, proving the live
+DC reminder appears, no target form opens, and no target-only choice exists. It
+then enables **Remember chained creatures** through the visible UI, records a
+failed grapple plus Chain Imprisonment save, verifies the compact
+Grappled/Restrained row and recurring-damage reminder in Combat and Play Mode,
+round-trips the save, releases through Play Mode, and confirms Rage teardown
+clears records without clearing the preference.

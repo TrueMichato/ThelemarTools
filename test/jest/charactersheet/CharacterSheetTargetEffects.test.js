@@ -1,4 +1,5 @@
 import "./setup.js";
+import fs from "node:fs";
 
 let CharacterSheetState;
 
@@ -6,286 +7,367 @@ beforeAll(async () => {
 	CharacterSheetState = (await import("../../../js/charactersheet/charactersheet-state.js")).CharacterSheetState;
 });
 
-const makeFury = (level = 6) => {
+const GENERATED_CHAIN_ID = "tgtt-chained-fury:spectral-chains";
+
+const makeFury = (level = 6, {tracking = false} = {}) => {
 	const state = new CharacterSheetState();
 	state.setAbilityBase("str", 18);
 	state.setAbilityBase("dex", 14);
 	state.setAbilityBase("con", 16);
-	state.setSpeed("walk", 30);
 	state.addClass({
 		name: "Barbarian",
 		source: "TGTT",
 		level,
 		subclass: {name: "Path of the Chained Fury", shortName: "Chained Fury", source: "TGTT"},
 	});
-	for (const [lvl, name] of [[3, "Manifest Chains"], [6, "Chain Imprisonment"], [10, "Chain Control"], [14, "Unchained Fury"]]) {
-		if (level >= lvl) state.addFeature({name, source: "TGTT", description: name});
+	for (const [featureLevel, name] of [[3, "Manifest Chains"], [6, "Chain Imprisonment"], [10, "Chain Control"], [14, "Unchained Fury"]]) {
+		if (level >= featureLevel) state.addFeature({name, source: "TGTT", description: name});
 	}
 	state.activateState("rage");
 	state.activateState("manifestChains");
+	state.setChainedFuryTargetTrackingEnabled(tracking);
 	return state;
 };
 
-describe("CharacterSheet target/effect lifecycle", () => {
-	it("opts Chained Fury riders into persistence without changing generic rider shape", () => {
-		const state = makeFury(6);
-		const options = state.getFeatureCalculations().attackOnHitOptions;
-		expect(options.find(o => o.id === "chains-grapple").targetAware).toBe(true);
-		expect(options.find(o => o.id === "chains-shove").targetAware).toBe(true);
-		expect(options.find(o => o.id === "chains-grapple").targetEffect).toEqual({source: "chained-fury", effect: "grapple"});
-		expect(options.find(o => o.id === "chains-restrain").targetEffect).toEqual({source: "chained-fury", effect: "restrain"});
-		expect(options.find(o => o.id === "chains-grapple").description).toContain("Grapple");
-	});
+const addGrappledTarget = (state, targetName = "Ogre") => state.applyChainedTargetEffect({
+	targetName,
+	effect: "grapple",
+	riderId: "chains-grapple",
+	grappleSaveFailed: true,
+});
 
-	it("persists a restrained Chained Fury target with recurring damage", () => {
-		const state = makeFury(6);
-		const result = state.applyChainedTargetEffect({
-			targetName: "Ogre",
-			size: "large",
-			distance: 20,
-			riderId: "chains-restrain",
-			effect: "restrain",
-			restraintSaveTotal: 10,
-		});
-		expect(result.ok).toBe(true);
-		expect(result.target).toMatchObject({
-			targetName: "Ogre",
+describe("Chained Fury optional target bookkeeping", () => {
+	it("defaults off for new characters and legacy saves", () => {
+		const fresh = makeFury(6);
+		expect(fresh.isChainedFuryTargetTrackingEnabled()).toBe(false);
+		expect(fresh.getSettings().chainedFuryTargetTracking).toBe(false);
+
+		const legacyJson = fresh.toJson();
+		delete legacyJson.settings.chainedFuryTargetTracking;
+		legacyJson.targetEffects = [{
+			id: "legacy-chain-target",
+			source: "chained-fury",
+			targetName: "Legacy target",
 			grappled: true,
-			restrained: true,
-			recurringDamage: {amount: 6, type: "force"},
-		});
-		expect(state.resolveChainedTargetTurn(result.target.id, 1)).toMatchObject({ok: true, damage: 6});
-		expect(state.resolveChainedTargetTurn(result.target.id, 1)).toMatchObject({ok: true, damage: 0, alreadyResolved: true});
-	});
-
-	it("enforces chain occupancy, size, and reach", () => {
-		const state = makeFury(3);
-		expect(state.applyChainedTargetEffect({targetName: "Too far", distance: 16}).reason).toBe("out-of-range");
-		expect(state.applyChainedTargetEffect({targetName: "Too big", size: "gargantuan", distance: 10}).reason).toBe("target-too-large");
-		expect(state.applyChainedTargetEffect({targetName: "A", distance: 10}).ok).toBe(true);
-		expect(state.applyChainedTargetEffect({targetName: "B", distance: 10}).ok).toBe(true);
-		expect(state.applyChainedTargetEffect({targetName: "C", distance: 10}).reason).toBe("chain-capacity");
-	});
-
-	it("supports escape, release, and source teardown", () => {
-		const state = makeFury(6);
-		const target = state.createChainedTarget({targetName: "Bandit", distance: 10}).target;
-		expect(state.escapeChainedTarget(target.id, 1)).toMatchObject({ok: false, escaped: false});
-		expect(state.escapeChainedTarget(target.id, 30)).toMatchObject({ok: true, escaped: true});
-		const second = state.createChainedTarget({targetName: "Cultist", distance: 10}).target;
-		expect(state.getChainedTargets()).toHaveLength(2);
-		expect(state.getChainedTargetState().used).toBe(1);
-		state.deactivateState("rage");
-		expect(state.getChainedTargets()).toHaveLength(0);
-		expect(second).toBeDefined();
-	});
-
-	it("migrates malformed target entries and removes stale chain effects on load", () => {
-		const state = makeFury(6);
-		const json = state.toJson();
-		json.targetEffects = [{id: "stale", source: "chained-fury", targetName: "Stale", size: "not-a-size"}];
+			chainIndex: 0,
+			effects: {grapple: {active: true, ability: "str", dc: 15}},
+		}];
 		const restored = new CharacterSheetState();
-		restored.loadFromJson(json);
-		expect(restored.getTargetEffects()).toHaveLength(1);
-		expect(restored.getChainedTargetState().used).toBe(0);
+		restored.loadFromJson(legacyJson);
+
+		expect(restored.isChainedFuryTargetTrackingEnabled()).toBe(false);
+		expect(restored.getChainedTargets()).toEqual([]);
+		expect(restored.toJson().targetEffects).toEqual([]);
 	});
 
-	it("resolves grapple and escape with either Strength or Dexterity against the live method DC", () => {
-		const state = makeFury(6);
-		const failed = state.applyChainedTargetEffect({
-			targetName: "Dextrous target",
-			distance: 10,
-			grappleSaveAbility: "dex",
-			grappleSaveTotal: state.getFeatureCalculations().chainGrappleDc,
-		});
-		expect(failed).toMatchObject({ok: true, grappled: false, grappleSaveSuccess: false});
-		const target = state.createChainedTarget({targetName: "Escaper", distance: 10}).target;
-		state.setAbilityBase("str", 20);
-		expect(state.escapeChainedTarget(target.id, 15, {ability: "dex"})).toMatchObject({ok: false, escaped: false, dc: 16});
-		expect(state.escapeChainedTarget(target.id, 16, {ability: "dex"})).toMatchObject({ok: true, escaped: true, ability: "dex"});
-	});
-
-	it("keeps shove-only records out of chain occupancy and validates the final shove distance", () => {
+	it("keeps every rider and the Spectral Chains attack usable while tracking is off", () => {
 		const state = makeFury(10);
-		const shove = state.applyChainedTargetEffect({targetName: "Shoved", distance: 10, effect: "shove", riderId: "chains-shove"});
-		expect(shove).toMatchObject({ok: true, grappled: false});
-		expect(state.getChainedTargetState().used).toBe(0);
+		const attacksBefore = state.getFeatureGrantedAttacks();
+		const chainAttackBefore = attacksBefore.find(it => it.sourceFeature === "Manifest Chains");
+		const optionsBefore = state.getFeatureCalculations().attackOnHitOptions;
+
+		expect(chainAttackBefore).toBeDefined();
+		expect(optionsBefore.map(it => it.id)).toEqual(expect.arrayContaining([
+			"chains-grapple",
+			"chains-shove",
+			"chains-restrain",
+			"chains-control-shove",
+		]));
+		expect(optionsBefore.every(it => !it.targetAware && !it.targetEffect)).toBe(true);
 		expect(state.applyChainedTargetEffect({
-			targetName: "Control",
-			distance: 20,
-			effect: "control-shove",
-			riderId: "chains-control-shove",
-			shoveDistance: 10,
-		})).toMatchObject({ok: false, reason: "shove-out-of-range", finalDistance: 30});
-	});
-
-	it("accounts for drag movement, doubled chain-only movement, and the level-14 exception", () => {
-		const pre14 = makeFury(10);
-		const target = pre14.createChainedTarget({targetName: "Large", size: "large", distance: 0}).target;
-		expect(pre14.moveChainedTarget(target.id, 15)).toMatchObject({ok: true, movementCost: 30, dragMultiplier: 2});
-		expect(pre14.moveChainedTarget(target.id, 25)).toMatchObject({ok: false, reason: "movement-exceeded"});
-		const level14 = makeFury(14);
-		const free = level14.createChainedTarget({targetName: "Huge", size: "huge", distance: 0}).target;
-		expect(level14.moveChainedTarget(free.id, 30, {doubleMovement: true})).toMatchObject({ok: true, movementCost: 30, dragMultiplier: 1});
-		expect(level14.resolveChainedTargetTurn(free.id, 1, {repeat: true})).toMatchObject({ok: false});
-	});
-
-	it("requires the canonical TGTT subclass/source and both active chain states", () => {
-		const wrongSource = makeFury(6);
-		wrongSource.getClasses()[0].subclass.source = "OTHER";
-		expect(wrongSource.getFeatureCalculations().hasManifestChains).toBeFalsy();
-		expect(wrongSource.activateState("manifestChains")).toBeNull();
-
-		const state = makeFury(6);
-		state.deactivateState("rage");
-		expect(state.getFeatureGrantedAttacks()).toEqual([]);
-		expect(state.applyChainedTargetEffect({targetName: "No rage", distance: 5}).reason).toBe("chains-inactive");
-	});
-
-	it("persists target-only hits without consuming a chain and rejects unavailable riders", () => {
-		const state = makeFury(3);
-		const tracked = state.applyChainedTargetEffect({targetName: "Tracked", distance: 10, effect: "target"});
-		expect(tracked).toMatchObject({ok: true, grappled: false, restrained: false});
-		expect(state.getChainedTargetState().used).toBe(0);
-		expect(state.applyTargetEffect({
-			source: "chained-fury",
-			targetEffect: {source: "chained-fury", effect: "target"},
-			riderId: "target-only",
-			targetName: "Tracked through dispatcher",
-			distance: 5,
-		})).toMatchObject({ok: true, target: {grappled: false, restrained: false}});
-		expect(state.applyChainedTargetEffect({targetName: "Illegal", distance: 10, effect: "restrain"}).reason).toBe("effect-unavailable");
-	});
-
-	it("rejects mismatched rider/effect metadata instead of bypassing level gates", () => {
-		const state = makeFury(3);
-		expect(state.applyTargetEffect({
-			source: "chained-fury",
-			targetName: "Mismatched",
-			effect: "grapple",
-			riderId: "chains-control-shove",
-			distance: 10,
-		})).toMatchObject({ok: false, reason: "effect-metadata-mismatch"});
-		expect(state.applyTargetEffect({
-			source: "chained-fury",
-			targetEffect: {source: "chained-fury", effect: "control-shove"},
-			targetName: "Nested mismatch",
-			effect: "grapple",
-			distance: 10,
-		})).toMatchObject({ok: false, reason: "effect-metadata-mismatch"});
-	});
-
-	it("keeps ordinary grapples unrestrained and without recurring damage", () => {
-		const state = makeFury(6);
-		const result = state.applyTargetEffect({
-			source: "chained-fury",
-			targetName: "Grappled",
+			targetName: "No bookkeeping",
 			effect: "grapple",
 			riderId: "chains-grapple",
-			distance: 10,
+			grappleSaveFailed: true,
+		})).toEqual({ok: false, reason: "tracking-disabled"});
+
+		state.setChainedFuryTargetTrackingEnabled(true);
+		const chainAttackAfter = state.getFeatureGrantedAttacks().find(it => it.sourceFeature === "Manifest Chains");
+		const optionsAfter = state.getFeatureCalculations().attackOnHitOptions;
+
+		expect(chainAttackAfter).toMatchObject({
+			attackBonus: chainAttackBefore.attackBonus,
+			damage: chainAttackBefore.damage,
+			damageBonus: chainAttackBefore.damageBonus,
+			range: chainAttackBefore.range,
 		});
+		expect(optionsAfter.map(it => it.id)).toEqual(optionsBefore.map(it => it.id));
+		expect(optionsAfter.find(it => it.id === "chains-grapple")).toMatchObject({
+			targetAware: true,
+			targetEffect: {source: "chained-fury", effect: "grapple"},
+		});
+		expect(optionsAfter.find(it => it.id === "chains-shove").targetAware).toBeUndefined();
+	});
+
+	it("requires explicit save outcomes and never treats missing input as a failed save", () => {
+		const state = makeFury(6, {tracking: true});
+
+		expect(state.applyChainedTargetEffect({
+			targetName: "Ambiguous",
+			effect: "grapple",
+			riderId: "chains-grapple",
+		})).toEqual({ok: false, reason: "outcome-required", outcome: "grapple"});
+		expect(state.applyChainedTargetEffect({
+			targetName: "Resisted",
+			effect: "grapple",
+			riderId: "chains-grapple",
+			grappleSaveFailed: false,
+		})).toMatchObject({
+			ok: true,
+			tracked: false,
+			target: null,
+			grappled: false,
+			grappleSaveSuccess: true,
+			grappleSaveFailed: false,
+		});
+		expect(state.getChainedTargets()).toEqual([]);
+	});
+
+	it("records only successful grapples with a human name and explicit condition state", () => {
+		const state = makeFury(6, {tracking: true});
+
+		expect(state.applyChainedTargetEffect({
+			effect: "grapple",
+			riderId: "chains-grapple",
+			grappleSaveFailed: true,
+		})).toEqual({ok: false, reason: "target-name-required"});
+
+		const result = addGrappledTarget(state, "Ogre");
 		expect(result).toMatchObject({
+			ok: true,
+			tracked: true,
+			grappled: true,
+			restrained: false,
+			grappleSaveSuccess: false,
+			grappleSaveFailed: true,
+			target: {
+				targetName: "Ogre",
+				effectType: "grapple",
+				grappled: true,
+				restrained: false,
+				shoved: false,
+				recurringDamage: null,
+				effects: {
+					grapple: {active: true},
+					restraint: {active: false},
+				},
+			},
+		});
+		expect(state.getChainedTargetState()).toMatchObject({trackingEnabled: true, capacity: 2, used: 1, availableChains: 1});
+	});
+
+	it("records Chain Imprisonment only after both saves are resolved", () => {
+		const state = makeFury(6, {tracking: true});
+		expect(state.applyChainedTargetEffect({
+			targetName: "Ogre",
+			effect: "restrain",
+			riderId: "chains-restrain",
+			grappleSaveFailed: true,
+		})).toEqual({ok: false, reason: "outcome-required", outcome: "restraint"});
+
+		const grappleOnly = state.applyChainedTargetEffect({
+			targetName: "Veteran",
+			effect: "restrain",
+			riderId: "chains-restrain",
+			grappleSaveFailed: true,
+			restraintSaveFailed: false,
+		});
+		expect(grappleOnly).toMatchObject({
 			ok: true,
 			grappled: true,
 			restrained: false,
+			restraintSaveSuccess: true,
+			restraintSaveFailed: false,
+			target: {effectType: "grapple", recurringDamage: null},
+		});
+
+		const restrained = state.applyChainedTargetEffect({
+			targetName: "Ogre",
+			effect: "restrain",
+			riderId: "chains-restrain",
+			grappleSaveFailed: true,
+			restraintSaveFailed: true,
+		});
+		expect(restrained).toMatchObject({
+			ok: true,
+			grappled: true,
+			restrained: true,
+			restraintSaveSuccess: false,
+			restraintSaveFailed: true,
 			target: {
-				effects: {restraint: {active: false}},
-				recurringDamage: null,
+				effectType: "restrain",
+				recurringDamage: {amount: 6, type: "force", when: "start of each of its turns"},
 			},
 		});
+		expect(state.resolveChainedTargetTurn(restrained.target.id, 1)).toMatchObject({ok: true, damage: 6});
+		expect(state.resolveChainedTargetTurn(restrained.target.id, 1)).toMatchObject({ok: true, damage: 0, alreadyResolved: true});
 	});
 
-	it("releases stale effects instead of clamping them and reconciles derived values/capacity", () => {
-		const state = makeFury(14);
-		const targets = [1, 2, 3, 4].map(i => state.createChainedTarget({targetName: `T${i}`, distance: 10}).target);
-		expect(state.getChainedTargetState().used).toBe(4);
-		state.getClasses()[0].level = 10;
-		state.reconcileTargetEffects();
-		expect(state.getChainedTargetState().used).toBe(2);
-		expect(state.getChainedTargets().filter(t => t.restrained).length).toBe(0);
-
-		const target = state.getChainedTargets()[0];
-		state.upsertTargetEffect({id: target.id, distance: 999});
-		state.reconcileTargetEffects();
-		expect(state.getChainedTargets().find(t => t.id === target.id)).toMatchObject({grappled: false, chainIndex: null});
-	});
-
-	it("uses one doubled movement pool across multiple moves and releases out-of-range moves", () => {
-		const state = makeFury(14);
-		const target = state.createChainedTarget({targetName: "Mover", distance: 0}).target;
-		expect(state.moveChainedTarget(target.id, 25, {doubleMovement: true})).toMatchObject({ok: true});
-		expect(state.moveChainedTarget(target.id, 30)).toMatchObject({ok: true});
-		const released = state.moveChainedTarget(target.id, 31);
-		expect(released).toMatchObject({ok: false, released: true, reason: "out-of-range-released"});
-		expect(state.getChainedTargets().find(t => t.id === target.id)).toMatchObject({grappled: false, chainIndex: null});
-	});
-
-	it("does not consume doubled movement or bonus action when validation fails", () => {
-		const state = makeFury(10);
-		state.setSpeed("walk", 5);
-		const target = state.createChainedTarget({targetName: "Transactional", distance: 0}).target;
-		const before = state.getChainedMovementState();
-		expect(state.isActionTypeAvailable("bonus")).toBe(true);
-		expect(state.moveChainedTarget(target.id, 20, {doubleMovement: true})).toMatchObject({ok: false, reason: "movement-exceeded"});
-		expect(state.getChainedMovementState()).toMatchObject(before);
-		expect(state.isActionTypeAvailable("bonus")).toBe(true);
-	});
-
-	it("shares bonus-action usage with movement across a new round boundary", () => {
-		const state = makeFury(14);
-		const target = state.createChainedTarget({targetName: "Shared economy", distance: 0}).target;
-		expect(state.consumeActionType("bonus")).toBe(true);
-		expect(state.isActionTypeAvailable("bonus")).toBe(false);
-		expect(state.moveChainedTarget(target.id, 10, {doubleMovement: true})).toMatchObject({ok: false, reason: "bonus-action-used"});
-		expect(state.getChainedMovementState()).toMatchObject({doubled: false, used: 0});
-		expect(state.isActionTypeAvailable("bonus")).toBe(false);
-	});
-
-	it("restores one action slot without restoring unrelated slots", () => {
-		const state = makeFury(6);
-		state.consumeActionType("action");
-		state.consumeActionType("bonus");
-		state.consumeActionType("reaction");
-
-		expect(state.restoreActionType("bonus")).toBe(true);
-		expect(state.getActionEconomyState()).toEqual({action: false, bonus: true, reaction: false});
-	});
-
-	it("accepts and validates Chain Control's declared final position and direction", () => {
-		const state = makeFury(10);
+	it("keeps ordinary shove reminder-only and records Chain Control only after a failed grapple save", () => {
+		const state = makeFury(10, {tracking: true});
 		expect(state.applyChainedTargetEffect({
-			targetName: "Control",
-			distance: 20,
-			effect: "control-shove",
-			riderId: "chains-control-shove",
-			shoveDistance: 10,
-			finalDistance: 10,
-			shoveDirection: "toward",
-		})).toMatchObject({ok: true, finalDistance: 10, shoveDirection: "toward"});
-		expect(state.applyChainedTargetEffect({
-			targetName: "Too far",
-			distance: 20,
-			effect: "control-shove",
-			riderId: "chains-control-shove",
-			finalDistance: 26,
-			shoveDirection: "away",
-		})).toMatchObject({ok: false, reason: "shove-out-of-range"});
-	});
+			targetName: "Shoved",
+			effect: "shove",
+			riderId: "chains-shove",
+		})).toMatchObject({ok: true, tracked: false, target: null, shoved: true});
+		expect(state.getChainedTargets()).toEqual([]);
 
-	it("does not apply Chain Control when the initial grapple save succeeds", () => {
-		const state = makeFury(10);
-		const result = state.applyTargetEffect({
-			source: "chained-fury",
+		expect(state.applyChainedTargetEffect({
 			targetName: "Resisted control",
 			effect: "control-shove",
 			riderId: "chains-control-shove",
-			distance: 10,
-			grappleSaveAbility: "str",
-			grappleSaveTotal: state.getFeatureCalculations().chainGrappleDc,
-			finalDistance: 20,
-			shoveDirection: "away",
+			grappleSaveFailed: false,
+		})).toMatchObject({ok: true, tracked: false, target: null, controlApplied: false});
+
+		const controlled = state.applyChainedTargetEffect({
+			targetName: "Controlled",
+			effect: "control-shove",
+			riderId: "chains-control-shove",
+			grappleSaveFailed: true,
 		});
-		expect(result).toMatchObject({ok: true, grappled: false, shoved: false, controlApplied: false});
-		expect(result.target).toMatchObject({grappled: false, shoved: false, chainIndex: null});
+		expect(controlled).toMatchObject({
+			ok: true,
+			tracked: true,
+			grappled: true,
+			controlApplied: true,
+			shoveDistance: 10,
+			target: {targetName: "Controlled", effectType: "grapple", shoved: false},
+		});
+	});
+
+	it("supports the authored two-to-four chain capacity without target occupancy controls", () => {
+		const level3 = makeFury(3, {tracking: true});
+		expect(addGrappledTarget(level3, "A").ok).toBe(true);
+		expect(addGrappledTarget(level3, "B").ok).toBe(true);
+		expect(addGrappledTarget(level3, "C")).toEqual({ok: false, reason: "chain-capacity"});
+		expect(level3.applyChainedTargetEffect({
+			effect: "grapple",
+			riderId: "chains-grapple",
+			grappleSaveFailed: false,
+		})).toMatchObject({ok: true, tracked: false, grappleSaveSuccess: true});
+		expect(level3.getChainedTargetState()).toMatchObject({capacity: 2, used: 2, availableChains: 0});
+
+		const level14 = makeFury(14, {tracking: true});
+		for (const targetName of ["A", "B", "C", "D"]) expect(addGrappledTarget(level14, targetName).ok).toBe(true);
+		expect(addGrappledTarget(level14, "E")).toEqual({ok: false, reason: "chain-capacity"});
+		expect(level14.getChainedTargetState()).toMatchObject({capacity: 4, used: 4, availableChains: 0});
+	});
+
+	it("preserves an opted-in tracker and targets across save/load", () => {
+		const state = makeFury(6, {tracking: true});
+		const target = state.applyChainedTargetEffect({
+			targetName: "Saved target",
+			effect: "restrain",
+			riderId: "chains-restrain",
+			grappleSaveFailed: true,
+			restraintSaveFailed: true,
+		}).target;
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(state.toJson());
+
+		expect(restored.isChainedFuryTargetTrackingEnabled()).toBe(true);
+		expect(restored.getChainedTargets()).toEqual([expect.objectContaining({
+			id: target.id,
+			targetName: "Saved target",
+			grappled: true,
+			restrained: true,
+		})]);
+	});
+
+	it.each([
+		["tracking is disabled", state => state.setChainedFuryTargetTrackingEnabled(false)],
+		["Rage ends", state => state.deactivateState("rage")],
+		["Manifest Chains ends", state => state.deactivateState("manifestChains")],
+		["the generated chains are unequipped", state => {
+			const item = state.getItems().find(it => it._generatedItemId === GENERATED_CHAIN_ID);
+			state.setItemEquipped(item.id, false);
+		}],
+		["the subclass becomes illegal", state => state.setSubclass("Barbarian", {name: "Path of the Juggernaut", shortName: "Juggernaut", source: "TGTT"})],
+	])("clears targets and legacy movement when %s", (_label, mutate) => {
+		const state = makeFury(6, {tracking: true});
+		expect(addGrappledTarget(state).ok).toBe(true);
+		state._data.chainedMovementUsage = {round: 2, movementUsed: 20, bonusActionUsed: true, doubled: true};
+
+		mutate(state);
+
+		expect(state._data.targetEffects.filter(it => it.source === "chained-fury")).toEqual([]);
+		expect(state._data.chainedMovementUsage).toEqual({
+			round: null,
+			movementUsed: 0,
+			bonusActionUsed: false,
+			doubled: false,
+		});
+		expect(state.getChainedTargets()).toEqual([]);
+		expect(state.getChainedMovementState()).toMatchObject({
+			round: null,
+			used: 0,
+			doubled: false,
+			bonusActionUsed: false,
+		});
+	});
+
+	it("drops invalid loaded targets before serialization", () => {
+		const state = makeFury(6, {tracking: true});
+		expect(addGrappledTarget(state).ok).toBe(true);
+		const chainItem = state.getItems().find(it => it._generatedItemId === GENERATED_CHAIN_ID);
+		state._data.inventory.find(it => it.id === chainItem.id).equipped = false;
+
+		expect(state.toJson().targetEffects).toEqual([]);
+	});
+
+	it("pins the grapple DC to the finalized spellcasting-aware Combat Method DC", () => {
+		const state = makeFury(6);
+		state.setAbilityBase("str", 10);
+		state.setAbilityBase("dex", 10);
+		state.setAbilityBase("cha", 20);
+		state.addClass({
+			name: "Warlock",
+			source: "TGTT",
+			level: 5,
+			subclass: {name: "Hexblade", shortName: "Hexblade", source: "TGTT"},
+		});
+		state.addCombatTradition("Mirror's Glint");
+		state.applyClassFeatureEffects();
+
+		const calc = state.getFeatureCalculations();
+		expect(calc.combatMethodDcUsesSpellcasting).toBe(true);
+		expect(calc.combatMethodDc).toBe(calc.spellSaveDc);
+		expect(calc.chainGrappleDc).toBe(calc.combatMethodDc);
+		expect(calc.chainGrappleDc).toBeGreaterThan(8 + state.getProficiencyBonus());
+	});
+
+	it("keeps the level-14 movement benefit visible in player-facing rider copy", () => {
+		const level10 = makeFury(10);
+		const level14 = makeFury(14);
+		const grapple10 = level10.getFeatureCalculations().attackOnHitOptions.find(it => it.id === "chains-grapple");
+		const grapple14 = level14.getFeatureCalculations().attackOnHitOptions.find(it => it.id === "chains-grapple");
+
+		expect(grapple10.description).toContain("spending your movement");
+		expect(grapple14.description).toContain("without spending extra movement");
+	});
+
+	it("keeps Combat and Play Mode free of the removed VTT-style controls", () => {
+		const combatSource = fs.readFileSync(new URL("../../../js/charactersheet/charactersheet-combat.js", import.meta.url), "utf8");
+		const playModeSource = fs.readFileSync(new URL("../../../js/charactersheet/charactersheet-playmode.js", import.meta.url), "utf8");
+		const html = fs.readFileSync(new URL("../../../charactersheet.html", import.meta.url), "utf8");
+		const removedControls = [
+			"Track target only",
+			"data-target-size",
+			"data-target-distance",
+			"data-final-distance",
+			"data-shove-direction",
+			"data-escape-total",
+			"data-double-movement",
+		];
+
+		for (const removed of removedControls) {
+			expect(combatSource).not.toContain(removed);
+			expect(playModeSource).not.toContain(removed);
+		}
+		expect(combatSource).toContain("Remember chained creatures");
+		expect(playModeSource).toContain("Remember chained creatures");
+		expect(combatSource).toContain("Did the creature fail its grapple save");
+		expect(html).toContain("Spectral Chains");
 	});
 });
