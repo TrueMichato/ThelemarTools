@@ -50,9 +50,12 @@ history has no corresponding property. This is how skipped skills, tools,
 languages, expertise, spell picks, subclasses, ASIs, feats, and other deferred
 choices become repairable.
 
-Legal option catalogs exist only on the in-memory manifest. They are re-derived
-when Respec opens and are not serialized into `levelHistory`, preventing full
-spell, feat, and feature entities from inflating character saves.
+Most legal option catalogs exist only on the in-memory manifest. They are
+re-derived when Respec opens and are not serialized into `levelHistory`,
+preventing full spell, feat, and feature entities from inflating character
+saves. Compatibility choices which are seeded directly from acquired feature
+prose may retain a compact string option list until a generic descriptor owns
+their discovery; they never persist full catalog entities.
 
 ### Nested decisions
 
@@ -210,6 +213,14 @@ mechanics, ownership lookup, reversal, and reconciliation resolve them as
 `animalhandling`. Load merges legacy whitespace aliases in skill-specific
 stores, keeps the highest proficiency level, unions owners, and preserves
 meaningful custom skill punctuation.
+
+Conditional feature-granted tool choices use the same rule. EFA Artillerist
+**Tools of the Trade** records a `nestedTool` decision only when the character
+already had Woodcarver's Tools at acquisition time. The pending choice carries
+the full `Tools of the Trade|Artificer|EFA|Artillerist|EFA|3|EFA` UID, persists
+the original legal artisan-tool options, and claims progression ownership for
+the selected replacement. Respec therefore removes only the old decision-owned
+tool and preserves an overlapping manual, origin, or class grant.
 
 Materialized feature/resource rows carry their decision provenance where the
 feature path can provide it. Descendant teardown runs deepest-first and also

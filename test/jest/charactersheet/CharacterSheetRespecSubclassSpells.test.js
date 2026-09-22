@@ -25,7 +25,27 @@ const SPELL_DB = [
 	{name: "Flaming Sphere", source: "PHB", level: 2, school: "V"},
 	{name: "Thunderwave", source: "PHB", level: 1, school: "V"},
 	{name: "Gust of Wind", source: "PHB", level: 2, school: "T"},
+	{name: "Shield", source: "XPHB", level: 1, school: "A"},
+	{name: "Thunderwave", source: "XPHB", level: 1, school: "V"},
+	{name: "Scorching Ray", source: "XPHB", level: 2, school: "V"},
+	{name: "Shatter", source: "XPHB", level: 2, school: "V"},
+	{name: "Fireball", source: "XPHB", level: 3, school: "V"},
+	{name: "Wind Wall", source: "XPHB", level: 3, school: "V"},
+	{name: "Ice Storm", source: "XPHB", level: 4, school: "V"},
+	{name: "Wall of Fire", source: "XPHB", level: 4, school: "V"},
+	{name: "Cone of Cold", source: "XPHB", level: 5, school: "V"},
+	{name: "Wall of Force", source: "XPHB", level: 5, school: "V"},
 ];
+
+const EFA_ARTILLERIST_SPELLS = [{
+	prepared: {
+		"3": ["shield|xphb", "thunderwave|xphb"],
+		"5": ["scorching ray|xphb", "shatter|xphb"],
+		"9": ["fireball|xphb", "wind wall|xphb"],
+		"13": ["ice storm|xphb", "wall of fire|xphb"],
+		"17": ["cone of cold|xphb", "wall of force|xphb"],
+	},
+}];
 
 function makeRespec (state) {
 	const respec = Object.create(CharacterSheetRespec.prototype);
@@ -75,5 +95,32 @@ describe("CharacterSheetRespec subclass change — spell cleanup", () => {
 		// Class entry now points at the new subclass.
 		const cls = state.getClasses().find(c => c.name === "Sorcerer");
 		expect(cls.subclass.name).toBe("Storm Sorcery");
+	});
+
+	test("changing an EFA Artificer subclass to Artillerist restores every XPHB always-prepared grant", async () => {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 17,
+			subclass: {name: "Alchemist", shortName: "Alchemist", source: "EFA"},
+		});
+
+		const respec = makeRespec(state);
+		const history = {level: 17, class: {name: "Artificer", source: "EFA"}};
+		const oldSubclass = {name: "Alchemist", shortName: "Alchemist", source: "EFA"};
+		const newSubclass = {
+			name: "Artillerist",
+			shortName: "Artillerist",
+			source: "EFA",
+			additionalSpells: EFA_ARTILLERIST_SPELLS,
+		};
+
+		await respec._applySubclassChange(17, history, oldSubclass, newSubclass);
+
+		const spells = state.getSpellsKnown().filter(spell => spell.sourceFeature === "Artillerist Spells");
+		expect(spells).toHaveLength(10);
+		expect(spells.every(spell => spell.source === "XPHB" && spell.alwaysPrepared && spell.prepared)).toBe(true);
 	});
 });

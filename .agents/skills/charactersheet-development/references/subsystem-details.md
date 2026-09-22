@@ -704,6 +704,8 @@ ledger-less legacy saves, where `sourceFeature` is the only surviving provenance
 
 **Manual pip toggling (Phase 6.2).** The Spells tab renders each slot as a `.charsheet__spell-slot-pip` element with an additional `.charsheet__spell-slot-pip--used` modifier class when consumed. Clicking a pip toggles it through `_toggleSlot`: clicking an available pip calls `state.useSpellSlot(level)` (decrement `current`); clicking the rightmost used pip calls `state.setSpellSlots(level, current + 1)` (restore one). The selector and used-class check must use the full prefixed names (`.charsheet__spell-slot-pip` and `.charsheet__spell-slot-pip--used`) — a previous shortform regression silently broke the click handler entirely.
 
+**Prepared capacity excludes always-prepared grants.** `CharacterSheetClassUtils.countPreparedSpells()` counts only player-prepared leveled spells. Subclass/class overlays with `alwaysPrepared: true` remain available and render as locked prepared spells, but never consume the class's preparation capacity. Preserve their exact `name|source` identity when populating, saving, loading, Quick Building, or changing a subclass in Respec.
+
 ### Divine Soul affinity spell (swappable subclass grant)
 
 A Divine Soul Sorcerer's affinity grants ONE always-prepared spell (Good → cure wounds, etc.) that — unlike every other subclass spell — the player may swap for another **Cleric** spell. The model is generic so any future "swappable subclass grant" can reuse it:
@@ -735,6 +737,12 @@ A Divine Soul Sorcerer's affinity grants ONE always-prepared spell (Good → cur
     attuned: false,
 }
 ```
+
+**Crafting-time calculation.** `CharacterSheetCrafting.getCraftingWorkweeks(recipe, {state, items})`
+is the only reusable workweek calculator: resolve the crafted item by `name|source`, calculate the
+Complete Crafter baseline, then multiply by `state.getCraftingTimeMultiplier({item})`. EFA
+Artillerist Tools of the Trade returns `0.5` only for the structural wand type `WD`; never infer
+the benefit from display names or apply it to TCE Artillerists.
 
 Catalog adds preserve both type layers: inventory grouping continues to use the coarse
 `type`, while rules logic reads `typeCode` first and strips any `|source` suffix.

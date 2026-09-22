@@ -81,6 +81,11 @@ Artificer 3+. The class and subclass sources must both be `EFA`; the TCE Armorer
 feature does not qualify. Mundane and magic armor use the same item taxonomy, while weapons,
 potions, adventuring gear, and shields remain unchanged.
 
+The EFA Artillerist's **Tools of the Trade** returns `0.5` only for magic wands, identified by the
+structural `WD` item type. TCE Artillerists, non-wand items, and unresolved recipe items remain at
+their unmodified duration. This uses the same exact-owner descriptor channel as Armorer, not a
+parallel crafting ledger or timer.
+
 ## The two invariants
 
 ### 1. Materials are inventory items, not a parallel ledger

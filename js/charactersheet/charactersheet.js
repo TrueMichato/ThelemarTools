@@ -16476,7 +16476,7 @@ class CharacterSheetPage {
 				el.addEventListener("click", () => {
 					const idx = Number(el.getAttribute("data-idx"));
 					const opt = choice.options[idx];
-					finalize(isSkill ? opt : {name: opt.name, source: opt.source});
+					finalize(isSkill || isTool ? opt : {name: opt.name, source: opt.source});
 					doClose();
 				});
 			});

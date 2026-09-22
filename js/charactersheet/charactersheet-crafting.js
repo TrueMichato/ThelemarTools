@@ -111,6 +111,30 @@ class CharacterSheetCrafting {
 		return harvest.quantityUnit ? `${n} ${harvest.quantityUnit}` : `${n}`;
 	}
 
+	static _resolveRecipeItem (recipe, items = []) {
+		const [uidName, uidSource] = String(recipe?.itemUid || "").split("|");
+		return items.find(item =>
+			item.name?.toLowerCase() === String(uidName || recipe?.name || "").toLowerCase()
+				&& item.source?.toLowerCase() === String(uidSource || recipe?.source || "").toLowerCase())
+			|| items.find(item => item.name === recipe?.name && item.source === recipe?.source)
+			|| null;
+	}
+
+	/**
+	 * Calculate the existing Complete Crafter workweek estimate, applying any
+	 * reusable character-state crafting-time multiplier to the resolved item.
+	 * @param {*} recipe
+	 * @param {{state?: *, items?: Array<*>}} [opts]
+	 * @returns {number|null}
+	 */
+	static getCraftingWorkweeks (recipe, {state = null, items = []} = {}) {
+		if (recipe?.value == null) return null;
+		const baseWorkweeks = Math.max(1, Math.round(recipe.value / 100 / 50));
+		const item = CharacterSheetCrafting._resolveRecipeItem(recipe, items);
+		const multiplier = state?.getCraftingTimeMultiplier?.({item}) ?? 1;
+		return baseWorkweeks * multiplier;
+	}
+
 	/** Roll a quantity expression through the dice pipeline so it lands in the roll log. */
 	_rollQuantity (harvest) {
 		if (!harvest?.quantityRoll) return harvest?.quantity ?? 1;

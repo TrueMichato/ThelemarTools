@@ -205,12 +205,12 @@ describe("countPreparedSpells", () => {
 		expect(C.countPreparedSpells(spells).current).toBe(1);
 	});
 
-	it("counts alwaysPrepared spells (e.g. subclass spells) toward 'currently prepared'", () => {
+	it("excludes alwaysPrepared spells (e.g. subclass spells) from prepared capacity", () => {
 		const spells = [
 			spell("Slow", 3, {prepared: false, alwaysPrepared: true, sourceFeature: "Chronurgy Magic Spells"}),
 			spell("Haste", 3, {prepared: true, sourceFeature: "Wizard Spellbook"}),
 		];
-		expect(C.countPreparedSpells(spells).current).toBe(2);
+		expect(C.countPreparedSpells(spells).current).toBe(1);
 	});
 
 	it("populates isOver / isAt against the supplied max", () => {

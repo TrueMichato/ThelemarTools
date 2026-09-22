@@ -21092,6 +21092,7 @@ class CharacterSheetState {
 	 */
 	_ensureSeededFeatureChoices () {
 		this._ensureStudentOfWarChoices();
+		this._ensureEfaArtilleristToolsOfTheTradeChoice();
 		this._ensureHagAncestorChoice();
 	}
 
@@ -21112,7 +21113,7 @@ class CharacterSheetState {
 				count: 1,
 			});
 		}
-		const toolFulfilled = (this._data.fulfilledFeatureToolChoices || []).includes(feature.name.toLowerCase());
+		const toolFulfilled = this.hasFulfilledFeatureToolChoice(feature);
 		if (!toolFulfilled) {
 			this.addPendingFeatureChoice({
 				featureName: feature.name,
@@ -21127,10 +21128,79 @@ class CharacterSheetState {
 		}
 	}
 
+	static _getSourceAwareSubclassFeatureUid (feature) {
+		if (!feature) return "";
+		return [
+			feature.name || "",
+			feature.className || "",
+			feature.classSource || "",
+			feature.subclassShortName || feature.subclassName || "",
+			feature.subclassSource || "",
+			feature.level != null ? feature.level : "",
+			feature.source || "",
+		].join("|");
+	}
+
+	static _isEfaArtilleristToolsOfTheTradeFeature (feature) {
+		return CharacterSheetState._getSourceAwareSubclassFeatureUid(feature).toLowerCase() ===
+			"tools of the trade|artificer|efa|artillerist|efa|3|efa";
+	}
+
+	_getFeatureToolChoiceFulfillmentKey (featureOrChoice) {
+		const featureUid = featureOrChoice?.featureUid
+			|| featureOrChoice?._sourceAwareFeatureUid
+			|| "";
+		if (featureUid) return `uid:${featureUid.toLowerCase()}`;
+		const name = featureOrChoice?.featureName || featureOrChoice?.name || featureOrChoice;
+		return name ? String(name).toLowerCase() : "";
+	}
+
+	hasFulfilledFeatureToolChoice (featureOrChoice) {
+		const key = this._getFeatureToolChoiceFulfillmentKey(featureOrChoice);
+		return !!key && (this._data.fulfilledFeatureToolChoices || []).includes(key);
+	}
+
+	_recordFulfilledFeatureToolChoice (featureOrChoice) {
+		const key = this._getFeatureToolChoiceFulfillmentKey(featureOrChoice);
+		if (!key) return;
+		if (!Array.isArray(this._data.fulfilledFeatureToolChoices)) this._data.fulfilledFeatureToolChoices = [];
+		if (!this._data.fulfilledFeatureToolChoices.includes(key)) this._data.fulfilledFeatureToolChoices.push(key);
+	}
+
+	_ensureEfaArtilleristToolsOfTheTradeChoice () {
+		const feature = this._data.features?.find(CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature);
+		if (!feature?._requiresArtisanToolReplacement || this.hasFulfilledFeatureToolChoice({featureUid: feature._sourceAwareFeatureUid})) return;
+
+		const options = (CharacterSheetClassUtils.CHOICE_TOOL_CATALOGS?.artisan || [])
+			.filter(tool => !this.hasToolProficiency(tool))
+			.filter(tool => CharacterSheetState.normalizeToolKey(tool) !== CharacterSheetState.normalizeToolKey("Woodcarver's Tools"));
+		this.addPendingFeatureChoice({
+			featureName: feature.name,
+			featureId: feature.id,
+			featureUid: feature._sourceAwareFeatureUid,
+			featureSource: feature.source,
+			featureClass: feature.className,
+			featureClassSource: feature.classSource,
+			featureSubclass: feature.subclassShortName || feature.subclassName,
+			featureSubclassSource: feature.subclassSource,
+			level: feature.level,
+			kind: "tool",
+			options,
+			count: 1,
+			sourceDecisionKey: feature.sourceDecisionKey,
+		});
+	}
+
+	_reconcileEfaArtilleristToolsOfTheTradeFixedGrant () {
+		const feature = this._data.features?.find(CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature);
+		if (!feature || feature._requiresArtisanToolReplacement) return;
+		this._addClassFeatureToolProficiency("Woodcarver's Tools");
+	}
+
 	/**
 	 * Queue a prose-parsed feature choice. Deduped by featureId + kind + option
 	 * signature so respec/level-up replays don't stack duplicate prompts.
-	 * @param {{featureName?: string, featureId?: string, featureSource?: string, level?: number, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
+	 * @param {{featureName?: string, featureId?: string, featureUid?: string, featureSource?: string, featureClass?: string, featureClassSource?: string, featureSubclass?: string, featureSubclassSource?: string, level?: number, kind: "skill"|"tool"|"cantrip"|"subfeature", options: Array, count?: number, unique?: boolean}} choice
 	 * @returns {boolean} True if a new choice was queued.
 	 */
 	addPendingFeatureChoice (choice) {
@@ -21149,9 +21219,12 @@ class CharacterSheetState {
 			id: CryptUtil.uid(),
 			featureName: choice.featureName,
 			featureId: choice.featureId,
+			...(choice.featureUid ? {featureUid: choice.featureUid} : {}),
 			...(choice.featureSource ? {featureSource: choice.featureSource} : {}),
 			...(choice.featureClass ? {featureClass: choice.featureClass} : {}),
 			...(choice.featureClassSource ? {featureClassSource: choice.featureClassSource} : {}),
+			...(choice.featureSubclass ? {featureSubclass: choice.featureSubclass} : {}),
+			...(choice.featureSubclassSource ? {featureSubclassSource: choice.featureSubclassSource} : {}),
 			...(choice.level != null ? {level: choice.level} : {}),
 			...(characterLevel != null ? {characterLevel} : {}),
 			kind: choice.kind,
@@ -21329,6 +21402,7 @@ class CharacterSheetState {
 	fulfillFeatureChoice (choiceId, selection, allSpells = null) {
 		const choice = this._data.pendingFeatureChoices?.find(c => c.id === choiceId);
 		if (!choice) return false;
+		let progressionSelection = selection;
 
 		if (choice.kind === "skill") {
 			const skillKey = String(selection).toLowerCase().replace(/\s+/g, "");
@@ -21351,17 +21425,21 @@ class CharacterSheetState {
 			// this marker is the only durable proof of fulfillment.
 			this._recordFulfilledFeatureSkillChoice(choice.featureName);
 		} else if (choice.kind === "tool") {
-			const tool = String(selection);
-			const toolKey = tool.toLowerCase();
+			const selectedName = typeof selection === "string" ? selection : selection?.name;
+			const tool = choice.options.find(option =>
+				CharacterSheetState.normalizeToolKey(typeof option === "string" ? option : option?.name) ===
+				CharacterSheetState.normalizeToolKey(selectedName));
+			if (!tool) return false;
+			const toolName = typeof tool === "string" ? tool : tool.name;
+			progressionSelection = toolName;
+			const toolKey = toolName.toLowerCase();
 			const trackSource = `feature-choice:${choice.featureId || choice.featureName}`;
-			if (this.hasToolProficiency(tool) && !this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
+			if (this.hasToolProficiency(toolName) && !this._data.grantedProficiencies?.tools?.[toolKey]?.length) {
 				this._trackGrantedProficiency("tools", toolKey, "base");
 			}
-			this.addToolProficiency(tool);
+			this.addToolProficiency(toolName);
 			this._trackGrantedProficiency("tools", toolKey, trackSource);
-			if (!Array.isArray(this._data.fulfilledFeatureToolChoices)) this._data.fulfilledFeatureToolChoices = [];
-			const key = String(choice.featureName || "").toLowerCase();
-			if (key && !this._data.fulfilledFeatureToolChoices.includes(key)) this._data.fulfilledFeatureToolChoices.push(key);
+			this._recordFulfilledFeatureToolChoice(choice);
 		} else if (choice.kind === "cantrip") {
 			const sel = typeof selection === "string"
 				? choice.options.find(o => o.name?.toLowerCase() === selection.toLowerCase())
@@ -21392,9 +21470,9 @@ class CharacterSheetState {
 		if (choice.kind !== "subfeature") {
 			const normalizedSelection = choice.kind === "cantrip"
 				? (typeof selection === "string" ? {name: selection, source: choice.featureSource || "XPHB"} : selection)
-				: selection;
+				: progressionSelection;
 			const characterLevel = this._getFeatureChoiceCharacterLevel(choice);
-			this.recordProgressionDecision?.({
+			const decision = this.recordProgressionDecision?.({
 				type: choice.kind === "skill" ? "nestedSkill"
 					: choice.kind === "tool" ? "nestedTool"
 						: "nestedCantrip",
@@ -21407,18 +21485,22 @@ class CharacterSheetState {
 				label: choice.featureName || `Feature ${choice.kind}`,
 				provenance: {
 					ownerType: "feature",
-					ownerUid: choice.featureId || choice.featureName || choice.kind,
+					ownerUid: choice.featureUid || choice.featureId || choice.featureName || choice.kind,
 					acquisitionKey: choice.sourceDecisionKey || `${choice.featureId || choice.featureName || choice.kind}|${choice.level || 0}`,
 					selectedGrantKey: typeof normalizedSelection === "object"
 						? normalizedSelection.name || normalizedSelection.value || ""
 						: String(normalizedSelection),
 					grantKind: choice.kind,
 					grantKey: choice.featureName || choice.kind,
-					sourcePath: choice.featureName || choice.kind,
+					sourcePath: choice.featureUid || choice.featureName || choice.kind,
 					occurrence: 0,
 					pickSlot: 0,
 				},
 			});
+			if (decision && choice.kind === "tool") {
+				decision.options = MiscUtil.copyFast(choice.options || []);
+				this.claimProgressionOwnership("tools", normalizedSelection, decision.semanticKey);
+			}
 		}
 		this.removePendingFeatureChoice(choiceId);
 		return true;
@@ -30779,6 +30861,55 @@ class CharacterSheetState {
 					const effectiveSubclass = this.getEffectiveSubclassForClass(cls);
 					const subclassName = effectiveSubclass?.name?.toLowerCase() || effectiveSubclass?.shortName?.toLowerCase();
 					const subclassSource = effectiveSubclass?.source || effectiveSubclass?.subclassSource;
+					const applyArtilleristCalculations = ({isEfaArtillerist = false} = {}) => {
+						if (isEfaArtillerist) {
+							calculations.hasArtilleristMartialRangedWeaponProficiency = true;
+							calculations.wandCraftingTimeMultiplier = 0.5;
+							(calculations.craftingTimeModifiers ||= []).push({
+								id: "efa-artillerist-tools-of-the-trade-wand-crafting",
+								owner: {
+									kind: "subclassFeature",
+									name: "Tools of the Trade",
+									source: "EFA",
+									uid: "Tools of the Trade|Artificer|EFA|Artillerist|EFA|3|EFA",
+								},
+								multiplier: 0.5,
+								filter: {itemTypes: ["WD"]},
+							});
+						}
+
+						calculations.hasEldritchCannon = true;
+						calculations.eldritchCannonHp = 5 * level;
+						const cannonBaseDamage = level >= 9 ? "3d8" : "2d8";
+						calculations.flamethrowerDamage = cannonBaseDamage;
+						calculations.forceBallistaDamage = cannonBaseDamage;
+						calculations.protectorTempHpDice = level >= 9 ? "2d8" : "1d8";
+						calculations.protectorTempHpBonus = intMod;
+						calculations.protectorTempHp = level >= 9 ? `2d8+${intMod}` : `1d8+${intMod}`;
+						calculations.maxCannons = level >= 15 ? 2 : 1;
+
+						if (level >= 5) {
+							calculations.hasArcaneFirearm = true;
+							calculations.arcaneFirearmDamage = "1d8";
+						}
+
+						if (level >= 9) {
+							calculations.hasExplosiveCannon = true;
+							calculations.cannonDetonationDamage = isEfaArtillerist ? "3d10" : "3d8";
+							calculations.cannonDetonationActionType = isEfaArtillerist ? "reaction" : "action";
+							calculations.cannonDetonationTrigger = isEfaArtillerist ? "cannonTakesDamage" : "command";
+						}
+
+						if (level >= 15) {
+							calculations.hasFortifiedPosition = true;
+							calculations.cannonCoverRange = 10;
+							calculations.cannonCoverType = "half";
+						}
+					};
+					const isEfaArtillerist = isEfa
+						&& level >= 3
+						&& subclassName === "artillerist"
+						&& `${subclassSource ?? ""}`.toUpperCase() === "EFA";
 					if (
 						isEfa
 						&& level >= 3
@@ -30821,6 +30952,8 @@ class CharacterSheetState {
 							calculations.safeHavenSourceFeatureUid = CharacterSheetState.SAFE_HAVEN_FEATURE_UID;
 						}
 					}
+
+					if (isEfaArtillerist) applyArtilleristCalculations({isEfaArtillerist: true});
 
 					if (!isEfa && subclassName && level >= 3) {
 						switch (subclassName) {
@@ -30884,41 +31017,7 @@ class CharacterSheetState {
 								break;
 							}
 							case "artillerist": {
-								// Eldritch Cannon available at level 3
-								calculations.hasEldritchCannon = true;
-								// Eldritch Cannon HP = 5 × artificer level
-								calculations.eldritchCannonHp = 5 * level;
-
-								// Cannon damage (increases at level 9)
-								const cannonBaseDamage = level >= 9 ? "3d8" : "2d8";
-								calculations.flamethrowerDamage = cannonBaseDamage;
-								calculations.forceBallistaDamage = cannonBaseDamage;
-								// Protector: separate dice and bonus for proper testing
-								calculations.protectorTempHpDice = level >= 9 ? "2d8" : "1d8";
-								calculations.protectorTempHpBonus = intMod;
-								calculations.protectorTempHp = level >= 9 ? `2d8+${intMod}` : `1d8+${intMod}`;
-
-								// Max cannons (1, or 2 at level 15)
-								calculations.maxCannons = level >= 15 ? 2 : 1;
-
-								// Arcane Firearm (level 5+): +1d8 to spell damage
-								if (level >= 5) {
-									calculations.hasArcaneFirearm = true;
-									calculations.arcaneFirearmDamage = "1d8";
-								}
-
-								// Explosive Cannon (level 9+): can detonate for 3d8 force
-								if (level >= 9) {
-									calculations.hasExplosiveCannon = true;
-									calculations.cannonDetonationDamage = "3d8";
-								}
-
-								// Fortified Position (level 15+): 2 cannons, half cover
-								if (level >= 15) {
-									calculations.hasFortifiedPosition = true;
-									calculations.cannonCoverRange = 10;
-									calculations.cannonCoverType = "half";
-								}
+								applyArtilleristCalculations();
 								break;
 							}
 							case "battle smith": {
@@ -33471,6 +33570,14 @@ class CharacterSheetState {
 		// Magical Tinkering (Artificer 1): imbue objects with properties
 		// (Active ability)
 
+		if (calculations.hasArtilleristMartialRangedWeaponProficiency) {
+			effects.push({
+				type: "weaponProficiency",
+				weapon: "Martial Ranged Weapons",
+				source: "Tools of the Trade",
+			});
+		}
+
 		// Tool Expertise (Artificer 6): double proficiency with tools
 		if (calculations.hasToolExpertise && !alreadyProcessed("Tool Expertise")) {
 			effects.push({
@@ -33696,6 +33803,7 @@ class CharacterSheetState {
 			if (!CharacterSheetState._isClassFeatureEffectSource(feature)) continue;
 			this._processFeatureModifiers(feature, feature.id);
 		}
+		this._reconcileEfaArtilleristToolsOfTheTradeFixedGrant();
 
 		// Store applied effects for debugging/display
 		this._data.appliedClassFeatureEffects = appliedEffects;
@@ -49300,6 +49408,10 @@ class CharacterSheetState {
 				? {sourceDecisionKey: opts.sourceDecisionKey || feature.sourceDecisionKey}
 				: {}),
 		};
+		if (CharacterSheetState._isEfaArtilleristToolsOfTheTradeFeature(featureData)) {
+			featureData._sourceAwareFeatureUid = CharacterSheetState._getSourceAwareSubclassFeatureUid(featureData);
+			featureData._requiresArtisanToolReplacement = this.hasToolProficiency("Woodcarver's Tools");
+		}
 
 		// Add uses if detected or passed in
 		if (uses) {
@@ -49312,6 +49424,7 @@ class CharacterSheetState {
 		}
 
 		this._data.features.push(featureData);
+		this._reconcileEfaArtilleristToolsOfTheTradeFixedGrant();
 
 		// Process resistances/immunities/vulnerabilities granted by the feature
 		if (feature.resistances) {
@@ -49390,7 +49503,7 @@ class CharacterSheetState {
 		// Parse prose "either A or B" player choices (e.g. Arcane Archer Lore's skill +
 		// cantrip picks) into pending feature choices, and collect the skill/spell
 		// identities they claim so the greedy parsers below don't also grant them.
-		const {claimedSkills, claimedSpells} = this._processFeatureChoices(feature, featureData.id);
+		const {claimedSkills, claimedSpells} = this._processFeatureChoices(featureData, featureData.id);
 
 		// Bug #5 belt-and-braces: if this feature's prose choice claims cantrips that the
 		// owning subclass already auto-granted (sourceFeature "<subclass> Spells"), strip those
@@ -49735,6 +49848,17 @@ class CharacterSheetState {
 			.replace(/[\u2018\u2019]/g, "'")
 			.replace(/[^a-z0-9]+/g, " ")
 			.trim();
+	}
+
+	/**
+	 * Reusable crafting-time modifier for item crafting. The EFA Artillerist's
+	 * Tools of the Trade halves time only for magic wands (`WD` item type).
+	 * @param {{item?: object|null}} [opts]
+	 * @returns {number}
+	 */
+	getCraftingTimeMultiplier ({item = null} = {}) {
+		if (String(item?.typeCode || item?.type || "").split("|")[0].toUpperCase() !== "WD") return 1;
+		return Number(this.getFeatureCalculations()?.wandCraftingTimeMultiplier) || 1;
 	}
 
 	/** Rank a material's source: lower wins identity when twins are merged. */
@@ -51266,14 +51390,24 @@ class CharacterSheetState {
 						this.addArmorProficiency(armorName);
 					}
 				} else if (profType === "weapon") {
-					const weaponName = profTarget.replace(/weapons/gi, " weapons").trim().toTitleCase();
+					const weaponName = profTarget
+						.replace(/([a-z])([A-Z])/g, "$1 $2")
+						.replace(/weapons/gi, " weapons")
+						.replace(/\s+/g, " ")
+						.trim()
+						.toTitleCase();
 					if (!this._data.weaponProficiencies.some(w => w.toLowerCase() === weaponName.toLowerCase())) {
-						this.addWeaponProficiency(weaponName);
+						if (CharacterSheetState._isClassFeatureEffectSource(feature)) this._addClassFeatureWeaponProficiency(weaponName);
+						else this.addWeaponProficiency(weaponName);
 					}
 				} else if (profType === "tool") {
-					const toolName = profTarget.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/tools/gi, " tools").replace(/kit/gi, " kit").trim().toTitleCase();
+					const canonicalTool = CharacterSheetClassUtils.getChoiceToolCatalog?.()
+						.find(tool => CharacterSheetState.normalizeToolKey(tool) === CharacterSheetState.normalizeToolKey(profTarget));
+					const toolName = canonicalTool
+						|| profTarget.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/tools/gi, " tools").replace(/kit/gi, " kit").trim().toTitleCase();
 					if (!this._data.toolProficiencies.some(t => t.toLowerCase().includes(profTarget.toLowerCase().substring(0, 6)))) {
-						this.addToolProficiency(toolName);
+						if (CharacterSheetState._isClassFeatureEffectSource(feature)) this._addClassFeatureToolProficiency(toolName);
+						else this.addToolProficiency(toolName);
 					}
 				}
 				return; // Don't create a named modifier for proficiency grants
@@ -51853,7 +51987,12 @@ class CharacterSheetState {
 			}
 			const featureKey = feature.name.toLowerCase();
 			this._data.fulfilledFeatureSkillChoices = (this._data.fulfilledFeatureSkillChoices || []).filter(name => name !== featureKey);
-			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || []).filter(name => name !== featureKey);
+			const featureToolKey = this._getFeatureToolChoiceFulfillmentKey({
+				featureUid: feature._sourceAwareFeatureUid,
+				featureName: feature.name,
+			});
+			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || [])
+				.filter(name => name !== featureKey && name !== featureToolKey);
 			const removedResourceIds = this._data.resources
 				.filter(r =>
 					r.featureId === feature.id
