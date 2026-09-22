@@ -162,6 +162,39 @@ describe("Guided Precision provider and shared receipt", () => {
 		})).toEqual([]);
 	});
 
+	it("does not strand repeated qualifying uses outside combat or across save/load", () => {
+		const state = makeCartographer();
+		const spellContext = {
+			route: "spell",
+			spell: {name: "Guiding Bolt", source: "XPHB"},
+		};
+
+		const first = state.getDeferredFlatDamageRiderOptions(spellContext)[0];
+		expect(state.consumeDeferredFlatDamageRider(first)).toMatchObject({
+			name: "Guided Precision",
+			value: 3,
+			turnReceipt: null,
+		});
+		expect(state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID)).toMatchObject({
+			ok: true,
+			used: false,
+			receipt: null,
+		});
+		expect(state.getDeferredFlatDamageRiderOptions(spellContext)).toHaveLength(1);
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		loaded.setClassCatalog([fullArtificer]);
+		expect(loaded.getDeferredFlatDamageRiderOptions(spellContext)).toHaveLength(1);
+		expect(loaded.consumeDeferredFlatDamageRider(
+			loaded.getDeferredFlatDamageRiderOptions(spellContext)[0],
+		)).toMatchObject({
+			name: "Guided Precision",
+			value: 3,
+			turnReceipt: null,
+		});
+	});
+
 	it("keeps the opposite route blocked until the canonical turn reset runs", () => {
 		const state = makeCartographer();
 		state.startCombat();
@@ -187,16 +220,21 @@ describe("Guided Precision provider and shared receipt", () => {
 
 	it("permits a qualifying reaction on another creature's turn in the same round", () => {
 		const state = makeCartographer();
+		state.setSpeed("walk", 30);
 		state.startCombat();
+		state.consumeActionType("action");
+		state.spendMovement(10, {source: "test:cartographer-turn"});
 		state.consumeDeferredFlatDamageRider(state.getDeferredFlatDamageRiderOptions({
 			route: "spell",
 			spell: {name: "Guiding Bolt", source: "XPHB"},
 		})[0]);
 		const firstTurnId = state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID).turnId;
 
-		state.resetTurnEconomy();
+		state.advanceTurnReceiptBoundary();
 		const reactionRider = state.getDeferredFlatDamageRiderOptions({route: "attack"})[0];
 		expect(state.getCombatRound()).toBe(1);
+		expect(state.isActionTypeAvailable("action")).toBe(false);
+		expect(state.getMovementEconomyState()).toMatchObject({used: 10, remaining: 20});
 		expect(state.consumeDeferredFlatDamageRider(reactionRider)).toMatchObject({value: 3});
 		expect(state.queryTurnReceipt(CharacterSheetState.GUIDED_PRECISION_FEATURE_UID)).toMatchObject({
 			used: true,

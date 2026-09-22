@@ -172,8 +172,10 @@ the intervention is cleared.
 
 ## Stable-Key Per-Turn Receipts
 
-One-per-turn mechanics use the serialized `turnReceipts` ledger on
-`CharacterSheetState`:
+Once-per-turn mechanics that need to work across multiple routes use the
+serialized `turnReceipts` ledger on `CharacterSheetState`. Its `turnId` is an
+opaque sequence advanced by an explicit receipt boundary; it is not a combat
+round, timestamp, or UI-local flag:
 
 ```javascript
 turnReceipts: {
@@ -198,10 +200,14 @@ Callers supply exact stable identities. Entity UIDs must include their source;
 do not key on a display label, DOM id, or `combatRound`. Public APIs are:
 
 ```javascript
-state.queryTurnReceipt(key);
-state.commitTurnReceipt({key, ownerUid, sourceUid, actionUid, metadata?});
+state.queryTurnReceipt(key, {trackOnlyInCombat?});
+state.commitTurnReceipt(
+    {key, ownerUid, sourceUid, actionUid, metadata?},
+    {trackOnlyInCombat?},
+);
 state.rollbackTurnReceipt(receipt);
 state.pruneTurnReceipts({ownerUid, sourceUid, actionUid?});
+state.advanceTurnReceiptBoundary();
 state.resetTurnEconomy();
 ```
 
@@ -221,14 +227,24 @@ commit before a later mutation must verify that mutation. On failure, return an
 explicit failed result containing the matching `rollbackTurnReceipt` outcome;
 never return success or silently leave a receipt committed.
 
-`resetTurnEconomy()` is the sole lifecycle reset for the ledger. It advances
-the opaque `turnId`, clears receipts, and restores action slots. Combat start,
-round advance, combat end, rests, and Play Mode's explicit **Reset turn**
-delegate to it. It works identically outside combat: a committed use remains
-blocked until an explicit reset, while Reaction/Action locks are not assumed to
-persist or enforce the receipt. Combat's `_resetTurnActionUsage()` resets only
-module-local caches after these state lifecycle calls; lazy local initialization
-must never restore state action slots or advance/clear the receipt ledger.
+With `trackOnlyInCombat: true`, an out-of-combat commit succeeds without writing
+a receipt (`tracked: false`, `receipt: null`), and its matching query remains
+unused. This is the policy for mechanics whose out-of-combat turn boundaries
+cannot be represented durably.
+
+`advanceTurnReceiptBoundary()` advances only the turn identity and clears
+receipts. Use it for another creature's distinct turn in the same combat round;
+it deliberately preserves the character's Action, Bonus Action, Reaction, and
+movement usage. `resetTurnEconomy()` delegates to that boundary and additionally
+resets the shared action and movement ledgers. `startCombat()`, `advanceRound()`,
+`endCombat()`, rests, and Play Mode's **Reset turn** continue to use the full
+reset.
+
+Default receipts still work identically outside combat: a committed use remains
+blocked until an explicit boundary or reset. Combat's `_resetTurnActionUsage()`
+resets only module-local caches after these state lifecycle calls; lazy local
+initialization must never restore state action slots or advance/clear the
+receipt ledger.
 
 Current consumers are:
 
@@ -245,8 +261,10 @@ Current consumers are:
 
 Guided Precision's shared receipt preserves the authored “once per turn”
 ceiling while allowing a qualifying reaction on another creature's turn in the
-same round. Save/load preserves the current turn and receipt. Removing the
-exact EFA Cartographer source prunes the receipt.
+same round. Guided Precision receipts are combat-only: out-of-combat uses do not
+persist or block later casts, including after save/load. Save/load within combat
+preserves the current turn and receipt. Removing the exact EFA Cartographer
+source prunes the receipt.
 - Registry-backed feature companions, with separate
   `Companion Action|<source-qualified companion UID>|<stable companion ID>` and
   matching Reaction receipts. The stable ID lets teardown use exact

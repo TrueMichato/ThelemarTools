@@ -31,6 +31,34 @@ function getCrueltyDice (state) {
 }
 
 describe("CharacterSheetState stable-key per-turn receipts", () => {
+	it("can validate a receipt without persisting it outside combat", () => {
+		const state = new CharacterSheetState();
+
+		const committed = state.commitTurnReceipt(RECEIPT_A, {trackOnlyInCombat: true});
+		expect(committed).toMatchObject({
+			ok: true,
+			committed: true,
+			duplicate: false,
+			tracked: false,
+			receipt: null,
+		});
+		expect(state.queryTurnReceipt(RECEIPT_A.key, {trackOnlyInCombat: true})).toMatchObject({
+			ok: true,
+			used: false,
+			tracked: false,
+			receipt: null,
+		});
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(state.toJson());
+		expect(loaded.queryTurnReceipt(RECEIPT_A.key, {trackOnlyInCombat: true})).toMatchObject({
+			ok: true,
+			used: false,
+			tracked: false,
+			receipt: null,
+		});
+	});
+
 	it("commits and queries in combat, rejects a duplicate, and resets on the next turn", () => {
 		const state = new CharacterSheetState();
 		state.startCombat();
@@ -182,18 +210,50 @@ describe("CharacterSheetState stable-key per-turn receipts", () => {
 		});
 	});
 
+	it("advances a receipt-only combat turn without restoring actions or movement", () => {
+		const state = new CharacterSheetState();
+		state.setSpeed("walk", 30);
+		state.startCombat();
+		state.consumeActionType("reaction");
+		state.spendMovement(10, {source: "test:other-creature-turn"});
+		const committed = state.commitTurnReceipt(RECEIPT_A, {trackOnlyInCombat: true});
+
+		const advanced = state.advanceTurnReceiptBoundary();
+
+		expect(advanced).toMatchObject({
+			ok: true,
+			advanced: true,
+			previousTurnId: committed.turnId,
+			turnId: committed.turnId + 1,
+			clearedReceipts: [expect.objectContaining(RECEIPT_A)],
+		});
+		expect(state.getCombatRound()).toBe(1);
+		expect(state.isActionTypeAvailable("reaction")).toBe(false);
+		expect(state.getMovementEconomyState()).toMatchObject({used: 10, remaining: 20});
+		expect(state.queryTurnReceipt(RECEIPT_A.key, {trackOnlyInCombat: true})).toMatchObject({
+			ok: true,
+			used: false,
+			tracked: true,
+			turnId: committed.turnId + 1,
+		});
+	});
+
 	it("persists the current turn identity and receipt through save/load", () => {
 		const state = new CharacterSheetState();
 		state.startCombat();
-		const committed = state.commitTurnReceipt({...RECEIPT_A, metadata: {route: "reaction"}});
+		const committed = state.commitTurnReceipt(
+			{...RECEIPT_A, metadata: {route: "reaction"}},
+			{trackOnlyInCombat: true},
+		);
 
 		const loaded = new CharacterSheetState();
 		loaded.loadFromJson(state.toJson());
 
 		expect(loaded.getCombatRound()).toBe(1);
-		expect(loaded.queryTurnReceipt(RECEIPT_A.key)).toMatchObject({
+		expect(loaded.queryTurnReceipt(RECEIPT_A.key, {trackOnlyInCombat: true})).toMatchObject({
 			ok: true,
 			used: true,
+			tracked: true,
 			turnId: committed.turnId,
 			receipt: {
 				...committed.receipt,
@@ -208,7 +268,13 @@ describe("CharacterSheetState stable-key per-turn receipts", () => {
 
 		state.startCombat();
 		expect(state.queryTurnReceipt(RECEIPT_A.key).turnId).toBe(initialTurnId + 1);
-		state.commitTurnReceipt(RECEIPT_A);
+		state.commitTurnReceipt(RECEIPT_A, {trackOnlyInCombat: true});
+
+		expect(state.pruneTurnReceipts({ownerUid: RECEIPT_A.ownerUid})).toMatchObject({
+			ok: false,
+			pruned: false,
+			reason: "invalidPruneScope",
+		});
 		expect(state.pruneTurnReceipts({
 			ownerUid: RECEIPT_A.ownerUid,
 			sourceUid: RECEIPT_A.sourceUid,

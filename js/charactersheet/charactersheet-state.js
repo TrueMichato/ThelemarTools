@@ -46642,18 +46642,31 @@ class CharacterSheetState {
 	/**
 	 * Query one caller-supplied stable exact identity in the current turn.
 	 * @param {string} key
+	 * @param {{trackOnlyInCombat?: boolean}} options
 	 * @returns {{ok: boolean, used: boolean, key: string, turnId: number, receipt: object|null, reason?: string}}
 	 */
-	queryTurnReceipt (key) {
+	queryTurnReceipt (key, {trackOnlyInCombat = false} = {}) {
 		const normalizedKey = String(key || "").trim();
 		const store = this._getTurnReceiptStore();
+		const tracked = !trackOnlyInCombat || this.isInCombat();
 		if (!normalizedKey) {
-			return {ok: false, used: false, key: normalizedKey, turnId: store.turnId, receipt: null, reason: "invalidKey"};
+			return {ok: false, used: false, tracked, key: normalizedKey, turnId: store.turnId, receipt: null, reason: "invalidKey"};
+		}
+		if (!tracked) {
+			return {
+				ok: true,
+				used: false,
+				tracked: false,
+				key: normalizedKey,
+				turnId: store.turnId,
+				receipt: null,
+			};
 		}
 		const receipt = store.receipts[normalizedKey] || null;
 		return {
 			ok: true,
 			used: !!receipt,
+			tracked: true,
 			key: normalizedKey,
 			turnId: store.turnId,
 			receipt: receipt ? MiscUtil.copyFast(receipt) : null,
@@ -46664,9 +46677,10 @@ class CharacterSheetState {
 	 * Commit one stable-key use for the current turn. Duplicate keys are rejected
 	 * without replacing the original receipt.
 	 * @param {{key: string, ownerUid: string, sourceUid: string, actionUid: string, metadata?: object}} descriptor
+	 * @param {{trackOnlyInCombat?: boolean}} options
 	 * @returns {{ok: boolean, committed: boolean, duplicate: boolean, reason: string|null, key: string, turnId: number, receipt: object|null}}
 	 */
-	commitTurnReceipt ({key, ownerUid, sourceUid, actionUid, metadata = {}} = {}) {
+	commitTurnReceipt ({key, ownerUid, sourceUid, actionUid, metadata = {}} = {}, {trackOnlyInCombat = false} = {}) {
 		const normalized = {
 			key: String(key || "").trim(),
 			ownerUid: String(ownerUid || "").trim(),
@@ -46674,12 +46688,26 @@ class CharacterSheetState {
 			actionUid: String(actionUid || "").trim(),
 		};
 		const store = this._getTurnReceiptStore();
+		const tracked = !trackOnlyInCombat || this.isInCombat();
 		if (Object.values(normalized).some(value => !value)) {
 			return {
 				ok: false,
 				committed: false,
 				duplicate: false,
+				tracked,
 				reason: "invalidDescriptor",
+				key: normalized.key,
+				turnId: store.turnId,
+				receipt: null,
+			};
+		}
+		if (!tracked) {
+			return {
+				ok: true,
+				committed: true,
+				duplicate: false,
+				tracked: false,
+				reason: null,
 				key: normalized.key,
 				turnId: store.turnId,
 				receipt: null,
@@ -46692,6 +46720,7 @@ class CharacterSheetState {
 				ok: false,
 				committed: false,
 				duplicate: true,
+				tracked: true,
 				reason: "alreadyUsed",
 				key: normalized.key,
 				turnId: store.turnId,
@@ -46713,6 +46742,7 @@ class CharacterSheetState {
 			ok: true,
 			committed: true,
 			duplicate: false,
+			tracked: true,
 			reason: null,
 			key: normalized.key,
 			turnId: store.turnId,
@@ -52282,12 +52312,15 @@ class CharacterSheetState {
 
 	_isDeferredFlatDamageRiderUsedThisTurn (receiptKey) {
 		if (!receiptKey) return false;
-		return this.queryTurnReceipt(receiptKey).used;
+		return this.queryTurnReceipt(receiptKey, {trackOnlyInCombat: true}).used;
 	}
 
 	_markDeferredFlatDamageRiderUsedThisTurn (receiptKey) {
 		if (receiptKey !== CharacterSheetState.GUIDED_PRECISION_FEATURE_UID) return null;
-		return this.commitTurnReceipt(this._getGuidedPrecisionTurnReceiptDescriptor());
+		return this.commitTurnReceipt(
+			this._getGuidedPrecisionTurnReceiptDescriptor(),
+			{trackOnlyInCombat: true},
+		);
 	}
 
 	_pruneGuidedPrecisionTurnReceipt () {
@@ -76792,10 +76825,10 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Advance the opaque turn sequence and clear all per-turn receipts. This is
-	 * the sole state lifecycle reset for action slots, movement, and turn receipts.
+	 * Advance only the opaque rules-turn sequence and clear its receipts.
+	 * Character action and movement economy remain unchanged.
 	 */
-	resetTurnEconomy ({round = this._data.inCombat ? Math.max(0, Number(this._data.combatRound) || 0) : null} = {}) {
+	advanceTurnReceiptBoundary () {
 		const store = this._getTurnReceiptStore();
 		const previousTurnId = store.turnId;
 		const clearedReceipts = Object.values(store.receipts).map(receipt => MiscUtil.copyFast(receipt));
@@ -76804,14 +76837,22 @@ class CharacterSheetState {
 			turnId: previousTurnId + 1,
 			receipts: {},
 		};
-		this.resetActionEconomy();
-		this.resetMovementEconomy({round});
 		return {
 			ok: true,
-			reset: true,
+			advanced: true,
 			previousTurnId,
 			turnId: this._data.turnReceipts.turnId,
 			clearedReceipts,
+		};
+	}
+
+	resetTurnEconomy ({round = this._data.inCombat ? Math.max(0, Number(this._data.combatRound) || 0) : null} = {}) {
+		const receiptBoundary = this.advanceTurnReceiptBoundary();
+		this.resetActionEconomy();
+		this.resetMovementEconomy({round});
+		return {
+			...receiptBoundary,
+			reset: true,
 		};
 	}
 
