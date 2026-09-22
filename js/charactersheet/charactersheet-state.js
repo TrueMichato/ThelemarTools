@@ -36400,14 +36400,6 @@ class CharacterSheetState {
 			});
 		}
 
-		if (calculations.hasEfaAlchemistChemicalResistance && !alreadyProcessed("Chemical Mastery")) {
-			effects.push(
-				{type: "resistance", damageType: "acid", source: "Chemical Mastery"},
-				{type: "resistance", damageType: "poison", source: "Chemical Mastery"},
-				{type: "conditionImmunity", condition: "poisoned", source: "Chemical Mastery"},
-			);
-		}
-
 		// Soul of Artifice (Artificer 20): +1 to saves per attuned item
 		if (calculations.hasSoulOfArtifice && !alreadyProcessed("Soul of Artifice")) {
 			effects.push({

@@ -29,6 +29,14 @@ state must be saved, and what the player-facing controls must do.
 > coexists with independent grants. Alchemical Eruption and cast execution are
 > not part of this milestone.
 
+> **Chemical Resistance milestone status:** the exact
+> `Chemical Mastery|Artificer|EFA|Alchemist|EFA|15|EFA` owner now contributes
+> Acid resistance, Poison resistance, and Poisoned condition immunity through
+> the canonical defense queries. The grant is source/owner/level gated,
+> round-trips idempotently, follows class/subclass/feature teardown, and
+> coexists with independent grants. Alchemical Eruption and cast execution are
+> not part of this milestone.
+
 ## 1. Identity comes before feature names
 
 The word "Alchemist" is not enough to identify the rules. The data contains
