@@ -3708,14 +3708,14 @@ export class CharacterSheetPlayMode {
 		cancelBtn.addEventListener("click", close);
 		overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
 
-		const apply = () => {
+		const apply = async () => {
 			const val = parseInt(input.value);
 			if (isNaN(val) || val <= 0) return;
 			const dtype = dmgTypeSelect?.value === "other"
 				? (customDmgInput?.value.trim().toLowerCase() || "")
 				: (dmgTypeSelect?.value || "");
 			close();
-			this._applyHpChange(mode, val, dtype);
+			await this._applyHpChange(mode, val, dtype);
 		};
 
 		applyBtn.addEventListener("click", apply);
@@ -3728,7 +3728,7 @@ export class CharacterSheetPlayMode {
 		input.focus();
 	}
 
-	_applyHpChange (mode, val, damageType = "") {
+	async _applyHpChange (mode, val, damageType = "") {
 		if (mode === "heal") {
 			const current = this._state.getCurrentHp();
 			const max = this._state.getMaxHp();
@@ -3736,46 +3736,30 @@ export class CharacterSheetPlayMode {
 			this._state.setCurrentHp(newHp);
 			this._logActivity("heal", `Healed ${newHp - current} HP (${current} → ${newHp})`);
 		} else {
-			// Apply resistance/immunity/vulnerability through the model's single source of
-			// truth (CS-BUG-100), so the preview above, this application and
-			// `CharacterSheetState.takeDamage()` cannot disagree about the number.
+			const beforeHp = this._state.getCurrentHp();
+			const beforeTemp = this._state.getTempHp();
 			const defenses = this._state.applyDamageDefenses(val, damageType);
-			const effective = defenses.damage;
+			if (typeof this._page._pApplyDamage === "function") {
+				await this._page._pApplyDamage(val, {damageType});
+			} else {
+				this._state.takeDamage(val, {damageType});
+				await this._page._pOfferZeroHpIntervention?.();
+				if (this._state.isConcentrating?.()) this._doConcentrationCheck(defenses.damage);
+			}
+			const afterHp = this._state.getCurrentHp();
+			const afterTemp = this._state.getTempHp();
+
 			if (defenses.applied === "immunity") {
 				this._logActivity("shield", `Immune to ${val} ${damageType} damage`);
-				this._renderStatusBar();
-				return;
-			}
-
-			let remaining = effective;
-			const temp = this._state.getTempHp();
-
-			// Absorb with temp HP first
-			if (temp > 0) {
-				const absorbed = Math.min(temp, remaining);
-				this._state.setTempHp(temp - absorbed);
-				remaining -= absorbed;
-			}
-
-			if (remaining > 0) {
-				const current = this._state.getCurrentHp();
-				const newHp = Math.max(0, current - remaining);
-				this._state.setCurrentHp(newHp);
-				// `effective < val` used to be read as "resistance" unconditionally, which
-				// became wrong the moment flat damage reduction started applying: a reduced
-				// hit is also smaller than the raw amount. Name the steps that actually ran.
+			} else {
 				const steps = [];
 				if (defenses.reduction) steps.push(`−${defenses.reduction} reduction`);
 				if (defenses.applied) steps.push(defenses.applied);
-				const suffix = steps.length ? ` (${val} ${damageType} → ${effective} after ${steps.join(", then ")})` : "";
-				this._logActivity("damage", `Took ${effective} damage${suffix} → ${newHp} HP`);
-			} else {
-				this._logActivity("shield", `Temp HP absorbed ${effective} damage`);
-			}
-
-			// Concentration auto-check
-			if (this._state.isConcentrating?.()) {
-				this._doConcentrationCheck(effective);
+				const suffix = steps.length ? ` (${val} ${damageType} → ${defenses.damage} after ${steps.join(", then ")})` : "";
+				const hpLost = Math.max(0, beforeHp - afterHp);
+				const tempLost = Math.max(0, beforeTemp - afterTemp);
+				if (!hpLost && tempLost) this._logActivity("shield", `Temp HP absorbed ${tempLost} damage`);
+				else this._logActivity("damage", `Took ${defenses.damage} damage${suffix} → ${afterHp} HP`);
 			}
 		}
 

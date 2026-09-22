@@ -14373,7 +14373,25 @@ class CharacterSheetPage {
 		const pending = this._state.getPendingZeroHpIntervention?.();
 		if (!pending) return;
 
-		const candidate = pending.interventions.find(i => i.available) || pending.interventions[0];
+		let candidate = null;
+		if (pending.chooser?.required) {
+			const selected = await InputUiUtil.pGetUserEnum({
+				title: "Choose a Zero-HP Intervention",
+				htmlDescription: "<div>More than one feature can intervene. Only the selected option will be committed.</div>",
+				values: pending.chooser.options,
+				fnDisplay: option => option.name,
+				isResolveItem: true,
+			});
+			if (!selected) {
+				this._state.cancelZeroHpIntervention?.();
+				return;
+			}
+			candidate = pending.interventions.find(intervention => intervention.id === selected.id);
+		} else {
+			const selectedId = pending.chooser?.options?.[0]?.id;
+			candidate = pending.interventions.find(intervention => intervention.id === selectedId)
+				|| pending.interventions[0];
+		}
 		if (!candidate) return;
 
 		// Ask only for the facts that actually gate this feature.
@@ -14386,7 +14404,7 @@ class CharacterSheetPage {
 				textYes: "Yes",
 				textNo: "No",
 			});
-			if (wasExcluded == null) { this._state.clearPendingZeroHpIntervention(); return; }
+			if (wasExcluded == null) { this._state.cancelZeroHpIntervention?.(candidate.id); return; }
 			if (wasExcluded) damageType = candidate.excludedDamageTypes[0];
 		}
 		if (candidate.excludeCritical && !isCritical) {
@@ -14396,7 +14414,7 @@ class CharacterSheetPage {
 				textYes: "Yes",
 				textNo: "No",
 			});
-			if (wasCrit == null) { this._state.clearPendingZeroHpIntervention(); return; }
+			if (wasCrit == null) { this._state.cancelZeroHpIntervention?.(candidate.id); return; }
 			isCritical = wasCrit;
 		}
 
@@ -14404,27 +14422,50 @@ class CharacterSheetPage {
 			.find(i => i.id === candidate.id);
 		if (!recheck?.available) {
 			if (recheck?.unavailableReason) JqueryUtil.doToast(/** @type {*} */ ({type: "info", content: recheck.unavailableReason}));
-			this._state.clearPendingZeroHpIntervention();
+			this._state.cancelZeroHpIntervention?.(candidate.id);
 			return;
 		}
 
 		const abv = String(recheck.saveAbility || "").toUpperCase();
+		const hpLabel = `${recheck.hpOnSuccess} hit point${recheck.hpOnSuccess === 1 ? "" : "s"}`;
+		const usesLabel = Number.isFinite(recheck.usesRemaining) && recheck.usesMax != null
+			? ` (${recheck.usesRemaining}/${recheck.usesMax} uses)`
+			: "";
+		const promptDescription = recheck.saveAbility
+			? `<div>You dropped to 0 hit points. Make a <strong>${abv} saving throw (DC ${recheck.dc}</strong> = ${recheck.dcFormula}) to rise to <strong>${hpLabel}</strong> instead? Your ${abv} save is ${recheck.saveModifier >= 0 ? "+" : ""}${recheck.saveModifier}.${usesLabel}</div>`
+			: `<div>You dropped to 0 hit points. Use <strong>${recheck.name}</strong> to rise to <strong>${hpLabel}</strong> instead?</div>`;
 		const use = await InputUiUtil.pGetUserBoolean({
 			title: recheck.name,
-			htmlDescription: `<div>You dropped to 0 hit points. Make a <strong>${abv} saving throw (DC ${recheck.dc}</strong> = ${recheck.dcFormula}) to drop to <strong>1 hit point</strong> instead? Your ${abv} save is ${recheck.saveModifier >= 0 ? "+" : ""}${recheck.saveModifier}. (${recheck.usesRemaining}/${recheck.usesMax} uses)</div>`,
-			textYes: "Roll the save",
+			htmlDescription: promptDescription,
+			textYes: recheck.saveAbility ? "Roll the save" : "Use feature",
 			textNo: "Decline",
 		});
-		if (!use) { this._state.clearPendingZeroHpIntervention(); return; }
+		if (!use) { this._state.cancelZeroHpIntervention?.(candidate.id); return; }
 
-		const result = this._state.applyZeroHpIntervention(candidate.id, {damageType, isCritical});
-		if (!result?.applied) { this._state.clearPendingZeroHpIntervention(); return; }
+		let result;
+		try {
+			result = this._state.applyZeroHpIntervention(candidate.id, {damageType, isCritical});
+		} catch (error) {
+			// eslint-disable-next-line no-console
+			console.error("[CharSheet State] Zero-HP intervention failed:", error);
+			JqueryUtil.doToast(/** @type {*} */ ({
+				type: "danger",
+				content: error?.message || `${recheck.name} failed to apply.`,
+			}));
+			return;
+		}
+		if (!result?.applied) {
+			if (result?.error) JqueryUtil.doToast(/** @type {*} */ ({type: "warning", content: result.error}));
+			return;
+		}
 
-		this._rollHistory?.addRoll({
-			title: `${result.name} (${abv} save)`,
-			total: result.total,
-			breakdown: `d20 [${result.roll}] ${result.total - result.roll >= 0 ? "+" : ""}${result.total - result.roll} vs DC ${result.dc}`,
-		});
+		if (result.saveAbility) {
+			this._rollHistory?.addRoll({
+				title: `${result.name} (${abv} save)`,
+				total: result.total,
+				breakdown: `d20 [${result.roll}] ${result.total - result.roll >= 0 ? "+" : ""}${result.total - result.roll} vs DC ${result.dc}`,
+			});
+		}
 		this._saveCurrentCharacter();
 		this._renderHp?.();
 		this._renderConditions?.();
@@ -14433,7 +14474,9 @@ class CharacterSheetPage {
 		JqueryUtil.doToast(/** @type {*} */ ({
 			type: result.success ? "success" : "warning",
 			content: result.success
-				? `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you stay up at <strong>1 hit point</strong>.`
+				? result.saveAbility
+					? `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you stay up at <strong>${result.hp} hit point${result.hp === 1 ? "" : "s"}</strong>.`
+					: `💀 <strong>${result.name}</strong>: you stay up at <strong>${result.hp} hit point${result.hp === 1 ? "" : "s"}</strong>.`
 				: `💀 <strong>${result.name}</strong>: rolled ${result.total} vs DC ${result.dc} — you drop to 0 hit points.`,
 		}));
 	}

@@ -11820,6 +11820,12 @@ class CharacterSheetState {
 		// Apply remaining damage to current HP
 		this._data.hp.current = Math.max(0, this._data.hp.current - damage);
 
+		// Check for massive damage death before arming any "drop to N instead" offer. These
+		// interventions all require that the character was not killed outright, and a stale
+		// pending offer from an earlier drop must not survive a later lethal hit.
+		const overkill = startingHp - damage;
+		const isKilledOutright = maxHp > 0 && overkill <= -maxHp;
+
 		// Death Ward: if character would drop to 0 HP, set to 1 instead and consume the ward
 		if (!unpreventable && this._data.hp.current === 0 && startingHp > 0) {
 			const effects = this.getActiveStateEffects();
@@ -11836,13 +11842,12 @@ class CharacterSheetState {
 			// applied here: a Strength-of-the-Grave-style feature is a CHOICE (it costs a
 			// once-per-long-rest use on a success), so the caller decides via
 			// `getPendingZeroHpIntervention()` / `applyZeroHpIntervention()`.
-			this._armZeroHpIntervention({damage, rawDamage, damageType, isCritical, hpBefore: startingHp});
+			if (!isKilledOutright) this._armZeroHpIntervention({damage, rawDamage, damageType, isCritical, hpBefore: startingHp});
 		}
 
-		// Check for massive damage death (damage remaining after reaching 0 >= max HP)
-		const overkill = startingHp - damage;
-		if (overkill <= -maxHp) {
+		if (isKilledOutright) {
 			this._data.massiveDamageDeath = true;
+			this.clearPendingZeroHpIntervention();
 		}
 
 		// Update bloodied condition based on new HP
@@ -11853,8 +11858,8 @@ class CharacterSheetState {
 
 	// #region Zero-HP interventions
 	/**
-	 * DECLARATIVE registry of "when damage reduces you to 0 hit points, you can instead drop
-	 * to 1" features. Adding a new one is a data edit — no branching in {@link takeDamage},
+	 * DECLARATIVE registry of "when damage reduces you to 0 hit points, intervene before the
+	 * normal 0-HP outcome" features. Adding a new one is a data edit — no branching in {@link takeDamage},
 	 * no bespoke recalculation path, and every consumer (state API, Jest, the sheet's damage
 	 * prompt, E2E `stateCall` probes) picks it up for free.
 	 *
@@ -11873,12 +11878,18 @@ class CharacterSheetState {
 	 * - `displayName`    optional label when the granting feature is an umbrella whose name
 	 *                    is not the player-facing name of the benefit (Shadow Sorcery's
 	 *                    "Power of Shadow" grants "Strength of the Grave")
-	 * - `hpOnSuccess`    optional `{flat?, abilityMod?, classLevel?}` descriptor for the hit
-	 *                    point total a success leaves you on. Defaults to a flat 1 — the
-	 *                    XGE/Death Ward wording. Shadow Sorcery (RHW) instead sets you to
-	 *                    "your Charisma modifier plus your Sorcerer level", which is a
-	 *                    different NUMBER on the same pipeline; see
-	 *                    {@link _resolveZeroHpInterventionHp}.
+	 * - `availability`   optional callback/static descriptor resolving
+	 *                    `{available, unavailableReason?}` after the common gates
+	 * - `validation`     optional callback/static descriptor resolving
+	 *                    `{valid, cancelled?, error?}` before the commit point
+	 * - `consumption`    optional callback/descriptor whose `consume` function owns the
+	 *                    selected intervention's custom cost. Omit to use the legacy
+	 *                    feature-use deduction.
+	 * - `hpOutcome`      optional callback/descriptor for the hit point total a success
+	 *                    leaves you on. The legacy `hpOnSuccess` descriptor remains supported.
+	 * - `postApplicationResult` optional callback/static structured payload returned after
+	 *                    the HP/resource commit. Throwing, or returning `{ok: false}`, rolls
+	 *                    the whole application back and surfaces an error.
 	 * @type {Array<object>}
 	 */
 	static ZERO_HP_INTERVENTIONS = [
@@ -11924,9 +11935,8 @@ class CharacterSheetState {
 		},
 		{
 			// Ghostslayer Rite Revival (18): no save, no per-rest budget. Its only cost is
-			// that ALL your active crimson rites end. It is therefore gated on having at least
-			// one active rite (`requiresActiveCrimsonRite`), has `usesMax: null` (unlimited),
-			// and ends the rites on a successful application (`endsCrimsonRitesOnApply`).
+			// that ALL your active crimson rites end. Its custom availability and consumption
+			// callbacks keep those rules inside the generic transaction.
 			id: "riteRevival",
 			featureName: "Rite Revival",
 			calcFlag: "hasRiteRevival",
@@ -11938,8 +11948,15 @@ class CharacterSheetState {
 			spendOn: "success",
 			usesMax: null,
 			recharge: null,
-			requiresActiveCrimsonRite: true,
-			endsCrimsonRitesOnApply: true,
+			availability: ({state}) => state._hasActiveCrimsonRite()
+				? {available: true}
+				: {available: false, unavailableReason: "Rite Revival requires at least one active crimson rite."},
+			consumption: {
+				consume: ({state}) => {
+					state.deactivateState("crimsonRite");
+					return {type: "activeState", stateTypeId: "crimsonRite", ended: true};
+				},
+			},
 			description: "If you have one or more active crimson rites and are reduced to 0 hit points without dying outright, all your active crimson rites end and you drop to 1 hit point instead.",
 		},
 	];
@@ -11959,17 +11976,71 @@ class CharacterSheetState {
 	 * @returns {number}
 	 * @private
 	 */
-	_resolveZeroHpInterventionHp (def) {
-		const spec = def?.hpOnSuccess;
-		if (!spec) return 1;
-		let hp = Number(spec.flat) || 0;
-		if (spec.abilityMod) hp += this.getAbilityMod(spec.abilityMod);
-		if (spec.classLevel) {
-			const cls = (this._data.classes || []).find(c => (c.name || "").toLowerCase() === String(spec.classLevel).toLowerCase());
-			hp += cls?.level || 0;
-		}
+	_resolveZeroHpInterventionHp (def, transaction = {}) {
+		const configured = def?.hpOutcome ?? def?.hpOnSuccess;
+		const resolved = this._resolveZeroHpInterventionSpec(configured, "calculate", {
+			state: this,
+			definition: def,
+			...transaction,
+		});
+		if (resolved == null) return 1;
+
+		let hp;
+		if (typeof resolved === "number") hp = resolved;
+		else if (typeof resolved === "object") {
+			if (resolved.hp == null && resolved.flat == null && !resolved.abilityMod && !resolved.classLevel) {
+				throw new Error(`${def?.displayName || def?.featureName || def?.id || "Zero-HP intervention"} produced an empty hit point outcome.`);
+			}
+			hp = Number(resolved.hp ?? resolved.flat ?? 0);
+			if (resolved.abilityMod) hp += this.getAbilityMod(resolved.abilityMod);
+			if (resolved.classLevel) {
+				const cls = (this._data.classes || []).find(c => (c.name || "").toLowerCase() === String(resolved.classLevel).toLowerCase());
+				hp += cls?.level || 0;
+			}
+		} else hp = Number.NaN;
+		if (!Number.isFinite(hp)) throw new Error(`${def?.displayName || def?.featureName || def?.id || "Zero-HP intervention"} produced an invalid hit point outcome.`);
 		const maxHp = this.getMaxHp();
 		return Math.max(1, Math.min(maxHp > 0 ? maxHp : hp, Math.floor(hp)));
+	}
+
+	/**
+	 * Resolve a zero-HP callback/static descriptor. Descriptor objects may expose the named
+	 * method (`calculate`, `consume`, `build`, …); otherwise the object itself is the value.
+	 * @param {*} spec
+	 * @param {string} methodName
+	 * @param {object} context
+	 * @returns {*}
+	 * @private
+	 */
+	_resolveZeroHpInterventionSpec (spec, methodName, context) {
+		if (typeof spec === "function") return spec(context);
+		if (spec && typeof spec[methodName] === "function") return spec[methodName](context);
+		return spec;
+	}
+
+	/**
+	 * Normalize a custom availability result without allowing it to bypass common registry
+	 * gates such as exhausted uses, critical-hit exclusions, or excluded damage types.
+	 * @param {*} result
+	 * @param {string|null} unavailableReason
+	 * @param {string} label
+	 * @returns {string|null}
+	 * @private
+	 */
+	_getZeroHpInterventionUnavailableReason (result, unavailableReason, label) {
+		if (unavailableReason) return unavailableReason;
+		if (result == null || result === true) return null;
+		if (result === false) return `${label} is not currently available.`;
+		if (typeof result === "string") return result;
+		if (result.available === false) return result.unavailableReason || result.reason || `${label} is not currently available.`;
+		return null;
+	}
+
+	/** @private */
+	_getZeroHpInterventionUsesRemaining (def) {
+		if (def.usesMax == null) return Infinity;
+		const feature = (this._data.features || []).find(f => f.name === def.featureName);
+		return feature?.uses ? (feature.uses.current ?? 0) : def.usesMax;
 	}
 
 	/**
@@ -11984,30 +12055,41 @@ class CharacterSheetState {
 	 * @returns {Array<object>} descriptors; `available` is the single boolean to branch on.
 	 */
 	getZeroHpInterventions ({damage = 0, damageType = null, isCritical = false} = {}) {
-		const calc = this.getFeatureCalculations();
+		let calc = null;
 		const out = [];
-		for (const def of CharacterSheetState.ZERO_HP_INTERVENTIONS) {
-			if (!calc[def.calcFlag]) continue;
+		for (const [order, def] of CharacterSheetState.ZERO_HP_INTERVENTIONS.entries()) {
+			if (def.calcFlag) {
+				calc = calc || this.getFeatureCalculations();
+				if (!calc[def.calcFlag]) continue;
+			}
 
 			const feature = (this._data.features || []).find(f => f.name === def.featureName);
 			// A null usesMax means the intervention has no per-rest budget (Rite Revival):
 			// treat it as unlimited so the uses check never gates it.
 			const unlimited = def.usesMax == null;
-			const usesRemaining = unlimited
-				? Infinity
-				: (feature?.uses ? (feature.uses.current ?? 0) : def.usesMax);
+			const usesRemaining = this._getZeroHpInterventionUsesRemaining(def);
 			const dmgType = damageType ? String(damageType).toLowerCase() : null;
 
 			let unavailableReason = null;
 			const label = def.displayName || def.featureName;
 			if (!unlimited && usesRemaining <= 0) unavailableReason = `${label} has no uses remaining (recharges on a ${def.recharge} rest).`;
-			else if (def.requiresActiveCrimsonRite && !this._hasActiveCrimsonRite()) unavailableReason = `${label} requires at least one active crimson rite.`;
 			else if (def.excludeCritical && isCritical) unavailableReason = `${label} can't be used when a critical hit reduces you to 0 hit points.`;
 			else if (dmgType && (def.excludedDamageTypes || []).includes(dmgType)) unavailableReason = `${label} can't be used against ${dmgType} damage.`;
 
 			const dc = (def.dcBase || 0) + (def.dcAddsDamage ? Math.max(0, Math.floor(Number(damage) || 0)) : 0);
+			const context = {
+				state: this,
+				definition: def,
+				pending: {damage, damageType: dmgType, isCritical: !!isCritical},
+				feature,
+				usesRemaining,
+				dc,
+			};
+			const availability = this._resolveZeroHpInterventionSpec(def.availability, "resolve", context);
+			unavailableReason = this._getZeroHpInterventionUnavailableReason(availability, unavailableReason, label);
 			out.push({
 				id: def.id,
+				order,
 				name: def.displayName || def.featureName,
 				featureName: def.featureName,
 				description: def.description,
@@ -12018,7 +12100,7 @@ class CharacterSheetState {
 				excludedDamageTypes: [...(def.excludedDamageTypes || [])],
 				excludeCritical: !!def.excludeCritical,
 				spendOn: def.spendOn,
-				hpOnSuccess: this._resolveZeroHpInterventionHp(def),
+				hpOnSuccess: unavailableReason == null ? this._resolveZeroHpInterventionHp(def, context) : null,
 				usesRemaining,
 				usesMax: feature?.uses?.max ?? def.usesMax,
 				recharge: def.recharge,
@@ -12060,12 +12142,49 @@ class CharacterSheetState {
 		if (this._data.hp.current > 0) return null;
 		const interventions = this.getZeroHpInterventions(pending);
 		if (!interventions.length) return null;
-		return {...pending, interventions};
+		const options = interventions
+			.filter(intervention => intervention.available)
+			.map(intervention => ({
+				id: intervention.id,
+				order: intervention.order,
+				name: intervention.name,
+				description: intervention.description,
+				saveAbility: intervention.saveAbility,
+				dc: intervention.dc,
+				hpOnSuccess: intervention.hpOnSuccess,
+			}));
+		return {
+			...pending,
+			interventions,
+			chooser: {
+				required: options.length > 1,
+				options,
+			},
+		};
 	}
 
 	/** Discard the armed 0-HP trigger (declined, or resolved some other way). */
 	clearPendingZeroHpIntervention () {
 		delete this._data._pendingZeroHpIntervention;
+	}
+
+	/**
+	 * Cancel the pending zero-HP transaction before its commit point.
+	 * @param {string|null} [id]
+	 * @returns {object|null}
+	 */
+	cancelZeroHpIntervention (id = null) {
+		const pending = this._data._pendingZeroHpIntervention;
+		if (!pending) return null;
+		const selected = id == null ? null : CharacterSheetState.ZERO_HP_INTERVENTIONS.find(it => it.id === id);
+		this.clearPendingZeroHpIntervention();
+		return {
+			applied: false,
+			committed: false,
+			cancelled: true,
+			id: selected?.id ?? id,
+			name: selected?.displayName || selected?.featureName || null,
+		};
 	}
 
 	/**
@@ -12077,58 +12196,163 @@ class CharacterSheetState {
 	 * @param {number} [opts.total] a pre-computed save total, overriding `roll`.
 	 * @param {string|null} [opts.damageType] refine the damage type if it was unstated.
 	 * @param {boolean} [opts.isCritical] refine the critical flag if it was unstated.
-	 * @returns {object|null} `{applied, success, dc, roll, total, hp, usesRemaining}` or null
-	 *   when there is nothing to resolve / the feature does not apply.
+	 * @param {boolean} [opts.cancelled=false] cancel before validation/commit.
+	 * @returns {object|null} committed, cancelled, unavailable, or validation-failure result;
+	 *   null when there is no pending transaction / matching intervention.
+	 * @throws {Error} when validation throws or any commit-phase callback/application fails.
 	 */
-	applyZeroHpIntervention (id, {roll = null, total = null, damageType, isCritical} = {}) {
+	applyZeroHpIntervention (id, {roll = null, total = null, damageType, isCritical, cancelled = false, ...options} = {}) {
+		if (cancelled) return this.cancelZeroHpIntervention(id);
+
 		const pending = this._data._pendingZeroHpIntervention;
 		if (!pending) return null;
 		if (this._data.hp.current > 0) return null;
 
+		const transactionPending = {...pending};
 		if (damageType !== undefined) {
-			pending.damageType = damageType ? String(damageType).toLowerCase() : null;
-			pending.damageTypeStated = true;
+			transactionPending.damageType = damageType ? String(damageType).toLowerCase() : null;
+			transactionPending.damageTypeStated = true;
 		}
-		if (isCritical !== undefined) pending.isCritical = !!isCritical;
+		if (isCritical !== undefined) transactionPending.isCritical = !!isCritical;
 
 		const def = CharacterSheetState.ZERO_HP_INTERVENTIONS.find(d => d.id === id);
 		if (!def) return null;
-		const info = this.getZeroHpInterventions(pending).find(i => i.id === id);
+		const info = this.getZeroHpInterventions(transactionPending).find(i => i.id === id);
 		if (!info) return null;
-		if (!info.available) return {applied: false, success: false, ...info};
+		if (!info.available) return {applied: false, committed: false, success: false, ...info};
 
 		let d20 = roll;
-		if (total == null && d20 == null) d20 = RollerUtil.randomise(20);
-		const saveTotal = total != null ? Math.floor(total) : (Math.floor(d20) + info.saveModifier);
+		if (def.saveAbility && total == null && d20 == null) d20 = RollerUtil.randomise(20);
+		const saveTotal = def.saveAbility
+			? total != null ? Math.floor(total) : (Math.floor(d20) + info.saveModifier)
+			: total != null ? Math.floor(total) : d20 != null ? Math.floor(d20) : null;
 		const success = def.saveAbility ? saveTotal >= info.dc : true;
-
-		if (success) {
-			this._data.hp.current = info.hpOnSuccess;
-			this.resetDeathSaves();
-			this._data.massiveDamageDeath = false;
-			this._updateBloodiedCondition();
-			// Rite Revival's cost: ending every active crimson rite.
-			if (def.endsCrimsonRitesOnApply) this.deactivateState("crimsonRite");
-		}
-
-		// A null usesMax means there is no per-rest budget to spend (Rite Revival).
-		if (def.usesMax != null && (success || def.spendOn === "attempt")) this._spendZeroHpInterventionUse(def);
-
-		this.clearPendingZeroHpIntervention();
-
-		return {
-			applied: true,
-			id: def.id,
-			name: def.displayName || def.featureName,
-			featureName: def.featureName,
-			success,
-			dc: info.dc,
-			saveAbility: def.saveAbility,
+		const transaction = {
+			state: this,
+			definition: def,
+			pending: transactionPending,
+			info,
+			options,
 			roll: d20,
 			total: saveTotal,
-			hp: this._data.hp.current,
-			usesRemaining: this.getZeroHpInterventions({damage: 0}).find(i => i.id === id)?.usesRemaining ?? 0,
+			success,
 		};
+
+		const snapshot = MiscUtil.copyFast(this._data);
+		let validation;
+		try {
+			validation = this._resolveZeroHpInterventionSpec(def.validation, "validate", transaction);
+		} catch (error) {
+			this._data = snapshot;
+			const cause = error instanceof Error ? error : new Error(String(error));
+			const wrapped = new Error(`${info.name} failed validation: ${cause.message}`);
+			wrapped.cause = cause;
+			throw wrapped;
+		}
+		transaction.validation = validation;
+		if (validation?.cancelled) {
+			this._data = snapshot;
+			return this.cancelZeroHpIntervention(id);
+		}
+		const validationError = validation === false
+			? `${info.name} could not be validated.`
+			: typeof validation === "string"
+				? validation
+				: validation?.valid === false
+					? validation.error || validation.reason || `${info.name} could not be validated.`
+					: null;
+		if (validationError) {
+			this._data = snapshot;
+			return {
+				applied: false,
+				committed: false,
+				success: false,
+				validationFailed: true,
+				error: validationError,
+				...info,
+			};
+		}
+		// Validation is pre-commit and read-only from the transaction's perspective. Discard
+		// any incidental state mutation it made, while preserving its returned descriptor for
+		// the selected intervention's commit callbacks.
+		if (typeof def.validation === "function" || typeof def.validation?.validate === "function") {
+			this._data = MiscUtil.copyFast(snapshot);
+		}
+
+		try {
+			const hpOnSuccess = success
+				? this._resolveZeroHpInterventionHp(def, transaction)
+				: this._data.hp.current;
+			let consumption = null;
+			const shouldConsume = success || def.spendOn === "attempt";
+			if (shouldConsume && def.consumption != null) {
+				if (typeof def.consumption !== "function" && typeof def.consumption?.consume !== "function") {
+					throw new Error(`${info.name} has a consumption descriptor with no consume callback.`);
+				}
+				consumption = this._resolveZeroHpInterventionSpec(def.consumption, "consume", {
+					...transaction,
+					hpOnSuccess,
+				});
+				if (consumption === false || consumption?.ok === false) {
+					throw new Error(consumption?.error || consumption?.reason || `${info.name} could not consume its cost.`);
+				}
+			} else if (shouldConsume && def.usesMax != null) {
+				const before = info.usesRemaining;
+				this._spendZeroHpInterventionUse(def);
+				const after = this._getZeroHpInterventionUsesRemaining(def);
+				consumption = {
+					type: "featureUse",
+					featureName: def.featureName,
+					amount: Math.max(0, before - after),
+					usesRemaining: after,
+				};
+			}
+
+			if (success) {
+				this._data.hp.current = hpOnSuccess;
+				this.resetDeathSaves();
+				this._data.massiveDamageDeath = false;
+				this._updateBloodiedCondition();
+			}
+
+			const postApplication = this._resolveZeroHpInterventionSpec(def.postApplicationResult, "build", {
+				...transaction,
+				hpOnSuccess,
+				consumption,
+				hp: this._data.hp.current,
+			});
+			if (postApplication === false || postApplication?.ok === false) {
+				throw new Error(postApplication?.error || postApplication?.reason || `${info.name} could not finish applying.`);
+			}
+			if (postApplication != null && typeof postApplication !== "object") {
+				throw new Error(`${info.name} produced an invalid post-application result; expected a structured object.`);
+			}
+
+			this.clearPendingZeroHpIntervention();
+
+			return {
+				applied: true,
+				committed: true,
+				id: def.id,
+				name: def.displayName || def.featureName,
+				featureName: def.featureName,
+				success,
+				dc: info.dc,
+				saveAbility: def.saveAbility,
+				roll: d20,
+				total: saveTotal,
+				hp: this._data.hp.current,
+				usesRemaining: this._getZeroHpInterventionUsesRemaining(def),
+				consumption,
+				postApplication: postApplication ?? null,
+			};
+		} catch (error) {
+			this._data = snapshot;
+			const cause = error instanceof Error ? error : new Error(String(error));
+			const wrapped = new Error(`${info.name} failed to apply: ${cause.message}`);
+			wrapped.cause = cause;
+			throw wrapped;
+		}
 	}
 
 	/** @private */

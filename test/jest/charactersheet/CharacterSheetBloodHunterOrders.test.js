@@ -168,7 +168,7 @@ describe("Order of the Ghostslayer (BH2022)", () => {
 		state.activateCrimsonRite("rite of the dawn", {roll: 1, weaponId: "w1", weaponName: "Longsword"});
 		expect(state._hasActiveCrimsonRite()).toBe(true);
 
-		state.takeDamage(200, {damageType: "slashing"});
+		state.takeDamage(60, {damageType: "slashing"});
 		expect(state.getCurrentHp()).toBe(0);
 
 		const pending = state.getPendingZeroHpIntervention();
@@ -189,7 +189,7 @@ describe("Order of the Ghostslayer (BH2022)", () => {
 		const state = makeBloodHunter({subclass: "Order of the Ghostslayer", level: 18});
 		addFeature(state, "Rite Revival", 18);
 		state.setCurrentHp(60);
-		state.takeDamage(200, {damageType: "slashing"});
+		state.takeDamage(60, {damageType: "slashing"});
 		const pending = state.getPendingZeroHpIntervention();
 		const revival = pending.interventions.find(i => i.id === "riteRevival");
 		// Offered, but gated off because there is no active crimson rite to consume.

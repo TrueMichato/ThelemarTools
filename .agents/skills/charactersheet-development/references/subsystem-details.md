@@ -449,6 +449,31 @@ natural-20-only behavior via the `natRange` default of `20`. Thelemar's
 generic crit-roll homebrew is suppressed on death-save rolls (`isAttack: true`)
 since death saves already hardcode their own nat-1/nat-20(+widened) cases.
 
+### Zero-HP Intervention Transactions
+
+`CharacterSheetState.ZERO_HP_INTERVENTIONS` is the generic registry for optional
+"damage reduced you to 0 HP, but not killed outright" effects. `takeDamage()`
+arms a pending transaction only after Death Ward and massive-damage exclusion.
+`getPendingZeroHpIntervention()` returns the live descriptors plus deterministic
+`chooser.options` in registry order; consumers must commit only the selected id.
+
+Registry entries retain the legacy save/use fields and may additionally provide:
+
+- `availability`: callback or `{resolve}` descriptor returning
+  `{available, unavailableReason?}`
+- `validation`: callback or `{validate}` descriptor returning
+  `{valid, cancelled?, error?}` before commit
+- `consumption`: callback or `{consume}` descriptor for a custom state-owned cost;
+  omitting it preserves the feature-use/resource deduction
+- `hpOutcome`: number, declarative HP descriptor, callback, or `{calculate}`
+- `postApplicationResult`: static structured payload, callback, or `{build}`
+
+Validation and `cancelZeroHpIntervention()` happen before the commit point and
+spend nothing. Commit snapshots `_data`, calculates the HP outcome, consumes once,
+applies HP/death-save state, and builds the optional result. Any commit-phase
+exception or `{ok: false}` rolls the snapshot back and throws; callers must surface
+that error rather than treating it as a declined or successful intervention.
+
 
 
 Class and subclass calculations can append attack descriptors to

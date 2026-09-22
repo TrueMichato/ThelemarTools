@@ -78,6 +78,26 @@ describe("CharacterSheetPlayMode", () => {
 		});
 	});
 
+	describe("HP changes", () => {
+		it("delegates damage to the page's canonical damage/intervention pipeline", async () => {
+			state.setHp(10, 20);
+			const page = {
+				getState: () => state,
+				_pApplyDamage: jest.fn(async (amount, opts) => state.takeDamage(amount, opts)),
+			};
+			const pm = new CharacterSheetPlayMode(page);
+			pm._logActivity = jest.fn();
+			pm._renderStatusBar = jest.fn();
+
+			await pm._applyHpChange("damage", 10, "fire");
+
+			expect(page._pApplyDamage).toHaveBeenCalledTimes(1);
+			expect(page._pApplyDamage).toHaveBeenCalledWith(10, {damageType: "fire"});
+			expect(state.getCurrentHp()).toBe(0);
+			expect(pm._renderStatusBar).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	describe("Item attunement", () => {
 		const addItem = (item) => {
 			state.addItem(item);
