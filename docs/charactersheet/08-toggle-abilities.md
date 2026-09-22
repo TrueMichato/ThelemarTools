@@ -414,7 +414,7 @@ placed on an ally rather than on the druid.
 
 ## Supported Toggle Abilities
 
-> ⚠️ **This section documents 34 of the 75 states in `ACTIVE_STATE_TYPES`.**
+> ⚠️ **This section documents 35 of the 76 states in `ACTIVE_STATE_TYPES`.**
 > The other 41 are **implemented and working** — they are merely undocumented
 > here. Do not read a state's absence from this section as "unsupported"; check
 > `CharacterSheetState.ACTIVE_STATE_TYPES` first, which is the only authority.
@@ -470,6 +470,18 @@ placed on an ally rather than on the druid.
 > <!-- TOGGLE_DOC_GAP:END -->
 
 ### Core D&D Abilities
+
+#### Giant Stature (EFA Artificer Armorer — Dreadnaught)
+
+`giantStature` is a one-minute, Bonus Action state activated from the bound
+Arcane Armor's item-power surface. Its committed transaction spends one use
+from the Intelligence-modifier-sized Long Rest pool and the Bonus Action
+together. The state always contributes `{type: "reach", value: 5}`. When the
+player confirms sufficient room, activation also stores the exact number of
+`sizeIncrease` steps needed to become Large; choosing insufficient room omits
+only that size effect. Doffing the armor, changing model, losing the exact
+`Artificer|EFA` / `Armorer|EFA` source, death, or duration expiry ends the
+state.
 
 #### Rage (Barbarian)
 ```javascript

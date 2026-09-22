@@ -13,9 +13,11 @@ import {CharacterSheetProgression} from "./charactersheet-progression.js";
 // branches. New sources can opt in by registering a handler method.
 const TARGET_EFFECT_HANDLER_METHODS = Object.freeze({
 	"chained-fury": "applyChainedTargetEffect",
+	"efa-armorer-thunder-pulse": "applyEfaThunderPulseTargetEffect",
 });
 const TARGET_EFFECT_METADATA_METHODS = Object.freeze({
 	"chained-fury": "getChainedTargetEffectMetadata",
+	"efa-armorer-thunder-pulse": "getEfaThunderPulseTargetEffectMetadata",
 });
 const FIXED_PROFICIENCY_FALLBACK_DEFINITIONS = new Map();
 
@@ -32905,15 +32907,49 @@ class CharacterSheetState {
 							switch (status.model?.name) {
 								case "Dreadnaught":
 									calculations.hasEfaForceDemolisher = true;
+									calculations.hasEfaGiantStature = true;
+									(calculations.attackOnHitOptions ||= []).push({
+										id: "efa-armorer-force-demolisher-movement",
+										name: "Force Demolisher Push/Pull",
+										attackIds: [status.model.id],
+										resolutionKind: "forcedMovement",
+										distanceMax: 10,
+										directions: ["push", "pull"],
+										description: "Push the target away from you or pull it toward you by up to 10 feet if it is at least one size smaller than you.",
+									});
 									break;
 								case "Guardian":
 									calculations.hasEfaThunderPulse = true;
+									calculations.hasEfaDefensiveField = true;
+									calculations.efaDefensiveFieldTempHp = level;
+									(calculations.attackOnHitOptions ||= []).push({
+										id: "efa-armorer-thunder-pulse-disadvantage",
+										name: "Thunder Pulse",
+										attackIds: [status.model.id],
+										targetAware: true,
+										targetEffect: {
+											source: "efa-armorer-thunder-pulse",
+											effect: "attack-disadvantage-other-targets",
+											attackId: status.model.id,
+										},
+										description: "Until the start of your next turn, the target has disadvantage on attack rolls against targets other than you.",
+									});
 									break;
 								case "Infiltrator":
 									calculations.hasEfaLightningLauncher = true;
 									calculations.hasEfaPoweredSteps = true;
 									calculations.hasEfaDampeningField = true;
 									calculations.efaArmorerSpeedBonus = 5;
+									(calculations.weaponDamageRiders ||= []).push({
+										id: "efa-armorer-lightning-launcher-extra-damage",
+										name: "Lightning Launcher",
+										dice: "1d6",
+										damageType: "lightning",
+										perTurn: true,
+										attackIds: [status.model.id],
+										condition: "once on each of your turns when this attack hits",
+										note: "once per turn",
+									});
 									break;
 							}
 						}
@@ -38654,6 +38690,7 @@ class CharacterSheetState {
 
 			const efaArcaneArmorPower = this._getEfaArcaneArmorItemPower(item);
 			if (efaArcaneArmorPower) out.push(efaArcaneArmorPower);
+			out.push(...this._getEfaArcaneArmorModelItemPowers(item));
 		}
 		for (const effect of this.getGemstoneEffects({activeOnly: false})) {
 			if (activeOnly && !effect.active) continue;
@@ -38701,11 +38738,12 @@ class CharacterSheetState {
 	 * Atomically validate and consume an item power's resource.
 	 * Spell/result resolution remains with the calling UI, but charge mutation has one owner.
 	 */
-	invokeItemPower (itemId, powerId, {confirmed = false, chargesCost = null} = {}) {
+	invokeItemPower (itemId, powerId, {confirmed = false, chargesCost = null, efaArmorer = null} = {}) {
 		const power = this.getItemPower(itemId, powerId);
 		if (!power) return {ok: false, reason: "Item power not found."};
 		if (!power.isAvailable) return {ok: false, reason: power.unavailableReason};
 		if (power.efaArcaneArmorAction) return this._invokeEfaArcaneArmorItemPower(power);
+		if (power.efaArcaneArmorModelAction) return this._invokeEfaArcaneArmorModelItemPower(power, efaArmorer);
 		if (power.gemstonePower) {
 			const found = this._findGemstoneByInstanceId(power.gemInstanceId);
 			if (!found) return {ok: false, reason: "Gemstone not found."};
@@ -46829,6 +46867,7 @@ class CharacterSheetState {
 		this._ensureFeatRegistryResources();
 		this._reconcileRhwReanimatorState();
 		this._ensureEfaFlashOfGeniusResource();
+		this._ensureEfaGiantStatureResource();
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
@@ -66016,6 +66055,18 @@ class CharacterSheetState {
 			exclusiveWith: ["bladesong"], // Cannot rage and bladesong simultaneously
 			breaksConcentration: true, // Rage prevents maintaining concentration
 		},
+		giantStature: {
+			id: "giantStature",
+			name: "Giant Stature",
+			icon: "↕",
+			description: "Your reach increases by 5 feet and, when space permits, you become Large if you were smaller.",
+			effects: [{type: "reach", value: 5}],
+			duration: "1 minute",
+			endConditions: ["Duration expires", "You die", "Arcane Armor is doffed", "Armor Model changes"],
+			activationAction: "bonus",
+			tracksActionEconomy: true,
+			preferCuratedEffects: true,
+		},
 		/**
 		 * Manifest Chains (Barbarian: Path of the Chained Fury, TGTT L3).
 		 *
@@ -72493,6 +72544,7 @@ class CharacterSheetState {
 	startCombat () {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
+		this._expireTargetEffectsAtOwnerTurnStart(1);
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: 1});
 		this._data.sanguineMasteryLastRerollRound = null;
@@ -72531,6 +72583,7 @@ class CharacterSheetState {
 		this._data.hybridBloodlustTurnStartCheck = null;
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: null});
+		this.clearTargetEffects("efa-armorer-thunder-pulse");
 
 		for (const state of this._data.activeStates) {
 			// Fully deactivate transient "consume on attack" states (e.g. Steady Aim)
@@ -72554,6 +72607,7 @@ class CharacterSheetState {
 		if (!this._data.inCombat) return [];
 
 		this._data.combatRound++;
+		this._expireTargetEffectsAtOwnerTurnStart(this._data.combatRound);
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: this._data.combatRound});
 		this._data.sanguineMasteryLastRerollRound = null;
@@ -73261,6 +73315,222 @@ class CharacterSheetState {
 		},
 	];
 
+	static EFA_ARMORER_FEATURE_UIDS = Object.freeze({
+		giantStature: "Giant Stature|Artificer|EFA|Armorer|EFA|3|EFA",
+		defensiveField: "Defensive Field|Artificer|EFA|Armorer|EFA|3|EFA",
+		thunderPulse: "Thunder Pulse|Artificer|EFA|Armorer|EFA|3|EFA",
+	});
+
+	static EFA_ARMORER_FEATURE_OWNERS = Object.freeze({
+		defensiveField: Object.freeze({
+			id: "efa-armorer:defensive-field",
+			kind: "subclassFeature",
+			name: "Defensive Field",
+			source: "EFA",
+			uid: "Defensive Field|Artificer|EFA|Armorer|EFA|3|EFA",
+		}),
+		thunderPulse: Object.freeze({
+			id: "efa-armorer:thunder-pulse",
+			kind: "subclassFeature",
+			name: "Thunder Pulse",
+			source: "EFA",
+			uid: "Thunder Pulse|Artificer|EFA|Armorer|EFA|3|EFA",
+		}),
+	});
+
+	static EFA_GIANT_STATURE_RESOURCE_NAME = "Giant Stature";
+
+	_ensureEfaGiantStatureResource () {
+		const featureUid = CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature;
+		const isOwned = resource =>
+			resource?.featureUid === featureUid
+			|| (resource?.name === CharacterSheetState.EFA_GIANT_STATURE_RESOURCE_NAME
+				&& resource?.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID);
+		const tracked = (this._data.resources || []).filter(isOwned);
+		const armorer = this._getEfaArmorerClass();
+		if (!armorer) {
+			this._data.resources = (this._data.resources || []).filter(resource => !isOwned(resource));
+			return null;
+		}
+
+		const desiredMax = Math.max(1, this.getAbilityMod("int"));
+		const spent = tracked.length
+			? Math.max(...tracked.map(resource => Math.max(0, (Number(resource.max) || 0) - Math.min(Number(resource.current) || 0, Number(resource.max) || 0))))
+			: 0;
+		let resource = tracked[0] || null;
+		if (!resource) {
+			resource = {
+				id: CryptUtil.uid(),
+				name: CharacterSheetState.EFA_GIANT_STATURE_RESOURCE_NAME,
+				current: desiredMax,
+				max: desiredMax,
+				recharge: "long",
+			};
+			(this._data.resources ||= []).push(resource);
+		}
+		resource.name = CharacterSheetState.EFA_GIANT_STATURE_RESOURCE_NAME;
+		resource.max = desiredMax;
+		resource.current = Math.max(0, desiredMax - spent);
+		resource.recharge = "long";
+		resource.featureUid = featureUid;
+		resource.classUid = CharacterSheetState.EFA_ARTIFICER_CLASS_UID;
+		resource.source = "EFA";
+		this._data.resources = (this._data.resources || []).filter(candidate => candidate === resource || !isOwned(candidate));
+		return resource;
+	}
+
+	getEfaGiantStatureStatus () {
+		this.reconcileEfaArmorerState({cause: "giant-stature-status"});
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		const resource = this._ensureEfaGiantStatureResource();
+		let reason = null;
+		if (!this._getEfaArmorerClass()) reason = "Requires a level 3 EFA Artificer Armorer.";
+		else if (status.model?.name !== "Dreadnaught") reason = "Requires the Dreadnaught Armor Model.";
+		else if (!status.active) reason = "Wear the bound Dreadnaught Arcane Armor first.";
+		else if (this.isStateTypeActive("giantStature")) reason = "Giant Stature is already active.";
+		else if (!resource || resource.current < 1) reason = "No Giant Stature uses remain until a Long Rest.";
+		else if (this.isInCombat() && !this.isActionTypeAvailable("bonus")) reason = "Bonus Action already used this turn.";
+		return {
+			ok: !reason,
+			reason,
+			resource: resource ? MiscUtil.copyFast(resource) : null,
+			active: this.isStateTypeActive("giantStature"),
+			status,
+		};
+	}
+
+	async activateEfaGiantStature ({hasRoom = true} = {}) {
+		const eligibility = this.getEfaGiantStatureStatus();
+		if (!eligibility.ok) return {ok: false, committed: false, reason: eligibility.reason};
+		const currentSize = String(this.getSize() || "medium").toLowerCase();
+		const currentRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(currentSize);
+		const largeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf("large");
+		const sizeSteps = hasRoom && currentRank >= 0 && currentRank < largeRank ? largeRank - currentRank : 0;
+		const effects = [
+			{type: "reach", value: 5},
+			...(sizeSteps ? [{type: "sizeIncrease", value: sizeSteps}] : []),
+		];
+		const committed = await this.pCommitFeatureUse({
+			featureUid: CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			actionType: "bonus",
+			resourceId: eligibility.resource.id,
+			resourceCost: 1,
+			context: {
+				model: "Dreadnaught",
+				arcaneArmorItemId: eligibility.status.boundItemId,
+				hasRoom: !!hasRoom,
+			},
+			result: {
+				reachBonus: 5,
+				sizeBefore: currentSize,
+				sizeSteps,
+			},
+		});
+		if (!committed.ok) return committed;
+
+		const stateId = this.activateState("giantStature", {
+			name: "Giant Stature",
+			description: CharacterSheetState.ACTIVE_STATE_TYPES.giantStature.description,
+			duration: "1 minute",
+			customEffects: effects,
+			sourceFeatureId: CharacterSheetState.EFA_ARMORER_FEATURE_UIDS.giantStature,
+		});
+		if (!stateId) {
+			return {
+				...committed,
+				followUpFailed: true,
+				reason: "stateActivationFailed",
+				actionConsumed: committed.actionType !== "free" && this.isInCombat(),
+				message: "Giant Stature was committed, but its active-state follow-up failed.",
+			};
+		}
+		return {
+			...committed,
+			stateId,
+			actionConsumed: committed.actionType !== "free" && this.isInCombat(),
+			message: sizeSteps
+				? "Giant Stature activated: reach +5 feet; size becomes Large."
+				: "Giant Stature activated: reach +5 feet; size unchanged because there is not enough room or you are already Large.",
+		};
+	}
+
+	getEfaDefensiveFieldStatus () {
+		this.reconcileEfaArmorerState({cause: "defensive-field-status"});
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		const level = Number(this._getEfaArmorerClass()?.level) || 0;
+		let reason = null;
+		if (!this._getEfaArmorerClass()) reason = "Requires a level 3 EFA Artificer Armorer.";
+		else if (status.model?.name !== "Guardian") reason = "Requires the Guardian Armor Model.";
+		else if (!status.active) reason = "Wear the bound Guardian Arcane Armor first.";
+		else if (!this.isBloodied()) reason = "Defensive Field is available only while Bloodied.";
+		else if (this.getTempHp() >= level) reason = `Existing temporary hit points are already ${level} or higher.`;
+		else if (this.isInCombat() && !this.isActionTypeAvailable("bonus")) reason = "Bonus Action already used this turn.";
+		return {ok: !reason, reason, tempHp: level, status};
+	}
+
+	activateEfaDefensiveField () {
+		const eligibility = this.getEfaDefensiveFieldStatus();
+		if (!eligibility.ok) return {ok: false, committed: false, reason: eligibility.reason};
+		const actionTracked = this.isInCombat();
+		if (actionTracked && !this.consumeActionType("bonus")) {
+			return {ok: false, committed: false, reason: "Bonus Action already used this turn."};
+		}
+		if (!this.grantOwnedTempHp(eligibility.tempHp, CharacterSheetState.EFA_ARMORER_FEATURE_OWNERS.defensiveField)) {
+			if (actionTracked) this.restoreActionType("bonus");
+			return {ok: false, committed: false, reason: "Temporary hit points were not granted."};
+		}
+		return {
+			ok: true,
+			committed: true,
+			actionType: "bonus",
+			actionConsumed: actionTracked,
+			tempHp: eligibility.tempHp,
+			owner: MiscUtil.copyFast(CharacterSheetState.EFA_ARMORER_FEATURE_OWNERS.defensiveField),
+			message: `Defensive Field granted ${eligibility.tempHp} temporary hit points.`,
+		};
+	}
+
+	resolveEfaForceDemolisherHitRider ({
+		attackId,
+		hit = true,
+		targetSize = "medium",
+		direction,
+		distance = 10,
+		cancelled = false,
+	} = {}) {
+		if (cancelled || !hit) return {ok: false, applied: false, reason: cancelled ? "cancelled" : "miss"};
+		const status = this.getEfaArcaneArmorBindingStatus();
+		const expectedAttackId = "efa-armorer:dreadnaught:force-demolisher";
+		if (!status.active || status.model?.name !== "Dreadnaught" || attackId !== expectedAttackId) {
+			return {ok: false, applied: false, reason: "inactive-force-demolisher"};
+		}
+		const ownerSize = String(this.getSize() || "medium").toLowerCase();
+		const normalizedTargetSize = String(targetSize || "").toLowerCase();
+		const ownerRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(ownerSize);
+		const targetRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(normalizedTargetSize);
+		if (ownerRank < 0 || targetRank < 0 || targetRank >= ownerRank) {
+			return {ok: false, applied: false, reason: "target-not-smaller", ownerSize, targetSize: normalizedTargetSize};
+		}
+		const normalizedDirection = direction === "pull" ? "pull" : direction === "push" ? "push" : null;
+		const normalizedDistance = Math.floor(Number(distance));
+		if (!normalizedDirection || !Number.isFinite(normalizedDistance) || normalizedDistance < 1 || normalizedDistance > 10) {
+			return {ok: false, applied: false, reason: "invalid-movement"};
+		}
+		return {
+			ok: true,
+			applied: true,
+			type: "forcedMovement",
+			source: "Force Demolisher",
+			attackId: expectedAttackId,
+			direction: normalizedDirection,
+			distance: normalizedDistance,
+			ownerSize,
+			targetSize: normalizedTargetSize,
+			message: `Force Demolisher: ${normalizedDirection === "push" ? "push" : "pull"} the ${normalizedTargetSize} target ${normalizedDistance} feet.`,
+		};
+	}
+
 	_getEfaArmorerModelWeaponTemplate (def) {
 		const managedBase = {
 			type: def.type,
@@ -73604,6 +73874,68 @@ class CharacterSheetState {
 		};
 	}
 
+	_getEfaArcaneArmorModelItemPowers (item) {
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		if (!status.active || status.boundItemId !== item?.id) return [];
+		const base = {
+			actionType: "bonus",
+			kind: "ability",
+			requiresEquipped: true,
+			isInlinePrimary: false,
+			isEfaArcaneArmorPower: true,
+			itemId: item.id,
+			itemName: item.name,
+			itemSource: item.source,
+			itemHoverData: item,
+			chargesCurrent: 0,
+			chargesMax: 0,
+			usesCurrent: null,
+			isActive: false,
+		};
+		if (status.model?.name === "Dreadnaught") {
+			const eligibility = this.getEfaGiantStatureStatus();
+			return [{
+				...base,
+				id: "efa-armorer:dreadnaught:giant-stature",
+				name: "Giant Stature",
+				invokeLabel: "Activate",
+				efaArcaneArmorModelAction: "giant-stature",
+				description: "Bonus Action: for 1 minute, increase your reach by 5 feet and become Large if space permits.",
+				resourceCurrent: eligibility.resource?.current ?? null,
+				resourceMax: eligibility.resource?.max ?? null,
+				isActive: eligibility.active,
+				isAvailable: eligibility.ok,
+				unavailableReason: eligibility.reason,
+			}];
+		}
+		if (status.model?.name === "Guardian") {
+			const eligibility = this.getEfaDefensiveFieldStatus();
+			return [{
+				...base,
+				id: "efa-armorer:guardian:defensive-field",
+				name: "Defensive Field",
+				invokeLabel: "Use",
+				efaArcaneArmorModelAction: "defensive-field",
+				description: `Bonus Action while Bloodied: gain ${eligibility.tempHp} temporary hit points.`,
+				isAvailable: eligibility.ok,
+				unavailableReason: eligibility.reason,
+			}];
+		}
+		return [];
+	}
+
+	_invokeEfaArcaneArmorModelItemPower (power, options = {}) {
+		if (power.efaArcaneArmorModelAction === "giant-stature") {
+			return this.activateEfaGiantStature({hasRoom: options?.hasRoom !== false})
+				.then(result => result.ok ? {...result, power} : result);
+		}
+		if (power.efaArcaneArmorModelAction === "defensive-field") {
+			const result = this.activateEfaDefensiveField();
+			return result.ok ? {...result, power} : result;
+		}
+		return {ok: false, committed: false, reason: "Unsupported Arcane Armor model action."};
+	}
+
 	_invokeEfaArcaneArmorItemPower (power) {
 		if (power.efaArcaneArmorAction === "transform") {
 			const result = this.bindEfaArcaneArmor(power.itemId);
@@ -73842,6 +74174,16 @@ class CharacterSheetState {
 			}
 
 			this._reconcileEfaArmorerGeneratedActivation();
+			this._ensureEfaGiantStatureResource();
+			const liveStatus = this._getEfaArcaneArmorStatusSnapshot();
+			if (
+				this.isStateTypeActive("giantStature")
+				&& (!liveStatus.active || liveStatus.model?.name !== "Dreadnaught" || this.isDead())
+			) this.deactivateState("giantStature", {reason: `EFA Armorer reconciliation: ${cause}`});
+			if (!liveStatus.active || liveStatus.model?.name !== "Guardian" || this.isDead()) {
+				this.clearOwnedTempHp(CharacterSheetState.EFA_ARMORER_FEATURE_OWNERS.defensiveField);
+				this.clearTargetEffects("efa-armorer-thunder-pulse");
+			}
 			return {...this._getEfaArcaneArmorStatusSnapshot(), cause};
 		} finally {
 			this._isReconcilingEfaArmorer = false;
@@ -74569,6 +74911,19 @@ class CharacterSheetState {
 		const restraintEffect = effects.restraint && typeof effects.restraint === "object" ? effects.restraint : {};
 		const grappleActive = grappleEffect.active == null ? !!raw.grappled : !!grappleEffect.active;
 		const shoveActive = shoveEffect.active == null ? !!raw.shoved : !!shoveEffect.active;
+		const owner = raw.owner && typeof raw.owner === "object"
+			? this._normalizeTempHpOwner(raw.owner)
+			: null;
+		const expiryRound = raw.expiry?.combatRound == null ? null : Number(raw.expiry.combatRound);
+		const expiry = raw.expiry?.type === "ownerTurnStart"
+			? {
+				type: "ownerTurnStart",
+				combatRound: Number.isFinite(expiryRound) && expiryRound >= 0 ? expiryRound : null,
+			}
+			: null;
+		const attackDisadvantage = raw.attackDisadvantage?.against === "other-than-owner"
+			? {against: "other-than-owner"}
+			: null;
 		// `restrained: false` is an explicit compatibility alias. Older saves
 		// occasionally carried a stale nested restraint layer, so never let that
 		// layer resurrect a normal grapple.
@@ -74579,6 +74934,12 @@ class CharacterSheetState {
 			id,
 			source: raw.source == null ? null : String(raw.source).trim().toLowerCase(),
 			effectType: raw.effectType || "target",
+			owner,
+			sourceFeatureUid: raw.sourceFeatureUid == null ? owner?.uid || null : String(raw.sourceFeatureUid).trim() || null,
+			attackId: raw.attackId == null ? null : String(raw.attackId).trim() || null,
+			model: raw.model == null ? null : String(raw.model).trim() || null,
+			attackDisadvantage,
+			expiry,
 			targetName: String(raw.targetName || raw.name || "Target"),
 			size: normalizedSize,
 			declaredDistance: Number.isFinite(declaredDistance) && declaredDistance >= 0 ? declaredDistance : (Number.isFinite(distance) && distance >= 0 ? distance : null),
@@ -74654,6 +75015,66 @@ class CharacterSheetState {
 			range,
 			prompt: "Optional bookkeeping: record the creature only after it fails the relevant save.",
 		};
+	}
+
+	getEfaThunderPulseTargetEffectMetadata () {
+		return {
+			source: "efa-armorer-thunder-pulse",
+			effect: "attack-disadvantage-other-targets",
+			range: null,
+			requiresSize: false,
+			requiresDistance: false,
+			prompt: "Record the creature hit by Thunder Pulse. Re-hitting the same named target refreshes the effect until the start of your next turn.",
+		};
+	}
+
+	applyEfaThunderPulseTargetEffect (opts = {}) {
+		const status = this.getEfaArcaneArmorBindingStatus();
+		const attackId = String(opts?.targetEffect?.attackId || opts?.attackId || "").trim();
+		const expectedAttackId = "efa-armorer:guardian:thunder-pulse";
+		if (!status.active || status.model?.name !== "Guardian" || attackId !== expectedAttackId) {
+			return {ok: false, reason: "inactive-thunder-pulse"};
+		}
+		if (String(opts?.effect || "").toLowerCase() !== "attack-disadvantage-other-targets") {
+			return {ok: false, reason: "effect-unavailable"};
+		}
+		const targetName = String(opts.targetName || "").trim();
+		if (!targetName) return {ok: false, reason: "target-required"};
+		const targetKey = targetName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "target";
+		const targetId = opts.targetId || `efa-armorer-thunder-pulse:${targetKey}`;
+		const owner = CharacterSheetState.EFA_ARMORER_FEATURE_OWNERS.thunderPulse;
+		const currentRound = this.isInCombat() ? this.getCombatRound() : null;
+		const target = this.upsertTargetEffect({
+			id: targetId,
+			source: "efa-armorer-thunder-pulse",
+			effectType: "attack-disadvantage-other-targets",
+			targetName,
+			owner,
+			sourceFeatureUid: owner.uid,
+			attackId: expectedAttackId,
+			model: "Guardian",
+			attackDisadvantage: {against: "other-than-owner"},
+			expiry: {
+				type: "ownerTurnStart",
+				combatRound: currentRound == null ? null : currentRound + 1,
+			},
+		});
+		return target ? {ok: true, applied: true, target} : {ok: false, applied: false, reason: "invalid-target"};
+	}
+
+	getTargetAttackDisadvantage (targetId, {defenderOwnerUid = null} = {}) {
+		const target = this._data.targetEffects.find(it => it.id === targetId);
+		if (!target?.attackDisadvantage || target.attackDisadvantage.against !== "other-than-owner") return false;
+		return !defenderOwnerUid || defenderOwnerUid !== target.owner?.uid;
+	}
+
+	_expireTargetEffectsAtOwnerTurnStart (combatRound) {
+		const round = Number(combatRound);
+		this._data.targetEffects = (this._data.targetEffects || []).filter(target => {
+			if (target.expiry?.type !== "ownerTurnStart") return true;
+			if (target.expiry.combatRound == null) return false;
+			return !Number.isFinite(round) || target.expiry.combatRound > round;
+		});
 	}
 
 	upsertTargetEffect (target = {}) {

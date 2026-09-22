@@ -5684,6 +5684,7 @@ class CharacterSheetInventory {
 	async _pInvokeItemPower (itemId, powerId, {closeModal = null, chargesCost = null} = {}) {
 		const power = this._state.getItemPower?.(itemId, powerId);
 		let pendingSpellCast = null;
+		let efaArmorer = null;
 		const selectedChargesCost = chargesCost == null ? power?.chargesCost : Number(chargesCost);
 		if (power?.chargesCostMax && (
 			selectedChargesCost < power.chargesCost
@@ -5709,11 +5710,25 @@ class CharacterSheetInventory {
 			if (!cast) return false;
 			pendingSpellCast = cast.pendingSpellCast || null;
 		}
-		let result = this._state.invokeItemPower?.(itemId, powerId, {chargesCost, ...(destructiveSpellConfirmed ? {confirmed: true} : {})});
+		if (power?.efaArcaneArmorModelAction === "giant-stature") {
+			const roomChoice = await InputUiUtil.pGetUserEnum({
+				title: "Giant Stature — Available Space",
+				htmlDescription: "Does the space allow you to become Large? Insufficient room prevents only the size change; the reach increase still applies.",
+				values: ["Become Large", "Reach only — insufficient room"],
+				isResolveItem: true,
+			});
+			if (roomChoice == null) return false;
+			efaArmorer = {hasRoom: roomChoice === "Become Large"};
+		}
+		let result = await this._state.invokeItemPower?.(itemId, powerId, {
+			chargesCost,
+			efaArmorer,
+			...(destructiveSpellConfirmed ? {confirmed: true} : {}),
+		});
 		if (result?.needsConfirmation) {
 			const confirmed = await this._pConfirmDestructiveItemPower(result.power);
 			if (!confirmed) return false;
-			result = this._state.invokeItemPower(itemId, powerId, {confirmed: true});
+			result = await this._state.invokeItemPower(itemId, powerId, {confirmed: true, efaArmorer});
 		}
 		if (!result?.ok) {
 			JqueryUtil.doToast({type: "warning", content: result?.reason || "That item power cannot be used."});
