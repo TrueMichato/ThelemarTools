@@ -239,9 +239,18 @@ the live generic fixed-proficiency fallback transaction for the exact mixed
 owner `Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW`: acquisition
 mode, pending/resolved status, fixed proficiency, and current selection. The
 descriptor is read-only; authoritative feature ingestion and the shared
-transaction own grants and choices. Reanimated Companion is ownership-only;
-creation/lifecycle, modification runtime, Life Transfer resolution, action
-economy, and UI belong to later milestones.
+transaction own grants and choices. Reanimated Companion publishes both its
+six-part registry UID and canonical seven-part runtime owner
+`Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW`.
+
+R3 implements generic State creation and lifecycle transactions for that exact
+owner. The boundary uses the shared inventory-focus resolver, one free creation
+per Long Rest or a selected level 1+ spell slot, detached pure-rule snapshots,
+and exact-owner source-loss/Respec cleanup. The R3 resolver option defers setup
+choices so high-level companions retain only base AC/HP/Hit Dice, spell attack,
+Dreadful Swipe, and Death Burst formulas. Modification effects, Improved
+Reanimation, command combat behavior, action execution, Life Transfer, and UI
+remain later milestones.
 
 Jolt to Life uses the exact EFA Artificer level, not total character level. Its
 calculation exposes uses `max(0, current INT modifier)`, exact

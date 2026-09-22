@@ -816,11 +816,24 @@ function getResolvedReanimatorModificationEffects (descriptor, context, selected
 	}));
 }
 
-function resolveRhwReanimatedCompanion (descriptor, context, setup) {
-	const modificationSetup = normalizeModificationSetup(descriptor, context, setup);
+function resolveRhwReanimatedCompanion (descriptor, context, setup, {deferSetupChoices = false} = {}) {
+	const modificationSetup = deferSetupChoices
+		? {
+			deferred: true,
+			requiredCount: getRequiredModificationCount(descriptor, context.artificerLevel),
+			selected: [],
+			available: Object.entries(descriptor.modifications.options)
+				.filter(([, option]) => context.artificerLevel >= option.unlockArtificerLevel)
+				.map(([id]) => id),
+		}
+		: {
+			deferred: false,
+			...normalizeModificationSetup(descriptor, context, setup),
+		};
 	const selected = new Set(modificationSetup.selected);
 	const abilityScores = cloneJson(descriptor.statistics.abilityScores);
-	const improvedReanimationAvailable = context.artificerLevel >= descriptor.damageRules.necrotic.unlockArtificerLevel;
+	const improvedReanimationAvailable = !deferSetupChoices
+		&& context.artificerLevel >= descriptor.damageRules.necrotic.unlockArtificerLevel;
 	const hasBloated = selected.has("bloated");
 	const hasGaunt = selected.has("gaunt");
 	const hasMoist = selected.has("moist");
@@ -911,6 +924,7 @@ function resolveRhwReanimatedCompanion (descriptor, context, setup) {
 			},
 		},
 		modifications: {
+			deferred: modificationSetup.deferred,
 			requiredCount: modificationSetup.requiredCount,
 			selected: modificationSetup.selected,
 			available: modificationSetup.available,
@@ -932,7 +946,7 @@ class CharacterSheetCompanionRules {
 		return match ? cloneJson(match.descriptor) : null;
 	}
 
-	static resolve (featureUid, summonerContext, setup) {
+	static resolve (featureUid, summonerContext, setup, options = {}) {
 		const match = getDescriptorInternal(featureUid);
 		if (!match) return null;
 
@@ -941,7 +955,7 @@ class CharacterSheetCompanionRules {
 			case COMPANION_FEATURE_UIDS.EFA_STEEL_DEFENDER:
 				return resolveEfaSteelDefender(match.descriptor, context);
 			case COMPANION_FEATURE_UIDS.RHW_REANIMATED_COMPANION:
-				return resolveRhwReanimatedCompanion(match.descriptor, context, setup);
+				return resolveRhwReanimatedCompanion(match.descriptor, context, setup, options);
 			case COMPANION_FEATURE_UIDS.TCE_STEEL_DEFENDER:
 				return resolveTceSteelDefender(match.descriptor, context);
 			default:

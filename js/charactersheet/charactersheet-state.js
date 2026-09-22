@@ -4471,6 +4471,7 @@ class CharacterSheetState {
 		SPELLS: "Reanimator Spells|Artificer|EFA|Reanimator|RHW|3",
 		SKILL_SET: "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3",
 		COMPANION: "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3",
+		COMPANION_OWNER: "Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW",
 		STRANGE_MODIFICATIONS: "Strange Modifications|Artificer|EFA|Reanimator|RHW|5",
 		IMPROVED_REANIMATION: "Improved Reanimation|Artificer|EFA|Reanimator|RHW|9",
 		MACABRE_MODIFICATIONS: "Macabre Modifications|Artificer|EFA|Reanimator|RHW|9",
@@ -46243,9 +46244,10 @@ class CharacterSheetState {
 			hasReanimatedCompanionOwnership: true,
 			reanimatedCompanion: {
 				featureUid: featureUids.COMPANION,
+				ownerUid: featureUids.COMPANION_OWNER,
 				companionUid: "Reanimated Companion|RHW",
-				ownershipOnly: true,
-				creationImplemented: false,
+				ownershipOnly: false,
+				creationImplemented: true,
 			},
 		};
 
@@ -46432,6 +46434,7 @@ class CharacterSheetState {
 
 	_reconcileRhwReanimatorState () {
 		const cls = this._getRhwReanimatorClass();
+		const companionOwnerUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.COMPANION_OWNER;
 		if (!cls) {
 			this._reconcileRhwReanimatorSpellOwnerSet(null, {
 				ownerUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.SPELLS,
@@ -46442,6 +46445,8 @@ class CharacterSheetState {
 				desiredGrants: [],
 			});
 			this._removeRhwReanimatorResources();
+			this._removeFeatureCompanionCreationResources(companionOwnerUid);
+			this._removeExactFeatureOwnedCompanions(companionOwnerUid);
 			return;
 		}
 
@@ -46504,6 +46509,18 @@ class CharacterSheetState {
 					&& resource?.subclassUid === CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID
 				),
 			);
+		}
+
+		if (level >= 3) {
+			this._ensureFeatureCompanionCreationResource(companionOwnerUid);
+			for (const companion of this._getExactFeatureOwnedCompanions(companionOwnerUid)) {
+				this.reconcileFeatureOwnedCompanion(companion.id, {
+					featureUid: companionOwnerUid,
+				});
+			}
+		} else {
+			this._removeFeatureCompanionCreationResources(companionOwnerUid);
+			this._removeExactFeatureOwnedCompanions(companionOwnerUid);
 		}
 	}
 
@@ -77194,6 +77211,8 @@ class CharacterSheetState {
 	]);
 
 	static FEATURE_COMPANION_MIGRATION_KEY = "featureCompanionLegacyV1";
+	static FEATURE_COMPANION_CREATION_RESOURCE_VERSION = 1;
+	static FEATURE_COMPANION_LIFECYCLE_RECEIPT_VERSION = 1;
 
 	static _isCompanionSchemaObject (value) {
 		return value != null && typeof value === "object" && !Array.isArray(value);
@@ -77259,6 +77278,736 @@ class CharacterSheetState {
 			subclassShortName,
 			subclassSource,
 			level: Number(normalizedUid.split("|")[5]),
+		};
+	}
+
+	static _getFeatureCompanionDescriptorOwnerUid (descriptor) {
+		return CharacterSheetState._normalizeFeatureCompanionUid(descriptor?.identity?.featureUid);
+	}
+
+	static _isCanonicalFeatureCompanionOwnerUid (featureUid) {
+		if (typeof featureUid !== "string") return false;
+		const trimmed = featureUid.trim();
+		if (trimmed.split("|").length !== 7) return false;
+		return CharacterSheetState._normalizeFeatureCompanionUid(trimmed) === trimmed;
+	}
+
+	static _isExactFeatureCompanionOwner (candidateUid, featureUid) {
+		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) return false;
+		if (typeof candidateUid !== "string" || candidateUid.trim().split("|").length !== 7) return false;
+		return candidateUid.trim().toLowerCase() === featureUid.trim().toLowerCase();
+	}
+
+	static _getExactFeatureCompanionIdentity (featureUid) {
+		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) return null;
+		const [
+			name,
+			className,
+			classSource,
+			subclassShortName,
+			subclassSource,
+			levelRaw,
+			featureSource,
+		] = featureUid.split("|");
+		return {
+			featureUid,
+			name,
+			source: featureSource,
+			className,
+			classSource,
+			classUid: `${className}|${classSource}`,
+			subclassShortName,
+			subclassSource,
+			subclassUid: `${subclassShortName}|${className}|${classSource}|${subclassSource}`,
+			level: Number(levelRaw),
+		};
+	}
+
+	static _isExactFeatureCompanionRecord (companion, featureUid) {
+		const identity = CharacterSheetState._getExactFeatureCompanionIdentity(featureUid);
+		const grant = companion?.featureGrant;
+		if (!identity || !CharacterSheetState._isExactFeatureCompanionOwner(grant?.uid, featureUid)) return false;
+		return grant.type === "subclassFeature"
+			&& grant.className === identity.className
+			&& grant.classSource === identity.classSource
+			&& grant.subclassShortName === identity.subclassShortName
+			&& grant.subclassSource === identity.subclassSource
+			&& Number(grant.level) === identity.level
+			&& companion.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
+			&& companion.creatureName === identity.name
+			&& companion.creatureSource === identity.source
+			&& companion.source === identity.source;
+	}
+
+	static _isExactFeatureCompanionCreationResource (resource, featureUid) {
+		const identity = CharacterSheetState._getExactFeatureCompanionIdentity(featureUid);
+		if (!identity) return false;
+		return resource?.featureCompanionCreation?.version === CharacterSheetState.FEATURE_COMPANION_CREATION_RESOURCE_VERSION
+			&& CharacterSheetState._isExactFeatureCompanionOwner(resource.featureUid, featureUid)
+			&& CharacterSheetState._isExactFeatureCompanionOwner(
+				resource.featureCompanionCreation.featureUid,
+				featureUid,
+			)
+			&& resource.classUid === identity.classUid
+			&& resource.subclassUid === identity.subclassUid
+			&& resource.source === identity.source;
+	}
+
+	static _isFeatureOwnedCompanionActive (companion) {
+		if (!companion || companion.active === false) return false;
+		return !["dead", "dismissed", "expired", "inactive"]
+			.includes(String(companion.lifecycle?.status || "").toLowerCase());
+	}
+
+	_getExactFeatureOwnedCompanions (featureUid) {
+		return (this._data.companions || []).filter(companion =>
+			CharacterSheetState._isExactFeatureCompanionRecord(companion, featureUid),
+		);
+	}
+
+	_removeExactFeatureOwnedCompanions (featureUid) {
+		const ownedIds = new Set(this._getExactFeatureOwnedCompanions(featureUid).map(companion => companion.id));
+		if (!ownedIds.size) return 0;
+		const before = this._data.companions.length;
+		this._data.companions = this._data.companions.filter(companion => !ownedIds.has(companion.id));
+		return before - this._data.companions.length;
+	}
+
+	_getFeatureCompanionCreationResource (featureUid) {
+		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) return null;
+		return (this._data.resources || []).find(resource =>
+			CharacterSheetState._isExactFeatureCompanionCreationResource(resource, featureUid),
+		) || null;
+	}
+
+	_ensureFeatureCompanionCreationResource (featureUid) {
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+		const descriptor = rules?.getDescriptor(featureUid);
+		const ownerUid = CharacterSheetState._getFeatureCompanionDescriptorOwnerUid(descriptor);
+		const policy = descriptor?.creationPolicy?.freeCreation;
+		if (!ownerUid || !policy) return null;
+
+		const isOwned = resource =>
+			CharacterSheetState._isExactFeatureCompanionCreationResource(resource, ownerUid);
+		const candidates = (this._data.resources || []).filter(isOwned);
+		let resource = candidates[0] || null;
+		const max = Math.max(0, Math.floor(Number(policy.uses) || 0));
+		const latestCompanion = this._getExactFeatureOwnedCompanions(ownerUid)
+			.sort((a, b) => (Number(b.lifecycle?.generation) || 0) - (Number(a.lifecycle?.generation) || 0))[0];
+		const inferredCurrent = latestCompanion
+			? latestCompanion.lifecycle?.creationReceipt?.payment?.type === "spellSlot" ? max : 0
+			: max;
+		const spent = candidates.length
+			? Math.max(...candidates.map(candidate =>
+				Math.max(0, (Number(candidate.max) || 0) - (Number(candidate.current) || 0))))
+			: Math.max(0, max - inferredCurrent);
+
+		if (!resource) {
+			resource = {id: CryptUtil.uid()};
+			(this._data.resources ||= []).push(resource);
+		}
+		Object.assign(resource, {
+			name: `${descriptor.identity.name} Creation`,
+			current: Math.max(0, max - spent),
+			max,
+			recharge: policy.recharge === "longRest" ? "long" : policy.recharge,
+			contextualOnly: true,
+			actionLabel: "Magic Action",
+			featureUid: ownerUid,
+			classUid: descriptor.identity.classUid,
+			subclassUid: descriptor.identity.subclassUid,
+			source: descriptor.identity.source,
+			featureCompanionCreation: {
+				version: CharacterSheetState.FEATURE_COMPANION_CREATION_RESOURCE_VERSION,
+				featureUid: ownerUid,
+			},
+		});
+		this._data.resources = (this._data.resources || []).filter(candidate => candidate === resource || !isOwned(candidate));
+		return resource;
+	}
+
+	_removeFeatureCompanionCreationResources (featureUid) {
+		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) return 0;
+		const before = (this._data.resources || []).length;
+		this._data.resources = (this._data.resources || []).filter(resource =>
+			!CharacterSheetState._isExactFeatureCompanionCreationResource(resource, featureUid),
+		);
+		return before - this._data.resources.length;
+	}
+
+	_getFeatureCompanionCreationFocusRequirement (featureUid, descriptor) {
+		const policy = descriptor?.creationPolicy?.toolEligibility;
+		if (!policy) return null;
+		const [className, classSource, ...classRemainder] = String(descriptor.identity.classUid || "").split("|");
+		if (!className || !classSource || classRemainder.length) return null;
+
+		const itemUids = [];
+		const itemTypes = [];
+		const itemSources = [];
+		for (const allowed of policy.allowed || []) {
+			const [name, source, ...remainder] = String(allowed?.uid || "").split("|");
+			if (!name || !source || remainder.length) continue;
+			if (allowed.kind === "tool") itemUids.push(`${name}|${source}`);
+			if (allowed.kind === "toolCategory" && name === "Artisan's Tools") itemTypes.push("AT");
+			itemSources.push(source);
+		}
+
+		return this._normalizeExplicitSpellCastFocusRequirement({
+			castingClass: {
+				name: className,
+				source: classSource,
+				uid: descriptor.identity.classUid,
+				subclassName: descriptor.identity.subclassUid?.split("|")[0] || null,
+				subclassSource: descriptor.identity.subclassUid?.split("|")[3] || null,
+			},
+			raw: {
+				required: true,
+				classUid: descriptor.identity.classUid,
+				ruleId: `feature-companion-creation:${featureUid.toLowerCase()}`,
+				sourceFeatureUid: featureUid,
+				filter: {
+					itemUids,
+					itemTypes,
+					itemSources,
+					requiresProficiency: policy.requiresProficiency === true,
+				},
+				ui: {
+					title: `Choose ${descriptor.identity.name} Creation Tools`,
+					description: "Choose the equipped, proficient tools used to create this companion.",
+					unavailableMessage: "This companion requires an equipped, proficient eligible tool.",
+				},
+			},
+		});
+	}
+
+	_getFeatureCompanionCreationPaymentOptions (resource, descriptor) {
+		const minimumSlotLevel = Number(descriptor?.creationPolicy?.alternatePayment?.spellSlot?.minimumLevel);
+		const spellSlots = Number.isInteger(minimumSlotLevel) && minimumSlotLevel >= 1
+			? Object.entries(this._data.spellcasting?.spellSlots || {})
+				.map(([level, slot]) => ({
+					type: "spellSlot",
+					pool: "spell",
+					slotLevel: Number(level),
+					current: Math.max(0, Number(slot?.current) || 0),
+					max: Math.max(0, Number(slot?.max) || 0),
+				}))
+				.filter(option =>
+					Number.isInteger(option.slotLevel)
+					&& option.slotLevel >= minimumSlotLevel
+					&& option.current > 0)
+			: [];
+		const pact = this.getPactSlots();
+		if (
+			Number.isInteger(minimumSlotLevel)
+			&& minimumSlotLevel >= 1
+			&& (Number(pact.current) || 0) > 0
+			&& (Number(pact.level) || 0) >= minimumSlotLevel
+		) {
+			spellSlots.push({
+				type: "spellSlot",
+				pool: "pact",
+				slotLevel: Number(pact.level),
+				current: Number(pact.current),
+				max: Number(pact.max) || 0,
+			});
+		}
+		return {
+			freeCreation: resource ? {
+				type: "freeCreation",
+				resourceId: resource.id,
+				current: Math.max(0, Number(resource.current) || 0),
+				max: Math.max(0, Number(resource.max) || 0),
+			} : null,
+			spellSlots,
+		};
+	}
+
+	_validateFeatureCompanionCreationPayment (payment, paymentOptions) {
+		if (!payment || typeof payment !== "object") return {ok: false, reason: "invalidPayment"};
+		if (payment.type === "freeCreation") {
+			const resource = paymentOptions.freeCreation;
+			return resource && resource.current > 0
+				? {ok: true, option: resource}
+				: {ok: false, reason: "unavailablePayment"};
+		}
+		if (payment.type !== "spellSlot") return {ok: false, reason: "invalidPayment"};
+		const pool = payment.pool === "pact" ? "pact" : "spell";
+		const slotLevel = Number(payment.slotLevel);
+		if (!Number.isInteger(slotLevel) || slotLevel < 1) return {ok: false, reason: "invalidPayment"};
+		const option = paymentOptions.spellSlots.find(candidate =>
+			candidate.pool === pool && candidate.slotLevel === slotLevel);
+		return option
+			? {ok: true, option}
+			: {ok: false, reason: "unavailablePayment"};
+	}
+
+	getFeatureCompanionCreationBoundary (
+		featureUid,
+		{
+			classUid = null,
+			subclassUid = null,
+			payment = null,
+		} = {},
+	) {
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+		const descriptor = rules?.getDescriptor(featureUid);
+		const ownerUid = CharacterSheetState._getFeatureCompanionDescriptorOwnerUid(descriptor);
+		if (
+			!descriptor
+			|| !ownerUid
+			|| !CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)
+			|| featureUid !== ownerUid
+		) {
+			return {available: false, executable: false, reason: "invalidFeature", featureUid};
+		}
+		if (classUid !== descriptor.identity.classUid) {
+			return {available: false, executable: false, reason: "invalidClass", featureUid, ownerUid};
+		}
+		if (subclassUid !== descriptor.identity.subclassUid) {
+			return {available: false, executable: false, reason: "invalidSubclass", featureUid, ownerUid};
+		}
+		if (!descriptor.creationPolicy) {
+			return {available: false, executable: false, reason: "creationUnsupported", featureUid, ownerUid};
+		}
+
+		const contextResult = this._tryGetFeatureCompanionSummonerContext(ownerUid);
+		if (!contextResult.ok) {
+			return {
+				available: false,
+				executable: false,
+				reason: contextResult.reason,
+				featureUid,
+				ownerUid,
+			};
+		}
+		const activeCompanions = this._getExactFeatureOwnedCompanions(ownerUid)
+			.filter(CharacterSheetState._isFeatureOwnedCompanionActive);
+		const resource = this._getFeatureCompanionCreationResource(ownerUid);
+		const focusRequirement = this._getFeatureCompanionCreationFocusRequirement(ownerUid, descriptor);
+		const eligibleToolReferences = this.getEligibleSpellCastFocusInventoryRows(focusRequirement)
+			.map(row => this.getSpellCastFocusReference(row))
+			.filter(Boolean);
+		const paymentOptions = this._getFeatureCompanionCreationPaymentOptions(resource, descriptor);
+		const selectedPayment = payment
+			? this._validateFeatureCompanionCreationPayment(payment, paymentOptions)
+			: null;
+		const hasPayment = payment
+			? selectedPayment.ok
+			: (paymentOptions.freeCreation?.current > 0 || paymentOptions.spellSlots.length > 0);
+		const reason = activeCompanions.length
+			? "activeCompanion"
+			: !eligibleToolReferences.length
+				? "toolUnavailable"
+				: !hasPayment
+					? (selectedPayment?.reason || "unavailablePayment")
+					: null;
+
+		return {
+			available: true,
+			executable: reason == null,
+			reason,
+			featureUid,
+			ownerUid,
+			classUid: descriptor.identity.classUid,
+			subclassUid: descriptor.identity.subclassUid,
+			companionUid: descriptor.identity.companionUid,
+			actionType: descriptor.creationPolicy.actionType,
+			context: MiscUtil.copyFast(contextResult.context),
+			activeCompanionIds: activeCompanions.map(companion => companion.id),
+			focus: {
+				status: eligibleToolReferences.length ? "ready" : "unavailable",
+				requirement: focusRequirement ? MiscUtil.copyFast(focusRequirement) : null,
+				eligibleReferences: eligibleToolReferences,
+			},
+			paymentOptions,
+			selectedPayment: selectedPayment?.ok ? MiscUtil.copyFast(selectedPayment.option) : null,
+		};
+	}
+
+	async pCreateFeatureCompanion ({
+		featureUid,
+		classUid,
+		subclassUid,
+		focusReference,
+		payment,
+		appearance = null,
+		cancelled = false,
+		context = {},
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		const boundary = this.getFeatureCompanionCreationBoundary(featureUid, {
+			classUid,
+			subclassUid,
+			payment,
+		});
+		if (!boundary.available || !boundary.executable) {
+			return {
+				ok: false,
+				committed: false,
+				reason: boundary.reason || "featureUnavailable",
+				featureUid,
+				classUid,
+				subclassUid,
+			};
+		}
+
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
+		const descriptor = rules.getDescriptor(featureUid);
+		const focusRequirement = this._getFeatureCompanionCreationFocusRequirement(featureUid, descriptor);
+		const focusInventoryRow = this.resolveSpellCastFocusReference(focusReference);
+		const eligibleFocusRows = this.getEligibleSpellCastFocusInventoryRows(focusRequirement);
+		if (!focusInventoryRow || !eligibleFocusRows.some(row => row.id === focusInventoryRow.id)) {
+			return {ok: false, committed: false, reason: "invalidTool", featureUid, classUid, subclassUid};
+		}
+		if (this._getExactFeatureOwnedCompanions(featureUid).some(CharacterSheetState._isFeatureOwnedCompanionActive)) {
+			return {ok: false, committed: false, reason: "activeCompanion", featureUid, classUid, subclassUid};
+		}
+
+		const resource = this._getFeatureCompanionCreationResource(featureUid);
+		const paymentValidation = this._validateFeatureCompanionCreationPayment(
+			payment,
+			this._getFeatureCompanionCreationPaymentOptions(resource, descriptor),
+		);
+		if (!paymentValidation.ok) {
+			return {ok: false, committed: false, reason: paymentValidation.reason, featureUid, classUid, subclassUid};
+		}
+
+		const dataSnapshot = MiscUtil.copyFast(this._data);
+		try {
+			const isActionTracked = this.isInCombat();
+			if (isActionTracked && !this.consumeActionType("action")) {
+				return {ok: false, committed: false, reason: "actionUnavailable", featureUid, classUid, subclassUid};
+			}
+
+			let paymentReceipt;
+			if (paymentValidation.option.type === "freeCreation") {
+				const before = Number(resource.current) || 0;
+				this.setResourceCurrent(resource.id, before - 1);
+				if ((Number(resource.current) || 0) !== before - 1) throw new Error("Free creation payment did not commit.");
+				paymentReceipt = {
+					type: "freeCreation",
+					resourceId: resource.id,
+					before,
+					after: resource.current,
+				};
+			} else if (paymentValidation.option.pool === "pact") {
+				const before = Number(this.getPactSlots().current) || 0;
+				if (!this.usePactSlot()) throw new Error("Pact-slot payment did not commit.");
+				paymentReceipt = {
+					type: "spellSlot",
+					pool: "pact",
+					slotLevel: paymentValidation.option.slotLevel,
+					before,
+					after: this.getPactSlots().current,
+				};
+			} else {
+				const slotLevel = paymentValidation.option.slotLevel;
+				const before = this.getSpellSlotsCurrent(slotLevel);
+				if (!this.useSpellSlot(slotLevel)) throw new Error("Spell-slot payment did not commit.");
+				paymentReceipt = {
+					type: "spellSlot",
+					pool: "spell",
+					slotLevel,
+					before,
+					after: this.getSpellSlotsCurrent(slotLevel),
+				};
+			}
+
+			const liveFocus = this.resolveSpellCastFocusReference(focusReference);
+			const liveEligibleFocusRows = this.getEligibleSpellCastFocusInventoryRows(focusRequirement);
+			if (!liveFocus || !liveEligibleFocusRows.some(row => row.id === liveFocus.id)) {
+				throw new Error("Creation tool became invalid before the companion commit.");
+			}
+
+			const summonerContext = this.getFeatureCompanionSummonerContext(featureUid);
+			const setup = {
+				...(typeof appearance === "string" && appearance.trim() ? {appearance: appearance.trim()} : {}),
+			};
+			const resolved = this.resolveFeatureCompanionRules(
+				featureUid,
+				summonerContext,
+				setup,
+				{deferSetupChoices: true},
+			);
+			const previousGeneration = Math.max(
+				0,
+				...this._getExactFeatureOwnedCompanions(featureUid)
+					.map(companion => Number(companion.lifecycle?.generation) || 0),
+			);
+			this._removeExactFeatureOwnedCompanions(featureUid);
+
+			const creationReceipt = {
+				version: CharacterSheetState.FEATURE_COMPANION_LIFECYCLE_RECEIPT_VERSION,
+				receiptId: CryptUtil.uid(),
+				owner: {
+					featureUid,
+					classUid,
+					subclassUid,
+					companionUid: descriptor.identity.companionUid,
+				},
+				action: {
+					type: descriptor.creationPolicy.actionType,
+					economyType: "action",
+					trackedInCombat: isActionTracked,
+					committed: true,
+				},
+				payment: paymentReceipt,
+				tool: this.getSpellCastFocusReference(liveFocus),
+				context: MiscUtil.copyFast(context),
+			};
+			const companionId = this.addCompanion({
+				name: descriptor.identity.name,
+				source: descriptor.identity.source,
+				type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+				origin: descriptor.identity.name,
+				hp: {max: resolved.statistics.maxHp, current: resolved.statistics.maxHp, temp: 0},
+				featureGrant: CharacterSheetState._getFeatureCompanionOwnerMetadata(featureUid, descriptor),
+				setup,
+				lifecycle: {
+					status: "active",
+					generation: previousGeneration + 1,
+					creationReceipt,
+					deathBurstEmitted: false,
+				},
+				hitDice: {
+					die: resolved.statistics.hitDice?.die || null,
+					current: resolved.statistics.hitDice?.count || 0,
+					max: resolved.statistics.hitDice?.count || 0,
+				},
+				turnUsage: {action: false, reaction: false, flags: {}},
+				scaling: {
+					kind: "featureCompanion",
+					featureUid,
+					registryFeatureUid: descriptor.identity.featureUid,
+					deferSetupChoices: true,
+				},
+			});
+			const companion = this.reconcileFeatureOwnedCompanion(companionId, {
+				featureUid,
+				summonerContext,
+				setup,
+				deferSetupChoices: true,
+			});
+			if (
+				!companion
+				|| this._getExactFeatureOwnedCompanions(featureUid)
+					.filter(CharacterSheetState._isFeatureOwnedCompanionActive).length !== 1
+			) throw new Error("Companion creation did not commit exactly one active instance.");
+
+			return {
+				ok: true,
+				committed: true,
+				featureUid,
+				classUid,
+				subclassUid,
+				companionId,
+				companion: MiscUtil.copyFast(companion),
+				creationReceipt: MiscUtil.copyFast(creationReceipt),
+			};
+		} catch (error) {
+			this._data = dataSnapshot;
+			return {
+				ok: false,
+				committed: false,
+				reason: "coreCommitFailed",
+				error: error instanceof Error ? error.message : String(error),
+				featureUid,
+				classUid,
+				subclassUid,
+			};
+		}
+	}
+
+	_getFeatureCompanionDeathBurst (companion) {
+		return companion?.scaling?.resolved?.traits?.deathBurst
+			? MiscUtil.copyFast(companion.scaling.resolved.traits.deathBurst)
+			: null;
+	}
+
+	killFeatureOwnedCompanion (
+		companionId,
+		{
+			featureUid,
+			cause = "companionDeath",
+			remove = false,
+		} = {},
+	) {
+		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) {
+			return {ok: false, committed: false, reason: "invalidFeature"};
+		}
+		const companion = this.getCompanion(companionId);
+		if (!companion) return {ok: false, committed: false, reason: "companionNotFound"};
+		if (
+			!CharacterSheetState._isExactFeatureCompanionRecord(companion, featureUid)
+		) return {ok: false, committed: false, reason: "ownerMismatch"};
+		if (companion.lifecycle?.deathBurstEmitted || String(companion.lifecycle?.status || "").toLowerCase() === "dead") {
+			return {ok: true, committed: false, reason: "alreadyDead", companionId, deathBurst: null};
+		}
+
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
+		const descriptor = rules.getDescriptor(featureUid);
+		const lifecycleRule = cause === "summonerDeath"
+			? descriptor?.lifecycle?.onSummonerDeath
+			: descriptor?.lifecycle?.onCompanionDeath;
+		if (!lifecycleRule) return {ok: false, committed: false, reason: "lifecycleUnsupported"};
+
+		const deathBurst = lifecycleRule.triggersDeathBurst === true
+			? this._getFeatureCompanionDeathBurst(companion)
+			: null;
+		const receipt = {
+			version: CharacterSheetState.FEATURE_COMPANION_LIFECYCLE_RECEIPT_VERSION,
+			receiptId: CryptUtil.uid(),
+			featureUid,
+			companionId,
+			cause,
+			deathBurst: MiscUtil.copyFast(deathBurst),
+		};
+		companion.hp.current = 0;
+		companion.hp.temp = 0;
+		companion.active = false;
+		companion.lifecycle = {
+			...(companion.lifecycle || {}),
+			status: "dead",
+			deathCause: cause,
+			deathBurstEmitted: !!deathBurst,
+			deathReceipt: receipt,
+		};
+		const companionSnapshot = MiscUtil.copyFast(companion);
+		if (remove) this.removeCompanion(companionId);
+
+		return {
+			ok: true,
+			committed: true,
+			featureUid,
+			companionId,
+			removed: remove,
+			companion: companionSnapshot,
+			deathBurst,
+			receipt,
+		};
+	}
+
+	async pDismissFeatureOwnedCompanion ({
+		featureUid,
+		companionId,
+		cancelled = false,
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) {
+			return {ok: false, committed: false, reason: "invalidFeature"};
+		}
+		const companion = this.getCompanion(companionId);
+		if (!companion) return {ok: false, committed: false, reason: "companionNotFound"};
+		if (
+			!CharacterSheetState._isExactFeatureCompanionRecord(companion, featureUid)
+		) return {ok: false, committed: false, reason: "ownerMismatch"};
+		if (!CharacterSheetState._isFeatureOwnedCompanionActive(companion)) {
+			return {ok: false, committed: false, reason: "companionInactive"};
+		}
+
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
+		const descriptor = rules.getDescriptor(featureUid);
+		if (!descriptor?.lifecycle?.earlyDismissal) {
+			return {ok: false, committed: false, reason: "lifecycleUnsupported"};
+		}
+		const dataSnapshot = MiscUtil.copyFast(this._data);
+		try {
+			const isActionTracked = this.isInCombat();
+			if (isActionTracked && !this.consumeActionType("action")) {
+				return {ok: false, committed: false, reason: "actionUnavailable"};
+			}
+			const companionSnapshot = MiscUtil.copyFast(companion);
+			if (!this.removeCompanion(companionId)) throw new Error("Companion dismissal did not remove the active instance.");
+			return {
+				ok: true,
+				committed: true,
+				featureUid,
+				companionId,
+				companion: companionSnapshot,
+				deathBurst: null,
+				receipt: {
+					version: CharacterSheetState.FEATURE_COMPANION_LIFECYCLE_RECEIPT_VERSION,
+					receiptId: CryptUtil.uid(),
+					featureUid,
+					companionId,
+					cause: "earlyDismissal",
+					action: {
+						type: descriptor.lifecycle.earlyDismissal.actionType,
+						economyType: "action",
+						trackedInCombat: isActionTracked,
+						committed: true,
+					},
+					deathBurst: null,
+				},
+			};
+		} catch (error) {
+			this._data = dataSnapshot;
+			return {
+				ok: false,
+				committed: false,
+				reason: "coreCommitFailed",
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
+	handleFeatureCompanionSummonerDeath (featureUid) {
+		if (!CharacterSheetState._isCanonicalFeatureCompanionOwnerUid(featureUid)) {
+			return {ok: false, committed: false, reason: "invalidFeature", results: []};
+		}
+		const active = this._getExactFeatureOwnedCompanions(featureUid)
+			.filter(CharacterSheetState._isFeatureOwnedCompanionActive);
+		if (!active.length) {
+			return {ok: true, committed: false, reason: "noActiveCompanion", featureUid, results: []};
+		}
+		const results = active.map(companion => this.killFeatureOwnedCompanion(companion.id, {
+			featureUid,
+			cause: "summonerDeath",
+			remove: true,
+		}));
+		return {
+			ok: results.every(result => result.ok),
+			committed: results.some(result => result.committed),
+			featureUid,
+			results,
+			deathBursts: results.map(result => result.deathBurst).filter(Boolean),
+		};
+	}
+
+	applyFeatureCompanionRest (restType) {
+		if (!["short", "long"].includes(restType)) {
+			return {ok: false, committed: false, reason: "invalidRestType", removedCompanionIds: []};
+		}
+		if (restType === "short") {
+			return {ok: true, committed: false, restType, removedCompanionIds: [], restoredCreationResources: []};
+		}
+
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
+		if (!rules) {
+			return {ok: false, committed: false, reason: "rulesUnavailable", removedCompanionIds: []};
+		}
+		const removedCompanionIds = [];
+		const restoredCreationResources = [];
+		for (const descriptor of Object.values(rules.getRegistry())) {
+			const featureUid = CharacterSheetState._getFeatureCompanionDescriptorOwnerUid(descriptor);
+			if (!featureUid) continue;
+			if (descriptor.restPolicy?.longRest?.companionLifecycle === "expires") {
+				const companions = this._getExactFeatureOwnedCompanions(featureUid);
+				removedCompanionIds.push(...companions.map(companion => companion.id));
+				this._removeExactFeatureOwnedCompanions(featureUid);
+			}
+			const resource = this._getFeatureCompanionCreationResource(featureUid);
+			if (resource && descriptor.restPolicy?.longRest?.freeCreationRecharge === "all") {
+				resource.current = resource.max;
+				restoredCreationResources.push(resource.id);
+			}
+		}
+		return {
+			ok: true,
+			committed: !!(removedCompanionIds.length || restoredCreationResources.length),
+			restType,
+			removedCompanionIds,
+			restoredCreationResources,
 		};
 	}
 
@@ -77380,11 +78129,11 @@ class CharacterSheetState {
 	 * already-derived summoner context. Missing modules, descriptors, and invalid
 	 * context are errors; State never guesses a source or falls back to TCE.
 	 */
-	resolveFeatureCompanionRules (featureUid, summonerContext) {
+	resolveFeatureCompanionRules (featureUid, summonerContext, setup = null, options = {}) {
 		const rules = CharacterSheetState._getFeatureCompanionRulesModule();
 		const descriptor = rules.getDescriptor(featureUid);
 		if (!descriptor) throw new RangeError(`No feature companion descriptor is registered for "${featureUid}".`);
-		const resolved = rules.resolve(featureUid, summonerContext);
+		const resolved = rules.resolve(featureUid, summonerContext, setup, options);
 		if (!resolved) throw new Error(`Feature companion resolver returned no result for "${featureUid}".`);
 		return resolved;
 	}
@@ -77424,6 +78173,7 @@ class CharacterSheetState {
 				case "intelligenceModifier": context[key] = this.getAbilityMod("int"); break;
 				case "proficiencyBonus": context[key] = this.getProficiencyBonus(); break;
 				case "spellAttackBonus": context[key] = this.getSpellAttackBonusForAbility("int"); break;
+				case "spellSaveDc": context[key] = this.getSpellSaveDcForAbility("int"); break;
 				default: return {ok: false, reason: "unsupportedContextKey", key};
 			}
 		}
@@ -77444,7 +78194,15 @@ class CharacterSheetState {
 	 * live state. Current HP is preserved exactly and only clamped downward when the
 	 * new maximum is lower; resource and Hit Die currents are never replenished.
 	 */
-	reconcileFeatureOwnedCompanion (companionId, {featureUid = null, summonerContext = null} = {}) {
+	reconcileFeatureOwnedCompanion (
+		companionId,
+		{
+			featureUid = null,
+			summonerContext = null,
+			setup = null,
+			deferSetupChoices = null,
+		} = {},
+	) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) throw new RangeError(`Companion "${companionId}" does not exist.`);
 
@@ -77464,7 +78222,16 @@ class CharacterSheetState {
 		const descriptor = rules.getDescriptor(requestedFeatureUid);
 		if (!descriptor) throw new RangeError(`No feature companion descriptor is registered for "${requestedFeatureUid}".`);
 		const context = summonerContext || this.getFeatureCompanionSummonerContext(requestedFeatureUid);
-		const resolved = this.resolveFeatureCompanionRules(requestedFeatureUid, context);
+		const resolvedSetup = setup || companion.setup || null;
+		const isDeferredSetup = deferSetupChoices ??
+			companion.scaling?.deferSetupChoices ??
+			(!!descriptor.modifications && !Array.isArray(resolvedSetup?.modifications));
+		const resolved = this.resolveFeatureCompanionRules(
+			requestedFeatureUid,
+			context,
+			resolvedSetup,
+			{deferSetupChoices: isDeferredSetup},
+		);
 		const owner = CharacterSheetState._getFeatureCompanionOwnerMetadata(requestedFeatureUid, descriptor);
 
 		companion.featureGrant = {
@@ -77494,6 +78261,7 @@ class CharacterSheetState {
 			.map(([sense, distance]) => `${sense} ${distance} ft.`);
 		companion.passive = Number(statistics.passivePerception) || 10;
 		companion.profBonus = Number(resolved.summonerContext?.proficiencyBonus) || 0;
+		companion.resistances = [...(statistics.damageResistances || [])];
 		companion.immunities = [...(statistics.damageImmunities || [])];
 		companion.conditionImmunities = [...(statistics.conditionImmunities || [])];
 		companion.size = Array.isArray(statistics.size) ? statistics.size[0] : statistics.size;
@@ -77510,6 +78278,7 @@ class CharacterSheetState {
 			{attacksOnly: true},
 		);
 		companion.reactions = CharacterSheetState._mergeFeatureCompanionRuleEntries(companion.reactions, resolved.reactions, "reaction");
+		companion.traits = CharacterSheetState._mergeFeatureCompanionRuleEntries(companion.traits, resolved.traits, "trait");
 
 		const uses = MiscUtil.copyFast(companion.uses || {});
 		for (const [key, action] of Object.entries(resolved.actions || {})) {
@@ -77542,6 +78311,7 @@ class CharacterSheetState {
 			kind: "featureCompanion",
 			featureUid: owner.uid,
 			registryFeatureUid: resolved.identity.featureUid,
+			deferSetupChoices: isDeferredSetup,
 			schemaVersion: resolved.schemaVersion,
 			identity: MiscUtil.copyFast(resolved.identity),
 			summonerContext: MiscUtil.copyFast(resolved.summonerContext),
@@ -81810,8 +82580,20 @@ class CharacterSheetState {
 	 * @param {string} restType - "short" or "long"
 	 */
 	restCompanions (restType) {
+		const rules = CharacterSheetState._getFeatureCompanionRulesModule({required: false});
 		(this._data.companions || []).forEach(companion => {
 			if (CharacterSheetState._isGeneratedClassSummonRecord(companion)) return;
+			const descriptor = rules?.getDescriptor(companion?.featureGrant?.uid);
+			const ownerUid = CharacterSheetState._getFeatureCompanionDescriptorOwnerUid(descriptor);
+			const isExactFeatureCompanion = ownerUid
+				&& CharacterSheetState._isExactFeatureCompanionRecord(companion, ownerUid);
+			if (
+				isExactFeatureCompanion
+				&& (
+					(restType === "short" && descriptor.restPolicy?.shortRest?.automaticChanges?.length === 0)
+					|| (restType === "long" && descriptor.restPolicy?.longRest?.companionLifecycle === "expires")
+				)
+			) return;
 			// A rest means the encounter is over, so settle the end-of-combat ferocity
 			// rule first: the companion banks the HP its fury earned it, then the track
 			// clears. Idempotent when combat was already ended explicitly.
@@ -82246,6 +83028,7 @@ class CharacterSheetState {
 		// means the encounter is over, so the companion's ferocity settles too.
 		this.resetUndyingProtector();
 		this.restCompanions("short");
+		this.applyFeatureCompanionRest("short");
 	}
 
 	onLongRest (options = {}) {
@@ -82321,6 +83104,7 @@ class CharacterSheetState {
 
 		// Restore companions on long rest
 		this.restCompanions("long");
+		this.applyFeatureCompanionRest("long");
 		this.resetUndyingProtector();
 
 		// College of Creation constructs are far shorter-lived than a long rest

@@ -286,6 +286,49 @@ Whole-owner helpers (`getFeatureOwnedCompanions`,
 They must not use `type`, display name, or subclass name, so EFA, TCE, and future
 Reanimator companions can coexist safely.
 
+Reanimated Companion creation and lifecycle use the stricter canonical runtime
+owner `Reanimated Companion|Artificer|EFA|Reanimator|RHW|3|RHW`. The six-part
+registry UID remains the pure-rule lookup key, but cannot open a creation
+transaction or match exact RHW teardown. Creation is exposed through
+`getFeatureCompanionCreationBoundary()` and `pCreateFeatureCompanion()`:
+
+- the Magic action is tracked only when combat action economy is active;
+- payment is one persisted free creation per Long Rest or one selected level
+  1+ spell/pact slot;
+- the tool receipt comes from the shared spell-focus inventory resolver and
+  must resolve immediately before the companion commit to an equipped,
+  proficient `Tinker's Tools|XPHB` or another XPHB Artisan's Tool;
+- action, payment, inventory, resource, and companion mutations roll back
+  together when any final validation or core commit fails;
+- an active exact-owner companion blocks replacement.
+
+The free creation is a contextual `_data.resources[]` row carrying exact
+`featureUid`, `classUid`, and `subclassUid` plus
+`featureCompanionCreation.version`. Reconciliation preserves spent state. When
+loading an exact active companion without that row, migration conservatively
+infers the free use as available only when the saved creation receipt proves a
+spell-slot payment; free-paid or unknown active instances infer it as spent.
+
+An active Reanimated Companion persists a stable companion ID, generation,
+current/max HP, Hit Dice, optional `setup.appearance`, exact `featureGrant`,
+detached resolved rules, and `lifecycle.creationReceipt`. The receipt includes
+stable owner identity, payment before/after values, Magic-action status, and
+the shared inventory wrapper/entity tool reference. R3 resolves through
+`CharacterSheetCompanionRules` with deferred setup choices, retaining the base
+AC, HP, Hit Dice, spell attack, Dreadful Swipe, and Death Burst formulas without
+applying modification or Improved Reanimation effects.
+
+Lifecycle APIs are `killFeatureOwnedCompanion()`,
+`pDismissFeatureOwnedCompanion()`, `handleFeatureCompanionSummonerDeath()`, and
+`applyFeatureCompanionRest()`. Ordinary death leaves the record dead at 0 HP
+and emits its detached Death Burst once. Early dismissal spends its Magic
+action and removes the companion without a burst. Summoner death kills at 0
+HP, emits once, and removes it. Short Rest changes neither companion nor
+creation payment; Long Rest expires exact-owner companions and restores the
+free creation. Exact subclass loss removes only the canonical RHW companion
+and creation resource. Name-only, wrong-source, foreign-owner, player-created,
+and unsupported provenance records are not adopted or removed.
+
 Legacy Steel Defender migration is intentionally narrower than the generic
 runtime contract. It binds only one exact `steel_defender` statblock whose
 name/source match one exact-source Artificer/Battle Smith owner. Missing source,
@@ -327,6 +370,13 @@ formula authority.
 The setup milestone still does not spend Repair/Hit Dice, implement command
 economy/default Dodge, transition death/revival/replacement state, apply rest
 policies, run Arcane Jolt, or implement Battle Ready attack substitution.
+
+The Reanimated Companion R3 boundary is state/lifecycle only. It does not apply
+Strange/Macabre/Superior modification choices, Improved Reanimation,
+Lightning Absorption runtime, Dreadful Swipe execution/riders, command/Dodge or
+Bonus Action combat behavior, Life Transfer, UI/Play Mode, or E2E behavior.
+Other feature companions still do not gain acquisition or lifecycle behavior
+unless their registry policies explicitly support it.
 
 ### Spellcasting
 

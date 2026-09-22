@@ -2087,6 +2087,7 @@ class CharacterSheetRest {
 			}
 		});
 		if (restType === "short") this._state.restoreEfaFlashOfGeniusOnShortRest?.();
+		this._state.applyFeatureCompanionRest?.(restType);
 
 		// Restore stamina (Combat Methods system) - recovers on both short and long rests
 		if (this._state.usesCombatSystem?.()) {

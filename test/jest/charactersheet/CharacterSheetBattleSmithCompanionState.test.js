@@ -369,7 +369,7 @@ describe("Battle Smith legacy migration and exact ownership", () => {
 					source: "RHW",
 					type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
 					hp: {max: 25, current: 11},
-					featureGrant: {uid: REANIMATOR_UID},
+					featureGrant: {uid: UNREGISTERED_UID},
 					scaling: {kind: "futureDescriptor", custom: {kept: true}},
 					customExtension: {kept: true},
 				},
@@ -382,7 +382,7 @@ describe("Battle Smith legacy migration and exact ownership", () => {
 
 		expect(state.toJson().companions).toEqual(before);
 		expect(state.getFeatureOwnedCompanions(EFA_UID)).toEqual([]);
-		expect(state.getFeatureOwnedCompanions(REANIMATOR_UID)).toHaveLength(1);
+		expect(state.getFeatureOwnedCompanions(UNREGISTERED_UID)).toHaveLength(1);
 	});
 
 	test("does not bind a conflicting legacy statblock identity", () => {

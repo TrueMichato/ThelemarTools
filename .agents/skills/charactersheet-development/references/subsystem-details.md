@@ -3318,6 +3318,7 @@ cannot leave a stale receipt. Save/load normalization preserves a valid receipt 
 - **Sorcerous Restoration** (Sorcerer 20): Auto-applies via `state.applySorcerousRestoration()`, not manual
 - **Stamina pool** (TGTT): Restores on BOTH short and long rest
 - **EFA Armor Model**: Optional staged switch through the canonical structured-choice transaction; a canonical model keeps the dialog available even when no Hit Dice/HP work remains.
+- **Feature companions**: `applyFeatureCompanionRest("short")` is an explicit no-op for companion lifecycle and creation payment.
 
 ### Long Rest
 - Full HP + half hit dice recovered (minimum 1 per die type)
@@ -3329,6 +3330,7 @@ cannot leave a stale receipt. Save/load normalization preserves a valid receipt 
   clear option. Death saves reset to 0/0.
 - Concentration optionally broken
 - **EFA Armor Model**: Uses the same staged/revalidated selector and transaction as Short Rest.
+- **Feature companions**: `applyFeatureCompanionRest("long")` applies registry rest policies. RHW Reanimated Companion exact-owner instances expire and their persisted free-creation resource restores to maximum; foreign and same-label records are untouched.
 
 ### Item Charge Restoration
 Recognizes recharge types: `restLong`, `dawn`, `dusk`, `midnight` (on long rest), `restShort` (short rest only). Parses `rechargeAmount` dice notation (e.g., `"1d6 + 1"`) and rolls if present.
