@@ -1022,6 +1022,40 @@ feature provenance, then resolve any Combat attack from the live item by wrapper
 ID so materials, upgrades, bonuses, attack notes, and edits remain
 authoritative. Editable names are not ownership keys.
 
+New transient generated items use the versioned
+`CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION` contract:
+
+```javascript
+{
+	_isGeneratedFeatureItem: true,
+	_generatedItemId: "<unique generated instance id>",
+	_generatedItemProvenance: {
+		version: 1,
+		owner: {
+			featureUid: "Feature|Class|ClassSource|Subclass|SubclassSource|Level",
+			classUid: "Class|ClassSource",
+			subclassUid: "Subclass|Class|ClassSource|SubclassSource",
+		},
+		metadata: {...featureSpecificData},
+	},
+}
+```
+
+The owner UIDs are validated together and matched case-insensitively as complete
+UIDs; display names or partial source matches never establish ownership.
+`createGeneratedFeatureItem()` creates one `_isCustom` quantity-1 row with
+separate stable wrapper and generated-instance IDs, so repeated calls never
+stack. `classifyGeneratedFeatureItem()` returns `valid`, `stale`, or `ordinary`;
+unsupported integer versions are `stale` with `repairRequired: true`, while
+partial/malformed markers remain ordinary inventory. Exact-owner lifecycle code
+uses `getGeneratedFeatureItemRows(owner)` and
+`removeGeneratedFeatureItemsByOwner(owner)`. The removal API delegates to
+`removeItem()` so containers, effects, bonuses, and equipment reconciliation use
+the normal cleanup path. `replaceItem()` preserves valid provenance and instance
+identity, and also carries unsupported-version metadata forward without trying
+to interpret it. Existing fixed generated systems may retain their dedicated
+legacy identities until explicitly migrated; never adopt them by name.
+
 Reconciliation must be idempotent: preserve the wrapper ID and player-owned
 fields, update only untouched generated/scaling fields, collapse duplicate
 generated rows, and remove owned artifacts when the granting feature is lost.

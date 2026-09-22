@@ -35655,6 +35655,214 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Inventory
+	static GENERATED_FEATURE_ITEM_PROVENANCE_VERSION = 1;
+
+	static _normalizeGeneratedFeatureItemOwner (owner) {
+		if (!owner || typeof owner !== "object" || Array.isArray(owner)) return null;
+
+		const getParts = (uid, count) => {
+			if (typeof uid !== "string") return null;
+			const parts = uid.split("|").map(part => part.trim());
+			if (parts.length !== count || parts.some(part => !part)) return null;
+			return parts;
+		};
+		const equals = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+		const classParts = getParts(owner.classUid, 2);
+		const subclassParts = owner.subclassUid == null ? null : getParts(owner.subclassUid, 4);
+		const featureParts = getParts(owner.featureUid, subclassParts ? 6 : 4);
+		if (!classParts || !featureParts || (owner.subclassUid != null && !subclassParts)) return null;
+		const featureLevel = Number(featureParts.at(-1));
+		if (!Number.isSafeInteger(featureLevel) || featureLevel < 1) return null;
+
+		if (!equals(featureParts[1], classParts[0]) || !equals(featureParts[2], classParts[1])) return null;
+		if (subclassParts && (
+			!equals(featureParts[3], subclassParts[0])
+			|| !equals(featureParts[4], subclassParts[3])
+			|| !equals(subclassParts[1], classParts[0])
+			|| !equals(subclassParts[2], classParts[1])
+		)) return null;
+
+		return {
+			featureUid: featureParts.join("|"),
+			classUid: classParts.join("|"),
+			subclassUid: subclassParts ? subclassParts.join("|") : null,
+		};
+	}
+
+	static _getGeneratedFeatureItemOwnerKey (owner) {
+		const normalized = CharacterSheetState._normalizeGeneratedFeatureItemOwner(owner);
+		if (!normalized) return null;
+		return [
+			normalized.featureUid,
+			normalized.classUid,
+			normalized.subclassUid || "",
+		]
+			.map(part => part.toLowerCase())
+			.join("::");
+	}
+
+	/**
+	 * Classify an inventory row or item payload without adopting ambiguous metadata.
+	 *
+	 * @param {object} itemOrWrapper Inventory wrapper or nested item payload.
+	 * @returns {{status: "valid"|"stale"|"ordinary", repairRequired: boolean, reason: string, generatedItemId?: string, owner?: object, ownerKey?: string, provenance?: object}}
+	 */
+	classifyGeneratedFeatureItem (itemOrWrapper) {
+		const item = itemOrWrapper?.item || itemOrWrapper;
+		if (!item || typeof item !== "object" || Array.isArray(item)) {
+			return {status: "ordinary", repairRequired: false, reason: "not-an-item"};
+		}
+
+		const hasAnyMarker = item._isGeneratedFeatureItem != null
+			|| item._generatedItemId != null
+			|| item._generatedItemProvenance != null;
+		if (!hasAnyMarker) return {status: "ordinary", repairRequired: false, reason: "not-generated"};
+
+		const generatedItemId = typeof item._generatedItemId === "string"
+			? item._generatedItemId.trim()
+			: "";
+		const provenance = item._generatedItemProvenance;
+		if (
+			item._isGeneratedFeatureItem !== true
+			|| !generatedItemId
+			|| !provenance
+			|| typeof provenance !== "object"
+			|| Array.isArray(provenance)
+			|| !Number.isSafeInteger(provenance.version)
+		) {
+			return {status: "ordinary", repairRequired: false, reason: "malformed-generated-metadata"};
+		}
+
+		if (provenance.version !== CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION) {
+			return {
+				status: "stale",
+				repairRequired: true,
+				reason: "unsupported-provenance-version",
+				generatedItemId,
+				provenance: MiscUtil.copyFast(provenance),
+			};
+		}
+
+		const owner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(provenance.owner);
+		const isMetadataValid = provenance.metadata == null
+			|| (typeof provenance.metadata === "object" && !Array.isArray(provenance.metadata));
+		if (!owner || !isMetadataValid) {
+			return {status: "ordinary", repairRequired: false, reason: "malformed-generated-metadata"};
+		}
+		const generatedIdMatches = (this._data.inventory || [])
+			.filter(row => row?.item?._generatedItemId === generatedItemId);
+		if (generatedIdMatches.length > 1) {
+			return {status: "ordinary", repairRequired: false, reason: "ambiguous-generated-item-id"};
+		}
+
+		return {
+			status: "valid",
+			repairRequired: false,
+			reason: "supported-provenance",
+			generatedItemId,
+			owner,
+			ownerKey: CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner),
+			provenance: MiscUtil.copyFast(provenance),
+		};
+	}
+
+	/**
+	 * Create one non-stacking generated inventory row with exact, versioned ownership.
+	 *
+	 * @param {{item: object, owner: object, metadata?: object, equipped?: boolean, attuned?: boolean}} opts
+	 * @returns {{ok: boolean, code: string, itemId?: string, generatedItemId?: string, classification?: object}}
+	 */
+	createGeneratedFeatureItem ({item, owner, metadata = {}, equipped = false, attuned = false} = {}) {
+		const normalizedOwner = CharacterSheetState._normalizeGeneratedFeatureItemOwner(owner);
+		if (!normalizedOwner) return {ok: false, code: "invalid-generated-item-owner"};
+		if (
+			!item
+			|| typeof item !== "object"
+			|| Array.isArray(item)
+			|| typeof item.name !== "string"
+			|| !item.name.trim()
+			|| typeof item.source !== "string"
+			|| !item.source.trim()
+		) {
+			return {ok: false, code: "invalid-generated-item"};
+		}
+		if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+			return {ok: false, code: "invalid-generated-item-metadata"};
+		}
+
+		const getUniqueId = isTaken => {
+			let id;
+			do {
+				id = CryptUtil.uid();
+			} while (isTaken(id));
+			return id;
+		};
+		const generatedItemId = getUniqueId(id => (this._data.inventory || [])
+			.some(row => row?.item?._generatedItemId === id));
+		const itemId = getUniqueId(id => (this._data.inventory || []).some(row => row.id === id));
+		const itemProps = MiscUtil.copyFast(item);
+		for (const prop of [
+			"id",
+			"quantity",
+			"equipped",
+			"attuned",
+			"_isGeneratedFeatureItem",
+			"_generatedItemId",
+			"_generatedItemProvenance",
+		]) delete itemProps[prop];
+
+		this.addItem({
+			...itemProps,
+			id: itemId,
+			_isCustom: true,
+			_isGeneratedFeatureItem: true,
+			_generatedItemId: generatedItemId,
+			_generatedItemProvenance: {
+				version: CharacterSheetState.GENERATED_FEATURE_ITEM_PROVENANCE_VERSION,
+				owner: normalizedOwner,
+				metadata: MiscUtil.copyFast(metadata),
+			},
+		}, 1, !!equipped, !!attuned);
+
+		const wrapper = this._findInventoryRow(itemId);
+		if (!wrapper) return {ok: false, code: "generated-item-add-failed"};
+		return {
+			ok: true,
+			code: "generated-item-created",
+			itemId,
+			generatedItemId,
+			classification: this.classifyGeneratedFeatureItem(wrapper),
+		};
+	}
+
+	/**
+	 * List only supported generated rows whose full owner UIDs match.
+	 *
+	 * @param {object} owner Exact `{featureUid, classUid, subclassUid}` owner.
+	 * @returns {object[]} Inventory wrappers.
+	 */
+	getGeneratedFeatureItemRows (owner) {
+		const ownerKey = CharacterSheetState._getGeneratedFeatureItemOwnerKey(owner);
+		if (!ownerKey) return [];
+		return (this._data.inventory || []).filter(row => {
+			const classification = this.classifyGeneratedFeatureItem(row);
+			return classification.status === "valid" && classification.ownerKey === ownerKey;
+		});
+	}
+
+	/**
+	 * Remove supported exact-owner generated rows through normal inventory cleanup.
+	 *
+	 * @param {object} owner Exact `{featureUid, classUid, subclassUid}` owner.
+	 * @returns {string[]} Removed inventory wrapper IDs.
+	 */
+	removeGeneratedFeatureItemsByOwner (owner) {
+		const itemIds = this.getGeneratedFeatureItemRows(owner).map(row => row.id);
+		itemIds.forEach(itemId => this.removeItem(itemId));
+		return itemIds;
+	}
+
 	getInventory () { return [...this._data.inventory]; }
 
 	/**
@@ -38838,6 +39046,12 @@ class CharacterSheetState {
 		if (!itemProps.storedSpells) itemProps.storedSpells = wrapper.item?.storedSpells || [];
 		if (!itemProps.appliedUpgrades) itemProps.appliedUpgrades = wrapper.item?.appliedUpgrades || [];
 		if (!itemProps.socketedGemstones) itemProps.socketedGemstones = wrapper.item?.socketedGemstones || [];
+		const generatedClassification = this.classifyGeneratedFeatureItem(wrapper);
+		if (generatedClassification.status === "valid" || generatedClassification.status === "stale") {
+			itemProps._isGeneratedFeatureItem = true;
+			itemProps._generatedItemId = generatedClassification.generatedItemId;
+			itemProps._generatedItemProvenance = generatedClassification.provenance;
+		}
 		if (wrapper.item?._efaArmorerWeaponId) {
 			itemProps._efaArmorerWeaponId = wrapper.item._efaArmorerWeaponId;
 			itemProps._generatedItemId = wrapper.item._generatedItemId || wrapper.item._efaArmorerWeaponId;
