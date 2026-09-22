@@ -6015,7 +6015,8 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 					const loaded = new CharacterSheetState();
 					loaded.loadFromJson(state.toJson());
 					expect(loaded.getSpellsKnown().filter(it => it.sourceFeature === "Time Domain Spells")).toHaveLength(4);
-					loaded.removeSubclassSpells("Time Domain Spells");
+					const cls = loaded.getClasses().find(it => it.name === "Cleric" && it.source === "TGTT");
+					loaded.removeSubclassSpells(loaded.getSubclassSpellGrantOwner(cls, {sourceFeature: "Time Domain Spells"}));
 					expect(loaded.getSpellsKnown().filter(it => it.sourceFeature === "Time Domain Spells")).toHaveLength(0);
 				});
 

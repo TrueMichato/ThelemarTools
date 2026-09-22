@@ -94,6 +94,18 @@ function addPlayerPreparedSpell (state, name) {
 	}, true);
 }
 
+function addPlayerCantrip (state, name) {
+	const spell = findXphbSpell(name);
+	state.addCantrip({
+		name: spell.name,
+		source: spell.source,
+		level: spell.level,
+		school: spell.school,
+		sourceFeature: "Cantrips Known",
+		sourceClass: "Artificer",
+	});
+}
+
 function makeState (level, {subclass = ARMORER, playerPrepared = []} = {}) {
 	const state = new CharacterSheetState();
 	state.setSpellData(XPHB_SPELLS);
@@ -271,6 +283,48 @@ function makeRespec (state) {
 	return respec;
 }
 
+function makeSharedArmorerOwnerClass (source) {
+	return {
+		name: "Artificer",
+		source,
+		level: 3,
+		subclass: {
+			name: "Armorer",
+			shortName: "Armorer",
+			source,
+			additionalSpells: [{
+				prepared: {3: ["magic missile|xphb"]},
+				innate: {"0": ["light|xphb#c"]},
+			}],
+		},
+	};
+}
+
+function makeSharedArmorerOwnerState () {
+	const state = new CharacterSheetState();
+	state.setSpellData(XPHB_SPELLS);
+	addPlayerPreparedSpell(state, "Magic Missile");
+	addPlayerCantrip(state, "Light");
+	state._data.classes = [
+		makeSharedArmorerOwnerClass("EFA"),
+		makeSharedArmorerOwnerClass("TCE"),
+	];
+	state.populateSubclassSpells();
+	return state;
+}
+
+function getArmorerGrantOwner (state, classSource) {
+	const cls = state.getClasses().find(it => it.name === "Artificer" && it.source === classSource);
+	return state.getSubclassSpellGrantOwner(cls, {sourceFeature: "Armorer Spells"});
+}
+
+function getSharedArmorerEntries (state) {
+	return {
+		spell: state.getSpellsKnown().find(it => spellUid(it) === "Magic Missile|XPHB"),
+		cantrip: state.getCantripsKnown().find(it => spellUid(it) === "Light|XPHB"),
+	};
+}
+
 beforeAll(() => {
 	globalThis.JqueryUtil = globalThis.JqueryUtil || {doToast: () => {}};
 });
@@ -331,6 +385,79 @@ describe("EFA Armorer progression surfaces", () => {
 	test.each([3, 4, 5, 9, 13, 17])("Quick Build to %i refreshes the exact grant set", async level => {
 		const state = await applyQuickBuildTo(level);
 		expectExactArmorerGrants(state, level);
+	});
+});
+
+describe("same-label subclass spell owner isolation", () => {
+	test.each([
+		["EFA", "TCE"],
+		["TCE", "EFA"],
+	])("removing %s Armorer preserves the %s owner and its cantrip", (removedSource, keptSource) => {
+		const state = makeSharedArmorerOwnerState();
+		const removedOwner = getArmorerGrantOwner(state, removedSource);
+		const keptOwner = getArmorerGrantOwner(state, keptSource);
+
+		state.removeSubclassSpells(removedOwner);
+
+		const {spell, cantrip} = getSharedArmorerEntries(state);
+		expect(spell.subclassSpellGrantOwners).toEqual([keptOwner]);
+		expect(cantrip.subclassSpellGrantOwners).toEqual([{...keptOwner, isCantrip: true}]);
+		expect(spell).toMatchObject({
+			sourceFeature: "Armorer Spells",
+			alwaysPrepared: true,
+			prepared: true,
+		});
+		expect(cantrip.sourceFeature).toBe("Armorer Spells");
+
+		state.removeSubclassSpells("Armorer Spells");
+		expect(getSharedArmorerEntries(state).spell.subclassSpellGrantOwners).toEqual([keptOwner]);
+		expect(getSharedArmorerEntries(state).cantrip.subclassSpellGrantOwners).toEqual([{...keptOwner, isCantrip: true}]);
+	});
+
+	test("Respec removes exact owners and final removal restores player metadata after save/load", async () => {
+		const state = makeSharedArmorerOwnerState();
+		const noSpellSubclass = source => ({
+			name: "Artillerist",
+			shortName: "Artillerist",
+			source,
+			additionalSpells: [],
+		});
+
+		await makeRespec(state)._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Artificer", source: "EFA"}},
+			{name: "Armorer", shortName: "Armorer", source: "EFA"},
+			noSpellSubclass("EFA"),
+		);
+
+		const tceOwner = getArmorerGrantOwner(state, "TCE");
+		expect(getSharedArmorerEntries(state).spell.subclassSpellGrantOwners).toEqual([tceOwner]);
+		expect(getSharedArmorerEntries(state).cantrip.subclassSpellGrantOwners).toEqual([{...tceOwner, isCantrip: true}]);
+		expect(state.getClasses().find(it => it.source === "TCE").subclass.name).toBe("Armorer");
+
+		const loaded = new CharacterSheetState();
+		loaded.setSpellData(XPHB_SPELLS);
+		loaded.loadFromJson(state.toJson());
+		await makeRespec(loaded)._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Artificer", source: "TCE"}},
+			{name: "Armorer", shortName: "Armorer", source: "TCE"},
+			noSpellSubclass("TCE"),
+		);
+
+		const {spell, cantrip} = getSharedArmorerEntries(loaded);
+		expect(spell).toMatchObject({
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Artificer",
+			prepared: true,
+			alwaysPrepared: false,
+		});
+		expect(cantrip).toMatchObject({
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Artificer",
+		});
+		expect(spell.subclassSpellGrantOwners).toBeUndefined();
+		expect(cantrip.subclassSpellGrantOwners).toBeUndefined();
 	});
 });
 

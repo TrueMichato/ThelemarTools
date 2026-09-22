@@ -4904,7 +4904,9 @@ class CharacterSheetRespec {
 	async _applySubclassChange (level, history, oldSubclass, newSubclass) {
 		// Get current total level for this class
 		const classes = this._state.getClasses();
-		const classEntry = classes.find(c => c.name === history.class.name);
+		const classEntry = classes.find(c =>
+			c.name === history.class.name
+			&& (!history.class.source || c.source === history.class.source));
 		const classLevel = classEntry?.level || 1;
 
 		// Remove old subclass features using proper API (scoped to the changed class)
@@ -4913,11 +4915,20 @@ class CharacterSheetRespec {
 			this._state.removeFeature(f.id);
 		});
 
-		// Remove the old subclass's always-prepared spells AND innate cantrips
-		// (e.g. domain/oath/origin spells + Sun Bloodline's Light). Subclass spells
-		// are stamped with sourceFeature "<Subclass Name> Spells" in
-		// populateSubclassSpells(); without this they linger after a subclass swap.
-		if (oldSubclass?.name) this._state.removeSubclassSpells(`${oldSubclass.name} Spells`);
+		// Remove only this exact class+subclass grant owner. Same-named subclasses can
+		// coexist across sources, so the display label alone is not safe provenance.
+		if (oldSubclass?.name) {
+			const sourceFeature = `${oldSubclass.name} Spells`;
+			const owner = this._state.getSubclassSpellGrantOwner({
+				name: classEntry?.name || history.class.name,
+				source: classEntry?.source || history.class.source,
+				subclass: {
+					name: oldSubclass.name,
+					source: oldSubclass.source || classEntry?.subclass?.source,
+				},
+			}, {sourceFeature});
+			this._state.removeSubclassSpells(owner);
+		}
 
 		// Update class entry with new subclass
 		if (classEntry) {

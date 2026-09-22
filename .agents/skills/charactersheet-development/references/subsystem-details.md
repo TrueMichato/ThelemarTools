@@ -586,6 +586,15 @@ tuple is adopted only when the stored spell has no ownership attribution at all.
 Changing ownership is an explicit reattribution operation, never a side effect of
 adding the same spell again.
 
+**Fixed subclass-grant ownership.** A fixed subclass `additionalSpells` overlay
+persists `subclassSpellGrantOwners[]`, whose `key` is the exact lowercased
+`class name|class source|subclass name|subclass source` identity. Exact cleanup
+must build the owner with `state.getSubclassSpellGrantOwner(classEntry,
+{sourceFeature})` and pass that object to `state.removeSubclassSpells(owner)`;
+never remove a ledger-backed grant by the display label alone, since same-named
+subclasses exist across sources. The string overload is intentionally limited to
+ledger-less legacy saves, where `sourceFeature` is the only surviving provenance.
+
 ### Innate Spells
 ```javascript
 {

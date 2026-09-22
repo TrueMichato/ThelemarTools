@@ -18322,7 +18322,15 @@ class CharacterSheetState {
 		spell.isSubclassChoiceSpell = true;
 	}
 
-	_getSubclassSpellGrantOwner (cls, spell) {
+	/**
+	 * Build the exact class+subclass identity persisted in a subclass spell grant ledger.
+	 * The display label is intentionally not part of identity: same-named subclasses can
+	 * coexist across class/subclass sources.
+	 * @param {*} cls
+	 * @param {*} spell
+	 * @returns {{key: string, sourceFeature: string, sourceClass: string, isCantrip: boolean}}
+	 */
+	getSubclassSpellGrantOwner (cls, spell) {
 		return {
 			key: [
 				cls.name,
@@ -18374,7 +18382,7 @@ class CharacterSheetState {
 				: null;
 		}
 
-		const owner = this._getSubclassSpellGrantOwner(cls, grant);
+		const owner = this.getSubclassSpellGrantOwner(cls, grant);
 		const isNewOwner = !spell.subclassSpellGrantOwners.some(it => it.key === owner.key);
 		if (isNewOwner) spell.subclassSpellGrantOwners.push(owner);
 		this._applySubclassSpellGrantOwner(spell, owner);
@@ -18397,7 +18405,7 @@ class CharacterSheetState {
 	}
 
 	_reconcileFixedSubclassSpellGrants (cls, desiredSpells) {
-		const ownerKey = this._getSubclassSpellGrantOwner(cls, {isCantrip: false}).key;
+		const ownerKey = this.getSubclassSpellGrantOwner(cls, {isCantrip: false}).key;
 		const desiredIds = new Set(desiredSpells.map(spell => this._spellIdentityKey(spell)));
 		const sourceFeature = cls.subclass ? `${cls.subclass.name} Spells` : null;
 		const authoredIds = new Set();
@@ -18954,25 +18962,36 @@ class CharacterSheetState {
 
 	/**
 	 * Remove subclass-granted always-prepared spells (for when subclass changes).
-	 * Only removes spells that were added by a specific subclass feature.
-	 * @param {string} sourceFeature - The source feature name (e.g., "Life Domain Spells")
+	 * Exact owner objects remove only their class+subclass ledger entry. A label string is
+	 * retained solely for old saves without a ledger, where source identity is unavailable.
+	 * @param {string|{key: string, sourceFeature: string}} ownerOrSourceFeature
 	 */
-	removeSubclassSpells (sourceFeature) {
+	removeSubclassSpells (ownerOrSourceFeature) {
+		const exactOwner = ownerOrSourceFeature && typeof ownerOrSourceFeature === "object"
+			? ownerOrSourceFeature
+			: null;
+		const sourceFeature = exactOwner?.sourceFeature || ownerOrSourceFeature;
 		if (!sourceFeature) return;
 		this._data.spellcasting.spellsKnown = this._data.spellcasting.spellsKnown.filter(s => {
-			const ownerResult = this._removeSubclassSpellGrantOwner(s, owner => owner.sourceFeature === sourceFeature);
-			if (ownerResult != null) return ownerResult;
-			// Keep if not from this source, or if player also manually added it
+			if (Array.isArray(s.subclassSpellGrantOwners)) {
+				if (!exactOwner?.key) return true;
+				const ownerResult = this._removeSubclassSpellGrantOwner(s, owner => owner.key === exactOwner.key);
+				return ownerResult == null ? true : ownerResult;
+			}
+			// Legacy fallback: no exact owner ledger exists, so the label is the only
+			// available provenance. Keep player-owned entries without alwaysPrepared.
 			if (s.sourceFeature !== sourceFeature) return true;
 			if (!s.alwaysPrepared) return true;
 			return false;
 		});
 		// Also remove subclass-granted cantrips (e.g. Sun Bloodline's innate Light).
-		// Cantrips don't carry `alwaysPrepared`, so match purely on sourceFeature —
-		// without this, swapping subclasses leaves the old subclass's cantrip behind.
+		// Ledger-less legacy cantrips have only the sourceFeature label to match.
 		this._data.spellcasting.cantripsKnown = this._data.spellcasting.cantripsKnown.filter(c => {
-			const ownerResult = this._removeSubclassSpellGrantOwner(c, owner => owner.sourceFeature === sourceFeature);
-			if (ownerResult != null) return ownerResult;
+			if (Array.isArray(c.subclassSpellGrantOwners)) {
+				if (!exactOwner?.key) return true;
+				const ownerResult = this._removeSubclassSpellGrantOwner(c, owner => owner.key === exactOwner.key);
+				return ownerResult == null ? true : ownerResult;
+			}
 			return c.sourceFeature !== sourceFeature;
 		});
 	}
