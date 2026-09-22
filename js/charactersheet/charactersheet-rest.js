@@ -1511,6 +1511,7 @@ class CharacterSheetRest {
 		const features = this._state.getFeatures();
 		features.forEach(feature => {
 			if (feature.uses) {
+				if (resources.some(resource => resource.mirrorsFeatureUses && resource.featureId === feature.id)) return;
 				if (restType === "short" && feature.uses.shortRestRecovery) {
 					this._state.setFeatureUses(feature.id, Math.min(feature.uses.max, feature.uses.current + feature.uses.shortRestRecovery));
 				} else if (restType === "long" || feature.uses.recharge === "short") {
@@ -1519,6 +1520,7 @@ class CharacterSheetRest {
 				}
 			}
 		});
+		if (restType === "short") this._state.restoreEfaFlashOfGeniusOnShortRest?.();
 
 		// Restore stamina (Combat Methods system) - recovers on both short and long rests
 		if (this._state.usesCombatSystem?.()) {

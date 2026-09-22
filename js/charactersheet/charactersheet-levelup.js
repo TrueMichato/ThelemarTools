@@ -260,20 +260,7 @@ class CharacterSheetLevelUp {
 					knownCantripsGain = Math.max(0, newCantrips - currentCantrips);
 				}
 
-				// Max spell level based on caster progression
-				if (casterProg === "full" || !casterProg) {
-					knownMaxSpellLevel = Math.min(9, Math.ceil(newLevel / 2));
-				} else if (casterProg === "1/2") {
-					knownMaxSpellLevel = Math.min(5, Math.ceil(newLevel / 4));
-				} else if (casterProg === "1/3") {
-					knownMaxSpellLevel = Math.min(4, Math.ceil(newLevel / 7));
-				} else if (casterProg === "pact") {
-					knownMaxSpellLevel = Math.min(5, Math.ceil(newLevel / 2));
-				} else if (casterProg === "artificer") {
-					knownMaxSpellLevel = Math.min(5, Math.ceil(newLevel / 4));
-				} else {
-					knownMaxSpellLevel = Math.min(9, Math.ceil(newLevel / 2));
-				}
+				knownMaxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(casterProg, newLevel);
 			}
 		}
 
@@ -300,16 +287,7 @@ class CharacterSheetLevelUp {
 				preparedCantripsGain = Math.max(0, newCantrips - currentCantrips);
 			}
 
-			// Max spell level for pact casters
-			if (casterProg === "pact") {
-				preparedMaxSpellLevel = Math.min(5, Math.ceil(newLevel / 2));
-			} else if (casterProg === "full") {
-				preparedMaxSpellLevel = Math.min(9, Math.ceil(newLevel / 2));
-			} else if (casterProg === "1/2") {
-				preparedMaxSpellLevel = Math.min(5, Math.ceil(newLevel / 4));
-			} else {
-				preparedMaxSpellLevel = Math.min(9, Math.ceil(newLevel / 2));
-			}
+			preparedMaxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(casterProg, newLevel);
 		}
 
 		/** @type {*} */ let selectedPreparedSpells = [];
@@ -1028,13 +1006,7 @@ class CharacterSheetLevelUp {
 			const swapContent = this._renderSpellSwapSection({
 				classEntry,
 				newLevel,
-				knownMaxSpellLevel: (() => {
-					const cp = classData?.casterProgression;
-					if (cp === "pact") return Math.min(5, Math.ceil(newLevel / 2));
-					if (cp === "1/2") return Math.min(5, Math.ceil(newLevel / 4));
-					if (cp === "1/3") return Math.min(4, Math.ceil(newLevel / 7));
-					return Math.min(9, Math.ceil(newLevel / 2));
-				})(),
+				knownMaxSpellLevel: CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData?.casterProgression, newLevel),
 				selectedSubclass: () => selectedSubclass || fullClassSubclassData,
 				selectedSubclassChoice: () => selectedSubclassChoice,
 				onSwap: (/** @type {*} */ oldSpell, /** @type {*} */ newSpell) => {

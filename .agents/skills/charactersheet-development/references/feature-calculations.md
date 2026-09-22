@@ -13,6 +13,7 @@
 - Post-Roll d20 Intervention API
 - Attack Rider Notes
 - Subclass Cantrip Choice Slots
+- EFA/TCE Artificer Source Separation
 
 ## Overview
 
@@ -56,6 +57,59 @@ These prefixes are used consistently and should be followed:
 | `{feature}Range` | `number` (feet) | `auraRange: 10`, `shadowStepRange: 60` |
 | `{feature}Count` | `number` | `experimentalElixirCount: 2`, `metamagicCount: 2` |
 | `{feature}Die` | `string` | `bardicInspirationDie: "d8"`, `superioritybDie: "d10"` |
+
+## EFA/TCE Artificer Source Separation
+
+Artificer rules are source-qualified. Treat an `Artificer|EFA` class entry as a
+different rules implementation from the legacy/TCE Artificer; never key these
+differences on the class name alone.
+
+`CharacterSheetClassUtils` is the progression authority:
+
+- `getMaxArtificerSpellLevel(classLevel)` returns the 1/5/9/13/17 spell-level
+  breakpoints. `getMaxSpellLevelForClass("Artificer", level)` and
+  `getMaxSpellLevelFromProgression("artificer", level)` delegate to it.
+- `getEfaArtificerPreparedSpells(classLevel)` and
+  `getEfaArtificerCantrips(classLevel)` are the lean-save fallbacks for the EFA
+  class tables.
+- `getEfaArtificerPlansKnown(classLevel)` and
+  `getEfaArtificerCreatedMagicItemsMax(classLevel)` project the Replicate Magic
+  Item progression without making plan choices or creating inventory.
+
+EFA calculation fields are:
+
+```javascript
+{
+    hasEfaArtificerSpellcasting,
+    hasReplicateMagicItem,
+    artificerPlansKnown,
+    artificerCreatedMagicItemsMax,
+    hasMagicItemTinker,
+    hasFlashOfGenius,
+    flashOfGeniusUses,
+    flashOfGeniusBonus,
+    hasMagicItemAdept,
+    hasSpellStoringItem,
+    hasAdvancedArtifice,
+    hasRefreshedGenius,
+    hasMagicItemMaster,
+    hasEfaSoulOfArtifice,
+    hasMagicalGuidance,
+    magicItemAttunementLimit,
+}
+```
+
+EFA does **not** set the TCE-only `hasToolExpertise`, `infusionSlots`,
+`infusionsKnown`, `hasRitualCasting`, `hasSoulOfArtifice`, or
+`soulOfArtificeSaveBonus` fields. Its Magic Item Savant effect has five
+attunement slots but `ignoreRequirements: false`. The source-aware
+`FeatureEffectRegistry` entries for `Magic Item Savant|EFA` and
+`Soul of Artifice|EFA` prevent same-named stored EFA features from falling back
+to TCE effects.
+
+Until an EFA subclass is implemented in its own bounded milestone, the
+existing Artificer subclass calculation switch remains TCE-only. Do not project
+TCE subclass mechanics onto an EFA subclass merely because the names match.
 
 ## Adding a New Subclass
 

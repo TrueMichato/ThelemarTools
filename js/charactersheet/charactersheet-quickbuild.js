@@ -319,14 +319,7 @@ class CharacterSheetQuickBuild {
 					preparedCantripsGainAtLevel = Math.max(0, newCantrips - prevCantrips);
 				}
 
-				const casterProg = classData.casterProgression;
-				if (casterProg === "pact") {
-					preparedMaxSpellLevel = Math.min(5, Math.ceil(classLevel / 2));
-				} else if (casterProg === "full") {
-					preparedMaxSpellLevel = Math.min(9, Math.ceil(classLevel / 2));
-				} else {
-					preparedMaxSpellLevel = Math.min(9, Math.ceil(classLevel / 2));
-				}
+				preparedMaxSpellLevel = CharacterSheetClassUtils.getMaxSpellLevelFromProgression(classData.casterProgression, classLevel);
 			}
 
 			// Update running optional feature counts

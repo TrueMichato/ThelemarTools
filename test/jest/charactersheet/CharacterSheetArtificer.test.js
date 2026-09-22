@@ -12,6 +12,7 @@
  * - Spellcasting mechanics (half-caster, prepared, INT-based) work correctly
  */
 import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
@@ -1146,24 +1147,24 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 	describe("Replicate Magic Item (Level 2)", () => {
 		it("should be available at level 2", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 2 });
-			expect(state.getTotalLevel()).toBe(2);
+			expect(state.getFeatureCalculations().hasReplicateMagicItem).toBe(true);
 		});
 
 		it("should know 4 plans at level 2", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 2 });
-			expect(state.getTotalLevel()).toBe(2);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(4);
 		});
 
 		it("should create 2 magic items at level 2", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 2 });
-			expect(state.getTotalLevel()).toBe(2);
+			expect(state.getFeatureCalculations().artificerCreatedMagicItemsMax).toBe(2);
 		});
 	});
 
 	describe("Magic Item Tinker (Level 6)", () => {
 		it("should be available at level 6", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 6 });
-			expect(state.getTotalLevel()).toBe(6);
+			expect(state.getFeatureCalculations().hasMagicItemTinker).toBe(true);
 		});
 
 		it("should allow charging magic items with spell slots", () => {
@@ -1183,43 +1184,56 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 	});
 
 	describe("Flash of Genius (Level 7)", () => {
-		it("should work the same as TCE version", () => {
+		it("should materialize the EFA source-qualified spendable pool", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 7 });
 			state.setAbilityBase("int", 18);
-			expect(state.getAbilityMod("int")).toBe(4);
+			const resource = state.getResources().find(it => it.featureUid === "Flash of Genius|Artificer|EFA");
+			expect(resource).toEqual(expect.objectContaining({current: 4, max: 4, recharge: "long"}));
 		});
 	});
 
 	describe("Magic Item Adept (Level 10)", () => {
 		it("should allow attuning to 4 magic items", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 10 });
-			expect(state.getTotalLevel()).toBe(10);
+			expect(state.getMaxAttunement()).toBe(4);
+			expect(state.getFeatureCalculations().hasMagicItemAdept).toBe(true);
 		});
 	});
 
 	describe("Spell-Storing Item (Level 11)", () => {
 		it("should store level 1, 2, or 3 spells", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 11 });
-			expect(state.getTotalLevel()).toBe(11);
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasSpellStoringItem).toBe(true);
+			expect(calculations.spellStoringItemUses).toBe(2);
 		});
 	});
 
 	describe("Advanced Artifice (Level 14)", () => {
 		it("should allow attuning to 5 magic items", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 14 });
-			expect(state.getTotalLevel()).toBe(14);
+			expect(state.getMaxAttunement()).toBe(5);
+			expect(state.getFeatureCalculations()).toEqual(expect.objectContaining({
+				hasAdvancedArtifice: true,
+				hasRefreshedGenius: true,
+			}));
 		});
 
 		it("should regain 1 Flash of Genius use on short rest", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 14 });
-			expect(state.getTotalLevel()).toBe(14);
+			state.setAbilityBase("int", 18);
+			const resource = state.getResources().find(it => it.featureUid === "Flash of Genius|Artificer|EFA");
+			state.setResourceCurrent(resource.id, 1);
+			state.onShortRest();
+			expect(state.getResources().find(it => it.id === resource.id).current).toBe(2);
 		});
 	});
 
 	describe("Magic Item Master (Level 18)", () => {
 		it("should allow attuning to 6 magic items", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 18 });
-			expect(state.getTotalLevel()).toBe(18);
+			expect(state.getMaxAttunement()).toBe(6);
+			expect(state.getFeatureCalculations().hasMagicItemMaster).toBe(true);
 		});
 	});
 
@@ -1231,9 +1245,13 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 	});
 
 	describe("Soul of Artifice (Level 20)", () => {
-		it("should allow disintegrating items to avoid death", () => {
+		it("should expose the EFA capstone flags without the TCE save bonus", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 20 });
-			expect(state.getTotalLevel()).toBe(20);
+			const calculations = state.getFeatureCalculations();
+			expect(calculations.hasEfaSoulOfArtifice).toBe(true);
+			expect(calculations.hasMagicalGuidance).toBe(true);
+			expect(calculations.hasSoulOfArtifice).toBeUndefined();
+			expect(calculations.soulOfArtificeSaveBonus).toBeUndefined();
 		});
 
 		it("should regain all Flash of Genius uses on short rest with attunement", () => {
@@ -1245,27 +1263,27 @@ describe("Artificer Core Class Features (EFA 2024)", () => {
 	describe("Plans Progression (EFA)", () => {
 		it("should know 4 plans at level 2-5", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 2 });
-			expect(state.getTotalLevel()).toBe(2);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(4);
 		});
 
 		it("should know 5 plans at level 6-9", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 6 });
-			expect(state.getTotalLevel()).toBe(6);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(5);
 		});
 
 		it("should know 6 plans at level 10-13", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 10 });
-			expect(state.getTotalLevel()).toBe(10);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(6);
 		});
 
 		it("should know 7 plans at level 14-17", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 14 });
-			expect(state.getTotalLevel()).toBe(14);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(7);
 		});
 
 		it("should know 8 plans at level 18-20", () => {
 			state.addClass({ name: "Artificer", source: "EFA", level: 18 });
-			expect(state.getTotalLevel()).toBe(18);
+			expect(state.getFeatureCalculations().artificerPlansKnown).toBe(8);
 		});
 	});
 });

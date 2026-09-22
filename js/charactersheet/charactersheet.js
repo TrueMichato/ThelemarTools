@@ -13582,6 +13582,13 @@ class CharacterSheetPage {
 			await this._pUseResource(triggerResource.id, {preselectedAugmentId: feature.id});
 			return;
 		}
+		if (
+			(feature?.name || "").toLowerCase() === "flash of genius"
+			&& String(feature.classSource || feature.source || "").toUpperCase() === "EFA"
+		) {
+			await this._pActivateEfaFlashOfGenius();
+			return;
+		}
 		let variableSpend = null;
 		if (stateType?.variablePointSpend) {
 			const calculations = this._state.getFeatureCalculations();
@@ -17012,10 +17019,8 @@ class CharacterSheetPage {
 			resultNote,
 		);
 
-		// Tactical Mind (XPHB Fighter L2): after a failed ability check, offer to expend a
-		// Second Wind use to add 1d10 (refunded if the check still fails). Player-driven,
-		// post-roll — the sheet has no DC, so the prompt is framed around failure.
-		await this._pMaybeApplyTacticalMind({
+		const abilityFlashResult = await this._pMaybeApplyEfaFlashOfGenius({
+			rollType: "abilityCheck",
 			rollLabel: `${Parser.attAbvToFull(ability)} Check`,
 			mode: rollResult.mode,
 			stateEffectStr,
@@ -17028,6 +17033,27 @@ class CharacterSheetPage {
 				naturalRoll: rollResult.roll,
 				breakdown: acBreakdown,
 				outcome: resultNote,
+			}),
+		});
+
+		// Tactical Mind (XPHB Fighter L2): after a failed ability check, offer to expend a
+		// Second Wind use to add 1d10 (refunded if the check still fails). Player-driven,
+		// post-roll — the sheet has no DC, so the prompt is framed around failure.
+		await this._pMaybeApplyTacticalMind({
+			rollLabel: `${Parser.attAbvToFull(ability)} Check`,
+			mode: rollResult.mode,
+			stateEffectStr,
+			...(abilityFlashResult || {
+				baseTotal: total,
+				breakdown: acBreakdown,
+				resultNote,
+				rollFollowup: CharacterSheetModal.buildRollFollowup({
+					label: `${Parser.attAbvToFull(ability)} Check`,
+					total,
+					naturalRoll: rollResult.roll,
+					breakdown: acBreakdown,
+					outcome: resultNote,
+				}),
 			}),
 		});
 	}
@@ -17217,12 +17243,20 @@ class CharacterSheetPage {
 		// Blood Price (Hellspeaker L10): after a save is rolled, offer to spend a Hit Die and
 		// add the rolled value to the result. Reactive and player-driven — prompted here rather
 		// than auto-applied. Only offered when the feature is present and a Hit Die remains.
-		const saveFollowupContext = {
+		const baseSaveFollowupContext = {
 			baseTotal: totalWithDice,
 			breakdown: saveBreakdown,
 			resultNote,
 			rollFollowup,
 		};
+		const flashSaveResult = await this._pMaybeApplyEfaFlashOfGenius({
+			rollType: "savingThrow",
+			rollLabel: `${Parser.attAbvToFull(ability)} Save`,
+			mode: rollResult.mode,
+			stateEffectStr,
+			...baseSaveFollowupContext,
+		});
+		const saveFollowupContext = flashSaveResult || baseSaveFollowupContext;
 		const bloodPriceResult = await this._pMaybeApplyBloodPrice({
 			ability,
 			mode: rollResult.mode,
@@ -17834,13 +17868,16 @@ class CharacterSheetPage {
 
 		// Tactical Mind (XPHB Fighter L2): skill checks are ability checks, so offer the
 		// same Second Wind +1d10 (refunded on continued failure) here too.
-		await this._pMaybeApplyTacticalMind({
+		const skillFlashResult = await this._pMaybeApplyEfaFlashOfGenius({
+			rollType: "abilityCheck",
 			rollLabel: `${skillName}${abilityLabel} Check`,
 			mode: rollResult.mode,
 			stateEffectStr,
 			baseTotal: totalWithDice,
 			breakdown: skillBreakdown,
 			resultNote,
+			isFailed: isSuccess == null ? null : !isSuccess,
+			dc,
 			rollFollowup: CharacterSheetModal.buildRollFollowup({
 				label: `${skillName}${abilityLabel} Check`,
 				total: totalWithDice,
@@ -17850,15 +17887,34 @@ class CharacterSheetPage {
 			}),
 		});
 
+		await this._pMaybeApplyTacticalMind({
+			rollLabel: `${skillName}${abilityLabel} Check`,
+			mode: rollResult.mode,
+			stateEffectStr,
+			...(skillFlashResult || {
+				baseTotal: totalWithDice,
+				breakdown: skillBreakdown,
+				resultNote,
+				rollFollowup: CharacterSheetModal.buildRollFollowup({
+					label: `${skillName}${abilityLabel} Check`,
+					total: totalWithDice,
+					naturalRoll: rollResult.roll,
+					breakdown: skillBreakdown,
+					outcome: resultNote,
+				}),
+			}),
+		});
+
+		const finalTotal = skillFlashResult?.baseTotal ?? totalWithDice;
 		return {
-			total: totalWithDice,
+			total: finalTotal,
 			roll: rollResult.roll,
 			mode: rollResult.mode,
-			isSuccess,
+			isSuccess: dc == null ? null : finalTotal >= dc,
 			isNat20: rollResult.roll === 20,
 			isNat1: rollResult.roll === 1,
-			breakdown: skillBreakdown,
-			resultNote,
+			breakdown: skillFlashResult?.breakdown || skillBreakdown,
+			resultNote: skillFlashResult?.resultNote || resultNote,
 		};
 	}
 
@@ -18452,6 +18508,153 @@ class CharacterSheetPage {
 		this._saveCurrentCharacter();
 		this._renderDicePresets();
 		return true;
+	}
+
+	async _pActivateEfaFlashOfGenius () {
+		const rollType = await InputUiUtil.pGetUserEnum({
+			title: "Flash of Genius — Failed Roll",
+			values: ["abilityCheck", "savingThrow"],
+			fnDisplay: value => value === "abilityCheck" ? "Ability check" : "Saving throw",
+			isResolveItem: true,
+		});
+		if (!rollType) return;
+
+		const failed = await CharacterSheetModal.pGetUserBoolean({
+			title: "Flash of Genius",
+			htmlDescription: "Confirm that the triggering roll failed.",
+			textYes: "The roll failed",
+			textNo: "Cancel",
+		});
+		if (!failed) return;
+
+		const targetType = await InputUiUtil.pGetUserEnum({
+			title: "Flash of Genius — Target",
+			values: ["self", "creature"],
+			fnDisplay: value => value === "self" ? "Self" : "Named visible creature within 30 feet",
+			isResolveItem: true,
+		});
+		if (!targetType) return;
+
+		let targetName = null;
+		let distanceFeet = 0;
+		if (targetType === "creature") {
+			targetName = await InputUiUtil.pGetUserString({title: "Visible target name", default: ""});
+			if (!String(targetName || "").trim()) return;
+			distanceFeet = await InputUiUtil.pGetUserNumber({
+				title: "Target distance (feet)",
+				default: 30,
+				min: 0,
+				max: 30,
+			});
+			if (distanceFeet == null) return;
+		}
+
+		await this._pCommitEfaFlashOfGenius({
+			rollType,
+			isFailed: true,
+			targetType,
+			targetName,
+			targetVisible: true,
+			distanceFeet,
+		});
+	}
+
+	async _pCommitEfaFlashOfGenius (opts) {
+		const committed = await this._state.pUseFlashOfGenius(opts);
+		if (!committed.ok) {
+			const messages = {
+				actionUnavailable: "Your Reaction is unavailable.",
+				insufficientResource: "No Flash of Genius uses remain.",
+				targetOutOfRange: "The target must be within 30 feet.",
+				targetNotVisible: "You must be able to see the target.",
+				invalidTarget: "Choose a named visible target.",
+			};
+			JqueryUtil.doToast({type: "warning", content: messages[committed.reason] || "Flash of Genius could not be used."});
+			return committed;
+		}
+
+		const {bonus, adjustedTotal, target} = committed.result;
+		const targetLabel = target.type === "self" ? "your roll" : `${target.name}'s roll`;
+		JqueryUtil.doToast({
+			type: committed.followUpFailed ? "warning" : "success",
+			content: committed.followUpFailed
+				? `Flash of Genius added +${bonus} to ${targetLabel}, but a follow-up effect failed.`
+				: `Flash of Genius added +${bonus} to ${targetLabel}.`,
+		});
+
+		this._saveCurrentCharacter();
+		this._renderResources();
+		this._features?._renderResources?.();
+		this._renderActiveStates();
+		this._combat?.render?.();
+		this._renderCharacter();
+		return {...committed, adjustedTotal};
+	}
+
+	async _pMaybeApplyEfaFlashOfGenius ({
+		rollType,
+		rollLabel,
+		baseTotal,
+		breakdown,
+		resultNote,
+		mode,
+		stateEffectStr = "",
+		isFailed = null,
+		dc = null,
+		rollFollowup = null,
+	} = {}) {
+		const resource = (this._state.getResources?.() || []).find(it =>
+			it.featureUid === CharacterSheetState.EFA_FLASH_OF_GENIUS_UID);
+		if (!resource || resource.current <= 0 || !this._state.isActionTypeAvailable?.("reaction")) return null;
+		if (isFailed === false) return null;
+
+		const useFlash = await CharacterSheetModal.pGetUserBoolean({
+			title: "Flash of Genius",
+			htmlDescription: isFailed === true
+				? `The ${rollLabel} failed with a total of <strong>${baseTotal}</strong>. Use your Reaction to add your Intelligence modifier?`
+				: `If the ${rollLabel} failed, use your Reaction to add your Intelligence modifier to the total of <strong>${baseTotal}</strong>?`,
+			textYes: "Use Flash of Genius",
+			textNo: "Keep the roll",
+			rollFollowup,
+		});
+		if (!useFlash) return null;
+
+		const committed = await this._pCommitEfaFlashOfGenius({
+			rollType,
+			isFailed: true,
+			rollTotal: baseTotal,
+			targetType: "self",
+			context: {rollLabel},
+		});
+		if (!committed?.committed) return null;
+
+		const bonus = committed.result.bonus;
+		const adjustedTotal = committed.result.adjustedTotal;
+		const flashNote = `Flash of Genius: +${bonus} → ${adjustedTotal}`;
+		let mergedNote = resultNote ? `${resultNote}\n${flashNote}` : flashNote;
+		if (dc != null) {
+			mergedNote = mergedNote.replace(/\n(?:Success|Failure) vs DC \d+(?=\nFlash of Genius:)/, "");
+			mergedNote += `\n${adjustedTotal >= dc ? "Success" : "Failure"} vs DC ${dc} after Flash of Genius`;
+		}
+		const adjustedBreakdown = `${breakdown} + ${bonus} (Flash of Genius)`;
+		this._showDiceResult(
+			`${rollLabel}${this._getModeLabel(mode)}${stateEffectStr}`,
+			adjustedTotal,
+			adjustedBreakdown,
+			"",
+			mergedNote,
+		);
+		return {
+			baseTotal: adjustedTotal,
+			breakdown: adjustedBreakdown,
+			resultNote: mergedNote,
+			rollFollowup: CharacterSheetModal.buildRollFollowup({
+				label: rollLabel,
+				total: adjustedTotal,
+				breakdown: adjustedBreakdown,
+				outcome: mergedNote,
+			}),
+		};
 	}
 
 	/**

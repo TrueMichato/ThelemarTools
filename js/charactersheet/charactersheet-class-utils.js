@@ -3381,6 +3381,78 @@ class CharacterSheetClassUtils {
 	}
 
 	/**
+	 * Get the maximum spell level available to an Artificer at a class level.
+	 *
+	 * Artificer is a rounded-up half caster, but its class table advances spell
+	 * levels at 1/5/9/13/17. Keep that table boundary in one shared resolver so
+	 * Builder, Level Up, Quick Build, and the live sheet cannot drift.
+	 *
+	 * @param {number} classLevel - Current Artificer class level
+	 * @returns {number} Maximum Artificer spell level, or 0 before level 1
+	 */
+	static getMaxArtificerSpellLevel (/** @type {*} */ classLevel) {
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 1) return 0;
+		return Math.min(5, Math.floor((level - 1) / 4) + 1);
+	}
+
+	/**
+	 * Eberron: Forge of the Artificer prepared-spell table.
+	 * @param {number} classLevel
+	 * @returns {number}
+	 */
+	static getEfaArtificerPreparedSpells (/** @type {*} */ classLevel) {
+		const progression = [2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15];
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 1) return 0;
+		const boundedLevel = Math.min(20, level);
+		return progression[boundedLevel - 1];
+	}
+
+	/**
+	 * Eberron: Forge of the Artificer cantrip table.
+	 * @param {number} classLevel
+	 * @returns {number}
+	 */
+	static getEfaArtificerCantrips (/** @type {*} */ classLevel) {
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 1) return 0;
+		if (level >= 14) return 4;
+		if (level >= 10) return 3;
+		return 2;
+	}
+
+	/**
+	 * Eberron: Forge of the Artificer Replicate Magic Item plans known.
+	 * @param {number} classLevel
+	 * @returns {number}
+	 */
+	static getEfaArtificerPlansKnown (/** @type {*} */ classLevel) {
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 2) return 0;
+		if (level >= 18) return 8;
+		if (level >= 14) return 7;
+		if (level >= 10) return 6;
+		if (level >= 6) return 5;
+		return 4;
+	}
+
+	/**
+	 * Eberron: Forge of the Artificer simultaneous created magic-item cap.
+	 * @param {number} classLevel
+	 * @returns {number}
+	 */
+	static getEfaArtificerCreatedMagicItemsMax (/** @type {*} */ classLevel) {
+		const level = Math.floor(Number(classLevel) || 0);
+		if (level < 2) return 0;
+		if (level >= 18) return 6;
+		if (level >= 14) return 5;
+		if (level >= 10) return 4;
+		if (level >= 6) return 3;
+		return 2;
+	}
+
+	/**
 	 * Get the maximum spell level a class can cast at a given level.
 	 * @param {string} className - Class name
 	 * @param {number} classLevel - Current class level
@@ -3388,10 +3460,13 @@ class CharacterSheetClassUtils {
 	 */
 	static getMaxSpellLevelForClass (/** @type {*} */ className, /** @type {*} */ classLevel) {
 		const fullCasters = ["Wizard", "Cleric", "Druid", "Bard", "Sorcerer", "Warlock"];
-		const halfCasters = ["Paladin", "Ranger", "Artificer"];
+		const halfCasters = ["Paladin", "Ranger"];
 
 		if (fullCasters.includes(className)) {
 			return Math.min(9, Math.ceil(classLevel / 2));
+		}
+		if (className === "Artificer") {
+			return CharacterSheetClassUtils.getMaxArtificerSpellLevel(classLevel);
 		}
 		if (halfCasters.includes(className)) {
 			return Math.min(5, Math.ceil((classLevel + 1) / 4));
@@ -3543,6 +3618,9 @@ class CharacterSheetClassUtils {
 	 * @returns {number|null} Cantrip count, or null if no cantrip progression
 	 */
 	static getCantripsAtLevel (/** @type {*} */ classData, /** @type {*} */ className, /** @type {*} */ classLevel) {
+		if (className === "Artificer" && String(classData?.source || "").toUpperCase() === "EFA") {
+			return CharacterSheetClassUtils.getEfaArtificerCantrips(classLevel);
+		}
 		const prog = classData.cantripProgression || (/** @type {*} */ (CharacterSheetClassUtils._CANTRIP_TABLES))[className];
 		if (!prog) return null;
 		return prog[classLevel - 1] || 0;
@@ -3564,7 +3642,7 @@ class CharacterSheetClassUtils {
 		} else if (casterProgression === "pact") {
 			return Math.min(5, Math.ceil(classLevel / 2));
 		} else if (casterProgression === "artificer") {
-			return Math.min(5, Math.ceil(classLevel / 4));
+			return CharacterSheetClassUtils.getMaxArtificerSpellLevel(classLevel);
 		}
 		return Math.min(9, Math.ceil(classLevel / 2));
 	}

@@ -12,6 +12,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
 - Custom Abilities (data structure, effect routing, reapply on load)
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
+- Committed Feature Uses and EFA Flash of Genius
 
 ## Gemstone Empowerment
 
@@ -36,6 +37,79 @@ standing flat-damage line. Chalice storage uses
 `getGemstoneSpellStorage`/`storeGemstoneSpell`/`castGemstoneStoredSpell`/
 `removeGemstoneStoredSpell`; its two-level capacity is gem-scoped and persists
 across unsocket/resocket.
+
+## Committed Feature Uses and EFA Flash of Genius
+
+Source-qualified feature follow-ups use the runtime-only committed-use API on
+`CharacterSheetState`:
+
+```javascript
+const unsubscribe = state.registerCommittedFeatureUseHook(
+    "Flash of Genius|Artificer|EFA",
+    async committedResult => { /* subclass follow-up */ },
+    {hookId: "stable-consumer-id"},
+);
+
+const committedResult = await state.pCommitFeatureUse({
+    featureUid,
+    classUid,
+    actionType,
+    resourceId,
+    resourceCost,
+    context,
+    result,
+});
+```
+
+Hooks are keyed by the exact source-qualified `featureUid`, not by subclass
+names. They run only after the action and resource cost have committed.
+Cancellation, invalid context, an unavailable action, or insufficient resource
+returns `{ok: false, committed: false, reason}` and invokes no hook. A hook
+failure does not roll back the valid core use; the return remains
+`{ok: true, committed: true}` with `followUpFailed: true` and a failed entry in
+`followUps`.
+
+The committed result fields are:
+
+```javascript
+{
+    ok,
+    committed,
+    featureUid,
+    classUid,
+    actionType,
+    resourceId,
+    resourceName,
+    resourceCost,
+    remainingUses,
+    context,
+    result,
+    followUps: [{hookId, ok, value?, error?}],
+    followUpFailed,
+}
+```
+
+EFA Flash of Genius uses:
+
+- class UID `Artificer|EFA`
+- feature UID `Flash of Genius|Artificer|EFA`
+- `pUseFlashOfGenius({rollType, isFailed, rollTotal, targetType, targetName,
+  targetVisible, distanceFeet, cancelled, context})`
+
+The call accepts only failed `abilityCheck` or `savingThrow` contexts. A target
+is either `self` or a named creature with explicit visibility and a finite
+distance from 0 through 30 feet. A valid use spends
+one Reaction and one canonical Flash resource use, then returns
+`result: {bonus, originalTotal, adjustedTotal, target}`. The bonus and maximum
+uses are the Intelligence modifier, minimum 1.
+
+The canonical resource is `contextualOnly`, uses the `Reaction` action label,
+recharges on a Long Rest, and mirrors the EFA Flash feature's `uses` object.
+Advanced Artifice adds `shortRestRecovery: 1`; Magical Guidance restores the
+pool fully on a Short Rest when the level-20 EFA Artificer has at least one
+attuned magic item. `efaFlashOfGeniusResourceV1` initializes an existing EFA
+level-7+ save at maximum exactly once; subsequent reconciliation preserves
+spent uses. No Replicate Magic Item plan is inferred by this migration.
 
 ## Active States / Toggle Abilities
 

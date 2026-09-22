@@ -2807,7 +2807,7 @@ globalThis.FeatureModifierParser = FeatureModifierParser;
 const FeatureEffectRegistry = {
 	// Internal registry of feature name -> effects mapping
 	_registry: {},
-	_sourceAwareFeatureNames: new Set(["draconic resilience"]),
+	_sourceAwareFeatureNames: new Set(["draconic resilience", "magic item savant", "soul of artifice"]),
 
 	/**
 	 * Initialize the default feature effects registry.
@@ -2869,9 +2869,13 @@ const FeatureEffectRegistry = {
 		this.register("Magic Item Savant", [
 			{type: "attunement", maxSlots: 5, ignoreRequirements: true},
 		]);
+		this.register("Magic Item Savant|EFA", [
+			{type: "attunement", maxSlots: 5, ignoreRequirements: false},
+		]);
 		this.register("Soul of Artifice", [
 			{type: "modifier", modType: "save:all", value: "attunedItems"},
 		]);
+		this.register("Soul of Artifice|EFA", []);
 
 		// ======= BARBARIAN =======
 		this.register("Rage", [
@@ -4338,6 +4342,9 @@ FeatureEffectRegistry.init();
 globalThis.FeatureEffectRegistry = FeatureEffectRegistry;
 
 class CharacterSheetState {
+	static EFA_ARTIFICER_CLASS_UID = "Artificer|EFA";
+	static EFA_FLASH_OF_GENIUS_UID = "Flash of Genius|Artificer|EFA";
+
 	/**
 	 * Return whether a feature is a class/subclass progression feature whose
 	 * prose-derived mechanics belong to the class-feature cleanup/rebuild domain.
@@ -4419,6 +4426,7 @@ class CharacterSheetState {
 		this._data = this._getDefaultState();
 		// Runtime-only seam for deterministic Gambler tests. Never serialized.
 		this._gamblerRollSource = null;
+		this._committedFeatureUseHooks = new Map();
 		// Optional full spell database, injected by the controller after data
 		// load (`setSpellData`). Used to enrich subclass/feature-granted spells
 		// with their real level/school/metadata so they render and persist
@@ -5511,6 +5519,7 @@ class CharacterSheetState {
 		this._data = this._getDefaultState();
 		// Runtime-only seam for deterministic Gambler tests. Never serialized.
 		this._gamblerRollSource = null;
+		this._committedFeatureUseHooks = new Map();
 	}
 
 	toJson () {
@@ -6051,6 +6060,7 @@ class CharacterSheetState {
 		this._migrateInventoryItemWeaponFlag();
 		this._ensureFeatRegistryResources();
 		this._endBladesongForInvalidEquipment();
+		this._migrateEfaFlashOfGeniusResource();
 	}
 
 	/**
@@ -16949,6 +16959,7 @@ class CharacterSheetState {
 		const classData = cls;
 		const source = cls.source || "PHB";
 		const is2024 = source === "XPHB" || source === "xphb" || source === "TGTT";
+		const isEfaArtificer = className === "Artificer" && String(source).toUpperCase() === "EFA";
 
 		// Subclass-specific spellcasting overrides MUST be checked first.
 		// These subclasses have their own spellcasting model that overrides
@@ -16971,6 +16982,18 @@ class CharacterSheetState {
 				is2024: false,
 				isRolledPrepared: true,
 				spellListClass: "Warlock",
+			};
+		}
+
+		if (isEfaArtificer) {
+			const max = CharacterSheetClassUtils.getEfaArtificerPreparedSpells(level);
+			return {
+				type: "prepared",
+				max,
+				cantripsKnown: CharacterSheetClassUtils.getEfaArtificerCantrips(level),
+				preparedMax: max,
+				hasFullAccess: true,
+				is2024: true,
 			};
 		}
 
@@ -17000,6 +17023,7 @@ class CharacterSheetState {
 						is2024: true,
 					};
 				}
+
 				return {
 					type: "prepared",
 					max,
@@ -17986,6 +18010,9 @@ class CharacterSheetState {
 		if (!cls) return 0;
 
 		const level = cls.level;
+		if (className === "Artificer" && String(cls.source || "").toUpperCase() === "EFA") {
+			return CharacterSheetClassUtils.getEfaArtificerPreparedSpells(level);
+		}
 
 		// Get the spellcasting ability for the class
 		const abilityMap = {
@@ -18900,9 +18927,13 @@ class CharacterSheetState {
 
 				case "Cleric":
 				case "Druid":
-				case "Artificer":
 					// Prepared casters: must be prepared + ritual tag
 					if (spell.prepared || spell.alwaysPrepared) return true;
+					break;
+
+				case "Artificer":
+					// The TCE Artificer has class ritual casting. The EFA rewrite does not.
+					if (String(source).toUpperCase() !== "EFA" && (spell.prepared || spell.alwaysPrepared)) return true;
 					break;
 
 				case "Bard":
@@ -29158,24 +29189,41 @@ class CharacterSheetState {
 				}
 				case "Artificer": {
 					const intMod = this.getAbilityMod("int");
+					const isEfa = String(cls.source || "").toUpperCase() === "EFA";
 
-					// Ritual Casting — Artificers can ritual-cast prepared spells with ritual tag
-					calculations.hasRitualCasting = true;
-					calculations.ritualCastingMode = "prepared";
+					if (isEfa) {
+						calculations.hasEfaArtificerSpellcasting = level >= 1;
+						calculations.hasReplicateMagicItem = level >= 2;
+						calculations.artificerPlansKnown = CharacterSheetClassUtils.getEfaArtificerPlansKnown(level);
+						calculations.artificerCreatedMagicItemsMax = CharacterSheetClassUtils.getEfaArtificerCreatedMagicItemsMax(level);
+						calculations.hasMagicItemTinker = level >= 6;
+						calculations.hasFlashOfGenius = level >= 7;
+						calculations.hasMagicItemAdept = level >= 10;
+						calculations.hasSpellStoringItem = level >= 11;
+						calculations.hasAdvancedArtifice = level >= 14;
+						calculations.hasRefreshedGenius = level >= 14;
+						calculations.hasMagicItemMaster = level >= 18;
+						calculations.hasEfaSoulOfArtifice = level >= 20;
+						calculations.hasMagicalGuidance = level >= 20;
+					} else {
+						// Ritual Casting — TCE Artificers can ritual-cast prepared ritual spells.
+						calculations.hasRitualCasting = true;
+						calculations.ritualCastingMode = "prepared";
+					}
 
 					// Tool Expertise (level 6+): double proficiency with all tools
-					if (level >= 6) {
+					if (!isEfa && level >= 6) {
 						calculations.hasToolExpertise = true;
 					}
 
 					// Infusion slots: starts at 2 at level 2, increases at 6, 10, 14, 18
-					if (level >= 2) {
+					if (!isEfa && level >= 2) {
 						const infusionSlots = level >= 18 ? 6 : level >= 14 ? 5 : level >= 10 ? 4 : level >= 6 ? 3 : 2;
 						calculations.infusionSlots = infusionSlots;
 					}
 
 					// Infusions known: 4 at level 2, +2 at 6, 10, 14, 18, 22
-					if (level >= 2) {
+					if (!isEfa && level >= 2) {
 						const infusionsKnown = level >= 18 ? 12 : level >= 14 ? 10 : level >= 10 ? 8 : level >= 6 ? 6 : 4;
 						calculations.infusionsKnown = infusionsKnown;
 					}
@@ -29194,6 +29242,7 @@ class CharacterSheetState {
 
 					if (level >= 14) {
 						calculations.hasMagicItemSavant = true;
+						calculations.magicItemSavantIgnoreRequirements = !isEfa;
 					}
 
 					// Spell-Storing Item (level 11+): can store INT mod * 2 uses
@@ -29203,15 +29252,17 @@ class CharacterSheetState {
 
 					// Soul of Artifice (level 20): +1 to all saves per attuned item
 					if (level >= 20) {
-						calculations.hasSoulOfArtifice = true;
-						calculations.soulOfArtificeSaveBonus = attunementLimit; // max possible bonus
+						if (!isEfa) {
+							calculations.hasSoulOfArtifice = true;
+							calculations.soulOfArtificeSaveBonus = attunementLimit; // max possible bonus
+						}
 					}
 
 					// =========================================================
 					// ARTIFICER SUBCLASSES
 					// =========================================================
 					const subclassName = cls.subclass?.name?.toLowerCase() || cls.subclass?.shortName?.toLowerCase();
-					if (subclassName && level >= 3) {
+					if (!isEfa && subclassName && level >= 3) {
 						switch (subclassName) {
 							case "alchemist": {
 								// Experimental Elixir count: 1 at 3, 2 at 6, 3 at 15
@@ -31877,7 +31928,7 @@ class CharacterSheetState {
 			effects.push({
 				type: "attunement",
 				maxSlots: 5,
-				ignoreRequirements: true,
+				ignoreRequirements: calculations.magicItemSavantIgnoreRequirements === true,
 				source: "Magic Item Savant",
 			});
 		}
@@ -41093,8 +41144,268 @@ class CharacterSheetState {
 		};
 	}
 
+	_getEfaArtificerClass () {
+		return (this._data.classes || []).find(cls =>
+			(cls.name || "").toLowerCase() === "artificer"
+			&& String(cls.source || "").toUpperCase() === "EFA",
+		) || null;
+	}
+
+	_getEfaFlashOfGeniusFeature () {
+		return (this._data.features || []).find(feature =>
+			(feature.name || "").toLowerCase() === "flash of genius"
+			&& String(feature.classSource || feature.source || "").toUpperCase() === "EFA",
+		) || null;
+	}
+
+	_ensureEfaFlashOfGeniusResource () {
+		const cls = this._getEfaArtificerClass();
+		const level = Number(cls?.level) || 0;
+		const feature = this._getEfaFlashOfGeniusFeature();
+		const isOwnedResource = resource =>
+			resource?.featureUid === CharacterSheetState.EFA_FLASH_OF_GENIUS_UID
+			|| (feature?.id && resource?.featureId === feature.id)
+			|| (
+				(resource?.name || "").toLowerCase() === "flash of genius"
+				&& String(resource?.classUid || "").toLowerCase() === CharacterSheetState.EFA_ARTIFICER_CLASS_UID.toLowerCase()
+			);
+
+		if (level < 7) {
+			this._data.resources = (this._data.resources || []).filter(resource => !isOwnedResource(resource));
+			if (feature?.uses) delete feature.uses;
+			return null;
+		}
+
+		const desiredMax = Math.max(1, this.getAbilityMod("int"));
+		const candidates = (this._data.resources || []).filter(resource => isOwnedResource(resource));
+		let resource = candidates.find(it => it.featureUid === CharacterSheetState.EFA_FLASH_OF_GENIUS_UID)
+			|| candidates[0]
+			|| null;
+
+		const trackedPools = [
+			...candidates.map(it => ({
+				max: Math.max(0, Number(it.max) || 0),
+				current: Math.max(0, Number(it.current) || 0),
+			})),
+			...(feature?.uses ? [{
+				max: Math.max(0, Number(feature.uses.max) || 0),
+				current: Math.max(0, Number(feature.uses.current) || 0),
+			}] : []),
+		];
+		const spent = trackedPools.length
+			? Math.max(...trackedPools.map(pool => Math.max(0, pool.max - Math.min(pool.current, pool.max))))
+			: 0;
+
+		if (!resource) {
+			resource = {
+				id: CryptUtil.uid(),
+				name: "Flash of Genius",
+				current: desiredMax,
+				max: desiredMax,
+				recharge: "long",
+			};
+			(this._data.resources ||= []).push(resource);
+		}
+
+		resource.name = "Flash of Genius";
+		resource.max = desiredMax;
+		resource.current = Math.max(0, desiredMax - spent);
+		resource.recharge = "long";
+		resource.contextualOnly = true;
+		resource.actionLabel = "Reaction";
+		resource.featureUid = CharacterSheetState.EFA_FLASH_OF_GENIUS_UID;
+		resource.classUid = CharacterSheetState.EFA_ARTIFICER_CLASS_UID;
+		resource.source = "EFA";
+		resource.mirrorsFeatureUses = true;
+		if (feature?.id) resource.featureId = feature.id;
+		else delete resource.featureId;
+		if (level >= 14) resource.shortRestRecovery = 1;
+		else delete resource.shortRestRecovery;
+
+		this._data.resources = (this._data.resources || []).filter(candidate => candidate === resource || !isOwnedResource(candidate));
+
+		if (feature) {
+			feature.uses = {
+				current: resource.current,
+				max: resource.max,
+				recharge: "long",
+				...(level >= 14 ? {shortRestRecovery: 1} : {}),
+			};
+		}
+
+		return resource;
+	}
+
+	_migrateEfaFlashOfGeniusResource () {
+		const flags = (this._data.migrationFlags ||= {});
+		if (flags.efaFlashOfGeniusResourceV1) return false;
+		const cls = this._getEfaArtificerClass();
+		if ((Number(cls?.level) || 0) >= 7) this._ensureEfaFlashOfGeniusResource();
+		flags.efaFlashOfGeniusResourceV1 = true;
+		return true;
+	}
+
+	/**
+	 * Register a runtime-only follow-up for a committed use of one source-qualified feature.
+	 * The hook runs after the action and resource costs are committed.
+	 * @param {string} featureUid
+	 * @param {(committedResult: object) => any|Promise<any>} hook
+	 * @param {{hookId?: string}} opts
+	 * @returns {() => void} unsubscribe callback
+	 */
+	registerCommittedFeatureUseHook (featureUid, hook, {hookId = CryptUtil.uid()} = {}) {
+		if (!featureUid || typeof hook !== "function") throw new TypeError("A feature UID and hook function are required.");
+		const hooks = this._committedFeatureUseHooks.get(featureUid) || new Map();
+		hooks.set(hookId, hook);
+		this._committedFeatureUseHooks.set(featureUid, hooks);
+		return () => {
+			const liveHooks = this._committedFeatureUseHooks.get(featureUid);
+			if (!liveHooks) return;
+			liveHooks.delete(hookId);
+			if (!liveHooks.size) this._committedFeatureUseHooks.delete(featureUid);
+		};
+	}
+
+	/**
+	 * Commit action economy and a feature resource before invoking source-qualified follow-ups.
+	 * A follow-up failure is reported without rolling back the valid core use.
+	 */
+	async pCommitFeatureUse ({
+		featureUid,
+		classUid = null,
+		actionType = "free",
+		resourceId,
+		resourceCost = 1,
+		context = {},
+		result = {},
+	} = {}) {
+		const resource = (this._data.resources || []).find(it => it.id === resourceId);
+		const cost = Math.max(0, Math.floor(Number(resourceCost) || 0));
+		if (!featureUid) return {ok: false, committed: false, reason: "invalidFeature"};
+		if (!resource) return {ok: false, committed: false, reason: "resourceUnavailable", featureUid, classUid};
+		if ((Number(resource.current) || 0) < cost) {
+			return {ok: false, committed: false, reason: "insufficientResource", featureUid, classUid, resourceId};
+		}
+		if (!this.isActionTypeAvailable(actionType)) {
+			return {ok: false, committed: false, reason: "actionUnavailable", featureUid, classUid, actionType};
+		}
+
+		if (!this.consumeActionType(actionType)) {
+			return {ok: false, committed: false, reason: "actionUnavailable", featureUid, classUid, actionType};
+		}
+		this.setResourceCurrent(resource.id, resource.current - cost);
+
+		const committedResult = {
+			ok: true,
+			committed: true,
+			featureUid,
+			classUid,
+			actionType,
+			resourceId: resource.id,
+			resourceName: resource.name,
+			resourceCost: cost,
+			remainingUses: resource.current,
+			context: MiscUtil.copyFast(context),
+			result: MiscUtil.copyFast(result),
+			followUps: [],
+			followUpFailed: false,
+		};
+
+		for (const [hookId, hook] of (this._committedFeatureUseHooks.get(featureUid) || new Map()).entries()) {
+			try {
+				const value = await hook(committedResult);
+				committedResult.followUps.push({hookId, ok: true, value});
+			} catch (error) {
+				committedResult.followUpFailed = true;
+				committedResult.followUps.push({
+					hookId,
+					ok: false,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+
+		return committedResult;
+	}
+
+	async pUseFlashOfGenius ({
+		rollType,
+		isFailed,
+		rollTotal = null,
+		targetType = "self",
+		targetName = null,
+		targetVisible = null,
+		distanceFeet = null,
+		cancelled = false,
+		context = {},
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		if (!["abilityCheck", "savingThrow"].includes(rollType)) {
+			return {ok: false, committed: false, reason: "invalidRollType"};
+		}
+		if (isFailed !== true) return {ok: false, committed: false, reason: "rollDidNotFail"};
+
+		if (!["self", "creature"].includes(targetType)) return {ok: false, committed: false, reason: "invalidTarget"};
+		const normalizedTargetType = targetType;
+		if (normalizedTargetType === "creature") {
+			if (!String(targetName || "").trim()) return {ok: false, committed: false, reason: "invalidTarget"};
+			if (targetVisible !== true) return {ok: false, committed: false, reason: "targetNotVisible"};
+			if (distanceFeet == null) return {ok: false, committed: false, reason: "targetOutOfRange"};
+			const distance = Number(distanceFeet);
+			if (!Number.isFinite(distance) || distance < 0 || distance > 30) {
+				return {ok: false, committed: false, reason: "targetOutOfRange"};
+			}
+		}
+
+		const cls = this._getEfaArtificerClass();
+		if ((Number(cls?.level) || 0) < 7) return {ok: false, committed: false, reason: "featureUnavailable"};
+		const resource = this._ensureEfaFlashOfGeniusResource();
+		if (!resource) return {ok: false, committed: false, reason: "resourceUnavailable"};
+
+		const bonus = Math.max(1, this.getAbilityMod("int"));
+		const originalTotal = rollTotal == null ? null : Number(rollTotal);
+		const target = normalizedTargetType === "self"
+			? {type: "self", name: this._data.name || "Self"}
+			: {
+				type: "creature",
+				name: String(targetName).trim(),
+				visible: true,
+				distanceFeet: Number(distanceFeet),
+			};
+		return this.pCommitFeatureUse({
+			featureUid: CharacterSheetState.EFA_FLASH_OF_GENIUS_UID,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			actionType: "reaction",
+			resourceId: resource.id,
+			resourceCost: 1,
+			context: {
+				...MiscUtil.copyFast(context),
+				rollType,
+				isFailed: true,
+				target,
+			},
+			result: {
+				bonus,
+				originalTotal: Number.isFinite(originalTotal) ? originalTotal : null,
+				adjustedTotal: Number.isFinite(originalTotal) ? originalTotal + bonus : null,
+				target,
+			},
+		});
+	}
+
+	restoreEfaFlashOfGeniusOnShortRest () {
+		const cls = this._getEfaArtificerClass();
+		if ((Number(cls?.level) || 0) < 20 || this.getAttunedItems().length < 1) return 0;
+		const resource = this._ensureEfaFlashOfGeniusResource();
+		if (!resource) return 0;
+		const restored = Math.max(0, resource.max - resource.current);
+		this.setResourceCurrent(resource.id, resource.max);
+		return restored;
+	}
+
 	getResources () {
 		this._ensureFeatRegistryResources();
+		this._ensureEfaFlashOfGeniusResource();
 		this._ensureBattleMasterSuperiorityDice();
 		this._ensureShadowKnightResources();
 		this._ensureMeteorKnightResources();
@@ -48505,6 +48816,15 @@ class CharacterSheetState {
 	_getCuratedFeatureUses (feature) {
 		const name = (feature.name || "").toLowerCase();
 		const source = feature.classSource || feature.source;
+
+		if (String(source || "").toUpperCase() === "EFA" && name === "flash of genius") {
+			const artificerLevel = Number(this._getEfaArtificerClass()?.level) || 0;
+			return {
+				max: Math.max(1, this.getAbilityMod("int")),
+				recharge: "long",
+				...(artificerLevel >= 14 ? {shortRestRecovery: 1} : {}),
+			};
+		}
 
 		if (source === "XPHB" && name === "warding flare") {
 			const clericLevel = this.getClassLevel("Cleric");
@@ -71792,6 +72112,7 @@ class CharacterSheetState {
 
 		// Recover short rest resources (includes Ki/Focus Points)
 		this.recoverResources("short");
+		this.restoreEfaFlashOfGeniusOnShortRest();
 		this.recoverGemstoneResources("short");
 
 		// Warlock pact slots
