@@ -3770,6 +3770,7 @@ const FeatureEffectRegistry = {
 				die: "d6",
 				recharge: "long",
 				oncePerTurn: true,
+				turnReceiptId: "cruelty-die",
 				contextualOnly: true,
 				actionLabel: "No action",
 				legacyNames: ["Cruel"],
@@ -5440,17 +5441,18 @@ class CharacterSheetState {
 
 			// Resources (class features, racial abilities, etc.)
 			resources: [], // [{id, name, current, max, recharge: "short"|"long"|"dawn"}]
-			// Shared once-per-turn receipts for data-driven triggered resource pools.
-			// Keyed by resource id → combat round; ignored outside combat.
-			resourceTurnUsage: {},
-			// Shared once-per-turn receipts for deferred flat-damage riders. The stable
-			// source-feature UID is the key, so spell and attack consumers share one ceiling.
-			deferredFlatDamageRiderTurnUsage: {},
+			// Shared stable-key receipts for once-per-turn effects. `turnId` is an
+			// opaque sequence advanced only by resetTurnEconomy(); it is deliberately
+			// independent of combatRound so out-of-combat callers use the same gate.
+			turnReceipts: {
+				version: 1,
+				turnId: 0,
+				receipts: {},
+			},
 			pendingDamageMaximization: null, // Deferred one-shot damage maximization (e.g. Destructive Wrath)
 			// Deferred one-shot flat bonus on the damage of your next spell
 			// (e.g. Summer's Defiant Blood). See `armPendingSpellDamageBonus`.
 			pendingSpellDamageBonus: null,
-			pendingSpellDamageBonusUsedKeys: [],
 
 			// Notes
 			notes: {
@@ -5925,12 +5927,7 @@ class CharacterSheetState {
 		) {
 			this._data.actionEconomyUsage.bonus = true;
 		}
-		if (!this._data.resourceTurnUsage || typeof this._data.resourceTurnUsage !== "object" || Array.isArray(this._data.resourceTurnUsage)) {
-			this._data.resourceTurnUsage = {};
-		}
-		if (!this._data.deferredFlatDamageRiderTurnUsage || typeof this._data.deferredFlatDamageRiderTurnUsage !== "object" || Array.isArray(this._data.deferredFlatDamageRiderTurnUsage)) {
-			this._data.deferredFlatDamageRiderTurnUsage = {};
-		}
+		this._normalizeTurnReceiptStore();
 		if (this._data.characterBase && typeof this._data.characterBase === "object") {
 			if (!Number(this._data.characterBase.v)) this._data.characterBase.v = 1;
 			if (!Array.isArray(this._data.characterBase.decisions)) this._data.characterBase.decisions = [];
@@ -6315,6 +6312,7 @@ class CharacterSheetState {
 		this.reconcileEfaArmorerState({cause: "load"});
 		this._ensureFeatRegistryResources();
 		this._endBladesongForInvalidEquipment();
+		this._migrateLegacyTurnReceipts();
 		this._migrateEfaFlashOfGeniusResource();
 		this._syncAdventurersAtlasEligibility();
 		this._syncCharacterDeathConsequences();
@@ -11525,13 +11523,11 @@ class CharacterSheetState {
 		for (const feat of sourceFeats) this.removeFeat(feat.name, feat.source);
 		this._data.chosenSubfeatures = (this._data.chosenSubfeatures || [])
 			.filter(record => record.sourceDecisionKey !== sourceId);
+		const removedSourceResources = (this._data.resources || [])
+			.filter(resource => resource.sourceDecisionKey === sourceId);
 		this._data.resources = (this._data.resources || [])
 			.filter(resource => resource.sourceDecisionKey !== sourceId);
-		for (const resourceId of Object.keys(this._data.resourceTurnUsage || {})) {
-			if (!(this._data.resources || []).some(resource => resource.id === resourceId)) {
-				delete this._data.resourceTurnUsage[resourceId];
-			}
-		}
+		this._pruneTurnReceiptsForResources(removedSourceResources);
 		this.removeModifiersBySourceDecision?.(sourceId);
 		const ownedKeys = new Set();
 		for (const effect of decision?.receipt?.effects || []) {
@@ -11550,14 +11546,15 @@ class CharacterSheetState {
 					if (feature.id) this.removeFeature(feature.id);
 					else if (feature.name) this.removeFeature(feature.name, feature.source);
 				}
+				const removedMaterializedResources = (this._data.resources || []).filter(resource =>
+					featureIds.has(resource.featureId)
+					|| resource.sourceDecisionKey === sourceId,
+				);
 				this._data.resources = (this._data.resources || []).filter(resource =>
 					!featureIds.has(resource.featureId)
 					&& resource.sourceDecisionKey !== sourceId,
 				);
-				const liveResourceIds = new Set((this._data.resources || []).map(resource => resource.id));
-				for (const resourceId of Object.keys(this._data.resourceTurnUsage || {})) {
-					if (!liveResourceIds.has(resourceId)) delete this._data.resourceTurnUsage[resourceId];
-				}
+				this._pruneTurnReceiptsForResources(removedMaterializedResources);
 				this._data.modifiers = (this._data.modifiers || []).filter(modifier =>
 					!featureIds.has(modifier.featureId)
 					&& modifier.sourceDecisionKey !== sourceId,
@@ -44640,6 +44637,260 @@ class CharacterSheetState {
 	}
 	// #endregion
 
+	// #region Per-Turn Receipts
+	_normalizeTurnReceiptStore () {
+		const raw = this._data.turnReceipts;
+		const turnId = Math.max(0, Math.floor(Number(raw?.turnId) || 0));
+		const receipts = {};
+		if (raw?.receipts && typeof raw.receipts === "object" && !Array.isArray(raw.receipts)) {
+			for (const [storedKey, storedReceipt] of Object.entries(raw.receipts)) {
+				if (!storedReceipt || typeof storedReceipt !== "object" || Array.isArray(storedReceipt)) continue;
+				const key = String(storedReceipt.key || storedKey || "").trim();
+				const receiptId = String(storedReceipt.receiptId || "").trim();
+				const ownerUid = String(storedReceipt.ownerUid || "").trim();
+				const sourceUid = String(storedReceipt.sourceUid || "").trim();
+				const actionUid = String(storedReceipt.actionUid || "").trim();
+				if (!key || !receiptId || !ownerUid || !sourceUid || !actionUid) continue;
+				if (Math.max(0, Math.floor(Number(storedReceipt.turnId) || 0)) !== turnId) continue;
+				receipts[key] = {
+					receiptVersion: 1,
+					receiptId,
+					key,
+					ownerUid,
+					sourceUid,
+					actionUid,
+					turnId,
+					metadata: storedReceipt.metadata && typeof storedReceipt.metadata === "object"
+						? MiscUtil.copyFast(storedReceipt.metadata)
+						: {},
+				};
+			}
+		}
+		this._data.turnReceipts = {version: 1, turnId, receipts};
+		return this._data.turnReceipts;
+	}
+
+	_getTurnReceiptStore () {
+		if (!this._data.turnReceipts || typeof this._data.turnReceipts !== "object" || Array.isArray(this._data.turnReceipts)) {
+			return this._normalizeTurnReceiptStore();
+		}
+		if (!this._data.turnReceipts.receipts || typeof this._data.turnReceipts.receipts !== "object" || Array.isArray(this._data.turnReceipts.receipts)) {
+			return this._normalizeTurnReceiptStore();
+		}
+		return this._data.turnReceipts;
+	}
+
+	/**
+	 * Query one caller-supplied stable exact identity in the current turn.
+	 * @param {string} key
+	 * @returns {{ok: boolean, used: boolean, key: string, turnId: number, receipt: object|null, reason?: string}}
+	 */
+	queryTurnReceipt (key) {
+		const normalizedKey = String(key || "").trim();
+		const store = this._getTurnReceiptStore();
+		if (!normalizedKey) {
+			return {ok: false, used: false, key: normalizedKey, turnId: store.turnId, receipt: null, reason: "invalidKey"};
+		}
+		const receipt = store.receipts[normalizedKey] || null;
+		return {
+			ok: true,
+			used: !!receipt,
+			key: normalizedKey,
+			turnId: store.turnId,
+			receipt: receipt ? MiscUtil.copyFast(receipt) : null,
+		};
+	}
+
+	/**
+	 * Commit one stable-key use for the current turn. Duplicate keys are rejected
+	 * without replacing the original receipt.
+	 * @param {{key: string, ownerUid: string, sourceUid: string, actionUid: string, metadata?: object}} descriptor
+	 * @returns {{ok: boolean, committed: boolean, duplicate: boolean, reason: string|null, key: string, turnId: number, receipt: object|null}}
+	 */
+	commitTurnReceipt ({key, ownerUid, sourceUid, actionUid, metadata = {}} = {}) {
+		const normalized = {
+			key: String(key || "").trim(),
+			ownerUid: String(ownerUid || "").trim(),
+			sourceUid: String(sourceUid || "").trim(),
+			actionUid: String(actionUid || "").trim(),
+		};
+		const store = this._getTurnReceiptStore();
+		if (Object.values(normalized).some(value => !value)) {
+			return {
+				ok: false,
+				committed: false,
+				duplicate: false,
+				reason: "invalidDescriptor",
+				key: normalized.key,
+				turnId: store.turnId,
+				receipt: null,
+			};
+		}
+
+		const existing = store.receipts[normalized.key];
+		if (existing) {
+			return {
+				ok: false,
+				committed: false,
+				duplicate: true,
+				reason: "alreadyUsed",
+				key: normalized.key,
+				turnId: store.turnId,
+				receipt: MiscUtil.copyFast(existing),
+			};
+		}
+
+		const receipt = {
+			receiptVersion: 1,
+			receiptId: `turn-receipt-${CryptUtil.uid()}`,
+			...normalized,
+			turnId: store.turnId,
+			metadata: metadata && typeof metadata === "object" ? MiscUtil.copyFast(metadata) : {},
+		};
+		store.receipts[normalized.key] = receipt;
+		return {
+			ok: true,
+			committed: true,
+			duplicate: false,
+			reason: null,
+			key: normalized.key,
+			turnId: store.turnId,
+			receipt: MiscUtil.copyFast(receipt),
+		};
+	}
+
+	/**
+	 * Roll back only the exact receipt returned by commitTurnReceipt(). A stale,
+	 * synthesized, or mismatched receipt cannot release another use.
+	 * @param {object} receipt
+	 * @returns {{ok: boolean, rolledBack: boolean, reason: string|null, key: string, turnId: number, receipt: object|null}}
+	 */
+	rollbackTurnReceipt (receipt) {
+		const key = String(receipt?.key || "").trim();
+		const store = this._getTurnReceiptStore();
+		const existing = key ? store.receipts[key] : null;
+		if (!existing) {
+			return {ok: false, rolledBack: false, reason: key ? "notFound" : "invalidReceipt", key, turnId: store.turnId, receipt: null};
+		}
+		const isMatch = [
+			"receiptId",
+			"key",
+			"ownerUid",
+			"sourceUid",
+			"actionUid",
+			"turnId",
+		].every(prop => existing[prop] === receipt?.[prop]);
+		if (!isMatch) {
+			return {
+				ok: false,
+				rolledBack: false,
+				reason: "receiptMismatch",
+				key,
+				turnId: store.turnId,
+				receipt: MiscUtil.copyFast(existing),
+			};
+		}
+		delete store.receipts[key];
+		return {
+			ok: true,
+			rolledBack: true,
+			reason: null,
+			key,
+			turnId: store.turnId,
+			receipt: MiscUtil.copyFast(existing),
+		};
+	}
+
+	/**
+	 * Tear down receipts for one exact owner/source pair. Optional actionUid
+	 * narrows the teardown further; broad owner-only or source-only pruning is
+	 * rejected to prevent unrelated same-named mechanics from being released.
+	 */
+	pruneTurnReceipts ({ownerUid, sourceUid, actionUid = null} = {}) {
+		const normalizedOwnerUid = String(ownerUid || "").trim();
+		const normalizedSourceUid = String(sourceUid || "").trim();
+		const normalizedActionUid = actionUid == null ? null : String(actionUid || "").trim();
+		const store = this._getTurnReceiptStore();
+		if (!normalizedOwnerUid || !normalizedSourceUid || (actionUid != null && !normalizedActionUid)) {
+			return {
+				ok: false,
+				pruned: false,
+				reason: "invalidPruneScope",
+				ownerUid: normalizedOwnerUid,
+				sourceUid: normalizedSourceUid,
+				actionUid: normalizedActionUid,
+				turnId: store.turnId,
+				count: 0,
+				receipts: [],
+			};
+		}
+
+		const removed = [];
+		for (const [key, receipt] of Object.entries(store.receipts)) {
+			if (receipt.ownerUid !== normalizedOwnerUid || receipt.sourceUid !== normalizedSourceUid) continue;
+			if (normalizedActionUid && receipt.actionUid !== normalizedActionUid) continue;
+			removed.push(MiscUtil.copyFast(receipt));
+			delete store.receipts[key];
+		}
+		return {
+			ok: true,
+			pruned: !!removed.length,
+			reason: null,
+			ownerUid: normalizedOwnerUid,
+			sourceUid: normalizedSourceUid,
+			actionUid: normalizedActionUid,
+			turnId: store.turnId,
+			count: removed.length,
+			receipts: removed,
+		};
+	}
+
+	_getLegacyPendingSpellDamageTurnReceiptDescriptor (legacyKey) {
+		if (legacyKey === "summersDefiantBlood") return this._getSummersDefiantBloodTurnReceiptDescriptor();
+		return null;
+	}
+
+	_migrateLegacyTurnReceipts () {
+		const legacyResourceUsage = this._data.resourceTurnUsage;
+		if (legacyResourceUsage && typeof legacyResourceUsage === "object" && !Array.isArray(legacyResourceUsage) && this.isInCombat()) {
+			const currentRound = this.getCombatRound();
+			for (const [resourceId, usedRound] of Object.entries(legacyResourceUsage)) {
+				if (Number(usedRound) !== currentRound) continue;
+				const resource = (this._data.resources || []).find(it => it.id === resourceId);
+				const descriptor = resource?.triggeredDiePool?.turnReceipt;
+				if (!descriptor) continue;
+				this.commitTurnReceipt({
+					...descriptor,
+					metadata: {migratedFrom: "resourceTurnUsage"},
+				});
+			}
+		}
+
+		const pending = this._data.pendingSpellDamageBonus;
+		const legacyPendingKey = pending?.oncePerRoundKey || null;
+		const pendingDescriptor = legacyPendingKey
+			? this._getLegacyPendingSpellDamageTurnReceiptDescriptor(legacyPendingKey)
+			: null;
+		if (pendingDescriptor) {
+			pending.turnReceipt = MiscUtil.copyFast(pendingDescriptor);
+			delete pending.oncePerRoundKey;
+		}
+		for (const legacyKey of Array.isArray(this._data.pendingSpellDamageBonusUsedKeys)
+			? this._data.pendingSpellDamageBonusUsedKeys
+			: []) {
+			const descriptor = this._getLegacyPendingSpellDamageTurnReceiptDescriptor(legacyKey);
+			if (!descriptor) continue;
+			this.commitTurnReceipt({
+				...descriptor,
+				metadata: {migratedFrom: "pendingSpellDamageBonusUsedKeys"},
+			});
+		}
+
+		delete this._data.resourceTurnUsage;
+		delete this._data.pendingSpellDamageBonusUsedKeys;
+	}
+	// #endregion
+
 	// #region Resources
 	_resolveFeatRegistryResourceMax (value) {
 		if (value === "proficiency") return this.getProficiencyBonus();
@@ -44682,12 +44933,27 @@ class CharacterSheetState {
 		if (feat.sourceDecisionKey) resource.sourceDecisionKey = feat.sourceDecisionKey;
 
 		if (effect.type === "triggeredDiePool") {
+			const featUid = `${feat.name}|${feat.source || ""}`;
+			const turnReceiptId = String(effect.turnReceiptId || "").trim();
+			if (effect.oncePerTurn !== false && !turnReceiptId) {
+				throw new Error(`Triggered die pool "${featUid}" requires a stable turnReceiptId.`);
+			}
 			resource.contextualOnly = effect.contextualOnly !== false;
 			resource.actionLabel = effect.actionLabel || "Triggered";
 			resource.triggeredDiePool = {
 				die: effect.die || "d6",
 				oncePerTurn: effect.oncePerTurn !== false,
 				triggers: MiscUtil.copyFast(effect.triggers || {}),
+				...(turnReceiptId
+					? {
+						turnReceipt: {
+							key: `feat:${featUid}:effect:${turnReceiptId}:action:triggered-die`,
+							ownerUid: `feat:${featUid}`,
+							sourceUid: `feat:${featUid}:effect:${turnReceiptId}`,
+							actionUid: "triggered-die",
+						},
+					}
+					: {}),
 			};
 		}
 
@@ -44696,7 +44962,6 @@ class CharacterSheetState {
 
 	_ensureFeatRegistryResources () {
 		if (!Array.isArray(this._data.resources)) this._data.resources = [];
-		if (!this._data.resourceTurnUsage || typeof this._data.resourceTurnUsage !== "object") this._data.resourceTurnUsage = {};
 
 		const liveRegistryKeys = new Set();
 		for (const feat of this._data.feats || []) {
@@ -44710,16 +44975,20 @@ class CharacterSheetState {
 			}
 		}
 
-		const removedIds = [];
+		const removedResources = [];
 		this._data.resources = this._data.resources.filter(resource => {
 			if (!resource.registryManaged || liveRegistryKeys.has(resource.registryKey)) return true;
-			removedIds.push(resource.id);
+			removedResources.push(resource);
 			return false;
 		});
-		for (const id of removedIds) delete this._data.resourceTurnUsage[id];
-		const resourceIds = new Set(this._data.resources.map(resource => resource.id));
-		for (const id of Object.keys(this._data.resourceTurnUsage)) {
-			if (!resourceIds.has(id)) delete this._data.resourceTurnUsage[id];
+		this._pruneTurnReceiptsForResources(removedResources);
+	}
+
+	_pruneTurnReceiptsForResources (resources) {
+		for (const resource of resources || []) {
+			const descriptor = resource?.triggeredDiePool?.turnReceipt;
+			if (!descriptor) continue;
+			this.pruneTurnReceipts(descriptor);
 		}
 	}
 
@@ -44733,12 +45002,12 @@ class CharacterSheetState {
 
 	getTriggeredFeatDieOptions (trigger, context = {}) {
 		this._ensureFeatRegistryResources();
-		const round = this.isInCombat() ? this.getCombatRound() : null;
 		return this._data.resources
 			.filter(resource => resource.triggeredDiePool?.triggers?.[trigger])
 			.filter(resource => resource.current > 0)
 			.filter(resource => this._matchesTriggeredFeatDieContext(resource.triggeredDiePool.triggers[trigger], context))
-			.filter(resource => !resource.triggeredDiePool.oncePerTurn || round == null || this._data.resourceTurnUsage[resource.id] !== round)
+			.filter(resource => !resource.triggeredDiePool.oncePerTurn
+				|| !this.queryTurnReceipt(resource.triggeredDiePool.turnReceipt?.key).used)
 			.map(resource => {
 				const feat = (this._data.feats || []).find(it => it.id === resource.featId);
 				return {
@@ -44750,6 +45019,7 @@ class CharacterSheetState {
 					max: resource.max,
 					die: resource.triggeredDiePool.die,
 					oncePerTurn: resource.triggeredDiePool.oncePerTurn,
+					turnReceiptKey: resource.triggeredDiePool.turnReceipt?.key || null,
 					actionLabel: resource.actionLabel || "Triggered",
 					trigger: MiscUtil.copyFast(resource.triggeredDiePool.triggers[trigger]),
 				};
@@ -44764,16 +45034,44 @@ class CharacterSheetState {
 		if (!this._matchesTriggeredFeatDieContext(triggerConfig, context)) return {ok: false, error: "This die cannot be used for that roll."};
 		if (resource.current <= 0) return {ok: false, error: `${resource.name} has no uses remaining.`};
 
-		const round = this.isInCombat() ? this.getCombatRound() : null;
-		if (resource.triggeredDiePool.oncePerTurn && round != null && this._data.resourceTurnUsage[resource.id] === round) {
-			return {ok: false, error: `${resource.name} has already been used this turn.`};
+		let turnReceiptResult = null;
+		if (resource.triggeredDiePool.oncePerTurn) {
+			const descriptor = resource.triggeredDiePool.turnReceipt;
+			turnReceiptResult = this.commitTurnReceipt(descriptor);
+			if (!turnReceiptResult.ok) {
+				return {
+					ok: false,
+					committed: false,
+					reason: turnReceiptResult.reason,
+					error: turnReceiptResult.reason === "alreadyUsed"
+						? `${resource.name} has already been used this turn.`
+						: `${resource.name} is missing valid per-turn receipt metadata.`,
+					turnReceipt: turnReceiptResult.receipt,
+				};
+			}
 		}
 
-		this.setResourceCurrent(resource.id, resource.current - 1);
-		if (resource.triggeredDiePool.oncePerTurn && round != null) this._data.resourceTurnUsage[resource.id] = round;
+		const previousCurrent = resource.current;
+		try {
+			this.setResourceCurrent(resource.id, previousCurrent - 1);
+			if (resource.current !== previousCurrent - 1) throw new Error("Resource state did not commit.");
+		} catch (error) {
+			const rollback = turnReceiptResult?.receipt
+				? this.rollbackTurnReceipt(turnReceiptResult.receipt)
+				: null;
+			return {
+				ok: false,
+				committed: false,
+				reason: "resourceCommitFailed",
+				error: error instanceof Error ? error.message : String(error),
+				turnReceipt: turnReceiptResult?.receipt || null,
+				rollback,
+			};
+		}
 		const feat = (this._data.feats || []).find(it => it.id === resource.featId);
 		return {
 			ok: true,
+			committed: true,
 			resourceId: resource.id,
 			featId: resource.featId,
 			sourceName: feat?.name || resource.name,
@@ -44781,6 +45079,7 @@ class CharacterSheetState {
 			die: resource.triggeredDiePool.die,
 			kind: triggerConfig.kind,
 			remaining: resource.current,
+			turnReceipt: turnReceiptResult?.receipt || null,
 		};
 	}
 
@@ -49349,12 +49648,10 @@ class CharacterSheetState {
 	applyTurnStartEffects () {
 		const effects = this.getTurnStartEffects();
 		const applied = [];
-		// GENERIC once-per-round riders (Summer's Defiant Blood, …) unlock at the
-		// start of your turn, and an armed-but-unspent bonus lapses once its
-		// "before the end of your next turn" window has fully elapsed. Out of
-		// combat there is no round counter to measure against, so an armed bonus
-		// simply waits for the next spell.
-		this.resetPendingSpellDamageBonusCooldowns();
+		// An armed-but-unspent bonus lapses once its "before the end of your next
+		// turn" window has fully elapsed. Per-turn reuse is released exclusively by
+		// resetTurnEconomy(), before this resolver runs. Out of combat there is no
+		// round counter to measure against, so an armed bonus waits for the next spell.
 		const pendingBonus = this._data.pendingSpellDamageBonus;
 		if (pendingBonus && this._data.inCombat && pendingBonus.armedAtRound != null
 			&& (this._data.combatRound || 0) - pendingBonus.armedAtRound >= 2) {
@@ -49662,56 +49959,79 @@ class CharacterSheetState {
 
 	/**
 	 * Arm a one-shot bonus on the damage of the next spell cast.
-	 * @param {{sourceFeatureId?: string|null, sourceName?: string, value: number, oncePerRoundKey?: string|null}} opts
-	 * @returns {boolean} true when newly armed
+	 * @param {{sourceFeatureId?: string|null, sourceName?: string, value: number, turnReceipt?: object|null}} opts
+	 * @returns {{ok: boolean, committed: boolean, reason: string|null, pending: object|null, turnReceipt: object|null, rollback?: object}}
 	 */
-	armPendingSpellDamageBonus ({sourceFeatureId = null, sourceName = "Spell Damage Bonus", value = 0, oncePerRoundKey = null} = /** @type {*} */ ({})) {
+	armPendingSpellDamageBonus ({sourceFeatureId = null, sourceName = "Spell Damage Bonus", value = 0, turnReceipt = null} = /** @type {*} */ ({})) {
 		const amount = Number(value) || 0;
-		if (amount <= 0) return false;
-		// A once-per-round rider may only be armed once between turn resets.
-		if (oncePerRoundKey && this._data.pendingSpellDamageBonusUsedKeys?.includes(oncePerRoundKey)) return false;
-		this._data.pendingSpellDamageBonus = {sourceFeatureId, sourceName, value: amount, oncePerRoundKey, armedAtRound: this._data.inCombat ? (this._data.combatRound || 0) : null};
-		if (oncePerRoundKey) {
-			if (!Array.isArray(this._data.pendingSpellDamageBonusUsedKeys)) this._data.pendingSpellDamageBonusUsedKeys = [];
-			this._data.pendingSpellDamageBonusUsedKeys.push(oncePerRoundKey);
+		if (amount <= 0) {
+			return {ok: false, committed: false, reason: "invalidValue", pending: null, turnReceipt: null};
 		}
-		return true;
+
+		const receiptResult = turnReceipt ? this.commitTurnReceipt(turnReceipt) : null;
+		if (receiptResult && !receiptResult.ok) {
+			return {
+				ok: false,
+				committed: false,
+				reason: receiptResult.reason,
+				pending: null,
+				turnReceipt: receiptResult.receipt,
+			};
+		}
+
+		try {
+			this._data.pendingSpellDamageBonus = {
+				sourceFeatureId,
+				sourceName,
+				value: amount,
+				turnReceipt: turnReceipt ? MiscUtil.copyFast(turnReceipt) : null,
+				armedAtRound: this._data.inCombat ? (this._data.combatRound || 0) : null,
+			};
+		} catch (error) {
+			const rollback = receiptResult?.receipt ? this.rollbackTurnReceipt(receiptResult.receipt) : null;
+			return {
+				ok: false,
+				committed: false,
+				reason: "pendingCommitFailed",
+				error: error instanceof Error ? error.message : String(error),
+				pending: null,
+				turnReceipt: receiptResult?.receipt || null,
+				rollback,
+			};
+		}
+		return {
+			ok: true,
+			committed: true,
+			reason: null,
+			pending: MiscUtil.copyFast(this._data.pendingSpellDamageBonus),
+			turnReceipt: receiptResult?.receipt || null,
+		};
 	}
 
-	/** @returns {{sourceFeatureId: string|null, sourceName: string, value: number, oncePerRoundKey: string|null}|null} */
+	/** @returns {{sourceFeatureId: string|null, sourceName: string, value: number, turnReceipt: object|null}|null} */
 	getPendingSpellDamageBonus () {
-		return this._data.pendingSpellDamageBonus ? {...this._data.pendingSpellDamageBonus} : null;
-	}
-
-	/**
-	 * Whether a once-per-round rider has already been armed since the last turn reset.
-	 * @param {string} oncePerRoundKey
-	 * @returns {boolean}
-	 */
-	isPendingSpellDamageBonusOnCooldown (oncePerRoundKey) {
-		return !!oncePerRoundKey && !!this._data.pendingSpellDamageBonusUsedKeys?.includes(oncePerRoundKey);
+		return this._data.pendingSpellDamageBonus ? MiscUtil.copyFast(this._data.pendingSpellDamageBonus) : null;
 	}
 
 	/**
 	 * Consume the armed bonus. Returns the descriptor that applied, or null.
-	 * @returns {{sourceName: string, value: number}|null}
+	 * The committed turn receipt deliberately remains until rollback, prune, or
+	 * resetTurnEconomy(), so consuming the rider does not permit a same-turn retry.
+	 * @returns {{sourceName: string, value: number, turnReceipt: object|null}|null}
 	 */
 	consumePendingSpellDamageBonus () {
 		const pending = this._data.pendingSpellDamageBonus;
 		if (!pending) return null;
 		this._data.pendingSpellDamageBonus = null;
-		return {sourceName: pending.sourceName, value: pending.value};
+		return {
+			sourceName: pending.sourceName,
+			value: pending.value,
+			turnReceipt: pending.turnReceipt ? MiscUtil.copyFast(pending.turnReceipt) : null,
+		};
 	}
 
 	clearPendingSpellDamageBonus () {
 		this._data.pendingSpellDamageBonus = null;
-	}
-
-	/**
-	 * Release the once-per-round locks (called from the start-of-turn reset).
-	 */
-	resetPendingSpellDamageBonusCooldowns () {
-		this._data.pendingSpellDamageBonusUsedKeys = [];
 	}
 
 	// =====================================================================
@@ -49747,21 +50067,27 @@ class CharacterSheetState {
 	}
 
 	_isDeferredFlatDamageRiderUsedThisTurn (receiptKey) {
-		if (!receiptKey || !this.isInCombat()) return false;
-		return this._data.deferredFlatDamageRiderTurnUsage?.[receiptKey] === this.getCombatRound();
+		if (!receiptKey) return false;
+		return this.queryTurnReceipt(receiptKey).used;
 	}
 
 	_markDeferredFlatDamageRiderUsedThisTurn (receiptKey) {
-		if (!receiptKey || !this.isInCombat()) return;
-		if (!this._data.deferredFlatDamageRiderTurnUsage || typeof this._data.deferredFlatDamageRiderTurnUsage !== "object") {
-			this._data.deferredFlatDamageRiderTurnUsage = {};
-		}
-		this._data.deferredFlatDamageRiderTurnUsage[receiptKey] = this.getCombatRound();
+		if (!receiptKey) return null;
+		return this.commitTurnReceipt({
+			key: receiptKey,
+			ownerUid: "Cartographer|Artificer|EFA|EFA",
+			sourceUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+			actionUid: "guided-precision:damage-rider",
+		});
 	}
 
 	_pruneDeferredFlatDamageRiderTurnUsage () {
 		if (this._getGuidedPrecisionClassEntry()) return;
-		delete this._data.deferredFlatDamageRiderTurnUsage?.[CharacterSheetState.GUIDED_PRECISION_FEATURE_UID];
+		this.pruneTurnReceipts({
+			ownerUid: "Cartographer|Artificer|EFA|EFA",
+			sourceUid: CharacterSheetState.GUIDED_PRECISION_FEATURE_UID,
+			actionUid: "guided-precision:damage-rider",
+		});
 	}
 
 	/**
@@ -49799,7 +50125,7 @@ class CharacterSheetState {
 	 * Resolve and consume an accepted deferred rider. Ability modifiers are read here,
 	 * at damage resolution time, rather than when the offer was displayed.
 	 * @param {*} rider
-	 * @returns {{name:string, sourceFeatureUid:string, receiptKey:string, value:number}|null}
+	 * @returns {{name:string, sourceFeatureUid:string, receiptKey:string, value:number, turnReceipt:object}|null}
 	 */
 	consumeDeferredFlatDamageRider (rider) {
 		if (!rider?.sourceFeatureUid || rider.sourceFeatureUid !== CharacterSheetState.GUIDED_PRECISION_FEATURE_UID) return null;
@@ -49815,12 +50141,14 @@ class CharacterSheetState {
 		}
 		if (!Number.isFinite(value)) return null;
 
-		this._markDeferredFlatDamageRiderUsedThisTurn(rider.receiptKey);
+		const receiptResult = this._markDeferredFlatDamageRiderUsedThisTurn(rider.receiptKey);
+		if (!receiptResult?.committed) return null;
 		return {
 			name: rider.name || "Damage Bonus",
 			sourceFeatureUid: rider.sourceFeatureUid,
 			receiptKey: rider.receiptKey,
 			value,
+			turnReceipt: receiptResult.receipt,
 		};
 	}
 
@@ -54526,22 +54854,20 @@ class CharacterSheetState {
 			const hasExactToolChoiceOwner = featureToolKey.startsWith("uid:");
 			this._data.fulfilledFeatureToolChoices = (this._data.fulfilledFeatureToolChoices || [])
 				.filter(name => name !== featureToolKey && (hasExactToolChoiceOwner || name !== featureKey));
-			const removedResourceIds = this._data.resources
+			const removedResources = this._data.resources
 				.filter(r =>
 					r.featureId === feature.id
 					|| (feature.sourceDecisionKey
 						? r.sourceDecisionKey === feature.sourceDecisionKey
 						: r.name === feature.name),
-				)
-				.map(r => r.id)
-				.filter(Boolean);
+				);
 			this._data.resources = this._data.resources.filter(r =>
 				r.featureId !== feature.id
 				&& (feature.sourceDecisionKey
 					? r.sourceDecisionKey !== feature.sourceDecisionKey
 					: r.name !== feature.name),
 			);
-			for (const resourceId of removedResourceIds) delete this._data.resourceTurnUsage?.[resourceId];
+			this._pruneTurnReceiptsForResources(removedResources);
 			// Remove associated attack if it was auto-added (natural weapon)
 			this._data.attacks = this._data.attacks.filter(a => a.featureId !== feature.id && a.sourceFeature !== feature.name);
 			// Remove associated innate spells
@@ -55013,19 +55339,18 @@ class CharacterSheetState {
 
 		// Remove associated resource if it was auto-added
 		if (feat) {
-			const resourceIdsToRemove = this._data.resources
+			const resourcesToRemove = this._data.resources
 				.filter(r => r.featId === feat.id
 					|| (feat.sourceDecisionKey
 						? r.sourceDecisionKey === feat.sourceDecisionKey
-						: r.name === feat.name))
-				.map(r => r.id);
+						: r.name === feat.name));
 			this._data.resources = this._data.resources.filter(r =>
 				r.featId !== feat.id
 				&& (feat.sourceDecisionKey
 					? r.sourceDecisionKey !== feat.sourceDecisionKey
 					: r.name !== feat.name),
 			);
-			for (const resourceId of resourceIdsToRemove) delete this._data.resourceTurnUsage?.[resourceId];
+			this._pruneTurnReceiptsForResources(resourcesToRemove);
 			// Remove associated modifiers
 			this.removeModifiersByFeature(feat.id);
 			// Remove optional features granted via feat choices
@@ -71214,7 +71539,6 @@ class CharacterSheetState {
 		this._data.sanguineMasteryLastRerollRound = null;
 		this._data.hybridBloodlustTurnStartRound = null;
 		this._data.hybridBloodlustTurnStartCheck = null;
-		this._data.resourceTurnUsage = {};
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: null});
 
@@ -73793,10 +74117,28 @@ class CharacterSheetState {
 		return this.getMovementEconomyState();
 	}
 
+	/**
+	 * Advance the opaque turn sequence and clear all per-turn receipts. This is
+	 * the sole state lifecycle reset for action slots, movement, and turn receipts.
+	 */
 	resetTurnEconomy ({round = this._data.inCombat ? Math.max(0, Number(this._data.combatRound) || 0) : null} = {}) {
+		const store = this._getTurnReceiptStore();
+		const previousTurnId = store.turnId;
+		const clearedReceipts = Object.values(store.receipts).map(receipt => MiscUtil.copyFast(receipt));
+		this._data.turnReceipts = {
+			version: 1,
+			turnId: previousTurnId + 1,
+			receipts: {},
+		};
 		this.resetActionEconomy();
 		this.resetMovementEconomy({round});
-		this._data.deferredFlatDamageRiderTurnUsage = {};
+		return {
+			ok: true,
+			reset: true,
+			previousTurnId,
+			turnId: this._data.turnReceipts.turnId,
+			clearedReceipts,
+		};
 	}
 
 	getChainedMovementState () {
@@ -78405,7 +78747,7 @@ class CharacterSheetState {
 		// Clear active states that end on rest
 		this.clearStatesOnRest("long");
 		this.clearChainedFuryTargets();
-		this.resetMovementEconomy({round: null});
+		this.resetTurnEconomy({round: null});
 
 		// Recover all HP
 		this._data.hp.current = this.getMaxHp();
@@ -79569,12 +79911,32 @@ class CharacterSheetState {
 		};
 	}
 
+	_getSummersDefiantBloodTurnReceiptDescriptor () {
+		const cls = (this._data.classes || []).find(it =>
+			String(it?.name || "").toLowerCase() === "sorcerer"
+			&& ["sun bloodline", "child of the sun bloodline"].includes(
+				String(it?.subclass?.shortName || it?.subclass?.name || "").toLowerCase(),
+			),
+		);
+		if (!cls?.source || !cls.subclass?.source) return null;
+		const classUid = `${cls.name}|${cls.source}`;
+		const subclassName = cls.subclass.shortName || cls.subclass.name;
+		const subclassUid = `${subclassName}|${cls.subclass.source}|${classUid}`;
+		const sourceUid = `subclassFeature:Summer's Defiant Blood|${classUid}|${subclassName}|${cls.subclass.source}`;
+		return {
+			key: `${sourceUid}:action:spell-damage-rider`,
+			ownerUid: `subclass:${subclassUid}`,
+			sourceUid,
+			actionUid: "spell-damage-rider",
+		};
+	}
+
 	/**
 	 * Summer's Defiant Blood — arm the CHA-modifier rider on the damage of your
-	 * next spell. Costs nothing and is limited to once per round; the lock is
-	 * released by {@link applyTurnStartEffects} at the start of your turn.
+	 * next spell. Costs nothing and is limited to once per turn; resetTurnEconomy()
+	 * releases the receipt in or out of combat.
 	 *
-	 * @returns {{ok: boolean, error?: string, bonus?: number}}
+	 * @returns {{ok: boolean, error?: string, bonus?: number, turnReceipt?: object|null}}
 	 */
 	armSummersDefiantBlood () {
 		const calc = this.getFeatureCalculations();
@@ -79582,17 +79944,25 @@ class CharacterSheetState {
 
 		const bonus = calc.defiantBloodBonus ?? 0;
 		if (bonus <= 0) return {ok: false, error: "Your Charisma modifier gives no bonus to add."};
-		if (this.isPendingSpellDamageBonusOnCooldown("summersDefiantBlood")) {
-			return {ok: false, error: "Summer's Defiant Blood has already been used this round."};
-		}
+		const turnReceipt = this._getSummersDefiantBloodTurnReceiptDescriptor();
+		if (!turnReceipt) return {ok: false, error: "Summer's Defiant Blood is missing exact source ownership."};
 
 		const armed = this.armPendingSpellDamageBonus({
 			sourceName: "Summer's Defiant Blood",
 			value: bonus,
-			oncePerRoundKey: "summersDefiantBlood",
+			turnReceipt,
 		});
-		if (!armed) return {ok: false, error: "Summer's Defiant Blood could not be armed." };
-		return {ok: true, bonus};
+		if (!armed.ok) {
+			return {
+				ok: false,
+				error: armed.reason === "alreadyUsed"
+					? "Summer's Defiant Blood has already been used this turn."
+					: "Summer's Defiant Blood could not be armed.",
+				reason: armed.reason,
+				turnReceipt: armed.turnReceipt,
+			};
+		}
+		return {ok: true, bonus, turnReceipt: armed.turnReceipt};
 	}
 
 	/**

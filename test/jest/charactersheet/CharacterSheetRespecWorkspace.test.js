@@ -220,7 +220,6 @@ describe("CharacterSheetRespec workspace", () => {
 		const resource = respec._state.getResources().find(item => item.name === "Cruel");
 		expect(resource).toBeTruthy();
 		respec._state.setResourceCurrent(resource.id, 1);
-		respec._state._data.resourceTurnUsage[resource.id] = 7;
 
 		const decision = {
 			semanticKey: cruel.sourceDecisionKey,
@@ -228,7 +227,6 @@ describe("CharacterSheetRespec workspace", () => {
 		};
 		respec._state.reverseProgressionFeatureReceipt(decision);
 		expect(respec._state.getResources().some(item => item.name === "Cruel")).toBe(false);
-		expect(respec._state._data.resourceTurnUsage[resource.id]).toBeUndefined();
 
 		respec._state.addFeature({...cruel, sourceDecisionKey: "nested:feat:other:occ0:slot0"}, {
 			sourceDecisionKey: "nested:feat:other:occ0:slot0",
@@ -255,14 +253,18 @@ describe("CharacterSheetRespec workspace", () => {
 		]));
 		expect(respec._state.spendTriggeredFeatDie(resource.id, "damage", {}).ok).toBe(true);
 		expect(respec._state.spendTriggeredFeatDie(resource.id, "damage", {}).ok).toBe(false);
-		expect(respec._state._data.resourceTurnUsage[resource.id]).toBe(1);
+		expect(respec._state.queryTurnReceipt(resource.triggeredDiePool.turnReceipt.key)).toMatchObject({
+			ok: true,
+			used: true,
+			turnId: expect.any(Number),
+		});
 
 		respec._state.reverseProgressionFeatureReceipt({
 			semanticKey: sourceDecisionKey,
 			receipt: {sourceDecisionKey, effects: []},
 		});
 		expect(respec._state.getResources().some(item => item.sourceDecisionKey === sourceDecisionKey)).toBe(false);
-		expect(respec._state._data.resourceTurnUsage[resource.id]).toBeUndefined();
+		expect(respec._state.queryTurnReceipt(resource.triggeredDiePool.turnReceipt.key).used).toBe(false);
 		expect(respec._state.getFeats().some(feat => feat.sourceDecisionKey === sourceDecisionKey)).toBe(false);
 	});
 

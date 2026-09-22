@@ -181,12 +181,13 @@ describe("Cruel feat resource model", () => {
 		const state = makeState();
 		state.startCombat();
 		const resource = getCrueltyDice(state);
+		const turnReceiptKey = resource.triggeredDiePool.turnReceipt.key;
 		state.spendTriggeredFeatDie(resource.id, "damage", {damageSource: "weapon"});
 
 		state.removeFeat("Cruel", CRUEL_SOURCE);
 
 		expect(getCrueltyDice(state)).toBeUndefined();
-		expect(state.toJson().resourceTurnUsage[resource.id]).toBeUndefined();
+		expect(state.queryTurnReceipt(turnReceiptKey).used).toBe(false);
 	});
 });
 

@@ -2478,7 +2478,9 @@ class CharacterSheetRespec {
 					: `unowned:${String(resource.name || "").toLowerCase()}`,
 			name: resource.name,
 			current: resource.current,
-			turnUsage: state._data?.resourceTurnUsage?.[resource.id],
+			turnReceipt: resource.triggeredDiePool?.turnReceipt?.key
+				? state.queryTurnReceipt(resource.triggeredDiePool.turnReceipt.key).receipt
+				: null,
 		}));
 		const oldFeatureDecisionKeys = new Map((state.getFeatures?.() || [])
 			.filter(feature => feature.sourceDecisionKey)
@@ -2624,14 +2626,18 @@ class CharacterSheetRespec {
 				|| (!resource.sourceDecisionKey && !resource.featureId && item.name === resource.name && item.identity.startsWith("unowned:")));
 			if (!prior) continue;
 			state.setResourceCurrent?.(resource.id, Math.min(prior.current, resource.max));
-			if (prior.turnUsage != null) {
-				state._data.resourceTurnUsage ||= {};
-				state._data.resourceTurnUsage[resource.id] = MiscUtil.copyFast(prior.turnUsage);
+			if (prior.turnReceipt && resource.triggeredDiePool?.turnReceipt) {
+				const restoredReceipt = state.commitTurnReceipt({
+					...resource.triggeredDiePool.turnReceipt,
+					metadata: {
+						...(prior.turnReceipt.metadata || {}),
+						restoredBy: "respecClassRebuild",
+					},
+				});
+				if (!restoredReceipt.ok && !restoredReceipt.duplicate) {
+					throw new Error(`Could not restore per-turn resource receipt: ${restoredReceipt.reason}`);
+				}
 			}
-		}
-		const liveResourceIds = new Set((state.getResources?.() || []).map(resource => resource.id));
-		for (const resourceId of Object.keys(state._data.resourceTurnUsage || {})) {
-			if (!liveResourceIds.has(resourceId)) delete state._data.resourceTurnUsage[resourceId];
 		}
 	}
 

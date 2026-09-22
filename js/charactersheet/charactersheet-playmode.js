@@ -1653,6 +1653,7 @@ export class CharacterSheetPlayMode {
 		const reset = this._ce("span", "pm-economy__reset", row);
 		this._setIconLabel(reset, "refresh", " Reset turn");
 		this._makeClickable(reset, "Reset turn (restore all actions)", () => {
+			this._actionEconomy = {action: true, bonus: true, reaction: true, movement: true};
 			if (this._state.resetTurnEconomy) this._state.resetTurnEconomy();
 			else {
 				this._state.resetActionEconomy?.();

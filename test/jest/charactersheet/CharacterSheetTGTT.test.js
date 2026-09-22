@@ -8826,16 +8826,21 @@ describe("Traveler's Guide to Thelemar (TGTT) Homebrew Support", () => {
 						mkSun(3, "TGTT");
 						state.armSummersDefiantBlood();
 						const consumed = state.consumePendingSpellDamageBonus();
-						expect(consumed).toEqual({sourceName: "Summer's Defiant Blood", value: 4});
+						expect(consumed).toMatchObject({sourceName: "Summer's Defiant Blood", value: 4});
+						expect(consumed.turnReceipt).toMatchObject({
+							ownerUid: expect.stringContaining("Sun Bloodline|TGTT"),
+							sourceUid: expect.stringContaining("Summer's Defiant Blood|Sorcerer|TGTT"),
+							actionUid: "spell-damage-rider",
+						});
 						expect(state.getPendingSpellDamageBonus()).toBeNull();
 					});
 
-					it("is limited to ONCE PER ROUND, released at the start of your turn", () => {
+					it("is limited to ONCE PER TURN and released by resetTurnEconomy", () => {
 						mkSun(3, "TGTT");
 						expect(state.armSummersDefiantBlood().ok).toBe(true);
 						state.consumePendingSpellDamageBonus();
 						expect(state.armSummersDefiantBlood().ok).toBe(false);
-						state.applyTurnStartEffects();
+						state.resetTurnEconomy();
 						expect(state.armSummersDefiantBlood().ok).toBe(true);
 					});
 

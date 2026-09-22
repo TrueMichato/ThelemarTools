@@ -12,6 +12,7 @@ Detailed reference for combat, active states, spells, items, NPC export, rest, a
 - Combat Action Effects Pipeline (parsing, classification, effect schema, modals, subclass grants)
 - Custom Abilities (data structure, effect routing, reapply on load)
 - Gemstone Empowerment (host-scoped effects, resources, riders, Chalice storage)
+- Stable-Key Per-Turn Receipts
 - Committed Feature Uses and EFA Flash of Genius
 - RHW Reanimator R2a State and Ownership
 - Fixed Proficiency with Fallback Transactions
@@ -39,6 +40,79 @@ standing flat-damage line. Chalice storage uses
 `getGemstoneSpellStorage`/`storeGemstoneSpell`/`castGemstoneStoredSpell`/
 `removeGemstoneStoredSpell`; its two-level capacity is gem-scoped and persists
 across unsocket/resocket.
+
+## Stable-Key Per-Turn Receipts
+
+One-per-turn mechanics use the serialized `turnReceipts` ledger on
+`CharacterSheetState`:
+
+```javascript
+turnReceipts: {
+    version: 1,
+    turnId: 12, // opaque sequence; never a combat round
+    receipts: {
+        "<caller key>": {
+            receiptVersion: 1,
+            receiptId,
+            key,
+            ownerUid,
+            sourceUid,
+            actionUid,
+            turnId: 12,
+            metadata: {},
+        },
+    },
+}
+```
+
+Callers supply exact stable identities. Entity UIDs must include their source;
+do not key on a display label, DOM id, or `combatRound`. Public APIs are:
+
+```javascript
+state.queryTurnReceipt(key);
+state.commitTurnReceipt({key, ownerUid, sourceUid, actionUid, metadata?});
+state.rollbackTurnReceipt(receipt);
+state.pruneTurnReceipts({ownerUid, sourceUid, actionUid?});
+state.resetTurnEconomy();
+```
+
+`commitTurnReceipt` returns `{ok, committed, duplicate, reason, key, turnId,
+receipt}`. A duplicate returns the original receipt with
+`reason: "alreadyUsed"` and does not mutate it. `rollbackTurnReceipt` accepts
+the exact committed receipt: receipt id, key, owner, source, action, and turn id
+must all match. A mismatch is explicit (`reason: "receiptMismatch"`) and leaves
+the live receipt in place. This makes the retry rule deterministic: retry is
+legal only after the matching rollback, exact owner/source prune, or
+`resetTurnEconomy()`.
+
+`pruneTurnReceipts` requires both `ownerUid` and `sourceUid`; broad owner-only
+or source-only teardown is rejected. This prevents removing an unrelated
+same-named feature, companion, item, or class implementation. Consumers that
+commit before a later mutation must verify that mutation. On failure, return an
+explicit failed result containing the matching `rollbackTurnReceipt` outcome;
+never return success or silently leave a receipt committed.
+
+`resetTurnEconomy()` is the sole lifecycle reset for the ledger. It advances
+the opaque `turnId`, clears receipts, and restores action slots. Combat start,
+round advance, combat end, rests, and Play Mode's explicit **Reset turn**
+delegate to it. It works identically outside combat: a committed use remains
+blocked until an explicit reset, while Reaction/Action locks are not assumed to
+persist or enforce the receipt.
+
+Current consumers are:
+
+- Cruel's triggered die pool, keyed by the exact
+  `Cruel|TalDoreiCampaignSettingReborn` feat and stable `cruelty-die` effect id.
+- Deferred spell-damage riders such as Summer's Defiant Blood, keyed by exact
+  class and subclass sources. Consuming or clearing the armed rider does not
+  release its receipt.
+
+Load migration is idempotent. A current-round legacy `resourceTurnUsage`
+entry becomes a receipt only when it represented the live combat turn; stale
+round values remain unused. `pendingSpellDamageBonusUsedKeys` and the pending
+descriptor's `oncePerRoundKey` migrate to the exact deferred-rider receipt.
+Both legacy fields are removed after migration, so they never remain a second
+source of truth.
 
 ## Committed Feature Uses and EFA Flash of Genius
 

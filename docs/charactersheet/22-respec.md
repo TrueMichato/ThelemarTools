@@ -428,8 +428,9 @@ Feature, modifier, spell, resource, and configuration effects carry the source
 decision receipt. Ownership claims preserve overlapping race/background/manual
 grants and remove only orphaned progression-owned values. Source-identical
 resources retain spent uses (clamped to the new maximum); same-named resources
-from different sources do not share uses. Triggered pools such as Cruel clear
-their `resourceTurnUsage` entries when removed.
+from different sources do not share uses. Triggered pools such as Cruel restore
+their stable-key `turnReceipts` entry across a same-owner rebuild and prune that
+exact owner/source receipt when removed.
 
 The nested editor is rendered inline in the level editor rather than opening a
 second modal. Rows expose graph depth and resolved/deferred/missing/invalid/
@@ -468,9 +469,9 @@ descendants deepest-first, reverses source-keyed receipts/ownership, applies
 the replacement, rediscovers children, retains only exact legal identities,
 and persists one refreshed manifest. Receipt reversal covers set ownership,
 features, modifiers, resources, spells, scalar ability changes, and reversible
-configuration. Resource cleanup also removes stale `resourceTurnUsage` entries;
-same-source resources preserve current uses while unrelated same-name resources
-do not inherit them.
+configuration. Resource cleanup also prunes exact stable-key `turnReceipts`;
+same-source resources preserve current uses and current-turn receipt state while
+unrelated same-name resources do not inherit either.
 
 The census now rejects reachable required `choose`/`options` nodes which do not
 produce a legal descriptor or an explicit reviewed runtime/non-Respec
