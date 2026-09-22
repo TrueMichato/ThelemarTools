@@ -209,6 +209,18 @@ loss, save/load, and reconciliation need no persisted Armorer ledger.
 Experimental Elixir and Reanimator consumers are not registered by the base
 Replicate implementation.
 
+EFA Armorer Improved Arsenal uses the ordinary generated-weapon effective-bonus
+path rather than mutating the generated item. At exact EFA Armorer level 9+,
+`getEffectiveItemBonuses(itemId)` adds +1 attack and +1 damage only when the
+row's permanent `_efaArmorerWeaponId` matches the active model of the currently
+worn, bound Arcane Armor. `_resolveGeneratedFeatureItemAttack()` consumes those
+folded totals through `getEffectiveWeaponDamage()`, then composes any
+player-authored `customAttackBonus`/`customDamageBonus`. Dormant model rows,
+same-named user items, doffed/unbound armor, death, unresolved models,
+downgrades, Respec/source loss, and TCE/mixed-source Armorers receive no bonus.
+No `bonusWeapon` value or separate persisted ledger is written, so model
+switches and save/load preserve wrapper IDs and customization.
+
 Committed M2 plan replacement calls the generic plan-lineage hook; class/source
 loss reconciles only the exact EFA owner. Equipped live Replicate-generated
 Wands and Weapons are additional legal focuses for exact `Artificer|EFA`

@@ -684,6 +684,15 @@ so armor disadvantage cancels it normally. Smith's Tools remain prerequisites
 for the transformation/bind operation (and model switching), not ongoing
 requirements after a binding is active.
 
+At exact EFA Armorer level 9+, Improved Arsenal contributes +1 attack and +1
+damage through `getEffectiveItemBonuses()` only for the active generated model
+row whose permanent `_efaArmorerWeaponId` matches the worn, bound Arcane Armor.
+The shared generated-attack resolver consumes those effective totals, so Combat
+cards and rolls update without an Armorer-specific UI. The derived bonus does
+not overwrite `bonusWeapon` or custom attack/damage fields; it composes with
+them and disappears immediately on downgrade, doff/unbind, death, unresolved
+model, Respec/source loss, or TCE/mixed-source ownership.
+
 Generated mechanics use `_generatedItemBase` snapshots. Reconciliation updates
 only fields that are absent or still equal to the previous generated base;
 player renames, wrapper IDs/notes, bonuses, entries, effects, metadata, and
@@ -693,7 +702,7 @@ coexist with player-authored effects.
 
 Deferred Armorer work includes Giant Stature activation/resources, Force
 Demolisher push/pull resolution, Thunder Pulse's target rider, Defensive Field,
-Lightning Launcher's once-per-turn extra damage, Improved Arsenal, remaining
+Lightning Launcher's once-per-turn extra damage, remaining
 level 9/15 mechanics, and E2E coverage. Level-9 Armor Replication uses the
 shared source-qualified plan-extension and constrained generated-item-capacity
 contracts; it does not add an Armorer-specific persisted ledger.

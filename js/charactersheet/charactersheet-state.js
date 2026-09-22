@@ -17780,6 +17780,9 @@ class CharacterSheetState {
 		// as a bare field, every reader has to know that and fold it in itself — twenty-one call
 		// sites tried, and the ones that mattered got it wrong. These are the folded, canonical
 		// totals; a caller should reach for these and never re-add the parts.
+		const efaImprovedArsenalBonus = this._getEfaArmorerImprovedArsenalBonus(item);
+		base.bonusWeaponAttack += efaImprovedArsenalBonus;
+		base.bonusWeaponDamage += efaImprovedArsenalBonus;
 		base.totalAttackBonus = base.bonusWeapon + base.bonusWeaponAttack;
 		base.totalDamageBonus = base.bonusWeapon + base.bonusWeaponDamage;
 
@@ -75573,6 +75576,7 @@ class CharacterSheetState {
 		giantStature: "Giant Stature|Artificer|EFA|Armorer|EFA|3|EFA",
 		defensiveField: "Defensive Field|Artificer|EFA|Armorer|EFA|3|EFA",
 		thunderPulse: "Thunder Pulse|Artificer|EFA|Armorer|EFA|3|EFA",
+		improvedArmorer: "Improved Armorer|Artificer|EFA|Armorer|EFA|9|EFA",
 	});
 
 	static EFA_ARMORER_FEATURE_OWNERS = Object.freeze({
@@ -75929,6 +75933,15 @@ class CharacterSheetState {
 		const itemData = item?.item || item;
 		const id = itemData?._efaArmorerWeaponId;
 		return CharacterSheetState.EFA_ARMORER_MODEL_WEAPONS.find(def => def.id === id) || null;
+	}
+
+	_getEfaArmorerImprovedArsenalBonus (item) {
+		const armorer = this._getEfaArmorerClass();
+		if (Number(armorer?.level) < 9) return 0;
+		const def = this._getEfaArmorerWeaponDefinition(item);
+		if (!def) return 0;
+		const status = this._getEfaArcaneArmorStatusSnapshot();
+		return status.active && status.model?.id === def.id ? 1 : 0;
 	}
 
 	_isEfaBodyArmor (item) {

@@ -53,6 +53,11 @@ all reconcile through the same binding/resource/active-state/target-effect
 paths. The three model child entities are suppressed from generic activation so
 their prose cannot create duplicate inert custom toggles.
 
+At EFA Armorer level 9+, Improved Arsenal adds +1 attack and +1 damage only to
+the active generated model weapon. The bonus follows `_efaArmorerWeaponId`,
+composes with player item/custom bonuses, and moves with the canonical model
+without rewriting the generated row or its wrapper identity.
+
 ### Gambler Rogue lifecycle
 
 The TGTT Gambler is source-qualified as `Rogue|TGTT` plus

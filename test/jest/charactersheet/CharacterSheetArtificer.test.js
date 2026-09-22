@@ -1338,18 +1338,6 @@ describe("Armorer Dreadnaught (EFA 2024)", () => {
 		});
 	});
 
-	describe("Improved Armorer (Level 9)", () => {
-		it("should grant +1 to attack and damage with armor weapons", () => {
-			state.addClass({
-				name: "Artificer",
-				source: "EFA",
-				level: 9,
-				subclass: { name: "Armorer", shortName: "Armorer", source: "EFA" },
-			});
-			expect(state.getTotalLevel()).toBe(9);
-		});
-	});
-
 	describe("Perfected Dreadnaught (Level 15)", () => {
 		it("should increase Force Demolisher to 2d6", () => {
 			state.addClass({
