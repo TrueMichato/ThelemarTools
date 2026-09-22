@@ -247,6 +247,25 @@ describe("Damage-triggered concentration protection", () => {
 	});
 
 	it.each([
+		["immunity", {damage: 0, applied: "immunity"}, {name: "Faerie Fire", source: "XPHB", level: 1}],
+		["full flat reduction", {damage: 0, reduction: 9}, {name: "Call Lightning", source: "XPHB", level: 3}],
+	])("does not trigger damage-only reactions or concentration handling after %s", async (_label, preview, concentration) => {
+		const state = makeCartographer();
+		state.setConcentration(concentration);
+		jest.spyOn(state, "applyDamageDefenses").mockReturnValue(preview);
+		const page = makePage(state);
+
+		const out = await page._pApplyDamage(9, {damageType: "fire"});
+
+		expect(out).toEqual(preview);
+		expect(state.getHp()).toMatchObject({current: 30, max: 30, temp: 0});
+		expect(state.isConcentrating()).toBe(true);
+		expect(page._pOfferMaterialDamageReactions).not.toHaveBeenCalled();
+		expect(page._promptConcentrationCheck).not.toHaveBeenCalled();
+		expect(page._showDiceResult).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
 		["another spell", {name: "Call Lightning", source: "XPHB", level: 3}],
 		["another Faerie Fire printing", {name: "Faerie Fire", source: "PHB", level: 1}],
 		["a legacy source-less concentration", {name: "Faerie Fire", level: 1}],

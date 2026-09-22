@@ -4987,6 +4987,7 @@ class CharacterSheetRespec {
 		// spell slots too.
 		this._state.applyClassFeatureEffects();
 		this._state.calculateSpellSlots();
+		this._state._syncAdventurersAtlasEligibility?.();
 
 		// Subclass features may grant hpPerLevel — recalc max HP.
 		this._recalcHpPreservingHealing();

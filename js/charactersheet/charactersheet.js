@@ -14297,41 +14297,43 @@ class CharacterSheetPage {
 		this._flashHpBar(flashParts.join(" "), "damage");
 
 		// Offer any drop-to-0 intervention the character has (Strength of the Grave, …).
-		await this._pOfferZeroHpIntervention();
+		if (preview.damage > 0) {
+			await this._pOfferZeroHpIntervention();
 
-		// Dropping to 0 HP, dying, or becoming incapacitated ends concentration before
-		// damage-specific concentration rules apply. Resolve the optional drop-to-1
-		// intervention first so a successful recovery can still retain protected concentration.
-		if (
-			this._state.isConcentrating?.()
-			&& (
-				this._state.getCurrentHp() <= 0
-				|| this._state.isDead?.()
-				|| this._state.isIncapacitated?.()
-			)
-		) {
-			this._state.breakConcentration();
-			this._combatModule?.renderCombatStates?.();
-			this._renderActiveStates?.();
-		}
+			// Dropping to 0 HP, dying, or becoming incapacitated ends concentration before
+			// damage-specific concentration rules apply. Resolve the optional drop-to-1
+			// intervention first so a successful recovery can still retain protected concentration.
+			if (
+				this._state.isConcentrating?.()
+				&& (
+					this._state.getCurrentHp() <= 0
+					|| this._state.isDead?.()
+					|| this._state.isIncapacitated?.()
+				)
+			) {
+				this._state.breakConcentration();
+				this._combatModule?.renderCombatStates?.();
+				this._renderActiveStates?.();
+			}
 
-		// Materials that react to being damaged. Until now `damageTaken` was matched by
-		// `isDegradationTriggered` but never fired by anything, so every authored
-		// damage-triggered material block — Rimeglass's fire degradation included — was dead.
-		await this._pOfferMaterialDamageReactions(damageType);
+			// Materials that react to being damaged. Until now `damageTaken` was matched by
+			// `isDegradationTriggered` but never fired by anything, so every authored
+			// damage-triggered material block — Rimeglass's fire degradation included — was dead.
+			await this._pOfferMaterialDamageReactions(damageType);
 
-		// Prompt for concentration check if concentrating
-		if (this._state.isConcentrating?.()) {
-			const protection = this._state.getDamageConcentrationProtection?.();
-			if (protection) {
-				const spellName = this._state.getConcentrationLabel?.() || "the spell";
-				this._showDiceResult(
-					"Concentration Protected",
-					"Protected",
-					`${protection.name}: taking damage can't end concentration on ${spellName}.`,
-				);
-			} else {
-				await this._promptConcentrationCheck(preview.damage);
+			// Prompt for concentration check if concentrating
+			if (this._state.isConcentrating?.()) {
+				const protection = this._state.getDamageConcentrationProtection?.();
+				if (protection) {
+					const spellName = this._state.getConcentrationLabel?.() || "the spell";
+					this._showDiceResult(
+						"Concentration Protected",
+						"Protected",
+						`${protection.name}: taking damage can't end concentration on ${spellName}.`,
+					);
+				} else {
+					await this._promptConcentrationCheck(preview.damage);
+				}
 			}
 		}
 		const after = {currentHp: this._state.getCurrentHp(), tempHp: this._state.getTempHp(), tempHpOwner: this._state.getTempHpOwner()};

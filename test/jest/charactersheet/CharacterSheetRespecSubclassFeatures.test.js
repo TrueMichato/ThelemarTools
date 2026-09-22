@@ -210,3 +210,44 @@ describe("CharacterSheetRespec subclass change — multiclass safety (Bug #2)", 
 		expect(state.getFeatures().some(f => f.name === "Training in War and Song")).toBe(true);
 	});
 });
+
+describe("CharacterSheetRespec subclass change — exact subclass lifecycle cleanup", () => {
+	test("invalidates an active EFA Cartographer Atlas while preserving snapshot-based Undo", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({
+			name: "Artificer",
+			source: "EFA",
+			level: 15,
+			subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+		});
+		state.addItem({
+			name: "Cartographer's Tools",
+			source: "XPHB",
+			type: "AT",
+			quantity: 1,
+		});
+		expect(state.createAdventurersAtlas(
+			[
+				{name: "Self", isSelf: true, status: "active"},
+				{name: "Ally", isSelf: false, status: "active"},
+			],
+			{isHoldingTools: true, createdAt: 1},
+		).ok).toBe(true);
+		const undoSnapshot = state.toJson();
+		const respec = makeRespec(state, []);
+
+		await respec._applySubclassChange(
+			3,
+			{level: 3, class: {name: "Artificer", source: "EFA"}},
+			{name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+			{name: "Armorer", shortName: "Armorer", source: "EFA", subclassFeatures: []},
+		);
+
+		expect(state.getAdventurersAtlasStatus()).toBe("invalidated");
+		expect(state.getAdventurersAtlas().invalidatedReason).toBe("subclass-removed");
+
+		expect(state.loadFromJson(undoSnapshot)).not.toBe(false);
+		expect(state.getAdventurersAtlasStatus()).toBe("active");
+		expect(state.getAdventurersAtlas().holders.map(it => it.name)).toEqual(["Self", "Ally"]);
+	});
+});
