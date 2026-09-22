@@ -369,7 +369,7 @@ describe("Rogue Specialty d10 roll integration", () => {
 			16,
 			expect.stringMatching(/d10.*Poison Expert/i),
 			expect.any(String),
-			expect.stringMatching(/Poison Expert.*d10/i),
+			expect.stringMatching(/\+d10 from Poison Expert against poison/i),
 		);
 	});
 

@@ -9,6 +9,10 @@ const CHARACTERSHEET_SOURCE = fs.readFileSync(
 	new URL("../../../js/charactersheet/charactersheet.js", import.meta.url),
 	"utf8",
 );
+const TGTT_DATA = JSON.parse(fs.readFileSync(
+	new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url),
+	"utf8",
+));
 
 let CharacterSheetPage;
 let savedWindow;
@@ -77,6 +81,10 @@ afterAll(() => {
 	globalThis.document = savedDocument;
 });
 
+function stripTags (text) {
+	return String(text).replace(/\{@\w+ ([^|}]+)(?:\|[^}]*)?\}/g, "$1");
+}
+
 describe("Bug 7 — skill ability pins refresh passive displays", () => {
 	test("getPassiveScore uses the pinned ability", () => {
 		const state = new CharacterSheetState();
@@ -141,6 +149,56 @@ describe("Bug 8 — skill definition hovers", () => {
 
 		expect(skillsSource).toMatch(/closest\?\.\("a\[data-vet-page\]"\)\) return;/);
 		expect(detailedSource).toMatch(/closest\?\.\("a\[data-vet-page\]"\)\) return;/);
+	});
+});
+
+describe("Round 61 — conditional modifier wording", () => {
+	test("real TGTT conditional data exposes a clean source and natural copy", () => {
+		const feature = TGTT_DATA.classFeature.find(it =>
+			it.name === "Path of Lean Winters"
+			&& it.className === "Barbarian"
+			&& it.source === "TGTT",
+		);
+		const state = new CharacterSheetState();
+		state.addFeature({
+			...feature,
+			featureType: "Class",
+			description: stripTags(feature.entries.join(" ")),
+		});
+
+		const conditional = state.aggregateModifiers("save:con").conditionalsAvailable[0];
+		expect(conditional).toMatchObject({
+			name: "Path of Lean Winters: against cold weather",
+			sourceName: "Path of Lean Winters",
+			conditional: "against cold weather",
+			advantage: true,
+		});
+
+		const page = Object.create(CharacterSheetPage.prototype);
+		expect(page._formatConditionalModifierDisplay(conditional)).toEqual({
+			source: "Path of Lean Winters",
+			effect: "Advantage",
+			context: "Applies against cold weather.",
+			summary: "Advantage from Path of Lean Winters against cold weather",
+		});
+		expect(page._formatAppliedConditionalsNote([conditional]))
+			.toBe("⚡ Advantage from Path of Lean Winters against cold weather");
+
+		const applied = state.aggregateModifiers("save:con", {
+			appliedConditionalIds: new Set([conditional.id]),
+		});
+		expect(applied.sources).toContain("Path of Lean Winters");
+		expect(applied.sources).not.toContain("Path of Lean Winters: against cold weather");
+	});
+
+	test("the display helper preserves legitimate colons in source names", () => {
+		const page = Object.create(CharacterSheetPage.prototype);
+		expect(page._formatConditionalModifierDisplay({
+			sourceName: "Divine Favor: Athena",
+			name: "Divine Favor: Athena",
+			conditional: "against spells",
+			bonusDie: "d10",
+		}).summary).toBe("+d10 from Divine Favor: Athena against spells");
 	});
 });
 

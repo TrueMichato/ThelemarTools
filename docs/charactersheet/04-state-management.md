@@ -869,10 +869,16 @@ When `true`, the conditional-modifier picker is suppressed and no conditional mo
     bonusDice,              // Compatibility array of die expressions
     bonusDiceContributions, // Stable {id, dice, source, conditional} entries
     conditionalsAvailable: [ // Surfaced for the pre-roll picker
-        {id, name, conditional, advantage?, disadvantage?, bonus?, bonusDie?, target?},
+        {id, name, sourceName, conditional, advantage?, disadvantage?, bonus?, bonusDie?, target?},
     ],
 }
 ```
+
+`name` preserves the stored modifier identity used by stable conditional IDs.
+`sourceName` is display-only: prose-parsed modifiers append `: <condition>` to
+their stored name, and this field removes only that exact suffix so prompts and
+roll results can say `Advantage from Dauntless Heritage against being
+frightened` without changing save compatibility.
 
 Roll handlers merge `bonusDiceContributions` by `id`, not by die text. Two
 different features which each grant `d10` therefore stack, while one logical
@@ -895,9 +901,18 @@ A modifier is **registered** with one string (`modType`) and **read** with anoth
 | `check:dex` | `skill:stealth` | the skill's ability |
 | `save:advantage:frightened` | `save:wis` | `_isConditionalSaveSubtype` → synthesized conditional |
 | `check:advantage:perception` | `skill:perception` | `_normalizeSkillKey` name match |
+| `skill:might` | `skill:might` | exact custom-skill selector match |
+| `skill:perception:senses` | `skill:perception` | exact selector + trailing conditional qualifier |
 | `d20:all` | any d20 roll | explicit category list |
 
 **A registration with no path is silent.** It parses, stores, renders in the feature list, and never reaches a roll. `check:advantage:perception` (Keen Senses) and `check:advantage:stealth` (Synchronized Stealth) sat in exactly that state: the ability branch compares sub-types against `"wis"`/`"dex"`, and `_isConditionalSaveSubtype` deliberately excludes standard skill names because a skill is a *selector*, not a condition. Both rules are correct in isolation; together they left skill-selected modifiers with no route at all.
+
+The selector rule applies equally to built-in and custom skills. A modifier
+registered as `skill:might` affects Might only; it must never be synthesized as
+an `against might` condition on Athletics, Acrobatics, or another skill. Skill
+conditions are represented separately as `skill:<target>:<qualifier>` or with
+an explicit `conditional` field. Save/check registry sub-types retain their
+category-wide synthesized-condition behavior.
 
 Two consequences worth carrying:
 

@@ -16194,20 +16194,21 @@ class CharacterSheetPage {
 			};
 
 			const rowsHtml = conditionalsAvailable.map((c, i) => {
+				const display = this._formatConditionalModifierDisplay(c);
 				const chips = [];
 				if (c.advantage) chips.push(`<span class="charsheet__cond-pick-chip charsheet__cond-pick-chip--adv">Advantage</span>`);
 				if (c.disadvantage) chips.push(`<span class="charsheet__cond-pick-chip charsheet__cond-pick-chip--dis">Disadvantage</span>`);
 				if (c.bonus) chips.push(`<span class="charsheet__cond-pick-chip">${c.bonus > 0 ? "+" : ""}${c.bonus}</span>`);
 				if (c.bonusDie) chips.push(`<span class="charsheet__cond-pick-chip">+${c.bonusDie}</span>`);
 				const chipHtml = chips.length ? chips.join(" ") : `<span class="ve-muted ve-small">applies</span>`;
-				const safeName = (c.name || "Conditional bonus").replace(/[<>]/g, "");
-				const safeCond = (c.conditional || "").replace(/[<>]/g, "");
+				const safeName = display.source.replace(/[<>]/g, "");
+				const safeContext = display.context.replace(/[<>]/g, "");
 				return `
 					<label class="charsheet__cond-pick-row" data-idx="${i}">
 						<input type="checkbox" class="charsheet__cond-pick-cb" data-idx="${i}">
 						<div class="charsheet__cond-pick-row__body">
 							<div class="charsheet__cond-pick-row__title"><strong>${safeName}</strong> ${chipHtml}</div>
-							<div class="ve-small ve-muted">${safeCond}</div>
+							<div class="ve-small ve-muted">${safeContext}</div>
 						</div>
 					</label>
 				`;
@@ -16411,6 +16412,32 @@ class CharacterSheetPage {
 	}
 
 	/**
+	 * Build plain-text conditional modifier copy shared by the picker and roll
+	 * result note. HTML chips remain a picker concern.
+	 *
+	 * @param {object} conditional
+	 * @returns {{source: string, effect: string, context: string, summary: string}}
+	 */
+	_formatConditionalModifierDisplay (conditional) {
+		const source = String(conditional?.sourceName || conditional?.name || "Conditional bonus").trim();
+		const condition = String(conditional?.conditional || "").trim();
+		const effect = conditional?.advantage ? "Advantage"
+			: conditional?.disadvantage ? "Disadvantage"
+				: conditional?.bonus ? `${conditional.bonus > 0 ? "+" : ""}${conditional.bonus}`
+					: conditional?.bonusDie ? `+${conditional.bonusDie}`
+						: "Modifier";
+		const context = condition
+			? `Applies ${condition}${/[.!?]$/.test(condition) ? "" : "."}`
+			: "Applies to this roll.";
+		return {
+			source,
+			effect,
+			context,
+			summary: `${effect} from ${source}${condition ? ` ${condition}` : ""}`,
+		};
+	}
+
+	/**
 	 * Build a result-note suffix for a roll that applied conditional modifiers.
 	 * Renders one ⚡-prefixed line per applied entry so the player can see at
 	 * a glance which conditionals contributed to the result.
@@ -16419,14 +16446,9 @@ class CharacterSheetPage {
 	 */
 	_formatAppliedConditionalsNote (applied) {
 		if (!applied || !applied.length) return "";
-		return applied.map(c => {
-			const effect = c.advantage ? "advantage"
-				: c.disadvantage ? "disadvantage"
-					: c.bonus ? `${c.bonus > 0 ? "+" : ""}${c.bonus}`
-						: c.bonusDie ? `+${c.bonusDie}`
-							: "applied";
-			return `⚡ ${c.name} (${effect}, ${c.conditional})`;
-		}).join("\n");
+		return applied
+			.map(c => `⚡ ${this._formatConditionalModifierDisplay(c).summary}`)
+			.join("\n");
 	}
 
 	/**

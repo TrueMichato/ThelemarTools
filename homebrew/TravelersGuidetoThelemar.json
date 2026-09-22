@@ -21945,7 +21945,7 @@
 			"classSource": "TGTT",
 			"level": 1,
 			"entries": [
-				"Your might is a force to be reckoned with. You gain a bonus to Strength ({@skill Might|TGTT}) checks made to lift, drag, push, throw, grapple, or shove. The bonus equals your proficiency bonus."
+				"Your might is a force to be reckoned with. You gain a bonus to Strength ({@skill Might|TGTT}) checks. The bonus equals your proficiency bonus. This reflects feats of raw strength such as breaking, bending, lifting, dragging, carrying, and forcing objects."
 			]
 		},
 		{
@@ -21955,7 +21955,7 @@
 			"classSource": "TGTT",
 			"level": 1,
 			"entries": [
-				"You gain a bonus to Strength ({@skill Athletics}) and Dexterity ({@skill Acrobatics}) checks made to climb, run, and swing. The bonus equals your proficiency bonus."
+				"You gain a bonus to Strength ({@skill Athletics}) and Dexterity ({@skill Acrobatics}) checks. The bonus equals your proficiency bonus."
 			]
 		},
 		{
@@ -22056,7 +22056,7 @@
 			"level": 6,
 			"entries": [
 				"{@i Prerequisite: 6th level}",
-				"You gain a bonus to Strength ({@skill Athletics}) or Dexterity ({@skill Acrobatics}) checks made to climb, jump, run, and swim. The bonus equals your proficiency bonus. When your group makes a group Athletics or Acrobatics check, you can choose one ally to use your roll's result instead of their own."
+				"You gain a bonus to Strength ({@skill Athletics}) and Dexterity ({@skill Acrobatics}) checks. The bonus equals your proficiency bonus. When your group makes a group Athletics or Acrobatics check, you can choose one ally to use your roll's result instead of their own."
 			]
 		},
 		{
