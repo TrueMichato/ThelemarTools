@@ -16501,7 +16501,7 @@ class CharacterSheetPage {
 					const opt = choice.options[idx];
 					if (count === 1) {
 						const value = optionValue(opt);
-						finalize(isTool ? [value] : value);
+						finalize(value);
 						doClose();
 						return;
 					}
