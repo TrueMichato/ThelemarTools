@@ -14299,6 +14299,22 @@ class CharacterSheetPage {
 		// Offer any drop-to-0 intervention the character has (Strength of the Grave, …).
 		await this._pOfferZeroHpIntervention();
 
+		// Dropping to 0 HP, dying, or becoming incapacitated ends concentration before
+		// damage-specific concentration rules apply. Resolve the optional drop-to-1
+		// intervention first so a successful recovery can still retain protected concentration.
+		if (
+			this._state.isConcentrating?.()
+			&& (
+				this._state.getCurrentHp() <= 0
+				|| this._state.isDead?.()
+				|| this._state.isIncapacitated?.()
+			)
+		) {
+			this._state.breakConcentration();
+			this._combatModule?.renderCombatStates?.();
+			this._renderActiveStates?.();
+		}
+
 		// Materials that react to being damaged. Until now `damageTaken` was matched by
 		// `isDegradationTriggered` but never fired by anything, so every authored
 		// damage-triggered material block — Rimeglass's fire degradation included — was dead.

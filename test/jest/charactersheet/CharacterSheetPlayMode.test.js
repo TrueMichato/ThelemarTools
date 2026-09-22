@@ -3,12 +3,32 @@
  * Tests for play mode state fields (viewMode, favorites) and state management helpers.
  */
 
-import "./setup.js";
+import fs from "node:fs";
 import {jest} from "@jest/globals";
+import "./setup.js";
+import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
+const artificerData = JSON.parse(fs.readFileSync(new URL("../../../data/class/class-artificer.json", import.meta.url), "utf8"));
+const fullArtificer = {
+	...artificerData.class.find(cls => cls.name === "Artificer" && cls.source === "EFA"),
+	subclasses: artificerData.subclass.filter(sc => sc.className === "Artificer" && sc.classSource === "EFA"),
+};
+
+function makeCartographer () {
+	const state = new CharacterSheetState();
+	state.setClassCatalog([fullArtificer]);
+	state.addClass({
+		name: "Artificer",
+		source: "EFA",
+		level: 5,
+		subclass: {name: "Cartographer", shortName: "Cartographer", source: "EFA"},
+	});
+	state.setAbilityBase("int", 16);
+	return state;
+}
 
 describe("CharacterSheetPlayMode", () => {
 	let state;
@@ -417,6 +437,66 @@ describe("CharacterSheetPlayMode", () => {
 				if (previousDocument === undefined) delete globalThis.document;
 				else globalThis.document = previousDocument;
 			}
+		});
+
+		it("Reset Turn releases Guided Precision for the opposite route in the same round", () => {
+			const cartographer = makeCartographer();
+			cartographer.startCombat();
+			const attackRider = cartographer.getDeferredFlatDamageRiderOptions({route: "attack"})[0];
+			cartographer.consumeDeferredFlatDamageRider(attackRider);
+			const spellContext = {
+				route: "spell",
+				spell: {name: "Guiding Bolt", source: "XPHB"},
+			};
+			expect(cartographer.getDeferredFlatDamageRiderOptions(spellContext)).toEqual([]);
+
+			const actionsHub = {
+				children: [],
+				querySelector: () => null,
+			};
+			const pm = new CharacterSheetPlayMode({getState: () => cartographer});
+			const clickable = [];
+			pm._elActionsHub = actionsHub;
+			pm._makeCard = (parent) => {
+				const card = {
+					dataset: {},
+					children: [],
+					querySelector: () => null,
+				};
+				parent.children.push(card);
+				return card;
+			};
+			pm._ce = (tag, className, parent) => {
+				const el = {
+					tag,
+					className,
+					children: [],
+					replaceChildren (...children) { this.children = children; },
+				};
+				parent.children.push(el);
+				return el;
+			};
+			pm._makeClickable = (el, label, handler) => {
+				el._label = label;
+				el._handler = handler;
+				clickable.push(el);
+			};
+			pm._icon = () => ({});
+			pm._setIconLabel = () => {};
+			pm._logActivity = jest.fn();
+
+			const previousDocument = globalThis.document;
+			globalThis.document = {createTextNode: text => text};
+			try {
+				pm._renderActionEconomy();
+				clickable.find(it => it._label === "Reset turn (restore all actions)")._handler();
+			} finally {
+				if (previousDocument === undefined) delete globalThis.document;
+				else globalThis.document = previousDocument;
+			}
+
+			expect(cartographer.getCombatRound()).toBe(1);
+			expect(cartographer.getDeferredFlatDamageRiderOptions(spellContext)).toHaveLength(1);
 		});
 	});
 

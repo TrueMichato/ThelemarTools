@@ -68194,7 +68194,6 @@ class CharacterSheetState {
 	startCombat () {
 		this._data.inCombat = true;
 		this._data.combatRound = 1;
-		this._data.deferredFlatDamageRiderTurnUsage = {};
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: 1});
 		this._data.sanguineMasteryLastRerollRound = null;
@@ -68232,7 +68231,6 @@ class CharacterSheetState {
 		this._data.hybridBloodlustTurnStartRound = null;
 		this._data.hybridBloodlustTurnStartCheck = null;
 		this._data.resourceTurnUsage = {};
-		this._data.deferredFlatDamageRiderTurnUsage = {};
 		for (const participant of this._data.combatTurnOrder || []) participant.hasActed = false;
 		this.resetTurnEconomy({round: null});
 
@@ -70548,6 +70546,7 @@ class CharacterSheetState {
 	resetTurnEconomy ({round = this._data.inCombat ? Math.max(0, Number(this._data.combatRound) || 0) : null} = {}) {
 		this.resetActionEconomy();
 		this.resetMovementEconomy({round});
+		this._data.deferredFlatDamageRiderTurnUsage = {};
 	}
 
 	getChainedMovementState () {

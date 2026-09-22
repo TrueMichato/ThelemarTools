@@ -59,6 +59,7 @@ function makePage (state = new CharacterSheetState()) {
 	page._saveCurrentCharacter = jest.fn();
 	page._renderHp = jest.fn();
 	page._renderConditions = jest.fn();
+	page._renderActiveStates = jest.fn();
 	page._showDiceResult = jest.fn();
 	page._flashHpBar = jest.fn();
 	page._pOfferZeroHpIntervention = jest.fn();
@@ -257,6 +258,79 @@ describe("Damage-triggered concentration protection", () => {
 		await page._pApplyDamage(5);
 
 		expect(page._promptConcentrationCheck).toHaveBeenCalledWith(5);
+		expect(page._showDiceResult).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		["no intervention", () => {}],
+		["a cancelled intervention", state => state.clearPendingZeroHpIntervention()],
+		["a failed intervention", state => state.setCurrentHp(0)],
+	])("ends Guided Faerie Fire before protection when %s leaves the character at 0 HP", async (_label, resolveIntervention) => {
+		const state = makeCartographer();
+		state.setHp(5, 30, 0);
+		state.setConcentration({name: "Faerie Fire", source: "XPHB", level: 1});
+		const breakSpy = jest.spyOn(state, "breakConcentration");
+		const page = makePage(state);
+		page._pOfferZeroHpIntervention = jest.fn(async () => resolveIntervention(state));
+
+		await page._pApplyDamage(5);
+
+		expect(state.getCurrentHp()).toBe(0);
+		expect(breakSpy).toHaveBeenCalledTimes(1);
+		expect(state.isConcentrating()).toBe(false);
+		expect(page._promptConcentrationCheck).not.toHaveBeenCalled();
+		expect(page._showDiceResult).toHaveBeenCalledTimes(1);
+	});
+
+	it("preserves Guided Faerie Fire when an intervention restores the character to 1 HP", async () => {
+		const state = makeCartographer();
+		state.setHp(5, 30, 0);
+		state.setConcentration({name: "Faerie Fire", source: "XPHB", level: 1});
+		const page = makePage(state);
+		page._pOfferZeroHpIntervention = jest.fn(async () => state.setCurrentHp(1));
+
+		await page._pApplyDamage(5);
+
+		expect(state.getCurrentHp()).toBe(1);
+		expect(state.isConcentrating()).toBe(true);
+		expect(page._promptConcentrationCheck).not.toHaveBeenCalled();
+		expect(page._showDiceResult).toHaveBeenNthCalledWith(
+			2,
+			"Concentration Protected",
+			"Protected",
+			expect.stringMatching(/Guided Precision.*Faerie Fire/i),
+		);
+	});
+
+	it("ends ordinary concentration at 0 HP as a non-damage ending", async () => {
+		const state = makeCartographer();
+		state.setHp(5, 30, 0);
+		state.setConcentration({name: "Call Lightning", source: "XPHB", level: 3});
+		const breakSpy = jest.spyOn(state, "breakConcentration");
+		const page = makePage(state);
+
+		await page._pApplyDamage(5);
+
+		expect(breakSpy).toHaveBeenCalledTimes(1);
+		expect(state.isConcentrating()).toBe(false);
+		expect(page._promptConcentrationCheck).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		["dead", "isDead"],
+		["incapacitated", "isIncapacitated"],
+	])("ends concentration after intervention when the character is %s above 0 HP", async (_label, predicate) => {
+		const state = makeCartographer();
+		state.setHp(5, 30, 0);
+		state.setConcentration({name: "Faerie Fire", source: "XPHB", level: 1});
+		jest.spyOn(state, predicate).mockReturnValue(true);
+		const page = makePage(state);
+		page._pOfferZeroHpIntervention = jest.fn(async () => state.setCurrentHp(1));
+
+		await page._pApplyDamage(5);
+
+		expect(state.isConcentrating()).toBe(false);
+		expect(page._promptConcentrationCheck).not.toHaveBeenCalled();
 		expect(page._showDiceResult).toHaveBeenCalledTimes(1);
 	});
 });

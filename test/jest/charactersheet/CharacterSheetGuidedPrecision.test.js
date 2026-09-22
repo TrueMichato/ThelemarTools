@@ -152,6 +152,24 @@ describe("Guided Precision provider and shared receipt", () => {
 		})).toEqual([]);
 	});
 
+	it("keeps the opposite route blocked until the canonical turn reset runs", () => {
+		const state = makeCartographer();
+		state.startCombat();
+		const spellRider = state.getDeferredFlatDamageRiderOptions({
+			route: "spell",
+			spell: {name: "Guiding Bolt", source: "XPHB"},
+		})[0];
+		state.consumeDeferredFlatDamageRider(spellRider);
+
+		expect(state.getDeferredFlatDamageRiderOptions({route: "attack"})).toEqual([]);
+		expect(state.getCombatRound()).toBe(1);
+
+		state.resetTurnEconomy();
+
+		expect(state.getCombatRound()).toBe(1);
+		expect(state.getDeferredFlatDamageRiderOptions({route: "attack"})).toHaveLength(1);
+	});
+
 	it("persists the receipt through save/load and releases it on the next turn", () => {
 		const state = makeCartographer();
 		state.startCombat();

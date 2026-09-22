@@ -249,8 +249,10 @@ resolution-time ability modifiers, and the shared persisted turn receipt.
 The receipt key is the stable source-feature UID. This is required when one feature can trigger
 through multiple modules: Guided Precision's Cartographer-spell and attack routes both use
 `Guided Precision|Artificer|EFA|Cartographer|EFA|5|EFA`, so accepting one blocks the other
-until the combat round advances. Declining or cancelling never calls the consume method and
-therefore never writes a receipt. Subclass/class teardown prunes source-owned receipts.
+until `resetTurnEconomy()` starts the next turn. Combat start/round advance/end and Play Mode's
+Reset Turn control all use that canonical reset; save/load during the same turn preserves the
+receipt. Declining or cancelling never calls the consume method and therefore never writes a
+receipt. Subclass/class teardown prunes source-owned receipts.
 
 ### Subclass-Scoped State Effects
 
