@@ -23,11 +23,11 @@ The four core Artificer subclasses are fully implemented with mechanical calcula
 - **Cartographer (EFA), Adventurer's Atlas milestone**: versioned persistent
   Atlas state, Long Rest creation/recreation with held-tool confirmation,
   creation-time capacity freezing, death/subclass invalidation, rest undo,
-  authoritative Features rendering, and the self-holder Awareness initiative
-  die are supported. External holder initiative is exposed through an immutable
-  integration snapshot. Cartographer spells, Portal Jump/movement, Positioning,
-  Guided Precision, Ingenious Movement, Safe Haven consumption, and Unerring
-  Path remain outside this bounded milestone.
+  authoritative Features rendering, ally-only or optional-self rosters, and the
+  self-holder Awareness initiative die are supported. External holder initiative
+  is exposed through an immutable integration snapshot. Cartographer spells,
+  Portal Jump/movement, Positioning, Guided Precision, Ingenious Movement, Safe
+  Haven consumption, and Unerring Path remain outside this bounded milestone.
 
 #### Druid Circles ✅
 All Druid circles are fully implemented:

@@ -1044,6 +1044,9 @@ class CharacterSheetRest {
 		const groupName = `adventurers-atlas-mode-${Date.now()}`;
 		const listeners = new Set();
 		let lastErrors = [];
+		const previousSelf = atlas.holders.find(holder => holder.isSelf)?.name;
+		const previousOthers = atlas.holders.filter(holder => !holder.isSelf).map(holder => holder.name);
+		const selfName = previousSelf || this._state.getCharacterName?.() || "Character";
 
 		const section = e_({
 			tag: "section",
@@ -1062,7 +1065,7 @@ class CharacterSheetRest {
 		const intro = e_({
 			tag: "p",
 			clazz: "charsheet__atlas-rest-copy",
-			txt: `Keep the current Atlas, or ${isRecreate ? "replace every existing map" : "create it"} while holding Cartographer's Tools. Capacity for a new Atlas will be ${capacity} and is frozen when created.`,
+			txt: `Keep the current Atlas, or ${isRecreate ? "replace every existing map" : "create it"} while holding Cartographer's Tools. Choose 2–${capacity} creatures; you may include yourself. Capacity is frozen when created.`,
 		});
 		section.append(title, intro);
 
@@ -1080,6 +1083,10 @@ class CharacterSheetRest {
 		const cbHeld = e_({tag: "input", type: "checkbox"});
 		const heldLabel = ee`<label class="charsheet__rest-option charsheet__atlas-rest-held">${cbHeld}<span>I confirm I am holding Cartographer's Tools for this rest.</span></label>`;
 		controls.append(heldLabel);
+		const cbIncludeSelf = e_({tag: "input", type: "checkbox"});
+		cbIncludeSelf.checked = !!previousSelf;
+		const selfLabel = ee`<label class="charsheet__rest-option charsheet__atlas-rest-self-choice">${cbIncludeSelf}<span><strong>Include yourself as a map holder</strong><small>${selfName} receives Awareness only while this self map is active.</small></span></label>`;
+		controls.append(selfLabel);
 
 		const rosterHeading = e_({tag: "div", clazz: "charsheet__atlas-rest-roster-heading"});
 		rosterHeading.append(
@@ -1099,22 +1106,31 @@ class CharacterSheetRest {
 		controls.append(status);
 		section.append(controls);
 
-		const previousSelf = atlas.holders.find(holder => holder.isSelf)?.name;
-		const previousOthers = atlas.holders.filter(holder => !holder.isSelf).map(holder => holder.name);
-		const rows = [
-			{isSelf: true, name: previousSelf || this._state.getCharacterName?.() || "Character"},
-			...previousOthers.slice(0, Math.max(1, capacity - 1)).map(name => ({isSelf: false, name})),
-		];
-		if (rows.length < 2) rows.push({isSelf: false, name: ""});
+		const rows = previousOthers
+			.slice(0, Math.max(0, capacity - (cbIncludeSelf.checked ? 1 : 0)))
+			.map(name => ({name}));
+		while (rows.length + (cbIncludeSelf.checked ? 1 : 0) < 2) rows.push({name: ""});
 
-		const getDraftHolders = () => rows.map(row => ({
-			id: null,
-			name: row.input?.value || row.name || "",
-			isSelf: row.isSelf,
-			status: "active",
-			destroyedBy: null,
-			destroyedAt: null,
-		}));
+		const getDraftHolders = () => [
+			...(cbIncludeSelf.checked
+				? [{
+					id: null,
+					name: selfName,
+					isSelf: true,
+					status: "active",
+					destroyedBy: null,
+					destroyedAt: null,
+				}]
+				: []),
+			...rows.map(row => ({
+				id: null,
+				name: row.input?.value || row.name || "",
+				isSelf: false,
+				status: "active",
+				destroyedBy: null,
+				destroyedAt: null,
+			})),
+		];
 
 		const notifyChange = () => listeners.forEach(fn => fn());
 		const sync = () => {
@@ -1135,10 +1151,11 @@ class CharacterSheetRest {
 			];
 			status.classList.toggle("charsheet__atlas-rest-feedback--error", !!lastErrors.length);
 			status.classList.toggle("charsheet__atlas-rest-feedback--ready", !lastErrors.length);
+			const holderCount = getDraftHolders().length;
 			status.textContent = lastErrors.length
 				? `Needs attention: ${lastErrors.join(" ")}`
-				: `Ready: ${rows.length} active maps will replace the prior Atlas when this Long Rest finishes.`;
-			btnAddHolder.disabled = rows.length >= capacity;
+				: `Ready: ${holderCount} active maps will ${isRecreate ? "replace the prior Atlas" : "be created"} when this Long Rest finishes.`;
+			btnAddHolder.disabled = holderCount >= capacity;
 			notifyChange();
 		};
 
@@ -1153,7 +1170,7 @@ class CharacterSheetRest {
 						id: inputId,
 						type: "text",
 						autocomplete: "off",
-						placeholder: row.isSelf ? "Your character" : "Creature name",
+						placeholder: "Creature name",
 					},
 				});
 				input.value = row.name;
@@ -1163,34 +1180,31 @@ class CharacterSheetRest {
 				const label = e_({
 					tag: "label",
 					attrs: {for: inputId},
-					txt: row.isSelf ? "Self holder" : `Holder ${ix + 1}`,
+					txt: `Ally holder ${ix + 1}`,
 				});
 				const field = e_({tag: "div", clazz: "charsheet__atlas-rest-holder-field"});
 				field.append(input);
-				if (row.isSelf) field.append(e_({tag: "span", clazz: "charsheet__atlas-rest-self", txt: "You"}));
-				else {
-					const btnRemove = e_({
-						tag: "button",
-						clazz: "ve-btn ve-btn-xs ve-btn-default",
-						attrs: {type: "button", "aria-label": `Remove holder ${ix + 1}`},
-						txt: "Remove",
-					});
-					btnRemove.addEventListener("click", () => {
-						rows.splice(ix, 1);
-						renderRows();
-						sync();
-					});
-					field.append(btnRemove);
-				}
+				const btnRemove = e_({
+					tag: "button",
+					clazz: "ve-btn ve-btn-xs ve-btn-default",
+					attrs: {type: "button", "aria-label": `Remove ally holder ${ix + 1}`},
+					txt: "Remove",
+				});
+				btnRemove.addEventListener("click", () => {
+					rows.splice(ix, 1);
+					renderRows();
+					sync();
+				});
+				field.append(btnRemove);
 				rowEle.append(label, field);
 				roster.append(rowEle);
 			});
-			btnAddHolder.disabled = rows.length >= capacity;
+			btnAddHolder.disabled = getDraftHolders().length >= capacity;
 		};
 
 		btnAddHolder.addEventListener("click", () => {
-			if (rows.length >= capacity) return;
-			rows.push({isSelf: false, name: ""});
+			if (getDraftHolders().length >= capacity) return;
+			rows.push({name: ""});
 			renderRows();
 			sync();
 			rows.at(-1)?.input?.focus();
@@ -1198,6 +1212,7 @@ class CharacterSheetRest {
 		radioKeep.addEventListener("change", sync);
 		radioChange.addEventListener("change", sync);
 		cbHeld.addEventListener("change", sync);
+		cbIncludeSelf.addEventListener("change", sync);
 		renderRows();
 		sync();
 
@@ -1213,6 +1228,7 @@ class CharacterSheetRest {
 				if (!cbHeld.checked) return cbHeld.focus();
 				const firstEmpty = rows.find(row => !row.input?.value.trim());
 				if (firstEmpty) return firstEmpty.input.focus();
+				if (getDraftHolders().length < 2) return btnAddHolder.focus();
 				status.focus?.();
 			},
 			selectCreateModeAndFocus: () => {
@@ -1220,7 +1236,7 @@ class CharacterSheetRest {
 				radioChange.checked = true;
 				radioKeep.checked = false;
 				sync();
-				queueMicrotask(() => (rows.find(row => !row.isSelf)?.input || cbHeld).focus());
+				queueMicrotask(() => (rows[0]?.input || cbIncludeSelf).focus());
 			},
 		};
 	}

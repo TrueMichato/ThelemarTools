@@ -6232,7 +6232,7 @@ class CharacterSheetState {
 				errors.push("Destroyed Atlas holders need a destruction time.");
 			}
 		}
-		if (selfCount !== 1) errors.push("The Atlas must have exactly one self holder.");
+		if (selfCount > 1) errors.push("The Atlas can have at most one self holder.");
 		if (Number.isInteger(atlas.capacityAtCreation) && activeCount > atlas.capacityAtCreation) {
 			errors.push("The active Atlas roster exceeds its creation-time capacity.");
 		}
@@ -6308,7 +6308,7 @@ class CharacterSheetState {
 		}
 		if (holders.length < 2) errors.push("The Atlas must map at least two creatures.");
 		if (Number.isInteger(capacity) && holders.length > capacity) errors.push(`The Atlas can map at most ${capacity} creatures.`);
-		if (selfCount !== 1) errors.push("The Atlas roster must contain exactly one self holder.");
+		if (selfCount > 1) errors.push("The Atlas roster can contain at most one self holder.");
 		return CharacterSheetState._copyAndFreeze({ok: !errors.length, errors, holders});
 	}
 

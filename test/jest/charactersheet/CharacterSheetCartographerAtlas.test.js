@@ -96,11 +96,26 @@ describe("Cartographer — Adventurer's Atlas lifecycle", () => {
 		expect(dead.errors.join(" ")).toContain("dead character");
 	});
 
-	test("validates one self holder, stable unique IDs, minimum two holders, and capacity", () => {
+	test("accepts ally-only rosters through the public validator and lifecycle", () => {
+		const state = makeCartographer({int: 14}); // capacity 3
+
+		expect(state.validateAdventurersAtlasRoster([ALLY, ALLY_TWO])).toMatchObject({
+			ok: true,
+			errors: [],
+		});
+
+		const atlas = createAtlas(state, [ALLY, ALLY_TWO]);
+		expect(atlas.holders).toHaveLength(2);
+		expect(atlas.holders.filter(holder => holder.isSelf)).toHaveLength(0);
+	});
+
+	test("validates at most one self holder, stable unique IDs, minimum two holders, and capacity", () => {
 		const state = makeCartographer({int: 14}); // capacity 3
 
 		expect(state.validateAdventurersAtlasRoster([SELF]).ok).toBe(false);
-		expect(state.validateAdventurersAtlasRoster([SELF, {...ALLY, isSelf: true}]).ok).toBe(false);
+		const multipleSelf = state.validateAdventurersAtlasRoster([SELF, {...ALLY, isSelf: true}]);
+		expect(multipleSelf.ok).toBe(false);
+		expect(multipleSelf.errors.join(" ")).toContain("at most one self holder");
 		expect(state.validateAdventurersAtlasRoster([
 			{...SELF, id: "same"},
 			{...ALLY, id: "same"},
@@ -124,7 +139,7 @@ describe("Cartographer — Adventurer's Atlas lifecycle", () => {
 		expect(state.getAdventurersAtlas()).toEqual(first);
 
 		const recreated = state.recreateAdventurersAtlas([
-			{...SELF, id: firstIds[0]},
+			{...ALLY, id: firstIds[0]},
 			{...ALLY_TWO, id: firstIds[1]},
 		], {
 			isHoldingTools: true,
@@ -132,7 +147,8 @@ describe("Cartographer — Adventurer's Atlas lifecycle", () => {
 		});
 		expect(recreated.ok).toBe(true);
 		expect(recreated.atlas.generation).toBe(2);
-		expect(recreated.atlas.holders.map(holder => holder.name)).toEqual(["Mira", "Vey"]);
+		expect(recreated.atlas.holders.map(holder => holder.name)).toEqual(["Thorn", "Vey"]);
+		expect(recreated.atlas.holders.some(holder => holder.isSelf)).toBe(false);
 		expect(recreated.atlas.holders.map(holder => holder.id)).not.toEqual(firstIds);
 		expect(recreated.atlas.createdAt).toBe(1_700_000_010_000);
 	});
@@ -221,16 +237,32 @@ describe("Cartographer — Awareness initiative integration", () => {
 		expect(removed.getRollBonusDice("initiative")).toEqual([]);
 	});
 
+	test("does not grant the current sheet Awareness for ally-only maps and restores it when self is added", () => {
+		const state = makeCartographer();
+		createAtlas(state, [ALLY, ALLY_TWO]);
+
+		expect(state.getAdventurersAtlasInitiativeDie()).toBeNull();
+		expect(state.getRollBonusDice("initiative")).toEqual([]);
+
+		const recreated = state.recreateAdventurersAtlas([SELF, ALLY], {isHoldingTools: true});
+		expect(recreated.ok).toBe(true);
+		expect(state.getAdventurersAtlasInitiativeDie()).toMatchObject({
+			dice: "1d4",
+			source: "Adventurer's Atlas — Awareness",
+		});
+		expect(state.getRollBonusDice("initiative")).toHaveLength(1);
+	});
+
 	test("exposes external-holder dice only in the immutable versioned integration snapshot", () => {
 		const state = makeCartographer();
-		createAtlas(state, [SELF, ALLY, ALLY_TWO]);
+		createAtlas(state, [ALLY, ALLY_TWO]);
 
 		const snapshot = state.getAdventurersAtlasIntegrationSnapshot();
 		expect(snapshot.version).toBe(1);
 		expect(snapshot.status).toBe("active");
 		expect(snapshot.holders.find(holder => holder.name === "Thorn").initiativeDie).toBe("1d4");
 		expect(snapshot.holders.find(holder => holder.name === "Vey").initiativeDie).toBe("1d4");
-		expect(state.getRollBonusDice("initiative")).toHaveLength(1);
+		expect(state.getRollBonusDice("initiative")).toEqual([]);
 		expect(Object.keys(snapshot)).toEqual([
 			"version",
 			"atlasVersion",
@@ -259,11 +291,13 @@ describe("Cartographer — Awareness initiative integration", () => {
 describe("Cartographer — persistence, invalidation, and teardown", () => {
 	test("round-trips valid state and migrates old saves to empty state", () => {
 		const state = makeCartographer();
-		createAtlas(state);
+		createAtlas(state, [ALLY, ALLY_TWO]);
 
 		const loaded = new CharacterSheetState();
 		loaded.loadFromJson(state.toJson());
 		expect(loaded.getAdventurersAtlas()).toEqual(state.getAdventurersAtlas());
+		expect(loaded.getAdventurersAtlas().holders.some(holder => holder.isSelf)).toBe(false);
+		expect(loaded.getRollBonusDice("initiative")).toEqual([]);
 
 		const oldSave = state.toJson();
 		delete oldSave.adventurersAtlas;
@@ -297,6 +331,25 @@ describe("Cartographer — persistence, invalidation, and teardown", () => {
 		const rejected = new CharacterSheetState();
 		rejected.loadFromJson(saved);
 		expect(rejected.getAdventurersAtlas().generation).toBe(0);
+	});
+
+	test("filters duplicate persisted self rows without inventing a missing self holder", () => {
+		const allyOnly = makeCartographer();
+		createAtlas(allyOnly, [ALLY, ALLY_TWO]);
+		const loadedAllyOnly = new CharacterSheetState();
+		loadedAllyOnly.loadFromJson(allyOnly.toJson());
+		expect(loadedAllyOnly.getAdventurersAtlas().holders.filter(holder => holder.isSelf)).toHaveLength(0);
+
+		const state = makeCartographer();
+		createAtlas(state);
+		const saved = state.toJson();
+		const self = saved.adventurersAtlas.holders.find(holder => holder.isSelf);
+		saved.adventurersAtlas.holders.push({...self, id: "duplicate-self", name: "False Mira"});
+
+		const loaded = new CharacterSheetState();
+		loaded.loadFromJson(saved);
+		expect(loaded.getAdventurersAtlas().holders.filter(holder => holder.isSelf)).toHaveLength(1);
+		expect(loaded.getAdventurersAtlas().holders.map(holder => holder.name)).not.toContain("False Mira");
 	});
 
 	test("invalidates for death exactly once through the centralized transition", () => {
@@ -347,11 +400,12 @@ describe("Cartographer — Long Rest atomicity and undo", () => {
 
 		const created = rest._applyAdventurersAtlasLongRestPlan({
 			mode: "create",
-			holders: [SELF, ALLY],
+			holders: [ALLY, ALLY_TWO],
 			isHoldingTools: true,
 		});
 		expect(created).toMatchObject({ok: true, changed: true});
 		expect(state.getAdventurersAtlas().generation).toBe(1);
+		expect(state.getAdventurersAtlas().holders.some(holder => holder.isSelf)).toBe(false);
 
 		const beforeRejectedRecreation = state.getAdventurersAtlas();
 		const rejected = rest._applyAdventurersAtlasLongRestPlan({
@@ -399,6 +453,15 @@ describe("Cartographer — Long Rest atomicity and undo", () => {
 		expect(rest._onUndoRest()).toBe(true);
 		expect(state.getAdventurersAtlas()).toEqual(before);
 	});
+
+	test("offers an explicit optional self choice instead of a fixed self roster row", () => {
+		const restSource = readFileSync(new URL("../../../js/charactersheet/charactersheet-rest.js", import.meta.url), "utf8");
+
+		expect(restSource).toContain("Include yourself as a map holder");
+		expect(restSource).toContain("cbIncludeSelf.checked = !!previousSelf;");
+		expect(restSource).toContain("const rows = previousOthers");
+		expect(restSource).not.toMatch(/const rows = \[\s*\{isSelf: true/);
+	});
 });
 
 describe("Cartographer — Features Atlas card model", () => {
@@ -426,5 +489,18 @@ describe("Cartographer — Features Atlas card model", () => {
 		expect(model.destroyedHolders).toEqual([
 			expect.objectContaining({name: "Vey", status: "destroyed", destroyedBy: "Fire"}),
 		]);
+	});
+
+	test("shows self as unmapped and Awareness inactive for an ally-only Atlas", () => {
+		const state = makeCartographer();
+		createAtlas(state, [ALLY, ALLY_TWO]);
+		const features = Object.create(CharacterSheetFeatures.prototype);
+		features._state = state;
+
+		expect(features._getAdventurersAtlasCardModel()).toMatchObject({
+			status: "active",
+			selfStatus: "Not mapped",
+			awarenessLabel: "Inactive",
+		});
 	});
 });

@@ -14546,8 +14546,25 @@ body.has-quickbuild-overlay .toast__container {
 	border-top: 1px solid var(--cs-border);
 }
 
-.charsheet__atlas-rest-held {
+.charsheet__atlas-rest-held,
+.charsheet__atlas-rest-self-choice {
 	margin: 0;
+}
+
+.charsheet__atlas-rest-self-choice {
+	align-items: flex-start;
+}
+
+.charsheet__atlas-rest-self-choice > span {
+	display: grid;
+	gap: var(--cs-space-xs, 0.25rem);
+	min-width: 0;
+}
+
+.charsheet__atlas-rest-self-choice small {
+	color: var(--cs-text-muted);
+	font-size: var(--cs-text-xs, 0.75rem);
+	font-weight: 400;
 }
 
 .charsheet__atlas-rest-roster-heading,
@@ -14582,14 +14599,6 @@ body.has-quickbuild-overlay .toast__container {
 .charsheet__atlas-rest-holder-field input {
 	flex: 1;
 	min-width: 0;
-}
-
-.charsheet__atlas-rest-self {
-	flex-shrink: 0;
-	color: var(--cs-text-muted);
-	font-size: var(--cs-text-xs, 0.75rem);
-	font-weight: 700;
-	text-transform: uppercase;
 }
 
 .charsheet__atlas-rest-feedback {
