@@ -47953,6 +47953,19 @@ class CharacterSheetState {
 	// =====================================================================
 
 	static _CRAFTING_TIME_FILTER_KEYS = Object.freeze(["itemTypes", "recipeCategories", "resultCategories"]);
+	static _CRAFTING_TIME_XDMG = Object.freeze({
+		name: "Magic Item Crafting Time and Cost",
+		source: "XDMG",
+		page: 221,
+		daysByRarity: Object.freeze({
+			common: 5,
+			uncommon: 10,
+			rare: 50,
+			"very rare": 125,
+			legendary: 250,
+		}),
+	});
+	static _CRAFTING_TIME_CONSUMABLE_ITEM_TYPES = Object.freeze(["OIL", "P"]);
 
 	/**
 	 * Resolve the output taxonomy used by crafting-time modifier filters.
@@ -47971,6 +47984,94 @@ class CharacterSheetState {
 		if (item?.weapon || ["A", "M", "R"].includes(itemType)) return "weapon";
 
 		return `${recipe?.recipeCategory ?? ""}`.trim().toLowerCase() || null;
+	}
+
+	/**
+	 * Resolve one source-grounded baseline before feature modifiers are applied.
+	 *
+	 * Precedence:
+	 * 1. A caller-provided structured workweek baseline.
+	 * 2. The existing recipe-value calculation (copper -> gold / 50, rounded, minimum 1).
+	 * 3. XDMG p. 221's rarity table for value-less magic item/potion recipes.
+	 *
+	 * XDMG's non-scroll consumable footnote halves the table duration. Unsupported categories and
+	 * rarities return an explicit failure object so consumers can explain the missing duration.
+	 */
+	static getCraftingTimeBaseline ({baseWorkweeks = null, recipe = null, item = null} = {}) {
+		if (baseWorkweeks != null) {
+			if (!Number.isFinite(baseWorkweeks) || baseWorkweeks <= 0) {
+				throw new RangeError("Crafting base workweeks must be a finite number greater than zero.");
+			}
+			return {
+				isSupported: true,
+				baseWorkweeks,
+				source: {
+					type: "explicit",
+					name: "Explicit crafting duration",
+				},
+			};
+		}
+
+		if (recipe?.value != null) {
+			if (!Number.isFinite(recipe.value) || recipe.value < 0) {
+				return {
+					isSupported: false,
+					reason: `Crafting time is unavailable because "${recipe.name || "this recipe"}" has an invalid value.`,
+				};
+			}
+			return {
+				isSupported: true,
+				baseWorkweeks: Math.max(1, Math.round(recipe.value / 100 / 50)),
+				source: {
+					type: "value",
+					name: "Recipe value \u00f7 50 GP",
+					valueCp: recipe.value,
+				},
+			};
+		}
+
+		const recipeCategory = `${recipe?.recipeCategory ?? ""}`.trim().toLowerCase();
+		const itemType = `${item?.type ?? recipe?.itemType ?? ""}`.split("|")[0].trim().toUpperCase();
+		const isScroll = recipeCategory === "scroll" || itemType === "SC";
+		if (isScroll) {
+			return {
+				isSupported: false,
+				reason: "Crafting time is unavailable because Spell Scrolls use the separate XPHB scribing table.",
+			};
+		}
+
+		if (!["item", "potion"].includes(recipeCategory)) {
+			return {
+				isSupported: false,
+				reason: `Crafting time is unavailable because no shared duration rule is configured for recipe category "${recipeCategory || "unknown"}".`,
+			};
+		}
+
+		const rarity = `${recipe?.rarity ?? item?.rarity ?? ""}`.trim().toLowerCase();
+		const days = this._CRAFTING_TIME_XDMG.daysByRarity[rarity];
+		if (days == null) {
+			return {
+				isSupported: false,
+				reason: `Crafting time is unavailable because XDMG p. 221 has no duration for rarity "${rarity || "unknown"}".`,
+			};
+		}
+
+		const isConsumable = recipeCategory === "potion" || this._CRAFTING_TIME_CONSUMABLE_ITEM_TYPES.includes(itemType);
+		const adjustedDays = days * (isConsumable ? 0.5 : 1);
+		return {
+			isSupported: true,
+			baseWorkweeks: adjustedDays / 5,
+			source: {
+				type: "xdmg-rarity",
+				name: this._CRAFTING_TIME_XDMG.name,
+				source: this._CRAFTING_TIME_XDMG.source,
+				page: this._CRAFTING_TIME_XDMG.page,
+				rarity,
+				days,
+				adjustedDays,
+				isConsumable,
+			},
+		};
 	}
 
 	/**
@@ -48045,31 +48146,44 @@ class CharacterSheetState {
 	 * Calculate baseline and effective crafting time for a quantity of one recipe.
 	 *
 	 * @returns {{
-	 *   baselineWorkweeks: number,
-	 *   effectiveWorkweeks: number,
-	 *   multiplier: number,
+	 *   isSupported: boolean,
+	 *   reason?: string,
+	 *   baselineWorkweeks?: number,
+	 *   effectiveWorkweeks?: number,
+	 *   multiplier?: number,
 	 *   quantity: number,
+	 *   baselineSource?: object,
 	 *   sourceBreakdown: Array<{id: string, name: string, source: string, uid: string, multiplier: number}>,
 	 *   modifiers: Array<object>,
 	 * }}
 	 */
-	getCraftingTimeCalculation ({baseWorkweeks, quantity = 1, recipe = null, item = null, category = null} = {}) {
-		if (!Number.isFinite(baseWorkweeks) || baseWorkweeks <= 0) {
-			throw new RangeError("Crafting base workweeks must be a finite number greater than zero.");
-		}
+	getCraftingTimeCalculation ({baseWorkweeks = null, quantity = 1, recipe = null, item = null, category = null} = {}) {
 		if (!Number.isFinite(quantity) || quantity <= 0) {
 			throw new RangeError("Crafting quantity must be a finite number greater than zero.");
 		}
 
+		const baseline = this.constructor.getCraftingTimeBaseline({baseWorkweeks, recipe, item});
+		if (!baseline.isSupported) {
+			return {
+				isSupported: false,
+				reason: baseline.reason,
+				quantity,
+				sourceBreakdown: [],
+				modifiers: [],
+			};
+		}
+
 		const modifiers = this.getCraftingTimeModifiers({recipe, item, category});
 		const multiplier = modifiers.reduce((acc, modifier) => acc * modifier.multiplier, 1);
-		const baselineWorkweeks = baseWorkweeks * quantity;
+		const baselineWorkweeks = baseline.baseWorkweeks * quantity;
 
 		return {
+			isSupported: true,
 			baselineWorkweeks,
 			effectiveWorkweeks: baselineWorkweeks * multiplier,
 			multiplier,
 			quantity,
+			baselineSource: baseline.source,
 			sourceBreakdown: modifiers.map(modifier => ({
 				id: modifier.id,
 				name: modifier.owner.name,

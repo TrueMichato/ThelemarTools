@@ -25,7 +25,7 @@ Crafting time is a state calculation, not dialog policy:
 
 ```js
 state.getCraftingTimeCalculation({
-  baseWorkweeks,
+  baseWorkweeks, // optional explicit structured baseline
   quantity,
   recipe,
   item,
@@ -54,6 +54,20 @@ source; missing ownership, unknown filter keys, duplicate IDs, and zero/non-fini
 explicitly instead of creating an impossible duration. The returned calculation contains baseline
 and effective workweeks, the effective multiplier, and a render-ready source breakdown. Both the
 commit confirmation and outcome consume that same object.
+
+Baseline precedence is:
+
+1. A caller-provided structured `baseWorkweeks`.
+2. Existing recipe-value behavior when `recipe.value` exists: copper pieces are converted to GP,
+   divided by 50, rounded, and clamped to at least one workweek.
+3. For value-less magic `item`/`potion` recipes with a recognized rarity, the XDMG p. 221
+   **Magic Item Crafting Time and Cost** table: Common 1, Uncommon 2, Rare 10, Very Rare 25, and
+   Legendary 50 workweeks (five eight-hour crafting days per workweek). The XDMG footnote halves
+   these baselines for non-scroll consumables; Spell Scrolls use their separate XPHB table.
+
+Unsupported categories and rarities return `isSupported: false` with a reason. The workbench shows
+that reason in both preview and outcome rather than silently omitting time. It never guesses from a
+recipe name.
 
 Generated recipes preserve the output's existing 5etools `itemType`. Armor is exactly `LA`, `MA`,
 or `HA`; shields remain `S`, so they do not become armor merely because both contribute AC. A

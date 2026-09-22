@@ -926,43 +926,60 @@ class CharacterSheetCrafting {
 	}
 
 	_getCraftingTime (recipe, {quantity = 1} = {}) {
-		if (recipe?.value == null) return null;
-		const baseWorkweeks = Math.max(1, Math.round(recipe.value / 100 / 50));
 		return this._state.getCraftingTimeCalculation({
-			baseWorkweeks,
 			quantity,
 			recipe,
 			item: this._getRecipeResultItem(recipe),
 		});
 	}
 
+	static _getCraftingTimeBaselineLabel (craftingTime) {
+		switch (craftingTime?.baselineSource?.type) {
+			case "explicit": return craftingTime.baselineSource.name;
+			case "value": return "recipe value \u00f7 50 GP";
+			case "xdmg-rarity": {
+				const source = craftingTime.baselineSource;
+				return `${source.source} p. ${source.page}, ${source.rarity.toTitleCase()} magic item${source.isConsumable ? " (non-scroll consumable time halved)" : ""}`;
+			}
+			default: return "shared crafting rule";
+		}
+	}
+
 	static _getCraftingTimeListItems (craftingTime) {
-		if (!craftingTime) return "";
+		if (!craftingTime?.isSupported) {
+			const reason = craftingTime?.reason || "Crafting time is unavailable because no shared duration rule matched.";
+			return `<li><strong>Time:</strong> <span class="cs-crafting__warning">${reason.qq()}</span></li>`;
+		}
 		const effective = this._fmtWorkweeks(craftingTime.effectiveWorkweeks);
 		const effectiveUnit = this._fmtWorkweekUnit(craftingTime.effectiveWorkweeks);
+		const baselineLabel = this._getCraftingTimeBaselineLabel(craftingTime);
 		if (!craftingTime.sourceBreakdown.length) {
-			return `<li><strong>Time:</strong> ~${effective} ${effectiveUnit} (gp \u00f7 50)</li>`;
+			return `<li><strong>Time:</strong> ~${effective} ${effectiveUnit} <span class="ve-muted">(${baselineLabel.qq()})</span></li>`;
 		}
 
 		const baseline = this._fmtWorkweeks(craftingTime.baselineWorkweeks);
 		const baselineUnit = this._fmtWorkweekUnit(craftingTime.baselineWorkweeks);
 		const sources = craftingTime.sourceBreakdown.map(source => this._fmtCraftingTimeSource(source)).join("; ");
 		return [
-			`<li><strong>Time:</strong> ~${effective} ${effectiveUnit} <span class="ve-muted">(baseline ~${baseline} ${baselineUnit} from gp \u00f7 50)</span></li>`,
+			`<li><strong>Time:</strong> ~${effective} ${effectiveUnit} <span class="ve-muted">(baseline ~${baseline} ${baselineUnit} from ${baselineLabel.qq()})</span></li>`,
 			`<li><strong>Time modifier:</strong> ${sources.qq()}</li>`,
 		].join("");
 	}
 
 	static _getCraftingTimeOutcomeText (craftingTime) {
-		if (!craftingTime) return "";
+		if (!craftingTime?.isSupported) {
+			const reason = craftingTime?.reason || "Crafting time is unavailable because no shared duration rule matched.";
+			return ` ${reason.qq()}`;
+		}
 		const effective = this._fmtWorkweeks(craftingTime.effectiveWorkweeks);
 		const effectiveUnit = this._fmtWorkweekUnit(craftingTime.effectiveWorkweeks);
-		if (!craftingTime.sourceBreakdown.length) return ` About ${effective} ${effectiveUnit} of work.`;
+		const baselineLabel = this._getCraftingTimeBaselineLabel(craftingTime);
+		if (!craftingTime.sourceBreakdown.length) return ` About ${effective} ${effectiveUnit} of work (${baselineLabel}).`;
 
 		const baseline = this._fmtWorkweeks(craftingTime.baselineWorkweeks);
 		const baselineUnit = this._fmtWorkweekUnit(craftingTime.baselineWorkweeks);
 		const sources = craftingTime.sourceBreakdown.map(source => this._fmtCraftingTimeSource(source)).join("; ");
-		return ` About ${effective} ${effectiveUnit} of work (baseline ${baseline} ${baselineUnit}; ${sources}).`;
+		return ` About ${effective} ${effectiveUnit} of work (baseline ${baseline} ${baselineUnit} from ${baselineLabel}; ${sources}).`;
 	}
 
 	/**

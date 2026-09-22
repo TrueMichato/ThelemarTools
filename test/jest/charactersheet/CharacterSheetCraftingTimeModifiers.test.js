@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import {jest} from "@jest/globals";
 
 import "./setup.js";
@@ -6,6 +7,8 @@ import "../../../js/charactersheet/charactersheet-crafting.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCrafting = globalThis.CharacterSheetCrafting;
+const CRAFTING_DATA = JSON.parse(fs.readFileSync("data/crafting.json", "utf8"));
+const CRAFTING_RECIPES = CRAFTING_DATA.craftingRecipe;
 
 if (!String.prototype.qq) {
 	Object.defineProperty(String.prototype, "qq", {
@@ -32,6 +35,11 @@ const MAGIC_ARMOR_RECIPE = {
 	itemUid: "dragonplate armor|comcraf",
 	rarity: "very rare",
 };
+
+const REAL_ARMOR_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "+1 Dusk Armor" && recipe.source === "HHHVI");
+const REAL_POTION_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.name === "Dra-gone Paste" && recipe.source === "HHHVI");
+const REAL_DISH_RECIPE = CRAFTING_RECIPES.find(recipe => recipe.recipeCategory === "dish");
+const REAL_MATERIAL = CRAFTING_DATA.craftingMaterial[0];
 
 const addEfaArmorer = (state, {level = 3, classSource = "EFA", subclassSource = "EFA", subclassName = "Armorer"} = {}) => {
 	state.addClass({
@@ -97,6 +105,110 @@ describe("Character Sheet crafting-time modifiers", () => {
 		expect(result.sourceBreakdown[0].name).toBe("Tools of the Trade");
 	});
 
+	describe("source-grounded crafting baselines", () => {
+		it("returns an explicit result for every generated typed armor and potion recipe", () => {
+			const armorRecipes = CRAFTING_RECIPES.filter(recipe => ["LA", "MA", "HA"].includes(recipe.itemType?.split("|")[0]));
+			const potionRecipes = CRAFTING_RECIPES.filter(recipe => recipe.recipeCategory === "potion");
+			expect(armorRecipes).toHaveLength(40);
+			expect(potionRecipes).toHaveLength(69);
+			expect([...armorRecipes, ...potionRecipes].every(recipe => recipe.value == null)).toBe(true);
+
+			const state = new CharacterSheetState();
+			for (const recipe of [...armorRecipes, ...potionRecipes]) {
+				const result = state.getCraftingTimeCalculation({recipe});
+				expect(result).not.toBeNull();
+				if (["common", "uncommon", "rare", "very rare", "legendary"].includes(recipe.rarity)) {
+					expect(result.isSupported).toBe(true);
+					expect(result.baselineWorkweeks).toBeGreaterThan(0);
+				} else {
+					expect(result.isSupported).toBe(false);
+					expect(result.reason).toContain("XDMG p. 221 has no duration");
+				}
+			}
+		});
+
+		it.each([
+			["common", 1],
+			["uncommon", 2],
+			["rare", 10],
+			["very rare", 25],
+			["legendary", 50],
+		])("uses the XDMG armor baseline for %s recipes", (rarity, expectedWorkweeks) => {
+			const state = new CharacterSheetState();
+			const result = state.getCraftingTimeCalculation({
+				recipe: {...REAL_ARMOR_RECIPE, rarity},
+			});
+
+			expect(result.isSupported).toBe(true);
+			expect(result.baselineWorkweeks).toBe(expectedWorkweeks);
+			expect(result.effectiveWorkweeks).toBe(expectedWorkweeks);
+			expect(result.baselineSource).toMatchObject({
+				type: "xdmg-rarity",
+				source: "XDMG",
+				page: 221,
+				rarity,
+				isConsumable: false,
+			});
+		});
+
+		it.each([
+			["common", 0.5],
+			["uncommon", 1],
+			["rare", 5],
+			["very rare", 12.5],
+			["legendary", 25],
+		])("applies the XDMG consumable footnote to %s potions", (rarity, expectedWorkweeks) => {
+			const state = new CharacterSheetState();
+			const result = state.getCraftingTimeCalculation({
+				recipe: {...REAL_POTION_RECIPE, rarity},
+			});
+
+			expect(result.isSupported).toBe(true);
+			expect(result.baselineWorkweeks).toBe(expectedWorkweeks);
+			expect(result.effectiveWorkweeks).toBe(expectedWorkweeks);
+			expect(result.baselineSource).toMatchObject({
+				type: "xdmg-rarity",
+				source: "XDMG",
+				page: 221,
+				rarity,
+				isConsumable: true,
+			});
+		});
+
+		it("preserves explicit and value-derived precedence over the rarity fallback", () => {
+			const state = new CharacterSheetState();
+			const recipe = {...REAL_ARMOR_RECIPE, rarity: "legendary", value: 20_000};
+
+			const valueDerived = state.getCraftingTimeCalculation({recipe});
+			expect(valueDerived.baselineWorkweeks).toBe(4);
+			expect(valueDerived.baselineSource.type).toBe("value");
+
+			const explicit = state.getCraftingTimeCalculation({baseWorkweeks: 3, recipe});
+			expect(explicit.baselineWorkweeks).toBe(3);
+			expect(explicit.baselineSource.type).toBe("explicit");
+		});
+
+		it.each([
+			["dish", REAL_DISH_RECIPE, "recipe category \"dish\""],
+			["material", REAL_MATERIAL, "recipe category \"unknown\""],
+		])("returns a clear unsupported result for an unrelated %s", (_label, recipe, expectedReason) => {
+			const result = new CharacterSheetState().getCraftingTimeCalculation({recipe});
+
+			expect(result.isSupported).toBe(false);
+			expect(result.reason).toContain(expectedReason);
+			expect(result).not.toHaveProperty("effectiveWorkweeks");
+		});
+
+		it("returns a clear unsupported result for unrecognized magic-item rarities", () => {
+			const result = new CharacterSheetState().getCraftingTimeCalculation({
+				recipe: {...REAL_ARMOR_RECIPE, rarity: "artifact"},
+			});
+
+			expect(result.isSupported).toBe(false);
+			expect(result.reason).toContain("XDMG p. 221 has no duration for rarity \"artifact\"");
+		});
+	});
+
 	it.each([
 		["weapon", {recipeCategory: "item", itemType: "M"}, {type: "M"}],
 		["potion", {recipeCategory: "potion", itemType: "P"}, {type: "P"}],
@@ -141,18 +253,57 @@ describe("Character Sheet crafting-time modifiers", () => {
 		const restored = new CharacterSheetState();
 		restored.loadFromJson(original.toJson());
 
-		expect(calculate(restored)).toEqual(calculate(original));
+		expect(restored.getCraftingTimeCalculation({recipe: REAL_ARMOR_RECIPE}))
+			.toEqual(original.getCraftingTimeCalculation({recipe: REAL_ARMOR_RECIPE}));
 		expect(restored.toJson()).not.toHaveProperty("craftingTimeModifiers");
 	});
 
 	it("drops the modifier immediately when its source class is removed", () => {
 		const state = new CharacterSheetState();
 		addEfaArmorer(state);
-		expect(calculate(state).multiplier).toBe(0.5);
+		expect(state.getCraftingTimeCalculation({recipe: REAL_ARMOR_RECIPE}).effectiveWorkweeks).toBe(5);
 
 		state.removeClass("Artificer", "EFA");
 
-		expect(calculate(state).multiplier).toBe(1);
+		expect(state.getCraftingTimeCalculation({recipe: REAL_ARMOR_RECIPE}).effectiveWorkweeks).toBe(10);
+	});
+
+	it("halves a real generated value-less armor recipe", () => {
+		expect(REAL_ARMOR_RECIPE).toMatchObject({itemType: "HA", rarity: "rare"});
+		expect(REAL_ARMOR_RECIPE).not.toHaveProperty("value");
+
+		const state = new CharacterSheetState();
+		addEfaArmorer(state);
+		const result = state.getCraftingTimeCalculation({recipe: REAL_ARMOR_RECIPE});
+
+		expect(result.baselineWorkweeks).toBe(10);
+		expect(result.effectiveWorkweeks).toBe(5);
+		expect(result.sourceBreakdown[0].uid).toBe("Tools of the Trade|Artificer|EFA|Armorer|EFA|3|EFA");
+	});
+
+	it("lets a synthetic Alchemist descriptor halve a real generated value-less potion recipe", () => {
+		expect(REAL_POTION_RECIPE).toMatchObject({recipeCategory: "potion", itemType: "P", rarity: "rare"});
+		expect(REAL_POTION_RECIPE).not.toHaveProperty("value");
+
+		const state = new CharacterSheetState();
+		const potionModifier = {
+			id: "test-alchemist-tools-of-the-trade-potions",
+			owner: {
+				kind: "subclassFeature",
+				name: "Tools of the Trade",
+				source: "EFA",
+				uid: "Tools of the Trade|Artificer|EFA|Alchemist|EFA|3|EFA",
+			},
+			multiplier: 0.5,
+			filter: {recipeCategories: ["potion"]},
+		};
+		jest.spyOn(state, "getFeatureCalculations").mockReturnValue({craftingTimeModifiers: [potionModifier]});
+
+		const result = state.getCraftingTimeCalculation({recipe: REAL_POTION_RECIPE});
+
+		expect(result.baselineWorkweeks).toBe(5);
+		expect(result.effectiveWorkweeks).toBe(2.5);
+		expect(result.sourceBreakdown.map(it => it.uid)).toEqual([potionModifier.owner.uid]);
 	});
 
 	it("lets a second generic descriptor target potions without Armorer-specific code", () => {
@@ -246,10 +397,10 @@ describe("Character Sheet crafting-time modifiers", () => {
 	it("renders the same effective time and source in confirmation and outcome", async () => {
 		const state = new CharacterSheetState();
 		addEfaArmorer(state);
-		state.addItem({name: "Dragon Bone", source: "COMCRAF", type: "G", _isCraftingMaterial: true}, 1);
+		state.addItem({name: "Young Shadow Dragon Scale", source: "HHHVI", type: "G", _isCraftingMaterial: true}, 1);
 
 		const page = {
-			getItems: () => [{name: "Dragonplate Armor", source: "COMCRAF", type: "HA", rarity: "very rare"}],
+			getItems: () => [{name: "+1 Dusk Armor", source: "HHHVI", type: "HA", rarity: "rare"}],
 			saveCharacter: jest.fn(),
 			_inventory: {render: jest.fn()},
 		};
@@ -257,20 +408,34 @@ describe("Character Sheet crafting-time modifiers", () => {
 		const modal = jest.spyOn(crafting, "_pThreeWay")
 			.mockResolvedValueOnce("primary")
 			.mockResolvedValueOnce("primary");
-		const recipe = {
-			...MAGIC_ARMOR_RECIPE,
-			ingredients: [{name: "Dragon Bone", quantity: 1}],
-		};
 
-		await crafting.pCommitCraft(recipe, null);
+		await crafting.pCommitCraft(REAL_ARMOR_RECIPE, null);
 
 		const confirmationHtml = modal.mock.calls[0][0].html;
 		const outcomeHtml = modal.mock.calls[1][0].html;
 		for (const html of [confirmationHtml, outcomeHtml]) {
-			expect(html).toContain("2 workweeks");
+			expect(html).toContain("5 workweeks");
 			expect(html).toContain("baseline");
-			expect(html).toContain("4 workweeks");
+			expect(html).toContain("10 workweeks");
+			expect(html).toContain("XDMG p. 221");
+			expect(html).toContain("Rare magic item");
 			expect(html).toContain("Tools of the Trade [EFA] \u00d70.5");
 		}
+	});
+
+	it("surfaces the same unsupported reason in preview and outcome instead of returning null", () => {
+		const state = new CharacterSheetState();
+		const page = {getItems: () => []};
+		const crafting = new CharacterSheetCrafting(page, state);
+		const recipe = {name: "Mystery Dish", source: "TST", recipeCategory: "dish", rarity: "rare"};
+
+		const result = crafting._getCraftingTime(recipe);
+		expect(result).not.toBeNull();
+		expect(result.isSupported).toBe(false);
+
+		const preview = CharacterSheetCrafting._getCraftingTimeListItems(result);
+		const outcome = CharacterSheetCrafting._getCraftingTimeOutcomeText(result);
+		expect(preview).toContain(result.reason);
+		expect(outcome).toContain(result.reason);
 	});
 });

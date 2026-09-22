@@ -275,6 +275,14 @@ recipe context, sorts by stable ID, and multiplies every applicable contribution
 contains `baselineWorkweeks`, `effectiveWorkweeks`, `multiplier`, and `sourceBreakdown`, and is the
 single value both crafting preview and outcome render.
 
+The calculation resolves its baseline in strict order: explicit caller `baseWorkweeks`, the
+existing value-derived formula when `recipe.value` is present, then the XDMG p. 221 **Magic Item
+Crafting Time and Cost** rarity table for value-less `item`/`potion` recipes. That table is
+Common/Uncommon/Rare/Very Rare/Legendary = 1/2/10/25/50 workweeks; its non-scroll consumable
+footnote halves those values. Scrolls, unsupported recipe categories, and unrecognized rarities
+return `{isSupported: false, reason}` so UI/tooling must surface the reason rather than hide the
+missing duration.
+
 The EFA Armorer's Tools of the Trade descriptor is source-gated to Artificer `EFA` + Armorer `EFA`
 at level 3 and filters on `LA`/`MA`/`HA`. `S` shields are deliberately separate. Future features
 such as an Alchemist potion discount use the same channel with
