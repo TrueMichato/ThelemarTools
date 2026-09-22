@@ -4532,6 +4532,33 @@ class CharacterSheetState {
 		return definition ? `fixed-proficiency-fallback:${definition.ownerUid.toLowerCase()}` : "";
 	}
 
+	static EFA_ARTILLERIST_SUBCLASS_UID = "Artillerist|Artificer|EFA|EFA";
+	static EFA_ELDRITCH_CANNON_TEMPLATE_UID = "Eldritch Cannon|EFA";
+	static GENERATED_CLASS_SUMMON_GENERATION_VERSION = 1;
+	static CLASS_SUMMON_RETIREMENT_REASONS = Object.freeze({
+		DISMISSED: "dismissed",
+		DESTROYED: "destroyed",
+		DURATION_EXPIRED: "durationExpired",
+		OWNER_REMOVED: "ownerRemoved",
+		SOURCE_MISMATCH: "sourceMismatch",
+		LEVEL_REDUCED: "levelReduced",
+		INVALID_STATE: "invalidState",
+		DEDUPLICATED: "deduplicated",
+		DETONATED: "detonated",
+	});
+
+	static get EFA_ELDRITCH_CANNON_FEATURE_UID () {
+		return CharacterSheetState._getSourceAwareSubclassFeatureUid({
+			name: "Eldritch Cannon",
+			source: "EFA",
+			className: "Artificer",
+			classSource: "EFA",
+			subclassShortName: "Artillerist",
+			subclassSource: "EFA",
+			level: 3,
+		});
+	}
+
 	/**
 	 * Return whether a feature is a class/subclass progression feature whose
 	 * prose-derived mechanics belong to the class-feature cleanup/rebuild domain.
@@ -4615,6 +4642,9 @@ class CharacterSheetState {
 		this._gamblerRollSource = null;
 		this._committedFeatureUseHooks = new Map();
 		this._committedSpellCastHooks = new Map();
+		this._classSummonTemplateCatalog = [];
+		this._lastClassSummonReconciliationResults = [];
+		this._classSummonReconciliationDeferDepth = 0;
 		// Optional full spell database, injected by the controller after data
 		// load (`setSpellData`). Used to enrich subclass/feature-granted spells
 		// with their real level/school/metadata so they render and persist
@@ -4649,6 +4679,22 @@ class CharacterSheetState {
 	setItemCatalog (allItems) {
 		this._allItems = Array.isArray(allItems) ? allItems : [];
 		this._migrateInventoryItemMetadata();
+	}
+
+	/**
+	 * Inject the authoritative object catalog used by generated class summons.
+	 * The catalog is runtime-only; summon saves persist only stable ownership
+	 * metadata and legal mutable runtime fields.
+	 * @param {Array} templates
+	 * @returns {Array<object>} Explicit reconciliation results.
+	 */
+	setClassSummonTemplateCatalog (templates) {
+		this._classSummonTemplateCatalog = Array.isArray(templates) ? templates : [];
+		return this.reconcileClassSummons();
+	}
+
+	getClassSummonTemplateCatalog () {
+		return [...(this._classSummonTemplateCatalog || [])];
 	}
 
 	static _normalizeInventoryItemBonuses (item) {
@@ -5594,6 +5640,11 @@ class CharacterSheetState {
 			//   turnUsage?: {action, reaction, flags: {[flagName]: boolean}},
 			//   hitDice?: {die, current, max} }
 			companions: [],
+			// Monotonic revision cursors for generated class-summon ownership slots.
+			// Runtime summon state remains in `companions`; this ledger only ensures a
+			// retired slot is recreated with a newer `instanceRevision`, including
+			// after save/load.
+			generatedClassSummonRevisions: {},
 
 			// Druid 2024 Wild Shape "Known Forms" roster — the persistent list of
 			// Beast forms a druid has learned (official 2024 model). Each entry is a
@@ -5751,6 +5802,8 @@ class CharacterSheetState {
 		this._gamblerRollSource = null;
 		this._committedFeatureUseHooks = new Map();
 		this._committedSpellCastHooks = new Map();
+		this._lastClassSummonReconciliationResults = [];
+		this._classSummonReconciliationDeferDepth = 0;
 	}
 
 	toJson () {
@@ -5929,6 +5982,11 @@ class CharacterSheetState {
 			this._data.actionEconomyUsage.bonus = true;
 		}
 		this._normalizeTurnReceiptStore();
+		if (!this._data.generatedClassSummonRevisions
+			|| typeof this._data.generatedClassSummonRevisions !== "object"
+			|| Array.isArray(this._data.generatedClassSummonRevisions)) {
+			this._data.generatedClassSummonRevisions = {};
+		}
 		if (this._data.characterBase && typeof this._data.characterBase === "object") {
 			if (!Number(this._data.characterBase.v)) this._data.characterBase.v = 1;
 			if (!Array.isArray(this._data.characterBase.decisions)) this._data.characterBase.decisions = [];
@@ -6285,6 +6343,7 @@ class CharacterSheetState {
 		// addCompanionFromBestiary arg-order bug) so they re-register under the correct
 		// string type. Idempotent.
 		this._migrateCompanions();
+		this.reconcileClassSummons();
 
 		// (#11) Backfill quiver contents for saves whose quiver was already equipped
 		// before the auto-place pipeline existed (or before dart recognition). Runs
@@ -9740,6 +9799,7 @@ class CharacterSheetState {
 		// Recalculate companion stats (HP, AC, etc. may scale with level/PB)
 		this.recalculateAllCompanions();
 		this._syncAdventurersAtlasEligibility();
+		this._reconcileClassSummonsAfterOwnerChange();
 	}
 
 	/**
@@ -9766,6 +9826,7 @@ class CharacterSheetState {
 		this.applyClassFeatureEffects();
 		this._ensureBattleMasterSuperiorityDice();
 		this._syncAdventurersAtlasEligibility();
+		this._reconcileClassSummonsAfterOwnerChange();
 
 		return true;
 	}
@@ -9782,6 +9843,7 @@ class CharacterSheetState {
 		this.applyClassFeatureEffects();
 		this._ensureBattleMasterSuperiorityDice();
 		this._syncAdventurersAtlasEligibility();
+		this._reconcileClassSummonsAfterOwnerChange();
 	}
 
 	/**
@@ -10224,6 +10286,7 @@ class CharacterSheetState {
 		this.applyClassFeatureEffects();
 		this.ensureUnarmedStrike();
 		this.ensureXpMatchesLevel();
+		this._reconcileClassSummonsAfterOwnerChange();
 
 		// 15. Cap current HP if it exceeds new max
 		if (this._data.hp.current > this._data.hp.max) {
@@ -10294,6 +10357,7 @@ class CharacterSheetState {
 			// Re-apply class feature effects for new subclass
 			this.applyClassFeatureEffects();
 			this._syncAdventurersAtlasEligibility();
+			this._reconcileClassSummonsAfterOwnerChange();
 		}
 	}
 
@@ -76222,6 +76286,679 @@ class CharacterSheetState {
 		return out;
 	}
 
+	static EFA_ELDRITCH_CANNON_FORMS = Object.freeze(["flamethrower", "forceBallista", "protector"]);
+	static EFA_ELDRITCH_CANNON_SIZES = Object.freeze(["T", "S"]);
+	static EFA_ELDRITCH_CANNON_PLACEMENTS = Object.freeze(["carried", "deployed"]);
+	static EFA_ELDRITCH_CANNON_MOBILITY = Object.freeze(["legs", "wheels"]);
+
+	static _isSameClassSummonUid (a, b) {
+		return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+	}
+
+	static _getGeneratedClassSummonDefinition (templateUid) {
+		if (!CharacterSheetState._isSameClassSummonUid(templateUid, CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID)) return null;
+		return {
+			templateUid: CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID,
+			ownerClassUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			ownerSubclassUid: CharacterSheetState.EFA_ARTILLERIST_SUBCLASS_UID,
+			ownerFeatureUid: CharacterSheetState.EFA_ELDRITCH_CANNON_FEATURE_UID,
+			generationVersion: CharacterSheetState.GENERATED_CLASS_SUMMON_GENERATION_VERSION,
+			minOwnerLevel: 3,
+			getMaxSlots: level => level >= 15 ? 2 : 1,
+			forms: CharacterSheetState.EFA_ELDRITCH_CANNON_FORMS,
+			sizes: CharacterSheetState.EFA_ELDRITCH_CANNON_SIZES,
+		};
+	}
+
+	static _getGeneratedClassSummonOwnershipKey (metadata) {
+		if (!metadata || typeof metadata !== "object") return null;
+		const slot = Number(metadata.generatedSlot);
+		if (!Number.isInteger(slot) || slot < 0) return null;
+		const parts = [
+			metadata.templateUid,
+			metadata.ownerClassUid,
+			metadata.ownerSubclassUid,
+			metadata.ownerFeatureUid,
+			slot,
+		];
+		if (parts.slice(0, 4).some(it => typeof it !== "string" || !it.trim())) return null;
+		return parts.map(it => String(it).trim().toLowerCase()).join("::");
+	}
+
+	_getClassSummonTemplate (templateUid) {
+		const [name, source] = String(templateUid || "").split("|");
+		if (!name || !source) return null;
+		return (this._classSummonTemplateCatalog || []).find(template =>
+			CharacterSheetState._isSameClassSummonUid(`${template?.name || ""}|${template?.source || ""}`, templateUid),
+		) || null;
+	}
+
+	_getGeneratedClassSummonOwnerState (definition) {
+		const [className, classSource] = definition.ownerClassUid.split("|");
+		const ownerClass = (this._data.classes || []).find(cls =>
+			CharacterSheetState._isSameClassSummonUid(`${cls?.name || ""}|${cls?.source || ""}`, definition.ownerClassUid),
+		);
+		if (!ownerClass) {
+			const hasSameNamedClass = (this._data.classes || []).some(cls =>
+				String(cls?.name || "").toLowerCase() === className.toLowerCase(),
+			);
+			return {
+				ok: false,
+				reason: hasSameNamedClass
+					? CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.SOURCE_MISMATCH
+					: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.OWNER_REMOVED,
+				details: {ownerClassUid: definition.ownerClassUid},
+			};
+		}
+
+		const subclass = this.getEffectiveSubclassForClass(ownerClass);
+		const actualSubclassUid = subclass
+			? [
+				subclass.shortName || subclass.name || "",
+				ownerClass.name || className,
+				ownerClass.source || classSource,
+				subclass.source || "",
+			].join("|")
+			: "";
+		if (!CharacterSheetState._isSameClassSummonUid(actualSubclassUid, definition.ownerSubclassUid)) {
+			const hasSameNamedSubclass = String(subclass?.shortName || subclass?.name || "").toLowerCase() === "artillerist";
+			return {
+				ok: false,
+				reason: hasSameNamedSubclass
+					? CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.SOURCE_MISMATCH
+					: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.OWNER_REMOVED,
+				details: {
+					ownerSubclassUid: definition.ownerSubclassUid,
+					actualSubclassUid: actualSubclassUid || null,
+				},
+			};
+		}
+
+		const level = Math.max(0, Math.floor(Number(ownerClass.level) || 0));
+		if (level < definition.minOwnerLevel) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.LEVEL_REDUCED,
+				details: {requiredLevel: definition.minOwnerLevel, actualLevel: level},
+			};
+		}
+
+		return {
+			ok: true,
+			ownerClass,
+			subclass,
+			level,
+			maxSlots: definition.getMaxSlots(level),
+		};
+	}
+
+	_validateGeneratedClassSummonTemplate (definition) {
+		const hasCatalog = !!(this._classSummonTemplateCatalog || []).length;
+		const template = this._getClassSummonTemplate(definition.templateUid);
+		if (!template) {
+			return hasCatalog
+				? {
+					ok: false,
+					reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+					details: {templateUid: definition.templateUid, templateMissing: true},
+				}
+				: {
+					ok: true,
+					template: null,
+					details: {validationDeferred: "templateCatalogUnavailable"},
+				};
+		}
+
+		const ac = Number(template.ac);
+		const templateSizes = Array.isArray(template.size) ? template.size : [];
+		const immunities = Array.isArray(template.immune) ? template.immune.filter(it => typeof it === "string") : [];
+		const isLegal = Number.isFinite(ac)
+			&& definition.sizes.every(size => templateSizes.includes(size))
+			&& ["poison", "psychic"].every(type => immunities.includes(type));
+		if (!isLegal) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {templateUid: definition.templateUid, templateMalformed: true},
+			};
+		}
+		return {ok: true, template};
+	}
+
+	_validateGeneratedClassSummonRecord (record) {
+		const metadata = record?.generatedClassSummon;
+		if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {metadataMissing: true},
+			};
+		}
+
+		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(metadata.templateUid);
+		if (!definition) {
+			const isEldritchCannon = String(metadata.templateUid || "").toLowerCase().startsWith("eldritch cannon|");
+			return {
+				ok: false,
+				reason: isEldritchCannon
+					? CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.SOURCE_MISMATCH
+					: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {templateUid: metadata.templateUid || null},
+			};
+		}
+
+		const identityMatches = [
+			["templateUid", definition.templateUid],
+			["ownerClassUid", definition.ownerClassUid],
+			["ownerSubclassUid", definition.ownerSubclassUid],
+			["ownerFeatureUid", definition.ownerFeatureUid],
+		].every(([key, expected]) => CharacterSheetState._isSameClassSummonUid(metadata[key], expected));
+		if (!identityMatches) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.SOURCE_MISMATCH,
+				details: {expected: {
+					templateUid: definition.templateUid,
+					ownerClassUid: definition.ownerClassUid,
+					ownerSubclassUid: definition.ownerSubclassUid,
+					ownerFeatureUid: definition.ownerFeatureUid,
+				}},
+			};
+		}
+
+		if (metadata.generationVersion !== definition.generationVersion
+			|| !Number.isInteger(metadata.generatedSlot)
+			|| metadata.generatedSlot < 0
+			|| !Number.isInteger(record.instanceRevision)
+			|| record.instanceRevision < 1) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {metadataVersionOrRevisionInvalid: true},
+			};
+		}
+
+		const isFormValid = definition.forms.includes(record.form);
+		const isSizeValid = definition.sizes.includes(record.size);
+		const isPlacementValid = CharacterSheetState.EFA_ELDRITCH_CANNON_PLACEMENTS.includes(record.placement);
+		const isMobilityValid = record.mobility == null || CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(record.mobility);
+		const isDistanceValid = Number.isFinite(record.distanceFromOwnerFt) && record.distanceFromOwnerFt >= 0;
+		const isHpValid = Number.isInteger(record.currentHp) && record.currentHp >= 0;
+		const isDurationValid = Number.isFinite(record.durationRemainingMinutes) && record.durationRemainingMinutes >= 0;
+		const isPaymentValid = record.createdWith === "freeUse"
+			? record.createdWithSlotLevel == null
+			: record.createdWith === "spellSlot"
+				&& Number.isInteger(record.createdWithSlotLevel)
+				&& record.createdWithSlotLevel > 0;
+		const isPlacementRuntimeValid = record.placement !== "carried"
+			|| (record.mobility == null && record.distanceFromOwnerFt === 0);
+		if (!isFormValid
+			|| !isSizeValid
+			|| !isPlacementValid
+			|| !isMobilityValid
+			|| !isDistanceValid
+			|| !isHpValid
+			|| !isDurationValid
+			|| !isPaymentValid
+			|| !isPlacementRuntimeValid) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {runtimeInvalid: true},
+			};
+		}
+
+		const templateState = this._validateGeneratedClassSummonTemplate(definition);
+		if (!templateState.ok) return {...templateState, definition};
+		if (templateState.template && !templateState.template.size.includes(record.size)) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {size: record.size, templateSizes: templateState.template.size},
+			};
+		}
+
+		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
+		if (!ownerState.ok) return {...ownerState, definition, template: templateState.template};
+		if (metadata.generatedSlot === 1 && ownerState.level < 15) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.LEVEL_REDUCED,
+				details: {generatedSlot: 1, requiredLevel: 15, actualLevel: ownerState.level},
+			};
+		}
+		if (metadata.generatedSlot >= ownerState.maxSlots) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				details: {generatedSlot: metadata.generatedSlot, maxSlots: ownerState.maxSlots},
+			};
+		}
+		if (record.currentHp === 0) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DESTROYED,
+			};
+		}
+		if (record.durationRemainingMinutes === 0) {
+			return {
+				ok: false,
+				reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DURATION_EXPIRED,
+			};
+		}
+
+		return {
+			ok: true,
+			definition,
+			template: templateState.template,
+			templateDetails: templateState.details || null,
+			ownerState,
+			maxHp: 5 * ownerState.level,
+			ownershipKey: CharacterSheetState._getGeneratedClassSummonOwnershipKey(metadata),
+		};
+	}
+
+	_recordGeneratedClassSummonRevision (record) {
+		const ownershipKey = CharacterSheetState._getGeneratedClassSummonOwnershipKey(record?.generatedClassSummon);
+		const revision = Number(record?.instanceRevision);
+		if (!ownershipKey || !Number.isInteger(revision) || revision < 1) return;
+		this._data.generatedClassSummonRevisions ||= {};
+		this._data.generatedClassSummonRevisions[ownershipKey] = Math.max(
+			Number(this._data.generatedClassSummonRevisions[ownershipKey]) || 0,
+			revision,
+		);
+	}
+
+	_retireClassSummonRecord (record, reason, details = null) {
+		if (reason !== CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE) {
+			this._recordGeneratedClassSummonRevision(record);
+		}
+		const index = (this._data.companions || []).indexOf(record);
+		if (~index) this._data.companions.splice(index, 1);
+		return {
+			instanceId: record?.id || null,
+			action: "retired",
+			reason,
+			...(details ? {details} : {}),
+		};
+	}
+
+	/**
+	 * Reconcile generated class summons against their exact source-qualified
+	 * owner, authoritative template, legal runtime state, level, and slot.
+	 * Existing legacy `CLASS_SUMMON` companions without generated ownership
+	 * metadata remain untouched.
+	 * @returns {Array<{instanceId:string|null, action:"kept"|"retired"|"clamped", reason:string|null, details?:object}>}
+	 */
+	reconcileClassSummons () {
+		const records = (this._data.companions || []).filter(record =>
+			record?.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
+			&& record.generatedClassSummon,
+		);
+		const results = [];
+		const legalByOwnership = new Map();
+
+		records.forEach((record, index) => {
+			const validation = this._validateGeneratedClassSummonRecord(record);
+			if (!validation.ok) {
+				results.push(this._retireClassSummonRecord(record, validation.reason, validation.details || null));
+				return;
+			}
+			const group = legalByOwnership.get(validation.ownershipKey) || [];
+			group.push({record, validation, index});
+			legalByOwnership.set(validation.ownershipKey, group);
+		});
+
+		for (const group of legalByOwnership.values()) {
+			group.sort((a, b) =>
+				(b.record.instanceRevision - a.record.instanceRevision)
+				|| (b.index - a.index),
+			);
+			const [winner, ...duplicates] = group;
+			duplicates.forEach(({record}) => {
+				results.push(this._retireClassSummonRecord(
+					record,
+					CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DEDUPLICATED,
+					{keptInstanceId: winner.record.id},
+				));
+			});
+
+			this._recordGeneratedClassSummonRevision(winner.record);
+			if (winner.record.currentHp > winner.validation.maxHp) {
+				const previousCurrentHp = winner.record.currentHp;
+				winner.record.currentHp = winner.validation.maxHp;
+				results.push({
+					instanceId: winner.record.id,
+					action: "clamped",
+					reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.LEVEL_REDUCED,
+					details: {previousCurrentHp, maxHp: winner.validation.maxHp},
+				});
+				continue;
+			}
+			results.push({
+				instanceId: winner.record.id,
+				action: "kept",
+				reason: null,
+				...(winner.validation.templateDetails ? {details: winner.validation.templateDetails} : {}),
+			});
+		}
+
+		this._lastClassSummonReconciliationResults = MiscUtil.copyFast(results);
+		return MiscUtil.copyFast(results);
+	}
+
+	getLastClassSummonReconciliationResults () {
+		return MiscUtil.copyFast(this._lastClassSummonReconciliationResults || []);
+	}
+
+	_reconcileClassSummonsAfterOwnerChange () {
+		if (this._classSummonReconciliationDeferDepth > 0) return [];
+		return this.reconcileClassSummons();
+	}
+
+	withClassSummonReconciliationDeferred (callback) {
+		if (typeof callback !== "function") throw new TypeError("A class-summon reconciliation callback is required.");
+		this._classSummonReconciliationDeferDepth++;
+		try {
+			return callback();
+		} finally {
+			this._classSummonReconciliationDeferDepth = Math.max(0, this._classSummonReconciliationDeferDepth - 1);
+			if (!this._classSummonReconciliationDeferDepth) this.reconcileClassSummons();
+		}
+	}
+
+	_projectGeneratedClassSummon (record) {
+		const validation = this._validateGeneratedClassSummonRecord(record);
+		if (!validation.ok || !validation.template) return null;
+
+		const {template, ownerState, definition} = validation;
+		const intMod = this.getAbilityMod("int");
+		const spellAttackBonus = this.getSpellAttackBonusForAbility("int");
+		const spellSaveDc = this.getSpellSaveDcForAbility("int");
+		const damageDice = ownerState.level >= 9 ? "3d8" : "2d8";
+		const protectorDice = ownerState.level >= 9 ? "2d8" : "1d8";
+		const protectorBonus = Math.max(1, intMod);
+		const formCalculation = record.form === "flamethrower"
+			? {
+				kind: "savingThrow",
+				saveAbility: "dex",
+				saveDc: spellSaveDc,
+				damageDice,
+				damageType: "fire",
+				area: {shape: "cone", sizeFt: 15},
+			}
+			: record.form === "forceBallista"
+				? {
+					kind: "spellAttack",
+					attackBonus: spellAttackBonus,
+					damageDice,
+					damageType: "force",
+					rangeFt: 120,
+					pushFt: 5,
+				}
+				: {
+					kind: "temporaryHitPoints",
+					tempHpDice: protectorDice,
+					tempHpBonus: protectorBonus,
+					rangeFt: 10,
+				};
+
+		return {
+			id: record.id,
+			instanceId: record.id,
+			name: template.name,
+			source: template.source,
+			type: record.type,
+			origin: record.origin || "Eldritch Cannon",
+			generatedClassSummon: MiscUtil.copyFast(record.generatedClassSummon),
+			form: record.form,
+			size: record.size,
+			placement: record.placement,
+			mobility: record.mobility,
+			distanceFromOwnerFt: record.distanceFromOwnerFt,
+			currentHp: record.currentHp,
+			durationRemainingMinutes: record.durationRemainingMinutes,
+			createdWith: record.createdWith,
+			createdWithSlotLevel: record.createdWithSlotLevel,
+			instanceRevision: record.instanceRevision,
+			ac: Number(template.ac),
+			hp: {current: record.currentHp, max: validation.maxHp},
+			immunities: MiscUtil.copyFast(template.immune || []),
+			conditionImmunities: MiscUtil.copyFast(template.conditionImmune || []),
+			calculations: {
+				artificerLevel: ownerState.level,
+				maxCannonCount: ownerState.maxSlots,
+				activationRangeFt: 60,
+				movementSpeedFt: 15,
+				spellAttackBonus,
+				spellSaveDc,
+				...formCalculation,
+			},
+			templateUid: definition.templateUid,
+		};
+	}
+
+	getClassSummon (instanceId) {
+		const record = (this._data.companions || []).find(companion =>
+			companion?.id === instanceId
+			&& companion.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
+			&& companion.generatedClassSummon,
+		);
+		return record ? this._projectGeneratedClassSummon(record) : null;
+	}
+
+	listClassSummons ({
+		templateUid = null,
+		ownerClassUid = null,
+		ownerSubclassUid = null,
+		ownerFeatureUid = null,
+	} = {}) {
+		return (this._data.companions || [])
+			.filter(companion => companion?.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON && companion.generatedClassSummon)
+			.filter(companion => !templateUid || CharacterSheetState._isSameClassSummonUid(companion.generatedClassSummon.templateUid, templateUid))
+			.filter(companion => !ownerClassUid || CharacterSheetState._isSameClassSummonUid(companion.generatedClassSummon.ownerClassUid, ownerClassUid))
+			.filter(companion => !ownerSubclassUid || CharacterSheetState._isSameClassSummonUid(companion.generatedClassSummon.ownerSubclassUid, ownerSubclassUid))
+			.filter(companion => !ownerFeatureUid || CharacterSheetState._isSameClassSummonUid(companion.generatedClassSummon.ownerFeatureUid, ownerFeatureUid))
+			.map(companion => this._projectGeneratedClassSummon(companion))
+			.filter(Boolean);
+	}
+
+	createEfaEldritchCannon ({
+		form,
+		size,
+		placement,
+		mobility = null,
+		distanceFromOwnerFt = 0,
+		createdWith,
+		createdWithSlotLevel = null,
+	} = {}) {
+		this.reconcileClassSummons();
+		const definition = CharacterSheetState._getGeneratedClassSummonDefinition(CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID);
+		const templateState = this._validateGeneratedClassSummonTemplate(definition);
+		if (!templateState.ok || !templateState.template) {
+			return {
+				ok: false,
+				reason: "templateUnavailable",
+				details: templateState.details || {templateUid: definition.templateUid},
+			};
+		}
+		const ownerState = this._getGeneratedClassSummonOwnerState(definition);
+		if (!ownerState.ok) return {ok: false, reason: ownerState.reason, details: ownerState.details || null};
+
+		const paymentValid = createdWith === "freeUse"
+			? createdWithSlotLevel == null
+			: createdWith === "spellSlot"
+				&& Number.isInteger(createdWithSlotLevel)
+				&& createdWithSlotLevel > 0;
+		const runtimeValid = definition.forms.includes(form)
+			&& definition.sizes.includes(size)
+			&& CharacterSheetState.EFA_ELDRITCH_CANNON_PLACEMENTS.includes(placement)
+			&& (mobility == null || CharacterSheetState.EFA_ELDRITCH_CANNON_MOBILITY.includes(mobility))
+			&& Number.isFinite(distanceFromOwnerFt)
+			&& distanceFromOwnerFt >= 0
+			&& (placement !== "carried" || (mobility == null && distanceFromOwnerFt === 0))
+			&& paymentValid;
+		if (!runtimeValid) {
+			return {ok: false, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE};
+		}
+
+		const generatedClassSummon = {
+			templateUid: definition.templateUid,
+			ownerClassUid: definition.ownerClassUid,
+			ownerSubclassUid: definition.ownerSubclassUid,
+			ownerFeatureUid: definition.ownerFeatureUid,
+			generatedSlot: 0,
+			generationVersion: definition.generationVersion,
+		};
+		const ownershipKey = CharacterSheetState._getGeneratedClassSummonOwnershipKey(generatedClassSummon);
+		const hasOccupiedSlot = (this._data.companions || []).some(companion =>
+			CharacterSheetState._getGeneratedClassSummonOwnershipKey(companion?.generatedClassSummon) === ownershipKey,
+		);
+		if (hasOccupiedSlot) return {ok: false, reason: "slotOccupied"};
+
+		const instanceRevision = (Number(this._data.generatedClassSummonRevisions?.[ownershipKey]) || 0) + 1;
+		const record = {
+			id: CryptUtil.uid(),
+			name: templateState.template.name,
+			source: templateState.template.source,
+			type: CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON,
+			origin: "Eldritch Cannon",
+			generatedClassSummon,
+			form,
+			size,
+			placement,
+			mobility,
+			distanceFromOwnerFt,
+			currentHp: 5 * ownerState.level,
+			durationRemainingMinutes: 60,
+			createdWith,
+			createdWithSlotLevel,
+			instanceRevision,
+		};
+		this._data.companions ||= [];
+		this._data.companions.push(record);
+		this._recordGeneratedClassSummonRevision(record);
+		const reconciliation = this.reconcileClassSummons().find(result => result.instanceId === record.id) || null;
+		if (!reconciliation || reconciliation.action === "retired") {
+			return {
+				ok: false,
+				reason: reconciliation?.reason || CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE,
+				reconciliation,
+			};
+		}
+		return {
+			ok: true,
+			instanceId: record.id,
+			summon: this.getClassSummon(record.id),
+			reconciliation,
+		};
+	}
+
+	getEfaEldritchCannon (instanceId = null) {
+		if (instanceId) {
+			const summon = this.getClassSummon(instanceId);
+			return summon && CharacterSheetState._isSameClassSummonUid(
+				summon.generatedClassSummon.templateUid,
+				CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID,
+			)
+				? summon
+				: null;
+		}
+		return this.listEfaEldritchCannons()[0] || null;
+	}
+
+	listEfaEldritchCannons () {
+		return this.listClassSummons({templateUid: CharacterSheetState.EFA_ELDRITCH_CANNON_TEMPLATE_UID});
+	}
+
+	retireClassSummon (instanceId, reason) {
+		const allowed = new Set(Object.values(CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS)
+			.filter(it => it !== CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DETONATED));
+		if (!allowed.has(reason)) {
+			return {ok: false, instanceId, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE};
+		}
+		const record = (this._data.companions || []).find(companion =>
+			companion?.id === instanceId
+			&& companion.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
+			&& companion.generatedClassSummon,
+		);
+		if (!record) return {ok: false, instanceId, reason: "notFound"};
+		return {ok: true, ...this._retireClassSummonRecord(record, reason)};
+	}
+
+	dismissClassSummon (instanceId) {
+		return this.retireClassSummon(instanceId, CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DISMISSED);
+	}
+
+	dismissEfaEldritchCannon (instanceId) {
+		return this.dismissClassSummon(instanceId);
+	}
+
+	destroyClassSummon (instanceId) {
+		return this.retireClassSummon(instanceId, CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DESTROYED);
+	}
+
+	setClassSummonCurrentHp (instanceId, currentHp) {
+		if (!Number.isInteger(currentHp) || currentHp < 0) {
+			return {ok: false, instanceId, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE};
+		}
+		const record = (this._data.companions || []).find(companion =>
+			companion?.id === instanceId
+			&& companion.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
+			&& companion.generatedClassSummon,
+		);
+		if (!record) return {ok: false, instanceId, reason: "notFound"};
+		if (currentHp === 0) return this.destroyClassSummon(instanceId);
+
+		const summon = this._projectGeneratedClassSummon(record);
+		if (!summon) {
+			return {ok: false, instanceId, reason: CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.INVALID_STATE};
+		}
+		record.currentHp = Math.min(currentHp, summon.hp.max);
+		return {
+			ok: true,
+			instanceId,
+			currentHp: record.currentHp,
+			clamped: currentHp > summon.hp.max,
+		};
+	}
+
+	setEfaEldritchCannonCurrentHp (instanceId, currentHp) {
+		return this.setClassSummonCurrentHp(instanceId, currentHp);
+	}
+
+	advanceClassSummonGameTime (minutes) {
+		if (!Number.isFinite(minutes) || minutes < 0) {
+			throw new RangeError("Class-summon game time must be a non-negative finite number.");
+		}
+		const results = [];
+		const records = (this._data.companions || []).filter(companion =>
+			companion?.type === CharacterSheetState.COMPANION_TYPES.CLASS_SUMMON
+			&& companion.generatedClassSummon,
+		);
+		for (const record of records) {
+			record.durationRemainingMinutes = Math.max(0, record.durationRemainingMinutes - minutes);
+			if (record.durationRemainingMinutes === 0) {
+				results.push(this._retireClassSummonRecord(
+					record,
+					CharacterSheetState.CLASS_SUMMON_RETIREMENT_REASONS.DURATION_EXPIRED,
+					{minutesAdvanced: minutes},
+				));
+				continue;
+			}
+			results.push({
+				instanceId: record.id,
+				action: "kept",
+				reason: null,
+				details: {
+					minutesAdvanced: minutes,
+					durationRemainingMinutes: record.durationRemainingMinutes,
+				},
+			});
+		}
+		return results;
+	}
+
 	/**
 	 * Normalize a companion `type` (and recover `origin`) to honor the type/origin
 	 * contract: `companion.type` is ALWAYS a non-empty string.
@@ -77747,6 +78484,7 @@ class CharacterSheetState {
 	recalculateCompanion (companionId) {
 		const companion = this.getCompanion(companionId);
 		if (!companion) return;
+		if (companion.generatedClassSummon) return;
 
 		const calculations = this.getFeatureCalculations();
 		const profBonus = this.getProficiencyBonus();
@@ -78515,6 +79253,7 @@ class CharacterSheetState {
 	 */
 	restCompanions (restType) {
 		(this._data.companions || []).forEach(companion => {
+			if (companion.generatedClassSummon) return;
 			// A rest means the encounter is over, so settle the end-of-combat ferocity
 			// rule first: the companion banks the HP its fury earned it, then the track
 			// clears. Idempotent when combat was already ended explicitly.

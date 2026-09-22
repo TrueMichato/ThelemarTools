@@ -1263,6 +1263,31 @@ Semantics worth knowing:
 - `scaling` survives `toJson()` / `loadFromJson()`, so a saved character
   re-derives correctly on the next level-up.
 
+### Persisted generated-summon lifecycle
+
+Reusable class deployables which need ownership, retirement, duration, and
+deduplication semantics still use the same `CLASS_SUMMON` companion type, but
+store a `generatedClassSummon` metadata envelope instead of persisting a full
+derived statblock. The generic state APIs are:
+
+- `getClassSummon()` / `listClassSummons()` for catalog-backed projections;
+- `setClassSummonCurrentHp()` for clamped HP updates and zero-HP destruction;
+- `dismissClassSummon()`, `destroyClassSummon()`, and
+  `retireClassSummon()` for explicit retirement;
+- `advanceClassSummonGameTime()` for game-time duration expiration;
+- `reconcileClassSummons()` for load and owner-change validation.
+
+The EFA Eldritch Cannon is the first registered definition. Its compact runtime
+record derives AC 18 and poison/psychic immunities from `Eldritch Cannon|EFA`,
+maximum HP as five times the exact `Artificer|EFA` level, and attack/save/form
+formulas from current character state. Its 60-minute duration is advanced only
+through the explicit game-time API. Slot 1 is schema-valid at Artificer 15 for
+future dual-cannon work, but Milestone 2 creates slot 0 only.
+
+These projections are descriptive state. They do not apply cannon damage,
+invoke the sheet's damage pipeline, grant Protector temporary HP, or add
+detonation/operation controls.
+
 ## College of Creation (Bard, TCE)
 
 | Level | Feature | Calculation keys | What actually happens |

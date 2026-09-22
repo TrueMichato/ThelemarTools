@@ -541,6 +541,17 @@ host, representative feature adoption, and the no-stale-result invariant.
 - `toJson()`: Deep copy of `_data` via `MiscUtil.copyFast()`
 - `loadFromJson(json)`: Deep merge with defaults + migration steps + effect re-application
 - Migration handles: legacy features, combat traditions, custom ability effects, unarmed strike
+- Generated class summons remain ordinary `_data.companions[]` entries with
+  `type: "class_summon"`, but persist only stable ownership/version metadata
+  plus mutable runtime state. `charactersheet.js` loads the authoritative
+  object catalog and installs it with `setClassSummonTemplateCatalog()` before
+  loading a save; mechanics such as AC and maximum HP are projected from that
+  catalog and the current owner class rather than serialized.
+- Respec candidates must receive the same runtime-only class-summon template
+  catalog before `loadFromJson()`. Class-history reconstruction runs inside
+  `withClassSummonReconciliationDeferred()` so transient empty/partial class
+  arrays cannot retire a legal summon before the candidate class graph is
+  complete.
 
 #### Feature-companion reconciliation
 

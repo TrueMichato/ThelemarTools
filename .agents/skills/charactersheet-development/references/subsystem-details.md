@@ -1122,6 +1122,34 @@ Complete Crafter baseline, then multiply by `state.getCraftingTimeMultiplier({it
 Artillerist Tools of the Trade returns `0.5` only for the structural wand type `WD`; never infer
 the benefit from display names or apply it to TCE Artillerists.
 
+### EFA Artillerist generated Eldritch Cannon state
+
+EFA Eldritch Cannons reuse `_data.companions[]` with
+`COMPANION_TYPES.CLASS_SUMMON`; there is no cannon-specific parallel store and
+no inventory row. A generated summon carries source-qualified
+`generatedClassSummon` ownership metadata (`templateUid`, class/subclass/feature
+UIDs, slot, and generation version) plus only the legal mutable runtime fields.
+The canonical Milestone 2 identities are:
+
+- template `Eldritch Cannon|EFA`;
+- owner class `Artificer|EFA`;
+- owner subclass `Artillerist|Artificer|EFA|EFA`;
+- feature `Eldritch Cannon|Artificer|EFA|Artillerist|EFA|3|EFA`.
+
+`CharacterSheetPage` installs the authoritative `data/objects.json` catalog
+before save load. `getClassSummon()`/`listClassSummons()` then project AC,
+maximum HP, immunities, spell attack/save values, and form calculations from the
+template and current EFA Artificer level. Reconciliation runs after load and
+owner class/subclass/level changes: it retires invalid/source-crossed/ownerless
+records, removes stale slot 1 below level 15, deduplicates each ownership slot
+by newest legal revision, and clamps HP down without healing.
+
+Duration is game time, not wall time. `advanceClassSummonGameTime(minutes)`
+reduces the persisted 60-minute duration and retires at zero. Milestone 2 only
+projects form damage and Protector temporary-HP formulas; applying damage,
+granting temporary HP, detonation, cannon controls, and other operational UI are
+deferred.
+
 Catalog adds preserve both type layers: inventory grouping continues to use the coarse
 `type`, while rules logic reads `typeCode` first and strips any `|source` suffix.
 `CharacterSheetInventory.setItems()` injects the enhanced catalog into state;

@@ -32,6 +32,29 @@ import/manual origin still owns it. Cascades prune removed semantic sources and
 delete only values which no surviving or preserved source requires. See
 [22-respec.md](./22-respec.md).
 
+### Generated class summons
+
+Feature-created deployables use the existing `_data.companions[]` store with
+`type: "class_summon"`. New generated records add a reusable
+`generatedClassSummon` ownership envelope containing exact source-qualified
+template/class/subclass/feature UIDs, a generated slot, and a generation
+version. `generatedClassSummonRevisions` persists only the latest revision
+cursor per ownership slot so a retired deployable can be recreated with a
+monotonically newer identity after save/load.
+
+The record stores mutable runtime state only. For the EFA Eldritch Cannon this
+is form, size, placement, mobility, owner distance, current HP, remaining game
+minutes, payment metadata, and instance revision. AC, maximum HP, immunities,
+and current attack/save/form calculations are projected at read time from
+`data/objects.json` and the exact `Artificer|EFA` owner level. Generated summons
+are never inventory items.
+
+`reconcileClassSummons()` is the load/import and owner-change boundary. It
+returns explicit kept/clamped/retired results and reasons while enforcing
+template/source identity, owner/subclass eligibility, slot ceilings, legal
+runtime values, deduplication, zero-HP/duration retirement, and HP clamping
+without healing.
+
 ### Basic Information
 
 ```javascript

@@ -257,6 +257,15 @@ Starting equipment and ordinary inventory are not reconstructed by a class
 change. Inventory, notes, identity, layout, favorites, custom data, and other
 non-progression state remain attached to the candidate.
 
+Generated `class_summon` companions are also runtime state, not progression
+decisions. The candidate receives the live state's runtime-only authoritative
+template catalog before its snapshot is loaded. Class reconstruction defers
+summon reconciliation until the complete class set has been rebuilt, avoiding
+false retirement while `_data.classes` is temporarily empty or partial. The
+finished candidate then reconciles exact owner source, subclass, level, slot,
+HP, and duration normally; a staged EFA↔TCE change therefore retires only the
+candidate's EFA cannon.
+
 ## Improvements and Feats
 
 ASI and feat opportunities are derived from the loaded class data instead of a
@@ -332,6 +341,11 @@ proficiency/expertise, decision ownership, resolved status, and receipt are all
 already complete. The guard runs before descendant reversal, so it neither
 dirties the draft nor consumes Undo. Missing mechanics, ownership, or receipts
 fall through the normal transaction and are repaired.
+
+Because generated-summon ownership and revision state is part of the serialized
+candidate, Apply commits its reconciled runtime result atomically and Undo
+restores the pre-Apply summon. Candidate retirement never mutates the live
+character before Apply.
 
 Apply is disabled while any required decision is missing, invalid, or ambiguous,
 or while an optional decision contains an invalid/ambiguous selection.

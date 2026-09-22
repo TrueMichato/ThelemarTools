@@ -38,6 +38,7 @@ class CharacterSheetRespecEngine {
 		this._candidateState.setDraconicResonanceCatalog?.(this._liveState.getDraconicResonanceCatalog?.() || []);
 		this._candidateState.setSpellData?.(this._page.getSpells?.() || this._liveState._allSpells || []);
 		this._candidateState.setClassCatalog?.(this._page.getClasses?.() || []);
+		this._candidateState.setClassSummonTemplateCatalog?.(this._liveState.getClassSummonTemplateCatalog?.() || []);
 		if (this._candidateState.loadFromJson(this._originalSnapshot) === false) {
 			throw new Error("Could not initialize the Respec draft.");
 		}

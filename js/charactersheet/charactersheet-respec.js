@@ -2515,37 +2515,39 @@ class CharacterSheetRespec {
 			if (!firstEntryByClass.has(uid)) firstEntryByClass.set(uid, entry);
 		}
 
-		state._data.classes = [];
-		for (const [uid, level] of classCounts) {
-			const [name, source] = uid.split("|");
-			const classData = this._page.getClasses?.().find(cls =>
-				cls.name.toLowerCase() === name && cls.source.toLowerCase() === source,
-			);
-			if (!classData) continue;
-			const prior = existingClasses.find(cls => cls.name === classData.name && cls.source === classData.source);
-			const subclassChoiceEntry = history.find(entry =>
-				entry.class.name === classData.name
-				&& entry.class.source === classData.source
-				&& entry.choices?.subclass,
-			);
-			state.addClass({
-				...(prior || {}),
-				name: classData.name,
-				source: classData.source,
-				level,
-				hd: classData.hd,
-				proficiency: classData.proficiency,
-				startingProficiencies: classData.startingProficiencies,
-				multiclassing: classData.multiclassing,
-				subclass: subclassChoiceEntry?.choices?.subclass || prior?.subclass || null,
-				subclassChoice: subclassChoiceEntry?.choices?.subclassChoice || prior?.subclassChoice || null,
-				casterProgression: classData.casterProgression,
-				spellcastingAbility: classData.spellcastingAbility,
-				preparedSpellsProgression: classData.preparedSpellsProgression,
-				spellsKnownProgression: classData.spellsKnownProgression,
-				cantripProgression: classData.cantripProgression,
-			});
-		}
+		state.withClassSummonReconciliationDeferred(() => {
+			state._data.classes = [];
+			for (const [uid, level] of classCounts) {
+				const [name, source] = uid.split("|");
+				const classData = this._page.getClasses?.().find(cls =>
+					cls.name.toLowerCase() === name && cls.source.toLowerCase() === source,
+				);
+				if (!classData) continue;
+				const prior = existingClasses.find(cls => cls.name === classData.name && cls.source === classData.source);
+				const subclassChoiceEntry = history.find(entry =>
+					entry.class.name === classData.name
+						&& entry.class.source === classData.source
+						&& entry.choices?.subclass,
+				);
+				state.addClass({
+					...(prior || {}),
+					name: classData.name,
+					source: classData.source,
+					level,
+					hd: classData.hd,
+					proficiency: classData.proficiency,
+					startingProficiencies: classData.startingProficiencies,
+					multiclassing: classData.multiclassing,
+					subclass: subclassChoiceEntry?.choices?.subclass || prior?.subclass || null,
+					subclassChoice: subclassChoiceEntry?.choices?.subclassChoice || prior?.subclassChoice || null,
+					casterProgression: classData.casterProgression,
+					spellcastingAbility: classData.spellcastingAbility,
+					preparedSpellsProgression: classData.preparedSpellsProgression,
+					spellsKnownProgression: classData.spellsKnownProgression,
+					cantripProgression: classData.cantripProgression,
+				});
+			}
+		});
 
 		const firstClassData = this._page.getClasses?.().find(cls =>
 			cls.name === history[0]?.class?.name && cls.source === history[0]?.class?.source,
