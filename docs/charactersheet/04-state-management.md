@@ -350,7 +350,10 @@ armor, removing the wrapper, replacing it with a non-armor item, losing the exac
 EFA subclass/model, or dying clears the binding. The three generated model
 weapons use permanent `_efaArmorerWeaponId` values and retain their independent
 wrapper IDs and customization across model switches/save-load. Only the selected
-model row can expose an attack or item effect while the binding is active.
+model row can expose an attack or item effect while the binding is active. Its
+wrapper is derived-equipped only for that active/worn model; all other generated
+rows are forced unequipped, and direct equip toggles reconcile back to this
+derived state.
 
 The Short Rest and Long Rest dialogs expose one shared staged Armor Model
 selector for an exact `Artificer|EFA` Armorer with a canonical model. A switch

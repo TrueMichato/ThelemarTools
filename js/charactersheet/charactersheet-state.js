@@ -69907,7 +69907,7 @@ class CharacterSheetState {
 			}
 			const template = this._getEfaArmorerModelWeaponTemplate(def);
 			if (!keeper) {
-				this.addItem(template, 1, true, false);
+				this.addItem(template, 1, false, false);
 				keeper = (this._data.inventory || []).find(wrapper => wrapper.item?._efaArmorerWeaponId === def.id) || null;
 			}
 			if (!keeper) continue;
@@ -69985,6 +69985,13 @@ class CharacterSheetState {
 			return;
 		}
 		const active = rows.find(wrapper => this._isEfaArmorerModelWeaponActive(wrapper)) || null;
+		let didCorrectEquipState = false;
+		for (const wrapper of rows) {
+			const shouldEquip = wrapper.id === active?.id;
+			if (!!wrapper.equipped === shouldEquip) continue;
+			wrapper.equipped = shouldEquip;
+			didCorrectEquipState = true;
+		}
 		const signature = JSON.stringify({
 			activeId: active?.id || null,
 			rows: rows.map(wrapper => ({
@@ -69995,7 +70002,7 @@ class CharacterSheetState {
 				entries: wrapper.item?.entries || [],
 			})),
 		});
-		if (signature === this._efaArmorerGeneratedActivationSignature) return;
+		if (!didCorrectEquipState && signature === this._efaArmorerGeneratedActivationSignature) return;
 		this._efaArmorerGeneratedActivationSignature = signature;
 		for (const wrapper of rows) {
 			this._removeItemProficiencies(wrapper.id);
@@ -70006,6 +70013,7 @@ class CharacterSheetState {
 			this._registerItemEffects(active);
 		}
 		this._recalculateItemBonuses();
+		if (didCorrectEquipState) this._recalculateEquipmentModifiers();
 	}
 
 	/**

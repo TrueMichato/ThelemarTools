@@ -786,8 +786,12 @@ Armorer uses `_efaArmorerWeaponId` for Force Demolisher, Thunder Pulse, and
 Lightning Launcher. All three wrappers survive model switches and preserve
 player edits; `getItemAttackId()` gives the active row the same deterministic ID
 in both the state-granted and Combat auto-weapon paths. The inactive wrappers
-remain equipped inventory artifacts but `isItemAttackAvailable()` and the item
+remain persistent inventory artifacts but `isItemAttackAvailable()` and the item
 effect/proficiency activation gate must agree that they are mechanically inert.
+Their wrapper equip state is derived rather than user-owned: only the selected
+row is equipped while Arcane Armor is active and worn, while all other rows are
+forced unequipped. Generic equip attempts reconcile back without changing model
+activation.
 
 Persist equipment bindings by inventory wrapper `id`, never by display name or a
 derived AC snapshot. EFA Arcane Armor stores

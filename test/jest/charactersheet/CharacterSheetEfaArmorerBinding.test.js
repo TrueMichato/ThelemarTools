@@ -471,6 +471,66 @@ describe("EFA Armorer stable generated model weapons", () => {
 		})));
 	});
 
+	it("derives generated weapon equip state from the active selected model", () => {
+		const {state, armor} = buildState({model: "Guardian"});
+		expect(getGeneratedRows(state).map(item => [item._efaArmorerWeaponId, item.equipped])).toEqual([
+			[MODEL_IDS.Dreadnaught, false],
+			[MODEL_IDS.Guardian, false],
+			[MODEL_IDS.Infiltrator, false],
+		]);
+
+		state.bindEfaArcaneArmor(armor.id);
+
+		expect(getGeneratedRows(state).map(item => [item._efaArmorerWeaponId, item.equipped])).toEqual([
+			[MODEL_IDS.Dreadnaught, false],
+			[MODEL_IDS.Guardian, true],
+			[MODEL_IDS.Infiltrator, false],
+		]);
+		expect(getActiveModelAttack(state).id).toBe(MODEL_IDS.Guardian);
+	});
+
+	it("self-corrects generated weapon equip toggles without changing active mechanics", () => {
+		const {state, armor} = buildState({model: "Guardian"});
+		state.bindEfaArcaneArmor(armor.id);
+		const guardian = getGeneratedRows(state).find(item => item._efaArmorerWeaponId === MODEL_IDS.Guardian);
+		const dreadnaught = getGeneratedRows(state).find(item => item._efaArmorerWeaponId === MODEL_IDS.Dreadnaught);
+
+		state.setItemEquipped(guardian.id, false);
+		state.setItemEquipped(dreadnaught.id, true);
+
+		expect(getGeneratedRows(state).map(item => [item._efaArmorerWeaponId, item.equipped])).toEqual([
+			[MODEL_IDS.Dreadnaught, false],
+			[MODEL_IDS.Guardian, true],
+			[MODEL_IDS.Infiltrator, false],
+		]);
+		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toEqual([
+			expect.objectContaining({id: MODEL_IDS.Guardian}),
+		]);
+	});
+
+	it("transitions derived equip state across doff, don, and model switches", () => {
+		const {state, armor} = buildState({model: "Infiltrator"});
+		state.bindEfaArcaneArmor(armor.id);
+		const initialIds = Object.fromEntries(getGeneratedRows(state).map(item => [item._efaArmorerWeaponId, item.id]));
+		expect(getGeneratedRows(state).find(item => item._efaArmorerWeaponId === MODEL_IDS.Infiltrator).equipped).toBe(true);
+
+		state.setItemEquipped(armor.id, false);
+		expect(getGeneratedRows(state).every(item => !item.equipped)).toBe(true);
+		expect(state.getFeatureGrantedAttacks().filter(attack => attack._efaArmorerWeaponId)).toEqual([]);
+
+		state.setItemEquipped(armor.id, true);
+		expect(getGeneratedRows(state).find(item => item._efaArmorerWeaponId === MODEL_IDS.Infiltrator).equipped).toBe(true);
+
+		setCanonicalModel(state, "Dreadnaught");
+		expect(Object.fromEntries(getGeneratedRows(state).map(item => [item._efaArmorerWeaponId, item.id]))).toEqual(initialIds);
+		expect(getGeneratedRows(state).map(item => [item._efaArmorerWeaponId, item.equipped])).toEqual([
+			[MODEL_IDS.Dreadnaught, true],
+			[MODEL_IDS.Guardian, false],
+			[MODEL_IDS.Infiltrator, false],
+		]);
+		expect(getActiveModelAttack(state).id).toBe(MODEL_IDS.Dreadnaught);
+	});
+
 	it("upgrades accepted stat-less rows without replacing custom names or effects", () => {
 		const {state} = buildState({model: "Infiltrator"});
 		for (const wrapper of state._data.inventory.filter(row => row.item?._efaArmorerWeaponId)) {
@@ -740,6 +800,24 @@ describe("EFA Armorer stable generated model weapons", () => {
 		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
 			advantage: false,
 			disadvantage: true,
+		});
+	});
+
+	it("suspends Infiltrator passives when the bound Arcane Armor is doffed", () => {
+		const {state, armor} = buildState({model: "Infiltrator"});
+		const baseSpeed = buildState({model: "Guardian"}).state.getWalkSpeed();
+		state.bindEfaArcaneArmor(armor.id);
+		state.setItemEquipped(armor.id, false);
+
+		expect(state.getEfaArcaneArmorBindingStatus()).toMatchObject({
+			boundItemId: armor.id,
+			active: false,
+			suspended: true,
+		});
+		expect(state.getWalkSpeed()).toBe(baseSpeed);
+		expect(state.getAdvantageState("skill:stealth")).toMatchObject({
+			advantage: false,
+			disadvantage: false,
 		});
 	});
 
