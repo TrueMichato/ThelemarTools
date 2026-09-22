@@ -281,7 +281,7 @@ describe("RHW Reanimator R2a progression descriptors", () => {
 		},
 	);
 
-	it("publishes source-aware measurable descriptors without implementing excluded runtime behavior", () => {
+	it("publishes source-aware measurable descriptors while leaving excluded companion runtime behavior unimplemented", () => {
 		const state = makeState(15);
 		const calculations = state.getFeatureCalculations();
 
@@ -329,8 +329,11 @@ describe("RHW Reanimator R2a progression descriptors", () => {
 			spellOwnerUid: REFINED_REANIMATION_UID,
 			uses: 1,
 			recharge: "long",
+			executable: false,
 			executionAvailable: false,
-			pendingContract: "sharedToolReceiptAndFocusValidationR2b",
+			status: "focusUnavailable",
+			focusStatus: "unavailable",
+			eligibleFocusReferences: [],
 		});
 		expect(calculations.lifeTransferFeatureUid).toBe(REFINED_REANIMATION_UID);
 		expect(calculations).not.toHaveProperty("reanimatedCompanionCreated");
@@ -590,7 +593,7 @@ describe("RHW Reanimator R2a Facilitated Revival boundary", () => {
 		expect(getOwnedResource(state, REFINED_REANIMATION_UID)).toBeUndefined();
 	});
 
-	it("owns one canonical Raise Dead alternate cast at EFA 15 and exposes only the pending contract", () => {
+	it("owns one canonical Raise Dead alternate cast at EFA 15 and exposes the live focus boundary", () => {
 		const state = makeState(15);
 		const raiseDead = getSpellEntry(state, "Raise Dead|XPHB");
 		const resource = getOwnedResource(state, REFINED_REANIMATION_UID);
@@ -610,7 +613,15 @@ describe("RHW Reanimator R2a Facilitated Revival boundary", () => {
 				alternateCast: {
 					slotCost: 0,
 					ignoresMaterialComponents: true,
-					pendingSharedToolContract: "sharedToolReceiptAndFocusValidationR2b",
+					spellcastingFocusRequirement: expect.objectContaining({
+						required: true,
+						ruleId: "rhw-facilitated-revival-focus",
+						filter: {
+							itemTypes: ["AT"],
+							itemSources: ["XPHB"],
+							requiresProficiency: true,
+						},
+					}),
 				},
 			}),
 		]);
@@ -618,14 +629,15 @@ describe("RHW Reanimator R2a Facilitated Revival boundary", () => {
 			current: 1,
 			max: 1,
 			recharge: "long",
-			pendingSharedToolContract: true,
 		});
-		expect(state.getRhwFacilitatedRevivalBoundary()).toEqual({
+		expect(resource).not.toHaveProperty("pendingSharedToolContract");
+		expect(state.getRhwFacilitatedRevivalBoundary()).toMatchObject({
 			available: true,
 			executable: false,
-			reason: "pendingSharedToolContract",
-			pendingContract: "sharedToolReceiptAndFocusValidationR2b",
+			reason: "focusUnavailable",
 			featureUid: REFINED_REANIMATION_UID,
+			classUid: CLASS_UID,
+			subclassUid: SUBCLASS_UID,
 			spell: {
 				name: "Raise Dead",
 				source: "XPHB",
@@ -639,9 +651,13 @@ describe("RHW Reanimator R2a Facilitated Revival boundary", () => {
 				max: 1,
 				recharge: "long",
 			},
+			focus: {
+				status: "unavailable",
+				eligibleReferences: [],
+			},
 		});
 		expect(JSON.stringify(state.toJson())).toBe(before);
-		expect(state.pUseRhwFacilitatedRevival).toBeUndefined();
+		expect(state.pUseRhwFacilitatedRevival).toEqual(expect.any(Function));
 	});
 
 	it("coexists with the fixed level-17 owner as one prepared spell identity", () => {
@@ -687,7 +703,7 @@ describe("RHW Reanimator R2a Facilitated Revival boundary", () => {
 		expect(getSpellEntry(state, "Raise Dead|XPHB").subclassSpellGrantOwners).toBeUndefined();
 	});
 
-	it("restores its independent resource on a long rest without inventing execution", () => {
+	it("restores its independent resource on a long rest while focus remains the execution gate", () => {
 		const state = makeState(15);
 		const resource = getOwnedResource(state, REFINED_REANIMATION_UID);
 		state.setResourceCurrent(resource.id, 0);

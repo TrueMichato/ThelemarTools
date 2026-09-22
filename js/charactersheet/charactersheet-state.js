@@ -4441,6 +4441,7 @@ class CharacterSheetState {
 		}),
 	]);
 	static RHW_REANIMATOR_SUBCLASS_UID = "Reanimator|Artificer|EFA|RHW";
+	static RHW_FACILITATED_REVIVAL_FOCUS_RULE_ID = "rhw-facilitated-revival-focus";
 	static RHW_REANIMATOR_TOOL_OWNER_UID = "Reanimator's Skill Set|Artificer|EFA|Reanimator|RHW|3|RHW";
 	static RHW_REANIMATOR_FEATURE_UIDS = Object.freeze({
 		REANIMATOR: "Reanimator|Artificer|EFA|Reanimator|RHW|3",
@@ -20316,8 +20317,10 @@ class CharacterSheetState {
 			spell.subclassSpellGrantOwners = spell.subclassSpellGrantOwners
 				.filter(candidate => candidate.grantOwnerUid || candidate.key !== legacyKey);
 		}
-		const isNewOwner = !spell.subclassSpellGrantOwners.some(it => it.key === owner.key);
+		const ownerIndex = spell.subclassSpellGrantOwners.findIndex(it => it.key === owner.key);
+		const isNewOwner = ownerIndex === -1;
 		if (isNewOwner) spell.subclassSpellGrantOwners.push(owner);
+		else spell.subclassSpellGrantOwners[ownerIndex] = owner;
 		this._reapplySubclassSpellGrantOwners(spell);
 		return isNewOwner;
 	}
@@ -40431,7 +40434,10 @@ class CharacterSheetState {
 			});
 		const itemNames = normalizeList(raw.filter?.itemNames);
 		const itemTypes = normalizeList(raw.filter?.itemTypes)
-			.map(type => type.toUpperCase());
+			.map(type => type.split("|")[0].trim().toUpperCase())
+			.filter(Boolean);
+		const itemSources = normalizeList(raw.filter?.itemSources)
+			.map(source => source.toUpperCase());
 		const weapon = raw.filter?.weapon
 			&& typeof raw.filter.weapon === "object"
 			&& String(raw.filter.weapon.category || "").toLowerCase() === "any"
@@ -40454,7 +40460,9 @@ class CharacterSheetState {
 		];
 		const itemLabel = itemLabels.length
 			? itemLabels.join(", ")
-			: "the configured spellcasting focus";
+			: itemTypes.length
+				? "configured tool"
+				: "configured spellcasting focus";
 
 		return {
 			required: true,
@@ -40469,6 +40477,7 @@ class CharacterSheetState {
 				itemUids,
 				itemNames,
 				itemTypes,
+				itemSources,
 				weapon,
 				requiresProficiency: raw.filter?.requiresProficiency === true,
 			},
@@ -40547,6 +40556,7 @@ class CharacterSheetState {
 		const itemUids = new Set((requirement.filter.itemUids || []).map(uid => String(uid).toLowerCase()));
 		const itemNames = new Set((requirement.filter.itemNames || []).map(name => CharacterSheetState.normalizeToolKey(name)));
 		const itemTypes = new Set((requirement.filter.itemTypes || []).map(type => String(type).toUpperCase()));
+		const itemSources = new Set((requirement.filter.itemSources || []).map(source => String(source).toUpperCase()));
 		const weaponFilter = requirement.filter.weapon?.category === "any"
 			? requirement.filter.weapon
 			: null;
@@ -40564,6 +40574,7 @@ class CharacterSheetState {
 				|| itemNames.has(normalizedName)
 				|| itemTypes.has(baseType);
 			const isAuthorizedEntityUsable = isExplicitlyAuthorized
+				&& (!itemSources.size || itemSources.has(String(item.source).toUpperCase()))
 				&& (!requirement.filter.requiresProficiency || this.hasToolProficiency(item.name));
 			const isWeaponUsable = !!weaponFilter
 				&& this._isWeaponItem(item)
@@ -45170,6 +45181,7 @@ class CharacterSheetState {
 			calculations.reanimatorModificationFeatureUid = featureUids.MACABRE_MODIFICATIONS;
 		}
 		if (level >= 15) {
+			const facilitatedRevivalBoundary = this.getRhwFacilitatedRevivalBoundary();
 			calculations.hasRefinedReanimation = true;
 			calculations.hasSuperiorModifications = true;
 			calculations.reanimatorModificationCount = 3;
@@ -45183,8 +45195,13 @@ class CharacterSheetState {
 				recharge: "long",
 				slotCost: 0,
 				ignoresMaterialComponents: true,
-				executionAvailable: false,
-				pendingContract: "sharedToolReceiptAndFocusValidationR2b",
+				executable: facilitatedRevivalBoundary.executable,
+				executionAvailable: facilitatedRevivalBoundary.executable,
+				status: facilitatedRevivalBoundary.reason,
+				resource: facilitatedRevivalBoundary.resource,
+				focusStatus: facilitatedRevivalBoundary.focus?.status || "unavailable",
+				focusRequirement: facilitatedRevivalBoundary.focus?.requirement || null,
+				eligibleFocusReferences: facilitatedRevivalBoundary.focus?.eligibleReferences || [],
 			};
 			calculations.hasLifeTransfer = true;
 			calculations.lifeTransferFeatureUid = featureUids.REFINED_REANIMATION;
@@ -45198,7 +45215,6 @@ class CharacterSheetState {
 		name,
 		max,
 		actionLabel,
-		pendingSharedToolContract = false,
 	}) {
 		const classUid = CharacterSheetState.EFA_ARTIFICER_CLASS_UID;
 		const subclassUid = CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID;
@@ -45232,10 +45248,44 @@ class CharacterSheetState {
 			subclassUid,
 			source: "RHW",
 		});
-		if (pendingSharedToolContract) resource.pendingSharedToolContract = true;
-		else delete resource.pendingSharedToolContract;
+		delete resource.pendingSharedToolContract;
 		this._data.resources = (this._data.resources || []).filter(candidate => candidate === resource || !isOwned(candidate));
 		return resource;
+	}
+
+	_getRhwFacilitatedRevivalCastMeta () {
+		return {
+			type: "noSlotResource",
+			slotLevel: 0,
+			ignoresMaterialComponents: true,
+			materialComponentsRequired: false,
+			spellcastingFocusRequirement: {
+				required: true,
+				ruleId: CharacterSheetState.RHW_FACILITATED_REVIVAL_FOCUS_RULE_ID,
+				filter: {
+					itemTypes: ["AT"],
+					itemSources: ["XPHB"],
+					requiresProficiency: true,
+				},
+				ui: {
+					title: "Choose Facilitated Revival Tools",
+					description: "Choose the equipped, proficient XPHB Artisan's Tools you are using as the spellcasting focus.",
+					unavailableMessage: "Facilitated Revival requires equipped XPHB Tinker's Tools or another XPHB Artisan's Tool with which you are proficient.",
+				},
+			},
+		};
+	}
+
+	_getRhwFacilitatedRevivalSpellOwner (spell) {
+		return (spell?.subclassSpellGrantOwners || []).find(owner =>
+			owner.grantOwnerUid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION
+			&& owner.sourceClass === "Artificer"
+			&& owner.sourceClassSource === "EFA"
+			&& owner.sourceSubclass === "Reanimator"
+			&& owner.sourceSubclassSource === "RHW"
+			&& owner.alternateCast?.slotCost === 0
+			&& owner.alternateCast?.ignoresMaterialComponents === true,
+		) || null;
 	}
 
 	_removeRhwReanimatorResources () {
@@ -45331,7 +45381,7 @@ class CharacterSheetState {
 				alternateCast: {
 					slotCost: 0,
 					ignoresMaterialComponents: true,
-					pendingSharedToolContract: "sharedToolReceiptAndFocusValidationR2b",
+					spellcastingFocusRequirement: this._getRhwFacilitatedRevivalCastMeta().spellcastingFocusRequirement,
 				},
 			})]
 			: [];
@@ -45363,7 +45413,6 @@ class CharacterSheetState {
 				name: "Facilitated Revival",
 				max: 1,
 				actionLabel: "Alternate Cast",
-				pendingSharedToolContract: true,
 			});
 		} else {
 			const refinedUid = CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION;
@@ -45442,17 +45491,45 @@ class CharacterSheetState {
 				featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
 			};
 		}
-		this._reconcileRhwReanimatorState();
-		const resource = this._data.resources.find(candidate =>
+		const spell = (this._data.spellcasting.spellsKnown || []).find(candidate =>
+			candidate.name === "Raise Dead" && candidate.source === "XPHB");
+		const owner = this._getRhwFacilitatedRevivalSpellOwner(spell);
+		const resource = (this._data.resources || []).find(candidate =>
 			candidate.featureUid === CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION
 			&& candidate.classUid === CharacterSheetState.EFA_ARTIFICER_CLASS_UID
 			&& candidate.subclassUid === CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID);
+		const castMeta = this._getRhwFacilitatedRevivalCastMeta();
+		const attributedSpell = owner ? {
+			...spell,
+			sourceClass: owner.sourceClass,
+			sourceClassSource: owner.sourceClassSource,
+			sourceSubclass: owner.sourceSubclass,
+			sourceSubclassSource: owner.sourceSubclassSource,
+		} : null;
+		const focusRequirement = attributedSpell
+			? this.getSpellCastFocusRequirement(attributedSpell, castMeta)
+			: null;
+		const eligibleFocusReferences = focusRequirement
+			? this.getEligibleSpellCastFocusInventoryRows(focusRequirement)
+				.map(row => this.getSpellCastFocusReference(row))
+				.filter(Boolean)
+			: [];
+		const reason = !owner
+			? "spellUnavailable"
+			: !resource
+				? "resourceUnavailable"
+				: (Number(resource.current) || 0) < 1
+					? "insufficientResource"
+					: !eligibleFocusReferences.length
+						? "focusUnavailable"
+						: null;
 		return {
 			available: true,
-			executable: false,
-			reason: "pendingSharedToolContract",
-			pendingContract: "sharedToolReceiptAndFocusValidationR2b",
+			executable: reason == null,
+			reason,
 			featureUid: CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION,
+			classUid: CharacterSheetState.EFA_ARTIFICER_CLASS_UID,
+			subclassUid: CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID,
 			spell: {
 				name: "Raise Dead",
 				source: "XPHB",
@@ -45466,7 +45543,110 @@ class CharacterSheetState {
 				max: resource.max,
 				recharge: resource.recharge,
 			} : null,
+			focus: {
+				status: eligibleFocusReferences.length ? "ready" : "unavailable",
+				requirement: focusRequirement ? {
+					ruleId: focusRequirement.ruleId,
+					classUid: focusRequirement.classUid,
+					addsMaterialComponent: focusRequirement.addsMaterialComponent,
+					filter: MiscUtil.copyFast(focusRequirement.filter),
+				} : null,
+				eligibleReferences: eligibleFocusReferences,
+			},
 		};
+	}
+
+	async pUseRhwFacilitatedRevival ({
+		featureUid,
+		classUid,
+		subclassUid,
+		spellName,
+		spellSource,
+		spellOwnerUid,
+		focusReference,
+		cancelled = false,
+		context = {},
+	} = {}) {
+		if (cancelled) return {ok: false, committed: false, reason: "cancelled"};
+		if (featureUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION) {
+			return {ok: false, committed: false, reason: "invalidFeature"};
+		}
+		if (classUid !== CharacterSheetState.EFA_ARTIFICER_CLASS_UID) {
+			return {ok: false, committed: false, reason: "invalidClass"};
+		}
+		if (subclassUid !== CharacterSheetState.RHW_REANIMATOR_SUBCLASS_UID) {
+			return {ok: false, committed: false, reason: "invalidSubclass"};
+		}
+		if (spellName !== "Raise Dead") return {ok: false, committed: false, reason: "invalidSpell"};
+		if (spellSource !== "XPHB") return {ok: false, committed: false, reason: "invalidSpellSource"};
+		if (spellOwnerUid !== CharacterSheetState.RHW_REANIMATOR_FEATURE_UIDS.REFINED_REANIMATION) {
+			return {ok: false, committed: false, reason: "invalidSpellOwner"};
+		}
+
+		const boundary = this.getRhwFacilitatedRevivalBoundary();
+		if (!boundary.available || !boundary.executable) {
+			return {
+				ok: false,
+				committed: false,
+				reason: boundary.reason || "featureUnavailable",
+				featureUid,
+				classUid,
+				subclassUid,
+			};
+		}
+
+		const spell = (this._data.spellcasting.spellsKnown || []).find(candidate =>
+			candidate.name === spellName && candidate.source === spellSource);
+		const owner = this._getRhwFacilitatedRevivalSpellOwner(spell);
+		if (!spell || !owner) return {ok: false, committed: false, reason: "spellUnavailable"};
+
+		const focusInventoryRow = this.resolveSpellCastFocusReference(focusReference);
+		const castMeta = {
+			...this._getRhwFacilitatedRevivalCastMeta(),
+			resourceId: boundary.resource.id,
+			featureUid,
+			spellOwnerUid,
+			focusInventoryItemId: focusInventoryRow?.id || null,
+		};
+		const attributedSpell = {
+			...spell,
+			sourceClass: owner.sourceClass,
+			sourceClassSource: owner.sourceClassSource,
+			sourceSubclass: owner.sourceSubclass,
+			sourceSubclassSource: owner.sourceSubclassSource,
+		};
+		const focusRequirement = this.getSpellCastFocusRequirement(attributedSpell, castMeta);
+		const eligibleFocusRows = this.getEligibleSpellCastFocusInventoryRows(focusRequirement);
+		if (!focusInventoryRow || !eligibleFocusRows.some(row => row.id === focusInventoryRow.id)) {
+			return {ok: false, committed: false, reason: "invalidFocus"};
+		}
+
+		const spellData = (this._allSpells || []).find(candidate =>
+			candidate.name === spellName && candidate.source === spellSource) || spell;
+		return this.pPublishCommittedSpellCast({
+			spell: attributedSpell,
+			spellData,
+			focusInventoryRow,
+			cast: castMeta,
+			pCommit: () => this.pCommitFeatureUse({
+				featureUid,
+				classUid,
+				resourceId: boundary.resource.id,
+				resourceCost: 1,
+				context: {
+					...MiscUtil.copyFast(context),
+					subclassUid,
+					spell: {name: spellName, source: spellSource, ownerUid: spellOwnerUid},
+					focus: MiscUtil.copyFast(focusReference),
+				},
+				result: {
+					spell: {name: spellName, source: spellSource},
+					slotCost: 0,
+					ignoresMaterialComponents: true,
+					focus: MiscUtil.copyFast(focusReference),
+				},
+			}),
+		});
 	}
 
 	_getEfaFlashOfGeniusFeature () {
@@ -45680,7 +45860,7 @@ class CharacterSheetState {
 	 * the normalized pre-cost focusRequirement. Source attribution and the selected
 	 * focus are revalidated here so subscribers never repeat focus legality.
 	 * @param {*} input
-	 * @returns {Promise<*|null>} Receipt, or null when exact ownership cannot be proven.
+	 * @returns {Promise<*|null>} Receipt, commit failure, or null when exact ownership cannot be proven.
 	 */
 	async pPublishCommittedSpellCast ({
 		spell,
@@ -45688,6 +45868,7 @@ class CharacterSheetState {
 		focusInventoryRow = null,
 		focusRequirement = null,
 		cast = {},
+		pCommit = null,
 	} = {}) {
 		const castingClass = this.resolveSpellCastingClassIdentity(spell);
 		if (!castingClass) return null;
@@ -45719,12 +45900,15 @@ class CharacterSheetState {
 			isRitual: cast?.isRitual === true,
 			isPactSlot: cast?.isPactSlot === true,
 			resourceId: cast?.resourceId || null,
+			featureUid: cast?.featureUid || null,
+			spellOwnerUid: cast?.spellOwnerUid || null,
 			itemInventoryId: cast?.itemInventoryId || null,
 			itemUid: cast?.itemUid || null,
 			innateSpellId: cast?.innateSpellId || null,
 			ruleId: normalizedFocusRequirement?.ruleId || null,
 			sourceFeatureUid: normalizedFocusRequirement?.sourceFeatureUid || null,
 			rolls: Array.isArray(cast?.rolls) ? cast.rolls : [],
+			materialComponentsWaived: this.isSpellCastMaterialComponentWaived(spell, cast),
 		};
 		const focusRule = normalizedFocusRequirement
 			? {
@@ -45732,6 +45916,18 @@ class CharacterSheetState {
 				sourceFeatureUid: normalizedFocusRequirement.sourceFeatureUid,
 			}
 			: null;
+
+		let commitResult = null;
+		if (pCommit != null) {
+			if (typeof pCommit !== "function") throw new TypeError("Committed spell-cast pCommit must be a function.");
+			commitResult = await pCommit({
+				castingClass: MiscUtil.copyFast(castingClass),
+				spellUid,
+				focus: MiscUtil.copyFast(focus),
+				cast: MiscUtil.copyFast(castDescriptor),
+			});
+			if (!commitResult?.committed) return commitResult || null;
+		}
 
 		const receipt = {
 			receiptVersion: 1,
@@ -45753,11 +45949,23 @@ class CharacterSheetState {
 			ruleId: focusRule?.ruleId || null,
 			sourceFeatureUid: focusRule?.sourceFeatureUid || null,
 			focusRule,
+			materialComponentsWaived: castDescriptor.materialComponentsWaived,
 			focusInventoryItemId: focus?.inventoryItemId || null,
 			focusItemUid: focus?.itemUid || null,
 			focus,
-			followUps: [],
-			followUpFailed: false,
+			...(commitResult ? {
+				featureCommit: {
+					featureUid: commitResult.featureUid || null,
+					resourceId: commitResult.resourceId || null,
+					resourceCost: Number(commitResult.resourceCost) || 0,
+					remainingUses: Number(commitResult.remainingUses) || 0,
+				},
+			} : {}),
+			followUps: (commitResult?.followUps || []).map(followUp => ({
+				...MiscUtil.copyFast(followUp),
+				scope: "featureUse",
+			})),
+			followUpFailed: commitResult?.followUpFailed === true,
 		};
 
 		const hookGroups = [

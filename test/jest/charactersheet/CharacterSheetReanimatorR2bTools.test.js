@@ -933,13 +933,13 @@ describe("RHW Reanimator R2b Respec atomicity", () => {
 });
 
 describe("RHW Reanimator R2b scope boundary", () => {
-	it("keeps Facilitated Revival non-executable and adds no execution method", () => {
+	it("keeps Facilitated Revival blocked without a shared live focus", () => {
 		const state = makeState({artificerLevel: 15});
 		expect(state.getRhwFacilitatedRevivalBoundary()).toMatchObject({
 			available: true,
 			executable: false,
-			reason: "pendingSharedToolContract",
+			reason: "focusUnavailable",
 		});
-		expect(state.pUseRhwFacilitatedRevival).toBeUndefined();
+		expect(state.pUseRhwFacilitatedRevival).toEqual(expect.any(Function));
 	});
 });

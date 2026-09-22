@@ -236,12 +236,21 @@ resolution containing EFA Artificer-level healing, Dexterity save at the EFA
 spell DC, 10-foot emanation, and the level-scaled Lightning dice. The resource
 maximum is `max(0, current INT modifier)` with no minimum of 1.
 
-Facilitated Revival has a separate one-use long-rest resource, but R2a has no
-execution method. `getRhwFacilitatedRevivalBoundary()` returns
-`executable: false`, reason `pendingSharedToolContract`, and the exact
-alternate-cast ownership. R2b wires Reanimator's Tools through the generic
-fixed-proficiency fallback transaction, but tool focus/inventory receipt
-validation and Facilitated Revival spending remain a later shared dependency.
+Facilitated Revival has a separate one-use long-rest resource.
+`getRhwFacilitatedRevivalBoundary()` is read-only and returns `executable: true`
+only when the exact level-15 owner, an available use, and at least one equipped
+proficient `AT|XPHB` inventory row are all present. It exposes the shared focus
+requirement, status, and stable eligible focus references without reconciling or
+mutating state.
+
+`pUseRhwFacilitatedRevival()` validates the exact feature, class, subclass,
+`Raise Dead|XPHB` owner, resource, and selected shared focus reference before
+committing. The cast spends no slot, waives Material components, spends the
+feature resource once, and publishes one standard committed spell-cast receipt.
+The receipt carries exact EFA/RHW attribution plus stable focus wrapper/entity
+IDs. Cancellation and every pre-commit rejection are byte-for-byte no-ops.
+Committed spell-hook failures remain committed and are surfaced in `followUps`.
+Short rests do not restore the use; long rests do.
 
 `applyClassFeatureEffects()` owns reconciliation across add, level change,
 load, subclass teardown, and Respec. Respec drafts must install the spell
@@ -341,6 +350,8 @@ spellcastingFocusRequirement: {
     sourceFeatureUid: "Feature Name|Class Name|Class Source|Level|Feature Source",
     filter: {
         itemUids: ["Alchemist's Supplies|XPHB"],
+        itemTypes: ["AT"],
+        itemSources: ["XPHB"],
         requiresProficiency: true,
     },
     ui: {
@@ -366,6 +377,7 @@ filter: {
     itemUids: ["Alchemist's Supplies|XPHB"],
     itemNames: ["Alchemist's Supplies"],
     itemTypes: ["AT"],
+    itemSources: ["XPHB"],
     weapon: {
         category: "any",
         requiresProficiency: true,
@@ -388,6 +400,9 @@ can waive ordinary Material components while still requiring its named focus.
 The ordinary EFA rule is owned by
 `Spellcasting|Artificer|EFA|1|EFA` and continues to accept equipped,
 proficient Thieves' Tools, Tinker's Tools, and Artisan's Tools.
+The inventory filter can match exact `name|source` UIDs, names, or base item
+types. `itemSources` narrows every match to exact sources. The wrapper must be
+equipped and have positive quantity. `requiresProficiency` defaults to false.
 
 Callers select from the live wrappers returned by
 `getEligibleSpellCastFocusInventoryRows(requirement)` before any slot,
@@ -426,6 +441,12 @@ The pre-cost selection result's normalized `focusRequirement` must be passed
 unchanged to `pPublishCommittedSpellCast`. Publication normalizes it again and
 revalidates the selected live wrapper after all core costs commit.
 
+Feature-backed casts may pass an optional `pCommit` callback. The publisher
+first validates and snapshots exact spell/focus identity, then runs the core
+commit, then publishes the receipt and invokes spell hooks. A rejected core
+commit publishes nothing; a committed core use is never rolled back for a
+downstream hook failure.
+
 The serializable receipt remains `receiptVersion: 1` and additively exposes
 the exact rule owner at all stable consumer surfaces:
 
@@ -445,8 +466,9 @@ the exact rule owner at all stable consumer surfaces:
 The full receipt also contains `receiptId`, `ok`, `committed`,
 `castingClassUid`, `castingSubclassUid`, `spellEntryId`, `spellUid`, `spell`,
 `castType`, `slotLevel`, `focusInventoryItemId`, `focusItemUid`, `focus`,
-`followUps`, and `followUpFailed`. It never stores a DOM node or live data
-object. A saved receipt can re-resolve its live focus after export/import with
+`materialComponentsWaived`, optional `featureCommit`, `followUps`, and
+`followUpFailed`. It never stores a DOM node or live data object. A saved
+receipt can re-resolve its live focus after export/import with
 `resolveCommittedSpellCastReceiptFocus(receipt)`, which verifies both wrapper
 id and item UID.
 
