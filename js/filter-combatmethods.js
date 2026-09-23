@@ -12,14 +12,31 @@ class PageFilterCombatMethods extends PageFilterBase {
 			return SortUtil.ascSortLower(itemA.values.tradition, itemB.values.tradition) || SortUtil.listSort(itemA, itemB, options);
 		}
 		if (options.sortBy === "stamina") {
-			const aValue = Number(itemA.values.stamina) || 0;
-			const bValue = Number(itemB.values.stamina) || 0;
+			const aValue = Number(itemA.values.staminaSort ?? itemA.values.stamina) || 0;
+			const bValue = Number(itemB.values.staminaSort ?? itemB.values.stamina) || 0;
 			return SortUtil.ascSort(aValue, bValue) || SortUtil.listSort(itemA, itemB, options);
 		}
 		if (options.sortBy === "action") {
 			return SortUtil.ascSortLower(itemA.values.action || "", itemB.values.action || "") || SortUtil.listSort(itemA, itemB, options);
 		}
 		return SortUtil.listSort(itemA, itemB, options);
+	}
+
+	static getStaminaCostMeta (ent) {
+		const entriesText = JSON.stringify(ent?.entries || "");
+		const rangeMatch = entriesText.match(/\((\d+)\s*[-–—]\s*(\d+)\s*(?:Stamina|Exertion)(?:\s+Points?)?\)/i);
+		if (rangeMatch) {
+			const min = Number(rangeMatch[1]);
+			const max = Number(rangeMatch[2]);
+			return {isVariable: true, min, max, display: `${min}–${max}`};
+		}
+		const rawCost = Number(ent?.staminaCost);
+		const cost = ent?.staminaCost != null && Number.isFinite(rawCost) ? rawCost : 0;
+		return {isVariable: false, min: cost, max: cost, display: `${cost}`};
+	}
+
+	static getStaminaCostDisplay (ent) {
+		return this.getStaminaCostMeta(ent).display;
 	}
 	// endregion
 
@@ -68,7 +85,10 @@ class PageFilterCombatMethods extends PageFilterBase {
 		ent._fTradition = ent.tradition || "Unknown";
 		ent._fType = ent.isStance ? "Stance" : "Strike";
 		ent._fDegree = ent.degree ? PageFilterCombatMethods._getDegreeDisplay(ent.degree) : "Unknown";
-		ent._fStaminaCost = ent.staminaCost != null ? ent.staminaCost : 0;
+		const staminaMeta = this.getStaminaCostMeta(ent);
+		ent._fStaminaCost = staminaMeta.isVariable
+			? Array.from({length: staminaMeta.max - staminaMeta.min + 1}, (_, ix) => staminaMeta.min + ix)
+			: staminaMeta.min;
 		ent._fActionType = ent.actionType || "Unknown";
 		ent._fPrerequisites = [];
 		if (ent.prerequisite) {

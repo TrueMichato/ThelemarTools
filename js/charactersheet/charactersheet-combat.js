@@ -14332,6 +14332,12 @@ class CharacterSheetCombat {
 					else if (parsed.actionType === "Reaction") actKind = "reaction";
 					extraBadges.push(csCombatActionChip(actKind, {labelOverride: parsed.actionType, cls: "ml-1"}));
 				}
+				const randomOutcomesHtml = parsed.randomOutcomes
+					? `<details class="ve-small mt-1" style="width:100%">
+						<summary class="clickable">🎲 ${parsed.randomOutcomes.die} outcomes</summary>
+						<ol class="mb-0 pl-4">${parsed.randomOutcomes.options.map(option => `<li>${Renderer.get().render({entries: option.entries})}</li>`).join("")}</ol>
+					</details>`
+					: "";
 
 				const isWeaponModifier = parsed.methodCategory === "weaponModifier";
 				const rememberedWeapon = isWeaponModifier ? this._state.getCombatMethodWeapon(method.name) : null;
@@ -14369,10 +14375,11 @@ class CharacterSheetCombat {
 						<div class="ve-flex ve-flex-v-center ve-flex-wrap">
 							<span class="charsheet__method-name" style="font-weight: bold;">${methodNameHtml}</span>
 							<span class="ve-muted ve-small ml-2">(${degree}${this._getOrdinalSuffix(degree)})</span>
-							${staminaCost > 0 ? `<span class="badge badge-secondary ml-2" title="Stamina cost">${staminaCost} EP</span>` : ""}
+							${parsed.staminaCostMeta?.isVariable || staminaCost > 0 ? `<span class="badge badge-secondary ml-2" title="Stamina cost">${parsed.staminaCostDisplay || staminaCost} SP</span>` : ""}
 							${stanceActive ? `<span class="badge badge-success ml-1" title="Stance is active">Active</span>` : ""}
 							${extraBadges.join("")}
 							${weaponLabel}
+							${randomOutcomesHtml}
 						</div>
 						${showUseButton ? `<div class="ve-flex ve-flex-v-center ml-2">
 							${actionBtnHtml}
@@ -14392,101 +14399,157 @@ class CharacterSheetCombat {
 	}
 
 	_getMethodStaminaCost (method) {
-		// Try to extract stamina cost from method entries
-		// Usually formatted like "Cost: X stamina" or mentions stamina in the text
-		if (!method.entries) return 1; // Default cost
-
-		const entriesStr = JSON.stringify(method.entries).toLowerCase();
-
-		// Look for patterns like "costs X stamina" or "X stamina points"
-		const costMatch = entriesStr.match(/costs?\s+(\d+)\s+stamina/i);
-		if (costMatch) return parseInt(costMatch[1]);
-
-		// Also check for degree-based default costs (1st=1, 2nd=2, etc.)
-		const degree = this._getMethodDegree(method);
-		return degree || 1;
+		return CharacterSheetClassUtils.getMethodStaminaCost(method);
 	}
 
-	_useMethod (methodId) {
+	async _useMethod (methodId) {
 		const btn = /** @type {*} */ (document.querySelector(`.charsheet__method-use[data-method-id="${methodId}"]`));
+		const clickedMethod = /** @type {*} */ (btn?.closest(".charsheet__method-item"))?._methodData;
+		const result = await this._pUseCombatMethod(clickedMethod, {button: btn, surface: "combat"});
+		if (!result.ok) {
+			const warnings = {
+				"method-not-found": "Could not resolve method data. Please try again.",
+				"focus-blocked": result.message,
+				"cancelled": null,
+				"invalid-cost": "Choose a valid Stamina cost for this method.",
+				"insufficient-stamina": `Not enough stamina! You have ${this._state.getStaminaCurrent()}, but this method costs ${result.cost}.`,
+				"roll-failed": `Could not resolve ${clickedMethod?.name || "this method"}'s random outcome. No Stamina was spent.`,
+				"dispatch-failed": `Could not activate ${clickedMethod?.name || "this method"}. No Stamina was spent.`,
+			};
+			if (warnings[result.reason]) JqueryUtil.doToast({type: "warning", content: warnings[result.reason]});
+			return result;
+		}
 
-		// Stances are on/off toggles: if THIS stance is already active, END it here — BEFORE
-		// any stamina/focus checks. Exiting a stance is free (a bonus action) and must work
-		// even at 0 stamina or while in a mismatched Primal Focus mode.
-		const clickedMethod = /** @type {*} */ (btn.closest(".charsheet__method-item"))?._methodData;
-		if (clickedMethod && this._state.isStanceActive?.(clickedMethod.name)) {
-			this._exitStance(clickedMethod);
+		this._updateStaminaDisplay();
+		this._page?._features?._renderResources?.();
+		if (result.outcome && result.message) JqueryUtil.doToast({type: "success", content: result.message});
+		if (btn) {
 			btn.classList.add("ve-btn-success");
 			setTimeout(() => btn.classList.remove("ve-btn-success"), 200);
-			return;
 		}
-
-		const cost = parseInt(btn.dataset.cost) || 1;
-		const currentStamina = this._state.getStaminaCurrent();
-
-		if (currentStamina < cost) {
-			// Try ki/focus-to-stamina conversion for Monks with the combat system
-			if (this._state.canUseFocusForStamina?.()) {
-				const kiCurrent = this._state.getKiPointsCurrent?.() ?? 0;
-				if (kiCurrent >= cost) {
-					if (!this._state.useFocusForStamina(cost)) {
-						JqueryUtil.doToast({type: "warning", content: `Not enough ki/focus points to fuel this method!`});
-						return;
-					}
-					// Ki was spent — continue to activation (skip stamina deduction below)
-					this._activateMethodAfterPayment(btn, methodId, cost, "ki/focus");
-					return;
-				}
-			}
-			JqueryUtil.doToast({type: "warning", content: `Not enough stamina! You have ${currentStamina}, but this method costs ${cost}.`});
-			return;
-		}
-
-		// Get the method data from the parent element (validate before spending stamina)
-		const method = /** @type {*} */ (btn.closest(".charsheet__method-item"))?._methodData;
-		if (!method) {
-			JqueryUtil.doToast({type: "warning", content: `Could not resolve method data. Please try again.`});
-			return;
-		}
-
-		// Enforce Primal Focus gating at use time (not just via the disabled button) so a
-		// focus-locked method (Singular Focus → Predator, Groundshatter → Prey) can never be
-		// triggered while in the wrong focus, even if the disabled state is bypassed.
-		if (this._state.isCombatMethodFocusBlocked?.(method)) {
-			const focusLabel = method.requiresFocus.charAt(0).toUpperCase() + method.requiresFocus.slice(1);
-			JqueryUtil.doToast({type: "warning", content: `${method.name} can only be used while in ${focusLabel} focus.`});
-			return;
-		}
-
-		this._state.setStaminaCurrent(currentStamina - cost);
-		this._updateStaminaDisplay();
-
-		// Also update resources section
-		if (this._page?._features) {
-			this._page._features._renderResources();
-		}
-
-		this._activateMethodEffect(btn, methodId, method, cost, "stamina");
+		return result;
 	}
 
 	/**
-	 * Activate a combat method after paying with ki/focus points
+	 * Resolve, gate, pay for, and dispatch a combat method without depending on DOM state.
+	 * @param {*} method
+	 * @param {{button?:*, surface?:string, requestedCost?:number}} [opts]
+	 * @returns {Promise<*>}
 	 */
-	_activateMethodAfterPayment (btn, methodId, cost, resourceName) {
-		const method = btn.closest(".charsheet__method-item")?._methodData;
+	async _pUseCombatMethod (method, {button = null, surface = "combat", requestedCost = null} = {}) {
+		const resolvedMethod = method?.name
+			? (this._state._findCombatMethodFeature?.(method.name) || method)
+			: null;
+		if (!resolvedMethod) return {ok: false, reason: "method-not-found"};
 
-		// Also update resources section (ki display)
-		if (this._page?._features) {
-			this._page._features._renderResources();
+		if (this._state.isStanceActive?.(resolvedMethod.name)) {
+			this._exitStance(resolvedMethod);
+			return {ok: true, cost: 0, resource: "stamina", message: `Ended ${resolvedMethod.name}.`, surface};
 		}
 
-		this._activateMethodEffect(btn, methodId, method, cost, resourceName);
+		if (this._state.isCombatMethodFocusBlocked?.(resolvedMethod)) {
+			const focusLabel = resolvedMethod.requiresFocus.charAt(0).toUpperCase() + resolvedMethod.requiresFocus.slice(1);
+			return {ok: false, reason: "focus-blocked", message: `${resolvedMethod.name} can only be used while in ${focusLabel} focus.`};
+		}
+
+		const costMeta = CharacterSheetClassUtils.getMethodStaminaCostMeta(resolvedMethod);
+		let cost = costMeta.cost;
+		if (costMeta.isVariable) {
+			let selected = requestedCost;
+			if (selected == null) {
+				selected = await InputUiUtil.pGetUserNumber({
+					inputMode: "numeric",
+					title: `${resolvedMethod.name} — Stamina to spend`,
+					min: costMeta.min,
+					max: costMeta.max,
+					int: true,
+					default: costMeta.min,
+				});
+			}
+			if (selected == null || typeof selected === "symbol") return {ok: false, reason: "cancelled", cost: null};
+			cost = Number(selected);
+			if (!Number.isInteger(cost) || cost < costMeta.min || cost > costMeta.max) return {ok: false, reason: "invalid-cost", cost};
+		}
+		cost = Number.isFinite(cost) ? cost : 0;
+
+		const staminaBefore = this._state.getStaminaCurrent?.() ?? 0;
+		const kiBefore = this._state.getKiPointsCurrent?.() ?? 0;
+		let resource = "stamina";
+		if (staminaBefore < cost) {
+			if (!this._state.canUseFocusForStamina?.() || kiBefore < cost) {
+				return {ok: false, reason: "insufficient-stamina", cost};
+			}
+			resource = "ki/focus";
+		}
+
+		const parsedEffects = this._state._parseCombatMethodEffects?.(resolvedMethod) || {};
+		const stateBeforeDispatch = this._state._data ? MiscUtil.copyFast(this._state._data) : null;
+		let outcome = null;
+		let methodDc = null;
+		let message = null;
+		if (parsedEffects.randomOutcomes) {
+			const roll = Number(this._page?.rollDice?.(1, parsedEffects.randomOutcomes.sides));
+			outcome = parsedEffects.randomOutcomes.options.find(it => it.roll === roll) || null;
+			if (!outcome) return {ok: false, reason: "roll-failed", cost};
+			methodDc = this._state.getFeatureCalculations?.().combatMethodDc ?? null;
+			const dcText = Number.isFinite(methodDc) ? `DC ${methodDc} Wisdom save` : "Wisdom save against your method DC";
+			message = `${resolvedMethod.name}: if the attack hits and the target fails the ${dcText}, ${outcome.label.toLowerCase()} — ${outcome.effectText}`;
+		}
+
+		let paid = false;
+		if (cost > 0) {
+			if (resource === "stamina") {
+				this._state.setStaminaCurrent(staminaBefore - cost);
+				paid = true;
+			} else {
+				paid = !!this._state.useFocusForStamina?.(cost);
+			}
+			if (!paid) return {ok: false, reason: "insufficient-stamina", cost};
+		}
+
+		try {
+			if (!parsedEffects.randomOutcomes) {
+				const isActivated = this._activateMethodEffect(
+					button,
+					`${resolvedMethod.name}-${resolvedMethod.source || ""}`,
+					resolvedMethod,
+					cost,
+					resource,
+					{deferPersistence: true},
+				);
+				if (isActivated === false) throw new Error("Method effect was not activated");
+			}
+		} catch (error) {
+			if (stateBeforeDispatch && this._state._data) {
+				this._state._data = stateBeforeDispatch;
+			} else if (paid) {
+				if (resource === "stamina") this._state.setStaminaCurrent(staminaBefore);
+				else this._state.setKiPointsCurrent?.(kiBefore);
+			}
+			// eslint-disable-next-line no-console
+			console.error(`[CharSheet Combat] Failed to activate ${resolvedMethod.name}:`, error);
+			return {ok: false, reason: "dispatch-failed", cost};
+		}
+
+		if (!message) message = `Used ${resolvedMethod.name}! (${cost ? `−${cost} ${resource}` : "no Stamina cost"})`;
+		if (this._page?._saveCurrentCharacter) await this._page._saveCurrentCharacter();
+		else await this._page?.saveCharacter?.();
+
+		return {ok: true, cost, resource, outcome, methodDc, message, surface};
+	}
+
+	/**
+	 * Compatibility seam used by focused method-effect tests and legacy callers.
+	 */
+	_activateMethodAfterPayment (btn, methodId, cost, resourceName) {
+		const method = btn?.closest?.(".charsheet__method-item")?._methodData;
+		return this._activateMethodEffect(btn, methodId, method, cost, resourceName);
 	}
 
 	/**
 	 * Apply the method's effect after payment has been deducted
 	 */
-	_activateMethodEffect (btn, methodId, method, cost, resourceName) {
+	_activateMethodEffect (btn, methodId, method, cost, resourceName, {deferPersistence = false} = {}) {
 		if (method) {
 			// Check if this is a stance (typically has duration) vs instant effect
 			const isStance = this._isMethodStance(method);
@@ -14518,18 +14581,18 @@ class CharacterSheetCombat {
 					this.renderCombatStates();
 					this.renderCombatEffects();
 					this._page._renderActiveStates?.();
-					this._page._saveCurrentCharacter?.();
-					this._page._renderCharacter?.();
-					JqueryUtil.doToast({type: "warning", content: `Could not activate ${method.name}.`});
-					btn.classList.add("ve-btn-success");
-					setTimeout(() => btn.classList.remove("ve-btn-success"), 200);
-					return;
+					if (!deferPersistence) {
+						this._page._saveCurrentCharacter?.();
+						this._page._renderCharacter?.();
+						JqueryUtil.doToast({type: "warning", content: `Could not activate ${method.name}.`});
+					}
+					return false;
 				}
 
 				this.renderCombatStates();
 				this.renderCombatEffects();
 				this._page._renderActiveStates?.();
-				this._page._saveCurrentCharacter?.();
+				if (!deferPersistence) this._page._saveCurrentCharacter?.();
 				this._page._renderCharacter?.();
 				// Re-render the methods list so this stance's button flips to "End Stance"
 				// and any previously-active stance's button reverts to "Enter Stance"
@@ -14548,7 +14611,7 @@ class CharacterSheetCombat {
 				if (category === "weaponModifier") {
 					this._activateWeaponModifierMethod(method, parsedEffects, cost, resourceName);
 				} else if (category === "selfHeal") {
-					this._activateSelfHealMethod(method, parsedEffects, cost, resourceName);
+					this._activateSelfHealMethod(method, parsedEffects, cost, resourceName, {deferPersistence});
 				} else if (category === "rangedExtraDie") {
 					this._activateRangedExtraDieMethod(method, cost, resourceName);
 				} else {
@@ -14563,15 +14626,18 @@ class CharacterSheetCombat {
 		}
 
 		// Flash the button to indicate use
-		btn.classList.add("ve-btn-success");
-		setTimeout(() => btn.classList.remove("ve-btn-success"), 200);
+		if (btn) {
+			btn.classList.add("ve-btn-success");
+			setTimeout(() => btn.classList.remove("ve-btn-success"), 200);
+		}
+		return true;
 	}
 
 	/**
 	 * Self-heal combat method (e.g. Catch Your Breath). Rolls the method's healing dice and
 	 * applies `dice + proficiency + ability modifier` (clamped to its minimum) via the state.
 	 */
-	_activateSelfHealMethod (method, parsedEffects, cost, resourceName) {
+	_activateSelfHealMethod (method, parsedEffects, cost, resourceName, {deferPersistence = false} = {}) {
 		const heal = parsedEffects.selfHeal;
 		if (!heal) {
 			JqueryUtil.doToast({type: "success", content: `Used ${method.name}! (−${cost} ${resourceName})`});
@@ -14585,7 +14651,7 @@ class CharacterSheetCombat {
 		this._page._renderHp?.();
 		this.renderCombatResources?.();
 		this._page._renderCharacter?.();
-		this._page._saveCurrentCharacter?.();
+		if (!deferPersistence) this._page._saveCurrentCharacter?.();
 
 		if (result) {
 			JqueryUtil.doToast({type: "success", content: `${method.name}: regained ${result.amount} HP (${result.formulaText}; rolled ${dieRoll}). (−${cost} ${resourceName})`});

@@ -280,3 +280,54 @@ describe("CS-BUG-090 — species traits that share a name with a combat method",
 		expect(charge.tradition).toBe("Rapid Current");
 	});
 });
+
+describe("Combat-method repair same-name feature collisions", () => {
+	const features = [
+		{
+			name: "Deflect Strike",
+			source: "TGTT",
+			_entityType: "subclassFeature",
+			className: "Monk",
+			subclassShortName: "Debilitation",
+			entries: ["Subclass Deflect Strike rules."],
+			description: "Subclass Deflect Strike rules.",
+		},
+		{
+			name: "Bodyguard",
+			source: "TGTT",
+			_entityType: "subclassFeature",
+			className: "Fighter",
+			subclassShortName: "Warder",
+			entries: ["Warder Bodyguard rules."],
+			description: "Warder Bodyguard rules.",
+		},
+		{
+			name: "Low Blow",
+			source: "TGTT",
+			featureType: ["PS"],
+			entries: ["Precise Strike Low Blow rules."],
+			description: "Precise Strike Low Blow rules.",
+		},
+	];
+	const collidingCatalog = features.map((feature, ix) => ({
+		name: feature.name,
+		source: feature.source,
+		_entityType: "combatMethod",
+		tradition: "Biting Zephyr",
+		degree: ix + 1,
+		staminaCost: ix,
+		entries: [`Combat Method ${feature.name} rules.`],
+	}));
+
+	it("does not reclassify or overwrite subclass and Precise Strike features", () => {
+		const state = new CharacterSheetState();
+		state._data.features = features.map(feature => structuredClone(feature));
+		const before = structuredClone(state._data.features);
+
+		state.setCombatMethodCatalog(collidingCatalog);
+		state._repairCombatMethodMarkers();
+
+		expect(state._data.features).toEqual(before);
+		expect(state.getCombatMethods()).toEqual([]);
+	});
+});

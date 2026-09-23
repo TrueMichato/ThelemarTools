@@ -596,8 +596,8 @@ The stamina-based combat system is fully implemented.
 |---------|----------------|
 | **Stamina Pool** | `staminaPool = 2 × proficiency bonus` |
 | **Stamina Recovery** | Full on long rest, half (rounded up) on short rest |
-| **Method Costs** | 1-3 stamina per method |
-| **Method DC** | `8 + proficiency + STR or DEX` |
+| **Method Costs** | Authored per method; fixed, free (`0`), or a prompted range such as `1-3`. Degree never determines cost. |
+| **Method DC** | Standard: `8 + proficiency + max(STR, DEX)`; TGTT Monk: `9 + proficiency + max(STR, DEX, WIS)`. Existing spellcasting-DC overrides use the higher eligible DC. |
 | **Stance System** | One active stance at a time, stance speed bonus wired into `getSpeedBonusFromStates()` |
 
 ### ✅ Combat Traditions (17 total)

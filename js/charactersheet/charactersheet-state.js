@@ -47129,6 +47129,7 @@ class CharacterSheetState {
 	 */
 	setCombatMethodCatalog (combatMethodEntities) {
 		this._combatMethodCatalog = Array.isArray(combatMethodEntities) ? combatMethodEntities : [];
+		this._repairCombatMethodMarkers();
 	}
 
 	// =====================================================================
@@ -48009,6 +48010,9 @@ class CharacterSheetState {
 	 *     carries no `tradition`) are still repaired rather than skipped.
 	 *   - Never converts a Battle Tactic (`BT`) or Arcane Shot (`AS`) optionalfeature —
 	 *     those are intentionally NOT combat methods.
+	 *   - Never converts a class/subclass/other typed feature which happens to share an
+	 *     exact name + source with a combat method. Marker-less legacy methods are limited
+	 *     to the old generic `featureType: "Optional Feature"` save shape.
 	 *   - Only an exact name|source catalog match to a `combatMethod` entity is repaired;
 	 *     anything else is left untouched.
 	 */
@@ -48054,6 +48058,15 @@ class CharacterSheetState {
 				continue;
 			}
 
+			const wasCombatMethod = f._entityType === "combatMethod"
+				|| hasTypePrefix(f, ["CTM:"])
+				|| CharacterSheetClassUtils.isCombatMethod(f);
+			const isLegacyUnmarkedMethod = !f._entityType
+				&& f.featureType === "Optional Feature"
+				&& !f.subclassShortName
+				&& !f.subclassSource;
+			if (!wasCombatMethod && !isLegacyUnmarkedMethod) continue;
+
 			const name = (f.name || "").toLowerCase();
 			const source = (f.source || "").toLowerCase();
 			if (!name) continue;
@@ -48082,6 +48095,14 @@ class CharacterSheetState {
 			if (isMissing(f.staminaCost) && entity.staminaCost !== undefined) f.staminaCost = entity.staminaCost;
 			if (isMissing(f.actionType) && entity.actionType !== undefined) f.actionType = entity.actionType;
 			if (isMissing(f.optionalFeatureTypes) && Array.isArray(entity.optionalFeatureTypes)) f.optionalFeatureTypes = [...entity.optionalFeatureTypes];
+
+			// Learned combat methods snapshot their authored entries. Refresh exact catalog
+			// matches so data corrections reach existing saves rather than only newly learned
+			// methods. The catalog remains the authority; character-specific metadata stays on f.
+			if (Array.isArray(entity.entries) && JSON.stringify(f.entries || []) !== JSON.stringify(entity.entries)) {
+				f.entries = MiscUtil.copyFast(entity.entries);
+				f.description = Renderer.get().render({entries: f.entries});
+			}
 		}
 	}
 
@@ -50103,8 +50124,10 @@ class CharacterSheetState {
 		}) ?? [];
 
 		return methods.map(m => ({
+			id: m.id,
 			name: m.name,
 			source: m.source,
+			entries: m.entries,
 			description: m.description,
 			requiresFocus: m.requiresFocus ?? null,
 			...this._parseCombatMethodEffects(m),
@@ -50289,7 +50312,16 @@ class CharacterSheetState {
 			selfHeal: null, // e.g. {dice:"1d6", addProficiency:true, abilityMod:"con", minimum:0} (Catch Your Breath)
 			pendingRangedExtraDie: false, // one-shot +1 weapon die on next ranged attack (Doubleshot)
 			conditionalSaveAdvantage: null, // e.g. {target:"save:all", advantage:true, conditional:"to resist…"} (Iron Will)
+			staminaCostMeta: null,
+			staminaCostDisplay: "0",
+			randomOutcomes: null,
 		};
+
+		const staminaCostMeta = CharacterSheetClassUtils.getMethodStaminaCostMeta(feature);
+		effects.staminaCostMeta = staminaCostMeta;
+		effects.staminaCostDisplay = staminaCostMeta.display;
+		effects.staminaCost = staminaCostMeta.cost ?? staminaCostMeta.min;
+		effects.randomOutcomes = CharacterSheetClassUtils.getMethodRandomOutcomes(feature);
 
 		// Use structured fields from new combatMethod entity if available
 		const isNewEntity = feature._entityType === "combatMethod" || (feature.tradition !== undefined && feature.degree !== undefined && feature.staminaCost !== undefined);
@@ -50297,7 +50329,6 @@ class CharacterSheetState {
 		if (isNewEntity) {
 			effects.degree = feature.degree || 0;
 			effects.tradition = CharacterSheetClassUtils.getMethodTraditionCode(feature);
-			effects.staminaCost = feature.staminaCost || 0;
 			if (feature.actionType) {
 				effects.actionType = feature.actionType.replace(/\b\w/g, c => c.toUpperCase());
 			}
@@ -50321,16 +50352,8 @@ class CharacterSheetState {
 
 		// Parse from description text — strip HTML tags for reliable regex matching
 		// Fall back to JSON-stringified entries when description is empty (raw feature objects from getFeatures())
-		const rawText = feature.description || (feature.entries ? JSON.stringify(feature.entries) : "");
+		const rawText = feature.entries ? JSON.stringify(feature.entries) : (feature.description || "");
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1").replace(/\s+/g, " ");
-
-		// Parse stamina cost: "(1 Stamina Point)", "(3 Stamina Points)" — skip if already set from structured fields
-		if (!effects.staminaCost) {
-			const staminaMatch = text.match(/\((\d+)\s*Stamina\s*Points?\)/i);
-			if (staminaMatch) {
-				effects.staminaCost = parseInt(staminaMatch[1], 10);
-			}
-		}
 
 		// Parse action type from entry prefix — skip if already set from structured fields
 		if (!effects.actionType) {
@@ -50435,6 +50458,8 @@ class CharacterSheetState {
 		// Method category classification
 		if (effects.isStance) {
 			effects.methodCategory = "stance";
+		} else if (effects.randomOutcomes) {
+			effects.methodCategory = "randomOutcome";
 		} else if (effects.pendingRangedExtraDie) {
 			effects.methodCategory = "rangedExtraDie";
 		} else if (/(?:next\s+attack\s+roll|if\s+you\s+hit\s+with\s+your\s+next\s+attack|your\s+next\s+attack|hit\s+with\s+(?:the|your)\s+(?:chosen\s+)?weapon)/i.test(text)) {
@@ -50824,7 +50849,7 @@ class CharacterSheetState {
 		}
 
 		const parsed = this._parseCombatMethodEffects(method);
-		const cost = parsed.staminaCost || 0;
+		const cost = parsed.staminaCost;
 
 		if (cost > 0) {
 			const success = this.spendStamina(cost);
