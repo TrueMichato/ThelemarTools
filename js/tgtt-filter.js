@@ -202,8 +202,15 @@ class TgttFilter {
 
 	// ==================== Private Methods ====================
 
+	static isSpellsPage () {
+		const currentPage = globalThis.UrlUtil?.getCurrentPage?.();
+		if (currentPage) return currentPage === (globalThis.UrlUtil.PG_SPELLS || "spells.html");
+
+		return /(?:^|\/)spells\.html$/i.test(globalThis.window?.location?.pathname || "");
+	}
+
 	_isSpellsPage () {
-		return window.location.href.includes("spells.html");
+		return this.constructor.isSpellsPage();
 	}
 
 	// ==================== Hover Source Priority ====================
@@ -663,7 +670,7 @@ class TgttFilterModalUI {
 	}
 
 	_injectFilterUI () {
-		if (!window.location.href.includes("spells.html")) return;
+		if (!TgttFilter.isSpellsPage()) return;
 		if (document.querySelector(".tgtt-filter-section")) {
 			this._injected = true;
 			return;
@@ -702,14 +709,7 @@ class TgttFilterModalUI {
 	}
 
 	_getSpellFilterModalScroller () {
-		return [...document.querySelectorAll(".ve-ui-modal__scroller")]
-			.findLast(modalScroller => this.constructor.isSpellFilterModalTitle(
-				modalScroller.parentElement?.querySelector("h4")?.textContent?.trim() || "",
-			));
-	}
-
-	static isSpellFilterModalTitle (title) {
-		return /^Filter\/Search for Spells?$/.test(title);
+		return [...document.querySelectorAll("[data-filter-box-modal]")].findLast(Boolean);
 	}
 
 	/**
@@ -741,6 +741,9 @@ class TgttFilterModalUI {
 						 data-filter-type="${filterType}" 
 						 data-filter-key="${opt.key}" 
 						 data-state="${filterState[filterType]?.[opt.key] || "ignore"}"
+						 role="button"
+						 tabindex="0"
+						 aria-label="${opt.label}: ${filterState[filterType]?.[opt.key] || "ignore"}. Activate to cycle include, exclude, and ignore."
 						 title="Click to cycle: Include → Exclude → Ignore">
 						${opt.label}
 					</div>
@@ -751,6 +754,7 @@ class TgttFilterModalUI {
 		// Add click handlers
 		section.querySelectorAll(".tgtt-filter-pill").forEach(pill => {
 			pill.addEventListener("click", (e) => this._handlePillClick(e));
+			pill.addEventListener("keydown", (e) => this._handlePillKeydown(e));
 		});
 
 		section.querySelector(".tgtt-reset-btn")?.addEventListener("click", (e) => this._handleResetClick(e));
@@ -771,7 +775,21 @@ class TgttFilterModalUI {
 				: "ignore";
 
 		pill.dataset.state = nextState;
+		this._updatePillAccessibility(pill);
 		if (filterType && filterKey) this._tgttFilter.setFilterState(filterType, filterKey, nextState);
+	}
+
+	/** @param {KeyboardEvent} e */
+	_handlePillKeydown (e) {
+		if (e.key !== "Enter" && e.key !== " ") return;
+		e.preventDefault();
+		this._handlePillClick(e);
+	}
+
+	/** @param {HTMLElement} pill */
+	_updatePillAccessibility (pill) {
+		const label = pill.textContent?.trim() || pill.dataset.filterKey || "Filter";
+		pill.setAttribute?.("aria-label", `${label}: ${pill.dataset.state}. Activate to cycle include, exclude, and ignore.`);
 	}
 
 	/** @param {Event} e */
@@ -791,6 +809,7 @@ class TgttFilterModalUI {
 			const filterKey = pill.dataset.filterKey;
 			if (filterType && filterKey && filterState[filterType]?.[filterKey]) {
 				pill.dataset.state = filterState[filterType][filterKey];
+				this._updatePillAccessibility(pill);
 			}
 		});
 	}
