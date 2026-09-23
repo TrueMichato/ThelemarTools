@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<!--5ETOOLS_CMP-->
+	<!--5ETOOLS_ANALYTICS-->
+	<!--5ETOOLS_ADCODE-->
+	<meta charset="utf-8">
+	<meta name="description" content="">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<meta name="mobile-web-app-capable" content="yes">
+
+	<title>Encounter Workspace - ThelemarTools</title>
+
+	<link rel="stylesheet" href="css/bootstrap.css">
+	<link rel="stylesheet" href="css/main.css">
+	<link rel="stylesheet" href="css/encounterworkspace.css">
+
+	<!-- Favicons -->
+	<link rel="icon" type="image/svg+xml" href="favicon.svg">
+	<link rel="icon" type="image/png" sizes="256x256" href="favicon-256x256.png">
+	<link rel="icon" type="image/png" sizes="144x144" href="favicon-144x144.png">
+	<link rel="icon" type="image/png" sizes="128x128" href="favicon-128x128.png">
+	<link rel="icon" type="image/png" sizes="64x64" href="favicon-64x64.png">
+	<link rel="icon" type="image/png" sizes="48x48" href="favicon-48x48.png">
+	<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+	<link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+
+	<!-- Chrome Web App Icons -->
+	<link rel="manifest" href="manifest.webmanifest">
+	<meta name="application-name" content="ThelemarTools">
+	<meta name="theme-color" content="#005e66">
+
+	<!-- Windows Start Menu tiles -->
+	<meta name="msapplication-config" content="browserconfig.xml"/>
+	<meta name="msapplication-TileColor" content="#005e66">
+
+	<!-- Apple Touch Icons -->
+	<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon-180x180.png">
+	<link rel="apple-touch-icon" sizes="360x360" href="apple-touch-icon-360x360.png">
+	<link rel="apple-touch-icon" sizes="167x167" href="apple-touch-icon-167x167.png">
+	<link rel="apple-touch-icon" sizes="152x152" href="apple-touch-icon-152x152.png">
+	<link rel="apple-touch-icon" sizes="120x120" href="apple-touch-icon-120x120.png">
+	<meta name="apple-mobile-web-app-title" content="ThelemarTools">
+
+	<!-- macOS Safari Pinned Tab and Touch Bar -->
+	<link rel="mask-icon" href="safari-pinned-tab.svg" color="#005e66">
+
+	<!-- OpenSearch -->
+	<link rel="search" href="open-search.xml" title="Search ThelemarTools" type="application/opensearchdescription+xml">
+
+	<script type="text/javascript" src="sw-injector.js"></script>
+
+	<script blocking="render" type="module" src="js/styleswitch.js"></script>
+	<script type="text/javascript" src="js/navigation.js"></script>
+	<script type="module" src="js/browsercheck.js"></script>
+</head>
+
+<body>
+
+<div class="overlay-noise no-print"></div>
+
+<div class="viewport-wrapper">
+	<div class="cancer__wrp-leaderboard cancer__anchor"><div class="cancer__disp-cancer"></div><div class="cancer__wrp-leaderboard-inner cancer__wrp-interactive"><!--5ETOOLS_AD_LEADERBOARD--></div></div>
+	<div class="ve-flex-col" data-cancer-id="cancer-header">
+		<header class="ve-mobile-sm__hidden page__header">
+			<div class="container ve-flex-v-baseline">
+				<h1 class="page__title ve-no-wrap ve-my-0" id="page__title">Encounter Workspace</h1>
+				<p class="page__subtitle ve-no-wrap ve-my-0" id="page__subtitle">Run a separate working copy of a saved Bestiary pinned list.</p>
+			</div>
+		</header>
+
+		<nav class="container page__nav" id="navigation">
+			<ul class="nav nav-pills page__nav-inner" id="navbar"></ul>
+		</nav>
+	</div>
+
+	<!--
+	THESIS: Saved Bestiary encounters become independent, selectable working instances, not edits to pins.
+	OWN-WORLD: Bestiary's compact statblocks, site buttons, neutral roster rail, and restrained blue target selection.
+	STORY: Choose a saved list, see every counted monster together, select individual targets, return after reload.
+	FIRST VIEWPORT: Source/list action above a roster rail and multi-statblock field; omissions remain visible above both.
+	FORM: Familiar DM tool workspace, inherited from Bestiary rather than a new visual world.
+	-->
+	<main class="ew container" id="encounter-workspace" aria-busy="true">
+		<header class="ew__header">
+			<div>
+				<h2>Encounter Workspace</h2>
+				<p>Make a working copy of a saved Bestiary pinned list. Your original list stays untouched.</p>
+			</div>
+			<div class="ew__actions">
+				<button type="button" class="ve-btn ve-btn-primary" id="ew-choose" disabled>Choose saved list</button>
+				<a href="bestiary.html" class="ve-btn ve-btn-default">Bestiary</a>
+			</div>
+		</header>
+
+		<p class="ew__status" id="ew-status" role="status" aria-live="polite">Loading working encounter...</p>
+
+		<section class="ew__content" id="ew-workspace" aria-label="Working encounter" hidden>
+			<header class="ew__source">
+				<div>
+					<h2 id="ew-name"></h2>
+					<p>Working copy · source list will not change</p>
+				</div>
+				<p id="ew-summary" role="status" aria-live="polite"></p>
+			</header>
+			<div class="ew__notices" id="ew-notices" aria-label="Entries not loaded" hidden></div>
+			<div class="ew__layout">
+				<aside class="ew__rail" aria-label="Monster targets">
+					<div class="ew__rail-header">
+						<h3>Targets</h3>
+						<div class="ew__selection-actions">
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-all">All</button>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-none">None</button>
+						</div>
+					</div>
+					<p class="ew__help">Choose monsters individually. Selection is saved for the next visit.</p>
+					<div id="ew-roster" class="ew__roster"></div>
+				</aside>
+				<section class="ew__statblocks" id="ew-statblocks" aria-label="Monster statblocks"></section>
+			</div>
+		</section>
+	</main>
+</div>
+
+<!--5ETOOLS_SCRIPT_ANCHOR-->
+<!--5ETOOLS_AD_ADHESION-->
+<script type="text/javascript" defer src="js/parser.js"></script>
+<script type="text/javascript" defer src="js/utils.js"></script>
+<script type="text/javascript" defer src="js/utils-ui.js"></script>
+<script type="text/javascript" defer src="lib/localforage.js"></script>
+<script type="module" defer src="js/omnidexer.js"></script>
+<script type="module" src="js/omnisearch.js"></script>
+<script type="module" src="js/filter.js"></script>
+<script type="module" src="js/utils-dataloader.js"></script>
+<script type="module" src="js/utils-font.js"></script>
+<script type="module" src="js/utils-brew.js"></script>
+<script type="module" src="js/utils-config.js"></script>
+<script type="text/javascript" defer src="js/utils-list.js"></script>
+<script type="text/javascript" defer src="js/render.js"></script>
+<script type="text/javascript" defer src="js/render-dice.js"></script>
+<script type="module" src="js/shim-esmodules.js"></script>
+<script type="text/javascript" defer src="js/hist.js"></script>
+<script type="module" src="js/encounterworkspace.js"></script>
+<script type="module" defer src="js/list2.js"></script>
+<script type="text/javascript" defer src="lib/elasticlunr.js"></script>
+
+</body>
+</html>

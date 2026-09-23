@@ -52,6 +52,18 @@ class _PageGeneratorDmscreen extends PageGeneratorGeneric {
 	];
 }
 
+class _PageGeneratorEncounterWorkspace extends PageGeneratorGeneric {
+	_filename = "page/template-page-encounterworkspace.hbs";
+	_page = "encounterworkspace.html";
+
+	_pageTitle = "Encounter Workspace";
+	_navbarDescription = "Run a separate working copy of a saved Bestiary pinned list.";
+
+	_stylesheets = ["encounterworkspace"];
+	_scriptsUtilsAdditional = ["utils-list.js"];
+	_scriptsModules = ["encounterworkspace.js"];
+}
+
 class _PageGeneratorBlocklist extends PageGeneratorGeneric {
 	_filename = "page/template-page-blocklist.hbs";
 	_page = "blocklist.html";
@@ -400,6 +412,7 @@ export const PAGE_GENERATORS = 	[
 
 	new _PageGeneratorMaps(),
 	new _PageGeneratorDmscreen(),
+	new _PageGeneratorEncounterWorkspace(),
 	new _PageGeneratorBlocklist(),
 	new _PageGeneratorChangelog(),
 	new _PageGeneratorConverter(),

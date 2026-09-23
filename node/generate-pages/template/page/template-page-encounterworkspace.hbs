@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+{{> "head" }}
+
+<body>
+
+{{> "overlayNoise" }}
+
+<div class="viewport-wrapper">
+	{{> "adLeaderboard" }}
+	{{> "navbar" }}
+
+	<!--
+	THESIS: Saved Bestiary encounters become independent, selectable working instances, not edits to pins.
+	OWN-WORLD: Bestiary's compact statblocks, site buttons, neutral roster rail, and restrained blue target selection.
+	STORY: Choose a saved list, see every counted monster together, select individual targets, return after reload.
+	FIRST VIEWPORT: Source/list action above a roster rail and multi-statblock field; omissions remain visible above both.
+	FORM: Familiar DM tool workspace, inherited from Bestiary rather than a new visual world.
+	-->
+	<main class="ew container" id="encounter-workspace" aria-busy="true">
+		<header class="ew__header">
+			<div>
+				<h2>Encounter Workspace</h2>
+				<p>Make a working copy of a saved Bestiary pinned list. Your original list stays untouched.</p>
+			</div>
+			<div class="ew__actions">
+				<button type="button" class="ve-btn ve-btn-primary" id="ew-choose" disabled>Choose saved list</button>
+				<a href="bestiary.html" class="ve-btn ve-btn-default">Bestiary</a>
+			</div>
+		</header>
+
+		<p class="ew__status" id="ew-status" role="status" aria-live="polite">Loading working encounter...</p>
+
+		<section class="ew__content" id="ew-workspace" aria-label="Working encounter" hidden>
+			<header class="ew__source">
+				<div>
+					<h2 id="ew-name"></h2>
+					<p>Working copy · source list will not change</p>
+				</div>
+				<p id="ew-summary" role="status" aria-live="polite"></p>
+			</header>
+			<div class="ew__notices" id="ew-notices" aria-label="Entries not loaded" hidden></div>
+			<div class="ew__layout">
+				<aside class="ew__rail" aria-label="Monster targets">
+					<div class="ew__rail-header">
+						<h3>Targets</h3>
+						<div class="ew__selection-actions">
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-all">All</button>
+							<button type="button" class="ve-btn ve-btn-default ve-btn-xs" id="ew-none">None</button>
+						</div>
+					</div>
+					<p class="ew__help">Choose monsters individually. Selection is saved for the next visit.</p>
+					<div id="ew-roster" class="ew__roster"></div>
+				</aside>
+				<section class="ew__statblocks" id="ew-statblocks" aria-label="Monster statblocks"></section>
+			</div>
+		</section>
+	</main>
+</div>
+
+{{> "adFooter" }}
+{{> "scripts" }}
+
+</body>
+</html>
