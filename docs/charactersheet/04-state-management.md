@@ -228,6 +228,9 @@ source-qualified `classGrantOwners`, and temporarily applies the class grant.
 The inverse ordering is handled too: if a player or Respec decision selects a
 spell that currently exists only because of a class grant, the add path converts
 that row into the same reversible overlay before coalescing the selection.
+Nested feat/feature spell choices use their progression-ownership claim rather
+than a display-label allowlist, so their owner survives removal of the class
+grant as well.
 Player-chosen/orphan rows temporarily use the class source feature so the grant
 does not consume a prepared/cantrip allowance; rows already owned by another
 feature keep that feature's attribution so its teardown remains authoritative.

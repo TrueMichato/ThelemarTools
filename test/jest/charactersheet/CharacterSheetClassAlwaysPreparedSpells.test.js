@@ -14,10 +14,12 @@
 import "./setup.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
 import "../../../js/charactersheet/charactersheet-state.js";
+import "../../../js/charactersheet/charactersheet-respec.js";
 import fs from "fs";
 import path from "path";
 import {fileURLToPath} from "url";
 
+const CharacterSheetRespec = globalThis.CharacterSheetRespec;
 const CharacterSheetState = globalThis.CharacterSheetState;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -526,6 +528,62 @@ describe("Class-level always-prepared spells — collision ownership", () => {
 			sourceClass: "Cleric",
 		});
 		expect(state._getProgressionOwnershipEntry("cantrips", selection)?.sources).toContain("cantrips:Cleric:1");
+	});
+
+	test.each([
+		{
+			type: "nestedSpell",
+			ownershipType: "spells",
+			selection: {name: "Ceremony", source: "XPHB", level: 1},
+			getSpell: state => state.getSpellsKnown().find(spell => spell.name === "Ceremony"),
+		},
+		{
+			type: "nestedCantrip",
+			ownershipType: "cantrips",
+			selection: {name: "Thaumaturgy", source: "XPHB", level: 0},
+			getSpell: state => state.getCantripsKnown().find(spell => spell.name === "Thaumaturgy"),
+		},
+	])("$type Respec choices preserve their independent progression owner", ({
+		type,
+		ownershipType,
+		selection,
+		getSpell,
+	}) => {
+		const state = newClericState({level: 1});
+		state.setClassCatalog([tgttClericCatalogEntry()]);
+		state.applyClassFeatureEffects();
+
+		const semanticKey = `feat:magic-initiate:${type}`;
+		const respec = new CharacterSheetRespec({page: {}, state});
+		respec._applyDecisionMechanicsSpells({
+			type,
+			semanticKey,
+			label: "Magic Initiate Spell",
+			className: "Cleric",
+			provenance: {ownerUid: "magic initiate|xphb"},
+			selection: [],
+			meta: {spellMode: type === "nestedSpell" ? "prepared" : null},
+		}, [selection], [selection]);
+
+		let spell = getSpell(state);
+		expect(spell).toMatchObject({
+			grantedByClass: false,
+			sourceFeature: "Cleric Spells",
+			classGrantOriginalMetadata: {
+				sourceFeature: "magic initiate|xphb",
+				sourceClass: "Cleric",
+			},
+		});
+
+		state._data.classes = [];
+		state.applyClassFeatureEffects();
+		spell = getSpell(state);
+		expect(spell).toMatchObject({
+			grantedByClass: false,
+			sourceFeature: "magic initiate|xphb",
+			sourceClass: "Cleric",
+		});
+		expect(state._getProgressionOwnershipEntry(ownershipType, selection)?.sources).toContain(semanticKey);
 	});
 
 	test("a colliding subclass grant keeps its attribution so subclass teardown can remove it", () => {

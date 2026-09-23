@@ -18488,9 +18488,11 @@ class CharacterSheetState {
 	}
 
 	_promoteClassSpellGrantToPlayerOverlay (existing, incoming, {isCantrip = false, prepared = false} = {}) {
+		const ownershipType = isCantrip ? "cantrips" : "spells";
+		const hasProgressionOwner = !!this._getProgressionOwnershipEntry(ownershipType, incoming)?.sources?.length;
 		if (!existing?.grantedByClass
 			|| Object.hasOwn(existing, "classGrantOriginalMetadata")
-			|| !CharacterSheetClassUtils.isPlayerChosenSpell(incoming)) return;
+			|| (!CharacterSheetClassUtils.isPlayerChosenSpell(incoming) && !hasProgressionOwner)) return;
 
 		const original = {
 			sourceFeature: incoming.sourceFeature,
