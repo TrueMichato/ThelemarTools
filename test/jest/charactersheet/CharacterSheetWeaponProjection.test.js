@@ -585,4 +585,35 @@ describe("ability substitution is a choice, not an additive bonus", () => {
 			substitution: {name: "Lies", value: 1},
 		});
 	});
+
+	describe("combat effect rendering", () => {
+		let savedDocument;
+
+		beforeEach(() => {
+			savedDocument = globalThis.document;
+		});
+
+		afterEach(() => {
+			globalThis.document = savedDocument;
+		});
+
+		it("renders an empty new-character effect panel without reading a stale critical variable", () => {
+			const state = new CharacterSheetState();
+			const container = globalThis.e_({outer: "<div></div>"});
+			globalThis.document = {
+				getElementById: id => id === "charsheet-combat-effects" ? container : null,
+				querySelector: () => null,
+				querySelectorAll: () => [],
+				addEventListener: () => {},
+				removeEventListener: () => {},
+			};
+			const combat = new CharacterSheetCombat({
+				getState: () => state,
+				getNotes: () => null,
+			});
+
+			expect(() => combat.renderCombatEffects()).not.toThrow();
+			expect(container.innerHTML).toContain("No active effects");
+		});
+	});
 });

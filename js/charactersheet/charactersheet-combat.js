@@ -11392,7 +11392,8 @@ class CharacterSheetCombat {
 		const hasTempHpDisplay = tempHp > 0 && tempHpSource;
 		const hasConditionals = allConditionals.length > 0;
 		const hasMethodEffects = methodEffects.length > 0;
-		const hasAnyEffects = advantageTypes.size > 0 || disadvantageTypes.size > 0 || bonusEffects.length > 0 || otherEffects.length > 0 || enemyAdvantageAgainst.size > 0 || enemyDisadvantageAgainst.size > 0 || critRange < 20 || hasTempHpDisplay || hasConditionals || hasItemDefenses || hasMethodEffects;
+		const hasCriticalRangeEffects = attackCriticalRanges.size > 0 || broadCriticalRange < 20;
+		const hasAnyEffects = advantageTypes.size > 0 || disadvantageTypes.size > 0 || bonusEffects.length > 0 || otherEffects.length > 0 || enemyAdvantageAgainst.size > 0 || enemyDisadvantageAgainst.size > 0 || hasCriticalRangeEffects || hasTempHpDisplay || hasConditionals || hasItemDefenses || hasMethodEffects;
 		if (!hasAnyEffects) {
 			container.innerHTML = `<div class="ve-muted ve-text-center py-2">No active effects</div>`;
 		}
