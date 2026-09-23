@@ -432,6 +432,22 @@ All 8 XPHB properties tracked: Cleave, Graze, Nick, Push, Sap, Slow, Topple, Vex
 
 ## Spell Data Format
 
+### TGTT condition-gated casting
+
+`CharacterSheetSpells._pHandleCastingConstraints` is the shared gate for slot,
+cantrip, ritual, item, and innate casts. `_checkCastingConstraints` first handles
+hard bans (including Silenced, TGTT Restrained, materials and armor) and
+Subtle Spell's component removal; it returns every applicable TGTT
+verbal/somatic check. One automatic roll covers those checks, using
+`state.makeConcentrationCheck(0)` for the default DC 10 (the condition text
+does not state a DC), `page.rollD20` for dice/critical rules and advantage
+resolution, and `page.showDiceResult` for visible roll history. Include
+concentration-specific disadvantage (TGTT Poisoned), CON-save advantage,
+concentration bonuses, save/concentration bonus dice and exhaustion. Do not call
+the damage-triggered `_promptConcentrationCheck`: that flow can **end** a spell,
+whereas a disrupted cast must preserve any existing concentration. Confirming replacement
+concentration is only intent; `setConcentration` changes it on a committed cast.
+
 ### Known/Prepared Spells (`_data.spellcasting.spellsKnown[]`)
 ```javascript
 {
