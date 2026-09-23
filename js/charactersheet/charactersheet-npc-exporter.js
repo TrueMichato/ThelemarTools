@@ -7661,7 +7661,7 @@ class CharacterSheetNpcExporter {
 		const attackNames = new Set(attacks.map(it => (it?.name || "").toLowerCase()).filter(Boolean));
 
 		activeWeapons.forEach(item => {
-			const derived = state.updateAttackFromWeapon?.(item);
+			const derived = state.buildAutoAttackFromWeapon?.(item) || state.updateAttackFromWeapon?.(item);
 			if (!derived?.name) return;
 			const key = derived.name.toLowerCase();
 			if (attackNames.has(key)) return;
@@ -7702,7 +7702,7 @@ class CharacterSheetNpcExporter {
 				...derived,
 				isMelee: !isRangedType,
 				properties: props,
-				attackBonus: (Number(derived.attackBonus) || 0) + magicAttackBonus,
+				attackBonus: Number(derived.attackBonus) || 0,
 				// Already carries the ability modifier and every standing bonus.
 				damage: exportDamage,
 				// `updateAttackFromWeapon` already folds the ability modifier into `damage`.
@@ -7740,10 +7740,7 @@ class CharacterSheetNpcExporter {
 	 * them in here would count them twice.
 	 */
 	static _getWeaponStandingDamage ({state, item, derived, damageDie, magicDamageBonus}) {
-		const abilityMod = Number(state.getAbilityMod?.(derived.abilityMod)) || 0;
-		// Mirrors the shape the combat tab builds for an auto-generated weapon attack, so the
-		// breakdown resolves the same contributions here as it does on the sheet.
-		const breakdown = state.getWeaponDisplayDamageBreakdown?.({
+		const projectedAttack = state.buildAutoAttackFromWeapon?.(item) || {
 			id: `auto_${item.id}`,
 			name: item.name,
 			abilityMod: derived.abilityMod,
@@ -7751,7 +7748,12 @@ class CharacterSheetNpcExporter {
 			properties: derived.properties,
 			range: derived.range,
 			sourceItem: item,
-		});
+		};
+		const abilityMod = state.getAttackBonusBreakdown?.(projectedAttack, {includeActiveStates: false})?.effectiveAbility ??
+			(Number(state.getAbilityMod?.(derived.abilityMod)) || 0);
+		const breakdown = state.getWeaponDisplayDamageBreakdown?.({
+			...projectedAttack,
+		}, {includeActiveStates: false});
 		const standing = breakdown
 			? (Number(breakdown.base) || 0) + (Number(breakdown.feature) || 0) + (Number(breakdown.item) || 0)
 			: magicDamageBonus;
@@ -10544,14 +10546,15 @@ class CharacterSheetNpcExporter {
 	}
 
 	static _getAttackToHit (attack, state) {
+		const sourceItem = attack?._sourceItem || attack?.sourceItem;
+		const projectedAttack = sourceItem && state.buildAutoAttackFromWeapon
+			? state.buildAutoAttackFromWeapon(sourceItem)
+			: attack;
+		const breakdown = state.getAttackBonusBreakdown?.(projectedAttack, {includeActiveStates: false});
+		if (breakdown) return breakdown.total;
 		const abilityMod = this._getAttackAbilityMod(attack, state);
 		const profBonus = state.getProficiencyBonus?.() || 2;
-		const magicAttackBonus = Number(attack?.magicAttackBonus) || 0;
-		const derived = abilityMod + profBonus + magicAttackBonus;
-
-		const explicit = Number(attack?.attackBonus);
-		if (!Number.isFinite(explicit)) return derived;
-		return Math.max(explicit, derived);
+		return abilityMod + profBonus + (Number(attack?.magicAttackBonus) || 0);
 	}
 
 	static _getAttackAbilityMod (attack, state) {
@@ -12857,14 +12860,14 @@ class CharacterSheetNpcExporter {
 				// The butt-end swing is the *same weapon*, so it must inherit the sheet's own
 				// to-hit and damage bonus — recomputing from ability mods produces a statblock
 				// that contradicts itself (e.g. +12 on the haft, +15 on the butt).
-				const source = this._getPolearmSourceAttack(attacks);
+				const source = this._getPolearmSourceAttack(attacks, state);
 				const strMod = state.getAbilityMod?.("str") ?? 0;
 				const dexMod = state.getAbilityMod?.("dex") ?? 0;
 				const abilMod = Math.max(strMod, dexMod);
 				const pb = state.getProficiencyBonus?.() ?? 2;
 				const dmgBonus = source ? this._getDamageBonusFromExpression(source.damage) : null;
 				const effectiveMod = dmgBonus == null ? abilMod : dmgBonus;
-				const toHit = this._toSignedStr(source ? Number(source.attackBonus) || 0 : pb + abilMod);
+				const toHit = this._toSignedStr(source ? this._getAttackToHit(source, state) : pb + abilMod);
 				const dmg = String(damage).replace(/\+mod\b/i, this._toSignedStr(effectiveMod).replace(/^\+/, "+"));
 				body = `After taking the Attack action with a polearm, ${npcName} can make one melee weapon attack with the opposite end as a bonus action: {@atk mw} {@hit ${toHit}} to hit, reach 5 ft., one target. {@h} {@damage ${dmg}} bludgeoning damage.`;
 			} else {
@@ -12881,12 +12884,14 @@ class CharacterSheetNpcExporter {
 	}
 
 	/** The two-handed melee attack a polearm feat actually keys off, preferring reach weapons. */
-	static _getPolearmSourceAttack (attacks = []) {
-		const melee = (attacks || []).filter(a => a && !/unarmed/i.test(String(a.name || "")) && Number(a.attackBonus));
+	static _getPolearmSourceAttack (attacks = [], state) {
+		const melee = (attacks || []).filter(a => a && !/unarmed/i.test(String(a.name || "")) && this._getAttackToHit(a, state));
 		if (!melee.length) return null;
 		const polearm = melee.find(a => /glaive|halberd|pike|quarterstaff|spear|lance|bolg/i.test(String(a.name || "")));
 		if (polearm) return polearm;
-		return melee.reduce((best, a) => (Number(a.attackBonus) > Number(best.attackBonus) ? a : best), melee[0]);
+		return melee.reduce((best, attack) => (
+			this._getAttackToHit(attack, state) > this._getAttackToHit(best, state) ? attack : best
+		), melee[0]);
 	}
 
 	/** Trailing flat bonus of a damage expression: "4d10+7" → 7, "1d8" → 0. */

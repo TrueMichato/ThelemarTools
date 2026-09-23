@@ -902,6 +902,8 @@ describe("#14 auto-attack builder keeps sourceItem for the direct getEffectiveIt
 			getMeleeReach: () => 5,
 			getReachBonus: () => 0,
 		};
+		combat._state.buildAutoAttackFromWeapon = item =>
+			CharacterSheetState.prototype.buildAutoAttackFromWeapon.call(combat._state, item);
 		combat._page = {};
 		combat._renderAttackItem = () => ({}); // skip heavy DOM rendering
 		return combat;

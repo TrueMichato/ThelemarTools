@@ -590,15 +590,25 @@ class CharacterSheetPdf {
 	// region Attacks
 
 	_renderAttacks () {
-		const attacks = this._state.getAttacks();
+		const attacks = [...this._state.getAttacks()];
+		for (const weapon of this._state.getItems().filter(item => item.weapon && item.equipped && (this._state.isItemAttackAvailable?.(item) ?? true))) {
+			if (attacks.some(attack => attack.name === weapon.name)) continue;
+			const autoAttack = this._state.buildAutoAttackFromWeapon?.(weapon);
+			if (autoAttack) attacks.push(autoAttack);
+		}
 		if (!attacks.length) return "";
 
 		const rows = attacks.map(atk => {
 			const name = this._esc(atk.name || "Attack");
-			const bonus = atk.attackBonus != null ? this._fmtMod(atk.attackBonus) : (atk.bonus != null ? this._fmtMod(atk.bonus) : "\u2014");
-			const damage = this._esc(atk.damage || "\u2014");
+			const attackBreakdown = this._state.getAttackBonusBreakdown?.(atk);
+			const bonus = atk.attackBonus != null && attackBreakdown
+				? this._fmtMod(attackBreakdown.total)
+				: (atk.bonus != null ? this._fmtMod(atk.bonus) : "\u2014");
+			const damageBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod?.(atk) ?? 0)
+				+ (this._state.getWeaponDisplayDamageBonus?.(atk) ?? (Number(atk.damageBonus) || 0));
+			const damage = this._esc(`${atk.damage || "\u2014"}${damageBonus ? `${damageBonus >= 0 ? "+" : ""}${damageBonus}` : ""}`);
 			const damageType = this._esc(atk.damageType || "");
-			const range = this._esc(atk.range || "");
+			const range = this._esc(this._state.getAttackRangeProjection?.(atk)?.display || atk.range || "");
 			const props = (atk.properties || []).map(p => this._esc(p)).join(", ");
 
 			// Collect upgrade/gemstone notes for this attack's source item

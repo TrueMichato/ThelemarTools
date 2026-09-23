@@ -1430,21 +1430,10 @@ class CharacterSheetCombat {
 		if (hasAdvantage && !hasDisadvantage) stateMode = "advantage";
 		else if (hasDisadvantage && !hasAdvantage) stateMode = "disadvantage";
 
-		// Calculate total attack bonus - resolve weapon ability mod (finesse → max
-		// STR/DEX; Bladesong → max(weapon mod, INT) while active)
-		const abilityMod = this._state.getWeaponAbilityMod(attack);
-		const profBonus = this._state.getProficiencyBonus();
-
-		// Get attack modifiers from named modifiers (features like fighting styles,
-		// magic items, etc.). SCOPE-AWARE: ranged-only modifiers (e.g. Archery +2)
-		// apply to ranged rolls only, melee-only to melee only, and plain `attack`
-		// modifiers to both. Itemized so each source breaks out in the result.
-		const attackContributions = this._state.getAttackModifierContributions?.({isMelee}) || [];
-		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
+		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+		const attackContributions = attackBreakdown?.passiveFeatureContributions || [];
+		const externalItemContributions = attackBreakdown?.externalItemContributions || [];
 		const conditionalAttackBonus = appliedConditionals.reduce((sum, conditional) => sum + (conditional.bonus || 0), 0);
-
-		// Get bonus from active states (activated abilities like combat stances)
-		const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id}) || 0;
 
 		// Combat-tab-local contributors (e.g. Flanking) feed the SAME total via a
 		// generic pre-roll hook so other positional/tactical modifiers can plug in.
@@ -1457,7 +1446,7 @@ class CharacterSheetCombat {
 		const extraBonus = (opts?.extraBonus && Number.isFinite(opts.extraBonus.value)) ? opts.extraBonus : null;
 		const extraBonusValue = extraBonus ? extraBonus.value : 0;
 
-		const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + conditionalAttackBonus + stateAttackBonus + localAttackBonus + extraBonusValue + ammoAttackBonus;
+		const totalBonus = (attackBreakdown?.total || 0) + conditionalAttackBonus + localAttackBonus + extraBonusValue + ammoAttackBonus;
 		const exhaustionPenalty = this._state._getExhaustionD20Penalty?.() || 0;
 
 		// A committed fresh attack roll discards any pending channeled-spell
@@ -1473,7 +1462,7 @@ class CharacterSheetCombat {
 		const total = rollResult.roll + totalBonus - exhaustionPenalty;
 
 		// Check for crit/fumble
-		const critRange = this._state.getCriticalRange?.() || 20;
+		const critRange = this._state.getCriticalRange?.({attack}) || 20;
 		let resultClass = "";
 		let resultNote = "";
 		if (rollResult.roll >= critRange) {
@@ -1510,6 +1499,12 @@ class CharacterSheetCombat {
 		const featureModLabel = attackContributions.length
 			? ` <span class="ve-muted">(${attackContributions.map(c => `${c.name} ${c.value >= 0 ? "+" : ""}${c.value}`).join(", ")})</span>`
 			: "";
+		const externalItemLabel = externalItemContributions.length
+			? ` <span class="ve-muted">(${externalItemContributions.map(c => `${c.name} ${c.value >= 0 ? "+" : ""}${c.value}`).join(", ")})</span>`
+			: "";
+		const substitutionLabel = attackBreakdown?.abilitySubstitution
+			? ` <span class="ve-muted">(${attackBreakdown.abilitySubstitution.name} ability)</span>`
+			: "";
 		// Itemize the active ammunition's to-hit bonus explicitly (the user asked for
 		// attack bonuses to be broken out) — e.g. "(Healing Arrow +1)".
 		const ammoLabel = (selectedAmmo && ammoAttackBonus)
@@ -1519,16 +1514,16 @@ class CharacterSheetCombat {
 
 		// Show result
 		const modeLabel = this._page.getModeLabel(rollResult.mode);
-		const attackBreakdown = this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr);
+		const rollBreakdown = this._page.formatD20Breakdown(rollResult, totalBonus, exhaustionStr);
 		void this._page.pAnimateD20?.(rollResult);
 		const resultEl = this._page.showDiceResult({
-			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${localLabel}${extraBonusLabel}${featureModLabel}${ammoLabel}${riderLabel}`,
+			title: `${attack.name} Attack${modeLabel}${stateEffectLabel}${substitutionLabel}${localLabel}${extraBonusLabel}${featureModLabel}${externalItemLabel}${ammoLabel}${riderLabel}`,
 			roll: rollResult.roll,
 			modifier: totalBonus - exhaustionPenalty,
 			total,
 			resultClass,
 			resultNote: resultNote,
-			subtitle: attackBreakdown,
+			subtitle: rollBreakdown,
 		});
 		const rollFollowup = CharacterSheetModal.buildRollFollowup({
 			label: `${attack.name} Attack`,
@@ -1764,7 +1759,7 @@ class CharacterSheetCombat {
 		// "spell" kind: Champion Improved/Superior Critical never expands the crit
 		// range for spell attacks (RAW text is weapon/Unarmed Strike only) — see
 		// `getCriticalRange(kind)`.
-		const critRange = this._state.getCriticalRange?.("spell") || 20;
+		const critRange = this._state.getCriticalRange?.({kind: "spell"}) || 20;
 		let resultClass = "";
 		let resultNote = "";
 		if (rollResult.roll >= critRange) {
@@ -2353,14 +2348,15 @@ class CharacterSheetCombat {
 		});
 		if (!result?.applied) return;
 
-		const critRange = this._state.getCriticalRange?.() || 20;
+		const critRange = this._state.getCriticalRange?.({attack: ctx.attack}) || 20;
 		const newTotal = result.effectiveRoll + rollModifier;
+		const revisedRollResult = {...ctx.rollResult, roll: result.effectiveRoll};
 		let resultClass = "";
 		let resultNote = "";
-		if (ctx.rollResult.roll >= critRange) {
+		if (result.effectiveRoll >= critRange) {
 			resultClass = "charsheet__dice-result-total--crit";
 			resultNote = "Critical Hit!";
-		} else if (ctx.rollResult.roll === 1) {
+		} else if (result.effectiveRoll === 1) {
 			resultClass = "charsheet__dice-result-total--fumble";
 			resultNote = "Critical Miss!";
 		}
@@ -2373,17 +2369,18 @@ class CharacterSheetCombat {
 			total: newTotal,
 			resultClass,
 			resultNote,
-			subtitle: this._page.formatD20Breakdown(ctx.rollResult, rollModifier),
+			subtitle: this._page.formatD20Breakdown(revisedRollResult, rollModifier),
 		});
 		ctx.total = newTotal;
-		ctx.isCrit = ctx.rollResult.roll >= critRange;
-		ctx.isNat20 = ctx.rollResult.roll === 20;
-		ctx.isFumble = ctx.rollResult.roll === 1;
+		ctx.rollResult = revisedRollResult;
+		ctx.isCrit = result.effectiveRoll >= critRange;
+		ctx.isNat20 = result.effectiveRoll === 20;
+		ctx.isFumble = result.effectiveRoll === 1;
 		ctx.rollFollowup = CharacterSheetModal.buildRollFollowup({
 			label: `${ctx.attack?.name || "Attack"} Attack`,
 			total: newTotal,
-			naturalRoll: ctx.rollResult.roll,
-			breakdown: this._page.formatD20Breakdown(ctx.rollResult, rollModifier),
+			naturalRoll: result.effectiveRoll,
+			breakdown: this._page.formatD20Breakdown(revisedRollResult, rollModifier),
 			outcome: resultNote,
 		});
 
@@ -3605,6 +3602,7 @@ class CharacterSheetCombat {
 				.filter(mod => !mod.manual && !mod.isManual && !mod.requiresChoice && !mod.requiresActivation && !mod.oncePerTurn && mod.perTurn !== true && !mod.critOnly && !mod.onCrit)
 				.reduce((sum, mod) => sum + (typeof mod.value === "number" ? mod.value : 0), 0),
 			itemContributions: this._state.getItemWeaponScopedDamageContributions?.(attack) || [],
+			externalItemContributions: this._state.getExternalItemDamageContributions?.(attack) || [],
 			state: this._state.getBonusFromStates?.("damage", {weaponId: attack.riteWeaponId || attack.id}) || 0,
 			rage: this._state.getRageDamageBonus?.(!attack.isRanged && !attack.isSpell, attack.abilityMod || "str") || 0,
 			hybrid: 0,
@@ -3613,12 +3611,16 @@ class CharacterSheetCombat {
 			standingDamage.base
 				+ standingDamage.feature
 				+ standingDamage.itemContributions.reduce((sum, it) => sum + (it.value || 0), 0)
+				+ standingDamage.externalItemContributions.reduce((sum, it) => sum + (it.value || 0), 0)
 				+ standingDamage.state
 				+ standingDamage.rage
 				+ standingDamage.hybrid
 		);
 		const featureDamageBonus = standingDamage.feature;
-		const itemWeaponDamageContribs = standingDamage.itemContributions;
+		const itemWeaponDamageContribs = [
+			...(standingDamage.itemContributions || []),
+			...(standingDamage.externalItemContributions || []),
+		];
 		const stateDamageBonus = standingDamage.state;
 		const rageBonus = standingDamage.rage;
 		const hybridDamageBonus = standingDamage.hybrid;
@@ -5046,62 +5048,8 @@ class CharacterSheetCombat {
 			// Check if we already have an attack for this weapon
 			const existingAttack = attacks.find(a => a.name === weapon.name);
 			if (!existingAttack) {
-				// Get any user overrides for this weapon's attack
-				const overrides = weapon.attackOverrides || {};
-
-				// Auto-generate attack from weapon
-				// Use property (5etools format) or properties (normalized format)
-				const props = weapon.property || weapon.properties || [];
-				const isRanged = props.some(p => p === "A" || p.startsWith("A|")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false;
-				const hasFinesse = props.some(p => p === "F" || p.startsWith("F|"));
-				const isMonkWeapon = this._state.isMonkWeapon?.(weapon);
-				const defaultAbility = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");
-
-				// Calculate total bonuses including magic item bonuses, upgrade bonuses, and custom bonuses
-				const effectiveBonuses = this._state.getEffectiveItemBonuses?.(weapon.id);
-				let magicAttackBonus;
-				let magicDamageBonus;
-				if (effectiveBonuses) {
-					magicAttackBonus = effectiveBonuses.totalAttackBonus || 0;
-					magicDamageBonus = effectiveBonuses.totalDamageBonus || 0;
-				} else {
-					magicAttackBonus = this._parseBonus(weapon.bonusWeapon) + this._parseBonus(weapon.bonusWeaponAttack);
-					magicDamageBonus = this._parseBonus(weapon.bonusWeapon) + this._parseBonus(weapon.bonusWeaponDamage);
-				}
-				const customAttackBonus = weapon.customAttackBonus || 0;
-				const customDamageBonus = weapon.customDamageBonus || 0;
-
-				const baseDamageDie = this._getEffectiveWeaponDamageDie(weapon);
-				let baseDamageType = weapon.dmgType
-					? Parser.dmgTypeToFull(weapon.dmgType)
-					: (weapon.damageType || (weapon.damage ? weapon.damage.split(" ").slice(1).join(" ") : null) || "slashing");
-				const range = overrides.range ?? (weapon.range || (isRanged ? "80/320 ft." : "5 ft."));
-				const reachMatch = !isRanged ? /^\s*(\d+(?:\.\d+)?)\s*ft\b/i.exec(String(range || "")) : null;
-				const sourceFeature = weapon.sourceFeature || weapon._generatedItemProvenance?.sourceFeature || null;
-
-				const autoAttack = {
-					id: `auto_${weapon.id}`,
-					// Use overrides if present, otherwise use weapon defaults
-					name: overrides.name ?? weapon.name,
-					isMelee: overrides.isMelee ?? !isRanged,
-					abilityMod: overrides.abilityMod ?? defaultAbility,
-					attackBonus: magicAttackBonus + customAttackBonus,
-					range,
-					reach: overrides.reach ?? (reachMatch ? Number(reachMatch[1]) : weapon.reach),
-					damage: overrides.damage ?? baseDamageDie,
-					damageType: overrides.damageType ?? baseDamageType,
-					damageBonus: magicDamageBonus + customDamageBonus,
-					properties: overrides.properties ?? props,
-					mastery: weapon.mastery || [],
-					countsAsMagical: !!(weapon.countsAsMagical || effectiveBonuses?.countsAsMagical || effectiveBonuses?.tags?.includes("Magical")),
-					actionType: weapon.actionType || "action",
-					sourceFeature,
-					isFeatureAttack: !!sourceFeature,
-					isAutoGenerated: true,
-					isMonkWeapon: !!isMonkWeapon,
-					sourceItem: weapon, // #14: kept so `_rollDamage` can read getEffectiveItemBonuses(sourceItem.id) directly (and for hover)
-				};
-				attacks.push(autoAttack);
+				const autoAttack = this._state.buildAutoAttackFromWeapon?.(weapon);
+				if (autoAttack) attacks.push(autoAttack);
 			}
 		});
 
@@ -5268,36 +5216,29 @@ class CharacterSheetCombat {
 	}
 
 	_renderAttackItem (attack, reachCtx = {}) {
-		// Calculate ability modifier — handles finesse (max STR/DEX), spellcasting
-		// (max INT/WIS/CHA for natural weapons), and Bladesong (max(weapon mod, INT)
-		// while active) so the displayed bonus matches the roll.
-		const abilityMod = this._state.getWeaponAbilityMod(attack);
-
-		const profBonus = this._state.getProficiencyBonus();
-		// Scope-aware named attack modifiers (e.g. Archery +2 on ranged weapons only)
-		// so the displayed badge matches the roll. Transient combat-local toggles
-		// (Flanking, High Ground) are intentionally excluded — they're situational
-		// and surface in the roll breakdown, not the static badge.
 		const {isMelee: attackIsMelee} = this._getAttackRollKind(attack);
-		const attackContributions = this._state.getAttackModifierContributions?.({isMelee: attackIsMelee}) || [];
-		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
-		const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id}) || 0;
-		const totalAttackBonus = abilityMod + profBonus + (attack.attackBonus || 0) + featureAttackBonus + stateAttackBonus;
-		const totalDamageBonus = abilityMod + (this._state.getWeaponDisplayDamageBonus?.(attack) ?? (Number(attack.damageBonus) || 0));
+		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+		const totalAttackBonus = attackBreakdown?.total ?? 0;
+		const totalDamageBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack))
+			+ (this._state.getWeaponDisplayDamageBonus?.(attack) ?? (Number(attack.damageBonus) || 0));
 		// Itemized tooltip for the to-hit badge so each contributing source is visible.
 		const atkBreakdownParts = [
-			`${abilityMod >= 0 ? "+" : ""}${abilityMod} ability`,
-			`+${profBonus} prof`,
+			`${attackBreakdown?.baseAbility >= 0 ? "+" : ""}${attackBreakdown?.baseAbility || 0} ability`,
+			`+${attackBreakdown?.proficiency || 0} prof`,
 		];
+		if (attackBreakdown?.abilitySubstitution) {
+			atkBreakdownParts.push(`${attackBreakdown.abilitySubstitution.value >= 0 ? "+" : ""}${attackBreakdown.abilitySubstitution.value} ${attackBreakdown.abilitySubstitution.name}`);
+		}
 		if (attack.attackBonus) atkBreakdownParts.push(`${attack.attackBonus >= 0 ? "+" : ""}${attack.attackBonus} weapon`);
-		attackContributions.forEach(c => atkBreakdownParts.push(`${c.value >= 0 ? "+" : ""}${c.value} ${c.name}`));
-		if (stateAttackBonus) atkBreakdownParts.push(`${stateAttackBonus >= 0 ? "+" : ""}${stateAttackBonus} active state`);
+		attackBreakdown?.passiveFeatureContributions?.forEach(c => atkBreakdownParts.push(`${c.value >= 0 ? "+" : ""}${c.value} ${c.name}`));
+		attackBreakdown?.activeStateContributions?.forEach(c => atkBreakdownParts.push(`${c.value >= 0 ? "+" : ""}${c.value} ${c.name}`));
+		attackBreakdown?.externalItemContributions?.forEach(c => atkBreakdownParts.push(`${c.value >= 0 ? "+" : ""}${c.value} ${c.name}`));
 		const atkBadgeTitle = atkBreakdownParts.join(", ");
 		const isAutoGenerated = attack.isAutoGenerated || attack.id?.startsWith?.("auto_");
 		const isNaturalWeapon = attack.isNaturalWeapon;
 
 		// Get critical range
-		const critRange = this._state.getCriticalRange?.() || 20;
+		const critRange = this._state.getCriticalRange?.({attack}) || 20;
 		const critRangeHtml = critRange < 20
 			? `<span class="badge badge-warning" title="Critical Hit Range: ${critRange}-20">Crit ${critRange}+</span>`
 			: "";
@@ -6862,27 +6803,21 @@ class CharacterSheetCombat {
 	 */
 	_buildAttackRangeDisplay (attack, reachCtx = {}) {
 		const rawRange = attack.range ? `<span class="ve-muted">${attack.range}</span>` : "";
+		const projection = this._state.getAttackRangeProjection?.(attack, {meleeReach: reachCtx.meleeReach});
+		const reach = projection?.reach ?? null;
+		if (!projection?.isEffectiveReach) return {rangeHtml: rawRange, reach};
 
-		const rangeStr = attack.range != null ? String(attack.range) : "";
-		const isThrown = rangeStr.includes("/");
 		const hasReachProp = (attack.properties || []).some(p => String(p).split("|")[0].toUpperCase() === "R");
 		const structuredReach = Number(attack.reach) || 0;
 		const reachBonus = reachCtx.reachBonus ?? (this._state.getReachBonus?.() ?? 0);
 		const attackReachBonus = Number(attack.reachBonus) || 0;
-		const reach = this._state.getAttackReach?.(attack, {meleeReach: reachCtx.meleeReach});
-
-		// Only override when melee, not thrown, and reach is actually modified.
-		if (reach == null || isThrown || (reachBonus === 0 && !structuredReach && !hasReachProp && attackReachBonus === 0)) {
-			return {rangeHtml: rawRange, reach};
-		}
 
 		const breakdown = [`Base ${structuredReach || CharacterSheetState.BASE_MELEE_REACH} ft`];
 		if (reachBonus) breakdown.push(`${reachBonus > 0 ? "+" : ""}${reachBonus} ft (reach modifiers)`);
 		if (!structuredReach && hasReachProp) breakdown.push(`+${CharacterSheetState.REACH_PROPERTY_BONUS} ft (Reach property)`);
 		if (attackReachBonus) breakdown.push(`+${attackReachBonus} ft${attack.reachCondition === "onYourTurn" ? " (on your turn)" : ""}`);
 		const title = `Melee reach: ${reach} ft\n${breakdown.join("\n")}`;
-		const condition = attack.reachCondition === "onYourTurn" ? " on your turn" : "";
-		return {rangeHtml: `<span class="ve-muted" title="${title}">${reach} ft.${condition}</span>`, reach};
+		return {rangeHtml: `<span class="ve-muted" title="${title}">${projection.display}</span>`, reach};
 	}
 
 	/**
@@ -9333,6 +9268,7 @@ class CharacterSheetCombat {
 
 		if (type === "attack") {
 			const bonus = diceConfig.attackBonus || 0;
+			const critRange = diceConfig.critRange || 20;
 			const mode = diceConfig.mode || "normal";
 			const result = this._page.rollD20?.({mode}) || {roll: 10, roll1: 10, roll2: 10, mode};
 			const total = result.roll + bonus;
@@ -9343,9 +9279,9 @@ class CharacterSheetCombat {
 				`${feature.name} — Attack Roll`,
 				total,
 				`d20(${result.roll}) ${bonusStr}${modeNote}`,
-				result.roll === 20 ? "charsheet__dice-crit" : result.roll === 1 ? "charsheet__dice-fumble" : "",
+				result.roll >= critRange ? "charsheet__dice-crit" : result.roll === 1 ? "charsheet__dice-fumble" : "",
 			);
-			return {type: "attack", total, roll: result.roll, isNat20: result.roll === 20, isNat1: result.roll === 1};
+			return {type: "attack", total, roll: result.roll, isCritical: result.roll >= critRange, isNat20: result.roll === 20, isNat1: result.roll === 1};
 		}
 
 		if (type === "save") {
@@ -9551,18 +9487,13 @@ class CharacterSheetCombat {
 		// Resolve attack parameters once. Unarmed strikes are melee, so use
 		// melee-scoped contributions — a ranged-only modifier (Archery) must never
 		// buff Flurry of Blows.
-		const abilityMod = this._state.getWeaponAbilityMod(unarmedStrike);
-		const profBonus = this._state.getProficiencyBonus();
-		const attackContributions = this._state.getAttackModifierContributions?.({isMelee: true}) || [];
-		const featureAttackBonus = attackContributions.reduce((sum, c) => sum + (c.value || 0), 0);
-		const stateAttackBonus = this._state.getBonusFromStates?.("attack") || 0;
-		const totalBonus = abilityMod + profBonus + (unarmedStrike.attackBonus || 0) + featureAttackBonus + stateAttackBonus;
+		const attackBreakdown = this._state.getAttackBonusBreakdown?.(unarmedStrike);
+		const totalBonus = attackBreakdown?.total || 0;
 
 		// Resolve damage parameters once
-		const damageModifiers = this._state.getNamedModifiersByType("damage");
-		const featureDamageBonus = damageModifiers.reduce((sum, mod) => sum + (mod.value || 0), 0);
-		const stateDamageBonus = this._state.getBonusFromStates?.("damage") || 0;
-		const totalDamageBonus = abilityMod + (unarmedStrike.damageBonus || 0) + featureDamageBonus + stateDamageBonus;
+		const damageBreakdown = this._state.getWeaponDisplayDamageBreakdown?.(unarmedStrike);
+		const totalDamageBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(unarmedStrike))
+			+ (damageBreakdown?.total ?? (Number(unarmedStrike.damageBonus) || 0));
 
 		// Check advantage/disadvantage
 		const hasAdvantage = this._state.hasAdvantageFromStates?.("attack:melee:str")
@@ -9575,7 +9506,7 @@ class CharacterSheetCombat {
 
 		// Roll all strikes and collect results
 		const results = [];
-		const critRange = this._state.getCriticalRange?.() || 20;
+		const critRange = this._state.getCriticalRange?.({attack: unarmedStrike, kind: "unarmed"}) || 20;
 		let handOfHarmApplied = false;
 		const dmgType = unarmedStrike.damageType || "bludgeoning";
 		for (let i = 0; i < strikes; i++) {
@@ -9967,7 +9898,8 @@ class CharacterSheetCombat {
 		modalInner.append(e_({outer: `<div class="mb-2 ve-small"><strong>Choose weapon attack:</strong></div>`}));
 		const select = e_({tag: "select", clazz: "ve-form-control ve-input-sm mb-3"});
 		for (const atk of attacks) {
-			select.append(e_({outer: `<option value="${atk.id}">${atk.name} (+${atk.attackBonus || 0})</option>`}));
+			const total = this._state.getAttackBonusBreakdown?.(atk)?.total || 0;
+			select.append(e_({outer: `<option value="${atk.id}">${atk.name} (${total >= 0 ? "+" : ""}${total})</option>`}));
 		}
 		modalInner.append(select);
 
@@ -9980,7 +9912,8 @@ class CharacterSheetCombat {
 			const numTargets = Math.max(1, Math.min(10, parseInt(numInput.value) || 2));
 			const selectedAtkId = select.value;
 			const selectedAtk = attacks.find(a => String(a.id) === String(selectedAtkId)) || attacks[0];
-			const bonus = selectedAtk.attackBonus || 0;
+			const bonus = this._state.getAttackBonusBreakdown?.(selectedAtk)?.total || 0;
+			const critRange = this._state.getCriticalRange?.({attack: selectedAtk}) || 20;
 
 			resultArea.innerHTML = "";
 			const rows = [];
@@ -9988,7 +9921,7 @@ class CharacterSheetCombat {
 				const result = this._page.rollD20?.({mode: "normal"}) || {roll: 10};
 				const total = result.roll + bonus;
 				const bonusDamage = i > 0 ? `+${i}d6` : "—";
-				const critClass = result.roll === 20 ? "text-success bold" : result.roll === 1 ? "text-danger bold" : "";
+				const critClass = result.roll >= critRange ? "text-success bold" : result.roll === 1 ? "text-danger bold" : "";
 				rows.push(`<tr>
 					<td>${i + 1}</td>
 					<td class="${critClass}">${result.roll}</td>
@@ -10088,13 +10021,16 @@ class CharacterSheetCombat {
 
 	_executeFeatureAttackVolley (feature, {attack, count = 1} = {}) {
 		if (!attack) return [];
-		const attackBonus = this._state.getWeaponAbilityMod(attack) + this._state.getProficiencyBonus() + (attack.attackBonus || 0);
-		const damageBonus = this._state.getWeaponAbilityMod(attack) + (attack.damageBonus || 0);
+		const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
+		const attackBonus = attackBreakdown?.total || 0;
+		const damageBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack))
+			+ (this._state.getWeaponDisplayDamageBonus?.(attack) ?? (Number(attack.damageBonus) || 0));
+		const critRange = this._state.getCriticalRange?.({attack}) || 20;
 		const formula = `${attack.damage}${damageBonus >= 0 ? "+" : ""}${damageBonus}`;
 		const results = [];
 		for (let ix = 0; ix < count; ++ix) {
 			results.push({
-				attack: this._rollCombatActionDice(feature, {type: "attack", attackBonus}),
+				attack: this._rollCombatActionDice(feature, {type: "attack", attackBonus, critRange}),
 				damage: this._rollCombatActionDice(feature, {type: "damage", formula, label: `${attack.damageType} damage`}),
 			});
 		}
@@ -11316,16 +11252,33 @@ class CharacterSheetCombat {
 			container.append(enemyDisadvSection);
 		}
 
-		// Critical hit range display
-		const critRange = this._state.getCriticalRange?.() || 20;
-		if (critRange < 20) {
+		// Critical hit ranges are attack-scoped. Group equal thresholds without implying
+		// that one improved weapon changes every other attack.
+		const attackCriticalRanges = new Map();
+		for (const attack of this._cachedAttacks || []) {
+			const threshold = this._state.getCriticalRange?.({attack}) || 20;
+			if (threshold >= 20) continue;
+			if (!attackCriticalRanges.has(threshold)) attackCriticalRanges.set(threshold, []);
+			attackCriticalRanges.get(threshold).push(attack.name || "Attack");
+		}
+		const broadCriticalRange = this._state.getCriticalRange?.({kind: "spell", includeItemThreshold: false}) || 20;
+		if (attackCriticalRanges.size || broadCriticalRange < 20) {
 			const critSection = e_({outer: `<div class="charsheet__effect-group mb-2"></div>`});
 			critSection.insertAdjacentHTML("beforeend", `<div class="ve-small ve-bold text-warning mb-1">⚔️ Critical Hit Range:</div>`);
-			critSection.insertAdjacentHTML("beforeend", `
-				<div class="charsheet__effect-item badge badge-warning mr-1 mb-1" title="You score a critical hit on ${critRange}-20">
-					${critRange}-20 (${21 - critRange} numbers)
-				</div>
-			`);
+			if (broadCriticalRange < 20) {
+				critSection.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__effect-item badge badge-warning mr-1 mb-1" title="Broad active effect">
+						All attacks: ${broadCriticalRange}-20
+					</div>
+				`);
+			}
+			for (const [threshold, names] of [...attackCriticalRanges.entries()].sort((a, b) => a[0] - b[0])) {
+				critSection.insertAdjacentHTML("beforeend", `
+					<div class="charsheet__effect-item badge badge-warning mr-1 mb-1" title="${names.join(", ")}">
+						${names.join(", ")}: ${threshold}-20
+					</div>
+				`);
+			}
 			container.append(critSection);
 		}
 
@@ -13735,6 +13688,8 @@ class CharacterSheetCombat {
 	 * @returns {{isMelee: boolean, isRanged: boolean}}
 	 */
 	_getAttackRollKind (attack) {
+		const classification = this._state.getAttackClassification?.(attack);
+		if (classification) return {isMelee: classification.isMelee, isRanged: classification.isRanged};
 		const isMelee = attack?.isRanged === true
 			? false
 			: !!(attack?.isMelee || attack?.type === "melee" || attack?.range === "melee"
