@@ -745,20 +745,25 @@ Five roll sites in `charactersheet.js` use the same pre-roll picker pattern to l
 
 Defined at ~L8960. Modal with one row per available conditional:
 
-- Checkbox + name + colored chip (Advantage = green, Disadvantage = red, `+N` or `+dN` = indigo)
+- Checkbox + clean source name + colored chip (Advantage = green, Disadvantage = red, `+N` or `+dN` = indigo)
+- Natural context sentence beneath it (`Applies against poison.`, `Applies while concentrating.`)
 - "Apply all" / "Apply none" buttons
 - Actions: **Cancel** (abort the roll), **Skip** (roll with zero conditionals applied), **Apply selected**
 
 Skipped silently when `conditionalsAvailable` is empty **or** `settings.skipConditionalPrompt === true`. Returns `{appliedConditionalIds: Set<string>, applied: Array<Entry>, cancelled: boolean}`.
+
+The picker reads `sourceName`, a display-only projection which removes only the
+exact `: <condition>` suffix added by prose registration. Stored names and
+conditional IDs are unchanged.
 
 ### Result Note Format — `_formatAppliedConditionalsNote(applied)`
 
 Each opted-in conditional contributes one line to the roll result note, prefixed with ⚡:
 
 ```
-⚡ Dauntless Heritage (Advantage, against being frightened)
-⚡ Stout Resilience (+2, against poison)
-⚡ Poison Expert (+d10, against poison)
+⚡ Advantage from Dauntless Heritage against being frightened
+⚡ +2 from Stout Resilience against poison
+⚡ +d10 from Poison Expert against poison
 ```
 
 ### Settings Toggle

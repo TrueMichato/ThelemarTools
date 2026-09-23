@@ -57263,6 +57263,23 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get a conditional modifier's display source without changing its stored
+	 * name or stable ID. Prose-parsed modifiers append `: <condition>` to the
+	 * feature name; strip only that exact suffix for picker/result copy.
+	 *
+	 * @param {object} mod
+	 * @returns {string}
+	 */
+	static _getConditionalSourceName (mod) {
+		const raw = String(mod?.name || mod?.note || "Conditional bonus").trim();
+		const conditional = String(mod?.conditional || "").trim();
+		if (!conditional) return raw;
+		const suffix = `: ${conditional}`;
+		if (!raw.endsWith(suffix)) return raw;
+		return raw.slice(0, -suffix.length).trim() || raw;
+	}
+
+	/**
 	 * Build a stable, deterministic identifier for a conditional modifier so
 	 * the same mod can be opted-in / opted-out consistently across repeated
 	 * `aggregateModifiers` calls within a single roll cycle.
@@ -57600,11 +57617,14 @@ class CharacterSheetState {
 			// so the conditional opt-in picker can offer it — but only as a
 			// gated conditional. We synthesize a human-readable `conditional`
 			// field from the sub-type so it flows through the same default-off
-			// gating path as text-parsed conditionals. See _isConditionalSaveSubtype.
+			// gating path as text-parsed conditionals. Skill sub-types are always
+			// selectors (`skill:might`, `skill:perception`), never category-wide
+			// conditions; qualified skill conditions use `skill:<target>:<qualifier>`
+			// and are handled below. See _isConditionalSaveSubtype.
 			let synthesizedConditional = null;
 			if (!matches
 				&& modCategory === category
-				&& ["save", "check", "skill"].includes(category)
+				&& ["save", "check"].includes(category)
 				&& modSpecific
 				&& CharacterSheetState._isConditionalSaveSubtype(modSpecific)
 			) {
@@ -57736,6 +57756,7 @@ class CharacterSheetState {
 						result.conditionalsAvailable.push({
 							id: condId,
 							name: mod.name || mod.note || "Conditional bonus",
+							sourceName: CharacterSheetState._getConditionalSourceName(mod),
 							conditional: mod.conditional,
 							advantage: !!mod.advantage,
 							disadvantage: !!mod.disadvantage,
@@ -57758,8 +57779,11 @@ class CharacterSheetState {
 			}
 
 			// Track sources
-			if (mod.name && !result.sources.includes(mod.name)) {
-				result.sources.push(mod.name);
+			const sourceName = mod.conditional
+				? CharacterSheetState._getConditionalSourceName(mod)
+				: mod.name;
+			if (sourceName && !result.sources.includes(sourceName)) {
+				result.sources.push(sourceName);
 			}
 			if (mod.conditional && !result.conditionals.includes(mod.conditional)) {
 				result.conditionals.push(mod.conditional);

@@ -213,6 +213,26 @@ Subclasses that grant combat traditions automatically when selected:
 
 Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect type via `_aggregateCalculationBasedEffects()`. Traditions clear/re-apply on class change.
 
+### Barbarian Specialties — permanent skill bonuses
+
+Three Barbarian Specialties grant permanent bonuses equal to proficiency bonus:
+
+| Specialty | Modifier targets | Scope |
+|---|---|---|
+| **Agile Sprinter** | `skill:athletics`, `skill:acrobatics` | Always on |
+| **Lead the Pack** | `skill:athletics`, `skill:acrobatics` | Always on; its separate group-check result-sharing rider remains DM/player operated |
+| **Unyielding Might** | `skill:might` | Always on; never Athletics |
+
+TGTT defines **Might** as the Strength skill for raw-strength feats such as
+breaking, bending, lifting, dragging, carrying, and forcing objects. Grapple and
+shove are not part of the Might skill definition.
+
+These modifiers are prose-parsed from the explicit shape “gain a bonus to
+<skill> checks. The bonus equals your proficiency bonus.” Keep that wording and
+the `{@skill ...}` tags when editing the source data. The Barbarian Specialty
+corpus test pins both raw-tagged and rendered-text parsing for every option in
+the L1 pool.
+
 ---
 
 ## Subclasses
