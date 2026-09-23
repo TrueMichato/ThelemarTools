@@ -3,17 +3,28 @@ In general all bugs refer to TGTT classes unless otherwise specified.
 
 ## Open Bugs
 
+## Closed Bugs
+
 ### Round 61 — Respec, Bard capstone, combat methods, specialties, and derived combat statistics
 
-- **R61-S1 — Respec skill mechanics (Bug 1):** the Respec workspace offers skill changes, but the selected skill does not change live sheet mechanics. Owns the Respec skill adapter/editor, candidate transaction, and skill-specific ownership/receipt normalization. Must prove candidate isolation, real proficiency/expertise effects, Apply/reload, Cancel, and one-step Undo.
-- **R61-S2 — Words of Creation (Bug 2):** XPHB/TGTT Bard 20 detects Words of Creation but does not grant Power Word Heal and Power Word Kill as always-prepared spells. Owns Bard capstone spell grants across Builder, Level Up, Quick Build, legacy load, and Respec level changes.
-- **R61-S3 — Combat methods (Bugs 3–4):** Spell Shattering Strike is not implemented and its four choices are absent; combat-method Stamina spending appears to use degree instead of the authored `staminaCost`. Owns combat-method catalog parsing, option persistence/action rendering, Stamina consumption, class-utils integration, and Play Mode parity. Must not edit Chained Fury target lifecycle or generic conditional-modifier copy.
-- **R61-S4 — Chained Fury flow (Bug 5):** the full chain/grapple target-management flow should become optional and less VTT-like while preserving Spectral Chains attacks and riders. Owns Chained Fury-specific target effects, lifecycle cleanup, and combat UX, but must not edit the granted-attack projection or generic combat-method costs/options.
-- **R61-S5 — Specialty mechanics and roll copy (Bugs 6–7):** Agile Sprinter and Lead the Pack are applied unconditionally despite situational wording, while Unyielding Might appears as a roll option tied to grapple/shove instead of clearly increasing the Might skill. Rewrite the three specialties to permanent, explicit mechanics and replace awkward conditional-roll phrases such as “against skillname” with natural source-aware copy. Owns specialty data, modifier parsing/registration, and conditional-picker text only.
-- **R61-S6 — Weapon attack projection (Bugs 8.1–8.3):** critical range, reach, and attack bonus omit stacked material/stance/boon/magic/Masterwork/Ioun effects on Spectral Chains and other weapons. Owns the generated Chained Fury attack descriptor, item material/upgrade/Ioun projection, effective item bonuses, critical-range and reach resolvers, and attack-row total assembly. Must prove regeneration does not discard upgrades and no bonus leaks to unrelated attacks.
-- **R61-S7 — Shield/AC projection (Bug 8.4):** AC is 28 instead of 29 when Dragon Scales add +1 to a shield. Owns `getAc`, the canonical shield slot snapshot, both duplicated inventory shield writers, signed bonus normalization, and equip-flow tests. Must consume—but not alter—the material/upgrade projection owned by R61-S6.
+**Integration.** Seven isolated fixes were merged `--no-ff` from the certified
+Respec base `9602a6f2` in dependency order. Cross-branch validation exposed a
+stale critical-range variable that crashed fresh-character Combat rendering;
+independent review then found that class-granted spells selected later through
+Respec could lose their new ownership. Both integration-only defects now have
+causal regressions, including standard and nested spell/cantrip choices. Final
+gate: ESLint, JSON, Combat Method schema, Stylelint, and diff checks are clean;
+**569 Character Sheet suites / 16,469 tests pass** (2 suites / 208 tests
+skipped); the 17-suite overlap matrix passes **587 tests**; and the complete
+Bard and Chained Fury Chromium specs pass **16/16 tests**.
 
-## Closed Bugs
+- **R61-S1 — Respec skill mechanics (Bug 1):** Respec skill and expertise decisions now mutate the isolated candidate mechanically, preserve source-aware ownership and receipts, and survive Apply/reload, Cancel, conflict detection, and one-step Undo without touching live state early.
+- **R61-S2 — Words of Creation (Bug 2):** XPHB and TGTT Bard 20 now receive Power Word Heal and Power Word Kill as source-qualified always-prepared spells across fresh builds, load repair, recalculation, multiclass level gates, and Respec. Class grants use reversible overlays, including when standard or nested Respec spell choices acquire the same spell later.
+- **R61-S3 — Combat methods (Bugs 3–4):** Spell Shattering Strike now contains and resolves all four authored d4 outcomes. Combat Method cost parsing and activation share one transaction across Combat and Play Mode, honor fixed, free, and ranged costs, spend exactly once, and roll back failed or cancelled uses without stale persistence.
+- **R61-S4 — Chained Fury flow (Bug 5):** Spectral Chains attacks and riders remain available by default while target bookkeeping is an explicit opt-in. The compact Combat/Play Mode tracker records only creature name and explicit save outcome, applies the finalized Combat Method DC, respects the authored two/four-chain capacity, and clears stale targets on every relevant lifecycle transition.
+- **R61-S5 — Specialty mechanics and roll copy (Bugs 6–7):** Agile Sprinter, Lead the Pack, and Unyielding Might now apply their intended permanent mechanics, and conditional roll prompts use natural source-aware wording without broadening exact skill selectors.
+- **R61-S6 — Weapon attack projection (Bugs 8.1–8.3):** one state-owned projection now supplies attack bonuses, damage, critical thresholds, and range to Overview, Combat, Play Mode, PDF, and NPC export. Source-weapon material/upgrade/magic bonuses apply once, external Ioun effects stay correctly scoped, Lies and Bladesong choose rather than stack, and regenerated Spectral Chains preserve their full `+22`, `Crit 17+`, `40 ft.` composition.
+- **R61-S7 — Shield/AC projection (Bug 8.4):** inventory-backed shield AC now uses the canonical synchronized slot snapshot and signed material/upgrade normalization, so Dragon Scales correctly produce the reported 26→29→26 equip/unequip sequence without altering weapon projection.
 
 ### Round 60 — Rogue Specialty d10 rolls and tool checks
 
