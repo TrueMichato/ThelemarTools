@@ -443,7 +443,7 @@ export class ManageBrewUi {
 			attrs: {"aria-label": "Check for homebrew issues"},
 			children: [
 				e_({tag: "span", clazz: "glyphicon glyphicon-search", attrs: {"aria-hidden": "true"}}),
-				e_({tag: "span", clazz: "ve-ml-1", text: "Check for Issues"}),
+				e_({tag: "span", clazz: "ve-ml-1", txt: "Check for Issues"}),
 				eleBadge,
 			],
 			click: () => this._pRender_pOpenDiagnosticsModal(rdState),
@@ -538,7 +538,7 @@ export class ManageBrewUi {
 		const btnCopy = e_({
 			tag: "button",
 			clazz: "ve-btn ve-btn-default ve-btn-xs",
-			text: "Copy report",
+			txt: "Copy report",
 			click: async () => {
 				await MiscUtil.pCopyTextToClipboard(ManageBrewDiagnosticsUtil.getCopyableReport(recordsVisible));
 				JqueryUtil.doToast("Copied issue report");
@@ -550,14 +550,14 @@ export class ManageBrewUi {
 			title: "Re-scan the loaded homebrew for issues",
 			children: [
 				e_({tag: "span", clazz: "glyphicon glyphicon-refresh", attrs: {"aria-hidden": "true"}}),
-				e_({tag: "span", clazz: "ve-ml-1", text: "Re-scan"}),
+				e_({tag: "span", clazz: "ve-ml-1", txt: "Re-scan"}),
 			],
 			click: () => pRunScan({isForce: true}),
 		});
 		const btnClear = e_({
 			tag: "button",
 			clazz: "ve-btn ve-btn-danger ve-btn-xs",
-			text: "Clear",
+			txt: "Clear",
 			click: async () => {
 				if (!await InputUiUtil.pGetUserBoolean({
 					title: "Clear issue log",
@@ -598,7 +598,7 @@ export class ManageBrewUi {
 		].map(({value, label}) => e_({
 			tag: "button",
 			clazz: `ve-btn ve-btn-default ve-btn-xs${filterState.severity === value ? " active" : ""}`,
-			text: label,
+			txt: label,
 			attrs: {"aria-pressed": filterState.severity === value ? "true" : "false"},
 			click: evt => {
 				filterState.severity = value;
@@ -711,13 +711,13 @@ export class ManageBrewUi {
 				e_({
 					tag: "div",
 					clazz: "manbrew-diag__empty-title",
-					text: isFilteredEmpty ? "No issues match the current filters." : "No homebrew issues detected.",
+					txt: isFilteredEmpty ? "No issues match the current filters." : "No homebrew issues detected.",
 				}),
 				!isFilteredEmpty
 					? e_({
 						tag: "div",
 						clazz: "manbrew-diag__empty-detail",
-						text: "The loaded homebrew was scanned for structural issues (such as an item referencing a type or property that no content defines) and none were found.",
+						txt: "The loaded homebrew was scanned for structural issues (such as an item referencing a type or property that no content defines) and none were found.",
 					})
 					: null,
 			],
@@ -745,13 +745,13 @@ export class ManageBrewUi {
 			attrs: {"aria-expanded": isCollapsed ? "false" : "true"},
 			children: [
 				eleCaret,
-				e_({tag: "span", clazz: "manbrew-diag__document", text: group.label}),
-				e_({tag: "span", clazz: "manbrew-diag__group-count", text: `${group.records.length}`}),
+				e_({tag: "span", clazz: "manbrew-diag__document", txt: group.label}),
+				e_({tag: "span", clazz: "manbrew-diag__group-count", txt: `${group.records.length}`}),
 				group.countErrors
-					? e_({tag: "span", clazz: "manbrew-diag__tally manbrew-diag__tally--error", text: `${group.countErrors} error${group.countErrors === 1 ? "" : "s"}`})
+					? e_({tag: "span", clazz: "manbrew-diag__tally manbrew-diag__tally--error", txt: `${group.countErrors} error${group.countErrors === 1 ? "" : "s"}`})
 					: null,
 				group.countWarnings
-					? e_({tag: "span", clazz: "manbrew-diag__tally manbrew-diag__tally--warning", text: `${group.countWarnings} warning${group.countWarnings === 1 ? "" : "s"}`})
+					? e_({tag: "span", clazz: "manbrew-diag__tally manbrew-diag__tally--warning", txt: `${group.countWarnings} warning${group.countWarnings === 1 ? "" : "s"}`})
 					: null,
 			],
 			click: () => {
@@ -796,15 +796,15 @@ export class ManageBrewUi {
 							clazz: `glyphicon glyphicon-${isError ? "remove-sign" : "warning-sign"}`,
 							attrs: {"aria-hidden": "true"},
 						}),
-						e_({tag: "span", text: isError ? "ERROR" : "WARN"}),
+						e_({tag: "span", txt: isError ? "ERROR" : "WARN"}),
 					],
 				}),
-				e_({tag: "span", clazz: "manbrew-diag__code", text: record.code, title: record.code}),
-				e_({tag: "span", clazz: "manbrew-diag__owner", text: ownerText, title: ownerText}),
-				e_({tag: "span", clazz: "manbrew-diag__field", text: record.fieldPath || "(Unknown field)", title: record.fieldPath || "(Unknown field)"}),
-				e_({tag: "span", clazz: "manbrew-diag__target", text: targetText, title: targetText}),
+				e_({tag: "span", clazz: "manbrew-diag__code", txt: record.code, title: record.code}),
+				e_({tag: "span", clazz: "manbrew-diag__owner", txt: ownerText, title: ownerText}),
+				e_({tag: "span", clazz: "manbrew-diag__field", txt: record.fieldPath || "(Unknown field)", title: record.fieldPath || "(Unknown field)"}),
+				e_({tag: "span", clazz: "manbrew-diag__target", txt: targetText, title: targetText}),
 				record.detail
-					? e_({tag: "span", clazz: "manbrew-diag__detail", text: record.detail})
+					? e_({tag: "span", clazz: "manbrew-diag__detail", txt: record.detail})
 					: null,
 			],
 		});

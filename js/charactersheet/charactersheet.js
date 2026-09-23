@@ -2043,7 +2043,7 @@ class CharacterSheetPage {
 		 * @param {function(): *} fn
 		 */
 		const mkBtn = (txt, clazz, fn) => {
-			const btn = e_({tag: "button", clazz: `ve-btn ve-btn-sm ${clazz} ml-2`, text: txt});
+			const btn = e_({tag: "button", clazz: `ve-btn ve-btn-sm ${clazz} ml-2`, txt});
 			btn.addEventListener("click", fn);
 			btnRow.appendChild(btn);
 			return btn;
