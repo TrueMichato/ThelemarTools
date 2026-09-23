@@ -254,7 +254,21 @@ rather than the editable display name.
 
 **Reach:** the inventory weapon carries an absolute item-specific reach, not a
 global reach effect — a global one would wrongly extend the character's
-greataxe too. See `getReachContributions()` / `getAttackReach()`.
+greataxe too. Its authored progression is 15/20/25/30 ft. at Barbarian levels
+3/6/10/14. `getAttackRangeProjection()` adds a separate character-wide reach
+boon to that value (for example, 30 + 10 = 40 ft.) without copying the chain
+reach onto unrelated weapons. Thrown uses return no melee reach, and
+`onYourTurn` reach is omitted off-turn.
+
+**Attack and critical projection:** the generated attack reads the live item
+through `buildAutoAttackFromWeapon()`. Weapon magic, Masterwork, Sharpened, and
+material effects remain intrinsic to that item; equipment such as a seated Ioun
+Stone is added separately by `getAttackBonusBreakdown()`. Reconciliation across
+Rage and level changes preserves the generated item ID, material, upgrades, and
+Ioun relationships. Critical thresholds are attack-specific: Sharpened and an
+Obsidian striking surface produce 18–20 on the chains, and Perfect Edge can
+expand that to its 17–20 floor without changing an unrelated weapon's item
+threshold.
 
 **On-hit riders are never auto-applied.** They surface through the generic
 `featureOnHitOptions` post-attack hook, then use the persisted target/effect

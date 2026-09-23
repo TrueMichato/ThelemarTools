@@ -210,6 +210,13 @@ The ⚙ editor is the sharp edge here: it shows and receives **base** values, an
 Without that, a player who simply opened the editor on a two-stone sword and pressed Save
 would bake the stones' contribution into the sword permanently.
 
+Combat projection reads the materialised value from the seated stone as an
+**external item contribution**. It never invents a second matrix-host bonus and
+never folds the stone into the source weapon's intrinsic `attackBonus`. For
+example, Ioun Sand changes Stone #282's authored `+1` to `+2`; the canonical
+attack breakdown reports that single `+2` contribution and removes it when the
+stone is unset, stowed, or unattuned.
+
 ### Seats are references, not copies
 
 `item.iounSet` holds inventory **ids**. This is deliberately unlike `socketedGemstones`,

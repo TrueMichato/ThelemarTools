@@ -147,33 +147,47 @@ unless an option explicitly declares `targetAware: true`.
 ### Attack Bonus Calculation
 
 ```javascript
-_calculateWeaponAttackBonus(weapon) {
-    let bonus = this._state.getProficiencyBonus();
-    
-    // Determine ability modifier
-    if (weapon.isRanged) {
-        bonus += this._state.getAbilityMod("dex");
-    } else if (weapon.properties?.includes("finesse")) {
-        // Use higher of STR or DEX
-        bonus += Math.max(
-            this._state.getAbilityMod("str"),
-            this._state.getAbilityMod("dex")
-        );
-    } else {
-        bonus += this._state.getAbilityMod("str");
-    }
-    
-    // Magic weapon bonus
-    if (weapon.bonusWeapon) {
-        bonus += weapon.bonusWeapon;
-    }
-    
-    // Active state modifiers (Rage, Bladesong, etc.)
-    bonus += this._getAttackModifiersFromActiveStates();
-    
-    return bonus;
-}
+const attack = state.buildAutoAttackFromWeapon(weapon);
+const breakdown = state.getAttackBonusBreakdown(attack);
+const total = breakdown.total;
 ```
+
+`buildAutoAttackFromWeapon()` owns the canonical inventory-to-attack conversion.
+Its `attackBonus` is **intrinsic/local only**: the source weapon's effective
+magic bonus, upgrades, projected material effects, and custom flat bonus.
+
+`getAttackBonusBreakdown()` then adds the character-facing layers exactly once:
+
+- base ability, with finesse resolved before alternate-ability choices;
+- the single best eligible substitution (for example, Lies or Bladesong);
+- proficiency;
+- unconditional feature modifiers;
+- active-state modifiers;
+- equipped non-weapon item bonuses whose authored scope matches the attack.
+
+The returned buckets are used by Overview, Combat, Play Mode, PDF export, and
+NPC export. Consumers must not re-read `bonusWeapon`, upgrades, or material
+bonuses from `sourceItem`, because those values are already folded into the
+attack descriptor. Roll-only conditionals, ammunition, tactical toggles,
+one-shot bonuses, and exhaustion remain outside the standing total.
+
+Signed string bonuses such as `"+2"` are normalized to numbers at the state
+boundary. A non-weapon item that repeats one bonus through both structured fields
+and `effects[]` contributes only once. Weapon-local bonuses never leak to another
+weapon, while broadly authored equipment such as an Ioun Stone can contribute
+through the external-item bucket.
+
+### Attack Reach
+
+`getAttackRangeProjection(attack, {meleeReach, isOwnTurn})` is the shared display
+projection. A structured weapon reach is combined with the character's reach
+above the normal 5-foot baseline, then with attack-local reach. An
+`onYourTurn` local bonus is omitted off-turn. The Reach property adds 5 feet only
+when the attack has no authored structured reach.
+
+Thrown uses retain their thrown range and return no melee reach. An attack-local
+reach value therefore cannot leak to another weapon; a character-wide boon still
+adds to each eligible melee attack independently.
 
 ### Rolling Attacks
 
@@ -224,28 +238,17 @@ to weapon and Unarmed Strike attacks only**, so spell attacks never inherit
 a widened crit range:
 
 ```javascript
-_isCriticalHit(roll, attack) {
-    // getCriticalRange() takes the attack's kind explicitly (e.g. "weapon",
-    // "unarmed", "spell") rather than reading one global number — this is
-    // what keeps Champion's Improved/Superior Critical from leaking into
-    // spell attacks for multiclass/Eldritch Knight-style builds.
-    let critRange = this._state.getCriticalRange(attack.kind ?? "weapon");
-
-    // Hexblade's Curse
-    if (this._state.isStateTypeActive("hexbladescurse")) {
-        critRange = Math.min(critRange, 19);
-    }
-
-    return roll >= critRange;
-}
+const critRange = state.getCriticalRange({attack});
+const isCritical = roll >= critRange;
 ```
 
-`getCriticalRange(attackKind)` lives on `CharacterSheetState` and is shared
-by both `charactersheet-combat.js` (weapon/unarmed/flurry attacks) and
-`charactersheet-spells.js` (spell attacks) — the single source of truth for
-"what beats a natural 20 for this specific attack", so any future subclass
-that widens crit range only needs to gate its contribution by attack kind
-inside that one method, not duplicate scoping logic in each renderer.
+`getCriticalRange({attack, kind, includeItemThreshold})` lives on
+`CharacterSheetState` and is the single source of truth for "what beats a
+natural 20 for this specific attack." Item thresholds are read only from that
+attack's source weapon. Champion-style features, active states, and stance
+effects are then composed according to their authored weapon/range scope, with
+any stated minimum threshold enforced. Spell attacks pass `{kind: "spell"}` and
+never inherit weapon-only critical ranges.
 
 ### Rolling Damage
 

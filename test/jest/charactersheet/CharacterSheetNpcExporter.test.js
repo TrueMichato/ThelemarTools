@@ -167,6 +167,70 @@ describe("CharacterSheetNpcExporter", () => {
 		expect(battleaxe.entries[0]).toContain("Mastery: {@itemMastery Topple|XPHB}");
 	});
 
+	it("should export the same +22 standing total as the sheet projection", () => {
+		const warrior = new CharacterSheetState();
+		warrior.setName("Chain Tester");
+		warrior.addClass({name: "Fighter", source: "PHB", level: 20});
+		warrior.setAbilityBase("str", 32); // +11
+		warrior.addItem({
+			name: "Spectral Chains",
+			source: "TGTT",
+			dmg1: "1d8",
+			dmgType: "force",
+			range: "30 ft.",
+			type: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			bonusWeapon: "+2",
+			customAttackBonus: 1,
+			equipped: true,
+		});
+		warrior.addItem({
+			name: "Pale Aquamarine Lozenge",
+			source: "MECIounStones",
+			type: "wondrous",
+			bonusWeaponAttack: "+2",
+			entries: ["You gain a +2 bonus to attack rolls with every weapon and unarmed strike."],
+			equipped: true,
+		});
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		expect(out.action.find(a => a.name === "Spectral Chains").entries[0]).toContain("{@hit +22}");
+	});
+
+	it("should keep passive Lies but exclude active Bladesong from the standing statblock", () => {
+		const warrior = new CharacterSheetState();
+		warrior.setName("Substitution Tester");
+		warrior.addClass({name: "Illrigger", source: "TGTT", level: 20});
+		warrior.setAbilityBase("str", 14); // +2
+		warrior.setAbilityBase("cha", 20); // +5, passive Lies choice
+		warrior.setAbilityBase("int", 22); // +6, active Bladesong choice
+		warrior.addFeature({name: "Lies", source: "TGTT", optionalFeatureTypes: ["IllMastery"]});
+		warrior.setLiesWeaponType("Longsword");
+		warrior.activateState("bladesong");
+		warrior.addItem({
+			name: "Longsword",
+			source: "PHB",
+			dmg1: "1d8",
+			dmgType: "slashing",
+			range: "5 ft.",
+			type: "M",
+			weapon: true,
+			weaponCategory: "martial",
+			equipped: true,
+		});
+		const item = warrior.getItems().find(it => it.name === "Longsword");
+		const attack = warrior.buildAutoAttackFromWeapon(item);
+
+		expect(warrior.getAttackBonusBreakdown(attack).effectiveAbility).toBe(6);
+		expect(warrior.getAttackBonusBreakdown(attack, {includeActiveStates: false}).effectiveAbility).toBe(5);
+
+		const out = CharacterSheetNpcExporter.convertStateToMonster(warrior);
+		const entry = out.action.find(a => a.name === "Longsword").entries[0];
+		expect(entry).toContain("{@hit +11}"); // CHA +5 (Lies) + PB +6
+		expect(entry).toContain("{@damage 1d8+5}");
+	});
+
 	it("should place magic items under special equipment and route uses by activation", () => {
 		state.addItem({
 			name: "Wand of Bolts",

@@ -128,9 +128,10 @@ describe("display and roll consumers", () => {
 		const overviewSource = readFileSync(resolve(root, "js/charactersheet/charactersheet.js"), "utf8");
 		const playModeSource = readFileSync(resolve(root, "js/charactersheet/charactersheet-playmode.js"), "utf8");
 
-		expect(combatSource).toMatch(/totalDamageBonus = abilityMod \+ \(this\._state\.getWeaponDisplayDamageBonus\?\.\(attack\)/);
-		expect(overviewSource).toMatch(/totalDamageBonus = abilityMod \+ \(this\._state\.getWeaponDisplayDamageBonus\?\.\(attack\)/);
-		expect(playModeSource).toMatch(/totalDmgBonus = abilityMod \+ \(this\._state\.getWeaponDisplayDamageBonus\?\.\(attack\)/);
+		for (const source of [combatSource, overviewSource, playModeSource]) {
+			expect(source).toMatch(/getAttackBonusBreakdown\?\.\(attack\)/);
+			expect(source).toMatch(/getWeaponDisplayDamageBonus\?\.\(attack\)/);
+		}
 	});
 
 	test("_rollDamage uses the shared standing total", async () => {

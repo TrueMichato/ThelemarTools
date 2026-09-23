@@ -7992,7 +7992,8 @@ class CharacterSheetState {
 		for (const mod of (this._data.namedModifiers || [])) {
 			if (mod.type === "reach" && mod.enabled) {
 				// Resolve symbolic values before this feeds arithmetic/display (CS-BUG-038).
-				contributions.push({source: mod.name || "Modifier", value: this._resolveSymbolicModifierValue(mod.value) ?? 0});
+				const value = this._resolveSymbolicModifierValue(mod.value);
+				if (Number.isFinite(value)) contributions.push({source: mod.name || "Modifier", value});
 			}
 		}
 
@@ -8002,7 +8003,8 @@ class CharacterSheetState {
 				|| (e.type === "bonus" && e.target === "reach")
 				|| e.target === "reach";
 			if (isReach) {
-				contributions.push({source: e.stateName || e.source || "Active State", value: e.value || 0});
+				const value = this._resolveSymbolicModifierValue(e.value);
+				if (Number.isFinite(value)) contributions.push({source: e.stateName || e.source || "Active State", value});
 			}
 		}
 
@@ -8014,8 +8016,8 @@ class CharacterSheetState {
 			if (!CharacterSheetState._isAdditiveReachModifier(e)) continue;
 			// Conditional passive reach is not auto-applied (matches the conditional-modifier policy).
 			if (e.conditional) continue;
-			const value = typeof e.value === "number" ? e.value : parseInt(e.value, 10);
-			if (!Number.isNaN(value)) contributions.push({source: e.source || "Feature", value});
+			const value = this._resolveSymbolicModifierValue(e.value);
+			if (Number.isFinite(value)) contributions.push({source: e.source || "Feature", value});
 		}
 
 		return contributions;
@@ -8040,7 +8042,7 @@ class CharacterSheetState {
 	 * @returns {number} Total reach bonus in feet (default 0; base reach is 5ft)
 	 */
 	getReachBonus () {
-		return this.getReachContributions().reduce((total, c) => total + (c.value || 0), 0);
+		return this.getReachContributions().reduce((total, c) => total + c.value, 0);
 	}
 
 	/**
@@ -8070,6 +8072,7 @@ class CharacterSheetState {
 
 		const rangeStr = attack.range != null ? String(attack.range) : "";
 		const isThrown = rangeStr.includes("/");
+		if (isThrown) return null;
 		const isMelee = attack.isMelee === true
 			|| attack.type === "melee"
 			|| attack.range === "melee"
@@ -8086,6 +8089,37 @@ class CharacterSheetState {
 			? 0
 			: Number(attack.reachBonus) || 0;
 		return base + (!structuredReach && hasReachProp ? CharacterSheetState.REACH_PROPERTY_BONUS : 0) + attackReachBonus;
+	}
+
+	/**
+	 * Canonical player-facing range projection for one attack.
+	 * @param {object} attack
+	 * @param {object} [ctx]
+	 * @param {number} [ctx.meleeReach]
+	 * @param {boolean} [ctx.isOwnTurn=true]
+	 * @returns {{reach: number|null, display: string, isEffectiveReach: boolean}}
+	 */
+	getAttackRangeProjection (attack, {meleeReach, isOwnTurn = true} = {}) {
+		if (!attack) return {reach: null, display: "", isEffectiveReach: false};
+		const rawRange = String(attack.range || "");
+		const reach = this.getAttackReach(attack, {meleeReach, isOwnTurn});
+		const structuredReach = Number(attack.reach) || 0;
+		const attackReachBonus = Number(attack.reachBonus) || 0;
+		const hasReachProperty = (attack.properties || []).some(prop => String(prop).split("|")[0].toUpperCase() === "R");
+		const characterReach = meleeReach != null ? meleeReach : this.getMeleeReach();
+		const isEffectiveReach = reach != null
+			&& (
+				structuredReach > 0
+				|| attackReachBonus !== 0
+				|| hasReachProperty
+				|| characterReach !== CharacterSheetState.BASE_MELEE_REACH
+			);
+		if (!isEffectiveReach) return {reach, display: rawRange, isEffectiveReach: false};
+		return {
+			reach,
+			display: `${reach} ft.${attack.reachCondition === "onYourTurn" ? " on your turn" : ""}`,
+			isEffectiveReach: true,
+		};
 	}
 
 	getRaceName () {
@@ -10821,6 +10855,109 @@ class CharacterSheetState {
 		// one at a time, so compose via MAX of their positive deltas (never additive).
 		const override = Math.max(this.getBladesongWeaponBonus(attack), this.getLiesWeaponBonus(attack));
 		return base + override;
+	}
+
+	/**
+	 * Itemize a weapon/unarmed attack's base ability and alternate-ability substitution.
+	 * Lies and Bladesong are choices, not additive modifiers, so only the highest eligible
+	 * positive delta is applied.
+	 * @param {object} attack
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.includeActiveStates=true]
+	 * @param {boolean} [opts.includePassiveFeatures=true]
+	 * @returns {{base: number, substitution: {name: string, value: number}|null, total: number, candidates: Array<{name: string, value: number}>}}
+	 */
+	getAttackAbilityBreakdown (attack, {includeActiveStates = true, includePassiveFeatures = true} = {}) {
+		const base = this._resolveBaseWeaponAbilityMod(attack?.abilityMod || "str");
+		const candidates = [];
+		if (includePassiveFeatures) {
+			const lies = Number(this.getLiesWeaponBonus?.(attack)) || 0;
+			if (lies > 0) candidates.push({name: "Lies", value: lies});
+		}
+		if (includeActiveStates) {
+			const bladesong = Number(this.getBladesongWeaponBonus?.(attack)) || 0;
+			if (bladesong > 0) candidates.push({name: "Bladesong", value: bladesong});
+		}
+		const substitution = candidates.reduce((best, it) => !best || it.value > best.value ? it : best, null);
+		return {
+			base,
+			substitution,
+			total: base + (substitution?.value || 0),
+			candidates,
+		};
+	}
+
+	/**
+	 * Canonical standing attack-total breakdown. Roll-only conditionals, ammunition,
+	 * tactical bonuses, one-shot bonuses, dice, and exhaustion are intentionally excluded.
+	 * @param {object} attack
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.includeActiveStates=true]
+	 * @param {boolean} [opts.includePassiveFeatures=true]
+	 * @param {boolean} [opts.includeExternalItems=true]
+	 * @returns {object}
+	 */
+	getAttackBonusBreakdown (
+		attack,
+		{
+			includeActiveStates = true,
+			includePassiveFeatures = true,
+			includeExternalItems = true,
+		} = {},
+	) {
+		if (!attack) {
+			return {
+				baseAbility: 0,
+				abilitySubstitution: null,
+				effectiveAbility: 0,
+				proficiency: 0,
+				intrinsicLocal: 0,
+				passiveFeatureContributions: [],
+				activeStateContributions: [],
+				externalItemContributions: [],
+				total: 0,
+			};
+		}
+
+		const classification = this.getAttackClassification(attack);
+		const ability = this.getAttackAbilityBreakdown(attack, {includeActiveStates, includePassiveFeatures});
+		const proficiency = Number(this.getProficiencyBonus?.()) || 0;
+		const intrinsicRaw = Number(attack.attackBonus);
+		const intrinsicLocal = Number.isFinite(intrinsicRaw) ? intrinsicRaw : 0;
+		const passiveFeatureContributions = includePassiveFeatures
+			? (this.getAttackModifierContributions?.({isMelee: classification.isMelee}) || [])
+				.filter(it => Number.isFinite(Number(it.value)))
+				.map(it => ({...it, value: Number(it.value)}))
+			: [];
+		const stateRaw = includeActiveStates
+			? this.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id})
+			: 0;
+		const stateValue = Number(stateRaw);
+		const activeStateContributions = Number.isFinite(stateValue) && stateValue
+			? [{name: "Active State", value: stateValue}]
+			: [];
+		const externalItemContributions = includeExternalItems
+			? this.getExternalItemAttackContributions?.(attack) || []
+			: [];
+		const total = ability.total
+			+ proficiency
+			+ intrinsicLocal
+			+ passiveFeatureContributions.reduce((sum, it) => sum + it.value, 0)
+			+ activeStateContributions.reduce((sum, it) => sum + it.value, 0)
+			+ externalItemContributions.reduce((sum, it) => sum + it.value, 0);
+
+		return {
+			classification,
+			baseAbility: ability.base,
+			abilitySubstitution: ability.substitution,
+			effectiveAbility: ability.total,
+			proficiency,
+			intrinsicLocal,
+			passiveFeatureContributions,
+			activeStateContributions,
+			externalItemContributions,
+			total,
+		};
 	}
 
 	getAbilityBase (ability) {
@@ -39120,6 +39257,116 @@ class CharacterSheetState {
 	getAttacks () { return [...this._data.attacks]; }
 
 	/**
+	 * Build the canonical attack descriptor for an equipped inventory weapon.
+	 * `attackBonus`/`damageBonus` are intrinsic-only: effective source-item bonuses,
+	 * upgrades, projected materials, and the item's custom flat value.
+	 * @param {object} weapon
+	 * @returns {object|null}
+	 */
+	buildAutoAttackFromWeapon (weapon) {
+		if (!weapon) return null;
+
+		const overrides = weapon.attackOverrides || {};
+		const properties = overrides.properties ?? weapon.property ?? weapon.properties ?? [];
+		const typeBase = String(weapon.type || "").split("|")[0].toUpperCase();
+		const isRanged = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "A")
+			|| ["R", "RW"].includes(typeBase)
+			|| weapon.isMelee === false;
+		const isThrown = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "T");
+		const hasFinesse = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "F");
+		const isMonkWeapon = !!this.isMonkWeapon?.(weapon);
+		const defaultAbility = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");
+		const effectiveBonuses = this.getEffectiveItemBonuses?.(weapon.id) || {};
+		const num = value => {
+			const parsed = Number(value);
+			return Number.isFinite(parsed) ? parsed : 0;
+		};
+		const intrinsicAttack = num(effectiveBonuses.totalAttackBonus)
+			+ num(weapon.customAttackBonus);
+		const intrinsicDamage = num(effectiveBonuses.totalDamageBonus)
+			+ num(weapon.customDamageBonus);
+
+		let damage = this.getWeaponDamageDie(weapon);
+		if (isMonkWeapon) {
+			const martialArtsDie = this.getFeatureCalculations?.()?.martialArtsDie;
+			const getMaximum = die => {
+				const match = String(die || "").match(/(\d+)d(\d+)/);
+				return match ? Number(match[1]) * Number(match[2]) : 0;
+			};
+			if (getMaximum(martialArtsDie) > getMaximum(damage)) damage = martialArtsDie;
+		}
+
+		const damageType = weapon.dmgType
+			? (Parser.dmgTypeToFull?.(weapon.dmgType) || weapon.dmgType)
+			: (weapon.damageType || (weapon.damage ? weapon.damage.split(" ").slice(1).join(" ") : null) || "slashing");
+		const range = overrides.range ?? weapon.range ?? (isRanged ? "80/320 ft." : "5 ft.");
+		const reachMatch = !isRanged ? /^\s*(\d+(?:\.\d+)?)\s*ft\b/i.exec(String(range || "")) : null;
+		const sourceFeature = weapon.sourceFeature || weapon._generatedItemProvenance?.sourceFeature || null;
+
+		return {
+			id: `auto_${weapon.id}`,
+			name: overrides.name ?? weapon.name,
+			source: weapon.source,
+			isMelee: overrides.isMelee ?? !isRanged,
+			isRanged: overrides.isMelee == null ? isRanged : !overrides.isMelee,
+			isThrown,
+			abilityMod: overrides.abilityMod ?? defaultAbility,
+			attackBonus: intrinsicAttack,
+			range,
+			reach: overrides.reach ?? (reachMatch ? Number(reachMatch[1]) : weapon.reach),
+			reachBonus: overrides.reachBonus ?? 0,
+			reachCondition: overrides.reachCondition ?? weapon.reachCondition,
+			damage: overrides.damage ?? damage,
+			damageType: overrides.damageType ?? damageType,
+			damageBonus: intrinsicDamage,
+			properties,
+			mastery: weapon.mastery || [],
+			countsAsMagical: !!(weapon.countsAsMagical || effectiveBonuses.countsAsMagical || effectiveBonuses.tags?.includes("Magical")),
+			actionType: weapon.actionType || "action",
+			sourceFeature,
+			isFeatureAttack: !!sourceFeature,
+			isAutoGenerated: true,
+			isMonkWeapon,
+			sourceItem: weapon,
+		};
+	}
+
+	/**
+	 * Resolve the rules-facing kind and range of an attack.
+	 * @param {object} attack
+	 * @returns {{kind: "weapon"|"unarmed"|"spell"|"other", isMelee: boolean, isRanged: boolean, isThrown: boolean}}
+	 */
+	getAttackClassification (attack) {
+		if (!attack) return {kind: "other", isMelee: false, isRanged: false, isThrown: false};
+		if (attack.isSpell || attack.isSpellAttack || attack.abilityMod === "spellcasting") {
+			return {kind: "spell", isMelee: false, isRanged: true, isThrown: false};
+		}
+
+		const range = String(attack.range || "").toLowerCase();
+		const properties = attack.properties || attack.property || [];
+		const isThrown = attack.isThrown === true
+			|| range.includes("/")
+			|| properties.some(prop => String(prop).split("|")[0].toUpperCase() === "T");
+		const isExplicitRanged = attack.isRanged === true
+			|| attack.type === "ranged"
+			|| (!attack.isMelee && /\d/.test(range) && !range.includes("reach") && range !== "melee");
+		const isMelee = !isExplicitRanged && (
+			attack.isMelee === true
+			|| attack.type === "melee"
+			|| range === "melee"
+			|| range.includes("reach")
+			|| range.includes("touch")
+			|| (!!range && !range.includes("/"))
+		);
+		return {
+			kind: attack.isUnarmedStrike ? "unarmed" : "weapon",
+			isMelee,
+			isRanged: !isMelee,
+			isThrown,
+		};
+	}
+
+	/**
 	 * Ensure the character has an unarmed strike attack.
 	 * For Monks, this uses their Martial Arts die and can use DEX.
 	 * For everyone else, it's 1 + STR bludgeoning damage.
@@ -50220,6 +50467,7 @@ class CharacterSheetState {
 			skillBonuses: {},
 			saveBonuses: {},
 			passiveBonuses: {},
+			criticalRange: null,
 			otherEffects: [],
 		};
 
@@ -50261,6 +50509,18 @@ class CharacterSheetState {
 		if (passiveBonusMatch) {
 			const skill = passiveBonusMatch[2].toLowerCase().replace(/\s+/g, "");
 			effects.passiveBonuses[skill] = parseInt(passiveBonusMatch[3], 10);
+		}
+
+		const critMatch = text.match(/(?:melee\s+)?weapon\s+attacks?(?:,\s*you)?\s+score\s+(?:a\s+)?critical\s+hits?\s+on\s+a\s+roll\s+of\s+(\d+)\s*[\u2013-]\s*20/i);
+		if (critMatch) {
+			const maximumMatch = text.match(/maximum\s+(\d+)\s*[\u2013-]\s*20/i);
+			effects.criticalRange = {
+				baseThreshold: parseInt(critMatch[1], 10),
+				expandIfImproved: /already\s+have\s+a\s+feature\s+that\s+increases\s+the\s+range\s+of\s+your\s+critical\s+hits/i.test(text) ? 1 : 0,
+				minimumThreshold: maximumMatch ? parseInt(maximumMatch[1], 10) : 2,
+				attackKinds: ["weapon"],
+				ranges: /\bmelee\s+weapon\s+attacks?\b/i.test(text) ? ["melee"] : ["melee", "ranged"],
+			};
 		}
 
 		return effects;
@@ -50765,32 +51025,42 @@ class CharacterSheetState {
 	 * Get the critical hit range (lowest number that crits)
 	 * Considers Champion Fighter, Battle Tactics, custom abilities, and other sources
 	 *
-	 * @param {"weapon"|"spell"} [kind] - The kind of attack being rolled. Weapon/Unarmed
-	 *   Strike attack sources of an expanded crit range (e.g. Champion's Improved/Superior
-	 *   Critical, a weapon's `critThreshold`) are scoped to `"weapon"` (the default) and
-	 *   never leak into spell attack rolls — 5e text is explicit that these expand the
-	 *   crit range only for "attack rolls with weapons and Unarmed Strikes". Homebrew
-	 *   active-state effects (`critRange` / `critRange:expand`) are intentionally left
-	 *   unscoped so broadly-worded custom abilities keep applying to any attack kind,
-	 *   as they did before this parameter was introduced.
+	 * @param {object|"weapon"|"unarmed"|"spell"} [opts] - Options, or a legacy kind string.
+	 * @param {object|null} [opts.attack]
+	 * @param {"weapon"|"unarmed"|"spell"} [opts.kind]
+	 * @param {boolean} [opts.includeItemThreshold=true]
 	 * @returns {number} The lowest roll that scores a critical hit (default 20)
 	 */
-	getCriticalRange (kind = "weapon") {
+	getCriticalRange (opts = {}) {
+		const isLegacyString = typeof opts === "string";
+		const isLegacyNoArg = arguments.length === 0;
+		if (isLegacyNoArg) this._legacyCriticalRangeReadCount = (this._legacyCriticalRangeReadCount || 0) + 1;
+		const normalized = isLegacyString
+			? {kind: opts}
+			: (opts && typeof opts === "object" ? opts : {});
+		const attack = normalized.attack || null;
+		const classification = attack ? this.getAttackClassification(attack) : null;
+		const kind = normalized.kind || classification?.kind || "weapon";
+		const includeItemThreshold = normalized.includeItemThreshold !== false;
 		let critRange = 20;
 		let totalExpansion = 0;
 
 		// Check Champion Fighter (already in getFeatureCalculations). Weapon/Unarmed
 		// Strike only — never applies to spell attacks (Improved/Superior Critical text).
 		const calcs = this.getFeatureCalculations();
-		if (kind !== "spell" && calcs.criticalRange && calcs.criticalRange < critRange) {
+		if ((kind === "weapon" || kind === "unarmed") && calcs.criticalRange && calcs.criticalRange < critRange) {
 			critRange = calcs.criticalRange;
 		}
 
-		// Check magic item critThreshold (e.g., Sword of Sharpness with critThreshold: 19).
-		// Weapon-only — an item's threshold describes attacks made with THAT weapon.
-		const itemCrit = this._data.itemBonuses?.critThreshold;
-		if (kind !== "spell" && itemCrit && itemCrit < critRange) {
-			critRange = itemCrit;
+		// A weapon's threshold belongs only to attacks made with that weapon. The legacy
+		// no-argument path retains the old character-wide minimum for compatibility, but
+		// all UI/roll consumers pass a concrete attack.
+		if (includeItemThreshold && kind === "weapon") {
+			let itemCrit = Number(attack?.critThreshold) || 0;
+			const sourceItemId = attack?.sourceItem?.id;
+			if (sourceItemId != null) itemCrit = Number(this.getEffectiveItemBonuses(sourceItemId)?.critThreshold) || itemCrit;
+			else if (isLegacyNoArg || isLegacyString) itemCrit = Number(this._data.itemBonuses?.critThreshold) || itemCrit;
+			if (itemCrit > 0 && itemCrit < critRange) critRange = itemCrit;
 		}
 
 		// Check active state effects for expanded crit range (e.g., Hexblade's Curse, homebrew).
@@ -50813,7 +51083,24 @@ class CharacterSheetState {
 			critRange = Math.max(1, critRange - totalExpansion);
 		}
 
+		const stanceCritical = this._getActiveStanceEffects?.()?.criticalRange;
+		if (stanceCritical && attack && kind === "weapon") {
+			const rangeKind = classification?.isThrown ? "ranged" : (classification?.isMelee ? "melee" : "ranged");
+			if (stanceCritical.attackKinds?.includes("weapon") && stanceCritical.ranges?.includes(rangeKind)) {
+				const candidate = critRange < 20 && stanceCritical.expandIfImproved
+					? Math.max(stanceCritical.minimumThreshold || 2, critRange - stanceCritical.expandIfImproved)
+					: stanceCritical.baseThreshold;
+				critRange = Math.min(critRange, candidate);
+			}
+		}
+
 		return critRange;
+	}
+
+	getLegacyCriticalRangeReadCount ({reset = false} = {}) {
+		const count = this._legacyCriticalRangeReadCount || 0;
+		if (reset) this._legacyCriticalRangeReadCount = 0;
+		return count;
 	}
 
 	/**
@@ -54957,6 +55244,162 @@ class CharacterSheetState {
 	// a magic weapon derived from a shortbow ("Frost Shortbow") still benefits.
 	// =========================================================================
 
+	_isWeaponLikeItem (item) {
+		if (!item) return false;
+		const typeBase = String(item.type || "").split("|")[0].toUpperCase();
+		return item.weapon === true
+			|| !!item.weaponCategory
+			|| ["M", "R", "MW", "RW"].includes(typeBase);
+	}
+
+	_getRegisteredItemModifierAxes (itemId) {
+		const sourceId = `item:${itemId}`;
+		const out = new Set();
+		for (const mod of this._data.namedModifiers || []) {
+			if (mod?.sourceFeatureId !== sourceId) continue;
+			const axis = String(mod._baseType || mod.modType || mod.type || "").split(":")[0];
+			if (axis === "attack" || axis === "damage") out.add(axis);
+		}
+		return out;
+	}
+
+	static _getExternalItemBonusScope (scopeText) {
+		const text = String(scopeText || "").toLowerCase();
+		const hasUnarmed = /\bunarmed strikes?\b/.test(text);
+		const hasWeapon = /\bweapons?\b|\bweapon attacks?\b/.test(text);
+		const attackKinds = hasUnarmed && !hasWeapon ? ["unarmed"] : ["weapon", ...(hasUnarmed ? ["unarmed"] : [])];
+		const hasMelee = /\bmelee weapons?\b/.test(text);
+		const hasRanged = /\branged weapons?\b/.test(text);
+		const isEveryWeapon = /\bevery weapon\b|\ball weapons?\b/.test(text);
+		const ranges = !isEveryWeapon && hasMelee !== hasRanged
+			? [hasMelee ? "melee" : "ranged"]
+			: ["melee", "ranged"];
+		return {attackKinds, ranges};
+	}
+
+	/**
+	 * Normalize passive non-weapon item bonuses into explicit attack/damage scopes.
+	 * Weapon-local and ammunition bonuses never enter this path.
+	 * @param {object} inv
+	 * @returns {Array<object>}
+	 */
+	_getExternalItemBonusDescriptors (inv) {
+		if (!this._isItemEffectsActive(inv)) return [];
+		const item = inv?.item || inv;
+		if (!item || this._isWeaponLikeItem(item) || this._isAmmunitionItem(item)) return [];
+
+		const num = value => {
+			const parsed = Number(String(value ?? "").replace(/\s/g, ""));
+			return Number.isFinite(parsed) ? parsed : 0;
+		};
+		const attackValue = num(item.bonusWeapon) + num(item.bonusWeaponAttack);
+		const structuredDamageValue = num(item.bonusWeapon) + num(item.bonusWeaponDamage);
+		if (!attackValue && !structuredDamageValue) return [];
+
+		const registeredAxes = this._getRegisteredItemModifierAxes(inv.id);
+		const hasWeaponScopedDamage = this._getItemWeaponScopedDamageSpecs(item).length > 0;
+		const entryText = CharacterSheetState._getItemEntryText(item.entries, {skipTables: true});
+		const text = `${entryText} ${item.description || ""}`.replace(/\s+/g, " ").trim();
+		const sentences = text
+			.split(/(?<=[.!?])\s+/)
+			.filter(sentence => /\byou\s+(?:gain|have|receive)\b/i.test(sentence));
+		const descriptors = [];
+		const push = ({axis, value, scopeText, scopeOrigin}) => {
+			if (!value || registeredAxes.has(axis) || (axis === "damage" && hasWeaponScopedDamage)) return;
+			const scope = CharacterSheetState._getExternalItemBonusScope(scopeText);
+			descriptors.push({
+				itemId: inv.id,
+				name: item.name || inv.name || "Item",
+				value,
+				axis,
+				...scope,
+				scopeOrigin,
+			});
+		};
+
+		let hasAttackText = false;
+		let hasDamageText = false;
+		for (const sentence of sentences) {
+			const shared = /\bbonus to attack(?: rolls)? and (?:the )?damage rolls\b([^.]*)/i.exec(sentence);
+			if (shared) {
+				hasAttackText = true;
+				hasDamageText = true;
+				push({axis: "attack", value: attackValue, scopeText: shared[1], scopeOrigin: "authored-text"});
+				push({
+					axis: "damage",
+					value: structuredDamageValue || attackValue,
+					scopeText: shared[1],
+					scopeOrigin: "authored-text",
+				});
+				continue;
+			}
+
+			const attack = /\bbonus to attack rolls\b(.*?)(?=\band\s+(?:a\s+)?[+\-−]?\d+\s+bonus to damage rolls\b|$)/i.exec(sentence);
+			if (attack) {
+				hasAttackText = true;
+				push({axis: "attack", value: attackValue, scopeText: attack[1], scopeOrigin: "authored-text"});
+			}
+			const damage = /\bbonus to damage rolls\b([^.]*)/i.exec(sentence);
+			if (damage) {
+				hasDamageText = true;
+				push({
+					axis: "damage",
+					value: structuredDamageValue || attackValue,
+					scopeText: damage[1],
+					scopeOrigin: "authored-text",
+				});
+			}
+		}
+
+		// Custom data may deliberately provide the structured field without prose. In that
+		// case use the field's ordinary weapon-only meaning. Catalog prose which describes
+		// an activated/third-party benefit (rather than "you gain") is not auto-applied.
+		if (!text) {
+			if (!hasAttackText) push({axis: "attack", value: attackValue, scopeText: "", scopeOrigin: "field-default"});
+			if (!hasDamageText && structuredDamageValue) {
+				push({axis: "damage", value: structuredDamageValue, scopeText: "", scopeOrigin: "field-default"});
+			}
+		}
+
+		return descriptors;
+	}
+
+	_externalItemBonusAppliesToAttack (descriptor, attack) {
+		const classification = this.getAttackClassification(attack);
+		if (classification.kind === "spell" || classification.kind === "other") return false;
+		if (!descriptor.attackKinds.includes(classification.kind)) return false;
+		const rangeKind = classification.isThrown ? "ranged" : (classification.isMelee ? "melee" : "ranged");
+		return descriptor.ranges.includes(rangeKind);
+	}
+
+	getExternalItemAttackContributions (attack) {
+		if (!attack || this.getAttackClassification(attack).kind === "spell") return [];
+		const sourceItemId = attack.sourceItem?.id;
+		const out = [];
+		for (const inv of this._data.inventory || []) {
+			if (sourceItemId != null && String(inv.id) === String(sourceItemId)) continue;
+			for (const descriptor of this._getExternalItemBonusDescriptors(inv)) {
+				if (descriptor.axis !== "attack" || !this._externalItemBonusAppliesToAttack(descriptor, attack)) continue;
+				out.push(descriptor);
+			}
+		}
+		return out;
+	}
+
+	getExternalItemDamageContributions (attack) {
+		if (!attack || this.getAttackClassification(attack).kind === "spell") return [];
+		const sourceItemId = attack.sourceItem?.id;
+		const out = [];
+		for (const inv of this._data.inventory || []) {
+			if (sourceItemId != null && String(inv.id) === String(sourceItemId)) continue;
+			for (const descriptor of this._getExternalItemBonusDescriptors(inv)) {
+				if (descriptor.axis !== "damage" || !this._externalItemBonusAppliesToAttack(descriptor, attack)) continue;
+				out.push(descriptor);
+			}
+		}
+		return out;
+	}
+
 	/**
 	 * Resolve a weapon's normalized base-item name. Prefers the explicit `baseItem`
 	 * reference ("shortbow|phb" → "shortbow"); falls back to the weapon's own name.
@@ -55062,27 +55505,43 @@ class CharacterSheetState {
 	 * riders remain roll-time concerns and are deliberately excluded.
 	 *
 	 * @param {object} attack
-	 * @returns {{base: number, feature: number, itemContributions: Array<{name: string, value: number}>, item: number, state: number, rage: number, hybrid: number, total: number}}
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.includeActiveStates=true]
+	 * @param {boolean} [opts.includePassiveFeatures=true]
+	 * @param {boolean} [opts.includeExternalItems=true]
+	 * @returns {{base: number, feature: number, itemContributions: Array<{name: string, value: number}>, externalItemContributions: Array<{name: string, value: number}>, item: number, state: number, rage: number, hybrid: number, total: number}}
 	 */
-	getWeaponDisplayDamageBreakdown (attack) {
-		if (!attack) return {base: 0, feature: 0, itemContributions: [], item: 0, state: 0, rage: 0, hybrid: 0, total: 0};
+	getWeaponDisplayDamageBreakdown (
+		attack,
+		{
+			includeActiveStates = true,
+			includePassiveFeatures = true,
+			includeExternalItems = true,
+		} = {},
+	) {
+		if (!attack) return {base: 0, feature: 0, itemContributions: [], externalItemContributions: [], item: 0, state: 0, rage: 0, hybrid: 0, total: 0};
 
 		const baseRaw = Number(attack.damageBonus);
 		const base = Number.isFinite(baseRaw) ? baseRaw : 0;
-		const feature = this.getNamedModifiersByType("damage", {includeConditional: false})
-			.filter(mod => !mod.manual && !mod.isManual && !mod.requiresChoice && !mod.requiresActivation && !mod.oncePerTurn && mod.perTurn !== true && !mod.critOnly && !mod.onCrit)
-			.reduce((sum, mod) => sum + (typeof mod.value === "number" && Number.isFinite(mod.value) ? mod.value : 0), 0);
+		const feature = includePassiveFeatures
+			? this.getNamedModifiersByType("damage", {includeConditional: false})
+				.filter(mod => !mod.manual && !mod.isManual && !mod.requiresChoice && !mod.requiresActivation && !mod.oncePerTurn && mod.perTurn !== true && !mod.critOnly && !mod.onCrit)
+				.reduce((sum, mod) => sum + (typeof mod.value === "number" && Number.isFinite(mod.value) ? mod.value : 0), 0)
+			: 0;
 		const itemContributions = this.getItemWeaponScopedDamageContributions(attack)
 			.filter(it => typeof it.value === "number" && Number.isFinite(it.value));
-		const item = itemContributions.reduce((sum, it) => sum + it.value, 0);
+		const externalItemContributions = includeExternalItems
+			? this.getExternalItemDamageContributions(attack)
+				.filter(it => typeof it.value === "number" && Number.isFinite(it.value))
+			: [];
+		const item = [...itemContributions, ...externalItemContributions].reduce((sum, it) => sum + it.value, 0);
 		const weaponId = attack.riteWeaponId || attack.id;
-		const stateRaw = this.getBonusFromStates("damage", {weaponId});
+		const stateRaw = includeActiveStates ? this.getBonusFromStates("damage", {weaponId}) : 0;
 		const state = typeof stateRaw === "number" && Number.isFinite(stateRaw) ? stateRaw : 0;
-		const isMeleeWeapon = !attack.isSpell
-			&& !attack.isRanged
-			&& this.getAttackReach(attack, {meleeReach: CharacterSheetState.BASE_MELEE_REACH}) != null;
-		const rage = this.getRageDamageBonus(isMeleeWeapon, attack.abilityMod || "str");
-		const hybrid = this.isStateTypeActive("hybridTransformation") && isMeleeWeapon
+		const classification = this.getAttackClassification(attack);
+		const isMeleeWeapon = classification.kind === "weapon" && classification.isMelee && !classification.isThrown;
+		const rage = includeActiveStates ? this.getRageDamageBonus(isMeleeWeapon, attack.abilityMod || "str") : 0;
+		const hybrid = includeActiveStates && this.isStateTypeActive("hybridTransformation") && isMeleeWeapon
 			? (Number(this.getFeatureCalculation("hybridDamageBonus")) || 0)
 			: 0;
 
@@ -55090,6 +55549,7 @@ class CharacterSheetState {
 			base,
 			feature,
 			itemContributions,
+			externalItemContributions,
 			item,
 			state,
 			rage,
@@ -55103,8 +55563,8 @@ class CharacterSheetState {
 	 * @param {object} attack
 	 * @returns {number}
 	 */
-	getWeaponDisplayDamageBonus (attack) {
-		return this.getWeaponDisplayDamageBreakdown(attack).total;
+	getWeaponDisplayDamageBonus (attack, opts) {
+		return this.getWeaponDisplayDamageBreakdown(attack, opts).total;
 	}
 
 	/**

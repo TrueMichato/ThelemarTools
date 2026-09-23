@@ -94,7 +94,7 @@ describe("resolveFeatureHoverSources for subclass features (Bug 12)", () => {
 describe("item hover routing", () => {
 	test("Overview auto-attacks retain the source item and use the shared item hover", () => {
 		const source = readFileSync(resolve(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
-		expect(source).toMatch(/sourceItem:\s*weapon/);
+		expect(source).toMatch(/buildAutoAttackFromWeapon\?\.\(weapon\)/);
 		expect(source).toMatch(/buildItemHoverNameHtml\(attack\.sourceItem \|\| attack\)/);
 		expect(source).not.toMatch(/getHoverElementAttributes\(\{page:\s*UrlUtil\.PG_ITEMS/);
 	});
