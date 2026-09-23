@@ -102,6 +102,11 @@ body:not(.tgtt-filter-active) .tgtt-winner {
 	border-color: #666;
 }
 
+.tgtt-filter-pill:focus-visible {
+	outline: 2px solid #d9b257;
+	outline-offset: 2px;
+}
+
 /* Include state (yes) - teal */
 .tgtt-filter-pill[data-state="yes"] {
 	background-color: #005E66;

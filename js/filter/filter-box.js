@@ -351,7 +351,7 @@ export class FilterBox extends ProxyBase {
 		</div>
 		<hr class="ve-w-100 ve-m-0 ve-mb-2">
 
-		<div class="ve-ui-modal__scroller ve-smooth-scroll ve-px-1">
+		<div class="ve-ui-modal__scroller ve-smooth-scroll ve-px-1" data-filter-box-modal>
 			${children}
 		</div>
 		<hr class="ve-my-1 ve-w-100">
