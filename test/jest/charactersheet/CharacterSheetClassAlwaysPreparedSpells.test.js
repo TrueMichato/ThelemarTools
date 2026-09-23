@@ -417,6 +417,49 @@ describe("Class-level always-prepared spells — Bard Words of Creation", () => 
 });
 
 describe("Class-level always-prepared spells — collision ownership", () => {
+	test("a later Respec spell choice converts a pure class grant into a reversible player-owned overlay", () => {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state._data.classes = [{name: "Bard", source: "XPHB", level: 20, subclass: null}];
+		state.setClassCatalog([getRealBard("PHB"), getRealBard("XPHB"), getRealBard("TGTT")]);
+		state.applyClassFeatureEffects();
+		const selection = {name: "Power Word Heal", source: "XPHB", level: 9};
+		state.claimProgressionOwnership("spells", selection, "preparedSpells:Bard:19");
+		state.addSpell({
+			...selection,
+			school: "E",
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Bard",
+			prepared: true,
+		}, true);
+
+		let heal = state.getSpellsKnown().find(spell => spell.name === "Power Word Heal");
+		expect(heal).toMatchObject({
+			grantedByClass: false,
+			alwaysPrepared: true,
+			prepared: true,
+			sourceFeature: "Bard Spells",
+			classGrantOriginalMetadata: {
+				alwaysPrepared: false,
+				prepared: true,
+				sourceFeature: "Prepared Spells",
+				sourceClass: "Bard",
+			},
+		});
+
+		state._data.classes[0].level = 19;
+		state.applyClassFeatureEffects();
+		heal = state.getSpellsKnown().find(spell => spell.name === "Power Word Heal");
+		expect(heal).toMatchObject({
+			grantedByClass: false,
+			alwaysPrepared: false,
+			prepared: true,
+			sourceFeature: "Prepared Spells",
+			sourceClass: "Bard",
+		});
+		expect(state._getProgressionOwnershipEntry("spells", selection)?.sources).toContain("preparedSpells:Bard:19");
+	});
+
 	test("a player-chosen cantrip is temporarily class-granted and restored on teardown", () => {
 		const state = newClericState({level: 1});
 		state.addCantrip({
@@ -449,6 +492,40 @@ describe("Class-level always-prepared spells — collision ownership", () => {
 			sourceClass: "Cleric",
 		});
 		expect(thaumaturgy.classGrantOwners).toBeUndefined();
+	});
+
+	test("a later Respec cantrip choice converts a pure class grant into a reversible player-owned overlay", () => {
+		const state = newClericState({level: 1});
+		state.setClassCatalog([tgttClericCatalogEntry()]);
+		state.applyClassFeatureEffects();
+		const selection = {name: "Thaumaturgy", source: "XPHB", level: 0};
+		state.claimProgressionOwnership("cantrips", selection, "cantrips:Cleric:1");
+		state.addCantrip({
+			...selection,
+			school: "T",
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Cleric",
+		});
+
+		let thaumaturgy = state.getCantripsKnown().find(spell => spell.name === "Thaumaturgy");
+		expect(thaumaturgy).toMatchObject({
+			grantedByClass: false,
+			sourceFeature: "Cleric Spells",
+			classGrantOriginalMetadata: {
+				sourceFeature: "Cantrips Known",
+				sourceClass: "Cleric",
+			},
+		});
+
+		state._data.classes = [];
+		state.applyClassFeatureEffects();
+		thaumaturgy = state.getCantripsKnown().find(spell => spell.name === "Thaumaturgy");
+		expect(thaumaturgy).toMatchObject({
+			grantedByClass: false,
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Cleric",
+		});
+		expect(state._getProgressionOwnershipEntry("cantrips", selection)?.sources).toContain("cantrips:Cleric:1");
 	});
 
 	test("a colliding subclass grant keeps its attribution so subclass teardown can remove it", () => {

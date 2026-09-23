@@ -18472,7 +18472,7 @@ class CharacterSheetState {
 	_captureClassSpellGrantOriginalMetadata (spell) {
 		if (Object.hasOwn(spell, "classGrantOriginalMetadata")) return;
 		const original = {};
-		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) {
+		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"]) {
 			if (Object.hasOwn(spell, key)) original[key] = spell[key];
 		}
 		spell.classGrantOriginalMetadata = original;
@@ -18481,10 +18481,31 @@ class CharacterSheetState {
 	_restoreClassSpellGrantOriginalMetadata (spell) {
 		if (!Object.hasOwn(spell, "classGrantOriginalMetadata")) return;
 		const original = spell.classGrantOriginalMetadata || {};
-		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass"]) delete spell[key];
+		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"]) delete spell[key];
 		Object.assign(spell, original);
 		delete spell.classGrantOriginalMetadata;
 		delete spell.classGrantOwners;
+	}
+
+	_promoteClassSpellGrantToPlayerOverlay (existing, incoming, {isCantrip = false, prepared = false} = {}) {
+		if (!existing?.grantedByClass
+			|| Object.hasOwn(existing, "classGrantOriginalMetadata")
+			|| !CharacterSheetClassUtils.isPlayerChosenSpell(incoming)) return;
+
+		const original = {
+			sourceFeature: incoming.sourceFeature,
+			sourceClass: incoming.sourceClass ?? null,
+		};
+		for (const key of ["sourceSubclass", "spellcastingAbility"]) {
+			if (Object.hasOwn(incoming, key)) original[key] = incoming[key];
+		}
+		if (!isCantrip) {
+			original.alwaysPrepared = !!incoming.alwaysPrepared;
+			original.prepared = !!prepared;
+		}
+
+		existing.classGrantOriginalMetadata = original;
+		existing.grantedByClass = false;
 	}
 
 	_applyClassSpellGrantMetadata (spell, desiredGrant, {isCantrip = false} = {}) {
@@ -18863,6 +18884,7 @@ class CharacterSheetState {
 		if (existing) {
 			// Coalesce: fill missing enrichment + grant/prepared flags without stealing the
 			// survivor's ownership (never force grantedByClass onto a player-owned entry).
+			this._promoteClassSpellGrantToPlayerOverlay(existing, spell, {prepared: wantPrepared});
 			this._mergeSpellMetadata(existing, spell);
 			if (wantPrepared && !existing.prepared) existing.prepared = true;
 		} else {
@@ -18902,6 +18924,7 @@ class CharacterSheetState {
 		if (existing) {
 			// Coalesce a case/edition-casing variant into the existing cantrip, filling
 			// missing enrichment + grant metadata (including a per-cantrip casting ability).
+			this._promoteClassSpellGrantToPlayerOverlay(existing, spell, {isCantrip: true});
 			this._mergeSpellMetadata(existing, spell);
 		} else {
 			this._data.spellcasting.cantripsKnown.push({
