@@ -294,6 +294,8 @@ Structured reach adds the character-wide reach above the normal 5-foot baseline;
 attack-local reach is added separately and respects `reachCondition:
 "onYourTurn"`. The Reach property adds 5 feet only without structured reach.
 Thrown uses preserve their ranged text and return `null` from `getAttackReach()`.
+Spell attacks also return `null` regardless of their range string; an item/feature
+that increases melee reach must not rewrite a spell's authored range.
 
 ### Standing Weapon Damage Display
 

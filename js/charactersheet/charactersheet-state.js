@@ -8087,7 +8087,7 @@ class CharacterSheetState {
 	 */
 	getAttackReach (attack, {meleeReach, isOwnTurn = true} = {}) {
 		if (!attack) return null;
-		if (attack.isMelee === false) return null; // explicitly ranged
+		if (this.getAttackClassification(attack).kind === "spell" || attack.isMelee === false) return null;
 
 		const rangeStr = attack.range != null ? String(attack.range) : "";
 		const isThrown = rangeStr.includes("/");

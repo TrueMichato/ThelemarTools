@@ -14,14 +14,19 @@ import "../../../js/charactersheet/charactersheet-materials.js";
 import "../../../js/charactersheet/charactersheet-upgrades.js";
 import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-combat.js";
+import "../../../js/charactersheet/charactersheet-spells.js";
 import {CharacterSheetPlayMode} from "../../../js/charactersheet/charactersheet-playmode.js";
+import {CharacterSheetPdf} from "../../../js/charactersheet/charactersheet-pdf.js";
 
 const CharacterSheetState = globalThis.CharacterSheetState;
 const CharacterSheetCombat = globalThis.CharacterSheetCombat;
+const CharacterSheetSpells = globalThis.CharacterSheetSpells;
 
 const TGTT = JSON.parse(fs.readFileSync(new URL("../../../homebrew/TravelersGuidetoThelemar.json", import.meta.url)));
 const MOORCHLYNE = JSON.parse(fs.readFileSync(new URL("../../../homebrew/Moorchlyne Ioun Stones.json", import.meta.url)));
 const ITEM_UPGRADES = JSON.parse(fs.readFileSync(new URL("../../../data/itemupgrades.json", import.meta.url))).itemUpgrade;
+const CATALOG_ITEMS = JSON.parse(fs.readFileSync(new URL("../../../data/items.json", import.meta.url))).item;
+const BASE_ITEMS = JSON.parse(fs.readFileSync(new URL("../../../data/items-base.json", import.meta.url))).baseitem;
 
 const IounSand = TGTT.itemMaterial.find(it => it.name === "Ioun Sand");
 const Obsidian = TGTT.itemMaterial.find(it => it.name === "Obsidian");
@@ -553,6 +558,161 @@ describe("attack-specific critical projection", () => {
 		expect(state.getCriticalRange({attack: chain})).toBe(17);
 		expect(state.getCriticalRange({attack: thrown})).toBe(20);
 		expect(state.getCriticalRange({attack: unarmed, kind: "unarmed"})).toBe(20);
+	});
+});
+
+describe("item bonus scope across attack kinds", () => {
+	it("keeps equipped melee reach off ranged spells in state, Combat, Play Mode, and PDF", () => {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		const charm = addItem(state, {
+			name: "Reach Charm",
+			source: "Custom",
+			type: "wondrous",
+			effects: [{type: "reach", value: 5}],
+		});
+		const sword = addItem(state, BASE_ITEMS.find(item => item.name === "Longsword" && item.source === "PHB"));
+		const melee = state.buildAutoAttackFromWeapon(sword);
+		const spell = {
+			name: "Ray of Frost",
+			isSpell: true,
+			isRanged: true,
+			abilityMod: "spellcasting",
+			range: "60 ft.",
+			damage: "1d8",
+			damageType: "cold",
+			attackBonus: 0,
+			damageBonus: 0,
+		};
+		state.addAttack(spell);
+		const spellAttack = state.getAttacks().find(attack => attack.name === spell.name);
+
+		expect(state.getAttackRangeProjection(melee).display).toBe("10 ft.");
+		expect(state.getAttackClassification(spellAttack).kind).toBe("spell");
+		expect(state.getAttackReach(spellAttack)).toBeNull();
+		expect(state.getAttackRangeProjection(spellAttack).display).toBe("60 ft.");
+		const touchSpell = {...spellAttack, isMelee: true, isRanged: false, range: "Touch"};
+		expect(state.getAttackReach(touchSpell)).toBeNull();
+		expect(state.getAttackRangeProjection(touchSpell).display).toBe("Touch");
+
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._state = state;
+		combat._page = {};
+		combat._channelCantripsCache = [];
+		const row = combat._renderAttackItem(spellAttack, {meleeReach: state.getMeleeReach()});
+		expect(row.outerHTML).toContain("60 ft.");
+		expect(row.outerHTML).not.toContain("10 ft.");
+
+		const elements = [];
+		const playMode = Object.create(CharacterSheetPlayMode.prototype);
+		playMode._state = state;
+		playMode._page = {};
+		playMode._elActionsHub = e_({});
+		playMode._makeCard = parent => {
+			const card = e_({});
+			parent.appendChild(card);
+			return card;
+		};
+		playMode._ce = (tag, className, parent) => {
+			const element = e_({tag, clazz: className});
+			element.className = className;
+			parent?.appendChild(element);
+			elements.push(element);
+			return element;
+		};
+		playMode._getEntityNote = () => "";
+		playMode._setIcon = () => {};
+		playMode._makeClickable = () => {};
+		playMode._isFavorite = () => false;
+		playMode._renderAttacks();
+		expect(elements.filter(el => el.className === "pm-attack__range").map(el => el.textContent))
+			.toEqual(expect.arrayContaining(["10 ft.", "60 ft."]));
+
+		const pdf = new CharacterSheetPdf(state)._renderAttacks();
+		expect(pdf).toMatch(/Ray of Frost<\/td>[\s\S]*?<td class="pdf-atk__range">60 ft\.<\/td>/);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(JSON.parse(JSON.stringify(state.toJson())));
+		expect(restored.getAttackRangeProjection(restored.getAttacks().find(attack => attack.name === spell.name)).display).toBe("60 ft.");
+		restored.setItemEquipped(charm.id, false);
+		expect(restored.getAttackRangeProjection(restored.buildAutoAttackFromWeapon(restored.getItems().find(item => item.id === sword.id))).display).toBe("5 ft.");
+		expect(restored.getAttackRangeProjection(restored.getAttacks().find(attack => attack.name === spell.name)).display).toBe("60 ft.");
+	});
+
+	it("keeps a catalog weapon's crit, to-hit, and damage on its own attack and roll after save/load", async () => {
+		const state = new CharacterSheetState();
+		state.addClass({name: "Fighter", source: "PHB", level: 5});
+		state.setAbilityBase("str", 18);
+		const kas = addItem(state, CATALOG_ITEMS.find(item => item.name === "Sword of Kas" && item.source === "XDMG"), {attuned: true});
+		const plain = addItem(state, BASE_ITEMS.find(item => item.name === "Longsword" && item.source === "PHB"));
+		const thrown = addItem(state, BASE_ITEMS.find(item => item.name === "Handaxe" && item.source === "PHB"));
+		const attacks = () => [
+			state.buildAutoAttackFromWeapon(state.getItems().find(item => item.id === kas.id)),
+			state.buildAutoAttackFromWeapon(state.getItems().find(item => item.id === plain.id)),
+			state.buildAutoAttackFromWeapon(state.getItems().find(item => item.id === thrown.id)),
+			{name: "Unarmed Strike", isMelee: true, isUnarmedStrike: true, abilityMod: "str", attackBonus: 0, damageBonus: 0},
+			{name: "Ray of Frost", isSpell: true, isRanged: true, range: "60 ft.", abilityMod: "spellcasting", attackBonus: 0, damageBonus: 0},
+		];
+		const check = current => {
+			const handaxe = current[2];
+			expect(current.map(attack => state.getCriticalRange({attack}))).toEqual([19, 20, 20, 20, 20]);
+			expect(current.map(attack => state.getAttackBonusBreakdown(attack).intrinsicLocal)).toEqual([3, 0, 0, 0, 0]);
+			expect(current.map(attack => state.getWeaponDisplayDamageBonus(attack))).toEqual([3, 0, 0, 0, 0]);
+			expect(state.getAttackRangeProjection(handaxe).display).toBe(handaxe.range);
+			expect(state.getLegacyCriticalRangeReadCount()).toBe(0);
+		};
+		check(attacks());
+		const [enhanced, normal, handaxe, unarmed, spell] = attacks();
+		const combat = Object.create(CharacterSheetCombat.prototype);
+		combat._state = state;
+		combat._cachedAttacks = [enhanced, normal, handaxe, unarmed, spell];
+		combat._battleTacticToggles = {};
+		combat._flankingEnabled = false;
+		combat._channelCantripsCache = [];
+		const shown = [];
+		combat._page = {
+			rollD20: () => ({roll: 19, mode: "normal"}),
+			getModeLabel: () => "",
+			formatD20Breakdown: () => "",
+			pAnimateD20: () => {},
+			showDiceResult: result => { shown.push(result); return null; },
+			getModifierString: value => `${value >= 0 ? "+" : ""}${value}`,
+			saveCharacter: () => {},
+		};
+		combat._renderSneakAttackToggle = () => {};
+		combat._isSneakAttackAvailableThisTurn = () => false;
+		combat._runPostAttackHooks = async () => {};
+		combat._consumeOnAttackStates = () => {};
+		combat._clearPendingSpellRider = () => {};
+		const preview = attack => combat._renderAttackItem(attack, {meleeReach: state.getMeleeReach()}).outerHTML;
+		expect(preview(enhanced)).toContain("Crit 19+");
+		for (const attack of [normal, handaxe, unarmed, spell]) expect(preview(attack)).not.toContain("Crit 19+");
+		for (const attack of [enhanced, normal, handaxe, unarmed, spell]) {
+			await combat._rollAttack(attack.id, null);
+		}
+		expect(shown.map(result => result.resultNote)).toEqual(["Critical Hit!", "", "", "", ""]);
+		expect(shown.slice(0, 3).map(result => result.modifier)).toEqual([10, 7, 7]);
+		const spells = Object.create(CharacterSheetSpells.prototype);
+		spells._state = state;
+		spells._page = combat._page;
+		spells._rollSpellsTabAttack(null, "Wizard", 6);
+		expect(shown.at(-1)).toMatchObject({resultNote: "", roll: 19});
+		expect(state.getLegacyCriticalRangeReadCount()).toBe(0);
+
+		const restored = new CharacterSheetState();
+		restored.loadFromJson(JSON.parse(JSON.stringify(state.toJson())));
+		expect(restored.getItems().find(item => item.id === kas.id).critThreshold).toBe(19);
+		const restoredAttacks = [kas.id, plain.id, thrown.id].map(id =>
+			restored.buildAutoAttackFromWeapon(restored.getItems().find(item => item.id === id)));
+		expect([
+			...restoredAttacks,
+			{name: "Unarmed Strike", isMelee: true, isUnarmedStrike: true},
+			{name: "Ray of Frost", isSpell: true, isRanged: true, range: "60 ft."},
+		].map(attack => restored.getCriticalRange({attack}))).toEqual([19, 20, 20, 20, 20]);
+		restored.setItemEquipped(kas.id, false);
+		expect(restored.getItems().find(item => item.id === plain.id).equipped).toBe(true);
+		expect(restored.getCriticalRange({attack: restoredAttacks[1]})).toBe(20);
+		expect(restored.getAttackBonusBreakdown(restoredAttacks[1]).intrinsicLocal).toBe(0);
 	});
 });
 

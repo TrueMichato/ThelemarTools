@@ -442,5 +442,16 @@ describe("Spellcasting flow — Bug #9: Feywild Shard cast appends surge to the 
 		const toast = getLastToastContent();
 		expect(toast).not.toContain("Feywild Shard");
 	});
+
+	it("queries a spell-scoped critical range when resolving a cast attack", async () => {
+		spells._allSpells = [{name: "Fire Bolt", source: "XPHB", level: 0, duration: [{type: "instant"}], entries: ["ranged spell attack {@damage 1d10}"], spellAttack: ["R"]}];
+		page.rollD20.mockReturnValue({roll: 19});
+		const getCriticalRange = jest.spyOn(state, "getCriticalRange");
+
+		await spells._handleSpellEffects({name: "Fire Bolt", source: "XPHB", level: 0}, 0);
+
+		expect(getCriticalRange).toHaveBeenCalledWith({kind: "spell"});
+		expect(state.getLegacyCriticalRangeReadCount()).toBe(0);
+	});
 });
 // endregion

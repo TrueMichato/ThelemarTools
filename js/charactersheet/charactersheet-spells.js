@@ -4412,7 +4412,7 @@ class CharacterSheetSpells {
 					: initialRoll;
 				// Animate the spell-attack d20 (lands on the resolved roll).
 				await this._page.pAnimateDiceSpec?.({groups: [{sides: 20, values: [finalRoll]}]});
-				const criticalRange = this._state.getCriticalRange?.("spell") || 20;
+				const criticalRange = this._state.getCriticalRange?.({kind: "spell"}) || 20;
 				if (finalRoll >= criticalRange) await this._pApplyTriggeredFeatCriticalHit({spell, spellData});
 				const aimedText = aimedBonus ? ` + ${aimedBonus.total} aimed` : "";
 				const seekingText = normalizedCastMeta.attackMeta?.seekingRerollUsed
@@ -8899,7 +8899,7 @@ class CharacterSheetSpells {
 		const rollResult = this._page.rollD20({event, mode: stateMode, isAttack: true});
 		const total = rollResult.roll + totalBonus;
 
-		const critRange = this._state.getCriticalRange?.("spell") || 20;
+		const critRange = this._state.getCriticalRange?.({kind: "spell"}) || 20;
 		let resultClass = "";
 		let resultNote = "";
 		if (rollResult.roll >= critRange) {

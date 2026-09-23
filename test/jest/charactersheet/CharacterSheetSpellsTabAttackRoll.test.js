@@ -125,6 +125,17 @@ describe("_applySpellsTabAttackAffordance (Bug #3b)", () => {
 });
 
 describe("_rollSpellsTabAttack", () => {
+	test("queries the spell-specific critical range without the legacy kind-string API", () => {
+		const queried = [];
+		const page = makePage(19);
+		const spells = makeSpells(makeState({
+			getCriticalRange: opts => { queried.push(opts); return 20; },
+		}), page);
+		spells._rollSpellsTabAttack({}, "Wizard", 6);
+		expect(queried).toEqual([{kind: "spell"}]);
+		expect(page.diceResults[0].resultNote).not.toBe("Critical Hit!");
+	});
+
 	test("nat-20 within crit range flags a Critical Hit", () => {
 		const page = makePage(20);
 		const spells = makeSpells(makeState({getCriticalRange: () => 20}), page);

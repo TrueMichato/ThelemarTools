@@ -191,7 +191,10 @@ when the attack has no authored structured reach.
 
 Thrown uses retain their thrown range and return no melee reach. An attack-local
 reach value therefore cannot leak to another weapon; a character-wide boon still
-adds to each eligible melee attack independently.
+adds to each eligible melee attack independently. Spell attacks, including
+ranged spells with a distance such as "60 ft." and melee spell attacks with
+touch range, keep their authored range even when an equipped item grants
+additional melee reach.
 
 ### Rolling Attacks
 
@@ -252,7 +255,8 @@ natural 20 for this specific attack." Item thresholds are read only from that
 attack's source weapon. Champion-style features, active states, and stance
 effects are then composed according to their authored weapon/range scope, with
 any stated minimum threshold enforced. Spell attacks pass `{kind: "spell"}` and
-never inherit weapon-only critical ranges.
+never inherit weapon-only critical ranges, including when rolled directly from
+the Spells tab or while casting.
 
 ### Rolling Damage
 
