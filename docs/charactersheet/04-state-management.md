@@ -300,18 +300,27 @@ activeStates: [
     },
 ],
 
-// Opt-in target/effect records (for features such as TGTT Chained Fury).
-// Prompt-only attack riders do not create entries here.
+// Chained Fury creature bookkeeping is explicitly opt-in and defaults off.
+settings: {
+    chainedFuryTargetTracking: false,
+},
+
+// Only successful grapple/restraint outcomes are persisted.
+// Reminder-only riders do not create entries here.
 targetEffects: [
     {
         id: "chain-target-...",
         source: "chained-fury",
         targetName: "Ogre",
-        size: "large",
-        distance: 15,
+        effectType: "restrain",
         grappled: true,
         restrained: true,
-        recurringDamage: {amount: 6, type: "force"},
+        chainIndex: 0,
+        recurringDamage: {
+            amount: 6,
+            type: "force",
+            when: "start of each of its turns",
+        },
     },
 ],
 
@@ -943,4 +952,21 @@ The extractor deliberately skips comment lines: the JSDoc for the modifier shape
 
 ## Chained Fury target effects
 
-Target identity is persisted separately from active effects. Chained Fury records may remain as no-rider or shove-only records while chain occupancy counts only targets with an active grapple effect and a chain slot. Grapple and escape checks accept Strength or Dexterity against the current combat-method DC; Chain Imprisonment keeps its separate Strength save DC. Load, class/subclass changes, level changes, teardown, and rests reconcile derived DCs, range, size, occupancy, and recurring-damage state.
+`settings.chainedFuryTargetTracking` is read with strict `=== true`, so both new
+characters and older saves with no key start with tracking off. Spectral Chains
+attacks and every on-hit rider remain available in that mode; the sheet shows
+the live save DC and player-facing rule reminder without creating a target
+record.
+
+When the player opts in, the rider form records only a creature name and
+explicit failed/succeeded save outcomes. Missing outcomes never imply failure.
+Only successful grapples consume one of the two chains (four from Barbarian
+level 14); ordinary shove, resisted saves, and the removed target-only route do
+not persist records. Chain Imprisonment keeps its separate
+`8 + PB + CON` Strength save and recurring force-damage reminder.
+
+Legacy size, distance, movement, and shove-position fields remain load-compatible
+but are not authored or rendered by the current flow. Disabling tracking,
+ending Rage or Manifest Chains, unequipping/removing the generated chain item,
+losing the subclass, reducing capacity, or serializing an invalid state removes
+stale Chained Fury records and resets legacy movement bookkeeping.

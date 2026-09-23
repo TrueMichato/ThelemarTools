@@ -221,7 +221,7 @@ Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect
 
 | Subclass | Status | Key Features |
 |----------|--------|--------------|
-| **Path of the Chained Fury** | ✅ Complete | persistent generated Spectral Chains item, `chainDamageDie`, `chainRange`, `chainCount`, `chainRestrainDc`, `chainRestrainDamage`, `chainGrappleSizeBonus`, `grappleSizeUnlimited`, `grantedAttacks`, `attackOnHitOptions`, `attackActionAllowances` |
+| **Path of the Chained Fury** | ✅ Complete | persistent generated Spectral Chains item, reminder-first `attackOnHitOptions`, optional `chainedFuryTargetTracking`, `chainDamageDie`, `chainRange`, `chainCount`, finalized `chainGrappleDc`, `chainImprisonmentSaveDc`, `chainRecurringDamage`, `chainGrappleSizeBonus`, `grappleSizeUnlimited`, `grantedAttacks`, `attackActionAllowances` |
 
 #### Path of the Chained Fury — mechanical surface
 
@@ -237,6 +237,18 @@ exactly the RAW "they vanish when your rage ends". It inherits Rage's
 | 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + CON` and recurring damage equal to current Barbarian level |
 | 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
 | 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |
+
+Target bookkeeping is optional and defaults off. With it off, all attacks and
+riders still work and present concise rules reminders. With it on, only a
+creature name plus explicit save outcomes are collected; successful grapples
+occupy the authored two/four chain capacity and render as compact condition
+rows. The UI does not manage target size, distance, movement, escape rolls, or
+map positions.
+
+`chainGrappleDc` is finalized after the generic Combat Method DC calculation,
+so a higher spell save DC granted by Hexblade or Bladesinger is used correctly.
+Chain Imprisonment remains separate at `8 + PB + CON`, and its recurring force
+damage remains equal to Barbarian level.
 
 Damage die and range are read from the subclass's **`subclassTableGroups`** via
 `CharacterSheetClassUtils.getSubclassTableDice` / `getSubclassTableNumber`, never

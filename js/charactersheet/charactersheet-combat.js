@@ -2147,8 +2147,6 @@ class CharacterSheetCombat {
 			if (opt.save?.dc) bits.push(`DC ${opt.save.dc} ${Parser.attAbvToFull(opt.save.ability).slice(0, 3).toUpperCase()}`);
 			return bits.join(" — ");
 		});
-		const hasTargetAware = options.some(opt => opt.targetAware && opt.targetEffect?.source);
-
 		const didHit = await CharacterSheetModal.pGetUserBoolean({
 			title: `${ctx.attack?.name || "Attack"} — On Hit`,
 			htmlDescription: `Did this attack hit? On a hit you may use one of: ${labels.join("; ")}.`,
@@ -2160,23 +2158,13 @@ class CharacterSheetCombat {
 
 		const picked = await CharacterSheetModal.pGetUserEnum(/** @type {*} */ ({
 			title: `${ctx.attack?.name || "Attack"} — Choose an On-Hit Effect`,
-			values: [...labels, ...(hasTargetAware ? ["Track target only"] : []), "Skip"],
+			values: [...labels, "Skip"],
 			isResolveItem: false,
 			rollFollowup: ctx.rollFollowup,
 		}));
-		if (picked == null || picked > options.length || (picked === options.length && !hasTargetAware)) return;
+		if (picked == null || picked >= options.length) return;
 
-		const opt = picked === options.length
-			? (() => {
-				const base = options.find(it => it.targetAware && it.targetEffect?.source);
-				return base ? {
-					...base,
-					id: "target-only",
-					name: "Track target only",
-					targetEffect: {...base.targetEffect, effect: "target"},
-				} : null;
-			})()
-			: options[picked];
+		const opt = options[picked];
 		if (!opt) return;
 		if (opt.targetAware && opt.targetEffect?.source) {
 			await this._pOfferTargetEffect({...ctx, focusTrigger}, opt);
@@ -2201,8 +2189,8 @@ class CharacterSheetCombat {
 		const state = this._state;
 		const source = String(opt.targetEffect?.source || "").trim().toLowerCase();
 		const effect = String(opt.targetEffect?.effect || "target").trim().toLowerCase();
-		const metadata = state.getTargetEffectMetadata?.(source, effect) || {};
 		const existing = state.getTargetEffects?.({source}) || [];
+		const calc = state.getFeatureCalculations?.() || {};
 		const trigger = ctx.focusTrigger?.isConnected
 			? ctx.focusTrigger
 			: csGetAttackFocusTrigger(ctx.attack);
@@ -2240,83 +2228,87 @@ class CharacterSheetCombat {
 				resolve();
 				return true;
 			};
-			const targetOptions = existing.map(t => `<option value="${t.id}">${t.targetName} (${t.size})</option>`).join("");
+			const targetOptions = existing.map(t => `<option value="${t.id}">${t.targetName}</option>`).join("");
+			const isRestrain = effect === "restrain";
 			modalInner.innerHTML = `
 				<div class="cs-combat-target-effect" role="form" aria-label="Target effect">
-					<p class="ve-small ve-muted">${metadata.prompt || "Record the creature affected by this target-aware effect."}</p>
-					<label class="ve-form-label">Existing target
+					<p class="cs-combat-target-effect__lede">Optional bookkeeping only. Resolve the saves at the table, then record the result if you want the sheet to remember it.</p>
+					${existing.length ? `<label class="ve-form-label">Creature
 						<select class="form-control" data-target-id aria-label="Existing target">
-							<option value="">New target</option>${targetOptions}
+							<option value="">New creature</option>${targetOptions}
+						</select>
+					</label>` : ""}
+					<label class="ve-form-label">Creature name
+						<input class="form-control" data-target-name aria-label="Creature name" placeholder="Ogre, cultist, dragon...">
+					</label>
+					<label class="ve-form-label">Did the creature fail its grapple save against DC ${calc.chainGrappleDc || "—"}?
+						<select class="form-control" data-grapple-outcome aria-label="Grapple save outcome">
+							<option value="">Choose the outcome</option>
+							<option value="failed">Yes — it failed</option>
+							<option value="succeeded">No — it succeeded</option>
 						</select>
 					</label>
-					<label class="ve-form-label">Target name
-						<input class="form-control" data-target-name aria-label="Target name" placeholder="Goblin, ogre, ...">
-					</label>
-					<label class="ve-form-label">Size
-						<select class="form-control" data-target-size aria-label="Target size">
-							${["tiny", "small", "medium", "large", "huge", "gargantuan"].map(s => `<option value="${s}">${s[0].toUpperCase() + s.slice(1)}</option>`).join("")}
+					${isRestrain ? `<label class="ve-form-label">If grappled, did it fail the Chain Imprisonment Strength save against DC ${calc.chainImprisonmentSaveDc || calc.chainRestrainDc || "—"}?
+						<select class="form-control" data-restraint-outcome aria-label="Chain Imprisonment save outcome">
+							<option value="">Choose the outcome</option>
+							<option value="failed">Yes — it failed</option>
+							<option value="succeeded">No — it succeeded</option>
 						</select>
-					</label>
-					<label class="ve-form-label">Distance (ft.)
-						<input class="form-control" data-target-distance aria-label="Target distance in feet" type="number" min="0" max="${metadata.range || 30}" value="${metadata.range || 0}">
-					</label>
-					${opt.targetEffect?.effect === "grapple" || opt.targetEffect?.effect === "restrain" || opt.targetEffect?.effect === "control-shove" ? `<label class="ve-form-label">Grapple save ability
-						<select class="form-control" data-grapple-ability aria-label="Grapple save ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select>
-					</label>
-					<label class="ve-form-label">Grapple save total (optional)
-						<input class="form-control" data-grapple-save aria-label="Target Strength or Dexterity save total" type="number" placeholder="Leave blank if failed">
-					</label>` : ""}
-					${opt.targetEffect?.effect === "control-shove" ? `<label class="ve-form-label">Final distance (ft.)
-						<input class="form-control" data-final-distance aria-label="Declared final distance in feet" type="number" min="0" max="${state.getFeatureCalculations()?.chainRange || 30}" value="${state.getFeatureCalculations()?.chainRange || 0}">
-					</label>
-					<label class="ve-form-label">Shove direction
-						<select class="form-control" data-shove-direction aria-label="Declared shove direction"><option value="away">Away</option><option value="toward">Toward</option><option value="lateral">Lateral</option></select>
-					</label>` : ""}
-					${opt.targetEffect?.effect === "restrain" ? `<label class="ve-form-label">STR save total (optional)
-						<input class="form-control" data-restraint-save aria-label="Target Strength save total" type="number" placeholder="Leave blank if failed">
 					</label>` : ""}
 					<div class="ve-flex-h-right cs-combat-target-modal__footer mt-2">
 						<button class="cs-combat-btn" data-act="cancel">Cancel</button>
-						<button class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Apply effect</button>
+						<button class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Save result</button>
 					</div>
 				</div>`;
 			const targetSelect = modalInner.querySelector("[data-target-id]");
 			const nameInput = modalInner.querySelector("[data-target-name]");
-			const sizeInput = modalInner.querySelector("[data-target-size]");
-			const distanceInput = modalInner.querySelector("[data-target-distance]");
-			targetSelect.addEventListener("change", () => {
-				const target = existing.find(t => t.id === targetSelect.value);
+			targetSelect?.addEventListener("change", () => {
+				const target = existing.find(t => t.id === targetSelect?.value);
 				if (!target) return;
 				nameInput.value = target.targetName;
-				sizeInput.value = target.size;
-				distanceInput.value = target.distance ?? "";
 			});
 			modalInner.querySelector("[data-act=cancel]").addEventListener("click", async () => { finish(); await doClose(); });
 			modalInner.querySelector("[data-act=apply]").addEventListener("click", async () => {
-				const targetId = targetSelect.value || undefined;
-				const restraintSave = modalInner.querySelector("[data-restraint-save]")?.value;
+				const grappleOutcome = modalInner.querySelector("[data-grapple-outcome]")?.value;
+				const restraintOutcome = modalInner.querySelector("[data-restraint-outcome]")?.value;
+				if (!grappleOutcome) {
+					JqueryUtil.doToast({type: "warning", content: "Choose whether the creature failed its grapple save."});
+					return;
+				}
+				if (isRestrain && grappleOutcome === "failed" && !restraintOutcome) {
+					JqueryUtil.doToast({type: "warning", content: "Choose whether the creature failed its Chain Imprisonment save."});
+					return;
+				}
 				const result = state.applyTargetEffect({
-					targetId,
+					targetId: targetSelect?.value || undefined,
 					source,
 					targetName: nameInput.value.trim() || undefined,
-					size: sizeInput.value,
-					distance: Number(distanceInput.value),
 					riderId: opt.id,
 					targetEffect: {...opt.targetEffect, source, effect},
 					effect,
-					grappleSaveAbility: modalInner.querySelector("[data-grapple-ability]")?.value || "str",
-					grappleSaveTotal: modalInner.querySelector("[data-grapple-save]")?.value === "" ? null : Number(modalInner.querySelector("[data-grapple-save]")?.value),
-					restraintSaveTotal: restraintSave === "" || restraintSave == null ? null : Number(restraintSave),
-					finalDistance: modalInner.querySelector("[data-final-distance]")?.value === "" ? null : Number(modalInner.querySelector("[data-final-distance]")?.value),
-					shoveDirection: modalInner.querySelector("[data-shove-direction]")?.value || null,
+					grappleSaveFailed: grappleOutcome === "failed",
+					restraintSaveFailed: restraintOutcome ? restraintOutcome === "failed" : null,
 				});
 				if (!result.ok) {
-					JqueryUtil.doToast({type: "warning", content: `Cannot apply target effect: ${result.reason || "invalid target"}`});
+					const messages = {
+						"chain-capacity": "All available chains are already holding creatures.",
+						"target-name-required": "Enter a creature name before saving it.",
+						"tracking-disabled": "Optional chain tracking is currently off.",
+						"chains-inactive": "Rage, manifest, and equip your Spectral Chains before recording a creature.",
+						"effect-unavailable": "That Spectral Chains effect is not currently available.",
+						"effect-metadata-mismatch": "That Spectral Chains choice changed. Close this window and choose the hit effect again.",
+						"invalid-save-ability": "Choose Strength or Dexterity for the grapple save.",
+						"outcome-required": "Choose each required save outcome before saving.",
+					};
+					JqueryUtil.doToast({type: "warning", content: messages[result.reason] || "The creature result could not be saved."});
 					return;
 				}
 				finish();
 				await doClose();
-				JqueryUtil.doToast({type: "success", content: `${opt.name} applied to ${result.target.targetName}.`});
+				const outcome = result.target
+					? `${result.target.targetName} recorded as ${result.target.restrained ? "restrained" : "grappled"}.`
+					: "The creature resisted; no chain was recorded.";
+				JqueryUtil.doToast({type: "success", content: `${outcome} ${opt.description || ""}`.trim()});
 				this._page.renderCharacter?.();
 			});
 			csFocusModalOnOpen(modalInner, {preferSelector: "[data-target-name]"});
@@ -7237,175 +7229,119 @@ class CharacterSheetCombat {
 		const container = document.getElementById("charsheet-combat-chained-targets");
 		if (!section || !container) return;
 		container.setAttribute("role", "region");
-		container.setAttribute("aria-live", "polite");
-		container.setAttribute("aria-label", "Chained Fury targets");
-		const targets = this._state.getChainedTargets?.() || [];
+		container.setAttribute("aria-label", "Optional Chained Fury bookkeeping");
 		const calc = this._state.getFeatureCalculations?.() || {};
-		const isAvailable = !!calc.hasManifestChains && this._state.isStateTypeActive?.("manifestChains") && this._state.isStateTypeActive?.("rage");
-		section.style.display = isAvailable || targets.length ? "" : "none";
+		const isEligible = !!calc.hasManifestChains;
+		section.style.display = isEligible ? "" : "none";
 		container.innerHTML = "";
-		if (!targets.length) {
-			container.innerHTML = `<div class="ve-muted ve-small">No creatures chained. Choose a target-aware rider after a Spectral Chains hit.</div>`;
+		if (!isEligible) return;
+
+		const trackingEnabled = this._state.isChainedFuryTargetTrackingEnabled?.() === true;
+		const optIn = document.createElement("div");
+		optIn.className = "charsheet__chain-tracker-optin";
+		const optInCopy = document.createElement("div");
+		optInCopy.className = "charsheet__chain-tracker-optin-copy";
+		const optInTitle = document.createElement("div");
+		optInTitle.className = "bold";
+		optInTitle.textContent = "Remember chained creatures";
+		const optInDescription = document.createElement("div");
+		optInDescription.className = "ve-muted ve-small";
+		optInDescription.textContent = "Optional bookkeeping. Spectral Chains attacks and hit effects work normally without it.";
+		optInCopy.append(optInTitle, optInDescription);
+		optIn.appendChild(optInCopy);
+
+		const toggle = document.createElement("label");
+		toggle.className = "charsheet__chain-tracker-toggle";
+		const toggleInput = document.createElement("input");
+		toggleInput.type = "checkbox";
+		toggleInput.checked = trackingEnabled;
+		toggleInput.setAttribute("aria-label", "Remember chained creatures");
+		const toggleText = document.createElement("span");
+		toggleText.textContent = trackingEnabled ? "On" : "Off";
+		toggle.append(toggleInput, toggleText);
+		optIn.appendChild(toggle);
+		container.appendChild(optIn);
+
+		toggleInput.addEventListener("change", () => {
+			this._state.setChainedFuryTargetTrackingEnabled?.(toggleInput.checked);
+			this._page.saveCharacter?.();
+			this.renderChainedTargets();
+			container.querySelector(".charsheet__chain-tracker-toggle input")?.focus();
+		});
+		if (!trackingEnabled) return;
+
+		const targets = this._state.getChainedTargets?.() || [];
+		const targetState = this._state.getChainedTargetState?.() || {};
+		const summary = document.createElement("div");
+		summary.className = "charsheet__chain-tracker-summary";
+		summary.textContent = `${targetState.used || 0} of ${targetState.capacity || calc.chainCount || 0} chains holding creatures · Grapple DC ${targetState.grappleDc || calc.chainGrappleDc || "—"}`;
+		container.appendChild(summary);
+
+		const isAvailable = this._state.isStateTypeActive?.("manifestChains")
+			&& this._state.isStateTypeActive?.("rage")
+			&& this._state.getItems?.().some(it => it._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID && it.equipped);
+		if (!isAvailable) {
+			const idle = document.createElement("div");
+			idle.className = "charsheet__chain-tracker-empty ve-muted ve-small";
+			idle.textContent = "Tracking is ready. Rage, manifest, and equip your Spectral Chains to record a creature.";
+			container.appendChild(idle);
 			return;
 		}
-		const summary = document.createElement("div");
-		summary.className = "ve-muted ve-small mb-2";
-		const occupied = this._state.getChainedTargetState?.().used ?? targets.filter(it => it.chainIndex != null).length;
-		summary.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft.`;
-		container.appendChild(summary);
-		if (occupied >= Number(calc.chainCount || 0)) {
+		if (!targets.length) {
+			const empty = document.createElement("div");
+			empty.className = "charsheet__chain-tracker-empty ve-muted ve-small";
+			empty.textContent = "No creatures recorded. After a Spectral Chains hit, choose a grapple or restraint rider and save the outcome.";
+			container.appendChild(empty);
+			return;
+		}
+		if (targetState.used >= targetState.capacity) {
 			const warning = document.createElement("div");
-			warning.className = "ve-small cs-combat-target-warning mb-2";
+			warning.className = "charsheet__chain-tracker-warning ve-small";
 			warning.setAttribute("role", "status");
-			warning.textContent = "Chain capacity reached — release a grapple before adding another.";
+			warning.textContent = `All ${targetState.capacity} chains are holding creatures. Release one before recording another.`;
 			container.appendChild(warning);
 		}
+
 		for (const target of targets) {
 			const row = document.createElement("div");
-			row.className = "charsheet__chained-target-row ve-flex-v-center ve-flex-wrap gap-1";
+			row.className = "charsheet__chained-target-row";
 			row.dataset.targetId = target.id;
 			row.setAttribute("role", "group");
-			row.setAttribute("aria-label", `${target.targetName}, chained target`);
-			const label = document.createElement("span");
-			label.className = "bold";
-			label.textContent = target.targetName;
-			row.appendChild(label);
-			const meta = document.createElement("span");
-			meta.className = "ve-muted ve-small";
-			const status = target.restrained ? "restrained" : target.grappled ? "grappled" : target.shoved ? "shoved (no chain)" : "tracked";
-			meta.textContent = `${target.size} · ${status}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
-			row.appendChild(meta);
+			row.setAttribute("aria-label", `${target.targetName}, ${target.restrained ? "restrained" : "grappled"}`);
+
+			const details = document.createElement("div");
+			details.className = "charsheet__chained-target-details";
+			const name = document.createElement("span");
+			name.className = "charsheet__chained-target-name";
+			name.textContent = target.targetName;
+			const statuses = document.createElement("div");
+			statuses.className = "charsheet__chained-target-statuses";
+			for (const statusText of ["Grappled", ...(target.restrained ? ["Restrained"] : [])]) {
+				const status = document.createElement("span");
+				status.className = "charsheet__chained-target-status";
+				status.textContent = statusText;
+				statuses.appendChild(status);
+			}
+			details.append(name, statuses);
+			if (target.restrained && target.recurringDamage?.amount) {
+				const reminder = document.createElement("div");
+				reminder.className = "charsheet__chained-target-reminder";
+				reminder.textContent = `Start of its turn: ${target.recurringDamage.amount} ${target.recurringDamage.type || "force"} damage.`;
+				details.appendChild(reminder);
+			}
+			row.appendChild(details);
+
 			const release = document.createElement("button");
 			release.type = "button";
-			release.className = "ve-btn ve-btn-xs ve-btn-default ml-auto";
+			release.className = "ve-btn ve-btn-xs ve-btn-default charsheet__chained-target-release";
 			release.textContent = "Release";
-			release.style.minHeight = "44px";
-			release.title = `Release ${target.targetName}`;
-			release.setAttribute("aria-label", `Release chained target ${target.targetName}`);
+			release.setAttribute("aria-label", `Release ${target.targetName}`);
 			release.addEventListener("click", () => {
 				this._state.releaseChainedTarget(target.id);
 				this._page.saveCharacter?.();
 				this.renderChainedTargets();
 			});
 			row.appendChild(release);
-			const distance = document.createElement("input");
-			distance.type = "number";
-			distance.min = "0";
-			distance.max = String(calc.chainRange || 30);
-			distance.value = target.distance ?? "";
-			distance.className = "form-control input-xs ml-1";
-			distance.style.width = "min(5rem, 100%)";
-			distance.style.maxWidth = "100%";
-			distance.style.minHeight = "44px";
-			distance.setAttribute("aria-label", `New distance for ${target.targetName} in feet`);
-			row.appendChild(distance);
-			const move = document.createElement("button");
-			move.type = "button";
-			move.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
-			move.textContent = "Move";
-			move.style.minHeight = "44px";
-			move.setAttribute("aria-label", `Move ${target.targetName} within chain range`);
-			move.addEventListener("click", () => {
-				const doubleMovement = !!row.querySelector("[data-double-movement]")?.checked;
-				if (doubleMovement && !this._isActionTypeAvailable("bonus")) {
-					JqueryUtil.doToast({type: "warning", content: "Your bonus action has already been used this turn."});
-					return;
-				}
-				const result = this._state.moveChainedTarget(target.id, Number(distance.value), {doubleMovement});
-				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
-				else {
-					this._page.saveCharacter?.();
-					this.renderChainedTargets();
-				}
-			});
-			row.appendChild(move);
-			const doubleLabel = document.createElement("label");
-			doubleLabel.className = "ve-muted ve-small ml-1";
-			doubleLabel.innerHTML = `<input type="checkbox" data-double-movement aria-label="Spend bonus action to double chain-only movement"> Double`;
-			row.appendChild(doubleLabel);
-			if (target.restrained && target.recurringDamage?.amount) {
-				const damage = document.createElement("button");
-				damage.type = "button";
-				damage.className = "ve-btn ve-btn-xs ve-btn-warning ml-1";
-				damage.textContent = `Turn damage (${target.recurringDamage.amount})`;
-				damage.style.minHeight = "44px";
-				damage.setAttribute("aria-label", `Resolve recurring damage for ${target.targetName}`);
-				damage.addEventListener("click", () => {
-					const result = this._state.resolveChainedTargetTurn(target.id);
-					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage.`});
-					else JqueryUtil.doToast({type: "info", content: "Recurring damage already resolved for this turn."});
-					this._page.saveCharacter?.();
-				});
-				row.appendChild(damage);
-				const repeat = document.createElement("button");
-				repeat.type = "button";
-				repeat.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
-				repeat.textContent = "Repeat";
-				repeat.style.minHeight = "44px";
-				repeat.setAttribute("aria-label", `Repeat recurring damage for ${target.targetName}`);
-				repeat.addEventListener("click", () => {
-					const result = this._state.resolveChainedTargetTurn(target.id, this._state.getCombatRound?.(), {repeat: true});
-					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage again.`});
-					this._page.saveCharacter?.();
-				});
-				row.appendChild(repeat);
-			}
-			if (target.distance != null && Number(target.distance) > Number(calc.chainRange || 0)) {
-				const warning = document.createElement("span");
-				warning.className = "ve-small cs-combat-target-warning";
-				warning.setAttribute("role", "status");
-				warning.textContent = "Out of range — effect released";
-				row.appendChild(warning);
-			}
-			const escape = document.createElement("button");
-			escape.type = "button";
-			escape.className = "ve-btn ve-btn-xs ve-btn-default ml-1";
-			escape.textContent = "Escape";
-			escape.style.minHeight = "44px";
-			escape.setAttribute("aria-label", `Resolve escape for ${target.targetName}`);
-			escape.addEventListener("click", async () => {
-				const trigger = document.activeElement;
-				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
-					title: `${target.targetName} — Escape`,
-					isMinHeight0: true,
-					cbClose: () => csRestoreModalFocus(trigger),
-				});
-				modalInner.classList.add("cs-combat-target-modal");
-				modalInner.style.maxHeight = "calc(100dvh - 2rem)";
-				modalInner.style.overflowY = "auto";
-				modalInner.style.boxSizing = "border-box";
-				modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
-				modalInner.innerHTML = `
-					<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
-						<p class="ve-small ve-muted">The target may use Strength or Dexterity against the current grapple DC (${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}).</p>
-						<label class="ve-form-label">Escape ability
-							<select class="form-control" data-escape-ability aria-label="Escape ability">
-								<option value="str">Strength</option><option value="dex">Dexterity</option>
-							</select>
-						</label>
-						<label class="ve-form-label">Save total
-							<input class="form-control" data-escape-total aria-label="Escape save total" type="number" min="0" inputmode="numeric">
-						</label>
-						<div class="ve-flex-h-right cs-combat-target-modal__footer mt-2">
-							<button type="button" class="cs-combat-btn" data-act="cancel">Cancel</button>
-							<button type="button" class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Resolve escape</button>
-						</div>
-					</div>`;
-				modalInner.querySelector("[data-act=cancel]").addEventListener("click", doClose);
-				modalInner.querySelector("[data-act=apply]").addEventListener("click", () => {
-					const raw = modalInner.querySelector("[data-escape-total]").value;
-					if (raw === "") return;
-					const result = this._state.escapeChainedTarget(target.id, Number(raw), {ability: modalInner.querySelector("[data-escape-ability]").value});
-					if (result.escaped) {
-						JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
-						this._page.saveCharacter?.();
-						doClose();
-						this.renderChainedTargets();
-					} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
-				});
-				csFocusModalOnOpen(modalInner, {preferSelector: "[data-escape-total]"});
-			});
-			row.appendChild(escape);
 			container.appendChild(row);
 		}
 	}

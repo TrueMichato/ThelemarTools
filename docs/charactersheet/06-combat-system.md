@@ -134,15 +134,19 @@ to permit a third Astral Arms attack only while the current Attack action
 contains exclusively Astral Arms attacks. Empowered Arms uses the shared
 once-per-turn damage-rider path and is scoped to the same feature-owned row.
 
-TGTT Path of the Chained Fury is the first opt-in persisted target/effect
-integration. A Spectral Chains on-hit choice opens an accessible target form
-and stores the result in `CharacterSheetState.targetEffects`. The Combat tab
-and Play Mode render the same records, including chain occupancy, target size,
-range, grappled/restrained state, recurring force damage, and Release controls.
-`CharacterSheetState` owns the lifecycle: escape/release, movement beyond chain
-range, save/load reconciliation, and ending Rage or Manifest Chains all remove
-invalid effects. Existing prompt-only `attackOnHitOptions` remain unchanged
-unless an option explicitly declares `targetAware: true`.
+TGTT Path of the Chained Fury uses a reminder-first on-hit flow. By default,
+Spectral Chains choices show the resolved grapple/method DC and the authored
+grapple, shove, restraint, or reposition reminder without asking the player to
+maintain creature records. The optional **Remember chained creatures** toggle
+adds a compact name plus failed/succeeded outcome form for grapple, Chain
+Imprisonment, and Chain Control; ordinary shove remains reminder-only.
+
+Combat and Play Mode render the same opted-in records as a creature name,
+Grappled/Restrained badges, the recurring force-damage reminder, chain capacity,
+and Release. They deliberately do not expose size, distance, coordinates,
+movement budgets, escape-roll resolution, or repeat-damage controls.
+`CharacterSheetState` owns save/load and cleanup, while attack and damage math
+stay identical with tracking on or off.
 
 ### Attack Bonus Calculation
 
@@ -768,4 +772,11 @@ The dice settings dropdown (in `charactersheet.html` near L256) has a **"Skip co
 
 ## Data-driven attack allowances and target riders
 
-Attack-action allowances apply to every qualifying feature attack. Chained Fury Unchained Fury grants a third attack only while every Attack-action attack uses Manifest Chains; mixed sequences return to the normal allowance. Target-aware on-hit riders declare target-effect metadata and are routed through the shared state dispatcher; feature handlers validate their own canonical metadata contract. The target modal records identity, grapple/shove/restrain effects, range, final shove position, and accessible Strength/Dexterity escape resolution. Repeating recurring damage is an explicit override.
+Attack-action allowances apply to every qualifying feature attack. Chained Fury
+Unchained Fury grants a third attack only while every Attack-action attack uses
+Manifest Chains; mixed sequences return to the normal allowance. Chained Fury
+adds target-effect metadata only while its optional tracker is enabled. Its
+compact modal records identity and explicit save outcomes, and the feature
+handler persists only successful grapple/restraint states. The final grapple DC
+is assigned after Combat Method resolution so spellcasting-aware Hexblade and
+Bladesinger overrides are respected.

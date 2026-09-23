@@ -37,10 +37,8 @@ describeCharacter({
 		deathSaves: true,
 		applyCondition: {skip: true}, // blocked by CS-BUG-009 (addCondition hangs render — to retest after fix)
 		featAbility: {skip: true},
-		targetLifecycle: {
+		optionalChainTracking: {
 			targetName: "Playwright ogre",
-			size: "large",
-			distance: 15,
 			effect: "restrain",
 		},
 	},

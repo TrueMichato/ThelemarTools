@@ -182,14 +182,10 @@ export interface CharacterSpec {
 		 * doesn't take the feat.
 		 */
 		featAbility?: {featureName: string | RegExp; expectDelta?: "ac" | "dc" | "attack"} | {skip: true};
-		/** Opt-in Chained Fury target lifecycle probe at the usage level. */
-		targetLifecycle?: {skip: true; reason?: string} | {
+		/** Reminder-first Chained Fury flow plus optional creature bookkeeping. */
+		optionalChainTracking?: {skip: true; reason?: string} | {
 			targetName?: string;
-			size?: string;
-			distance?: number;
-			effect?: "target" | "grapple" | "restrain" | "shove" | "control-shove";
-			finalDistance?: number;
-			shoveDirection?: string;
+			effect?: "grapple" | "restrain";
 		};
 		/** If true, skip the entire usage spec (e.g. blocked by a bug). */
 		skip?: boolean;
@@ -655,52 +651,31 @@ export function describeCharacter (spec: CharacterSpec): void {
 					}
 				}
 
-				if (usage.targetLifecycle && !(usage.targetLifecycle as any).skip) {
-					const tl = usage.targetLifecycle as {targetName?: string; size?: string; distance?: number; effect?: "target" | "grapple" | "restrain" | "shove" | "control-shove"; finalDistance?: number; shoveDirection?: string};
+				if (usage.optionalChainTracking && !(usage.optionalChainTracking as any).skip) {
+					const tracking = usage.optionalChainTracking as {targetName?: string; effect?: "grapple" | "restrain"};
 					const calc = await page.evaluate(() => (globalThis as any).charSheet?._state?.getFeatureCalculations?.() ?? {});
 					if (!calc.hasManifestChains) {
-						throw new Error("targetLifecycle requires a Chained Fury build with Manifest Chains");
+						throw new Error("optionalChainTracking requires a Chained Fury build with Manifest Chains");
 					}
-					const applied = await charSheet.rollSpectralChainsTargetEffect({
-						targetName: tl.targetName || "Playwright target",
-						size: tl.size || "medium",
-						distance: tl.distance ?? 10,
-						effect: tl.effect || "restrain",
-						finalDistance: tl.finalDistance,
-						shoveDirection: tl.shoveDirection,
+					const probe = await charSheet.probeOptionalChainedFuryTracking({
+						targetName: tracking.targetName || "Playwright ogre",
+						effect: tracking.effect || "restrain",
 					});
-					expect(applied, "the real attack/modal path should create a target effect").toBeTruthy();
-					const targets = await charSheet.getChainedTargets();
-					expect(targets.some(t => t.id === applied.id && (tl.effect === "target" ? !t.grappled && !t.restrained : (t.grappled || t.restrained)))).toBe(true);
-					if (tl.effect === "restrain") {
-						expect(applied.recurringDamage?.amount, "restraint damage should use current Barbarian level").toBe(atLevel);
-					}
-					const roundTrip = await page.evaluate(() => {
-						const cs: any = (globalThis as any).charSheet;
-						const json = cs?._state?.toJson?.();
-						cs?._state?.loadFromJson?.(json);
-						return cs?._state?.getTargetEffects?.() ?? [];
+					expect(probe).toEqual({
+						defaultOff: true,
+						reminderShowsLiveDc: true,
+						noTargetFormWhileOff: true,
+						noTrackTargetOnlyChoice: true,
+						enabledThroughUi: true,
+						combatToggleRetainsFocus: true,
+						compactCombatRow: true,
+						roundTrip: true,
+						playModeParity: true,
+						playModeToggleRetainsFocus: true,
+						recurringDamage: tracking.effect === "restrain" ? atLevel : null,
+						releasedThroughUi: true,
+						rageTeardown: true,
 					});
-					expect(roundTrip.some((t: any) => t.id === applied.id)).toBe(true);
-					if (tl.effect === "restrain") {
-						const branches = await charSheet.probeChainedFuryLifecycleBranches(applied.id);
-						expect(branches).toEqual({
-							focusRestored: true,
-							targetOnly: true,
-							failedGrapple: true,
-							failedControl: true,
-							recurringDamage: true,
-							distributedMovement: true,
-							escape: true,
-							manualRelease: true,
-							outOfRangeRelease: true,
-							teardown: true,
-						});
-						expect((await charSheet.getChainedTargets()).some(t => t.id === applied.id)).toBe(false);
-					} else {
-						expect(await charSheet.releaseChainedTarget(applied.id)).toBe(true);
-					}
-					expect((await charSheet.getChainedTargets()).some(t => t.id === applied.id)).toBe(false);
 				}
 			});
 		}

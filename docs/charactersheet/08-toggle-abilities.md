@@ -530,6 +530,13 @@ manifested without deleting or recreating the item. Because the state is nested
 inside Rage, the chains inherit Rage's `breaksConcentration` and its
 `exclusiveWith: ["bladesong"]` without restating either.
 
+Creature bookkeeping is a separate player preference,
+`settings.chainedFuryTargetTracking`, and defaults off even for legacy saves.
+The Combat and Play Mode Spectral Chains cards keep the toggle discoverable
+without making it part of Manifest Chains activation. Turning it off clears
+records immediately but does not end Rage, dismiss the chains, or alter attacks
+and on-hit choices.
+
 #### Resolute Stance (Juggernaut Barbarian)
 `resoluteStance` is a free, start-of-turn state which expires at the start of
 the next turn. It grants Grappled immunity, imposes disadvantage on the
@@ -1617,8 +1624,15 @@ visible only during Manifest Chains. The attack therefore inherits the backing
 item's materials, upgrades, bonuses, notes, and edits without duplicating the
 inventory row across toggles or reloads.
 
-Spectral Chains on-hit riders open the target-aware modal; selecting grapple,
-shove, Chain Imprisonment, or Chain Control does not silently mutate a target.
-The modal records target name, size, distance, save totals, and final shove
-distance. Ending Rage, ending Manifest Chains, resting, or releasing a target
-clears active chain effects and occupancy.
+Spectral Chains on-hit riders are reminders by default. They show the live
+grapple DC, the separate Chain Imprisonment DC, recurring damage, reposition
+distance, and the level-14 movement benefit without requiring a target record.
+
+If **Remember chained creatures** is enabled, grapple, Chain Imprisonment, and
+Chain Control ask only for a creature name and explicit failed/succeeded save
+outcomes. Successful grapples render as compact Grappled/Restrained rows with a
+recurring-damage reminder and Release. Shove, size, distance, movement budgets,
+escape rolls, and map positions are intentionally not managed. Ending Rage or
+Manifest Chains, disabling tracking, unequipping the generated chains, or
+losing the subclass clears every row while preserving the opt-in preference
+across temporary Rage/gear changes.
