@@ -43,6 +43,15 @@ across unsocket/resocket.
 
 Core states: `rage`, `resoluteStance`, `bladesong`, `sunShield`, `wildShape`, `hybridTransformation`, `crimsonRite`, `wardingFlare`, `coronaOfLight`, `dodge`, `recklessAttack`, `steadyAim`, `patientDefense`, `stepOfTheWind`, `flurryOfBlows`, `focusedAim`, `deflectMissiles`
 
+Bladesong equipment eligibility lives in `getBladesongEquipmentIssue` and is
+checked before UI resource/action spending, on state activation, on armor or
+shield equip, and when loading a saved state. TCE/TGTT-2014 permits light armor
+and lacks Bladework; FRHoF/TGTT-2024 requires no armor and grants Intelligence
+attack/damage substitution only to proficient weapons. TGTT-2024 also inherits
+FRHoF's fixed martial-melee proficiency from Training in War and Song. Combat
+and Overview/Play Mode end Bladesong before rolling a two-handed weapon attack,
+then refresh the sheet so AC, speed, and attack rows agree with the roll.
+
 Astral Self states: `astralArms`, `astralVisage`, `astralBody`,
 `awakenedAstralSelf`. Body uses `requiresStates`; ending a prerequisite
 cascades through dependents. All four declare incapacitation/death

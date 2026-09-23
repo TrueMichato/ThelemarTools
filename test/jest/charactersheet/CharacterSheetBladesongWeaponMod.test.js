@@ -1,13 +1,14 @@
 /**
  * Bug #3 — Bladesong INT modifier for weapon attacks/damage.
  *
- * While Bladesong is active, a Bladesinger's WEAPON attack and damage rolls use
- * MAX(weapon's normally-resolved modifier, INT). This is the shared roll-math
+ * The 2024 Bladesinger's Bladework lets a proficient weapon attack and damage
+ * roll use MAX(weapon's normally-resolved modifier, INT). This is the shared roll-math
  * surface both attack systems read from:
  *   - getWeaponAbilityMod(attack)   → absolute effective mod (combat tab + displays)
  *   - getBladesongWeaponBonus(attack)→ additive delta (overview/play-mode roll path)
  *
- * Gates: spell attacks (isSpell / "spellcasting") never gain INT scaling.
+ * Gates: 2014 Bladesinging, unarmed strikes, nonproficient weapons, and spells
+ * never gain INT scaling.
  * Player-favorable: a weapon whose native mod already exceeds INT is unaffected.
  */
 
@@ -25,6 +26,13 @@ describe("Bladesong weapon ability modifier", () => {
 	// INT highest: STR -1, DEX +3, INT +4
 	function makeIntFavoured () {
 		state = new CharacterSheetState();
+		state.addClass({
+			name: "Wizard",
+			source: "XPHB",
+			level: 3,
+			subclass: {name: "Bladesinger", shortName: "Bladesinger", source: "FRHoF"},
+		});
+		for (const name of ["Longsword", "Shortsword", "Rapier", "Shortbow"]) state.addWeaponProficiency(name);
 		state.setAbilityBase("str", 8); // -1
 		state.setAbilityBase("dex", 16); // +3
 		state.setAbilityBase("con", 14);
@@ -33,10 +41,16 @@ describe("Bladesong weapon ability modifier", () => {
 		state.setAbilityBase("cha", 10);
 	}
 
-	const strWeapon = {name: "Longsword", abilityMod: "str"};
-	const dexWeapon = {name: "Shortsword", abilityMod: "dex"};
-	const finesseWeapon = {name: "Rapier", abilityMod: "finesse"};
-	const rangedWeapon = {name: "Shortbow", abilityMod: "dex", isRanged: true};
+	const weapon = (name, abilityMod, extra = {}) => ({
+		name,
+		abilityMod,
+		sourceItem: {name, type: extra.isRanged ? "R" : "M", weaponCategory: "martial", weapon: true},
+		...extra,
+	});
+	const strWeapon = weapon("Longsword", "str");
+	const dexWeapon = weapon("Shortsword", "dex");
+	const finesseWeapon = weapon("Rapier", "finesse");
+	const rangedWeapon = weapon("Shortbow", "dex", {isRanged: true});
 
 	describe("Bladesong INACTIVE (baseline, no behavior change)", () => {
 		beforeEach(makeIntFavoured);
@@ -84,7 +98,7 @@ describe("Bladesong weapon ability modifier", () => {
 
 	describe("Bladesong ACTIVE, INT lower than weapon's mod (no penalty)", () => {
 		beforeEach(() => {
-			state = new CharacterSheetState();
+			makeIntFavoured();
 			state.setAbilityBase("str", 18); // +4
 			state.setAbilityBase("dex", 12); // +1
 			state.setAbilityBase("int", 10); // +0
@@ -124,8 +138,9 @@ describe("Bladesong weapon ability modifier", () => {
 				name: "Wizard",
 				source: "TGTT",
 				level: 6,
-				subclass: {name: "Bladesinger", shortName: "Bladesinger", source: "TGTT"},
+				subclass: {name: "Bladesinger", shortName: "Bladesinger", source: "TGTT-2024"},
 			});
+			state.addWeaponProficiency("Longsword");
 			state.setAbilityBase("str", 8); // -1
 			state.setAbilityBase("dex", 14); // +2
 			state.setAbilityBase("int", 18); // +4

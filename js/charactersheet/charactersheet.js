@@ -13562,6 +13562,13 @@ class CharacterSheetPage {
 	}
 
 	async _activateFeatureState (feature, stateTypeId, stateType, resource, resourceCost, activationInfo = null) {
+		if (stateTypeId === "bladesong") {
+			const issue = this._state.getBladesongEquipmentIssue();
+			if (issue) {
+				JqueryUtil.doToast({type: "warning", content: issue});
+				return;
+			}
+		}
 		if (activationInfo?.resourceTrigger && !activationInfo.resourceTriggerResolved) {
 			const triggerResource = (this._state.getResources() || []).find(it =>
 				String(it.name || "").toLowerCase() === String(activationInfo.resourceTrigger.resourceName || "").toLowerCase());
@@ -18037,6 +18044,7 @@ class CharacterSheetPage {
 			});
 			if (!weaponDamageType) return;
 		}
+		const bladesongEnded = this._state.endBladesongForWeaponAttack(attack);
 
 		// Check for advantage/disadvantage from active states + opted-in conditionals.
 		const hasAdvantage = this._state.hasAdvantageFromStates(attackType) || aggregated.advantage;
@@ -18107,6 +18115,10 @@ class CharacterSheetPage {
 			resultClass,
 			resultNote,
 		);
+		if (bladesongEnded) {
+			this._renderCharacter();
+			this._saveCurrentCharacter();
+		}
 	}
 
 	// Public methods for sub-modules

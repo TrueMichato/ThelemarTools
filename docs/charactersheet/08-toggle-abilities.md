@@ -547,16 +547,35 @@ Juggernaut through the normal defense-effect pipeline.
 ```javascript
 bladesong: {
     effects: [
-        {type: "bonus", target: "ac", abilityMod: "int"},
+        {type: "bonus", target: "ac", abilityMod: "int", minimum: 1},
         {type: "bonus", target: "speed:walk", value: 10},
         {type: "advantage", target: "skill:acrobatics"},
         {type: "bonus", target: "concentration", abilityMod: "int"},
     ],
     duration: "1 minute",
-    resourceCost: 1, // Uses per proficiency bonus
     activationAction: "bonus",
 }
 ```
+
+Bladesong costs one use to activate. TCE / TGTT-2014 Bladesinging has
+proficiency-bonus uses and permits light armor; FRHoF / TGTT-2024 Bladesinger
+has Intelligence-modifier uses (minimum one), requires **no armor**, and gains
+Bladework: a **proficient weapon** can use Intelligence instead of Strength or
+Dexterity for both attack and damage. TGTT-2024 copies the FRHoF martial-melee
+proficiency grant (excluding Heavy and Two-Handed weapons); TGTT-2014 does not.
+Neither edition gives Bladework to unarmed strikes, natural weapons, spells, or
+nonproficient weapons. Bladework changes the ability of the existing attack,
+not the attack's ID or intrinsic bonuses.
+
+Both editions grant +10 walking speed, Acrobatics advantage, at least +1
+Intelligence AC, and an Intelligence bonus to concentration saves while active;
+the 2014 concentration bonus has a +1 minimum, whereas the 2024 bonus uses
+the actual modifier. Equipping a shield or invalid armor ends the state
+immediately, including when a second armor item is marked equipped. A weapon
+attack made with two hands (including a versatile weapon set to 2H) ends it
+**before** attack/damage are calculated. An invalid activation shows a
+remove-equipment warning and spends neither a use nor a combat action. Loaded
+characters with incompatible equipped gear also shed the stale state.
 
 #### Wild Shape (Druid)
 ```javascript

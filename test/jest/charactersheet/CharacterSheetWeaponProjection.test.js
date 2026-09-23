@@ -560,6 +560,11 @@ describe("ability substitution is a choice, not an additive bonus", () => {
 	function makeState () {
 		const state = new CharacterSheetState();
 		state.addClass({name: "Illrigger", source: "TGTT", level: 10});
+		state.addClass({name: "Wizard",
+			source: "XPHB",
+			level: 3,
+			subclass: {name: "Bladesinger", shortName: "Bladesinger", source: "FRHoF"}});
+		state.addWeaponProficiency("Longsword");
 		state.setAbilityBase("str", 14); // +2
 		state.setAbilityBase("int", 18); // +4
 		state.setAbilityBase("cha", 20); // +5
@@ -568,7 +573,11 @@ describe("ability substitution is a choice, not an additive bonus", () => {
 		return state;
 	}
 
-	const attack = {name: "Longsword", isMelee: true, abilityMod: "str", attackBonus: 0};
+	const attack = {name: "Longsword",
+		isMelee: true,
+		abilityMod: "str",
+		attackBonus: 0,
+		sourceItem: {name: "Longsword", type: "M", weapon: true, weaponCategory: "martial"}};
 
 	it("uses base, Bladesong, Lies, and both with max-not-sum semantics", () => {
 		const state = makeState();

@@ -6050,6 +6050,7 @@ class CharacterSheetState {
 		// Idempotent; only ever sets a missing/false flag to true.
 		this._migrateInventoryItemWeaponFlag();
 		this._ensureFeatRegistryResources();
+		this._endBladesongForInvalidEquipment();
 	}
 
 	/**
@@ -10883,32 +10884,79 @@ class CharacterSheetState {
 	}
 
 	/**
-	 * Whether an attack is a weapon attack eligible for Bladesong's INT override.
-	 * Spell attacks (and the "spellcasting" pseudo-ability) are excluded so a
-	 * custom/temp spell attack never silently gains INT scaling.
+	 * Only weapon attacks can use the 2024 Bladework ability choice.
 	 * @param {object} attack
 	 * @returns {boolean}
 	 */
 	_isBladesongWeaponAttack (attack) {
 		if (!attack || typeof attack !== "object") return false;
 		if (attack.isSpell || attack.isSpellAttack) return false;
+		if (attack.isUnarmedStrike || attack.isNaturalWeapon) return false;
 		if (attack.abilityMod === "spellcasting") return false;
 		return true;
 	}
 
+	_isBladesong2024 () {
+		return this._data.classes.some(cls =>
+			cls.name?.toLowerCase() === "wizard"
+			&& (
+				(cls.source === "XPHB" && cls.subclass?.source === "FRHoF")
+				|| (cls.source === "TGTT" && cls.subclass?.source === "TGTT-2024")
+			)
+			&& ["bladesinger", "bladesinging"].includes((cls.subclass?.shortName || cls.subclass?.name || "").toLowerCase())
+			&& cls.level >= 3,
+		);
+	}
+
+	getBladesongEquipmentIssue () {
+		const equipped = (this._data.inventory || []).filter(row => row.equipped && row.item);
+		if (this._data.ac.shield || equipped.some(row => this.isShieldItem(row.item))) {
+			return "Remove your shield before activating Bladesong.";
+		}
+		const armor = [
+			this._data.ac.armor,
+			...equipped.filter(row => this.isBodyArmorItem(row.item)).map(row => row.item),
+		].filter(Boolean);
+		if (!armor.length) return null;
+		if (this._isBladesong2024()) return "Remove your armor before activating Bladesong.";
+		const hasIncompatibleArmor = armor.some(item => {
+			const type = `${item.armorType || item.type || ""}`.split("|")[0].trim().toLowerCase();
+			return !["light", "light armor", "la"].includes(type);
+		});
+		return hasIncompatibleArmor ? "Remove your medium or heavy armor before activating Bladesong." : null;
+	}
+
+	_endBladesongForInvalidEquipment () {
+		if (!this.isStateTypeActive("bladesong") || !this.getBladesongEquipmentIssue()) return;
+		this.deactivateState("bladesong", {reason: "incompatible equipment"});
+	}
+
+	endBladesongForWeaponAttack (attack) {
+		if (!this.isStateTypeActive("bladesong") || !this._isBladesongWeaponAttack(attack)) return false;
+		const weapon = (attack.sourceItem?.id && this.getItemRaw(attack.sourceItem.id)) || attack.sourceItem;
+		const props = attack.properties?.length
+			? attack.properties
+			: (weapon?.attackOverrides?.properties ?? weapon?.property ?? weapon?.properties ?? attack.properties ?? []);
+		const twoHanded = Number(weapon?.handsUsed ?? attack.handsUsed) >= 2
+			|| (Array.isArray(props) && props.some(prop => ["2h", "two-handed"].includes(String(prop).split("|")[0].trim().toLowerCase())));
+		if (!twoHanded) return false;
+		this.deactivateState("bladesong", {reason: "two-handed weapon attack"});
+		return true;
+	}
+
 	/**
-	 * Additive bonus Bladesong contributes to a weapon attack/damage roll.
-	 * While Bladesong is active a Bladesinger may use Intelligence in place of the
-	 * weapon's normal ability when it is higher, so the bonus is the
-	 * (player-favorable) positive difference between INT and the weapon's
-	 * normally-resolved modifier. 0 when Bladesong is inactive, the attack is not
-	 * a weapon attack, or INT does not exceed the weapon's mod.
+	 * Additive bonus 2024 Bladework contributes to a proficient weapon attack.
+	 * When Intelligence exceeds the weapon's Strength/Dexterity modifier, return
+	 * the positive difference; 2014 Bladesinging does not grant Bladework.
 	 * @param {object} attack - Attack object (uses attack.abilityMod, attack.isSpell)
 	 * @returns {number}
 	 */
 	getBladesongWeaponBonus (attack) {
 		if (!this.isStateTypeActive?.("bladesong")) return 0;
+		if (!this._isBladesong2024()) return 0;
 		if (!this._isBladesongWeaponAttack(attack)) return 0;
+		if (!["str", "dex", "finesse"].includes(attack.abilityMod || "str")) return 0;
+		if (!this._isWeaponProficient(attack.sourceItem || attack)) return 0;
 		const base = this._resolveBaseWeaponAbilityMod(attack.abilityMod || "str");
 		return Math.max(0, this.getAbilityMod("int") - base);
 	}
@@ -14465,6 +14513,7 @@ class CharacterSheetState {
 		if (!wasHeavy && this._isHeavyArmorSnapshot(armor)) {
 			this._deactivateStatesForEndCondition({armorType: "heavy"});
 		}
+		this._endBladesongForInvalidEquipment();
 	}
 
 	_isHeavyArmorSnapshot (armor) {
@@ -14528,6 +14577,7 @@ class CharacterSheetState {
 	setShield (hasShield) {
 		if (!hasShield || typeof hasShield !== "object") {
 			this._data.ac.shield = hasShield;
+			this._endBladesongForInvalidEquipment();
 			return;
 		}
 		this._data.ac.shield = {
@@ -14535,6 +14585,7 @@ class CharacterSheetState {
 			ac: CharacterSheetItemUtils.parseBonus(hasShield.ac ?? 2),
 			bonus: CharacterSheetItemUtils.parseBonus(hasShield.bonus),
 		};
+		this._endBladesongForInvalidEquipment();
 	}
 	setItemAcBonus (bonus) { this._data.ac.itemBonus = CharacterSheetItemUtils.parseBonus(bonus); }
 	getItemAcBonus () { return CharacterSheetItemUtils.parseBonus(this._data.ac.itemBonus); }
@@ -28902,11 +28953,9 @@ class CharacterSheetState {
 								calculations.hasTrainingInWarAndSong = true;
 
 								// The 2024 (FRHoF) Bladesinger's version additionally grants a
-								// FIXED proficiency with all Melee Martial weapons lacking the
-								// Two-Handed/Heavy property. Gate strictly on the FRHoF subclass
-								// source so neither the 2014 TCE "Bladesinging" nor TGTT variants
-								// pick up the bundle.
-								if (cls.subclass?.source === "FRHoF") {
+								// FIXED proficiency with Melee Martial weapons lacking the
+								// Two-Handed/Heavy property; TGTT-2024 copies FRHoF, not TCE.
+								if (["FRHoF", "TGTT-2024"].includes(cls.subclass?.source)) {
 									calculations.hasTrainingInWarAndSongMartialMelee = true;
 								}
 
@@ -59942,13 +59991,13 @@ class CharacterSheetState {
 			icon: "⚔️",
 			description: "Elven combat magic granting speed, agility, and focus",
 			effects: [
-				{type: "bonus", target: "ac", abilityMod: "int"}, // +INT to AC
+				{type: "bonus", target: "ac", abilityMod: "int", minimum: 1},
 				{type: "bonus", target: "speed:walk", value: 10},
 				{type: "advantage", target: "skill:acrobatics"},
 				{type: "bonus", target: "concentration", abilityMod: "int"}, // +INT to concentration saves
 			],
 			duration: "1 minute",
-			endConditions: ["Incapacitated", "Don medium/heavy armor or shield", "Two-handed weapon attack"],
+			endConditions: ["Incapacitated", "Don incompatible armor or shield", "Two-handed weapon attack"],
 			resourceName: "Bladesong",
 			detectPatterns: ["bladesong", "invoke.*bladesong"],
 			activationAction: "bonus",
@@ -65594,6 +65643,7 @@ class CharacterSheetState {
 		const stateType = CharacterSheetState.ACTIVE_STATE_TYPES[stateTypeId];
 		if (stateType?.requiresStates?.some(requiredId => !this.isStateTypeActive(requiredId))) return null;
 		if (stateTypeId === "manifestChains" && !this._getChainedFuryClass()) return null;
+		if (stateTypeId === "bladesong" && this.getBladesongEquipmentIssue()) return null;
 
 		// (Generic) A state type may declare an `effectsBuilder` — the name of an
 		// instance method that resolves its effect list against the CURRENT build
@@ -67066,7 +67116,10 @@ class CharacterSheetState {
 			.forEach(e => {
 				if (e.abilityMod) {
 					// Add ability modifier (e.g., Bladesong adds INT to AC)
-					bonus += Math.max(e.minimum ?? -Infinity, this.getAbilityMod(e.abilityMod));
+					const minimum = e.stateTypeId === "bladesong" && target === "concentration" && !this._isBladesong2024()
+						? 1
+						: (e.minimum ?? -Infinity);
+					bonus += Math.max(minimum, this.getAbilityMod(e.abilityMod));
 				} else if (e.useProficiency) {
 					bonus += this.getProficiencyBonus();
 				} else {

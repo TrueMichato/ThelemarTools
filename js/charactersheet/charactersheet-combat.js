@@ -1406,6 +1406,7 @@ class CharacterSheetCombat {
 		const conditionalAggregate = appliedConditionalIds.size
 			? this._state.aggregateModifiers(attackType, {appliedConditionalIds})
 			: conditionalProbe;
+		const bladesongEnded = this._state.endBladesongForWeaponAttack(attack);
 
 		// Check for advantage/disadvantage from active states and conditions. The
 		// hierarchical matcher in hasAdvantageFromStates already resolves a generic
@@ -1633,6 +1634,10 @@ class CharacterSheetCombat {
 			// eslint-disable-next-line no-console
 			console.error("[CharSheet Combat] post-attack hook error", e);
 		});
+		if (bladesongEnded) {
+			this._page._renderCharacter();
+			this._page._saveCurrentCharacter();
+		}
 		return true;
 	}
 
