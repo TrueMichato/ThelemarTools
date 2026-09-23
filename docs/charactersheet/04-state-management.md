@@ -214,6 +214,31 @@ concentration: {
 },
 ```
 
+Persisted spells are object rows in `spellcasting.spellsKnown` /
+`cantripsKnown`; the arrays above are the conceptual view. Base-class
+`additionalSpells.prepared` grants are reconciled by
+`populateClassSpells()` after the page injects the fully merged class and spell
+catalogs. A row created only by the class carries `grantedByClass: true` and is
+removed when its class-level requirement is lost.
+
+If the exact `name|source` spell already belongs to the player, the reconciler
+does not create or later delete a duplicate. It snapshots the row's
+`alwaysPrepared`, `prepared`, `sourceFeature`, and `sourceClass` values, records
+source-qualified `classGrantOwners`, and temporarily applies the class grant.
+The inverse ordering is handled too: if a player or Respec decision selects a
+spell that currently exists only because of a class grant, the add path converts
+that row into the same reversible overlay before coalescing the selection.
+Nested feat/feature spell choices use their progression-ownership claim rather
+than a display-label allowlist, so their owner survives removal of the class
+grant as well.
+Player-chosen/orphan rows temporarily use the class source feature so the grant
+does not consume a prepared/cantrip allowance; rows already owned by another
+feature keep that feature's attribution so its teardown remains authoritative.
+The original metadata is restored when the last class owner disappears. Respec
+draft states receive the same class and spell catalogs before loading their
+snapshot, so draft previews and committed characters use identical spell
+identities and levels.
+
 ### Inventory
 
 ```javascript
@@ -300,18 +325,27 @@ activeStates: [
     },
 ],
 
-// Opt-in target/effect records (for features such as TGTT Chained Fury).
-// Prompt-only attack riders do not create entries here.
+// Chained Fury creature bookkeeping is explicitly opt-in and defaults off.
+settings: {
+    chainedFuryTargetTracking: false,
+},
+
+// Only successful grapple/restraint outcomes are persisted.
+// Reminder-only riders do not create entries here.
 targetEffects: [
     {
         id: "chain-target-...",
         source: "chained-fury",
         targetName: "Ogre",
-        size: "large",
-        distance: 15,
+        effectType: "restrain",
         grappled: true,
         restrained: true,
-        recurringDamage: {amount: 6, type: "force"},
+        chainIndex: 0,
+        recurringDamage: {
+            amount: 6,
+            type: "force",
+            when: "start of each of its turns",
+        },
     },
 ],
 
@@ -405,6 +439,15 @@ getAc() {
     return ac;
 }
 ```
+
+Inventory-backed AC is synchronized through `CharacterSheetState.syncEquippedAcState()`.
+It rebuilds the armor and shield snapshots from the raw equipped inventory rows, then applies
+material projection exactly once. A shield snapshot keeps the shield's base `ac` separate from
+its numeric `bonus` (authored `bonusAc` plus any material delta), while `ac.itemBonus` is reserved
+for non-armor items such as Rings and Cloaks of Protection. Inventory render/update flows call this
+same state-owned path, so equip, unequip, material changes, and first render after loading cannot
+race competing shield writers. Signed catalog values such as `"+1"` are normalized before AC
+arithmetic.
 
 ### Unarmored Defense Variants
 
@@ -869,10 +912,16 @@ When `true`, the conditional-modifier picker is suppressed and no conditional mo
     bonusDice,              // Compatibility array of die expressions
     bonusDiceContributions, // Stable {id, dice, source, conditional} entries
     conditionalsAvailable: [ // Surfaced for the pre-roll picker
-        {id, name, conditional, advantage?, disadvantage?, bonus?, bonusDie?, target?},
+        {id, name, sourceName, conditional, advantage?, disadvantage?, bonus?, bonusDie?, target?},
     ],
 }
 ```
+
+`name` preserves the stored modifier identity used by stable conditional IDs.
+`sourceName` is display-only: prose-parsed modifiers append `: <condition>` to
+their stored name, and this field removes only that exact suffix so prompts and
+roll results can say `Advantage from Dauntless Heritage against being
+frightened` without changing save compatibility.
 
 Roll handlers merge `bonusDiceContributions` by `id`, not by die text. Two
 different features which each grant `d10` therefore stack, while one logical
@@ -895,9 +944,18 @@ A modifier is **registered** with one string (`modType`) and **read** with anoth
 | `check:dex` | `skill:stealth` | the skill's ability |
 | `save:advantage:frightened` | `save:wis` | `_isConditionalSaveSubtype` → synthesized conditional |
 | `check:advantage:perception` | `skill:perception` | `_normalizeSkillKey` name match |
+| `skill:might` | `skill:might` | exact custom-skill selector match |
+| `skill:perception:senses` | `skill:perception` | exact selector + trailing conditional qualifier |
 | `d20:all` | any d20 roll | explicit category list |
 
 **A registration with no path is silent.** It parses, stores, renders in the feature list, and never reaches a roll. `check:advantage:perception` (Keen Senses) and `check:advantage:stealth` (Synchronized Stealth) sat in exactly that state: the ability branch compares sub-types against `"wis"`/`"dex"`, and `_isConditionalSaveSubtype` deliberately excludes standard skill names because a skill is a *selector*, not a condition. Both rules are correct in isolation; together they left skill-selected modifiers with no route at all.
+
+The selector rule applies equally to built-in and custom skills. A modifier
+registered as `skill:might` affects Might only; it must never be synthesized as
+an `against might` condition on Athletics, Acrobatics, or another skill. Skill
+conditions are represented separately as `skill:<target>:<qualifier>` or with
+an explicit `conditional` field. Save/check registry sub-types retain their
+category-wide synthesized-condition behavior.
 
 Two consequences worth carrying:
 
@@ -934,4 +992,21 @@ The extractor deliberately skips comment lines: the JSDoc for the modifier shape
 
 ## Chained Fury target effects
 
-Target identity is persisted separately from active effects. Chained Fury records may remain as no-rider or shove-only records while chain occupancy counts only targets with an active grapple effect and a chain slot. Grapple and escape checks accept Strength or Dexterity against the current combat-method DC; Chain Imprisonment keeps its separate Strength save DC. Load, class/subclass changes, level changes, teardown, and rests reconcile derived DCs, range, size, occupancy, and recurring-damage state.
+`settings.chainedFuryTargetTracking` is read with strict `=== true`, so both new
+characters and older saves with no key start with tracking off. Spectral Chains
+attacks and every on-hit rider remain available in that mode; the sheet shows
+the live save DC and player-facing rule reminder without creating a target
+record.
+
+When the player opts in, the rider form records only a creature name and
+explicit failed/succeeded save outcomes. Missing outcomes never imply failure.
+Only successful grapples consume one of the two chains (four from Barbarian
+level 14); ordinary shove, resisted saves, and the removed target-only route do
+not persist records. Chain Imprisonment keeps its separate
+`8 + PB + CON` Strength save and recurring force-damage reminder.
+
+Legacy size, distance, movement, and shove-position fields remain load-compatible
+but are not authored or rendered by the current flow. Disabling tracking,
+ending Rage or Manifest Chains, unequipping/removing the generated chain item,
+losing the subclass, reducing capacity, or serializing an invalid state removes
+stale Chained Fury records and resets legacy movement bookkeeping.

@@ -8,20 +8,19 @@
  *
  * "Might" is TGTT's custom Strength skill (homebrew skill entry + skillMap `might:"str"`).
  * The specialty grants a bonus equal to the proficiency bonus to Strength ({@skill Might})
- * checks (feats of might: lift/drag/push/throw/grapple/shove), which must flow onto the
- * MIGHT skill line — via `skill:might` → customModifiers.skills.might → getSkillCustomMod —
- * and NOT onto Athletics. The feature-modifier parser recognises TGTT's custom "Might" skill
- * in its structured "bonus to <skill> checks … proficiency bonus" block. The bonus is
- * phrased to match sibling specialties (Agile Sprinter / Lead the Pack) and deliberately
- * avoids the "counts as one size larger" carry clause so it does NOT stack with a Minotaur's
- * Powerful Build.
+ * checks, which must flow onto the MIGHT skill line — via `skill:might` →
+ * customModifiers.skills.might → getSkillCustomMod — and NOT onto Athletics. TGTT defines
+ * Might as feats of raw strength such as breaking, bending, lifting, dragging, carrying,
+ * and forcing objects; grapple and shove are not part of this custom skill. The feature-
+ * modifier parser recognises TGTT's custom "Might" skill in its structured
+ * "bonus to <skill> checks … proficiency bonus" block.
  */
 
 import "./setup.js";
 import fs from "node:fs";
 import path from "node:path";
-import "../../../js/charactersheet/charactersheet-state.js";
 import "../../../js/charactersheet/charactersheet-class-utils.js";
+import "../../../js/charactersheet/charactersheet-state.js";
 
 const repo = path.resolve(process.cwd());
 const CharacterSheetState = globalThis.CharacterSheetState;
@@ -103,11 +102,8 @@ describe("Bug #9 — Unyielding Might barbarian specialty", () => {
 	});
 
 	it("applies a proficiency-bonus boost to the Might skill on a real barbarian (not Athletics)", () => {
-		// NOTE: like the sibling TGTT specialties (Agile Sprinter, Lead the Pack, ...),
-		// the "made to lift/drag/push/..." scoping is narrative flavor — the sheet's
-		// modifier parser applies the proficiency-bonus boost to Might as an always-on
-		// modifier. We assert that always-on behavior deliberately, and that Athletics
-		// (a separate Strength skill) is left untouched.
+		// The rewritten feature is explicitly permanent. Assert that the PB boost reaches
+		// Might and that Athletics (a separate Strength skill) is left untouched.
 		const brew = loadBrew();
 		const spec = brew.classFeature.find(f => f.name === SPEC_NAME && f.source === "TGTT");
 		const desc = stripTags(spec.entries.join(" "));

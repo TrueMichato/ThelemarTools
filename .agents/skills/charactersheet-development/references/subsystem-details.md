@@ -262,12 +262,29 @@ grants a named action's benefit for free; read via
 
 ### Attack Bonus Calculation
 ```
-total = abilityMod + profBonus + weaponBonus + featureAttackBonus + stateAttackBonus
+attack = buildAutoAttackFromWeapon(weapon)
+breakdown = getAttackBonusBreakdown(attack)
+total = breakdown.total
 ```
 
-- `weaponBonus`: from magic item's `bonusWeapon` + `bonusWeaponAttack`
-- `featureAttackBonus`: from feature calculations
-- `stateAttackBonus`: from `getBonusFromStates("attack")`
+- `attack.attackBonus` is intrinsic/local only: effective source-weapon magic,
+  upgrades, materials, and custom flat attack bonus.
+- The breakdown adds base ability, the best eligible ability substitution,
+  proficiency, passive feature contributions, active-state contributions, and
+  scoped external-item contributions.
+- Source-weapon and external-item paths are disjoint. Do not re-read the source
+  item's `bonusWeapon`/`bonusWeaponAttack` in a renderer or exporter.
+- Signed string bonuses are normalized numerically. Roll-only conditionals,
+  ammunition, tactical toggles, one-shot bonuses, and exhaustion remain outside.
+- Overview, Combat, Play Mode, PDF, and NPC export consume this same contract.
+
+### Attack Reach Projection
+
+`getAttackRangeProjection(attack, {meleeReach, isOwnTurn})` owns rendered range.
+Structured reach adds the character-wide reach above the normal 5-foot baseline;
+attack-local reach is added separately and respects `reachCondition:
+"onYourTurn"`. The Reach property adds 5 feet only without structured reach.
+Thrown uses preserve their ranged text and return `null` from `getAttackReach()`.
 
 ### Standing Weapon Damage Display
 
@@ -300,17 +317,14 @@ riders remain roll-time concerns and must not appear in the standing formula.
 
 ### Critical Hit Range Scoping
 
-`CharacterSheetState#getCriticalRange(kind = "weapon")` is the single shared
-source of truth for "what beats a natural 20" — called from
-`charactersheet-combat.js` (weapon/unarmed/flurry attacks, default `"weapon"`)
-and `charactersheet-spells.js` (`"spell"`). Champion's Improved/Superior
-Critical (`calc.criticalRange`) and a magic item's `critThreshold` are both
-scoped to `kind !== "spell"` per RAW text ("attack rolls with weapons and
-Unarmed Strikes"); homebrew active-state `critRange`/`critRange:expand`
-effects are intentionally left unscoped (broadly-worded custom abilities keep
-applying to any attack kind). Any future feature that widens crit range only
-for a specific attack kind should add its own `kind !== "..."` guard inside
-this one method rather than duplicating scoping logic per renderer.
+`CharacterSheetState#getCriticalRange({attack, kind, includeItemThreshold})` is
+the single shared source of truth for "what beats a natural 20." Concrete
+weapon attacks read only their own source item's `critThreshold`; the legacy
+no-argument path exists for compatibility and must not be used by player-facing
+renderers or rolls. Champion's Improved/Superior Critical is weapon/unarmed
+only. Stance critical effects carry attack-kind/range scopes, can expand an
+already-improved range, and enforce their authored floor. Broad custom-state
+`critRange`/`critRange:expand` effects remain intentionally unscoped.
 
 ### Turn-Start Effect Resolver
 
@@ -570,10 +584,13 @@ Raw catalog bonuses are normalized when an item enters state, including signed
 strings such as `"+2"` and `reqAttune`. State-owned recalculation applies
 non-armor `bonusAc` and saving-throw bonuses only while the item is equipped
 and, when required, attuned. Equip, attune, remove, and load all rebuild these
-totals, while the Inventory renderer writes derived totals without turning
-them into manual overrides. This keeps direct-state consumers and rendered
-Inventory consumers on one lifecycle and prevents duplicate Ring/Cloak-style
-bonuses.
+totals. `syncEquippedAcState()` is the sole inventory-backed armor/shield writer:
+it reads raw equipped rows, projects each material once, and folds a shield's
+authored `bonusAc` plus its projected material delta into the numeric
+`_data.ac.shield.bonus`. Inventory render/update flows delegate to that state
+path, so a first render repairs stale saved snapshots without a migration or a
+last-writer race. Armor and shield bonuses stay out of `_data.ac.itemBonus`,
+which remains the Ring/Cloak-style bucket.
 
 Magic weapon bonuses are THREE separate fields on the item:
 - `bonusWeapon`: general bonus (applies to both attack and damage)

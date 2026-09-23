@@ -1259,138 +1259,75 @@ export class CharacterSheetPlayMode {
 	}
 
 	_renderChainedTargets () {
-		const targets = this._state.getChainedTargets?.() || [];
 		const calc = this._state.getFeatureCalculations?.() || {};
-		const available = !!calc.hasManifestChains && this._state.isStateTypeActive?.("rage") && this._state.isStateTypeActive?.("manifestChains");
-		if (!available && !targets.length) return;
-		const card = this._makeCard(this._elActionsHub, "feature", "Chained Targets");
-		const lede = this._ce("div", "pm-card__lede ve-muted ve-small", card);
-		const occupied = this._state.getChainedTargetState?.().used ?? targets.filter(it => it.chainIndex != null).length;
-		const movement = this._state.getChainedMovementState?.() || {};
-		lede.textContent = `${occupied}/${calc.chainCount || 0} chains occupied · reach ${calc.chainRange || 0} ft. · chain movement ${movement.remaining ?? 0}/${movement.allowance ?? 0} ft.${movement.doubled ? " (doubled)" : ""}`;
-		if (occupied >= Number(calc.chainCount || 0)) {
-			const warning = this._ce("div", "pm-chained-target__warning ve-small", card);
-			warning.setAttribute("role", "status");
-			warning.textContent = "Chain capacity reached — release a grapple before adding another.";
-		}
-		if (!targets.length) {
-			this._ce("div", "ve-muted ve-small", card).textContent = "No creatures chained. Use a target-aware rider after a Spectral Chains hit.";
+		if (!calc.hasManifestChains) return;
+
+		const card = this._makeCard(this._elActionsHub, "feature", "Spectral Chains");
+		const trackingEnabled = this._state.isChainedFuryTargetTrackingEnabled?.() === true;
+		const optIn = this._ce("div", "pm-chain-tracker__optin", card);
+		const optInCopy = this._ce("div", "pm-chain-tracker__copy", optIn);
+		this._ce("div", "pm-chain-tracker__title", optInCopy).textContent = "Remember chained creatures";
+		this._ce("div", "pm-chain-tracker__description ve-muted ve-small", optInCopy).textContent = "Optional bookkeeping. Attacks and hit effects work normally without it.";
+		const toggle = this._ce("label", "pm-chain-tracker__toggle", optIn);
+		const toggleInput = this._ce("input", "", toggle);
+		toggleInput.type = "checkbox";
+		toggleInput.checked = trackingEnabled;
+		toggleInput.setAttribute("aria-label", "Remember chained creatures");
+		this._ce("span", "", toggle).textContent = trackingEnabled ? "On" : "Off";
+		toggleInput.addEventListener("change", () => {
+			this._state.setChainedFuryTargetTrackingEnabled?.(toggleInput.checked);
+			this._page._saveCurrentCharacter?.();
+			this.render();
+			this._elActionsHub?.querySelector(".pm-chain-tracker__toggle input")?.focus();
+		});
+		if (!trackingEnabled) return;
+
+		const targets = this._state.getChainedTargets?.() || [];
+		const targetState = this._state.getChainedTargetState?.() || {};
+		const lede = this._ce("div", "pm-card__lede pm-chain-tracker__summary", card);
+		lede.textContent = `${targetState.used || 0} of ${targetState.capacity || calc.chainCount || 0} chains holding creatures · Grapple DC ${targetState.grappleDc || calc.chainGrappleDc || "—"}`;
+
+		const available = this._state.isStateTypeActive?.("rage")
+			&& this._state.isStateTypeActive?.("manifestChains")
+			&& this._state.getItems?.().some(it => it._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID && it.equipped);
+		if (!available) {
+			this._ce("div", "pm-chain-tracker__empty ve-muted ve-small", card).textContent = "Tracking is ready. Rage, manifest, and equip your Spectral Chains to record a creature.";
 			return;
 		}
+		if (!targets.length) {
+			this._ce("div", "pm-chain-tracker__empty ve-muted ve-small", card).textContent = "No creatures recorded. Save a grapple or restraint outcome after a Spectral Chains hit.";
+			return;
+		}
+		if (targetState.used >= targetState.capacity) {
+			const warning = this._ce("div", "pm-chain-tracker__warning ve-small", card);
+			warning.setAttribute("role", "status");
+			warning.textContent = `All ${targetState.capacity} chains are holding creatures. Release one before recording another.`;
+		}
+
 		for (const target of targets) {
 			const row = this._ce("div", "pm-chained-target", card);
 			row.setAttribute("role", "group");
-			row.setAttribute("aria-label", `${target.targetName}, chained target`);
+			row.setAttribute("aria-label", `${target.targetName}, ${target.restrained ? "restrained" : "grappled"}`);
 			row.dataset.targetId = target.id;
-			const name = this._ce("span", "pm-chained-target__name", row);
-			name.textContent = target.targetName;
-			const meta = this._ce("span", "pm-chained-target__meta", row);
-			meta.textContent = `${target.size} · ${target.restrained ? "restrained" : target.grappled ? "grappled" : target.shoved ? "shoved (no chain)" : "tracked"}${target.distance != null ? ` · ${target.distance} ft.` : ""}`;
+
+			const details = this._ce("div", "pm-chained-target__details", row);
+			this._ce("div", "pm-chained-target__name", details).textContent = target.targetName;
+			const statuses = this._ce("div", "pm-chained-target__statuses", details);
+			for (const statusText of ["Grappled", ...(target.restrained ? ["Restrained"] : [])]) {
+				this._ce("span", "pm-chained-target__status", statuses).textContent = statusText;
+			}
+			if (target.restrained && target.recurringDamage?.amount) {
+				this._ce("div", "pm-chained-target__reminder", details).textContent = `Start of its turn: ${target.recurringDamage.amount} ${target.recurringDamage.type || "force"} damage.`;
+			}
+
 			const release = this._ce("button", "pm-chained-target__release", row);
 			release.type = "button";
 			release.textContent = "Release";
-			release.style.minHeight = "44px";
-			release.setAttribute("aria-label", `Release chained target ${target.targetName}`);
-			this._makeClickable(release, `Release chained target ${target.targetName}`, () => {
+			release.setAttribute("aria-label", `Release ${target.targetName}`);
+			this._makeClickable(release, `Release ${target.targetName}`, () => {
 				this._state.releaseChainedTarget(target.id);
 				this._page._saveCurrentCharacter?.();
 				this.render();
-			});
-			const distance = this._ce("input", "pm-chained-target__distance", row);
-			distance.type = "number";
-			distance.min = "0";
-			distance.max = String(calc.chainRange || 30);
-			distance.value = target.distance ?? "";
-			distance.inputMode = "numeric";
-			distance.setAttribute("aria-label", `New distance for ${target.targetName} in feet`);
-			distance.style.minHeight = "44px";
-			const move = this._ce("button", "pm-chained-target__move", row);
-			move.type = "button";
-			move.textContent = "Move";
-			move.style.minHeight = "44px";
-			move.setAttribute("aria-label", `Move ${target.targetName} within chain range`);
-			const doubleLabel = this._ce("label", "pm-chained-target__double", row);
-			doubleLabel.innerHTML = `<input type="checkbox" data-double-movement aria-label="Spend bonus action to double chain-only movement"> Double movement`;
-			this._makeClickable(move, `Move ${target.targetName} within chain range`, () => {
-				const doubleMovement = !!doubleLabel.querySelector("[data-double-movement]")?.checked;
-				if (doubleMovement && !this._state.isActionTypeAvailable?.("bonus")) {
-					JqueryUtil.doToast({type: "warning", content: "Your bonus action has already been used this turn."});
-					return;
-				}
-				const result = this._state.moveChainedTarget(target.id, Number(distance.value), {doubleMovement});
-				if (!result.ok) JqueryUtil.doToast({type: "warning", content: `Cannot move target: ${result.reason || "invalid distance"}`});
-				else {
-					const economy = this._state.getActionEconomyState?.();
-					if (economy) {
-						this._actionEconomy.action = economy.action;
-						this._actionEconomy.bonus = economy.bonus;
-						this._actionEconomy.reaction = economy.reaction;
-					}
-					this._page._saveCurrentCharacter?.();
-					this.render();
-				}
-			});
-			if (target.restrained && target.recurringDamage?.amount) {
-				const resolve = this._ce("button", "pm-chained-target__resolve", row);
-				resolve.type = "button";
-				resolve.textContent = `Resolve Turn (${target.recurringDamage.amount})`;
-				resolve.style.minHeight = "44px";
-				resolve.setAttribute("aria-label", `Resolve recurring damage for ${target.targetName}`);
-				this._makeClickable(resolve, `Resolve recurring damage for ${target.targetName}`, () => {
-					const result = this._state.resolveChainedTargetTurn(target.id);
-					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage.`});
-					else JqueryUtil.doToast({type: "info", content: "Recurring damage already resolved for this turn."});
-					this._page._saveCurrentCharacter?.();
-					this.render();
-				});
-				const repeat = this._ce("button", "pm-chained-target__repeat", row);
-				repeat.type = "button";
-				repeat.textContent = "Repeat";
-				repeat.style.minHeight = "44px";
-				repeat.setAttribute("aria-label", `Repeat recurring damage for ${target.targetName}`);
-				this._makeClickable(repeat, `Repeat recurring damage for ${target.targetName}`, () => {
-					const result = this._state.resolveChainedTargetTurn(target.id, this._state.getCombatRound?.(), {repeat: true});
-					if (result.damage) JqueryUtil.doToast({type: "warning", content: `${target.targetName} takes ${result.damage} ${result.damageType} damage again.`});
-					this._page._saveCurrentCharacter?.();
-					this.render();
-				});
-			}
-			const escape = this._ce("button", "pm-chained-target__escape", row);
-			escape.type = "button";
-			escape.textContent = "Escape";
-			escape.style.minHeight = "44px";
-			escape.setAttribute("aria-label", `Resolve escape for ${target.targetName}`);
-			this._makeClickable(escape, `Resolve escape for ${target.targetName}`, async () => {
-				const trigger = document.activeElement;
-				const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
-					title: `${target.targetName} — Escape`,
-					isMinHeight0: true,
-					cbClose: () => csRestoreModalFocus(trigger),
-				});
-				modalInner.classList.add("cs-combat-target-modal");
-				modalInner.style.maxHeight = "calc(100dvh - 2rem)";
-				modalInner.style.overflowY = "auto";
-				modalInner.style.boxSizing = "border-box";
-				modalInner.style.paddingBottom = "max(1.5rem, env(safe-area-inset-bottom, 0px))";
-				modalInner.innerHTML = `<div class="cs-combat-target-effect" role="form" aria-label="Chained target escape">
-					<p class="ve-small ve-muted">Strength or Dexterity against DC ${this._state.getFeatureCalculations?.()?.chainGrappleDc || target.escapeDc}.</p>
-					<label class="ve-form-label">Escape ability <select class="form-control" data-escape-ability aria-label="Escape ability"><option value="str">Strength</option><option value="dex">Dexterity</option></select></label>
-					<label class="ve-form-label">Save total <input class="form-control" data-escape-total aria-label="Escape save total" type="number" min="0" inputmode="numeric"></label>
-					<div class="ve-flex-h-right cs-combat-target-modal__footer mt-2"><button type="button" class="cs-combat-btn" data-act="cancel">Cancel</button><button type="button" class="cs-combat-btn cs-combat-btn--primary ml-2" data-act="apply">Resolve escape</button></div>
-				</div>`;
-				modalInner.querySelector("[data-act=cancel]").addEventListener("click", doClose);
-				modalInner.querySelector("[data-act=apply]").addEventListener("click", async () => {
-					const raw = modalInner.querySelector("[data-escape-total]").value;
-					if (raw === "") return;
-					const result = this._state.escapeChainedTarget(target.id, Number(raw), {ability: modalInner.querySelector("[data-escape-ability]").value});
-					if (result.escaped) {
-						JqueryUtil.doToast({type: "success", content: `${target.targetName} escaped the chains.`});
-						this._page._saveCurrentCharacter?.();
-						await doClose();
-						this.render();
-					} else JqueryUtil.doToast({type: "info", content: `${target.targetName} remains chained (escape DC ${result.dc}).`});
-				});
-				csFocusModalOnOpen(modalInner, {preferSelector: "[data-escape-total]"});
 			});
 		}
 	}
@@ -1825,26 +1762,35 @@ export class CharacterSheetPlayMode {
 			const name = this._ce("span", "pm-feature__name", row);
 			name.textContent = method.name;
 
-			if (method.staminaCost > 0) {
+			if (method.staminaCostMeta?.isVariable || method.staminaCost > 0) {
 				const cost = this._ce("span", "pm-card__badge", row);
-				cost.textContent = `${method.staminaCost} SP`;
+				cost.textContent = `${method.staminaCostDisplay || method.staminaCost} SP`;
 			}
 
 			const useBtn = this._ce("button", "pm-feature__use-btn", row);
 			useBtn.textContent = "Use";
-			const canUse = staminaCur >= (method.staminaCost || 0);
+			const minimumCost = method.staminaCostMeta?.min ?? method.staminaCost ?? 0;
+			const canUse = staminaCur >= minimumCost
+				|| (!!this._state.canUseFocusForStamina?.() && (this._state.getKiPointsCurrent?.() ?? 0) >= minimumCost);
 			if (!canUse) useBtn.classList.add("pm-feature__use-btn--disabled");
 			useBtn.disabled = !canUse;
-			useBtn.addEventListener("click", (e) => {
+			useBtn.addEventListener("click", async (e) => {
 				e.stopPropagation();
-				if (method.staminaCost > 0) {
-					const cur = this._state.getStaminaCurrent?.() || 0;
-					if (cur < method.staminaCost) return;
-					this._state.setStaminaCurrent(cur - method.staminaCost);
-				}
-				this._logActivity("attack", `Used ${method.name}${method.staminaCost ? ` (${method.staminaCost} stamina)` : ""}`);
+				const result = await this._page?._combat?._pUseCombatMethod?.(method, {surface: "playMode"});
+				if (!result?.ok) return;
+				this._logActivity("attack", result.message || `Used ${method.name}`);
 				this._renderCombatMethods();
 			});
+
+			if (method.randomOutcomes) {
+				const details = this._ce("details", "pm-feature__details", row);
+				const summary = this._ce("summary", "pm-feature__details-summary", details);
+				summary.textContent = `${method.randomOutcomes.die} outcomes`;
+				for (const option of method.randomOutcomes.options) {
+					const optionEl = this._ce("div", "pm-feature__detail", details);
+					optionEl.textContent = `${option.label}: ${option.effectText}`;
+				}
+			}
 		});
 	}
 
@@ -1859,38 +1805,8 @@ export class CharacterSheetPlayMode {
 			&& (this._state.isItemAttackAvailable?.(i) ?? true));
 		equippedWeapons.forEach(weapon => {
 			if (attacks.find(a => a.name === weapon.name)) return;
-
-			const props = weapon.property || weapon.properties || [];
-			const isRanged = props.some(p => p === "A" || p === "T" || p.startsWith?.("A|") || p.startsWith?.("T|"));
-			const hasFinesse = props.some(p => p === "F" || p.startsWith?.("F|"));
-			const abilityMod = isRanged ? "dex" : ((hasFinesse && this._state.getAbilityMod("dex") >= this._state.getAbilityMod("str")) ? "dex" : "str");
-			const effectiveBonuses = this._state.getEffectiveItemBonuses?.(weapon.id);
-			// See `getEffectiveItemBonuses`: the totals fold `bonusWeapon` into both axes and
-			// coerce the authored "+2" strings, which a raw `+` would concatenate.
-			const parseB = (v) => (typeof v === "number" ? v : (parseInt(String(v ?? 0), 10) || 0));
-			const attackBonus = (effectiveBonuses
-				? (effectiveBonuses.totalAttackBonus || 0)
-				: parseB(weapon.bonusWeapon) + parseB(weapon.bonusWeaponAttack)) + parseB(weapon.customAttackBonus);
-			const damageBonus = (effectiveBonuses
-				? (effectiveBonuses.totalDamageBonus || 0)
-				: parseB(weapon.bonusWeapon) + parseB(weapon.bonusWeaponDamage)) + parseB(weapon.customDamageBonus);
-			const baseDamageDie = this._state.getWeaponDamageDie(weapon);
-			const baseDamageType = weapon.dmgType ? Parser.dmgTypeToFull?.(weapon.dmgType) : "slashing";
-
-			attacks.push({
-				id: `auto_${weapon.id}`,
-				name: weapon.name,
-				source: weapon.source,
-				isMelee: !isRanged,
-				abilityMod,
-				attackBonus,
-				damage: baseDamageDie,
-				damageType: baseDamageType,
-				damageBonus,
-				range: weapon.range || (isRanged ? "80/320 ft." : "5 ft."),
-				isAutoGenerated: true,
-				sourceItem: weapon,
-			});
+			const autoAttack = this._state.buildAutoAttackFromWeapon?.(weapon);
+			if (autoAttack) attacks.push(autoAttack);
 		});
 
 		if (!attacks.length) {
@@ -1932,14 +1848,14 @@ export class CharacterSheetPlayMode {
 		const customAttackIds = new Set(this._state.getAttacks().map(a => a.id));
 
 		attacks.forEach(attack => {
-			const abilityMod = this._state.getWeaponAbilityMod(attack);
-			const profBonus = this._state.getProficiencyBonus();
+			const attackBreakdown = this._state.getAttackBonusBreakdown?.(attack);
 			const weaponId = attack.riteWeaponId || attack.id;
-			const stateAttackBonus = this._state.getBonusFromStates?.("attack", {weaponId}) || 0;
-			const totalBonus = abilityMod + profBonus + (attack.attackBonus || 0) + stateAttackBonus;
-			const totalDmgBonus = abilityMod + (this._state.getWeaponDisplayDamageBonus?.(attack) ?? (Number(attack.damageBonus) || 0));
+			const totalBonus = attackBreakdown?.total ?? 0;
+			const totalDmgBonus = (attackBreakdown?.effectiveAbility ?? this._state.getWeaponAbilityMod(attack))
+				+ (this._state.getWeaponDisplayDamageBonus?.(attack) ?? (Number(attack.damageBonus) || 0));
 			const dmgStr = totalDmgBonus >= 0 ? `${attack.damage}+${totalDmgBonus}` : `${attack.damage}${totalDmgBonus}`;
 			const damageTypes = this._state.getWeaponDamageTypeChoices?.(weaponId, attack.damageType) || [attack.damageType];
+			const critRange = this._state.getCriticalRange?.({attack}) || 20;
 
 			const row = this._ce("div", "pm-attack", card);
 
@@ -1953,11 +1869,17 @@ export class CharacterSheetPlayMode {
 			dmg.textContent = dmgStr;
 			const type = this._ce("span", "pm-attack__type", row);
 			type.textContent = damageTypes.filter(Boolean).join("/");
+			if (critRange < 20) {
+				const crit = this._ce("span", "pm-attack__crit pm-attack__mastery", row);
+				crit.textContent = `Crit ${critRange}+`;
+				crit.title = `Critical Hit Range: ${critRange}-20`;
+			}
 
 			// Attack range
-			if (attack.range) {
+			const rangeProjection = this._state.getAttackRangeProjection?.(attack);
+			if (rangeProjection?.display || attack.range) {
 				const range = this._ce("span", "pm-attack__range", row);
-				range.textContent = attack.range;
+				range.textContent = rangeProjection?.display || attack.range;
 			}
 
 			// Weapon mastery badge (XPHB 2024)

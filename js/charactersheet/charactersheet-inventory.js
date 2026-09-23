@@ -6050,95 +6050,7 @@ class CharacterSheetInventory {
 	}
 
 	_updateArmorClass () {
-		// Recalculate AC based on equipped armor and update state
-		const items = this._state.getItems();
-		const equippedArmor = items.find(i => i.armor && i.equipped);
-		// Check for shield by flag first, then fall back to name check for older saves
-		// Exclude items like "Ring of Mind Shielding" by checking it's not a ring type
-		const equippedShield = items.find(i => {
-			if (!i.equipped) return false;
-			if (i.shield) return true;
-			// Fallback name check - but exclude ring/wondrous items that happen to have "shield" in name
-			if (i.name?.toLowerCase().includes("shield")) {
-				const nameLower = i.name.toLowerCase();
-				// Exclude "Ring of X Shielding" patterns and similar non-shield items
-				if (nameLower.startsWith("ring of") || i.type === "ring" || i.type === "wondrous") {
-					return false;
-				}
-				return true;
-			}
-			return false;
-		});
-
-		if (equippedArmor) {
-			// Use stored armor type first, then look up from data
-			let armorType = equippedArmor.armorType || "light";
-
-			// If no stored type, look up full armor data
-			if (!equippedArmor.armorType) {
-				const armorData = this._allItems.find(i => i.name === equippedArmor.name && i.source === equippedArmor.source);
-				if (armorData) {
-					const itemType = armorData.type?.split("|")[0]; // Handle "MA|XPHB" format
-					if (itemType === "HA") {
-						armorType = "heavy";
-					} else if (itemType === "MA") {
-						armorType = "medium";
-					} else if (itemType === "LA") {
-						armorType = "light";
-					}
-				}
-			}
-
-			// Get AC value - include magic bonus if present
-			const baseAC = equippedArmor.ac || 10;
-			const magicBonus = equippedArmor.bonusAc || 0;
-			const armorAC = baseAC + magicBonus;
-
-			// Get armor properties for mechanics - try stored values first, then look up
-			let dexterityMax = equippedArmor.dexterityMax;
-			let stealth = equippedArmor.stealth;
-			let strength = equippedArmor.strength;
-
-			// If properties not on stored item, look up from full item data
-			if (dexterityMax === undefined || stealth === undefined || strength === undefined) {
-				const armorData = this._allItems.find(i => i.name === equippedArmor.name && i.source === equippedArmor.source);
-				if (armorData) {
-					if (dexterityMax === undefined) dexterityMax = armorData.dexterityMax ?? null;
-					if (stealth === undefined) stealth = armorData.stealth || false;
-					if (strength === undefined) strength = armorData.strength || null;
-				}
-			}
-
-			// Update state with armor info
-			this._state.setArmor({
-				ac: armorAC,
-				type: armorType,
-				name: equippedArmor.name,
-				source: equippedArmor.source,
-				magicBonus: magicBonus,
-				dexterityMax: dexterityMax ?? null,
-				stealth: stealth || false,
-				strength: strength || null,
-				appliedUpgrades: equippedArmor.appliedUpgrades || [],
-			});
-		} else {
-			// No armor equipped
-			this._state.setArmor(null);
-		}
-
-		// Update shield state - track base AC and magic bonus separately
-		const shieldBaseAc = equippedShield?.ac ?? 2;
-		const shieldMagicBonus = equippedShield?.bonusAc || 0;
-		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield", source: equippedShield.source, appliedUpgrades: equippedShield.appliedUpgrades || []} : false);
-
-		// Calculate AC bonuses from other equipped/attuned items (like Cloak of Protection, Ring of Protection)
-		const otherAcBonus = this._calculateItemBonuses("bonusAc", items, [equippedArmor, equippedShield]);
-		this._state.setItemAcBonus(otherAcBonus);
-
-		// Calculate other bonuses from equipped items
-		this._updateItemBonuses(items);
-
-		// Re-render to show updated AC
+		this._syncArmorState();
 		this._page.renderCharacter();
 	}
 
@@ -6158,9 +6070,10 @@ class CharacterSheetInventory {
 				if (!item.equipped) return false;
 				// If item requires attunement, it must be attuned
 				if (item.requiresAttunement && !item.attuned) return false;
+				if (bonusType === "bonusAc" && (this._state.isBodyArmorItem(item) || this._state.isShieldItem(item))) return false;
 				// Conditional AC bonuses are evaluated by state.getAc() against live armor/shield state.
 				if (bonusType === "bonusAc" && item.effects?.some(effect => effect?.type === "acBonusConditional")) return false;
-				return item[bonusType];
+				return CharacterSheetItemUtils.parseBonus(item[bonusType]) !== 0;
 			})
 			.reduce((sum, item) => sum + CharacterSheetItemUtils.parseBonus(item[bonusType]), 0);
 	}
@@ -7855,81 +7768,7 @@ class CharacterSheetInventory {
 	 */
 	_syncArmorState () {
 		const items = this._state.getItems();
-		const equippedArmor = items.find(i => i.armor && i.equipped);
-		// Check for shield by flag first, then fall back to name check for older saves
-		// Exclude items like "Ring of Mind Shielding" by checking it's not a ring type
-		const equippedShield = items.find(i => {
-			if (!i.equipped) return false;
-			if (i.shield) return true;
-			// Fallback name check - but exclude ring/wondrous items that happen to have "shield" in name
-			if (i.name?.toLowerCase().includes("shield")) {
-				const nameLower = i.name.toLowerCase();
-				// Exclude "Ring of X Shielding" patterns and similar non-shield items
-				if (nameLower.startsWith("ring of") || i.type === "ring" || i.type === "wondrous") {
-					return false;
-				}
-				return true;
-			}
-			return false;
-		});
-
-		if (equippedArmor) {
-			let armorType = equippedArmor.armorType || "light";
-
-			// If no stored type, try to determine from item data
-			if (!equippedArmor.armorType) {
-				const armorData = this._allItems.find(i => i.name === equippedArmor.name && i.source === equippedArmor.source);
-				if (armorData) {
-					const itemType = armorData.type?.split("|")[0];
-					if (itemType === "HA") armorType = "heavy";
-					else if (itemType === "MA") armorType = "medium";
-					else if (itemType === "LA") armorType = "light";
-				}
-			}
-
-			// Include magic armor bonus
-			const baseAC = equippedArmor.ac || 10;
-			const magicBonus = equippedArmor.bonusAc || 0;
-
-			// Get armor properties - try stored values first, then look up
-			let dexterityMax = equippedArmor.dexterityMax;
-			let stealth = equippedArmor.stealth;
-			let strength = equippedArmor.strength;
-
-			if (dexterityMax === undefined || stealth === undefined || strength === undefined) {
-				const armorData = this._allItems.find(i => i.name === equippedArmor.name && i.source === equippedArmor.source);
-				if (armorData) {
-					if (dexterityMax === undefined) dexterityMax = armorData.dexterityMax ?? null;
-					if (stealth === undefined) stealth = armorData.stealth || false;
-					if (strength === undefined) strength = armorData.strength || null;
-				}
-			}
-
-			this._state.setArmor({
-				ac: baseAC + magicBonus,
-				type: armorType,
-				name: equippedArmor.name,
-				source: equippedArmor.source,
-				magicBonus: magicBonus,
-				dexterityMax: dexterityMax ?? null,
-				stealth: stealth || false,
-				strength: strength || null,
-				appliedUpgrades: equippedArmor.appliedUpgrades || [],
-			});
-		} else {
-			this._state.setArmor(null);
-		}
-
-		// Update shield state - track base AC and magic bonus separately
-		const shieldBaseAc = equippedShield?.ac ?? 2;
-		const shieldMagicBonus = equippedShield?.bonusAc || 0;
-		this._state.setShield(equippedShield ? {equipped: true, ac: shieldBaseAc, bonus: shieldMagicBonus, name: equippedShield.name || "Shield", source: equippedShield.source, appliedUpgrades: equippedShield.appliedUpgrades || []} : false);
-
-		// Calculate AC bonuses from other equipped/attuned items
-		const otherAcBonus = this._calculateItemBonuses("bonusAc", items, [equippedArmor, equippedShield]);
-		this._state.setItemAcBonus(otherAcBonus);
-
-		// Calculate other bonuses from equipped items
+		this._state.syncEquippedAcState();
 		this._updateItemBonuses(items);
 	}
 

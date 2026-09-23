@@ -348,7 +348,7 @@ describe("Character Sheet Respec unplaced Skill Expert choices", () => {
 				choices: {
 					ability: "int",
 					skills: ["Stealth"],
-					expertise: ["Stealth"],
+					expertise: ["stealth"],
 				},
 			},
 		});
@@ -383,7 +383,7 @@ describe("Character Sheet Respec unplaced Skill Expert choices", () => {
 				choices: {
 					ability: "int",
 					skills: ["Stealth"],
-					expertise: ["Stealth"],
+					expertise: ["stealth"],
 				},
 			},
 		});

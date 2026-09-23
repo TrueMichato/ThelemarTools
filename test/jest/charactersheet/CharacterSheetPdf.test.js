@@ -310,6 +310,38 @@ describe("CharacterSheetPdf", () => {
 			expect(html).toContain("1d8+3");
 			expect(html).toContain("slashing");
 		});
+
+		test("should project equipped weapon totals and effective reach through the canonical resolver", () => {
+			state.addClass({name: "Fighter", source: "PHB", level: 20});
+			state.setAbilityBase("str", 32); // +11
+			state.addNamedModifier({name: "Reach Boon", type: "reach", value: "+10", enabled: true});
+			state.addItem({
+				name: "Spectral Chains",
+				source: "TGTT",
+				type: "M",
+				weapon: true,
+				weaponCategory: "martial",
+				dmg1: "1d8",
+				dmgType: "O",
+				range: "30 ft.",
+				bonusWeapon: "+2",
+				customAttackBonus: 1,
+				equipped: true,
+			});
+			state.addItem({
+				name: "Pale Aquamarine Lozenge",
+				source: "MECIounStones",
+				type: "wondrous",
+				bonusWeaponAttack: "+2",
+				entries: ["You gain a +2 bonus to attack rolls with every weapon and unarmed strike."],
+				equipped: true,
+			});
+
+			const html = new CharacterSheetPdf(state).generate();
+			expect(html).toContain("Spectral Chains");
+			expect(html).toContain("+22");
+			expect(html).toContain("40 ft.");
+		});
 	});
 
 	// ===================================================================
@@ -873,12 +905,12 @@ describe("CharacterSheetPdf", () => {
 			expect(html).toContain("Two-Handed");
 		});
 
-		test("should use attackBonus field when available", () => {
+		test("should treat attackBonus as intrinsic and add ability plus proficiency", () => {
 			state._data.attacks = [
 				{id: "a1", name: "Rapier", attackBonus: 8, bonus: 5, damage: "1d8+5", damageType: "piercing"},
 			];
 			const html = new CharacterSheetPdf(state).generate();
-			expect(html).toContain("+8"); // attackBonus takes precedence
+			expect(html).toContain("+10"); // base ability +0, PB +2, intrinsic +8
 		});
 	});
 

@@ -31,6 +31,14 @@ point and the item returns to its printed stats.
 > Use `state.getItemRaw(id)` when you need the **unprojected** item (the picker preview
 > does this — previewing against an already-projected item was a real bug).
 
+Weapon attacks consume the projected item through
+`CharacterSheetState.buildAutoAttackFromWeapon()`. Material and upgrade attack/
+damage changes are folded into the attack's intrinsic fields once; downstream
+renderers and rolls use the canonical attack/damage breakdown APIs instead of
+reading the material or upgrade a second time. Material critical thresholds
+remain source-weapon-specific, so one Obsidian weapon cannot widen another
+weapon's critical range.
+
 ## Structured composition across the site
 
 Items now carry all three composition axes as canonical source-qualified references:

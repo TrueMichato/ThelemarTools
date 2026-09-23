@@ -41,7 +41,8 @@ class CombatMethodsSublistManager extends SublistManager {
 
 	pGetSublistItem (it, hash) {
 		const degree = it.degree ? PageFilterCombatMethods._getDegreeDisplay(it.degree) : "\u2014";
-		const stamina = it.staminaCost != null ? it.staminaCost : "\u2014";
+		const staminaMeta = PageFilterCombatMethods.getStaminaCostMeta(it);
+		const stamina = PageFilterCombatMethods.getStaminaCostDisplay(it);
 		const action = it.actionType ? it.actionType.toTitleCase() : "\u2014";
 
 		const cellsText = [
@@ -69,6 +70,7 @@ class CombatMethodsSublistManager extends SublistManager {
 				tradition: it.tradition || "",
 				degree,
 				stamina,
+				staminaSort: staminaMeta.min,
 				action,
 			},
 			{
@@ -111,7 +113,8 @@ class CombatMethodsPage extends ListPage {
 		const source = Parser.sourceJsonToAbv(it.source);
 		const hash = UrlUtil.autoEncodeHash(it);
 		const degree = it.degree ? PageFilterCombatMethods._getDegreeDisplay(it.degree) : "\u2014";
-		const stamina = it.staminaCost != null ? it.staminaCost : "\u2014";
+		const staminaMeta = PageFilterCombatMethods.getStaminaCostMeta(it);
+		const stamina = PageFilterCombatMethods.getStaminaCostDisplay(it);
 		const action = it.actionType ? it.actionType.toTitleCase() : "\u2014";
 		const type = it.isStance ? "Stance" : "Strike";
 		const tradClass = Parser.cmTraditionToStyleClass(it.tradition);
@@ -149,6 +152,7 @@ class CombatMethodsPage extends ListPage {
 				type,
 				degree,
 				stamina,
+				staminaSort: staminaMeta.min,
 				action,
 			},
 			{

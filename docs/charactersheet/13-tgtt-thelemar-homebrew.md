@@ -213,6 +213,26 @@ Subclasses that grant combat traditions automatically when selected:
 
 Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect type via `_aggregateCalculationBasedEffects()`. Traditions clear/re-apply on class change.
 
+### Barbarian Specialties — permanent skill bonuses
+
+Three Barbarian Specialties grant permanent bonuses equal to proficiency bonus:
+
+| Specialty | Modifier targets | Scope |
+|---|---|---|
+| **Agile Sprinter** | `skill:athletics`, `skill:acrobatics` | Always on |
+| **Lead the Pack** | `skill:athletics`, `skill:acrobatics` | Always on; its separate group-check result-sharing rider remains DM/player operated |
+| **Unyielding Might** | `skill:might` | Always on; never Athletics |
+
+TGTT defines **Might** as the Strength skill for raw-strength feats such as
+breaking, bending, lifting, dragging, carrying, and forcing objects. Grapple and
+shove are not part of the Might skill definition.
+
+These modifiers are prose-parsed from the explicit shape “gain a bonus to
+<skill> checks. The bonus equals your proficiency bonus.” Keep that wording and
+the `{@skill ...}` tags when editing the source data. The Barbarian Specialty
+corpus test pins both raw-tagged and rendered-text parsing for every option in
+the L1 pool.
+
 ---
 
 ## Subclasses
@@ -221,7 +241,7 @@ Generic `_subclassGrantedTraditions` pattern feeds into `combatTradition` effect
 
 | Subclass | Status | Key Features |
 |----------|--------|--------------|
-| **Path of the Chained Fury** | ✅ Complete | persistent generated Spectral Chains item, `chainDamageDie`, `chainRange`, `chainCount`, `chainRestrainDc`, `chainRestrainDamage`, `chainGrappleSizeBonus`, `grappleSizeUnlimited`, `grantedAttacks`, `attackOnHitOptions`, `attackActionAllowances` |
+| **Path of the Chained Fury** | ✅ Complete | persistent generated Spectral Chains item, reminder-first `attackOnHitOptions`, optional `chainedFuryTargetTracking`, `chainDamageDie`, `chainRange`, `chainCount`, finalized `chainGrappleDc`, `chainImprisonmentSaveDc`, `chainRecurringDamage`, `chainGrappleSizeBonus`, `grappleSizeUnlimited`, `grantedAttacks`, `attackActionAllowances` |
 
 #### Path of the Chained Fury — mechanical surface
 
@@ -237,6 +257,18 @@ exactly the RAW "they vanish when your rage ends". It inherits Rage's
 | 6 | Chain Imprisonment | `countsAsMagical` on the chains (renders a `✧ Magical` badge); `chains-restrain` on-hit rider with a STR save at `8 + PB + CON` and recurring damage equal to current Barbarian level |
 | 10 | Chain Control | grapple size bonus → +2; `chains-control-shove` on-hit rider |
 | 14 | Unchained Fury | `chainCount` 2 → 4; `attackActionAllowances` entry (3 attacks with the chains per Attack action); `grappleSizeUnlimited` (no size cap) |
+
+Target bookkeeping is optional and defaults off. With it off, all attacks and
+riders still work and present concise rules reminders. With it on, only a
+creature name plus explicit save outcomes are collected; successful grapples
+occupy the authored two/four chain capacity and render as compact condition
+rows. The UI does not manage target size, distance, movement, escape rolls, or
+map positions.
+
+`chainGrappleDc` is finalized after the generic Combat Method DC calculation,
+so a higher spell save DC granted by Hexblade or Bladesinger is used correctly.
+Chain Imprisonment remains separate at `8 + PB + CON`, and its recurring force
+damage remains equal to Barbarian level.
 
 Damage die and range are read from the subclass's **`subclassTableGroups`** via
 `CharacterSheetClassUtils.getSubclassTableDice` / `getSubclassTableNumber`, never
@@ -254,7 +286,21 @@ rather than the editable display name.
 
 **Reach:** the inventory weapon carries an absolute item-specific reach, not a
 global reach effect — a global one would wrongly extend the character's
-greataxe too. See `getReachContributions()` / `getAttackReach()`.
+greataxe too. Its authored progression is 15/20/25/30 ft. at Barbarian levels
+3/6/10/14. `getAttackRangeProjection()` adds a separate character-wide reach
+boon to that value (for example, 30 + 10 = 40 ft.) without copying the chain
+reach onto unrelated weapons. Thrown uses return no melee reach, and
+`onYourTurn` reach is omitted off-turn.
+
+**Attack and critical projection:** the generated attack reads the live item
+through `buildAutoAttackFromWeapon()`. Weapon magic, Masterwork, Sharpened, and
+material effects remain intrinsic to that item; equipment such as a seated Ioun
+Stone is added separately by `getAttackBonusBreakdown()`. Reconciliation across
+Rage and level changes preserves the generated item ID, material, upgrades, and
+Ioun relationships. Critical thresholds are attack-specific: Sharpened and an
+Obsidian striking surface produce 18–20 on the chains, and Perfect Edge can
+expand that to its 17–20 floor without changing an unrelated weapon's item
+threshold.
 
 **On-hit riders are never auto-applied.** They surface through the generic
 `featureOnHitOptions` post-attack hook, then use the persisted target/effect
@@ -582,8 +628,8 @@ The stamina-based combat system is fully implemented.
 |---------|----------------|
 | **Stamina Pool** | `staminaPool = 2 × proficiency bonus` |
 | **Stamina Recovery** | Full on long rest, half (rounded up) on short rest |
-| **Method Costs** | 1-3 stamina per method |
-| **Method DC** | `8 + proficiency + STR or DEX` |
+| **Method Costs** | Authored per method; fixed, free (`0`), or a prompted range such as `1-3`. Degree never determines cost. |
+| **Method DC** | Standard: `8 + proficiency + max(STR, DEX)`; TGTT Monk: `9 + proficiency + max(STR, DEX, WIS)`. Existing spellcasting-DC overrides use the higher eligible DC. |
 | **Stance System** | One active stance at a time, stance speed bonus wired into `getSpeedBonusFromStates()` |
 
 ### ✅ Combat Traditions (17 total)

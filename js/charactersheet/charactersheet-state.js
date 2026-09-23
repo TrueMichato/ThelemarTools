@@ -4656,6 +4656,13 @@ class CharacterSheetState {
 		if (src.isDivineSoulAffinity && !target.isDivineSoulAffinity) target.isDivineSoulAffinity = true;
 		if (src.isSubclassChoiceSpell && !target.isSubclassChoiceSpell) target.isSubclassChoiceSpell = true;
 		if (src.inSpellbook && !target.inSpellbook) target.inSpellbook = true;
+		if (!Object.hasOwn(target, "classGrantOriginalMetadata")
+			&& Object.hasOwn(src, "classGrantOriginalMetadata")) {
+			target.classGrantOriginalMetadata = MiscUtil.copyFast(src.classGrantOriginalMetadata);
+		}
+		if (Array.isArray(src.classGrantOwners)) {
+			target.classGrantOwners = [...new Set([...(target.classGrantOwners || []), ...src.classGrantOwners])];
+		}
 		if (target.linkedResourceId == null && src.linkedResourceId != null) target.linkedResourceId = src.linkedResourceId;
 		// Innate use tracking: keep the higher max, but NEVER restore spent uses — the
 		// target's own `current` (what the player has left) is authoritative; only clamp it
@@ -5433,6 +5440,9 @@ class CharacterSheetState {
 				speedEmojiLabels: true,
 				// Show the redundant top-level "Abilities" tab (Overview already shows scores). Default OFF.
 				showAbilitiesTab: false,
+				// Chained Fury target bookkeeping is optional. Spectral Chains attacks and
+				// riders remain usable when this is off; only named target records are gated.
+				chainedFuryTargetTracking: false,
 
 				// Crafting, harvesting and cooking. The master toggle is ON — the flows are
 				// opt-in by nature (a character who never harvests never opens them) and hiding
@@ -5505,6 +5515,9 @@ class CharacterSheetState {
 
 	toJson () {
 		this._ensureBattleMasterSuperiorityDice();
+		if ((this._data.targetEffects || []).some(it => String(it?.source || "").toLowerCase() === "chained-fury")) {
+			this.reconcileTargetEffects();
+		}
 		return MiscUtil.copyFast(this._data);
 	}
 
@@ -5774,6 +5787,7 @@ class CharacterSheetState {
 		if (this._data.progressionOwnership?.version !== 1 || typeof this._data.progressionOwnership?.values !== "object") {
 			this._data.progressionOwnership = {version: 1, initialized: false, values: {}};
 		}
+		this._normalizeStoredSkillState();
 
 		// Ensure Forked Tongue (Illrigger) state exists. Older saves predate this
 		// feature-state block; backward-compatible default keeps load crash-free and
@@ -7992,7 +8006,8 @@ class CharacterSheetState {
 		for (const mod of (this._data.namedModifiers || [])) {
 			if (mod.type === "reach" && mod.enabled) {
 				// Resolve symbolic values before this feeds arithmetic/display (CS-BUG-038).
-				contributions.push({source: mod.name || "Modifier", value: this._resolveSymbolicModifierValue(mod.value) ?? 0});
+				const value = this._resolveSymbolicModifierValue(mod.value);
+				if (Number.isFinite(value)) contributions.push({source: mod.name || "Modifier", value});
 			}
 		}
 
@@ -8002,7 +8017,8 @@ class CharacterSheetState {
 				|| (e.type === "bonus" && e.target === "reach")
 				|| e.target === "reach";
 			if (isReach) {
-				contributions.push({source: e.stateName || e.source || "Active State", value: e.value || 0});
+				const value = this._resolveSymbolicModifierValue(e.value);
+				if (Number.isFinite(value)) contributions.push({source: e.stateName || e.source || "Active State", value});
 			}
 		}
 
@@ -8014,8 +8030,8 @@ class CharacterSheetState {
 			if (!CharacterSheetState._isAdditiveReachModifier(e)) continue;
 			// Conditional passive reach is not auto-applied (matches the conditional-modifier policy).
 			if (e.conditional) continue;
-			const value = typeof e.value === "number" ? e.value : parseInt(e.value, 10);
-			if (!Number.isNaN(value)) contributions.push({source: e.source || "Feature", value});
+			const value = this._resolveSymbolicModifierValue(e.value);
+			if (Number.isFinite(value)) contributions.push({source: e.source || "Feature", value});
 		}
 
 		return contributions;
@@ -8040,7 +8056,7 @@ class CharacterSheetState {
 	 * @returns {number} Total reach bonus in feet (default 0; base reach is 5ft)
 	 */
 	getReachBonus () {
-		return this.getReachContributions().reduce((total, c) => total + (c.value || 0), 0);
+		return this.getReachContributions().reduce((total, c) => total + c.value, 0);
 	}
 
 	/**
@@ -8070,6 +8086,7 @@ class CharacterSheetState {
 
 		const rangeStr = attack.range != null ? String(attack.range) : "";
 		const isThrown = rangeStr.includes("/");
+		if (isThrown) return null;
 		const isMelee = attack.isMelee === true
 			|| attack.type === "melee"
 			|| attack.range === "melee"
@@ -8086,6 +8103,37 @@ class CharacterSheetState {
 			? 0
 			: Number(attack.reachBonus) || 0;
 		return base + (!structuredReach && hasReachProp ? CharacterSheetState.REACH_PROPERTY_BONUS : 0) + attackReachBonus;
+	}
+
+	/**
+	 * Canonical player-facing range projection for one attack.
+	 * @param {object} attack
+	 * @param {object} [ctx]
+	 * @param {number} [ctx.meleeReach]
+	 * @param {boolean} [ctx.isOwnTurn=true]
+	 * @returns {{reach: number|null, display: string, isEffectiveReach: boolean}}
+	 */
+	getAttackRangeProjection (attack, {meleeReach, isOwnTurn = true} = {}) {
+		if (!attack) return {reach: null, display: "", isEffectiveReach: false};
+		const rawRange = String(attack.range || "");
+		const reach = this.getAttackReach(attack, {meleeReach, isOwnTurn});
+		const structuredReach = Number(attack.reach) || 0;
+		const attackReachBonus = Number(attack.reachBonus) || 0;
+		const hasReachProperty = (attack.properties || []).some(prop => String(prop).split("|")[0].toUpperCase() === "R");
+		const characterReach = meleeReach != null ? meleeReach : this.getMeleeReach();
+		const isEffectiveReach = reach != null
+			&& (
+				structuredReach > 0
+				|| attackReachBonus !== 0
+				|| hasReachProperty
+				|| characterReach !== CharacterSheetState.BASE_MELEE_REACH
+			);
+		if (!isEffectiveReach) return {reach, display: rawRange, isEffectiveReach: false};
+		return {
+			reach,
+			display: `${reach} ft.${attack.reachCondition === "onYourTurn" ? " on your turn" : ""}`,
+			isEffectiveReach: true,
+		};
 	}
 
 	getRaceName () {
@@ -9360,9 +9408,65 @@ class CharacterSheetState {
 		});
 	}
 
+	_normalizeStoredSkillState () {
+		const skillProficiencies = {};
+		for (const [value, level] of Object.entries(this._data.skillProficiencies || {})) {
+			const key = this.normalizeSkillProficiencyKey(value);
+			if (!key) continue;
+			skillProficiencies[key] = Math.max(
+				Number(skillProficiencies[key]) || 0,
+				Number(level) || 0,
+			);
+		}
+		this._data.skillProficiencies = skillProficiencies;
+
+		const grantedSkills = {};
+		for (const [value, sources] of Object.entries(this._data.grantedProficiencies?.skills || {})) {
+			const key = this.normalizeSkillProficiencyKey(value);
+			if (!key) continue;
+			grantedSkills[key] = [...new Set([
+				...(grantedSkills[key] || []),
+				...(Array.isArray(sources) ? sources : []),
+			])];
+		}
+		this._data.grantedProficiencies.skills = grantedSkills;
+
+		for (const modifier of this._data.namedModifiers || []) {
+			if (!modifier?.type?.startsWith("skill:")) continue;
+			const key = this.normalizeSkillProficiencyKey(modifier.type.slice("skill:".length));
+			if (key) modifier.type = `skill:${key}`;
+		}
+
+		const ownership = this._data.progressionOwnership;
+		for (const type of ["skills", "expertise"]) {
+			const entries = ownership.values[type];
+			if (!entries) continue;
+			const normalized = {};
+			for (const [storedKey, entry] of Object.entries(entries)) {
+				const key = type === "skills"
+					? this.normalizeSkillProficiencyKey(storedKey)
+					: String(storedKey || "").trim().toLowerCase().replace(/['\s]+/g, "");
+				if (!key) continue;
+				const existing = normalized[key];
+				normalized[key] = {
+					value: existing?.value ?? entry?.value ?? storedKey,
+					sources: [...new Set([
+						...(existing?.sources || []),
+						...(Array.isArray(entry?.sources) ? entry.sources : []),
+					])],
+					preserved: !!existing?.preserved || !!entry?.preserved,
+				};
+			}
+			ownership.values[type] = normalized;
+		}
+	}
+
 	_getProgressionOwnershipKey (type, value) {
 		if (["spells", "cantrips", "innateSpells"].includes(type)) {
 			return `${String(value?.name || "").trim().toLowerCase()}|${String(value?.source || "").trim().toLowerCase()}`;
+		}
+		if (type === "skills") {
+			return this.normalizeSkillProficiencyKey(value?.name || value);
 		}
 		return String(value?.name || value || "").trim().toLowerCase().replace(/['\s]+/g, "");
 	}
@@ -9720,8 +9824,7 @@ class CharacterSheetState {
 				const selected = Array.isArray(decision.selection) ? decision.selection : [decision.selection];
 				if (feat && selected.length === 1) {
 					const value = selected[0];
-					const skill = CharacterSheetClassUtils.normalizeSkillKey?.(value)
-						|| String(value || "").toLowerCase().replace(/['\s]+/g, "");
+					const skill = this.normalizeSkillProficiencyKey(value);
 					if (skill) {
 						const current = this.getSkillProficiency(skill);
 						const ownershipType = decision.type === "nestedExpertise" ? "expertise" : "skills";
@@ -10084,8 +10187,7 @@ class CharacterSheetState {
 				if (!type) continue;
 				if (!this.releaseProgressionOwnership(type, value, sourceId)) continue;
 				if (type === "skills") {
-					const skill = CharacterSheetClassUtils.normalizeSkillKey?.(value)
-						|| String(value || "").toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
+					const skill = this.normalizeSkillProficiencyKey(value);
 					const expertise = this._getProgressionOwnershipEntry("expertise", skill);
 					if (!expertise?.preserved && !expertise?.sources?.length) this.setSkillProficiency(skill, 0);
 				} else if (type === "expertise") {
@@ -10821,6 +10923,109 @@ class CharacterSheetState {
 		// one at a time, so compose via MAX of their positive deltas (never additive).
 		const override = Math.max(this.getBladesongWeaponBonus(attack), this.getLiesWeaponBonus(attack));
 		return base + override;
+	}
+
+	/**
+	 * Itemize a weapon/unarmed attack's base ability and alternate-ability substitution.
+	 * Lies and Bladesong are choices, not additive modifiers, so only the highest eligible
+	 * positive delta is applied.
+	 * @param {object} attack
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.includeActiveStates=true]
+	 * @param {boolean} [opts.includePassiveFeatures=true]
+	 * @returns {{base: number, substitution: {name: string, value: number}|null, total: number, candidates: Array<{name: string, value: number}>}}
+	 */
+	getAttackAbilityBreakdown (attack, {includeActiveStates = true, includePassiveFeatures = true} = {}) {
+		const base = this._resolveBaseWeaponAbilityMod(attack?.abilityMod || "str");
+		const candidates = [];
+		if (includePassiveFeatures) {
+			const lies = Number(this.getLiesWeaponBonus?.(attack)) || 0;
+			if (lies > 0) candidates.push({name: "Lies", value: lies});
+		}
+		if (includeActiveStates) {
+			const bladesong = Number(this.getBladesongWeaponBonus?.(attack)) || 0;
+			if (bladesong > 0) candidates.push({name: "Bladesong", value: bladesong});
+		}
+		const substitution = candidates.reduce((best, it) => !best || it.value > best.value ? it : best, null);
+		return {
+			base,
+			substitution,
+			total: base + (substitution?.value || 0),
+			candidates,
+		};
+	}
+
+	/**
+	 * Canonical standing attack-total breakdown. Roll-only conditionals, ammunition,
+	 * tactical bonuses, one-shot bonuses, dice, and exhaustion are intentionally excluded.
+	 * @param {object} attack
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.includeActiveStates=true]
+	 * @param {boolean} [opts.includePassiveFeatures=true]
+	 * @param {boolean} [opts.includeExternalItems=true]
+	 * @returns {object}
+	 */
+	getAttackBonusBreakdown (
+		attack,
+		{
+			includeActiveStates = true,
+			includePassiveFeatures = true,
+			includeExternalItems = true,
+		} = {},
+	) {
+		if (!attack) {
+			return {
+				baseAbility: 0,
+				abilitySubstitution: null,
+				effectiveAbility: 0,
+				proficiency: 0,
+				intrinsicLocal: 0,
+				passiveFeatureContributions: [],
+				activeStateContributions: [],
+				externalItemContributions: [],
+				total: 0,
+			};
+		}
+
+		const classification = this.getAttackClassification(attack);
+		const ability = this.getAttackAbilityBreakdown(attack, {includeActiveStates, includePassiveFeatures});
+		const proficiency = Number(this.getProficiencyBonus?.()) || 0;
+		const intrinsicRaw = Number(attack.attackBonus);
+		const intrinsicLocal = Number.isFinite(intrinsicRaw) ? intrinsicRaw : 0;
+		const passiveFeatureContributions = includePassiveFeatures
+			? (this.getAttackModifierContributions?.({isMelee: classification.isMelee}) || [])
+				.filter(it => Number.isFinite(Number(it.value)))
+				.map(it => ({...it, value: Number(it.value)}))
+			: [];
+		const stateRaw = includeActiveStates
+			? this.getBonusFromStates?.("attack", {weaponId: attack.riteWeaponId || attack.id})
+			: 0;
+		const stateValue = Number(stateRaw);
+		const activeStateContributions = Number.isFinite(stateValue) && stateValue
+			? [{name: "Active State", value: stateValue}]
+			: [];
+		const externalItemContributions = includeExternalItems
+			? this.getExternalItemAttackContributions?.(attack) || []
+			: [];
+		const total = ability.total
+			+ proficiency
+			+ intrinsicLocal
+			+ passiveFeatureContributions.reduce((sum, it) => sum + it.value, 0)
+			+ activeStateContributions.reduce((sum, it) => sum + it.value, 0)
+			+ externalItemContributions.reduce((sum, it) => sum + it.value, 0);
+
+		return {
+			classification,
+			baseAbility: ability.base,
+			abilitySubstitution: ability.substitution,
+			effectiveAbility: ability.total,
+			proficiency,
+			intrinsicLocal,
+			passiveFeatureContributions,
+			activeStateContributions,
+			externalItemContributions,
+			total,
+		};
 	}
 
 	getAbilityBase (ability) {
@@ -12501,12 +12706,22 @@ class CharacterSheetState {
 	// #endregion
 
 	// #region Skills
+	static normalizeSkillProficiencyKey (skill) {
+		return String(skill || "").toLowerCase().replace(/\s+/g, "");
+	}
+
+	normalizeSkillProficiencyKey (skill) {
+		return CharacterSheetState.normalizeSkillProficiencyKey(skill);
+	}
+
 	setSkillProficiency (skill, level) {
+		const normalizedSkill = this.normalizeSkillProficiencyKey(skill);
+		if (!normalizedSkill) return;
 		// 0 = none, 1 = proficient, 2 = expertise
 		if (level === 0) {
-			delete this._data.skillProficiencies[skill];
+			delete this._data.skillProficiencies[normalizedSkill];
 		} else {
-			this._data.skillProficiencies[skill] = level;
+			this._data.skillProficiencies[normalizedSkill] = level;
 		}
 	}
 
@@ -12520,7 +12735,8 @@ class CharacterSheetState {
 
 	// Add expertise (level 2 proficiency) to a skill
 	addExpertise (skill) {
-		const normalizedSkill = skill.toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
+		const normalizedSkill = this.normalizeSkillProficiencyKey(skill);
+		if (!normalizedSkill) return;
 		// Only add expertise if already proficient or becoming proficient
 		this.setSkillProficiency(normalizedSkill, 2);
 	}
@@ -12532,15 +12748,15 @@ class CharacterSheetState {
 	}
 
 	getSkillProficiency (skill) {
-		const baseProficiency = this._data.skillProficiencies[skill] || 0;
+		const normalizedSkill = this.normalizeSkillProficiencyKey(skill);
+		const baseProficiency = this._data.skillProficiencies[normalizedSkill] || 0;
 		// Scholar feature grants expertise in one skill if already proficient
-		if (this._data.scholarExpertise === skill && baseProficiency >= 1) {
+		if (this.normalizeSkillProficiencyKey(this._data.scholarExpertise) === normalizedSkill && baseProficiency >= 1) {
 			return 2; // Expertise level
 		}
 		// Beastheart grants several skills outright, some with a doubled proficiency bonus.
-		// Only override when the floor is strictly higher, so a legacy boolean `true`
-		// stored in `skillProficiencies` is returned unchanged rather than coerced to 1.
-		const beastheartFloor = this._getBeastheartSkillProficiencyFloor(skill, baseProficiency);
+		// Only override when the floor is strictly higher than the normalized stored level.
+		const beastheartFloor = this._getBeastheartSkillProficiencyFloor(normalizedSkill, baseProficiency);
 		if (beastheartFloor > baseProficiency) return beastheartFloor;
 		return baseProficiency;
 	}
@@ -13254,15 +13470,15 @@ class CharacterSheetState {
 			if (!isMonkUnarmored && !formulaForbidsShield) {
 				// Shield AC = base AC from item (default 2) + magic enhancement bonus
 				const shield = /** @type {*} */ (this._data.ac.shield);
-				const baseAc = (typeof shield === "object" ? (shield.ac ?? 2) : 2);
-				const magicBonus = (typeof shield === "object" ? (shield.bonus ?? 0) : 0);
+				const baseAc = CharacterSheetItemUtils.parseBonus(typeof shield === "object" ? (shield.ac ?? 2) : 2);
+				const magicBonus = CharacterSheetItemUtils.parseBonus(typeof shield === "object" ? shield.bonus : 0);
 				ac += baseAc + magicBonus;
 			}
 		}
 
 		// Bonuses from other equipped magic items (e.g., Cloak of Protection, Ring of Protection)
 		// Note: Armor and shield bonuses are already included above, this is for OTHER items only
-		ac += this._data.ac.itemBonus || 0;
+		ac += CharacterSheetItemUtils.parseBonus(this._data.ac.itemBonus);
 		ac += this._getItemConditionalAcBonus();
 
 		// Custom bonuses
@@ -13456,8 +13672,8 @@ class CharacterSheetState {
 				const typeLabel = armorType === "light" ? "Light" : armorType === "medium" ? "Medium" : armorType === "heavy" ? "Heavy" : "";
 				components.push({type: "armor", name: armorName, value: armorAc - armorMagicBonus, icon: "🛡️", subtype: typeLabel});
 
-				if (armorMagicBonus > 0) {
-					components.push({type: "magic", name: `+${armorMagicBonus} Armor`, value: armorMagicBonus, icon: "✨"});
+				if (armorMagicBonus !== 0) {
+					components.push({type: "magic", name: `${armorMagicBonus > 0 ? "+" : ""}${armorMagicBonus} Armor`, value: armorMagicBonus, icon: "✨"});
 				}
 
 				// Add DEX modifier based on armor type
@@ -13565,13 +13781,13 @@ class CharacterSheetState {
 
 			if (!isMonkUnarmored && !formulaForbidsShield) {
 				const shield = /** @type {*} */ (this._data.ac.shield);
-				const baseShieldBonus = (typeof shield === "object") ? (shield.ac ?? 2) : 2;
-				const magicBonus = (typeof shield === "object") ? (shield.bonus ?? 0) : 0;
+				const baseShieldBonus = CharacterSheetItemUtils.parseBonus((typeof shield === "object") ? (shield.ac ?? 2) : 2);
+				const magicBonus = CharacterSheetItemUtils.parseBonus((typeof shield === "object") ? shield.bonus : 0);
 				const shieldName = (typeof shield === "object") ? (shield.name || "Shield") : "Shield";
 
-				if (magicBonus > 0) {
+				if (magicBonus !== 0) {
 					components.push({type: "shield", name: shieldName, value: baseShieldBonus, icon: "🛡️"});
-					components.push({type: "magic", name: `+${magicBonus} Shield`, value: magicBonus, icon: "✨"});
+					components.push({type: "magic", name: `${magicBonus > 0 ? "+" : ""}${magicBonus} Shield`, value: magicBonus, icon: "✨"});
 				} else {
 					components.push({type: "shield", name: shieldName, value: baseShieldBonus, icon: "🛡️"});
 				}
@@ -13579,7 +13795,7 @@ class CharacterSheetState {
 		}
 
 		// Item bonuses (e.g., Ring of Protection, Cloak of Protection)
-		const itemBonus = this._data.ac.itemBonus || 0;
+		const itemBonus = CharacterSheetItemUtils.parseBonus(this._data.ac.itemBonus);
 		if (itemBonus !== 0) {
 			components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
 		}
@@ -14252,11 +14468,14 @@ class CharacterSheetState {
 	 */
 	_getArmorAcSlotSnapshot (item) {
 		const projected = this.projectItemMaterial(item);
+		const magicBonus = CharacterSheetItemUtils.parseBonus(item.bonusAc);
 		return {
-			ac: projected.ac,
+			ac: CharacterSheetItemUtils.parseBonus(projected.ac) + magicBonus,
 			type: projected.armorType || item.armorType || this._inferArmorType(projected),
 			name: item.name,
 			source: item.source,
+			bonus: magicBonus,
+			magicBonus,
 			appliedUpgrades: item.appliedUpgrades || [],
 			...(projected.strength !== undefined ? {strength: projected.strength} : {}),
 			...(projected.stealth !== undefined ? {stealth: projected.stealth} : {}),
@@ -14273,19 +14492,32 @@ class CharacterSheetState {
 	 * @returns {object}
 	 */
 	_getShieldAcSlotSnapshot (item) {
-		const projected = this.projectItemMaterial(item);
+		const projected = this.projectItemMaterial(item.shield === true ? item : {...item, shield: true});
+		const storedLegacyAc = CharacterSheetItemUtils.parseBonus(item.acBonus);
+		const projectedLegacyAc = CharacterSheetItemUtils.parseBonus(projected.acBonus);
+		const materialBonus = projectedLegacyAc - storedLegacyAc;
 		return {
-			ac: projected.ac ?? 2,
-			bonus: projected.acBonus,
+			ac: item.ac != null ? CharacterSheetItemUtils.parseBonus(item.ac) : (item.acBonus != null ? storedLegacyAc : 2),
+			bonus: CharacterSheetItemUtils.parseBonus(item.bonusAc) + materialBonus,
 			name: item.name,
 			source: item.source,
 			appliedUpgrades: item.appliedUpgrades || [],
 			...(item.material ? {material: item.material} : {}),
 		};
 	}
-	setShield (hasShield) { this._data.ac.shield = hasShield; }
-	setItemAcBonus (bonus) { this._data.ac.itemBonus = bonus || 0; }
-	getItemAcBonus () { return this._data.ac.itemBonus || 0; }
+	setShield (hasShield) {
+		if (!hasShield || typeof hasShield !== "object") {
+			this._data.ac.shield = hasShield;
+			return;
+		}
+		this._data.ac.shield = {
+			...hasShield,
+			ac: CharacterSheetItemUtils.parseBonus(hasShield.ac ?? 2),
+			bonus: CharacterSheetItemUtils.parseBonus(hasShield.bonus),
+		};
+	}
+	setItemAcBonus (bonus) { this._data.ac.itemBonus = CharacterSheetItemUtils.parseBonus(bonus); }
+	getItemAcBonus () { return CharacterSheetItemUtils.parseBonus(this._data.ac.itemBonus); }
 
 	// Item bonuses from equipped/attuned magic items
 	setItemBonuses (bonuses, {isManual = true} = {}) {
@@ -14337,8 +14569,8 @@ class CharacterSheetState {
 			const baseSpellAtk = CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSpellAttack);
 			const baseSpellDc = CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSpellSaveDc);
 			const baseCrit = invItem.item?.critThreshold || 20;
-			const itemType = String(invItem.item?.typeCode || invItem.item?.type || "").split("|")[0].toUpperCase();
-			const isArmorOrShield = !!invItem.item?.armor || !!invItem.item?.shield || ["LA", "MA", "HA", "S"].includes(itemType);
+			const isArmorOrShield = this.isBodyArmorItem(invItem.item) || this.isShieldItem(invItem.item);
+			const hasConditionalAcBonus = invItem.item?.effects?.some(effect => effect?.type === "acBonusConditional");
 
 			// Material crit contribution. Read from the projection so the clamps in
 			// `applyToItem` (never an impossible crit, never past the natural 20) apply here too.
@@ -14363,7 +14595,7 @@ class CharacterSheetState {
 				upgradeSavingThrow = effects.bonusSavingThrow || 0;
 			}
 
-			if (!isArmorOrShield) itemAcBonus += CharacterSheetItemUtils.parseBonus(invItem.item?.bonusAc) + upgradeAc;
+			if (!isArmorOrShield && !hasConditionalAcBonus) itemAcBonus += CharacterSheetItemUtils.parseBonus(invItem.item?.bonusAc) + upgradeAc;
 			additiveBonuses.savingThrow += CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSavingThrow) + upgradeSavingThrow;
 			for (const ability of Parser.ABIL_ABVS) {
 				const suffix = `${ability.charAt(0).toUpperCase()}${ability.slice(1)}`;
@@ -18233,6 +18465,77 @@ class CharacterSheetState {
 		};
 	}
 
+	_getClassSpellGrantOwnerKey (cls) {
+		return `${String(cls?.name || "").trim().toLowerCase()}|${String(cls?.source || "").trim().toLowerCase()}`;
+	}
+
+	_captureClassSpellGrantOriginalMetadata (spell) {
+		if (Object.hasOwn(spell, "classGrantOriginalMetadata")) return;
+		const original = {};
+		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"]) {
+			if (Object.hasOwn(spell, key)) original[key] = spell[key];
+		}
+		spell.classGrantOriginalMetadata = original;
+	}
+
+	_restoreClassSpellGrantOriginalMetadata (spell) {
+		if (!Object.hasOwn(spell, "classGrantOriginalMetadata")) return;
+		const original = spell.classGrantOriginalMetadata || {};
+		for (const key of ["alwaysPrepared", "prepared", "sourceFeature", "sourceClass", "sourceSubclass", "spellcastingAbility"]) delete spell[key];
+		Object.assign(spell, original);
+		delete spell.classGrantOriginalMetadata;
+		delete spell.classGrantOwners;
+	}
+
+	_promoteClassSpellGrantToPlayerOverlay (existing, incoming, {isCantrip = false, prepared = false} = {}) {
+		const ownershipType = isCantrip ? "cantrips" : "spells";
+		const hasProgressionOwner = !!this._getProgressionOwnershipEntry(ownershipType, incoming)?.sources?.length;
+		if (!existing?.grantedByClass
+			|| Object.hasOwn(existing, "classGrantOriginalMetadata")
+			|| (!CharacterSheetClassUtils.isPlayerChosenSpell(incoming) && !hasProgressionOwner)) return;
+
+		const original = {
+			sourceFeature: incoming.sourceFeature,
+			sourceClass: incoming.sourceClass ?? null,
+		};
+		for (const key of ["sourceSubclass", "spellcastingAbility"]) {
+			if (Object.hasOwn(incoming, key)) original[key] = incoming[key];
+		}
+		if (!isCantrip) {
+			original.alwaysPrepared = !!incoming.alwaysPrepared;
+			original.prepared = !!prepared;
+		}
+
+		existing.classGrantOriginalMetadata = original;
+		existing.grantedByClass = false;
+	}
+
+	_applyClassSpellGrantMetadata (spell, desiredGrant, {isCantrip = false} = {}) {
+		const owners = [...desiredGrant.owners.keys()];
+		const primary = desiredGrant.owners.values().next().value;
+		spell.classGrantOwners = owners;
+		const originalSourceFeature = spell.classGrantOriginalMetadata?.sourceFeature;
+		const isOwnedByAnotherFeature = originalSourceFeature
+			&& !CharacterSheetClassUtils.isPlayerChosenSpell({sourceFeature: originalSourceFeature});
+		if (spell.grantedByClass || !isOwnedByAnotherFeature) spell.sourceFeature = primary.sourceFeature;
+
+		if (spell.grantedByClass
+			|| !Object.hasOwn(spell, "classGrantOriginalMetadata")
+			|| !spell.classGrantOriginalMetadata?.sourceClass) {
+			spell.sourceClass = primary.sourceClass;
+		}
+
+		if (!isCantrip) {
+			spell.alwaysPrepared = true;
+			spell.prepared = true;
+		}
+
+		if ((spell.level == null) && (desiredGrant.spell.level != null)) {
+			spell.level = desiredGrant.spell.level;
+			if (desiredGrant.spell.school && !spell.school) spell.school = desiredGrant.spell.school;
+		}
+	}
+
 	/**
 	 * Populate class-level always-prepared spells (base CLASS `additionalSpells`) for
 	 * every current class. This is the class-level sibling of
@@ -18240,15 +18543,10 @@ class CharacterSheetState {
 	 * immediately after it.
 	 *
 	 * Runs as a full RECONCILE (idempotent across load / addClass / levelUp /
-	 * level-down / focus change):
-	 *  1. Compute the desired set of class-granted spells across all current classes.
-	 *  2. PRUNE any previously class-granted entry (`grantedByClass === true`) that is
-	 *     no longer desired — this tears the spells down on class removal, level-down
-	 *     below the grant level, or a source change. Player-owned spells never carry
-	 *     `grantedByClass`, so they are never pruned.
-	 *  3. ADD the desired spells (dedup by name+source). A colliding PLAYER-OWNED spell
-	 *     is left completely untouched (never claimed/flagged) so removing the class
-	 *     never deletes a spell the player learned independently.
+	 * level-down / focus change). Pure class-created entries carry
+	 * `grantedByClass`; a colliding player-owned entry instead receives a reversible
+	 * metadata overlay plus source-qualified `classGrantOwners`. Removing the last
+	 * owner deletes only a pure grant and restores a player-owned entry exactly.
 	 *
 	 * No-ops until the class catalog is available (see {@link setClassCatalog}).
 	 * @returns {number} Number of spells added
@@ -18261,75 +18559,70 @@ class CharacterSheetState {
 		sc.spellsKnown = sc.spellsKnown || [];
 		sc.cantripsKnown = sc.cantripsKnown || [];
 
-		// 1. Desired set across all current classes.
-		const desired = [];
+		// 1. Desired grants across all current classes, grouped by canonical spell
+		// identity. Owners stay separate from spell identity so two classes can grant
+		// the same spell without churn or destructive teardown.
+		const desiredSpells = new Map();
+		const desiredCantrips = new Map();
 		for (const cls of (this._data.classes || [])) {
-			desired.push(...this.getClassAlwaysPreparedSpells(cls));
+			const ownerKey = this._getClassSpellGrantOwnerKey(cls);
+			for (const spell of this.getClassAlwaysPreparedSpells(cls)) {
+				const target = spell.isCantrip ? desiredCantrips : desiredSpells;
+				const spellKey = this._spellIdentityKey(spell);
+				if (!target.has(spellKey)) target.set(spellKey, {spell, owners: new Map()});
+				target.get(spellKey).owners.set(ownerKey, {
+					sourceFeature: spell.sourceFeature,
+					sourceClass: spell.sourceClass,
+				});
+			}
 		}
-		const keyOf = s => `${(s.name || "").toLowerCase()}|${(s.source || "").toLowerCase()}|${(s.sourceClass || "").toLowerCase()}`;
-		const desiredKeys = new Set(desired.map(keyOf));
-
-		// 2. Prune stale class-granted entries (removal / level-down / source change).
-		sc.spellsKnown = sc.spellsKnown.filter(s => !(s.grantedByClass === true && !desiredKeys.has(keyOf(s))));
-		sc.cantripsKnown = sc.cantripsKnown.filter(c => !(c.grantedByClass === true && !desiredKeys.has(keyOf(c))));
-
-		// 3. Add / mark desired spells.
 		let totalAdded = 0;
-		for (const spell of desired) {
-			if (spell.isCantrip) {
-				const existingCantrip = sc.cantripsKnown.find(
-					c => c.name.toLowerCase() === spell.name.toLowerCase()
-						&& (c.source === spell.source || !spell.source),
-				);
-				if (!existingCantrip) {
-					this.addCantrip({
-						name: spell.name,
-						source: spell.source,
-						school: spell.school,
-						castingTime: spell.castingTime,
-						range: spell.range,
-						duration: spell.duration,
-						concentration: spell.concentration,
-						components: spell.components,
-						subschools: spell.subschools,
-						grantedByClass: true,
-						sourceFeature: spell.sourceFeature,
-						sourceClass: spell.sourceClass,
-					});
-					totalAdded++;
-				} else if (existingCantrip.grantedByClass) {
-					// Idempotent: our own prior grant. Keep the stable tags.
-					existingCantrip.sourceFeature = spell.sourceFeature;
-					existingCantrip.sourceClass = spell.sourceClass;
+
+		const reconcile = (entries, desired, {isCantrip = false} = {}) => {
+			const found = new Set();
+			const kept = [];
+
+			for (const entry of entries) {
+				const key = this._spellIdentityKey(entry);
+				const desiredGrant = desired.get(key);
+				if (desiredGrant) {
+					found.add(key);
+					const wasManaged = entry.grantedByClass || Object.hasOwn(entry, "classGrantOriginalMetadata");
+					if (!entry.grantedByClass) this._captureClassSpellGrantOriginalMetadata(entry);
+					this._applyClassSpellGrantMetadata(entry, desiredGrant, {isCantrip});
+					if (!wasManaged) totalAdded++;
+					kept.push(entry);
+					continue;
 				}
-				// A player-owned (non-class-granted) cantrip of the same name is left
-				// untouched so class removal never deletes it.
-				continue;
+
+				if (entry.grantedByClass) continue;
+				if (Object.hasOwn(entry, "classGrantOriginalMetadata")) {
+					this._restoreClassSpellGrantOriginalMetadata(entry);
+				}
+				kept.push(entry);
 			}
 
-			const existing = sc.spellsKnown.find(
-				s => s.name.toLowerCase() === spell.name.toLowerCase()
-					&& (s.source === spell.source || !spell.source),
-			);
-
-			if (!existing) {
-				this.addSpell({...spell, alwaysPrepared: true}, true);
+			for (const [key, desiredGrant] of desired) {
+				if (found.has(key)) continue;
+				const spell = desiredGrant.spell;
+				if (isCantrip) {
+					this.addCantrip({...spell, grantedByClass: true});
+				} else {
+					this.addSpell({...spell, grantedByClass: true, alwaysPrepared: true}, true);
+				}
+				const added = (isCantrip ? sc.cantripsKnown : sc.spellsKnown)
+					.find(entry => this._spellIdentityKey(entry) === key);
+				if (!added) continue;
+				this._applyClassSpellGrantMetadata(added, desiredGrant, {isCantrip});
+				kept.push(added);
 				totalAdded++;
-			} else if (existing.grantedByClass) {
-				// Our own prior grant — re-affirm flags and self-heal a missing level
-				// (saves created before class-spell enrichment). Idempotent.
-				existing.alwaysPrepared = true;
-				existing.prepared = true;
-				existing.sourceFeature = spell.sourceFeature;
-				existing.sourceClass = spell.sourceClass;
-				if ((existing.level == null) && (spell.level != null)) {
-					existing.level = spell.level;
-					if (spell.school && !existing.school) existing.school = spell.school;
-				}
 			}
-			// A player-owned spell of the same name is intentionally left untouched: we
-			// neither claim nor flag it, so removing the class never deletes it.
-		}
+
+			return kept;
+		};
+
+		sc.spellsKnown = reconcile(sc.spellsKnown, desiredSpells);
+		sc.cantripsKnown = reconcile(sc.cantripsKnown, desiredCantrips, {isCantrip: true});
 
 		return totalAdded;
 	}
@@ -18593,6 +18886,7 @@ class CharacterSheetState {
 		if (existing) {
 			// Coalesce: fill missing enrichment + grant/prepared flags without stealing the
 			// survivor's ownership (never force grantedByClass onto a player-owned entry).
+			this._promoteClassSpellGrantToPlayerOverlay(existing, spell, {prepared: wantPrepared});
 			this._mergeSpellMetadata(existing, spell);
 			if (wantPrepared && !existing.prepared) existing.prepared = true;
 		} else {
@@ -18632,6 +18926,7 @@ class CharacterSheetState {
 		if (existing) {
 			// Coalesce a case/edition-casing variant into the existing cantrip, filling
 			// missing enrichment + grant metadata (including a per-cantrip casting ability).
+			this._promoteClassSpellGrantToPlayerOverlay(existing, spell, {isCantrip: true});
 			this._mergeSpellMetadata(existing, spell);
 		} else {
 			this._data.spellcasting.cantripsKnown.push({
@@ -23183,10 +23478,6 @@ class CharacterSheetState {
 								calculations.chainDamageDie = chainStats.damage;
 								calculations.chainRange = chainStats.range;
 								calculations.chainCount = level >= 14 ? 4 : 2;
-								// Escape DC is the character's current grapple/method DC. Keep
-								// this separate from Chain Imprisonment's STR save DC.
-								calculations.chainGrappleDc = calculations.combatMethodDc
-									|| (8 + profBonus + Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex")));
 								// "You count as 1 size category larger" (2 at L10) when grappling
 								// or moving a grappled creature. Fed to getGrappleSizeCategory().
 								calculations.chainGrappleSizeBonus = level >= 10 ? 2 : 1;
@@ -23224,12 +23515,15 @@ class CharacterSheetState {
 								// resolved after the attack lands, via the generic post-attack
 								// `featureOnHitOptions` hook.
 								const onHit = (calculations.attackOnHitOptions ||= []);
+								const isTargetTracking = this.isChainedFuryTargetTrackingEnabled();
 								onHit.push({
 									id: "chains-grapple",
 									name: "Grapple with the chains",
 									attackSourceFeature: "Manifest Chains",
-									targetAware: true,
-									targetEffect: {source: "chained-fury", effect: "grapple"},
+									...(isTargetTracking ? {
+										targetAware: true,
+										targetEffect: {source: "chained-fury", effect: "grapple"},
+									} : {}),
 									requiresState: "manifestChains",
 									requiresStates: ["rage", "manifestChains"],
 									description: `Grapple the target in addition to dealing damage. You count as ${calculations.chainGrappleSizeBonus} size ${calculations.chainGrappleSizeBonus === 1 ? "category" : "categories"} larger for the grapple.`,
@@ -23238,8 +23532,6 @@ class CharacterSheetState {
 									id: "chains-shove",
 									name: "Shove with the chains",
 									attackSourceFeature: "Manifest Chains",
-									targetAware: true,
-									targetEffect: {source: "chained-fury", effect: "shove"},
 									requiresState: "manifestChains",
 									requiresStates: ["rage", "manifestChains"],
 									description: "Shove the target in addition to dealing damage.",
@@ -23251,12 +23543,16 @@ class CharacterSheetState {
 									calculations.chainsAreMagical = true;
 									calculations.chainRestrainDc = 8 + profBonus + conMod;
 									calculations.chainRestrainDamage = level; // force damage per turn
+									calculations.chainImprisonmentSaveDc = calculations.chainRestrainDc;
+									calculations.chainRecurringDamage = calculations.chainRestrainDamage;
 									onHit.push({
 										id: "chains-restrain",
 										name: "Chain Imprisonment (restrain)",
 										attackSourceFeature: "Manifest Chains",
-										targetAware: true,
-										targetEffect: {source: "chained-fury", effect: "restrain"},
+										...(isTargetTracking ? {
+											targetAware: true,
+											targetEffect: {source: "chained-fury", effect: "restrain"},
+										} : {}),
 										requiresState: "manifestChains",
 										requiresStates: ["rage", "manifestChains"],
 										description: `On a successful grapple, the target must succeed on a Strength saving throw or be restrained until the grapple ends, taking ${level} force damage at the start of each of its turns.`,
@@ -23273,8 +23569,10 @@ class CharacterSheetState {
 										id: "chains-control-shove",
 										name: "Chain Control (10 ft. reposition)",
 										attackSourceFeature: "Manifest Chains",
-										targetAware: true,
-										targetEffect: {source: "chained-fury", effect: "control-shove"},
+										...(isTargetTracking ? {
+											targetAware: true,
+											targetEffect: {source: "chained-fury", effect: "control-shove"},
+										} : {}),
 										requiresState: "manifestChains",
 										requiresStates: ["rage", "manifestChains"],
 										description: "On a successful grapple, immediately shove the target 10 feet in any direction, provided it ends within the chains' reach.",
@@ -29444,6 +29742,40 @@ class CharacterSheetState {
 			}
 		}
 
+		// Manifest Chains uses the finalized Combat Method DC. This must run after
+		// spellcasting-aware Combat Method resolution (e.g. Hexblade/Bladesinger).
+		if (calculations.hasManifestChains) {
+			const physicalChainDc = 8
+				+ profBonus
+				+ Math.max(this.getAbilityMod("str"), this.getAbilityMod("dex"))
+				- exhaustionPenalty;
+			calculations.chainGrappleDc = Number(calculations.combatMethodDc) || physicalChainDc;
+
+			const targetTrackingSuffix = this.isChainedFuryTargetTrackingEnabled()
+				? " If the target fails, you can record it in the optional chain tracker."
+				: "";
+			const movementReminder = calculations.chainFreeMovement
+				? " You can move a creature held by your chains without spending extra movement."
+				: " You can move it without moving yourself by spending your movement, and can use your bonus action to double that movement for this purpose.";
+
+			for (const option of calculations.attackOnHitOptions || []) {
+				switch (option.id) {
+					case "chains-grapple":
+						option.description = `The target chooses Strength or Dexterity and makes a save against DC ${calculations.chainGrappleDc}. On a failure, it is grappled by your chains.${movementReminder}${targetTrackingSuffix}`;
+						break;
+					case "chains-shove":
+						option.description = `The target chooses Strength or Dexterity and makes a save against DC ${calculations.chainGrappleDc}. On a failure, shove it as normal.`;
+						break;
+					case "chains-restrain":
+						option.description = `First resolve the grapple against DC ${calculations.chainGrappleDc}. If the target is grappled, it then makes a DC ${calculations.chainImprisonmentSaveDc} Strength save; on a failure, it is restrained and takes ${calculations.chainRecurringDamage} force damage at the start of each of its turns.${targetTrackingSuffix}`;
+						break;
+					case "chains-control-shove":
+						option.description = `The target chooses Strength or Dexterity and makes a save against DC ${calculations.chainGrappleDc}. On a failure, it is grappled and you can move it up to 10 feet in a direction of your choice.${targetTrackingSuffix}`;
+						break;
+				}
+			}
+		}
+
 		// Active Stance Effects (Thelemar homebrew)
 		if (this._data.activeStance && this.usesCombatSystem?.()) {
 			const stanceEffects = this._getActiveStanceEffects();
@@ -33113,36 +33445,53 @@ class CharacterSheetState {
 	 * responsible for re-rendering and saving, as with the other item setters.
 	 */
 	_onItemMaterialChanged () {
-		this._refreshEquippedAcSlots();
 		// Applying or removing Ioun Sand turns an item into (or out of) a matrix, which
 		// changes both its host policy and whether its seated stones are doubled.
 		this.reconcileIounHosts?.();
-		this._recalculateItemBonuses();
+		this.syncEquippedAcState();
 		this._recalculateEquipmentModifiers();
 	}
 
+	isShieldItem (item) {
+		if (!item) return false;
+		const type = String(item.typeCode || item.type || "").split("|")[0].trim().toUpperCase();
+		if (item.shield === true || type === "S") return true;
+
+		const name = String(item.name || "").trim().toLowerCase();
+		if (name.startsWith("ring of") || ["RG", "RING", "W", "WONDROUS"].includes(type)) return false;
+		if (name.includes("shield")) return true;
+
+		return item.acBonus != null && item.ac == null && !item.armor && !["LA", "MA", "HA", "ARMOR"].includes(type);
+	}
+
+	isBodyArmorItem (item) {
+		if (!item || this.isShieldItem(item)) return false;
+		const type = String(item.typeCode || item.type || "").split("|")[0].trim().toUpperCase();
+		return item.armor === true || ["LA", "MA", "HA", "ARMOR"].includes(type);
+	}
+
 	/**
-	 * Re-stamp the `_data.ac.armor` / `_data.ac.shield` snapshots from the currently
-	 * equipped items.
+	 * Re-stamp the `_data.ac.armor` / `_data.ac.shield` snapshots from the raw currently
+	 * equipped inventory rows.
 	 *
-	 * The snapshots are captured once, at `equip()` time. Anything that changes what an
-	 * equipped armour or shield *is* after the fact — currently a material change — has to
-	 * refresh them, or the character keeps wearing the pre-change armour.
+	 * This is the sole writer for inventory-backed AC slots. It deliberately reads raw items:
+	 * each snapshot applies material projection exactly once and can therefore repair stale
+	 * persisted snapshots during the first render sync.
 	 *
 	 * @returns {void}
 	 */
 	_refreshEquippedAcSlots () {
-		for (const invItem of this._data.inventory) {
-			if (!invItem.equipped) continue;
-			const item = invItem.item;
-			if (!item) continue;
+		const equipped = this._data.inventory.filter(invItem => invItem.equipped && invItem.item);
+		const armor = equipped.find(invItem => this.isBodyArmorItem(invItem.item))?.item || null;
+		const shield = equipped.find(invItem => this.isShieldItem(invItem.item))?.item || null;
 
-			if (item.acBonus !== undefined && this._data.ac.shield?.name === item.name) {
-				this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
-			} else if (item.ac !== undefined && this._data.ac.armor?.name === item.name) {
-				this.setArmor(this._getArmorAcSlotSnapshot(item));
-			}
-		}
+		this.setArmor(armor ? this._getArmorAcSlotSnapshot(armor) : null);
+		this.setShield(shield ? {equipped: true, ...this._getShieldAcSlotSnapshot(shield)} : false);
+	}
+
+	syncEquippedAcState () {
+		this._refreshEquippedAcSlots();
+		this._recalculateItemBonuses();
 	}
 
 	/**
@@ -35064,16 +35413,7 @@ class CharacterSheetState {
 				this._registerItemEffects(_addedWrapper);
 			}
 
-			// If item is equipped, also set it in appropriate AC slot
-			if (equipped && item.type === "armor") {
-				if (item.acBonus !== undefined) {
-					// Shield-type item (has bonus instead of base AC)
-					this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
-				} else if (item.ac !== undefined) {
-					// Body armor
-					this.setArmor(this._getArmorAcSlotSnapshot(item));
-				}
-			}
+			if (equipped) this.syncEquippedAcState();
 
 			// An equipped armor/shield added with upgrades already applied must register its
 			// conditional roll modifiers immediately (covers one-shot add-equipped flows).
@@ -35643,6 +35983,9 @@ class CharacterSheetState {
 	}
 
 	removeItem (itemId) {
+		const removedItem = this._findInventoryRow(itemId);
+		const isChainedFuryChain = removedItem?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+			|| removedItem?.item?._isChainedFuryChain;
 		// Remove any effects/modifiers this item contributed BEFORE it leaves the inventory
 		// (defensive-trait cleanup needs to read the item's effects[] while it is still present).
 		this._unregisterItemEffects(itemId);
@@ -35657,7 +36000,11 @@ class CharacterSheetState {
 		}
 
 		this._data.inventory = this._data.inventory.filter(i => i.id !== itemId);
-		this._recalculateItemBonuses();
+		if (isChainedFuryChain) {
+			this.clearTargetEffects("chained-fury");
+			this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		}
+		this.syncEquippedAcState();
 
 		// A stone (or a host) leaving the inventory must not leave a dangling seat behind,
 		// and losing your last bond must revoke any bond-borne attunement waiver.
@@ -35729,6 +36076,7 @@ class CharacterSheetState {
 		if (this._isItemEffectsActive(wrapper)) this._registerItemEffects(wrapper);
 
 		this._recalculateItemBonuses();
+		if (wrapper.equipped) this.syncEquippedAcState();
 		// Replacing an equipped armor/shield payload may change its upgrades.
 		this._recalculateEquipmentModifiers();
 		return true;
@@ -35760,12 +36108,19 @@ class CharacterSheetState {
 				this._unregisterItemEffects(itemId);
 			}
 			// Refresh derived armor/shield-upgrade conditional modifiers (equip state changed).
-			this._recalculateItemBonuses();
+			this.syncEquippedAcState();
 			this._recalculateEquipmentModifiers();
 			// A set stone is by definition functioning, so stowing it must vacate its setting.
 			if (!equipped) {
 				const host = this.getIounHostOfStone(itemId);
 				if (host) this.unsetIounStone(host.id, itemId);
+				if (
+					item.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+					|| item.item?._isChainedFuryChain
+				) {
+					this.clearTargetEffects("chained-fury");
+					this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+				}
 			}
 			this._data.hp.current = Math.min(this._data.hp.current, this.getMaxHp());
 		}
@@ -35781,22 +36136,10 @@ class CharacterSheetState {
 		if (invItem) {
 			invItem.equipped = true;
 
-			// Also set AC slot if armor
-			const item = invItem.item;
-			if (item?.type === "armor" || item?.type === "M" || item?.type === "R" || item?.ac !== undefined || item?.acBonus !== undefined) {
-				if (item.acBonus !== undefined) {
-					// Shield
-					this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
-				} else if (item.ac !== undefined) {
-					// Body armor
-					this.setArmor(this._getArmorAcSlotSnapshot(item));
-				}
-			}
-
 			// Apply item effects now that it is equipped (if attunement gate also satisfied)
 			if (this._isItemEffectsActive(invItem)) this._registerItemEffects(invItem);
 			// Refresh derived armor/shield-upgrade conditional modifiers.
-			this._recalculateItemBonuses();
+			this.syncEquippedAcState();
 			this._recalculateEquipmentModifiers();
 
 			return true;
@@ -35813,6 +36156,13 @@ class CharacterSheetState {
 		const item = this._findInventoryRow(itemId);
 		if (item) {
 			item.equipped = false;
+			if (
+				item.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+				|| item.item?._isChainedFuryChain
+			) {
+				this.clearTargetEffects("chained-fury");
+				this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+			}
 			// A set stone is by definition functioning, so taking it out of use must also take
 			// it out of its setting — otherwise the host keeps its +1 for a dormant stone.
 			const host = this.getIounHostOfStone(itemId);
@@ -35820,7 +36170,7 @@ class CharacterSheetState {
 			// Remove any effects the item was contributing while equipped
 			this._unregisterItemEffects(itemId);
 			// Refresh derived armor/shield-upgrade conditional modifiers (now unequipped).
-			this._recalculateItemBonuses();
+			this.syncEquippedAcState();
 			this._recalculateEquipmentModifiers();
 			return true;
 		}
@@ -39120,6 +39470,116 @@ class CharacterSheetState {
 	getAttacks () { return [...this._data.attacks]; }
 
 	/**
+	 * Build the canonical attack descriptor for an equipped inventory weapon.
+	 * `attackBonus`/`damageBonus` are intrinsic-only: effective source-item bonuses,
+	 * upgrades, projected materials, and the item's custom flat value.
+	 * @param {object} weapon
+	 * @returns {object|null}
+	 */
+	buildAutoAttackFromWeapon (weapon) {
+		if (!weapon) return null;
+
+		const overrides = weapon.attackOverrides || {};
+		const properties = overrides.properties ?? weapon.property ?? weapon.properties ?? [];
+		const typeBase = String(weapon.type || "").split("|")[0].toUpperCase();
+		const isRanged = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "A")
+			|| ["R", "RW"].includes(typeBase)
+			|| weapon.isMelee === false;
+		const isThrown = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "T");
+		const hasFinesse = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "F");
+		const isMonkWeapon = !!this.isMonkWeapon?.(weapon);
+		const defaultAbility = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");
+		const effectiveBonuses = this.getEffectiveItemBonuses?.(weapon.id) || {};
+		const num = value => {
+			const parsed = Number(value);
+			return Number.isFinite(parsed) ? parsed : 0;
+		};
+		const intrinsicAttack = num(effectiveBonuses.totalAttackBonus)
+			+ num(weapon.customAttackBonus);
+		const intrinsicDamage = num(effectiveBonuses.totalDamageBonus)
+			+ num(weapon.customDamageBonus);
+
+		let damage = this.getWeaponDamageDie(weapon);
+		if (isMonkWeapon) {
+			const martialArtsDie = this.getFeatureCalculations?.()?.martialArtsDie;
+			const getMaximum = die => {
+				const match = String(die || "").match(/(\d+)d(\d+)/);
+				return match ? Number(match[1]) * Number(match[2]) : 0;
+			};
+			if (getMaximum(martialArtsDie) > getMaximum(damage)) damage = martialArtsDie;
+		}
+
+		const damageType = weapon.dmgType
+			? (Parser.dmgTypeToFull?.(weapon.dmgType) || weapon.dmgType)
+			: (weapon.damageType || (weapon.damage ? weapon.damage.split(" ").slice(1).join(" ") : null) || "slashing");
+		const range = overrides.range ?? weapon.range ?? (isRanged ? "80/320 ft." : "5 ft.");
+		const reachMatch = !isRanged ? /^\s*(\d+(?:\.\d+)?)\s*ft\b/i.exec(String(range || "")) : null;
+		const sourceFeature = weapon.sourceFeature || weapon._generatedItemProvenance?.sourceFeature || null;
+
+		return {
+			id: `auto_${weapon.id}`,
+			name: overrides.name ?? weapon.name,
+			source: weapon.source,
+			isMelee: overrides.isMelee ?? !isRanged,
+			isRanged: overrides.isMelee == null ? isRanged : !overrides.isMelee,
+			isThrown,
+			abilityMod: overrides.abilityMod ?? defaultAbility,
+			attackBonus: intrinsicAttack,
+			range,
+			reach: overrides.reach ?? (reachMatch ? Number(reachMatch[1]) : weapon.reach),
+			reachBonus: overrides.reachBonus ?? 0,
+			reachCondition: overrides.reachCondition ?? weapon.reachCondition,
+			damage: overrides.damage ?? damage,
+			damageType: overrides.damageType ?? damageType,
+			damageBonus: intrinsicDamage,
+			properties,
+			mastery: weapon.mastery || [],
+			countsAsMagical: !!(weapon.countsAsMagical || effectiveBonuses.countsAsMagical || effectiveBonuses.tags?.includes("Magical")),
+			actionType: weapon.actionType || "action",
+			sourceFeature,
+			isFeatureAttack: !!sourceFeature,
+			isAutoGenerated: true,
+			isMonkWeapon,
+			sourceItem: weapon,
+		};
+	}
+
+	/**
+	 * Resolve the rules-facing kind and range of an attack.
+	 * @param {object} attack
+	 * @returns {{kind: "weapon"|"unarmed"|"spell"|"other", isMelee: boolean, isRanged: boolean, isThrown: boolean}}
+	 */
+	getAttackClassification (attack) {
+		if (!attack) return {kind: "other", isMelee: false, isRanged: false, isThrown: false};
+		if (attack.isSpell || attack.isSpellAttack || attack.abilityMod === "spellcasting") {
+			return {kind: "spell", isMelee: false, isRanged: true, isThrown: false};
+		}
+
+		const range = String(attack.range || "").toLowerCase();
+		const properties = attack.properties || attack.property || [];
+		const isThrown = attack.isThrown === true
+			|| range.includes("/")
+			|| properties.some(prop => String(prop).split("|")[0].toUpperCase() === "T");
+		const isExplicitRanged = attack.isRanged === true
+			|| attack.type === "ranged"
+			|| (!attack.isMelee && /\d/.test(range) && !range.includes("reach") && range !== "melee");
+		const isMelee = !isExplicitRanged && (
+			attack.isMelee === true
+			|| attack.type === "melee"
+			|| range === "melee"
+			|| range.includes("reach")
+			|| range.includes("touch")
+			|| (!!range && !range.includes("/"))
+		);
+		return {
+			kind: attack.isUnarmedStrike ? "unarmed" : "weapon",
+			isMelee,
+			isRanged: !isMelee,
+			isThrown,
+		};
+	}
+
+	/**
 	 * Ensure the character has an unarmed strike attack.
 	 * For Monks, this uses their Martial Arts die and can use DEX.
 	 * For everyone else, it's 1 + STR bludgeoning damage.
@@ -40019,6 +40479,17 @@ class CharacterSheetState {
 		if (key === "enableMaterials" && previous !== value && (value === false || this._itemMaterialCatalog?.length)) {
 			this._onItemMaterialChanged();
 		}
+	}
+
+	isChainedFuryTargetTrackingEnabled () {
+		return this._data.settings?.chainedFuryTargetTracking === true;
+	}
+
+	setChainedFuryTargetTrackingEnabled (isEnabled) {
+		this.setSetting("chainedFuryTargetTracking", !!isEnabled);
+		if (isEnabled) return;
+		this.clearTargetEffects("chained-fury");
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
 	}
 
 	/** Whether the optional top-level "Abilities" tab is shown (default false). */
@@ -46869,6 +47340,7 @@ class CharacterSheetState {
 	 */
 	setCombatMethodCatalog (combatMethodEntities) {
 		this._combatMethodCatalog = Array.isArray(combatMethodEntities) ? combatMethodEntities : [];
+		this._repairCombatMethodMarkers();
 	}
 
 	// =====================================================================
@@ -47749,6 +48221,9 @@ class CharacterSheetState {
 	 *     carries no `tradition`) are still repaired rather than skipped.
 	 *   - Never converts a Battle Tactic (`BT`) or Arcane Shot (`AS`) optionalfeature —
 	 *     those are intentionally NOT combat methods.
+	 *   - Never converts a class/subclass/other typed feature which happens to share an
+	 *     exact name + source with a combat method. Marker-less legacy methods are limited
+	 *     to the old generic `featureType: "Optional Feature"` save shape.
 	 *   - Only an exact name|source catalog match to a `combatMethod` entity is repaired;
 	 *     anything else is left untouched.
 	 */
@@ -47794,6 +48269,15 @@ class CharacterSheetState {
 				continue;
 			}
 
+			const wasCombatMethod = f._entityType === "combatMethod"
+				|| hasTypePrefix(f, ["CTM:"])
+				|| CharacterSheetClassUtils.isCombatMethod(f);
+			const isLegacyUnmarkedMethod = !f._entityType
+				&& f.featureType === "Optional Feature"
+				&& !f.subclassShortName
+				&& !f.subclassSource;
+			if (!wasCombatMethod && !isLegacyUnmarkedMethod) continue;
+
 			const name = (f.name || "").toLowerCase();
 			const source = (f.source || "").toLowerCase();
 			if (!name) continue;
@@ -47822,6 +48306,14 @@ class CharacterSheetState {
 			if (isMissing(f.staminaCost) && entity.staminaCost !== undefined) f.staminaCost = entity.staminaCost;
 			if (isMissing(f.actionType) && entity.actionType !== undefined) f.actionType = entity.actionType;
 			if (isMissing(f.optionalFeatureTypes) && Array.isArray(entity.optionalFeatureTypes)) f.optionalFeatureTypes = [...entity.optionalFeatureTypes];
+
+			// Learned combat methods snapshot their authored entries. Refresh exact catalog
+			// matches so data corrections reach existing saves rather than only newly learned
+			// methods. The catalog remains the authority; character-specific metadata stays on f.
+			if (Array.isArray(entity.entries) && JSON.stringify(f.entries || []) !== JSON.stringify(entity.entries)) {
+				f.entries = MiscUtil.copyFast(entity.entries);
+				f.description = Renderer.get().render({entries: f.entries});
+			}
 		}
 	}
 
@@ -49843,8 +50335,10 @@ class CharacterSheetState {
 		}) ?? [];
 
 		return methods.map(m => ({
+			id: m.id,
 			name: m.name,
 			source: m.source,
+			entries: m.entries,
 			description: m.description,
 			requiresFocus: m.requiresFocus ?? null,
 			...this._parseCombatMethodEffects(m),
@@ -50029,7 +50523,16 @@ class CharacterSheetState {
 			selfHeal: null, // e.g. {dice:"1d6", addProficiency:true, abilityMod:"con", minimum:0} (Catch Your Breath)
 			pendingRangedExtraDie: false, // one-shot +1 weapon die on next ranged attack (Doubleshot)
 			conditionalSaveAdvantage: null, // e.g. {target:"save:all", advantage:true, conditional:"to resist…"} (Iron Will)
+			staminaCostMeta: null,
+			staminaCostDisplay: "0",
+			randomOutcomes: null,
 		};
+
+		const staminaCostMeta = CharacterSheetClassUtils.getMethodStaminaCostMeta(feature);
+		effects.staminaCostMeta = staminaCostMeta;
+		effects.staminaCostDisplay = staminaCostMeta.display;
+		effects.staminaCost = staminaCostMeta.cost ?? staminaCostMeta.min;
+		effects.randomOutcomes = CharacterSheetClassUtils.getMethodRandomOutcomes(feature);
 
 		// Use structured fields from new combatMethod entity if available
 		const isNewEntity = feature._entityType === "combatMethod" || (feature.tradition !== undefined && feature.degree !== undefined && feature.staminaCost !== undefined);
@@ -50037,7 +50540,6 @@ class CharacterSheetState {
 		if (isNewEntity) {
 			effects.degree = feature.degree || 0;
 			effects.tradition = CharacterSheetClassUtils.getMethodTraditionCode(feature);
-			effects.staminaCost = feature.staminaCost || 0;
 			if (feature.actionType) {
 				effects.actionType = feature.actionType.replace(/\b\w/g, c => c.toUpperCase());
 			}
@@ -50061,16 +50563,8 @@ class CharacterSheetState {
 
 		// Parse from description text — strip HTML tags for reliable regex matching
 		// Fall back to JSON-stringified entries when description is empty (raw feature objects from getFeatures())
-		const rawText = feature.description || (feature.entries ? JSON.stringify(feature.entries) : "");
+		const rawText = feature.entries ? JSON.stringify(feature.entries) : (feature.description || "");
 		const text = rawText.replace(/<[^>]*>/g, " ").replace(/\{@\w+\s+([^|}]+)[^}]*\}/g, "$1").replace(/\s+/g, " ");
-
-		// Parse stamina cost: "(1 Stamina Point)", "(3 Stamina Points)" — skip if already set from structured fields
-		if (!effects.staminaCost) {
-			const staminaMatch = text.match(/\((\d+)\s*Stamina\s*Points?\)/i);
-			if (staminaMatch) {
-				effects.staminaCost = parseInt(staminaMatch[1], 10);
-			}
-		}
 
 		// Parse action type from entry prefix — skip if already set from structured fields
 		if (!effects.actionType) {
@@ -50175,6 +50669,8 @@ class CharacterSheetState {
 		// Method category classification
 		if (effects.isStance) {
 			effects.methodCategory = "stance";
+		} else if (effects.randomOutcomes) {
+			effects.methodCategory = "randomOutcome";
 		} else if (effects.pendingRangedExtraDie) {
 			effects.methodCategory = "rangedExtraDie";
 		} else if (/(?:next\s+attack\s+roll|if\s+you\s+hit\s+with\s+your\s+next\s+attack|your\s+next\s+attack|hit\s+with\s+(?:the|your)\s+(?:chosen\s+)?weapon)/i.test(text)) {
@@ -50220,6 +50716,7 @@ class CharacterSheetState {
 			skillBonuses: {},
 			saveBonuses: {},
 			passiveBonuses: {},
+			criticalRange: null,
 			otherEffects: [],
 		};
 
@@ -50261,6 +50758,18 @@ class CharacterSheetState {
 		if (passiveBonusMatch) {
 			const skill = passiveBonusMatch[2].toLowerCase().replace(/\s+/g, "");
 			effects.passiveBonuses[skill] = parseInt(passiveBonusMatch[3], 10);
+		}
+
+		const critMatch = text.match(/(?:melee\s+)?weapon\s+attacks?(?:,\s*you)?\s+score\s+(?:a\s+)?critical\s+hits?\s+on\s+a\s+roll\s+of\s+(\d+)\s*[\u2013-]\s*20/i);
+		if (critMatch) {
+			const maximumMatch = text.match(/maximum\s+(\d+)\s*[\u2013-]\s*20/i);
+			effects.criticalRange = {
+				baseThreshold: parseInt(critMatch[1], 10),
+				expandIfImproved: /already\s+have\s+a\s+feature\s+that\s+increases\s+the\s+range\s+of\s+your\s+critical\s+hits/i.test(text) ? 1 : 0,
+				minimumThreshold: maximumMatch ? parseInt(maximumMatch[1], 10) : 2,
+				attackKinds: ["weapon"],
+				ranges: /\bmelee\s+weapon\s+attacks?\b/i.test(text) ? ["melee"] : ["melee", "ranged"],
+			};
 		}
 
 		return effects;
@@ -50551,7 +51060,7 @@ class CharacterSheetState {
 		}
 
 		const parsed = this._parseCombatMethodEffects(method);
-		const cost = parsed.staminaCost || 0;
+		const cost = parsed.staminaCost;
 
 		if (cost > 0) {
 			const success = this.spendStamina(cost);
@@ -50765,32 +51274,42 @@ class CharacterSheetState {
 	 * Get the critical hit range (lowest number that crits)
 	 * Considers Champion Fighter, Battle Tactics, custom abilities, and other sources
 	 *
-	 * @param {"weapon"|"spell"} [kind] - The kind of attack being rolled. Weapon/Unarmed
-	 *   Strike attack sources of an expanded crit range (e.g. Champion's Improved/Superior
-	 *   Critical, a weapon's `critThreshold`) are scoped to `"weapon"` (the default) and
-	 *   never leak into spell attack rolls — 5e text is explicit that these expand the
-	 *   crit range only for "attack rolls with weapons and Unarmed Strikes". Homebrew
-	 *   active-state effects (`critRange` / `critRange:expand`) are intentionally left
-	 *   unscoped so broadly-worded custom abilities keep applying to any attack kind,
-	 *   as they did before this parameter was introduced.
+	 * @param {object|"weapon"|"unarmed"|"spell"} [opts] - Options, or a legacy kind string.
+	 * @param {object|null} [opts.attack]
+	 * @param {"weapon"|"unarmed"|"spell"} [opts.kind]
+	 * @param {boolean} [opts.includeItemThreshold=true]
 	 * @returns {number} The lowest roll that scores a critical hit (default 20)
 	 */
-	getCriticalRange (kind = "weapon") {
+	getCriticalRange (opts = {}) {
+		const isLegacyString = typeof opts === "string";
+		const isLegacyNoArg = arguments.length === 0;
+		if (isLegacyNoArg) this._legacyCriticalRangeReadCount = (this._legacyCriticalRangeReadCount || 0) + 1;
+		const normalized = isLegacyString
+			? {kind: opts}
+			: (opts && typeof opts === "object" ? opts : {});
+		const attack = normalized.attack || null;
+		const classification = attack ? this.getAttackClassification(attack) : null;
+		const kind = normalized.kind || classification?.kind || "weapon";
+		const includeItemThreshold = normalized.includeItemThreshold !== false;
 		let critRange = 20;
 		let totalExpansion = 0;
 
 		// Check Champion Fighter (already in getFeatureCalculations). Weapon/Unarmed
 		// Strike only — never applies to spell attacks (Improved/Superior Critical text).
 		const calcs = this.getFeatureCalculations();
-		if (kind !== "spell" && calcs.criticalRange && calcs.criticalRange < critRange) {
+		if ((kind === "weapon" || kind === "unarmed") && calcs.criticalRange && calcs.criticalRange < critRange) {
 			critRange = calcs.criticalRange;
 		}
 
-		// Check magic item critThreshold (e.g., Sword of Sharpness with critThreshold: 19).
-		// Weapon-only — an item's threshold describes attacks made with THAT weapon.
-		const itemCrit = this._data.itemBonuses?.critThreshold;
-		if (kind !== "spell" && itemCrit && itemCrit < critRange) {
-			critRange = itemCrit;
+		// A weapon's threshold belongs only to attacks made with that weapon. The legacy
+		// no-argument path retains the old character-wide minimum for compatibility, but
+		// all UI/roll consumers pass a concrete attack.
+		if (includeItemThreshold && kind === "weapon") {
+			let itemCrit = Number(attack?.critThreshold) || 0;
+			const sourceItemId = attack?.sourceItem?.id;
+			if (sourceItemId != null) itemCrit = Number(this.getEffectiveItemBonuses(sourceItemId)?.critThreshold) || itemCrit;
+			else if (isLegacyNoArg || isLegacyString) itemCrit = Number(this._data.itemBonuses?.critThreshold) || itemCrit;
+			if (itemCrit > 0 && itemCrit < critRange) critRange = itemCrit;
 		}
 
 		// Check active state effects for expanded crit range (e.g., Hexblade's Curse, homebrew).
@@ -50813,7 +51332,24 @@ class CharacterSheetState {
 			critRange = Math.max(1, critRange - totalExpansion);
 		}
 
+		const stanceCritical = this._getActiveStanceEffects?.()?.criticalRange;
+		if (stanceCritical && attack && kind === "weapon") {
+			const rangeKind = classification?.isThrown ? "ranged" : (classification?.isMelee ? "melee" : "ranged");
+			if (stanceCritical.attackKinds?.includes("weapon") && stanceCritical.ranges?.includes(rangeKind)) {
+				const candidate = critRange < 20 && stanceCritical.expandIfImproved
+					? Math.max(stanceCritical.minimumThreshold || 2, critRange - stanceCritical.expandIfImproved)
+					: stanceCritical.baseThreshold;
+				critRange = Math.min(critRange, candidate);
+			}
+		}
+
 		return critRange;
+	}
+
+	getLegacyCriticalRangeReadCount ({reset = false} = {}) {
+		const count = this._legacyCriticalRangeReadCount || 0;
+		if (reset) this._legacyCriticalRangeReadCount = 0;
+		return count;
 	}
 
 	/**
@@ -54957,6 +55493,162 @@ class CharacterSheetState {
 	// a magic weapon derived from a shortbow ("Frost Shortbow") still benefits.
 	// =========================================================================
 
+	_isWeaponLikeItem (item) {
+		if (!item) return false;
+		const typeBase = String(item.type || "").split("|")[0].toUpperCase();
+		return item.weapon === true
+			|| !!item.weaponCategory
+			|| ["M", "R", "MW", "RW"].includes(typeBase);
+	}
+
+	_getRegisteredItemModifierAxes (itemId) {
+		const sourceId = `item:${itemId}`;
+		const out = new Set();
+		for (const mod of this._data.namedModifiers || []) {
+			if (mod?.sourceFeatureId !== sourceId) continue;
+			const axis = String(mod._baseType || mod.modType || mod.type || "").split(":")[0];
+			if (axis === "attack" || axis === "damage") out.add(axis);
+		}
+		return out;
+	}
+
+	static _getExternalItemBonusScope (scopeText) {
+		const text = String(scopeText || "").toLowerCase();
+		const hasUnarmed = /\bunarmed strikes?\b/.test(text);
+		const hasWeapon = /\bweapons?\b|\bweapon attacks?\b/.test(text);
+		const attackKinds = hasUnarmed && !hasWeapon ? ["unarmed"] : ["weapon", ...(hasUnarmed ? ["unarmed"] : [])];
+		const hasMelee = /\bmelee weapons?\b/.test(text);
+		const hasRanged = /\branged weapons?\b/.test(text);
+		const isEveryWeapon = /\bevery weapon\b|\ball weapons?\b/.test(text);
+		const ranges = !isEveryWeapon && hasMelee !== hasRanged
+			? [hasMelee ? "melee" : "ranged"]
+			: ["melee", "ranged"];
+		return {attackKinds, ranges};
+	}
+
+	/**
+	 * Normalize passive non-weapon item bonuses into explicit attack/damage scopes.
+	 * Weapon-local and ammunition bonuses never enter this path.
+	 * @param {object} inv
+	 * @returns {Array<object>}
+	 */
+	_getExternalItemBonusDescriptors (inv) {
+		if (!this._isItemEffectsActive(inv)) return [];
+		const item = inv?.item || inv;
+		if (!item || this._isWeaponLikeItem(item) || this._isAmmunitionItem(item)) return [];
+
+		const num = value => {
+			const parsed = Number(String(value ?? "").replace(/\s/g, ""));
+			return Number.isFinite(parsed) ? parsed : 0;
+		};
+		const attackValue = num(item.bonusWeapon) + num(item.bonusWeaponAttack);
+		const structuredDamageValue = num(item.bonusWeapon) + num(item.bonusWeaponDamage);
+		if (!attackValue && !structuredDamageValue) return [];
+
+		const registeredAxes = this._getRegisteredItemModifierAxes(inv.id);
+		const hasWeaponScopedDamage = this._getItemWeaponScopedDamageSpecs(item).length > 0;
+		const entryText = CharacterSheetState._getItemEntryText(item.entries, {skipTables: true});
+		const text = `${entryText} ${item.description || ""}`.replace(/\s+/g, " ").trim();
+		const sentences = text
+			.split(/(?<=[.!?])\s+/)
+			.filter(sentence => /\byou\s+(?:gain|have|receive)\b/i.test(sentence));
+		const descriptors = [];
+		const push = ({axis, value, scopeText, scopeOrigin}) => {
+			if (!value || registeredAxes.has(axis) || (axis === "damage" && hasWeaponScopedDamage)) return;
+			const scope = CharacterSheetState._getExternalItemBonusScope(scopeText);
+			descriptors.push({
+				itemId: inv.id,
+				name: item.name || inv.name || "Item",
+				value,
+				axis,
+				...scope,
+				scopeOrigin,
+			});
+		};
+
+		let hasAttackText = false;
+		let hasDamageText = false;
+		for (const sentence of sentences) {
+			const shared = /\bbonus to attack(?: rolls)? and (?:the )?damage rolls\b([^.]*)/i.exec(sentence);
+			if (shared) {
+				hasAttackText = true;
+				hasDamageText = true;
+				push({axis: "attack", value: attackValue, scopeText: shared[1], scopeOrigin: "authored-text"});
+				push({
+					axis: "damage",
+					value: structuredDamageValue || attackValue,
+					scopeText: shared[1],
+					scopeOrigin: "authored-text",
+				});
+				continue;
+			}
+
+			const attack = /\bbonus to attack rolls\b(.*?)(?=\band\s+(?:a\s+)?[+\-−]?\d+\s+bonus to damage rolls\b|$)/i.exec(sentence);
+			if (attack) {
+				hasAttackText = true;
+				push({axis: "attack", value: attackValue, scopeText: attack[1], scopeOrigin: "authored-text"});
+			}
+			const damage = /\bbonus to damage rolls\b([^.]*)/i.exec(sentence);
+			if (damage) {
+				hasDamageText = true;
+				push({
+					axis: "damage",
+					value: structuredDamageValue || attackValue,
+					scopeText: damage[1],
+					scopeOrigin: "authored-text",
+				});
+			}
+		}
+
+		// Custom data may deliberately provide the structured field without prose. In that
+		// case use the field's ordinary weapon-only meaning. Catalog prose which describes
+		// an activated/third-party benefit (rather than "you gain") is not auto-applied.
+		if (!text) {
+			if (!hasAttackText) push({axis: "attack", value: attackValue, scopeText: "", scopeOrigin: "field-default"});
+			if (!hasDamageText && structuredDamageValue) {
+				push({axis: "damage", value: structuredDamageValue, scopeText: "", scopeOrigin: "field-default"});
+			}
+		}
+
+		return descriptors;
+	}
+
+	_externalItemBonusAppliesToAttack (descriptor, attack) {
+		const classification = this.getAttackClassification(attack);
+		if (classification.kind === "spell" || classification.kind === "other") return false;
+		if (!descriptor.attackKinds.includes(classification.kind)) return false;
+		const rangeKind = classification.isThrown ? "ranged" : (classification.isMelee ? "melee" : "ranged");
+		return descriptor.ranges.includes(rangeKind);
+	}
+
+	getExternalItemAttackContributions (attack) {
+		if (!attack || this.getAttackClassification(attack).kind === "spell") return [];
+		const sourceItemId = attack.sourceItem?.id;
+		const out = [];
+		for (const inv of this._data.inventory || []) {
+			if (sourceItemId != null && String(inv.id) === String(sourceItemId)) continue;
+			for (const descriptor of this._getExternalItemBonusDescriptors(inv)) {
+				if (descriptor.axis !== "attack" || !this._externalItemBonusAppliesToAttack(descriptor, attack)) continue;
+				out.push(descriptor);
+			}
+		}
+		return out;
+	}
+
+	getExternalItemDamageContributions (attack) {
+		if (!attack || this.getAttackClassification(attack).kind === "spell") return [];
+		const sourceItemId = attack.sourceItem?.id;
+		const out = [];
+		for (const inv of this._data.inventory || []) {
+			if (sourceItemId != null && String(inv.id) === String(sourceItemId)) continue;
+			for (const descriptor of this._getExternalItemBonusDescriptors(inv)) {
+				if (descriptor.axis !== "damage" || !this._externalItemBonusAppliesToAttack(descriptor, attack)) continue;
+				out.push(descriptor);
+			}
+		}
+		return out;
+	}
+
 	/**
 	 * Resolve a weapon's normalized base-item name. Prefers the explicit `baseItem`
 	 * reference ("shortbow|phb" → "shortbow"); falls back to the weapon's own name.
@@ -55062,27 +55754,43 @@ class CharacterSheetState {
 	 * riders remain roll-time concerns and are deliberately excluded.
 	 *
 	 * @param {object} attack
-	 * @returns {{base: number, feature: number, itemContributions: Array<{name: string, value: number}>, item: number, state: number, rage: number, hybrid: number, total: number}}
+	 * @param {object} [opts]
+	 * @param {boolean} [opts.includeActiveStates=true]
+	 * @param {boolean} [opts.includePassiveFeatures=true]
+	 * @param {boolean} [opts.includeExternalItems=true]
+	 * @returns {{base: number, feature: number, itemContributions: Array<{name: string, value: number}>, externalItemContributions: Array<{name: string, value: number}>, item: number, state: number, rage: number, hybrid: number, total: number}}
 	 */
-	getWeaponDisplayDamageBreakdown (attack) {
-		if (!attack) return {base: 0, feature: 0, itemContributions: [], item: 0, state: 0, rage: 0, hybrid: 0, total: 0};
+	getWeaponDisplayDamageBreakdown (
+		attack,
+		{
+			includeActiveStates = true,
+			includePassiveFeatures = true,
+			includeExternalItems = true,
+		} = {},
+	) {
+		if (!attack) return {base: 0, feature: 0, itemContributions: [], externalItemContributions: [], item: 0, state: 0, rage: 0, hybrid: 0, total: 0};
 
 		const baseRaw = Number(attack.damageBonus);
 		const base = Number.isFinite(baseRaw) ? baseRaw : 0;
-		const feature = this.getNamedModifiersByType("damage", {includeConditional: false})
-			.filter(mod => !mod.manual && !mod.isManual && !mod.requiresChoice && !mod.requiresActivation && !mod.oncePerTurn && mod.perTurn !== true && !mod.critOnly && !mod.onCrit)
-			.reduce((sum, mod) => sum + (typeof mod.value === "number" && Number.isFinite(mod.value) ? mod.value : 0), 0);
+		const feature = includePassiveFeatures
+			? this.getNamedModifiersByType("damage", {includeConditional: false})
+				.filter(mod => !mod.manual && !mod.isManual && !mod.requiresChoice && !mod.requiresActivation && !mod.oncePerTurn && mod.perTurn !== true && !mod.critOnly && !mod.onCrit)
+				.reduce((sum, mod) => sum + (typeof mod.value === "number" && Number.isFinite(mod.value) ? mod.value : 0), 0)
+			: 0;
 		const itemContributions = this.getItemWeaponScopedDamageContributions(attack)
 			.filter(it => typeof it.value === "number" && Number.isFinite(it.value));
-		const item = itemContributions.reduce((sum, it) => sum + it.value, 0);
+		const externalItemContributions = includeExternalItems
+			? this.getExternalItemDamageContributions(attack)
+				.filter(it => typeof it.value === "number" && Number.isFinite(it.value))
+			: [];
+		const item = [...itemContributions, ...externalItemContributions].reduce((sum, it) => sum + it.value, 0);
 		const weaponId = attack.riteWeaponId || attack.id;
-		const stateRaw = this.getBonusFromStates("damage", {weaponId});
+		const stateRaw = includeActiveStates ? this.getBonusFromStates("damage", {weaponId}) : 0;
 		const state = typeof stateRaw === "number" && Number.isFinite(stateRaw) ? stateRaw : 0;
-		const isMeleeWeapon = !attack.isSpell
-			&& !attack.isRanged
-			&& this.getAttackReach(attack, {meleeReach: CharacterSheetState.BASE_MELEE_REACH}) != null;
-		const rage = this.getRageDamageBonus(isMeleeWeapon, attack.abilityMod || "str");
-		const hybrid = this.isStateTypeActive("hybridTransformation") && isMeleeWeapon
+		const classification = this.getAttackClassification(attack);
+		const isMeleeWeapon = classification.kind === "weapon" && classification.isMelee && !classification.isThrown;
+		const rage = includeActiveStates ? this.getRageDamageBonus(isMeleeWeapon, attack.abilityMod || "str") : 0;
+		const hybrid = includeActiveStates && this.isStateTypeActive("hybridTransformation") && isMeleeWeapon
 			? (Number(this.getFeatureCalculation("hybridDamageBonus")) || 0)
 			: 0;
 
@@ -55090,6 +55798,7 @@ class CharacterSheetState {
 			base,
 			feature,
 			itemContributions,
+			externalItemContributions,
 			item,
 			state,
 			rage,
@@ -55103,8 +55812,8 @@ class CharacterSheetState {
 	 * @param {object} attack
 	 * @returns {number}
 	 */
-	getWeaponDisplayDamageBonus (attack) {
-		return this.getWeaponDisplayDamageBreakdown(attack).total;
+	getWeaponDisplayDamageBonus (attack, opts) {
+		return this.getWeaponDisplayDamageBreakdown(attack, opts).total;
 	}
 
 	/**
@@ -55220,6 +55929,8 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_trackGrantedProficiency (type, name, abilityId) {
+		if (type === "skills") name = this.normalizeSkillProficiencyKey(name);
+		if (!name) return;
 		if (!this._data.grantedProficiencies) {
 			this._data.grantedProficiencies = {skills: {}, tools: {}, weapons: {}, armor: {}, languages: {}};
 		}
@@ -55243,6 +55954,7 @@ class CharacterSheetState {
 	 * @private
 	 */
 	_untrackGrantedProficiency (type, name, abilityId) {
+		if (type === "skills") name = this.normalizeSkillProficiencyKey(name);
 		if (!this._data.grantedProficiencies?.[type]?.[name]) return false;
 
 		const sources = this._data.grantedProficiencies[type][name];
@@ -56690,6 +57402,23 @@ class CharacterSheetState {
 	}
 
 	/**
+	 * Get a conditional modifier's display source without changing its stored
+	 * name or stable ID. Prose-parsed modifiers append `: <condition>` to the
+	 * feature name; strip only that exact suffix for picker/result copy.
+	 *
+	 * @param {object} mod
+	 * @returns {string}
+	 */
+	static _getConditionalSourceName (mod) {
+		const raw = String(mod?.name || mod?.note || "Conditional bonus").trim();
+		const conditional = String(mod?.conditional || "").trim();
+		if (!conditional) return raw;
+		const suffix = `: ${conditional}`;
+		if (!raw.endsWith(suffix)) return raw;
+		return raw.slice(0, -suffix.length).trim() || raw;
+	}
+
+	/**
 	 * Build a stable, deterministic identifier for a conditional modifier so
 	 * the same mod can be opted-in / opted-out consistently across repeated
 	 * `aggregateModifiers` calls within a single roll cycle.
@@ -57027,11 +57756,14 @@ class CharacterSheetState {
 			// so the conditional opt-in picker can offer it — but only as a
 			// gated conditional. We synthesize a human-readable `conditional`
 			// field from the sub-type so it flows through the same default-off
-			// gating path as text-parsed conditionals. See _isConditionalSaveSubtype.
+			// gating path as text-parsed conditionals. Skill sub-types are always
+			// selectors (`skill:might`, `skill:perception`), never category-wide
+			// conditions; qualified skill conditions use `skill:<target>:<qualifier>`
+			// and are handled below. See _isConditionalSaveSubtype.
 			let synthesizedConditional = null;
 			if (!matches
 				&& modCategory === category
-				&& ["save", "check", "skill"].includes(category)
+				&& ["save", "check"].includes(category)
 				&& modSpecific
 				&& CharacterSheetState._isConditionalSaveSubtype(modSpecific)
 			) {
@@ -57163,6 +57895,7 @@ class CharacterSheetState {
 						result.conditionalsAvailable.push({
 							id: condId,
 							name: mod.name || mod.note || "Conditional bonus",
+							sourceName: CharacterSheetState._getConditionalSourceName(mod),
 							conditional: mod.conditional,
 							advantage: !!mod.advantage,
 							disadvantage: !!mod.disadvantage,
@@ -57185,8 +57918,11 @@ class CharacterSheetState {
 			}
 
 			// Track sources
-			if (mod.name && !result.sources.includes(mod.name)) {
-				result.sources.push(mod.name);
+			const sourceName = mod.conditional
+				? CharacterSheetState._getConditionalSourceName(mod)
+				: mod.name;
+			if (sourceName && !result.sources.includes(sourceName)) {
+				result.sources.push(sourceName);
 			}
 			if (mod.conditional && !result.conditionals.includes(mod.conditional)) {
 				result.conditionals.push(mod.conditional);
@@ -65243,7 +65979,10 @@ class CharacterSheetState {
 		}
 		// Chained Fury targets are sustained by Rage + Manifest Chains. Ending
 		// either source tears down every persisted chain effect immediately.
-		if (stateTypeId === "rage" || stateTypeId === "manifestChains") this.clearTargetEffects("chained-fury");
+		if (stateTypeId === "rage" || stateTypeId === "manifestChains") {
+			this.clearTargetEffects("chained-fury");
+			this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
+		}
 	}
 
 	_deactivateStatesForEndCondition ({conditionName = null, armorType = null, isIncapacitated = false, isDead = false} = {}) {
@@ -66831,7 +67570,7 @@ class CharacterSheetState {
 			source: "chained-fury",
 			effect,
 			range,
-			prompt: "Record the creature affected by the spectral chains. The target remains until the source releases it or its active requirements end.",
+			prompt: "Optional bookkeeping: record the creature only after it fails the relevant save.",
 		};
 	}
 
@@ -66883,11 +67622,13 @@ class CharacterSheetState {
 
 	getChainedTargetState () {
 		const calc = this.getFeatureCalculations() || {};
+		const occupants = this.getChainedTargetOccupants();
 		return {
+			trackingEnabled: this.isChainedFuryTargetTrackingEnabled(),
 			available: this.isStateTypeActive("manifestChains") && this.isStateTypeActive("rage"),
 			capacity: calc.chainCount || 0,
-			used: this.getChainedTargetOccupants().length,
-			availableChains: Math.max(0, (calc.chainCount || 0) - this.getChainedTargetOccupants().length),
+			used: occupants.length,
+			availableChains: Math.max(0, (calc.chainCount || 0) - occupants.length),
 			range: calc.chainRange || 0,
 			grappleDc: calc.chainGrappleDc || null,
 			restraintDc: calc.chainRestrainDc || null,
@@ -66997,7 +67738,14 @@ class CharacterSheetState {
 			.some(state => state.stateTypeId === "manifestChains");
 		const hasTargetEffects = (this._data.targetEffects || [])
 			.some(effect => String(effect.source || "").toLowerCase() === "chained-fury");
-		if (!ownedIds.size && !hasManifestState && !hasTargetEffects) return;
+		const hasMovementUsage = !!this._data.chainedMovementUsage
+			&& (
+				this._data.chainedMovementUsage.round != null
+				|| Number(this._data.chainedMovementUsage.movementUsed) > 0
+				|| this._data.chainedMovementUsage.bonusActionUsed
+				|| this._data.chainedMovementUsage.doubled
+			);
+		if (!ownedIds.size && !hasManifestState && !hasTargetEffects && !hasMovementUsage) return;
 
 		if (ownedIds.size) {
 			for (const itemId of ownedIds) this._unregisterItemEffects?.(itemId);
@@ -67007,6 +67755,7 @@ class CharacterSheetState {
 		this._data.activeStates = (this._data.activeStates || [])
 			.filter(state => state.stateTypeId !== "manifestChains");
 		this.clearTargetEffects?.("chained-fury");
+		this._data.chainedMovementUsage = {round: null, movementUsed: 0, bonusActionUsed: false, doubled: false};
 	}
 
 	_reconcileChainedFuryChainItem () {
@@ -67125,13 +67874,23 @@ class CharacterSheetState {
 	}
 
 	applyChainedTargetEffect ({
-		targetId, targetName, name, size = "medium", distance = null, effect = "grapple",
-		riderId, restraintSaveTotal = null, shoveDistance = null, grappleSaveTotal = null,
-		grappleSaveAbility = "str", finalDistance = null, shoveDirection = null,
+		targetId, targetName, name, effect = "grapple",
+		riderId, restraintSaveTotal = null, grappleSaveTotal = null,
+		grappleSaveFailed = null, restraintSaveFailed = null, grappleSaveAbility = "str",
 		source = "chained-fury", targetEffect = null,
 	} = {}) {
+		if (!this.isChainedFuryTargetTrackingEnabled()) return {ok: false, reason: "tracking-disabled"};
 		const calc = this.getFeatureCalculations() || {};
-		if (!calc.hasManifestChains || !this.isStateTypeActive("rage") || !this.isStateTypeActive("manifestChains")) {
+		const chainItem = (this._data.inventory || []).find(it =>
+			it?.item?._isChainedFuryChain
+			|| it?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID,
+		);
+		if (
+			!calc.hasManifestChains
+			|| !this.isStateTypeActive("rage")
+			|| !this.isStateTypeActive("manifestChains")
+			|| !chainItem?.equipped
+		) {
 			return {ok: false, reason: "chains-inactive"};
 		}
 		const normalizedSource = String(source || "chained-fury").trim().toLowerCase();
@@ -67153,144 +67912,122 @@ class CharacterSheetState {
 		if (riderId && riderEffects[riderId] && normalizedEffect !== riderEffects[riderId]) {
 			return {ok: false, reason: "effect-metadata-mismatch"};
 		}
-		if (riderId && !riderEffects[riderId] && !["target", "none", "track"].includes(normalizedEffect)) {
+		if (riderId && !riderEffects[riderId]) {
 			return {ok: false, reason: "effect-unavailable"};
 		}
-		const allowedEffects = new Set(["target", "none", "track", "grapple", "shove", "shove-only", "restrain", "control-shove"]);
+		const allowedEffects = new Set(["grapple", "shove", "shove-only", "restrain", "control-shove"]);
 		if (!allowedEffects.has(normalizedEffect)) return {ok: false, reason: "effect-unavailable"};
-		if (["restrain"].includes(normalizedEffect) && !calc.hasChainImprisonment) {
+		if (normalizedEffect === "restrain" && !calc.hasChainImprisonment) {
 			return {ok: false, reason: "effect-unavailable", requiredLevel: 6};
 		}
-		if (["control-shove"].includes(normalizedEffect) && !calc.hasChainControl) {
+		if (normalizedEffect === "control-shove" && !calc.hasChainControl) {
 			return {ok: false, reason: "effect-unavailable", requiredLevel: 10};
 		}
+
+		if (["shove", "shove-only"].includes(normalizedEffect)) {
+			return {
+				ok: true,
+				tracked: false,
+				target: null,
+				grappled: false,
+				restrained: false,
+				shoved: true,
+				shoveDistance: Number(calc.chainShoveDistance) || 0,
+			};
+		}
+
 		const existing = targetId ? this._data.targetEffects.find(it => it.id === targetId) : null;
 		const existingGrapple = !!existing?.effects?.grapple?.active || !!existing?.grappled;
-		const wantsGrapple = !["target", "none", "track", "shove", "shove-only"].includes(normalizedEffect);
-		if (!existingGrapple && wantsGrapple && this.getChainedTargetOccupants().length >= (calc.chainCount || 0)) return {ok: false, reason: "chain-capacity"};
-		const maxSize = this.getGrappleSizeCategory()?.maxTargetSize;
-		const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(size).toLowerCase());
-		const maxRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(maxSize || "gargantuan").toLowerCase());
-		if (wantsGrapple && !calc.grappleSizeUnlimited && maxRank >= 0 && sizeRank > maxRank) return {ok: false, reason: "target-too-large", maxSize};
-		const range = Number(calc.chainRange) || 0;
-		if (distance != null && (Number(distance) < 0 || Number(distance) > range)) return {ok: false, reason: "out-of-range", range};
 
-		const id = targetId || `chain-target-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 		const isRestrain = normalizedEffect === "restrain";
 		const isControlShove = normalizedEffect === "control-shove";
-		const isShove = ["shove", "control-shove"].includes(normalizedEffect);
 		const grappleAbility = grappleSaveAbility === "dex" ? "dex" : grappleSaveAbility === "str" ? "str" : null;
-		if (wantsGrapple && !grappleAbility) return {ok: false, reason: "invalid-save-ability"};
+		if (!grappleAbility) return {ok: false, reason: "invalid-save-ability"};
 		const grappleDc = Number(calc.chainGrappleDc) || null;
-		const grappleSucceeded = !wantsGrapple || grappleSaveTotal == null || Number(grappleSaveTotal) < grappleDc;
-		const grappled = wantsGrapple && grappleSucceeded;
-		const restraintDc = calc.chainRestrainDc || null;
-		const restraintSuccess = isRestrain && grappled
-			&& (restraintSaveTotal == null || Number(restraintSaveTotal) < restraintDc);
-		const finalShoveDistance = shoveDistance == null ? (isShove ? (calc.chainShoveDistance || 0) : 0) : Number(shoveDistance);
-		const currentDistance = Number(distance ?? existing?.distance ?? 0);
-		const direction = shoveDirection || existing?.shoveDirection || null;
-		const inferredFinalDistance = direction === "toward"
-			? currentDistance - finalShoveDistance
-			: direction === "lateral"
-				? currentDistance
-				: currentDistance + finalShoveDistance;
-		const declaredFinalDistance = finalDistance == null ? inferredFinalDistance : Number(finalDistance);
-		const expectedFinalDistance = direction === "toward"
-			? currentDistance - finalShoveDistance
-			: direction === "lateral"
-				? currentDistance
-				: currentDistance + finalShoveDistance;
-		if (isControlShove && !grappled) {
-			// Chain Control is explicitly contingent on the initial grapple. Keep
-			// the target record for the player's confirmed outcome, but never apply
-			// a shove or occupy a chain after a successful save.
-			const target = this.upsertTargetEffect({
-				id,
-				source: "chained-fury",
-				effectType: normalizedEffect,
-				targetName: targetName || name || existing?.targetName || "Target",
-				size,
-				grappled: false,
-				restrained: false,
-				shoved: false,
-				distance: currentDistance,
-				declaredDistance: currentDistance,
-				chainIndex: null,
-				escapeDc: grappleDc,
-				restraintDc,
-				effects: {
-					grapple: {active: false, ability: grappleAbility || "str", dc: grappleDc},
-					shove: {active: false, distance: 0},
-					restraint: {active: false, dc: restraintDc},
-				},
-			});
+
+		const getSaveFailed = (explicit, total, dc) => {
+			if (explicit != null) return explicit === true;
+			if (total == null) return null;
+			return Number(total) < dc;
+		};
+		const didFailGrappleSave = getSaveFailed(grappleSaveFailed, grappleSaveTotal, grappleDc);
+		if (didFailGrappleSave == null) return {ok: false, reason: "outcome-required", outcome: "grapple"};
+		if (!didFailGrappleSave) {
 			return {
-				ok: !!target,
-				target,
+				ok: true,
+				tracked: false,
+				target: null,
 				grappled: false,
 				restrained: false,
 				shoved: false,
-				grappleSaveSuccess: false,
+				grappleSaveSuccess: true,
+				grappleSaveFailed: false,
 				grappleDc,
 				grappleSaveAbility: grappleAbility,
-				restraintSaveSuccess: false,
-				saveDc: restraintDc,
+				restraintSaveSuccess: null,
+				restraintSaveFailed: null,
 				controlApplied: false,
 			};
 		}
-		if (isControlShove && (
-			!["away", "toward", "lateral"].includes(direction)
-			|| finalShoveDistance !== 10
-			|| !Number.isFinite(declaredFinalDistance)
-			|| declaredFinalDistance < 0
-			|| declaredFinalDistance > range
-			|| Math.abs(declaredFinalDistance - expectedFinalDistance) > 0.001
-		)) {
-			return {ok: false, reason: "shove-out-of-range", range, finalDistance: declaredFinalDistance};
+		if (!existingGrapple && this.getChainedTargetOccupants().length >= (calc.chainCount || 0)) {
+			return {ok: false, reason: "chain-capacity"};
 		}
+
+		const restraintDc = Number(calc.chainImprisonmentSaveDc || calc.chainRestrainDc) || null;
+		const didFailRestraintSave = isRestrain
+			? getSaveFailed(restraintSaveFailed, restraintSaveTotal, restraintDc)
+			: false;
+		if (isRestrain && didFailRestraintSave == null) return {ok: false, reason: "outcome-required", outcome: "restraint"};
+
+		const resolvedName = String(targetName || name || existing?.targetName || "").trim();
+		if (!resolvedName) return {ok: false, reason: "target-name-required"};
+		const restrained = isRestrain && didFailRestraintSave;
+		const id = targetId || `chain-target-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 		const target = this.upsertTargetEffect({
 			id,
 			source: "chained-fury",
-			effectType: normalizedEffect,
-			targetName: targetName || name || existing?.targetName || "Target",
-			size,
-			grappled,
-			restrained: isRestrain && restraintSuccess,
-			shoved: isShove && (!isControlShove || grappled),
-			shoveDistance: finalShoveDistance,
-			shoveDirection: direction,
-			declaredDistance: declaredFinalDistance,
-			distance: isShove && (!isControlShove || grappled) ? declaredFinalDistance : (distance == null && existing ? existing.distance : (distance == null ? 0 : distance)),
-			recurringDamage: isRestrain && restraintSuccess && calc.chainRestrainDamage
+			effectType: restrained ? "restrain" : "grapple",
+			targetName: resolvedName,
+			size: existing?.size || "medium",
+			grappled: true,
+			restrained,
+			shoved: false,
+			shoveDistance: 0,
+			shoveDirection: null,
+			declaredDistance: existing?.declaredDistance ?? 0,
+			distance: existing?.distance ?? 0,
+			recurringDamage: restrained && (calc.chainRecurringDamage || calc.chainRestrainDamage)
 				? {
-					amount: calc.chainRestrainDamage,
+					amount: Number(calc.chainRecurringDamage || calc.chainRestrainDamage),
 					type: "force",
 					when: "start of each of its turns",
 				}
 				: null,
-			chainIndex: grappled ? (existing?.chainIndex ?? this.getChainedTargetOccupants().length) : null,
+			chainIndex: existing?.chainIndex ?? this.getChainedTargetOccupants().length,
 			escapeDc: grappleDc,
 			restraintDc,
 			effects: {
-				grapple: {active: grappled, ability: grappleAbility || "str", dc: grappleDc},
-				shove: {active: isShove && (!isControlShove || grappled), distance: isShove && (!isControlShove || grappled) ? finalShoveDistance : 0},
-				restraint: {active: restraintSuccess, dc: restraintDc},
+				grapple: {active: true, ability: grappleAbility, dc: grappleDc},
+				shove: {active: false, distance: 0},
+				restraint: {active: restrained, dc: restraintDc},
 			},
 		});
 		return {
 			ok: !!target,
+			tracked: !!target,
 			target,
-			grappled,
+			grappled: true,
 			restrained: !!target?.restrained,
-			grappleSaveSuccess: grappleSucceeded,
+			shoved: false,
+			grappleSaveSuccess: false,
+			grappleSaveFailed: true,
 			grappleDc,
 			grappleSaveAbility: grappleAbility,
-			restraintSaveSuccess: restraintSuccess,
+			restraintSaveSuccess: isRestrain ? !didFailRestraintSave : null,
+			restraintSaveFailed: isRestrain ? didFailRestraintSave : null,
 			saveDc: restraintDc,
-			finalDistance: declaredFinalDistance,
-			shoveDirection: direction,
-			controlApplied: isControlShove && grappled,
+			shoveDistance: isControlShove ? 10 : 0,
+			controlApplied: isControlShove,
 		};
 	}
 
@@ -67436,67 +68173,68 @@ class CharacterSheetState {
 	}
 
 	reconcileTargetEffects () {
+		if (!Array.isArray(this._data.targetEffects)) this._data.targetEffects = [];
+		const hasChainedTargets = this._data.targetEffects
+			.some(it => String(it?.source || "").toLowerCase() === "chained-fury");
+		if (!hasChainedTargets) return;
+
 		const calc = this.getFeatureCalculations() || {};
-		const legal = calc.hasManifestChains && this.isStateTypeActive("rage") && this.isStateTypeActive("manifestChains");
+		const chainItem = (this._data.inventory || []).find(it =>
+			it?.item?._generatedItemId === CharacterSheetState.CHAINED_FURY_CHAIN_ITEM_ID
+			|| it?.item?._isChainedFuryChain,
+		);
+		const legal = this.isChainedFuryTargetTrackingEnabled()
+			&& !!calc.hasManifestChains
+			&& this.isStateTypeActive("rage")
+			&& this.isStateTypeActive("manifestChains")
+			&& !!chainItem?.equipped;
 		if (!legal) {
 			this.clearTargetEffects("chained-fury");
 			const manifest = this._data.activeStates.find(state => state.stateTypeId === "manifestChains");
 			if (manifest?.active && !this._getChainedFuryClass()) manifest.active = false;
-		} else {
-			const max = Number(calc.chainRange) || 0;
-			const maxSize = this.getGrappleSizeCategory()?.maxTargetSize;
-			const maxRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(maxSize || "gargantuan").toLowerCase());
-			const capacity = Number(calc.chainCount) || 0;
-			const occupants = [...this._data.targetEffects]
-				.filter(it => it.source === "chained-fury" && it.effects?.grapple?.active && it.chainIndex != null)
-				.sort((a, b) => Number(a.chainIndex) - Number(b.chainIndex));
-			for (const target of [...this._data.targetEffects]) {
-				if (target.source !== "chained-fury") continue;
-				const grappled = !!target.effects?.grapple?.active;
-				if (target.distance != null && target.distance > max) {
-					this._releaseChainedTargetEffect(target);
-					continue;
-				}
-				const sizeRank = CharacterSheetState.GRAPPLE_SIZE_ORDER.indexOf(String(target.size || "medium").toLowerCase());
-				if (grappled && (!calc.grappleSizeUnlimited && maxRank >= 0 && sizeRank > maxRank)) {
-					this._releaseChainedTargetEffect(target);
-					continue;
-				}
-				if (grappled && occupants.indexOf(target) >= capacity) {
-					this._releaseChainedTargetEffect(target);
-					continue;
-				}
-				if (grappled) {
-					target.chainIndex = occupants.indexOf(target);
-				}
-				if (!grappled) target.chainIndex = null;
-				target.grappled = grappled;
-				target.effects.grapple.active = grappled;
-				target.escapeDc = calc.chainGrappleDc || null;
-				target.effects.grapple.dc = calc.chainGrappleDc || null;
-				target.restraintDc = calc.chainRestrainDc || null;
-				target.effects.restraint.dc = calc.chainRestrainDc || null;
-				// Ordinary grapples never carry the restraint layer. This also
-				// repairs saves written by the earlier implementation, which
-				// accidentally marked every grapple as restrained.
-				if (target.effectType !== "restrain") {
-					target.restrained = false;
-					target.effects.restraint.active = false;
-					target.recurringDamage = null;
-				} else if (target.restrained && (!grappled || !calc.hasChainImprisonment)) {
-					this._releaseChainedTargetEffect(target);
-				} else if (target.restrained) {
-					target.effects.restraint.active = true;
-					target.recurringDamage = {
-						amount: Number(calc.chainRestrainDamage) || 0,
-						type: "force",
-						when: "start of each of its turns",
-					};
-				}
-				target.restrained = !!target.effects.restraint.active && grappled && target.effectType === "restrain";
-				target.shoved = !!target.effects.shove.active;
-			}
+			return;
 		}
+
+		const capacity = Math.max(0, Number(calc.chainCount) || 0);
+		const chained = this._data.targetEffects
+			.filter(it => String(it?.source || "").toLowerCase() === "chained-fury")
+			.sort((a, b) => (Number(a.chainIndex) || 0) - (Number(b.chainIndex) || 0) || (a.createdAt || 0) - (b.createdAt || 0));
+		const keptIds = new Set();
+		for (const target of chained) {
+			const grappled = !!target.effects?.grapple?.active || !!target.grappled;
+			if (!grappled || keptIds.size >= capacity) continue;
+
+			target.grappled = true;
+			target.chainIndex = keptIds.size;
+			target.escapeDc = Number(calc.chainGrappleDc) || null;
+			target.effects ||= {};
+			target.effects.grapple = {
+				active: true,
+				ability: target.effects.grapple?.ability === "dex" ? "dex" : "str",
+				dc: Number(calc.chainGrappleDc) || null,
+			};
+			target.effects.shove = {active: false, distance: 0};
+			target.shoved = false;
+			target.shoveDistance = 0;
+			target.shoveDirection = null;
+
+			const remainsRestrained = !!target.restrained && !!calc.hasChainImprisonment;
+			target.restrained = remainsRestrained;
+			target.effectType = remainsRestrained ? "restrain" : "grapple";
+			target.restraintDc = Number(calc.chainImprisonmentSaveDc || calc.chainRestrainDc) || null;
+			target.effects.restraint = {active: remainsRestrained, dc: target.restraintDc};
+			target.recurringDamage = remainsRestrained
+				? {
+					amount: Number(calc.chainRecurringDamage || calc.chainRestrainDamage) || 0,
+					type: "force",
+					when: "start of each of its turns",
+				}
+				: null;
+			keptIds.add(target.id);
+		}
+
+		this._data.targetEffects = this._data.targetEffects
+			.filter(it => String(it?.source || "").toLowerCase() !== "chained-fury" || keptIds.has(it.id));
 	}
 
 	getChainedFuryTargets () { return this.getChainedTargets(); }

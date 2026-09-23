@@ -112,7 +112,7 @@ describe("Way of the Sun Soul — combat execution", () => {
 		const results = combat._executeFeatureAttackVolley({name: "Radiant Sun Bolt"}, {attack, count: 2});
 
 		expect(results).toHaveLength(2);
-		expect(combat._rollCombatActionDice).toHaveBeenNthCalledWith(1, expect.anything(), {type: "attack", attackBonus: 6});
+		expect(combat._rollCombatActionDice).toHaveBeenNthCalledWith(1, expect.anything(), {type: "attack", attackBonus: 6, critRange: 20});
 		expect(combat._rollCombatActionDice).toHaveBeenNthCalledWith(2, expect.anything(), {
 			type: "damage",
 			formula: "1d6+3",

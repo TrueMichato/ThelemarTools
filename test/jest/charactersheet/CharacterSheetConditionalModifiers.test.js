@@ -79,6 +79,64 @@ describe("Conditional modifier helpers", () => {
 		expect(id).toContain("save");
 		expect(id).toContain("frightened");
 	});
+
+	test("_getConditionalSourceName strips only the exact parser-added condition suffix", () => {
+		expect(CharacterSheetState._getConditionalSourceName({
+			name: "Path of Lean Winters: against cold weather",
+			conditional: "against cold weather",
+		})).toBe("Path of Lean Winters");
+		expect(CharacterSheetState._getConditionalSourceName({
+			name: "Divine Favor: Athena",
+			conditional: "against spells",
+		})).toBe("Divine Favor: Athena");
+	});
+});
+
+describe("getModifiersForType — skill selectors stay exact", () => {
+	test.each([
+		["built-in TGTT custom skill", "Might", "might"],
+		["runtime custom skill", "Streetwise", "streetwise"],
+	])("%s does not leak onto unrelated skill rolls", (_label, displayName, skillKey) => {
+		s.addClass({name: "Barbarian", source: "TGTT", level: 6});
+		if (skillKey !== "might") expect(s.addCustomSkill(displayName, "cha")).toBe(true);
+		s.addNamedModifier({
+			name: `${displayName} Specialty`,
+			type: `skill:${skillKey}`,
+			value: 0,
+			proficiencyBonus: true,
+			sourceFeatureId: `feature:${skillKey}`,
+		});
+
+		const target = s.aggregateModifiers(`skill:${skillKey}`);
+		expect(target.bonus).toBe(s.getProficiencyBonus());
+		expect(target.conditionalsAvailable).toEqual([]);
+
+		for (const unrelated of ["athletics", "acrobatics", "perception"]) {
+			const aggregate = s.aggregateModifiers(`skill:${unrelated}`);
+			expect(aggregate.bonus).toBe(0);
+			expect(aggregate.sources).not.toContain(`${displayName} Specialty`);
+			expect(aggregate.conditionalsAvailable).toEqual([]);
+		}
+	});
+
+	test("qualified skill conditionals remain reachable on their target skill", () => {
+		s.addNamedModifier({
+			name: "Keen Senses",
+			type: "skill:advantage:perception:senses",
+			value: 1,
+			sourceFeatureId: "feature:keen-senses",
+		});
+		const perception = s.aggregateModifiers("skill:perception");
+		expect(perception.advantage).toBe(false);
+		expect(perception.conditionalsAvailable).toEqual([
+			expect.objectContaining({
+				sourceName: "Keen Senses",
+				conditional: "senses",
+				advantage: true,
+			}),
+		]);
+		expect(s.aggregateModifiers("skill:insight").conditionalsAvailable).toEqual([]);
+	});
 });
 
 describe("aggregateModifiers — conditional gating", () => {

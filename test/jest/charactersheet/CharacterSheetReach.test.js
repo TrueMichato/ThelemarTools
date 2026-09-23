@@ -90,6 +90,16 @@ describe("CharacterSheetState — Reach system", () => {
 			expect(state.getMeleeReach()).toBe(10);
 		});
 
+		it("coerces a signed-string reach boon before adding it", () => {
+			state.addActiveState("custom", {
+				name: "Long Reach Boon",
+				sourceFeatureId: "long-reach-boon",
+				customEffects: [{type: "reach", value: "+10"}],
+			});
+			expect(state.getReachContributions()).toContainEqual({source: "Long Reach Boon", value: 10});
+			expect(state.getMeleeReach()).toBe(15);
+		});
+
 		it("a deactivated state contributes nothing", () => {
 			const stateId = state.addActiveState("custom", {
 				name: "Off Form",
@@ -168,12 +178,47 @@ describe("CharacterSheetState — Reach system", () => {
 			expect(state.getAttackReach({isMelee: false, range: "30/120 ft."})).toBeNull();
 		});
 
+		it("returns null for a thrown use even when the weapon can also make melee attacks", () => {
+			expect(state.getAttackReach({isMelee: true, isThrown: true, range: "20/60 ft.", properties: ["T"]})).toBeNull();
+		});
+
 		it("treats an attack with a non-thrown range string as melee when isMelee is unset", () => {
 			expect(state.getAttackReach({range: "5 ft.", properties: []})).toBe(5);
 		});
 
 		it("honors a precomputed meleeReach context (skips recomputation)", () => {
 			expect(state.getAttackReach({isMelee: true, properties: ["R"]}, {meleeReach: 20})).toBe(25);
+		});
+
+		it("adds character reach to a structured attack reach without replacing either", () => {
+			state.addNamedModifier({name: "Reach Boon", type: "reach", value: "+10", enabled: true});
+			const attack = {isMelee: true, reach: 15, range: "15 ft.", properties: []};
+			expect(state.getAttackReach(attack)).toBe(25);
+			expect(state.getAttackRangeProjection(attack)).toEqual({
+				reach: 25,
+				display: "25 ft.",
+				isEffectiveReach: true,
+			});
+		});
+
+		it("applies an on-your-turn attack bonus only on the attacker's turn", () => {
+			const attack = {
+				isMelee: true,
+				reach: 5,
+				range: "5 ft.",
+				reachBonus: 10,
+				reachCondition: "onYourTurn",
+			};
+			expect(state.getAttackReach(attack, {isOwnTurn: true})).toBe(15);
+			expect(state.getAttackReach(attack, {isOwnTurn: false})).toBe(5);
+		});
+
+		it("adds the same character boon to an ordinary melee weapon without leaking attack-local reach", () => {
+			state.addNamedModifier({name: "Reach Boon", type: "reach", value: 10, enabled: true});
+			const chains = {name: "Spectral Chains", isMelee: true, reach: 30, range: "30 ft."};
+			const sword = {name: "Longsword", isMelee: true, range: "5 ft."};
+			expect(state.getAttackReach(chains)).toBe(40);
+			expect(state.getAttackReach(sword)).toBe(15);
 		});
 
 		it("returns null for a null attack", () => {
