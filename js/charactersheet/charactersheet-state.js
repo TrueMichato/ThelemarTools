@@ -13391,15 +13391,15 @@ class CharacterSheetState {
 			if (!isMonkUnarmored && !formulaForbidsShield) {
 				// Shield AC = base AC from item (default 2) + magic enhancement bonus
 				const shield = /** @type {*} */ (this._data.ac.shield);
-				const baseAc = (typeof shield === "object" ? (shield.ac ?? 2) : 2);
-				const magicBonus = (typeof shield === "object" ? (shield.bonus ?? 0) : 0);
+				const baseAc = CharacterSheetItemUtils.parseBonus(typeof shield === "object" ? (shield.ac ?? 2) : 2);
+				const magicBonus = CharacterSheetItemUtils.parseBonus(typeof shield === "object" ? shield.bonus : 0);
 				ac += baseAc + magicBonus;
 			}
 		}
 
 		// Bonuses from other equipped magic items (e.g., Cloak of Protection, Ring of Protection)
 		// Note: Armor and shield bonuses are already included above, this is for OTHER items only
-		ac += this._data.ac.itemBonus || 0;
+		ac += CharacterSheetItemUtils.parseBonus(this._data.ac.itemBonus);
 		ac += this._getItemConditionalAcBonus();
 
 		// Custom bonuses
@@ -13593,8 +13593,8 @@ class CharacterSheetState {
 				const typeLabel = armorType === "light" ? "Light" : armorType === "medium" ? "Medium" : armorType === "heavy" ? "Heavy" : "";
 				components.push({type: "armor", name: armorName, value: armorAc - armorMagicBonus, icon: "🛡️", subtype: typeLabel});
 
-				if (armorMagicBonus > 0) {
-					components.push({type: "magic", name: `+${armorMagicBonus} Armor`, value: armorMagicBonus, icon: "✨"});
+				if (armorMagicBonus !== 0) {
+					components.push({type: "magic", name: `${armorMagicBonus > 0 ? "+" : ""}${armorMagicBonus} Armor`, value: armorMagicBonus, icon: "✨"});
 				}
 
 				// Add DEX modifier based on armor type
@@ -13702,13 +13702,13 @@ class CharacterSheetState {
 
 			if (!isMonkUnarmored && !formulaForbidsShield) {
 				const shield = /** @type {*} */ (this._data.ac.shield);
-				const baseShieldBonus = (typeof shield === "object") ? (shield.ac ?? 2) : 2;
-				const magicBonus = (typeof shield === "object") ? (shield.bonus ?? 0) : 0;
+				const baseShieldBonus = CharacterSheetItemUtils.parseBonus((typeof shield === "object") ? (shield.ac ?? 2) : 2);
+				const magicBonus = CharacterSheetItemUtils.parseBonus((typeof shield === "object") ? shield.bonus : 0);
 				const shieldName = (typeof shield === "object") ? (shield.name || "Shield") : "Shield";
 
-				if (magicBonus > 0) {
+				if (magicBonus !== 0) {
 					components.push({type: "shield", name: shieldName, value: baseShieldBonus, icon: "🛡️"});
-					components.push({type: "magic", name: `+${magicBonus} Shield`, value: magicBonus, icon: "✨"});
+					components.push({type: "magic", name: `${magicBonus > 0 ? "+" : ""}${magicBonus} Shield`, value: magicBonus, icon: "✨"});
 				} else {
 					components.push({type: "shield", name: shieldName, value: baseShieldBonus, icon: "🛡️"});
 				}
@@ -13716,7 +13716,7 @@ class CharacterSheetState {
 		}
 
 		// Item bonuses (e.g., Ring of Protection, Cloak of Protection)
-		const itemBonus = this._data.ac.itemBonus || 0;
+		const itemBonus = CharacterSheetItemUtils.parseBonus(this._data.ac.itemBonus);
 		if (itemBonus !== 0) {
 			components.push({type: "item", name: "Magic Items", value: itemBonus, icon: "💎"});
 		}
@@ -14389,11 +14389,14 @@ class CharacterSheetState {
 	 */
 	_getArmorAcSlotSnapshot (item) {
 		const projected = this.projectItemMaterial(item);
+		const magicBonus = CharacterSheetItemUtils.parseBonus(item.bonusAc);
 		return {
-			ac: projected.ac,
+			ac: CharacterSheetItemUtils.parseBonus(projected.ac) + magicBonus,
 			type: projected.armorType || item.armorType || this._inferArmorType(projected),
 			name: item.name,
 			source: item.source,
+			bonus: magicBonus,
+			magicBonus,
 			appliedUpgrades: item.appliedUpgrades || [],
 			...(projected.strength !== undefined ? {strength: projected.strength} : {}),
 			...(projected.stealth !== undefined ? {stealth: projected.stealth} : {}),
@@ -14410,19 +14413,32 @@ class CharacterSheetState {
 	 * @returns {object}
 	 */
 	_getShieldAcSlotSnapshot (item) {
-		const projected = this.projectItemMaterial(item);
+		const projected = this.projectItemMaterial(item.shield === true ? item : {...item, shield: true});
+		const storedLegacyAc = CharacterSheetItemUtils.parseBonus(item.acBonus);
+		const projectedLegacyAc = CharacterSheetItemUtils.parseBonus(projected.acBonus);
+		const materialBonus = projectedLegacyAc - storedLegacyAc;
 		return {
-			ac: projected.ac ?? 2,
-			bonus: projected.acBonus,
+			ac: item.ac != null ? CharacterSheetItemUtils.parseBonus(item.ac) : (item.acBonus != null ? storedLegacyAc : 2),
+			bonus: CharacterSheetItemUtils.parseBonus(item.bonusAc) + materialBonus,
 			name: item.name,
 			source: item.source,
 			appliedUpgrades: item.appliedUpgrades || [],
 			...(item.material ? {material: item.material} : {}),
 		};
 	}
-	setShield (hasShield) { this._data.ac.shield = hasShield; }
-	setItemAcBonus (bonus) { this._data.ac.itemBonus = bonus || 0; }
-	getItemAcBonus () { return this._data.ac.itemBonus || 0; }
+	setShield (hasShield) {
+		if (!hasShield || typeof hasShield !== "object") {
+			this._data.ac.shield = hasShield;
+			return;
+		}
+		this._data.ac.shield = {
+			...hasShield,
+			ac: CharacterSheetItemUtils.parseBonus(hasShield.ac ?? 2),
+			bonus: CharacterSheetItemUtils.parseBonus(hasShield.bonus),
+		};
+	}
+	setItemAcBonus (bonus) { this._data.ac.itemBonus = CharacterSheetItemUtils.parseBonus(bonus); }
+	getItemAcBonus () { return CharacterSheetItemUtils.parseBonus(this._data.ac.itemBonus); }
 
 	// Item bonuses from equipped/attuned magic items
 	setItemBonuses (bonuses, {isManual = true} = {}) {
@@ -14474,8 +14490,8 @@ class CharacterSheetState {
 			const baseSpellAtk = CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSpellAttack);
 			const baseSpellDc = CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSpellSaveDc);
 			const baseCrit = invItem.item?.critThreshold || 20;
-			const itemType = String(invItem.item?.typeCode || invItem.item?.type || "").split("|")[0].toUpperCase();
-			const isArmorOrShield = !!invItem.item?.armor || !!invItem.item?.shield || ["LA", "MA", "HA", "S"].includes(itemType);
+			const isArmorOrShield = this.isBodyArmorItem(invItem.item) || this.isShieldItem(invItem.item);
+			const hasConditionalAcBonus = invItem.item?.effects?.some(effect => effect?.type === "acBonusConditional");
 
 			// Material crit contribution. Read from the projection so the clamps in
 			// `applyToItem` (never an impossible crit, never past the natural 20) apply here too.
@@ -14500,7 +14516,7 @@ class CharacterSheetState {
 				upgradeSavingThrow = effects.bonusSavingThrow || 0;
 			}
 
-			if (!isArmorOrShield) itemAcBonus += CharacterSheetItemUtils.parseBonus(invItem.item?.bonusAc) + upgradeAc;
+			if (!isArmorOrShield && !hasConditionalAcBonus) itemAcBonus += CharacterSheetItemUtils.parseBonus(invItem.item?.bonusAc) + upgradeAc;
 			additiveBonuses.savingThrow += CharacterSheetItemUtils.parseBonus(invItem.item?.bonusSavingThrow) + upgradeSavingThrow;
 			for (const ability of Parser.ABIL_ABVS) {
 				const suffix = `${ability.charAt(0).toUpperCase()}${ability.slice(1)}`;
@@ -33250,36 +33266,53 @@ class CharacterSheetState {
 	 * responsible for re-rendering and saving, as with the other item setters.
 	 */
 	_onItemMaterialChanged () {
-		this._refreshEquippedAcSlots();
 		// Applying or removing Ioun Sand turns an item into (or out of) a matrix, which
 		// changes both its host policy and whether its seated stones are doubled.
 		this.reconcileIounHosts?.();
-		this._recalculateItemBonuses();
+		this.syncEquippedAcState();
 		this._recalculateEquipmentModifiers();
 	}
 
+	isShieldItem (item) {
+		if (!item) return false;
+		const type = String(item.typeCode || item.type || "").split("|")[0].trim().toUpperCase();
+		if (item.shield === true || type === "S") return true;
+
+		const name = String(item.name || "").trim().toLowerCase();
+		if (name.startsWith("ring of") || ["RG", "RING", "W", "WONDROUS"].includes(type)) return false;
+		if (name.includes("shield")) return true;
+
+		return item.acBonus != null && item.ac == null && !item.armor && !["LA", "MA", "HA", "ARMOR"].includes(type);
+	}
+
+	isBodyArmorItem (item) {
+		if (!item || this.isShieldItem(item)) return false;
+		const type = String(item.typeCode || item.type || "").split("|")[0].trim().toUpperCase();
+		return item.armor === true || ["LA", "MA", "HA", "ARMOR"].includes(type);
+	}
+
 	/**
-	 * Re-stamp the `_data.ac.armor` / `_data.ac.shield` snapshots from the currently
-	 * equipped items.
+	 * Re-stamp the `_data.ac.armor` / `_data.ac.shield` snapshots from the raw currently
+	 * equipped inventory rows.
 	 *
-	 * The snapshots are captured once, at `equip()` time. Anything that changes what an
-	 * equipped armour or shield *is* after the fact — currently a material change — has to
-	 * refresh them, or the character keeps wearing the pre-change armour.
+	 * This is the sole writer for inventory-backed AC slots. It deliberately reads raw items:
+	 * each snapshot applies material projection exactly once and can therefore repair stale
+	 * persisted snapshots during the first render sync.
 	 *
 	 * @returns {void}
 	 */
 	_refreshEquippedAcSlots () {
-		for (const invItem of this._data.inventory) {
-			if (!invItem.equipped) continue;
-			const item = invItem.item;
-			if (!item) continue;
+		const equipped = this._data.inventory.filter(invItem => invItem.equipped && invItem.item);
+		const armor = equipped.find(invItem => this.isBodyArmorItem(invItem.item))?.item || null;
+		const shield = equipped.find(invItem => this.isShieldItem(invItem.item))?.item || null;
 
-			if (item.acBonus !== undefined && this._data.ac.shield?.name === item.name) {
-				this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
-			} else if (item.ac !== undefined && this._data.ac.armor?.name === item.name) {
-				this.setArmor(this._getArmorAcSlotSnapshot(item));
-			}
-		}
+		this.setArmor(armor ? this._getArmorAcSlotSnapshot(armor) : null);
+		this.setShield(shield ? {equipped: true, ...this._getShieldAcSlotSnapshot(shield)} : false);
+	}
+
+	syncEquippedAcState () {
+		this._refreshEquippedAcSlots();
+		this._recalculateItemBonuses();
 	}
 
 	/**
@@ -35201,16 +35234,7 @@ class CharacterSheetState {
 				this._registerItemEffects(_addedWrapper);
 			}
 
-			// If item is equipped, also set it in appropriate AC slot
-			if (equipped && item.type === "armor") {
-				if (item.acBonus !== undefined) {
-					// Shield-type item (has bonus instead of base AC)
-					this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
-				} else if (item.ac !== undefined) {
-					// Body armor
-					this.setArmor(this._getArmorAcSlotSnapshot(item));
-				}
-			}
+			if (equipped) this.syncEquippedAcState();
 
 			// An equipped armor/shield added with upgrades already applied must register its
 			// conditional roll modifiers immediately (covers one-shot add-equipped flows).
@@ -35794,7 +35818,7 @@ class CharacterSheetState {
 		}
 
 		this._data.inventory = this._data.inventory.filter(i => i.id !== itemId);
-		this._recalculateItemBonuses();
+		this.syncEquippedAcState();
 
 		// A stone (or a host) leaving the inventory must not leave a dangling seat behind,
 		// and losing your last bond must revoke any bond-borne attunement waiver.
@@ -35866,6 +35890,7 @@ class CharacterSheetState {
 		if (this._isItemEffectsActive(wrapper)) this._registerItemEffects(wrapper);
 
 		this._recalculateItemBonuses();
+		if (wrapper.equipped) this.syncEquippedAcState();
 		// Replacing an equipped armor/shield payload may change its upgrades.
 		this._recalculateEquipmentModifiers();
 		return true;
@@ -35897,7 +35922,7 @@ class CharacterSheetState {
 				this._unregisterItemEffects(itemId);
 			}
 			// Refresh derived armor/shield-upgrade conditional modifiers (equip state changed).
-			this._recalculateItemBonuses();
+			this.syncEquippedAcState();
 			this._recalculateEquipmentModifiers();
 			// A set stone is by definition functioning, so stowing it must vacate its setting.
 			if (!equipped) {
@@ -35918,22 +35943,10 @@ class CharacterSheetState {
 		if (invItem) {
 			invItem.equipped = true;
 
-			// Also set AC slot if armor
-			const item = invItem.item;
-			if (item?.type === "armor" || item?.type === "M" || item?.type === "R" || item?.ac !== undefined || item?.acBonus !== undefined) {
-				if (item.acBonus !== undefined) {
-					// Shield
-					this._data.ac.shield = /** @type {*} */ (this._getShieldAcSlotSnapshot(item));
-				} else if (item.ac !== undefined) {
-					// Body armor
-					this.setArmor(this._getArmorAcSlotSnapshot(item));
-				}
-			}
-
 			// Apply item effects now that it is equipped (if attunement gate also satisfied)
 			if (this._isItemEffectsActive(invItem)) this._registerItemEffects(invItem);
 			// Refresh derived armor/shield-upgrade conditional modifiers.
-			this._recalculateItemBonuses();
+			this.syncEquippedAcState();
 			this._recalculateEquipmentModifiers();
 
 			return true;
@@ -35957,7 +35970,7 @@ class CharacterSheetState {
 			// Remove any effects the item was contributing while equipped
 			this._unregisterItemEffects(itemId);
 			// Refresh derived armor/shield-upgrade conditional modifiers (now unequipped).
-			this._recalculateItemBonuses();
+			this.syncEquippedAcState();
 			this._recalculateEquipmentModifiers();
 			return true;
 		}

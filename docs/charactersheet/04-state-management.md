@@ -406,6 +406,15 @@ getAc() {
 }
 ```
 
+Inventory-backed AC is synchronized through `CharacterSheetState.syncEquippedAcState()`.
+It rebuilds the armor and shield snapshots from the raw equipped inventory rows, then applies
+material projection exactly once. A shield snapshot keeps the shield's base `ac` separate from
+its numeric `bonus` (authored `bonusAc` plus any material delta), while `ac.itemBonus` is reserved
+for non-armor items such as Rings and Cloaks of Protection. Inventory render/update flows call this
+same state-owned path, so equip, unequip, material changes, and first render after loading cannot
+race competing shield writers. Signed catalog values such as `"+1"` are normalized before AC
+arithmetic.
+
 ### Unarmored Defense Variants
 
 ```javascript
