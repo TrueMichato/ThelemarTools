@@ -919,7 +919,7 @@ Pure helpers, ~170 lines, no DOM dependencies — safe to unit-test.
 
 ## Lore Skills (TGTT)
 
-Rendered inline in the **Skills** tab via `_renderLoreSkillsSection()` (charactersheet.js ~L2849). See [TGTT Homebrew → Lore Skills](./13-tgtt-thelemar-homebrew.md#lore-skills) for the rule and state methods.
+Rendered inline in the **Skills** tab via `_renderLoreSkillsSection()` in `charactersheet.js`. Each Lore-skill roll row has a separate **Add/Edit source note** action with an inline plain-text editor; notes are stored on that skill's `customSkills` entry, with blank defaults for older saves. See [TGTT Homebrew → Lore Skills](./13-tgtt-thelemar-homebrew.md#lore-skills) for the rule and state methods.
 
 ---
 

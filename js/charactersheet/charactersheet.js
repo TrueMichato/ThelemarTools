@@ -4639,6 +4639,8 @@ class CharacterSheetPage {
 		} else {
 			loreSkills.forEach(skill => {
 				const skillKey = skill.name.toLowerCase().replace(/\s+/g, "");
+				const safeName = CharacterSheetClassUtils.escapeHtml(skill.name);
+				const safeKey = CharacterSheetClassUtils.escapeHtml(skillKey);
 				const breakdown = this._state.getSkillBreakdown(skillKey);
 				// Display the exhaustion-aware effective total (matches standard skills and the
 				// value the roll uses). Passive stays on the intrinsic getSkillMod — passives
@@ -4652,16 +4654,67 @@ class CharacterSheetPage {
 				const tooltip = tooltipLines.join("\n");
 
 				const row = e_({outer: `
-					<div class="charsheet__lore-skill-row" data-skill="${skillKey}" title="${tooltip.replace(/"/g, "&quot;")}">
+					<div class="charsheet__lore-skill-row" data-skill="${safeKey}" title="${CharacterSheetClassUtils.escapeHtml(tooltip)}">
 						<span class="charsheet__lore-skill-icon">📚</span>
-						<span class="charsheet__lore-skill-name">${skill.name}</span>
+						<span class="charsheet__lore-skill-name">${safeName}</span>
 						<span class="charsheet__lore-skill-mod">${modStr}</span>
-						<span class="charsheet__lore-skill-passive" title="Passive ${skill.name}: ${passive}">${passive}</span>
+						<span class="charsheet__lore-skill-passive" title="Passive ${safeName}: ${passive}">${passive}</span>
 						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__lore-skill-bump" data-delta="-2" title="Decrease bonus by 2">▼</button>
 						<button class="ve-btn ve-btn-xs ve-btn-default charsheet__lore-skill-bump" data-delta="2" title="Increase bonus by 2">▲</button>
 						<span class="charsheet__lore-skill-delete" title="Remove lore skill">×</span>
 					</div>
 				`});
+				const entryEl = e_({outer: `<div class="charsheet__lore-skill-entry"></div>`});
+				const noteArea = e_({outer: `
+					<div class="charsheet__lore-skill-note-area">
+						<div class="charsheet__lore-skill-note-view">
+							<div class="charsheet__lore-skill-note-text"></div>
+							<button type="button" class="ve-btn ve-btn-xs ve-btn-default charsheet__lore-skill-note-edit"></button>
+						</div>
+						<div class="charsheet__lore-skill-note-editor" hidden>
+							<label class="charsheet__lore-skill-note-label">What granted this Lore skill?
+								<textarea class="ve-form-control charsheet__lore-skill-note-input" rows="3" placeholder="e.g. a background, book, or feat"></textarea>
+							</label>
+							<div class="charsheet__lore-skill-note-actions">
+								<button type="button" class="ve-btn ve-btn-sm ve-btn-default charsheet__lore-skill-note-cancel">Cancel</button>
+								<button type="button" class="ve-btn ve-btn-sm ve-btn-primary charsheet__lore-skill-note-save">Save note</button>
+							</div>
+						</div>
+					</div>
+				`});
+				const noteView = noteArea.querySelector(".charsheet__lore-skill-note-view");
+				const noteText = noteArea.querySelector(".charsheet__lore-skill-note-text");
+				const noteEdit = noteArea.querySelector(".charsheet__lore-skill-note-edit");
+				const noteEditor = noteArea.querySelector(".charsheet__lore-skill-note-editor");
+				const noteInput = noteArea.querySelector(".charsheet__lore-skill-note-input");
+				const updateNote = (note) => {
+					noteText.textContent = note;
+					noteText.hidden = !note;
+					noteEdit.textContent = note ? "Edit source note" : "Add source note";
+					noteEdit.setAttribute("aria-label", `${note ? "Edit" : "Add"} source note for ${skill.name}`);
+				};
+				updateNote(this._state.getLoreSkills().find(s => s.name.toLowerCase().replace(/\s+/g, "") === skillKey)?.note || "");
+				noteEdit.addEventListener("click", () => {
+					noteInput.value = this._state.getLoreSkills().find(s => s.name.toLowerCase().replace(/\s+/g, "") === skillKey)?.note || "";
+					noteView.hidden = true;
+					noteEditor.hidden = false;
+					noteInput.focus();
+				});
+				const closeNoteEditor = () => {
+					noteEditor.hidden = true;
+					noteView.hidden = false;
+					noteEdit.focus();
+				};
+				noteArea.querySelector(".charsheet__lore-skill-note-cancel").addEventListener("click", closeNoteEditor);
+				noteArea.querySelector(".charsheet__lore-skill-note-save").addEventListener("click", () => {
+					if (!this._state.setLoreSkillNote(skill.name, noteInput.value)) {
+						JqueryUtil.doToast({type: "warning", content: "This Lore skill no longer exists. Reopen the Skills tab to refresh it."});
+						return;
+					}
+					updateNote(this._state.getLoreSkills().find(s => s.name.toLowerCase().replace(/\s+/g, "") === skillKey).note);
+					closeNoteEditor();
+					this._saveCurrentCharacter();
+				});
 
 				row.querySelectorAll(".charsheet__lore-skill-bump").forEach(btn => {
 					btn.addEventListener("click", (/** @type {*} */ ev) => {
@@ -4698,7 +4751,8 @@ class CharacterSheetPage {
 				});
 				this._bindActivate(row, {label: `Roll ${skill.name} check`});
 
-				listEl.append(row);
+				entryEl.append(row, noteArea);
+				listEl.append(entryEl);
 			});
 		}
 

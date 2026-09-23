@@ -4985,7 +4985,7 @@ class CharacterSheetState {
 			// Proficiencies
 			saveProficiencies: [], // ["str", "con"]
 			skillProficiencies: {}, // {athletics: 1, stealth: 2} (1 = prof, 2 = expertise)
-			customSkills: [], // [{name, ability, isLoreSkill?, bonus?}] - user-added custom skills (lore skills are flagged with isLoreSkill:true and store a flat `bonus`)
+			customSkills: [], // [{name, ability, isLoreSkill?, bonus?, note?}] - lore skills store a flat bonus and an optional source note
 			skillAbilityOverrides: {}, // {<normalizedSkillKey>: <ability>} - persistent per-skill ability pins (Feature C); lore skills excluded
 			armorProficiencies: [],
 			weaponProficiencies: [],
@@ -6473,7 +6473,7 @@ class CharacterSheetState {
 	 * `ability:"wis"` (or per-skill override) and a paired named modifier of value 2
 	 * with type `skill:<key>` and a `note` mentioning "Lore Mastery".
 	 *
-	 * New shape: `{name, ability:null, isLoreSkill:true, bonus:2}`, no companion modifier
+	 * New shape: `{name, ability:null, isLoreSkill:true, bonus:2, note:""}`, no companion modifier
 	 * (the bonus is stored on the skill itself).
 	 *
 	 * Detection heuristic: a custom skill is convertible iff it (a) lacks `isLoreSkill`,
@@ -6485,7 +6485,10 @@ class CharacterSheetState {
 		const mods = this._data.namedModifiers || [];
 
 		this._data.customSkills.forEach(skill => {
-			if (skill.isLoreSkill) return;
+			if (skill.isLoreSkill) {
+				if (typeof skill.note !== "string") skill.note = "";
+				return;
+			}
 			const key = skill.name.toLowerCase().replace(/\s+/g, "");
 			const matchingModifierIndex = mods.findIndex(m =>
 				m.type === `skill:${key}` && /lore mastery/i.test(m.note || m.name || ""),
@@ -6496,6 +6499,7 @@ class CharacterSheetState {
 			skill.isLoreSkill = true;
 			skill.ability = null;
 			skill.bonus = (skill.bonus || 0) + carriedBonus;
+			if (typeof skill.note !== "string") skill.note = "";
 			// Drop the now-redundant named modifier
 			mods.splice(matchingModifierIndex, 1);
 			// Ensure proficiency entry exists so the skill renders correctly
@@ -13303,7 +13307,7 @@ class CharacterSheetState {
 
 	// #region Lore Skills (TGTT variant rule)
 	// Lore skills are a flagged subtype of custom skills with a flat per-skill bonus
-	// (no ability mod, no PB doubling). Stored as {name, ability:null, isLoreSkill:true, bonus:N}.
+	// (no ability mod, no PB doubling). Stored as {name, ability:null, isLoreSkill:true, bonus:N, note:""}.
 
 	/**
 	 * Look up a lore-skill entry by normalized name.
@@ -13343,6 +13347,7 @@ class CharacterSheetState {
 			ability: null,
 			isLoreSkill: true,
 			bonus: Number(bonus) || 0,
+			note: "",
 		});
 		// Mark as proficient so the skills table treats it as a real entry; the
 		// flat bonus completely replaces ability+PB calc via the short-circuit.
@@ -13361,6 +13366,21 @@ class CharacterSheetState {
 		const entry = this._getLoreSkillEntry(key);
 		if (!entry) return false;
 		entry.bonus = Number(bonus) || 0;
+		return true;
+	}
+
+	/**
+	 * Record the player's own description of what granted a lore skill.
+	 * @param {string} name
+	 * @param {string} note - Plain text; may contain line breaks or be blank
+	 * @returns {boolean} true if the skill exists
+	 */
+	setLoreSkillNote (name, note) {
+		if (typeof note !== "string") throw new TypeError("Lore skill note must be plain text.");
+		const key = name.toLowerCase().replace(/\s+/g, "");
+		const entry = this._getLoreSkillEntry(key);
+		if (!entry) return false;
+		entry.note = note.trim();
 		return true;
 	}
 
@@ -13389,7 +13409,7 @@ class CharacterSheetState {
 
 	/**
 	 * Get all lore skills.
-	 * @returns {Array<{name:string, ability:null, isLoreSkill:true, bonus:number}>}
+	 * @returns {Array<{name:string, ability:null, isLoreSkill:true, bonus:number, note:string}>}
 	 */
 	getLoreSkills () {
 		return (this._data.customSkills || []).filter(s => s.isLoreSkill);
