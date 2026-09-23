@@ -894,6 +894,7 @@ describe("#14 auto-attack builder keeps sourceItem for the direct getEffectiveIt
 			getAttacks: () => [],
 			getItems: () => [weapon],
 			getWeaponDamageDie: item => item.dmg1,
+			isWeaponAlwaysThrown: CharacterSheetState.prototype.isWeaponAlwaysThrown,
 			isMonkWeapon: () => false,
 			getEffectiveItemBonuses: () => effectiveBonuses,
 			getFeatureCalculations: () => ({}),

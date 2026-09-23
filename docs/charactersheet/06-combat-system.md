@@ -196,6 +196,17 @@ ranged spells with a distance such as "60 ft." and melee spell attacks with
 touch range, keep their authored range even when an equipped item grants
 additional melee reach.
 
+TGTT's Rope Dart remains a martial melee weapon in the item catalog, but its
+Special rule requires **every** attack (even at 5 feet) to use the Thrown property.
+Equipping it builds a ranged, thrown attack with a 15/30-foot range and Finesse
+(the better of STR/DEX); ordinary thrown melee weapons still default to melee.
+The sheet shows the rope-retrieval rule as an attack reminder, without tracking
+where the blade lands or automatically retrieving it. Its Entangling mastery
+references `Entangling|GrimHollowPG24` from the external Grim Hollow Player's
+Guide (2024) brew in `homebrew/index.json`. The mastery is linked only when
+that source is loaded; otherwise its name stays visible without a broken hover.
+The sheet does not substitute another mastery effect or automate Entangling.
+
 ### Rolling Attacks
 
 Attack rolls support advantage/disadvantage via modifier keys:

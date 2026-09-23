@@ -784,11 +784,12 @@ class CharacterSheetCombat {
 					const props = weapon.property || weapon.properties || [];
 					// Ranged for ability purposes = true ranged weapon only. A thrown MELEE
 					// weapon (Thrown property, or a melee weapon's thrown `range`) still uses
-					// STR/finesse, so classify on Ammunition / type R / explicit isMelee===false.
-					const isRanged = props.some(p => p === "A" || p.startsWith("A|") || p.toLowerCase().includes("ammunition")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false;
+					// STR/finesse unless its Special rule makes every attack a throw.
+					const alwaysThrown = this._state.isWeaponAlwaysThrown?.(weapon);
+					const isRanged = props.some(p => p === "A" || p.startsWith("A|") || p.toLowerCase().includes("ammunition")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false || alwaysThrown;
 					typeSelect.value = isRanged ? "ranged" : "melee";
 					const hasFinesse = props.some(p => p.includes("F") || p.toLowerCase().includes("finesse"));
-					abilitySelect.value = isRanged ? "dex" : (hasFinesse ? "finesse" : "str");
+					abilitySelect.value = alwaysThrown ? (hasFinesse ? "finesse" : "str") : isRanged ? "dex" : (hasFinesse ? "finesse" : "str");
 					if (weapon.damage) {
 						const dmgMatch = weapon.damage.match(/(\d+d\d+)/);
 						if (dmgMatch) damageInput.value = dmgMatch[1];
@@ -822,10 +823,11 @@ class CharacterSheetCombat {
 			const weapon = this._allItems.find(i => i.name === name && i.source === source);
 			if (weapon) {
 				nameInput.value = weapon.name;
-				const isRanged = weapon.property?.some(p => p === "A" || p.startsWith("A|")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false;
+				const alwaysThrown = this._state.isWeaponAlwaysThrown?.(weapon);
+				const isRanged = weapon.property?.some(p => p === "A" || p.startsWith("A|")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false || alwaysThrown;
 				typeSelect.value = isRanged ? "ranged" : "melee";
 				const hasFinesse = weapon.property?.includes("F");
-				abilitySelect.value = isRanged ? "dex" : (hasFinesse ? "finesse" : "str");
+				abilitySelect.value = alwaysThrown ? (hasFinesse ? "finesse" : "str") : isRanged ? "dex" : (hasFinesse ? "finesse" : "str");
 				if (weapon.dmg1) damageInput.value = this._state.getWeaponDamageDie(weapon);
 				if (weapon.dmgType) damageTypeSelect.value = Parser.dmgTypeToFull(weapon.dmgType).toLowerCase();
 				if (weapon.range) rangeInput.value = weapon.range;
@@ -940,9 +942,9 @@ class CharacterSheetCombat {
 		// Handle both raw 5etools items (property) and normalized inventory items (properties)
 		const props = weapon.property || weapon.properties || [];
 		// Thrown (T) does NOT make a weapon ranged for ability purposes — a thrown melee
-		// weapon uses STR/finesse. Only Ammunition (A) / type R / explicit isMelee===false
-		// mark a true ranged weapon.
-		const isRanged = props.some(p => p === "A" || p.startsWith("A|")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false;
+		// weapon uses STR/finesse unless its Special rule forces every attack to be thrown.
+		const alwaysThrown = this._state.isWeaponAlwaysThrown?.(weapon);
+		const isRanged = props.some(p => p === "A" || p.startsWith("A|")) || ["R", "RW"].includes((weapon.type || "").split("|")[0]) || weapon.isMelee === false || alwaysThrown;
 		const hasFinesse = props.some(p => p === "F" || p.startsWith("F|"));
 
 		// Get weapon's base stats with overrides
@@ -970,7 +972,7 @@ class CharacterSheetCombat {
 			range: overrides.range ?? (weapon.range || ""),
 			properties: overrides.properties ?? (props.map(p => this._formatProperty(p)) || []),
 			isMelee: overrides.isMelee ?? !isRanged,
-			abilityMod: overrides.abilityMod ?? (isRanged ? "dex" : (hasFinesse ? "finesse" : "str")),
+			abilityMod: overrides.abilityMod ?? (alwaysThrown ? (hasFinesse ? "finesse" : "str") : isRanged ? "dex" : (hasFinesse ? "finesse" : "str")),
 		};
 
 		const {eleModalInner: modalInner, doClose} = await CharacterSheetModal.pGetShow({
@@ -6874,7 +6876,9 @@ class CharacterSheetCombat {
 	 * @returns {string} Attribute string to splice into an element tag.
 	 */
 	_getMasteryHoverAttrs (masteryName, source = Parser.SRC_XPHB) {
+		const fallback = `title="Weapon Mastery: ${masteryName}"`;
 		try {
+			if (!Renderer.item?._getMastery?.(`${masteryName}|${source}`, {isIgnoreMissing: true})?.entries?.length) return fallback;
 			const hash = UrlUtil.encodeForHash([masteryName, source].join(HASH_LIST_SEP));
 			return Renderer.hover.getHoverElementAttributes({
 				page: "itemMastery",
@@ -6883,7 +6887,7 @@ class CharacterSheetCombat {
 				isFauxPage: true,
 			});
 		} catch (e) {
-			return `title="Weapon Mastery: ${masteryName}"`;
+			return fallback;
 		}
 	}
 
@@ -6902,7 +6906,8 @@ class CharacterSheetCombat {
 		const name = (/** @type {*} */ (rawName)).toTitleCase();
 		const source = rawSource || Parser.SRC_XPHB;
 		const attrs = this._getMasteryHoverAttrs(name, source);
-		return `<span class="help-subtle charsheet__mastery-link" ${attrs}>${name}</span>`;
+		const hoverClass = attrs.includes("data-vet-page=") ? " charsheet__mastery-link" : "";
+		return `<span class="help-subtle${hoverClass}" ${attrs}>${name}</span>`;
 	}
 
 	renderDeathSaves () {

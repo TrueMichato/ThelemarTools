@@ -5856,7 +5856,9 @@ class CharacterSheetPage {
 	 * @returns {string}
 	 */
 	_getMasteryHoverAttrs (masteryName, source = Parser.SRC_XPHB) {
+		const fallback = `title="Weapon Mastery: ${masteryName}"`;
 		try {
+			if (!Renderer.item?._getMastery?.(`${masteryName}|${source}`, {isIgnoreMissing: true})?.entries?.length) return fallback;
 			const hash = UrlUtil.encodeForHash([masteryName, source].join(HASH_LIST_SEP));
 			return Renderer.hover.getHoverElementAttributes({
 				page: "itemMastery",
@@ -5867,7 +5869,7 @@ class CharacterSheetPage {
 		} catch (e) {
 			// eslint-disable-next-line no-console
 			console.warn("[CharSheet] Error getting mastery hover attrs:", e);
-			return `title="Weapon Mastery: ${masteryName}"`;
+			return fallback;
 		}
 	}
 
@@ -5906,11 +5908,12 @@ class CharacterSheetPage {
 				const masteryProp = this._getMasteryName(weapon?.mastery?.[0]);
 				const masterySource = this._getMasterySource(weapon?.mastery?.[0]);
 				const masteryHoverAttrs = masteryProp ? this._getMasteryHoverAttrs(masteryProp, masterySource) : "";
+				const masteryHoverClass = masteryHoverAttrs.includes("data-vet-page=") ? " charsheet__mastery-link" : "";
 
 				const badge = e_({outer: `
 					<span class="charsheet__mastery-badge" title="${weaponName}">
 						<strong>${weaponName}</strong>
-						${masteryProp ? `<span class="help-subtle charsheet__mastery-prop charsheet__mastery-link" ${masteryHoverAttrs}>${masteryProp}</span>` : ""}
+						${masteryProp ? `<span class="help-subtle charsheet__mastery-prop${masteryHoverClass}" ${masteryHoverAttrs}>${masteryProp}</span>` : ""}
 					</span>
 				`});
 				container.append(badge);

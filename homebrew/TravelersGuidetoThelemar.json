@@ -2725,6 +2725,36 @@
 			]
 		},
 		{
+			"name": "Rope Dart",
+			"source": "TGTT",
+			"type": "M",
+			"rarity": "none",
+			"value": 2000,
+			"weight": 3,
+			"weaponCategory": "martial",
+			"property": [
+				"F",
+				"2H",
+				"T",
+				"S"
+			],
+			"mastery": [
+				"Entangling|GrimHollowPG24"
+			],
+			"dmg1": "1d6",
+			"dmgType": "P",
+			"range": "15/30",
+			"entries": [
+				{
+					"type": "entries",
+					"name": "Special",
+					"entries": [
+						"All attacks with this weapon use its thrown property. For attacks at ranges up to 15 feet, you retain your hold on the rope and can pull the blade back as a free action. Following an attack beyond 15 feet, the weapon can be retrieved anywhere along the last 15 feet of its trajectory."
+					]
+				}
+			]
+		},
+		{
 			"name": "Smoke Bomb",
 			"source": "TGTT",
 			"page": 44,

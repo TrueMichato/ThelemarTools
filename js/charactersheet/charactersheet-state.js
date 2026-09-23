@@ -39539,6 +39539,16 @@ class CharacterSheetState {
 	getAttacks () { return [...this._data.attacks]; }
 
 	/**
+	 * A Special thrown weapon may require every attack to be a throw, including
+	 * attacks against adjacent targets. Its item type remains melee for proficiency.
+	 */
+	isWeaponAlwaysThrown (weapon) {
+		const properties = weapon?.property || weapon?.properties || [];
+		if (!properties.some(prop => String(prop).split("|")[0].toUpperCase() === "T")) return false;
+		return /\ball attacks with this weapon use its thrown property\b/i.test(CharacterSheetState._getItemEntryText(weapon.entries));
+	}
+
+	/**
 	 * Build the canonical attack descriptor for an equipped inventory weapon.
 	 * `attackBonus`/`damageBonus` are intrinsic-only: effective source-item bonuses,
 	 * upgrades, projected materials, and the item's custom flat value.
@@ -39551,13 +39561,17 @@ class CharacterSheetState {
 		const overrides = weapon.attackOverrides || {};
 		const properties = overrides.properties ?? weapon.property ?? weapon.properties ?? [];
 		const typeBase = String(weapon.type || "").split("|")[0].toUpperCase();
+		const isAlwaysThrown = this.isWeaponAlwaysThrown(weapon);
 		const isRanged = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "A")
 			|| ["R", "RW"].includes(typeBase)
-			|| weapon.isMelee === false;
+			|| weapon.isMelee === false
+			|| isAlwaysThrown;
 		const isThrown = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "T");
 		const hasFinesse = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "F");
 		const isMonkWeapon = !!this.isMonkWeapon?.(weapon);
-		const defaultAbility = isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");
+		const defaultAbility = isAlwaysThrown
+			? (hasFinesse ? "finesse" : "str")
+			: isRanged ? "dex" : ((hasFinesse || isMonkWeapon) ? "finesse" : "str");
 		const effectiveBonuses = this.getEffectiveItemBonuses?.(weapon.id) || {};
 		const num = value => {
 			const parsed = Number(value);
@@ -39795,13 +39809,14 @@ class CharacterSheetState {
 		const props = item.property || item.properties || [];
 		const isFinesse = props.some(p => p === "F" || p.startsWith("F|"));
 		const rawType = (item.type || "").split("|")[0];
-		// Thrown (T) alone does not make a weapon ranged — a thrown melee weapon uses
-		// STR/finesse. Classify ranged via Ammunition (A) / type R / explicit isMelee===false.
-		const isRanged = rawType === "R" || props.some(p => p === "A" || p.startsWith("A|")) || (item.isMelee === false);
+		const isAlwaysThrown = this.isWeaponAlwaysThrown(item);
+		// Thrown (T) alone does not make a weapon ranged — only an explicit
+		// always-thrown rule changes the default attack kind of a melee weapon.
+		const isRanged = rawType === "R" || props.some(p => p === "A" || p.startsWith("A|")) || (item.isMelee === false) || isAlwaysThrown;
 		const isMonkWeapon = this.isMonkWeapon?.(item) || item.isMonkWeapon;
 
 		let abilityUsed;
-		if (isRanged) {
+		if (isRanged && !isAlwaysThrown) {
 			abilityUsed = "dex";
 		} else if (isFinesse || isMonkWeapon) {
 			abilityUsed = this.getAbilityMod("dex") >= this.getAbilityMod("str") ? "dex" : "str";
@@ -51428,10 +51443,12 @@ class CharacterSheetState {
 	 * are surfaced as first-class badges on the attack row and in the roll title, the
 	 * same "reminder" convention used for Remarkable Athlete's movement.
 	 *
-	 * Two sources, unioned:
+	 * Sources, unioned:
 	 *  1. Structured `attackRiders` declared on the weapon's `sourceItem` — the
 	 *     data-driven path any homebrew item or feature-granted weapon can use.
-	 *  2. Feature-derived riders (TGTT Gambler's Coins ricochet).
+	 *  2. Authored Special rules which affect an attack but cannot be automated
+	 *     without tracking battlefield position (TGTT Rope Dart retrieval).
+	 *  3. Feature-derived riders (TGTT Gambler's Coins ricochet).
 	 *
 	 * Each rider: `{id, icon, label, description}`.
 	 * @param {*} attack
@@ -51450,6 +51467,20 @@ class CharacterSheetState {
 					icon: r.icon || "\u2726",
 					label: r.label,
 					description: r.description || r.label,
+				});
+			}
+		}
+
+		if (this.isWeaponAlwaysThrown(item)) {
+			const retrieval = CharacterSheetState._getItemEntryText(item.entries).match(
+				/For attacks at ranges up to \d+ feet, you retain your hold on the rope and can pull the blade back as a free action\. Following an attack beyond \d+ feet, the weapon can be retrieved anywhere along the last \d+ feet of its trajectory\./i,
+			);
+			if (retrieval) {
+				riders.push({
+					id: "ropeRetrieval",
+					icon: "\u21a9",
+					label: "Rope retrieval",
+					description: retrieval[0],
 				});
 			}
 		}
@@ -66927,10 +66958,11 @@ class CharacterSheetState {
 		const overrides = item.attackOverrides || {};
 		const properties = overrides.properties ?? item.property ?? item.properties ?? attack.properties ?? [];
 		const typeBase = String(item.type || "").split("|")[0].toUpperCase();
+		const isAlwaysThrown = this.isWeaponAlwaysThrown(item);
 		const isRanged = properties.some(prop => {
 			const code = String(prop).split("|")[0].toUpperCase();
 			return code === "A";
-		}) || ["R", "RW"].includes(typeBase) || item.isMelee === false;
+		}) || ["R", "RW"].includes(typeBase) || item.isMelee === false || isAlwaysThrown;
 		const hasFinesse = properties.some(prop => String(prop).split("|")[0].toUpperCase() === "F");
 		const range = overrides.range ?? item.range ?? attack.range;
 		const reachMatch = !isRanged ? /^\s*(\d+(?:\.\d+)?)\s*ft\b/i.exec(String(range || "")) : null;
@@ -66942,7 +66974,7 @@ class CharacterSheetState {
 			id: `auto_${item.id}`,
 			name: overrides.name ?? item.name ?? attack.name,
 			isMelee: overrides.isMelee ?? !isRanged,
-			abilityMod: overrides.abilityMod ?? (isRanged ? "dex" : hasFinesse ? "finesse" : "str"),
+			abilityMod: overrides.abilityMod ?? (isAlwaysThrown ? (hasFinesse ? "finesse" : "str") : isRanged ? "dex" : hasFinesse ? "finesse" : "str"),
 			attackBonus: Number(damage.attackBonus || 0) + Number(item.customAttackBonus || 0),
 			range,
 			reach: overrides.reach ?? (reachMatch ? Number(reachMatch[1]) : attack.reach),
