@@ -123,7 +123,7 @@ async function _pLoadConditions (fallback) {
 			}));
 		return _getDedupedConditions([...fallback, ...entities]);
 	} catch (e) {
-		_showLoadWarning("NPC Manager could not load condition reference data. Standard conditions remain available.");
+		_showLoadWarning("Condition reference data could not be loaded. Standard conditions remain available.");
 		return fallback;
 	}
 }
@@ -143,7 +143,7 @@ async function _pLoadSkills (fallback) {
 			}));
 		return _getDedupedSkills([...fallback, ...entities]);
 	} catch (e) {
-		_showLoadWarning("NPC Manager could not load skill reference data. Standard skills remain available.");
+		_showLoadWarning("Skill reference data could not be loaded. Standard skills remain available.");
 		return fallback;
 	}
 }
@@ -152,7 +152,7 @@ async function _pLoadBrew (page) {
 	try {
 		return await DataLoader.pCacheAndGetAllBrew(page) || [];
 	} catch (e) {
-		_showLoadWarning(`NPC Manager could not load installed homebrew for "${page}".`);
+		_showLoadWarning(`Installed homebrew for "${page}" could not be loaded.`);
 		return [];
 	}
 }

@@ -85,6 +85,84 @@
 			}
 		}
 
+		&__operations {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 14px;
+			margin-bottom: 18px;
+		}
+
+		&__operation,
+		&__results {
+			min-width: 0;
+			padding: 12px 14px;
+			border: 1px solid vars.$rgb-border-grey;
+			background: vars.$rgb-bg--alt;
+
+			h3 {
+				margin: 0 0 10px;
+				font-size: 1rem;
+			}
+		}
+
+		&__controls {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 8px;
+
+			label {
+				margin: 0;
+				font-weight: 600;
+			}
+
+			select {
+				width: auto;
+				max-width: 100%;
+				min-width: 105px;
+			}
+		}
+
+		&__operation-help {
+			margin: 9px 0 0;
+		}
+
+		&__results {
+			grid-column: 1 / -1;
+
+			p {
+				margin: 0 0 8px;
+			}
+		}
+
+		&__results-scroll {
+			max-height: 300px;
+			overflow: auto;
+		}
+
+		&__results-table {
+			width: 100%;
+			border-collapse: collapse;
+			text-align: left;
+
+			th,
+			td {
+				padding: 7px 10px;
+				border-bottom: 1px solid vars.$rgb-border-grey--muted;
+				vertical-align: top;
+			}
+
+			th {
+				position: sticky;
+				top: 0;
+				background: vars.$rgb-bg--alt;
+			}
+		}
+
+		&__result--failed {
+			color: vars.$rgb-alert-text-danger;
+		}
+
 		&__layout {
 			display: grid;
 			grid-template-columns: minmax(220px, 265px) minmax(0, 1fr);
@@ -188,6 +266,34 @@
 			font-weight: 600;
 		}
 
+		&__conditions {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 6px;
+			padding: 8px 12px;
+			border-bottom: 1px solid vars.$rgb-border-grey--muted;
+		}
+
+		&__condition-empty {
+			color: vars.$rgb-font;
+			font-size: 1rem;
+		}
+
+		&__condition {
+			padding: 3px 8px;
+			border: 1px solid var(--ew-condition-color);
+			background: vars.$rgb-bg;
+			color: vars.$rgb-font;
+			cursor: pointer;
+
+			&:hover,
+			&:focus-visible {
+				outline: 2px solid vars.$rgb-active-blue;
+				outline-offset: 2px;
+			}
+		}
+
 		&__empty {
 			margin: 0;
 			padding: 20px;
@@ -203,6 +309,8 @@
 		&__rail-header,
 		&__rail,
 		&__notices,
+		&__operation,
+		&__results,
 		&__statblock,
 		&__statblock-title,
 		&__empty {
@@ -212,6 +320,9 @@
 		&__rail,
 		&__status,
 		&__notices,
+		&__operation,
+		&__results,
+		&__results-table th,
 		&__statblock-title,
 		&__empty {
 			background: vars-night.$rgb-bg--alt-night;
@@ -227,6 +338,17 @@
 			border-color: vars-night.$rgb-border-grey--night;
 		}
 
+		&__results-table th,
+		&__results-table td,
+		&__conditions {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+
+		&__condition {
+			background: vars-night.$rgb-bg--night;
+			color: vars-night.$rgb-font--night;
+		}
+
 		&__help,
 		&__roster-meta {
 			color: vars-night.$rgb-font--night;
@@ -239,18 +361,93 @@
 			background: vars-night.$rgb-bg--night;
 		}
 
+		&__result--failed {
+			color: #ffa5a5;
+		}
+
 		&__statblock--selected {
 			border-color: vars-night.$rgb-link-blue--night;
 		}
 	}
 
 	@media (width <= 800px) {
+		.ew__operations {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
 		.ew__layout {
 			grid-template-columns: minmax(0, 1fr);
 		}
 
 		.ew__roster {
 			max-height: 240px;
+		}
+	}
+
+	@media (width <= 600px) {
+		.ew__results-scroll {
+			max-height: 360px;
+		}
+
+		.ew__results-table {
+			display: block;
+
+			thead {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				overflow: hidden;
+				clip-path: inset(50%);
+				white-space: nowrap;
+			}
+
+			tbody {
+				display: block;
+			}
+
+			tr {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 5px 10px;
+				padding: 9px 0;
+				border-bottom: 1px solid vars.$rgb-border-grey--muted;
+			}
+
+			td {
+				padding: 0;
+				border: 0;
+				overflow-wrap: anywhere;
+
+				&::before {
+					display: block;
+					content: attr(data-label);
+					font-weight: 600;
+				}
+
+				&:first-child,
+				&:last-child {
+					grid-column: 1 / -1;
+				}
+			}
+		}
+
+		.ve-night-mode .ew__results-table tr {
+			border-color: vars-night.$rgb-border-grey--night;
+		}
+	}
+
+	@media (width <= 480px) {
+		.ew__controls {
+			align-items: stretch;
+
+			select,
+			button {
+				width: 100%;
+			}
+
+			label {
+				width: 100%;
+			}
 		}
 	}
 }

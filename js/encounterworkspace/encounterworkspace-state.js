@@ -1,6 +1,8 @@
+import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionsAfterUpdate} from "../dmscreen/npctracker/dmscreen-npctracker-condition.js";
+
 const STORAGE_KEY = "encounterWorkspaceState";
 const PAGE = "encounterworkspace.html";
-const VERSION = 1;
+const VERSION = 2;
 const MAX_INSTANCES = 1000;
 
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -25,7 +27,7 @@ export class EncounterWorkspaceState {
 	}
 
 	static validate (raw) {
-		if (!raw || raw.version !== VERSION) throw new Error("This encounter save has an unsupported version. It has not been changed.");
+		if (!raw || ![1, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
 		if (
 			(raw.sourceList !== null && (typeof raw.sourceList?.name !== "string" || typeof raw.sourceList?.saveId !== "string"))
 			|| !Array.isArray(raw.instances)
@@ -41,6 +43,10 @@ export class EncounterWorkspaceState {
 				|| (instance.customHashId != null && typeof instance.customHashId !== "string")
 				|| typeof instance.monster?.name !== "string"
 				|| typeof instance.monster?.source !== "string"
+				|| (raw.version === VERSION && (
+					!Array.isArray(instance.conditions)
+					|| instance.conditions.some(condition => typeof condition !== "string" || !getNpcTrackerCanonicalConditionName(condition))
+				))
 			) throw new Error("The saved encounter contains an invalid monster instance. It has not been changed.");
 			ids.add(instance.id);
 		}
@@ -51,6 +57,15 @@ export class EncounterWorkspaceState {
 		) throw new Error("The saved encounter contains invalid targets or load notices. It has not been changed.");
 
 		const state = copy(raw);
+		state.version = VERSION;
+		if (raw.version === 1) state.instances.forEach(instance => instance.conditions = []);
+		else {
+			state.instances.forEach(instance => instance.conditions = getNpcTrackerConditionsAfterUpdate({
+				conditions: instance.conditions,
+				condition: null,
+				isAdd: true,
+			}));
+		}
 		state.instances.forEach(instance => freezeSnapshot(instance.monster));
 		return state;
 	}
@@ -95,6 +110,7 @@ export class EncounterWorkspaceState {
 					hash,
 					customHashId: item.customHashId || item.customhashid || null,
 					monster: freezeSnapshot(copy(resolved.entity)),
+					conditions: [],
 				});
 				state.selectedIds.push(id);
 			}
@@ -109,6 +125,20 @@ export class EncounterWorkspaceState {
 		if (isSelected) selectedIds.add(id);
 		else selectedIds.delete(id);
 		return this.validate({...state, selectedIds: [...selectedIds]});
+	}
+
+	static withConditions (state, {condition, isAdd, targetIds = state.selectedIds}) {
+		const canonical = getNpcTrackerCanonicalConditionName(condition);
+		if (!canonical) throw new Error("Choose a condition.");
+		if (!targetIds.length) throw new Error("Select at least one monster.");
+		const selected = new Set(targetIds);
+		if (state.instances.filter(it => selected.has(it.id)).length !== selected.size) throw new Error("An encounter target no longer exists.");
+		return this.validate({
+			...state,
+			instances: state.instances.map(instance => selected.has(instance.id)
+				? {...instance, conditions: getNpcTrackerConditionsAfterUpdate({conditions: instance.conditions, condition: canonical, isAdd})}
+				: instance),
+		});
 	}
 }
 

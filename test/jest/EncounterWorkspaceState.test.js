@@ -145,6 +145,70 @@ describe("Encounter Workspace working copy", () => {
 		expect(Object.isFrozen(restored.instances[0].monster)).toBe(true);
 	});
 
+	it("changes only selected instance conditions and keeps identical monsters independent across reload", async () => {
+		const storage = getStorage();
+		const store = new EncounterWorkspaceStore({storage});
+		const initial = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "goblin_mm", c: 2}]),
+			pResolveItem: async () => ({entity: getMonster()}),
+			fnUid: getUid(),
+		});
+		const oneSelected = EncounterWorkspaceState.withTarget(initial, {id: "encounter-2", isSelected: false});
+		const poisoned = EncounterWorkspaceState.withConditions(oneSelected, {condition: " Poisoned ", isAdd: true});
+		expect(oneSelected.instances.map(it => it.conditions)).toEqual([[], []]);
+		expect(poisoned.instances.map(it => it.conditions)).toEqual([["poisoned"], []]);
+		expect(poisoned.selectedIds).toEqual(["encounter-1"]);
+		const secondPoisoned = EncounterWorkspaceState.withConditions(poisoned, {condition: "poisoned", isAdd: true, targetIds: ["encounter-2"]});
+		expect(secondPoisoned.selectedIds).toEqual(["encounter-1"]);
+		expect(secondPoisoned.instances.map(it => it.conditions)).toEqual([["poisoned"], ["poisoned"]]);
+		const removed = EncounterWorkspaceState.withConditions(secondPoisoned, {condition: "poisoned", isAdd: false});
+		await store.pSave(removed);
+		const restored = await store.pLoad();
+		expect(restored.version).toBe(2);
+		expect(restored.instances.map(it => it.conditions)).toEqual([[], ["poisoned"]]);
+		expect(restored.instances[0].monster).toEqual(initial.instances[0].monster);
+		expect(Object.isFrozen(restored.instances[0].monster.action[0])).toBe(true);
+		expect(storage.pSetForPage).toHaveBeenCalledWith("encounterWorkspaceState", expect.anything(), {page: "encounterworkspace.html"});
+		expect(storage.pSetForPage).not.toHaveBeenCalledWith("listSaveManager", expect.anything(), {page: "bestiary.html"});
+	});
+
+	it("migrates foundation v1 saves without writes, then preserves conditions absent from the source catalog", async () => {
+		const storage = getStorage();
+		const store = new EncounterWorkspaceStore({storage});
+		const state = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "goblin_mm", c: 1}]),
+			pResolveItem: async () => ({entity: getMonster()}),
+			fnUid: getUid(),
+		});
+		const legacy = structuredClone(state);
+		legacy.version = 1;
+		delete legacy.instances[0].conditions;
+		storage.values.set("encounterWorkspaceState_encounterworkspace.html", legacy);
+		const loaded = await store.pLoad();
+		expect(loaded.version).toBe(2);
+		expect(loaded.instances[0].conditions).toEqual([]);
+		expect(storage.pSetForPage).not.toHaveBeenCalled();
+		const conditioned = EncounterWorkspaceState.withConditions(loaded, {condition: "Dreambound", isAdd: true});
+		await store.pSave(conditioned);
+		expect((await store.pLoad()).instances[0].conditions).toEqual(["dreambound"]);
+	});
+
+	it("does not change working state or selection on condition save failure", async () => {
+		const storage = getStorage();
+		const store = new EncounterWorkspaceStore({storage});
+		const state = await EncounterWorkspaceState.pFromSavedList({
+			exportedSublist: getList([{h: "goblin_mm", c: 2}]),
+			pResolveItem: async () => ({entity: getMonster()}),
+			fnUid: getUid(),
+		});
+		storage.pSetForPage.mockRejectedValue(new Error("Storage full"));
+		await expect(store.pSave(EncounterWorkspaceState.withConditions(state, {condition: "Poisoned", isAdd: true})))
+			.rejects.toThrow("Storage full");
+		expect(state.instances.map(it => it.conditions)).toEqual([[], []]);
+		expect(state.selectedIds).toEqual(["encounter-1", "encounter-2"]);
+		expect(storage.pGetForPage).not.toHaveBeenCalled();
+	});
+
 	it("confirms before replacing even an empty encounter; cancellation never writes", async () => {
 		const storage = getStorage();
 		const store = new EncounterWorkspaceStore({storage});
@@ -174,12 +238,16 @@ describe("Encounter Workspace working copy", () => {
 	it("does not accept invalid or unsupported persisted data, or silently erase it", async () => {
 		const storage = getStorage();
 		const store = new EncounterWorkspaceStore({storage});
-		storage.values.set("encounterWorkspaceState_encounterworkspace.html", {version: 2, instances: []});
+		storage.values.set("encounterWorkspaceState_encounterworkspace.html", {version: 3, instances: []});
 		await expect(store.pLoad()).rejects.toThrow(/unsupported version/);
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 		await expect(store.pSave({
 			...EncounterWorkspaceState.getEmpty(),
 			instances: [{id: "same", hash: "goblin_mm", monster: getMonster()}, {id: "same", hash: "goblin_mm", monster: getMonster()}],
+		})).rejects.toThrow(/invalid monster instance/);
+		await expect(store.pSave({
+			...EncounterWorkspaceState.getEmpty(),
+			instances: [{id: "one", hash: "goblin_mm", monster: getMonster(), conditions: "poisoned"}],
 		})).rejects.toThrow(/invalid monster instance/);
 		expect(storage.pSetForPage).not.toHaveBeenCalled();
 	});
