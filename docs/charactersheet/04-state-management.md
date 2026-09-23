@@ -214,6 +214,25 @@ concentration: {
 },
 ```
 
+Persisted spells are object rows in `spellcasting.spellsKnown` /
+`cantripsKnown`; the arrays above are the conceptual view. Base-class
+`additionalSpells.prepared` grants are reconciled by
+`populateClassSpells()` after the page injects the fully merged class and spell
+catalogs. A row created only by the class carries `grantedByClass: true` and is
+removed when its class-level requirement is lost.
+
+If the exact `name|source` spell already belongs to the player, the reconciler
+does not create or later delete a duplicate. It snapshots the row's
+`alwaysPrepared`, `prepared`, `sourceFeature`, and `sourceClass` values, records
+source-qualified `classGrantOwners`, and temporarily applies the class grant.
+Player-chosen/orphan rows temporarily use the class source feature so the grant
+does not consume a prepared/cantrip allowance; rows already owned by another
+feature keep that feature's attribution so its teardown remains authoritative.
+The original metadata is restored when the last class owner disappears. Respec
+draft states receive the same class and spell catalogs before loading their
+snapshot, so draft previews and committed characters use identical spell
+identities and levels.
+
 ### Inventory
 
 ```javascript

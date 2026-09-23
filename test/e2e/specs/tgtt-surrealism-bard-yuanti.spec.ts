@@ -177,7 +177,15 @@ const SURREALISM_FEATURES_MATRIX: FeatureCheck[] = [
 		],
 	},
 	{level: 18, name: /superior inspiration/i, kind: "passive"},
-	{level: 20, name: /words of creation/i, kind: "passive"},
+	{
+		level: 20,
+		name: /words of creation/i,
+		kind: "passive",
+		effects: [
+			{kind: "alwaysPreparedSpell", spellName: "Power Word Heal", expectedLevel: 9, sourceFeature: "Bard Spells", sourceClass: "Bard"},
+			{kind: "alwaysPreparedSpell", spellName: "Power Word Kill", expectedLevel: 9, sourceFeature: "Bard Spells", sourceClass: "Bard"},
+		],
+	},
 
 	// ── Subclass — College of Surrealism (TGTT) ─────────────────────
 	// L3 Lucid Insight: "When you roll for a Wisdom saving throw you
@@ -276,4 +284,3 @@ describeCharacter({
 	},
 	featuresMatrix: SURREALISM_FEATURES_MATRIX,
 });
-

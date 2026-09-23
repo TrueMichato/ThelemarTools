@@ -30,7 +30,22 @@ const SPELL_DB = [
 	{name: "Thaumaturgy", source: "XPHB", level: 0, school: "T"},
 	{name: "Hunter's Mark", source: "XPHB", level: 1, school: "D"},
 	{name: "Speak with Animals", source: "XPHB", level: 1, school: "D"},
+	{name: "Power Word Heal", source: "XPHB", level: 9, school: "E"},
+	{name: "Power Word Kill", source: "XPHB", level: 9, school: "E"},
 ];
+
+const BARD_DATA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "data/class/class-bard.json"), "utf8"));
+const TGTT_DATA = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "homebrew/TravelersGuidetoThelemar.json"), "utf8"));
+
+function getRealBard (source) {
+	const data = source === "TGTT" ? TGTT_DATA : BARD_DATA;
+	return data.class.find(cls => cls.name === "Bard" && cls.source === source);
+}
+
+function getWordsOfCreationRefs (cls) {
+	return (cls.additionalSpells || [])
+		.flatMap(block => block.prepared?.["20"] || []);
+}
 
 /** The real TGTT Cleric class object carries `additionalSpells` at the class level. */
 function tgttClericCatalogEntry () {
@@ -58,6 +73,8 @@ function newClericState ({level = 10} = {}) {
 }
 
 const lc = arr => arr.map(s => (s.name || "").toLowerCase());
+const powerWords = state => state.getSpellsKnown()
+	.filter(spell => /^power word (heal|kill)$/i.test(spell.name));
 
 describe("Class-level always-prepared spells — grant", () => {
 	test("TGTT Cleric always prepares Ceremony + Thaumaturgy, tagged, not counted vs limit", () => {
@@ -170,6 +187,309 @@ describe("Class-level always-prepared spells — genericity (non-Cleric)", () =>
 	});
 });
 
+describe("Class-level always-prepared spells — Bard Words of Creation", () => {
+	const wordsCatalog = [
+		getRealBard("PHB"),
+		getRealBard("XPHB"),
+		getRealBard("TGTT"),
+		{name: "Rogue", source: "XPHB"},
+	];
+
+	function getWordsState (classes) {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state._data.classes = classes;
+		state.setClassCatalog(wordsCatalog);
+		state.applyClassFeatureEffects();
+		return state;
+	}
+
+	test("TGTT and XPHB Bard data define the same level-20 grant", () => {
+		expect(getWordsOfCreationRefs(getRealBard("TGTT"))).toEqual(
+			getWordsOfCreationRefs(getRealBard("XPHB")),
+		);
+		expect(getWordsOfCreationRefs(getRealBard("TGTT"))).toEqual([
+			"power word heal|xphb",
+			"power word kill|xphb",
+		]);
+	});
+
+	test.each(["XPHB", "TGTT"])("%s Bard 20 owns both Power Words as always prepared", source => {
+		const state = getWordsState([{name: "Bard", source, level: 20, subclass: null}]);
+		expect(powerWords(state)).toHaveLength(2);
+		for (const spell of powerWords(state)) {
+			expect(spell).toMatchObject({
+				source: "XPHB",
+				level: 9,
+				alwaysPrepared: true,
+				prepared: true,
+				grantedByClass: true,
+				sourceFeature: "Bard Spells",
+				sourceClass: "Bard",
+				classGrantOwners: [`bard|${source.toLowerCase()}`],
+			});
+		}
+	});
+
+	test.each([
+		["XPHB Bard 19", [{name: "Bard", source: "XPHB", level: 19, subclass: null}]],
+		["XPHB Bard 19 / Rogue 1", [
+			{name: "Bard", source: "XPHB", level: 19, subclass: null},
+			{name: "Rogue", source: "XPHB", level: 1, subclass: null},
+		]],
+		["XPHB Bard 17 / Rogue 3", [
+			{name: "Bard", source: "XPHB", level: 17, subclass: null},
+			{name: "Rogue", source: "XPHB", level: 3, subclass: null},
+		]],
+		["PHB Bard 20", [{name: "Bard", source: "PHB", level: 20, subclass: null}]],
+	])("%s does not receive Words of Creation spells", (_label, classes) => {
+		expect(powerWords(getWordsState(classes))).toHaveLength(0);
+	});
+
+	test("legacy load repair and repeated recalculation remain idempotent", () => {
+		const legacy = new CharacterSheetState();
+		legacy._data.classes = [{name: "Bard", source: "TGTT", level: 20, subclass: null}];
+
+		const loaded = new CharacterSheetState();
+		loaded.setSpellData(SPELL_DB);
+		loaded.setClassCatalog(wordsCatalog);
+		expect(loaded.loadFromJson(legacy.toJson())).not.toBe(false);
+		loaded.applyClassFeatureEffects();
+		loaded.applyClassFeatureEffects();
+
+		expect(powerWords(loaded)).toHaveLength(2);
+		expect(new Set(powerWords(loaded).map(spell => `${spell.name}|${spell.source}`.toLowerCase())).size).toBe(2);
+
+		const reloaded = new CharacterSheetState();
+		reloaded.setSpellData(SPELL_DB);
+		reloaded.setClassCatalog(wordsCatalog);
+		expect(reloaded.loadFromJson(loaded.toJson())).not.toBe(false);
+		expect(powerWords(reloaded)).toHaveLength(2);
+	});
+
+	test("a manual overlay round-trips through save/load and still restores exactly", () => {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state._data.classes = [{name: "Bard", source: "XPHB", level: 20, subclass: null}];
+		state.addSpell({
+			name: "Power Word Heal",
+			source: "XPHB",
+			level: 9,
+			school: "E",
+			sourceFeature: "Spells Prepared",
+			sourceClass: "Bard",
+		}, false);
+		state.setClassCatalog(wordsCatalog);
+		state.applyClassFeatureEffects();
+
+		const loaded = new CharacterSheetState();
+		loaded.setSpellData(SPELL_DB);
+		loaded.setClassCatalog(wordsCatalog);
+		expect(loaded.loadFromJson(state.toJson())).not.toBe(false);
+		loaded._data.classes[0].level = 19;
+		loaded.applyClassFeatureEffects();
+
+		const heal = loaded.getSpellsKnown().find(spell => spell.name === "Power Word Heal");
+		expect(heal).toMatchObject({
+			alwaysPrepared: false,
+			prepared: false,
+			sourceFeature: "Spells Prepared",
+			sourceClass: "Bard",
+		});
+		expect(heal.classGrantOwners).toBeUndefined();
+		expect(heal.classGrantOriginalMetadata).toBeUndefined();
+	});
+
+	test("an exact manual copy is temporarily always prepared, then restored on 20 to 19", () => {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state._data.classes = [{name: "Bard", source: "XPHB", level: 20, subclass: null}];
+		state.addSpell({
+			name: "Power Word Heal",
+			source: "XPHB",
+			level: 9,
+			school: "E",
+			sourceFeature: "Spells Known",
+			sourceClass: "Wizard",
+		}, false);
+		state.setClassCatalog(wordsCatalog);
+		state.applyClassFeatureEffects();
+
+		let heal = state.getSpellsKnown().find(spell => spell.name === "Power Word Heal");
+		expect(heal).toMatchObject({
+			alwaysPrepared: true,
+			prepared: true,
+			grantedByClass: false,
+			sourceFeature: "Bard Spells",
+			sourceClass: "Wizard",
+			classGrantOwners: ["bard|xphb"],
+			classGrantOriginalMetadata: {
+				alwaysPrepared: false,
+				prepared: false,
+				sourceFeature: "Spells Known",
+				sourceClass: "Wizard",
+			},
+		});
+
+		state._data.classes[0].level = 19;
+		state.applyClassFeatureEffects();
+		heal = state.getSpellsKnown().find(spell => spell.name === "Power Word Heal");
+		expect(heal).toMatchObject({
+			alwaysPrepared: false,
+			prepared: false,
+			grantedByClass: false,
+			sourceFeature: "Spells Known",
+			sourceClass: "Wizard",
+		});
+		expect(heal.classGrantOwners).toBeUndefined();
+		expect(heal.classGrantOriginalMetadata).toBeUndefined();
+	});
+
+	test("an already-prepared manual copy survives teardown without provenance loss", () => {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state._data.classes = [{name: "Bard", source: "TGTT", level: 20, subclass: null}];
+		state.addSpell({
+			name: "Power Word Kill",
+			source: "XPHB",
+			level: 9,
+			school: "E",
+			sourceFeature: "Spells Prepared",
+			sourceClass: "Bard",
+		}, true);
+		state.setClassCatalog(wordsCatalog);
+		state.applyClassFeatureEffects();
+		state._data.classes[0].level = 19;
+		state.applyClassFeatureEffects();
+
+		const kill = state.getSpellsKnown().find(spell => spell.name === "Power Word Kill");
+		expect(kill).toMatchObject({
+			alwaysPrepared: false,
+			prepared: true,
+			grantedByClass: false,
+			sourceFeature: "Spells Prepared",
+			sourceClass: "Bard",
+		});
+	});
+
+	test("source-qualified owners retain a manual copy until the last class grant is removed", () => {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state._data.classes = [
+			{name: "Alpha", source: "A", level: 1, subclass: null},
+			{name: "Beta", source: "B", level: 1, subclass: null},
+		];
+		state.addSpell({
+			name: "Power Word Heal",
+			source: "XPHB",
+			level: 9,
+			school: "E",
+			sourceFeature: "Spells Known",
+			sourceClass: "Wizard",
+		}, false);
+		state.setClassCatalog([
+			{name: "Alpha", source: "A", additionalSpells: [{prepared: {1: ["power word heal|xphb"]}}]},
+			{name: "Beta", source: "B", additionalSpells: [{prepared: {1: ["power word heal|xphb"]}}]},
+		]);
+		state.applyClassFeatureEffects();
+
+		let heal = state.getSpellsKnown().find(spell => spell.name === "Power Word Heal");
+		expect(heal.classGrantOwners).toEqual(["alpha|a", "beta|b"]);
+		expect(heal.sourceClass).toBe("Wizard");
+
+		state._data.classes = state._data.classes.filter(cls => cls.name !== "Alpha");
+		state.applyClassFeatureEffects();
+		heal = state.getSpellsKnown().find(spell => spell.name === "Power Word Heal");
+		expect(heal.classGrantOwners).toEqual(["beta|b"]);
+		expect(heal.alwaysPrepared).toBe(true);
+
+		state._data.classes = [];
+		state.applyClassFeatureEffects();
+		heal = state.getSpellsKnown().find(spell => spell.name === "Power Word Heal");
+		expect(heal).toMatchObject({
+			prepared: false,
+			alwaysPrepared: false,
+			sourceFeature: "Spells Known",
+			sourceClass: "Wizard",
+		});
+		expect(heal.classGrantOwners).toBeUndefined();
+	});
+});
+
+describe("Class-level always-prepared spells — collision ownership", () => {
+	test("a player-chosen cantrip is temporarily class-granted and restored on teardown", () => {
+		const state = newClericState({level: 1});
+		state.addCantrip({
+			name: "Thaumaturgy",
+			source: "XPHB",
+			level: 0,
+			school: "T",
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Cleric",
+		});
+		state.setClassCatalog([tgttClericCatalogEntry()]);
+		state.applyClassFeatureEffects();
+
+		let thaumaturgy = state.getCantripsKnown().find(spell => spell.name === "Thaumaturgy");
+		expect(thaumaturgy).toMatchObject({
+			sourceFeature: "Cleric Spells",
+			sourceClass: "Cleric",
+			classGrantOwners: ["cleric|tgtt"],
+			classGrantOriginalMetadata: {
+				sourceFeature: "Cantrips Known",
+				sourceClass: "Cleric",
+			},
+		});
+
+		state._data.classes = [];
+		state.applyClassFeatureEffects();
+		thaumaturgy = state.getCantripsKnown().find(spell => spell.name === "Thaumaturgy");
+		expect(thaumaturgy).toMatchObject({
+			sourceFeature: "Cantrips Known",
+			sourceClass: "Cleric",
+		});
+		expect(thaumaturgy.classGrantOwners).toBeUndefined();
+	});
+
+	test("a colliding subclass grant keeps its attribution so subclass teardown can remove it", () => {
+		const state = new CharacterSheetState();
+		state.setSpellData(SPELL_DB);
+		state._data.classes = [{
+			name: "Cleric",
+			source: "TGTT",
+			level: 1,
+			subclass: {
+				name: "Test Domain",
+				shortName: "Test",
+				source: "TGTT",
+				additionalSpells: [{prepared: {1: ["ceremony|xphb"]}}],
+			},
+		}];
+		state.setClassCatalog([tgttClericCatalogEntry()]);
+		state.applyClassFeatureEffects();
+
+		let ceremony = state.getSpellsKnown().find(spell => spell.name === "Ceremony");
+		expect(ceremony).toMatchObject({
+			alwaysPrepared: true,
+			sourceFeature: "Test Domain Spells",
+			sourceClass: "Cleric",
+			classGrantOwners: ["cleric|tgtt"],
+		});
+
+		state.removeSubclassSpells("Test Domain Spells");
+		state._data.classes[0].subclass = null;
+		state.applyClassFeatureEffects();
+		ceremony = state.getSpellsKnown().find(spell => spell.name === "Ceremony");
+		expect(ceremony).toMatchObject({
+			alwaysPrepared: true,
+			grantedByClass: true,
+			sourceFeature: "Cleric Spells",
+			sourceClass: "Cleric",
+		});
+		expect(state.getSpellsKnown().filter(spell => spell.name === "Ceremony")).toHaveLength(1);
+	});
+});
+
 describe("Class-level always-prepared spells — teardown on removal / level-down", () => {
 	test("removing the class tears down its class-granted spells", () => {
 		const state = newClericState();
@@ -245,5 +565,18 @@ describe("Class-level always-prepared spells — existing save auto-fix on load"
 		const idxApply = src.indexOf("applyClassFeatureEffects()", idxCatalog);
 		expect(idxCatalog).toBeGreaterThan(-1);
 		expect(idxApply).toBeGreaterThan(idxCatalog);
+	});
+
+	test("page initialization installs the merged class catalog before loading or building a character", () => {
+		const src = fs.readFileSync(path.join(REPO_ROOT, "js/charactersheet/charactersheet.js"), "utf8");
+		const pInit = src.match(/async pInit \(\)\s*\{[\s\S]*?\n\t\}/)?.[0] || "";
+		const idxData = pInit.indexOf("await this._pLoadData()");
+		const idxSpells = pInit.indexOf("this._state.setSpellData(this._spellsData)");
+		const idxClasses = pInit.indexOf("this._state.setClassCatalog(this._classes || [])");
+		const idxUrlLoad = pInit.indexOf("await this._pLoadCharacter(charId)");
+		expect(idxData).toBeGreaterThan(-1);
+		expect(idxSpells).toBeGreaterThan(idxData);
+		expect(idxClasses).toBeGreaterThan(idxSpells);
+		expect(idxUrlLoad).toBeGreaterThan(idxClasses);
 	});
 });

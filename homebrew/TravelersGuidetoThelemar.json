@@ -9319,6 +9319,16 @@
 				4,
 				4
 			],
+			"additionalSpells": [
+				{
+					"prepared": {
+						"20": [
+							"power word heal|xphb",
+							"power word kill|xphb"
+						]
+					}
+				}
+			],
 			"featProgression": [
 				{
 					"name": "Epic Boon",
