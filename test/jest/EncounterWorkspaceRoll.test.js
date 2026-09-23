@@ -4,7 +4,9 @@ import "../../js/utils.js";
 import "../../js/render.js";
 import "../../js/render-dice.js";
 import {pRollEncounterSelection} from "../../js/encounterworkspace/encounterworkspace-roll.js";
+import {getEncounterModifierForPreset} from "../../js/encounterworkspace/encounterworkspace-effects.js";
 import {getNpcTrackerConditionPickerModel} from "../../js/dmscreen/npctracker/dmscreen-npctracker-condition.js";
+import {getNpcTrackerConditionRollMeta} from "../../js/dmscreen/npctracker/dmscreen-npctracker-roll.js";
 
 const monster = {
 	name: "Goblin",
@@ -15,10 +17,10 @@ const monster = {
 	save: {dex: "+6"},
 	skill: {stealth: "+6"},
 };
-const getState = ({selectedIds = ["one", "two"], conditions = [[], []]} = {}) => ({
+const getState = ({selectedIds = ["one", "two"], conditions = [[], []], modifiers = [[], []]} = {}) => ({
 	instances: [
-		{id: "one", monster, conditions: conditions[0]},
-		{id: "two", monster, conditions: conditions[1]},
+		{id: "one", monster, conditions: conditions[0], modifiers: modifiers[0]},
+		{id: "two", monster, conditions: conditions[1], modifiers: modifiers[1]},
 	],
 	selectedIds,
 });
@@ -75,6 +77,7 @@ describe("Encounter Workspace rolls", () => {
 				key: "dex",
 				rollMode: "advantage",
 			});
+
 			expect(failures).toEqual([]);
 			expect(results.map(it => [it.mode, it.die, it.total])).toEqual([["normal", 15, 17], ["advantage", 17, 19]]);
 			expect(results[0].statusText).toMatch(/advantage and disadvantage cancel/);
@@ -86,6 +89,63 @@ describe("Encounter Workspace rolls", () => {
 		} finally {
 			dice.mockRestore();
 		}
+	});
+
+	it("keeps the DMG save-only rule separate from the house check-and-save variant", async () => {
+		const dice = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValue(16);
+		try {
+			const dmg = getState({selectedIds: ["one"], modifiers: [[getEncounterModifierForPreset("desecrated-dmg")], []]});
+			const house = getState({selectedIds: ["one"], modifiers: [[getEncounterModifierForPreset("desecrated-house")], []]});
+			const roll = async (state, rollType, key) => (await pRollEncounterSelection({state, rollType, key, skills})).results[0];
+			expect((await roll(dmg, "ability", "wis")).mode).toBe("normal");
+			expect((await roll(dmg, "skill", "perception")).mode).toBe("normal");
+			expect((await roll(dmg, "save", "wis")).mode).toBe("advantage");
+			expect((await roll(house, "ability", "wis")).mode).toBe("advantage");
+			expect((await roll(house, "skill", "perception")).mode).toBe("advantage");
+			expect((await roll(house, "save", "wis")).mode).toBe("advantage");
+			expect(dice).toHaveBeenNthCalledWith(1, "1d20+1", expect.anything(), {isResultUsed: true});
+			expect(dice).toHaveBeenNthCalledWith(2, "1d20+1", expect.anything(), {isResultUsed: true});
+			expect(dice).toHaveBeenNthCalledWith(3, "2d20dl1+1", expect.anything(), {isResultUsed: true});
+			expect((await roll(house, "skill", "perception")).sourcesText).toContain("house rule");
+		} finally {
+			dice.mockRestore();
+		}
+	});
+
+	it("composes signed flat bonuses and named modes with conditions and manual choice", async () => {
+		const dice = jest.spyOn(Renderer.dice, "pRoll2").mockResolvedValueOnce(15).mockResolvedValueOnce(13);
+		const modifier = {id: "custom", name: "Blessed mist", scopes: ["check", "save"], mode: "advantage", bonus: 3};
+		const penalty = {id: "penalty", name: "Dark wind", scopes: ["check"], mode: "disadvantage", bonus: -2};
+		const state = getState({conditions: [["poisoned"], ["stunned"]], modifiers: [[modifier, penalty], [modifier]]});
+		try {
+			const first = await pRollEncounterSelection({state: {...state, selectedIds: ["one"]}, rollType: "skill", key: "stealth", skills, rollMode: "advantage"});
+			expect(first.results[0]).toMatchObject({mode: "normal", bonus: 7, baseBonus: 6, modifierBonus: 1, die: 8, total: 15});
+			expect(first.results[0].sourcesText).toContain("Poisoned");
+			expect(first.results[0].sourcesText).toContain("Chosen advantage");
+			expect(first.results[0].sourcesText).toContain("Blessed mist");
+			expect(first.results[0].sourcesText).toContain("Dark wind -2");
+			expect(dice).toHaveBeenNthCalledWith(1, "1d20+7", expect.objectContaining({label: expect.stringContaining("Blessed mist +3")}), {isResultUsed: true});
+			const save = await pRollEncounterSelection({state: {...state, selectedIds: ["one"]}, rollType: "save", key: "dex", skills});
+			expect(save.results[0]).toMatchObject({mode: "advantage", bonus: 9, modifierBonus: 3, die: 4});
+			expect(save.results[0].sourcesText).not.toContain("Dark wind");
+			expect(dice).toHaveBeenNthCalledWith(2, "2d20dl1+9", expect.anything(), {isResultUsed: true});
+			const failed = await pRollEncounterSelection({state: {...state, selectedIds: ["two"]}, rollType: "save", key: "dex"});
+			expect(failed.results[0]).toMatchObject({mode: "autoFail", die: null, total: null});
+			expect(failed.results[0].sourcesText).toContain("Stunned");
+			expect(dice).toHaveBeenCalledTimes(2);
+		} finally {
+			dice.mockRestore();
+		}
+	});
+
+	it("does not alter NPC Manager's default roll effects when encounter extras are absent", () => {
+		const npc = {conditions: ["poisoned"]};
+		expect(getNpcTrackerConditionRollMeta({npc, rollType: "ability", key: "dex"}))
+			.toEqual({mode: "disadvantage", reasons: ["Poisoned"], statusText: "Disadvantage: Poisoned"});
+		expect(getNpcTrackerConditionRollMeta({npc, rollType: "ability", key: "dex", additionalEffects: [{mode: "advantage", reason: "Area effect"}]}))
+			.toMatchObject({mode: "normal", reasons: ["Area effect", "Poisoned"]});
+		expect(() => getNpcTrackerConditionRollMeta({npc, rollType: "save", additionalEffects: [{mode: "autoFail", reason: "Fake"}]}))
+			.toThrow(/Additional roll effects/);
 	});
 
 	it("applies save disadvantage and automatic failures without fabricating or logging dice", async () => {

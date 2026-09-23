@@ -1,6 +1,7 @@
 import {
 	getNpcTrackerRollBonus,
 	getNpcTrackerRollLabel,
+	getNpcTrackerSignedNumber,
 	pRollNpcTrackerD20,
 } from "../dmscreen/npctracker/dmscreen-npctracker-roll.js";
 import {getNpcTrackerMonsterSkillMeta} from "../dmscreen/npctracker/dmscreen-npctracker-data.js";
@@ -46,13 +47,32 @@ export async function pRollEncounterSelection ({
 					throw new Error(`No valid bonus or governing ability is available for ${skill.label}.`);
 				}
 			}
-			const bonus = getNpcTrackerRollBonus({npc, rollType, key, skill});
-			const rolled = await pRoll({npc, label, bonus, rollType, key: rollType === "skill" ? skill.ability : key, rollMode});
+			const baseBonus = getNpcTrackerRollBonus({npc, rollType, key, skill});
+			const scope = rollType === "save" ? "save" : "check";
+			const modifiers = (instance.modifiers || []).filter(it => it.scopes.includes(scope));
+			const modifierBonus = modifiers.reduce((total, it) => total + it.bonus, 0);
+			const bonus = baseBonus + modifierBonus;
+			if (!Number.isSafeInteger(modifierBonus) || !Number.isFinite(bonus) || (modifiers.length && !Number.isSafeInteger(bonus))) {
+				throw new Error("Combined roll bonus exceeds precise whole-number range.");
+			}
+			const bonusSources = modifiers.filter(it => it.bonus !== 0).map(it => `${it.name} ${getNpcTrackerSignedNumber(it.bonus)}`);
+			const additionalEffects = modifiers.filter(it => it.mode !== "normal").map(it => ({mode: it.mode, reason: it.name}));
+			const diceLabel = bonusSources.length ? `${label} \u2014 ${bonusSources.join(", ")}` : label;
+			const rolled = await pRoll({npc, label: diceLabel, bonus, rollType, key: rollType === "skill" ? skill.ability : key, rollMode, additionalEffects});
 			if (!rolled || (rolled.mode !== "autoFail" && rolled.mode !== "unavailable" && (!Number.isFinite(rolled.total) || !Number.isFinite(rolled.die)))) {
 				failures.push({id: instance.id, name, reason: "Roll cancelled or dice result invalid."});
 				continue;
 			}
-			results.push({id: instance.id, name, label, bonus, ...rolled});
+			results.push({
+				id: instance.id,
+				name,
+				label,
+				bonus,
+				baseBonus,
+				modifierBonus,
+				...rolled,
+				sourcesText: [rolled.statusText, ...bonusSources].filter(Boolean).join(" \u00b7 "),
+			});
 		} catch (e) {
 			failures.push({id: instance.id, name, reason: String(e?.message || e)});
 		}

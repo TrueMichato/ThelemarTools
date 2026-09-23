@@ -3,6 +3,7 @@ import {ENCOUNTER_ROLL_TYPES, getEncounterInstanceLabels, pRollEncounterSelectio
 import {getNpcTrackerFallbackReferenceData, getNpcTrackerSkillDescriptors, pGetNpcTrackerReferenceData} from "./dmscreen/npctracker/dmscreen-npctracker-data.js";
 import {getNpcTrackerConditionColor, getNpcTrackerConditionHoverMeta, getNpcTrackerConditionPickerModel} from "./dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerSignedNumber} from "./dmscreen/npctracker/dmscreen-npctracker-roll.js";
+import {ENCOUNTER_DESECRATED_PRESETS, getEncounterModifierForPreset} from "./encounterworkspace/encounterworkspace-effects.js";
 
 export class EncounterWorkspacePage {
 	constructor ({store = new EncounterWorkspaceStore(), pGetReferenceData = pGetNpcTrackerReferenceData} = {}) {
@@ -15,6 +16,7 @@ export class EncounterWorkspacePage {
 		this._tiles = new Map();
 		this._checks = new Map();
 		this._conditionContainers = new Map();
+		this._effectContainers = new Map();
 		this._rosterMeta = new Map();
 		this._referenceData = getNpcTrackerFallbackReferenceData();
 
@@ -40,6 +42,24 @@ export class EncounterWorkspacePage {
 		this._selCondition = document.getElementById("ew-condition");
 		this._btnConditionAdd = document.getElementById("ew-condition-add");
 		this._btnConditionRemove = document.getElementById("ew-condition-remove");
+		this._eleEffectSummary = document.getElementById("ew-effects-summary");
+		this._selNoteKind = document.getElementById("ew-note-kind");
+		this._inpNoteName = document.getElementById("ew-note-name");
+		this._inpNoteDescription = document.getElementById("ew-note-description");
+		this._btnNoteAdd = document.getElementById("ew-note-add");
+		this._selNoteRemove = document.getElementById("ew-note-remove");
+		this._btnNoteRemove = document.getElementById("ew-note-remove-selected");
+		this._selPreset = document.getElementById("ew-preset");
+		this._elePresetDetail = document.getElementById("ew-preset-detail");
+		this._btnPresetAdd = document.getElementById("ew-preset-add");
+		this._inpModName = document.getElementById("ew-mod-name");
+		this._checkModCheck = document.getElementById("ew-mod-check");
+		this._checkModSave = document.getElementById("ew-mod-save");
+		this._selModMode = document.getElementById("ew-mod-mode");
+		this._inpModBonus = document.getElementById("ew-mod-bonus");
+		this._btnModAdd = document.getElementById("ew-mod-add");
+		this._selModRemove = document.getElementById("ew-mod-remove");
+		this._btnModRemove = document.getElementById("ew-mod-remove-selected");
 	}
 
 	async pInit () {
@@ -53,6 +73,14 @@ export class EncounterWorkspacePage {
 		this._selCondition.addEventListener("change", () => this._updateControls());
 		this._btnConditionAdd.addEventListener("click", () => this._pUpdateConditions(true));
 		this._btnConditionRemove.addEventListener("click", () => this._pUpdateConditions(false));
+		this._btnNoteAdd.addEventListener("click", () => this._pUpdateAreaNote({isAdd: true}));
+		this._btnNoteRemove.addEventListener("click", () => this._pUpdateAreaNote({isAdd: false}));
+		this._selNoteRemove.addEventListener("change", () => this._updateControls());
+		this._selPreset.addEventListener("change", () => this._renderPresetDetail());
+		this._btnPresetAdd.addEventListener("click", () => this._pUpdateModifier({isAdd: true, isPreset: true}));
+		this._btnModAdd.addEventListener("click", () => this._pUpdateModifier({isAdd: true, isPreset: false}));
+		this._btnModRemove.addEventListener("click", () => this._pUpdateModifier({isAdd: false}));
+		this._selModRemove.addEventListener("change", () => this._updateControls());
 
 		let catalogError = null;
 		try {
@@ -97,6 +125,7 @@ export class EncounterWorkspacePage {
 		this._btnSelectNone.disabled = isBusy || !this._state.instances.length;
 		this._checks.forEach(check => check.disabled = isBusy);
 		this._conditionContainers.forEach(container => container.querySelectorAll("button").forEach(button => button.disabled = isBusy));
+		this._effectContainers.forEach(container => container.querySelectorAll("button").forEach(button => button.disabled = isBusy));
 		this._updateControls();
 	}
 
@@ -111,6 +140,16 @@ export class EncounterWorkspacePage {
 		this._btnConditionAdd.disabled = this._isBusy || !hasTargets || !this._referenceData.conditions.some(it => it.name === condition);
 		this._btnConditionRemove.disabled = this._isBusy || !hasTargets || !this._state.instances.some(it =>
 			this._state.selectedIds.includes(it.id) && it.conditions.includes(condition));
+		[
+			this._selNoteKind, this._inpNoteName, this._inpNoteDescription,
+			this._selPreset, this._inpModName, this._checkModCheck, this._checkModSave,
+			this._selModMode, this._inpModBonus,
+		].forEach(field => field.disabled = this._isBusy || !hasTargets);
+		this._btnNoteAdd.disabled = this._btnPresetAdd.disabled = this._btnModAdd.disabled = this._isBusy || !hasTargets;
+		this._selNoteRemove.disabled = this._isBusy || !hasTargets || this._selNoteRemove.options.length <= 1;
+		this._btnNoteRemove.disabled = this._selNoteRemove.disabled || !this._selNoteRemove.value;
+		this._selModRemove.disabled = this._isBusy || !hasTargets || this._selModRemove.options.length <= 1;
+		this._btnModRemove.disabled = this._selModRemove.disabled || !this._selModRemove.value;
 	}
 
 	_setStatus (text) {
@@ -179,7 +218,7 @@ export class EncounterWorkspacePage {
 	_pConfirmReplace () {
 		return InputUiUtil.pGetUserBoolean({
 			title: "Replace Working Encounter",
-			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, target selection, and conditions will be lost. The saved Bestiary list will not change.",
+			htmlDescription: "Replace the current working encounter with a new copy of this saved Bestiary list? Its roster, target selection, conditions, area notes, and modifiers will be lost. The saved Bestiary list will not change.",
 			textYes: "Replace Encounter",
 			textNo: "Keep Current",
 		});
@@ -226,6 +265,113 @@ export class EncounterWorkspacePage {
 			this._setBusy(false);
 			if (focused !== document.body && focused?.isConnected && !focused.disabled) focused.focus({preventScroll: true});
 		}
+	}
+
+	async _pUpdateAreaNote ({isAdd, id = null, noteId = null}) {
+		if (this._isBusy) return;
+		const focused = document.activeElement;
+		const targetIds = id ? [id] : this._state.selectedIds;
+		const removedId = noteId || this._selNoteRemove.value;
+		this._setBusy(true);
+		try {
+			const note = isAdd
+				? {
+					id: `note:${CryptUtil.uid()}`,
+					kind: this._selNoteKind.value,
+					name: this._inpNoteName.value.trim(),
+					description: this._inpNoteDescription.value.trim(),
+				}
+				: null;
+			const name = note?.name || this._getEffectName(removedId, "areaNotes") || "area note";
+			const {state, changedIds} = EncounterWorkspaceState.withAreaNote(this._state, {
+				note, noteId: removedId, isAdd, targetIds,
+			});
+			if (changedIds.length) {
+				this._state = await this._store.pSave(state);
+				this._renderEffects();
+				if (isAdd) {
+					this._inpNoteName.value = "";
+					this._inpNoteDescription.value = "";
+				}
+			}
+			this._setStatus(changedIds.length
+				? `${isAdd ? "Added" : "Removed"} "${name}" ${isAdd ? "to" : "from"} ${changedIds.length} ${changedIds.length === 1 ? "monster" : "monsters"}.`
+				: "No selected monster had that area note to remove.");
+		} catch (e) {
+			this._setError(`Area notes were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+			this._focusAfterEffectUpdate(focused, id, this._selNoteRemove);
+		}
+	}
+
+	async _pUpdateModifier ({isAdd, isPreset = false, id = null, modifierId = null}) {
+		if (this._isBusy) return;
+		const focused = document.activeElement;
+		const targetIds = id ? [id] : this._state.selectedIds;
+		const removedId = modifierId || this._selModRemove.value;
+		this._setBusy(true);
+		try {
+			const enteredBonus = this._inpModBonus.value.trim();
+			const modifier = !isAdd ? null : isPreset
+				? getEncounterModifierForPreset(this._selPreset.value)
+				: {
+					id: `modifier:${CryptUtil.uid()}`,
+					name: this._inpModName.value.trim(),
+					scopes: [
+						...(this._checkModCheck.checked ? ["check"] : []),
+						...(this._checkModSave.checked ? ["save"] : []),
+					],
+					mode: this._selModMode.value,
+					bonus: /^[+-]?\d+$/.test(enteredBonus) ? Number(enteredBonus) : NaN,
+				};
+			const name = modifier?.name || this._getEffectName(removedId, "modifiers") || "roll modifier";
+			const {state, changedIds, skippedIds} = EncounterWorkspaceState.withModifier(this._state, {
+				modifier, modifierId: removedId, isAdd, targetIds,
+			});
+			if (changedIds.length) {
+				this._state = await this._store.pSave(state);
+				this._renderEffects();
+				this._clearRollResults();
+				if (isAdd && !isPreset) this._inpModName.value = "";
+			}
+			const outcome = changedIds.length
+				? `${isAdd ? "Applied" : "Removed"} "${name}" ${isAdd ? "to" : "from"} ${changedIds.length} ${changedIds.length === 1 ? "monster" : "monsters"}.`
+				: `No selected monster ${isAdd ? "gained" : "had"} "${name}".`;
+			const skipped = skippedIds.length
+				? ` Skipped ${skippedIds.length} selected non-undead: ${this._getTargetNames(skippedIds)}.`
+				: "";
+			this._setStatus(`${outcome}${skipped}`);
+		} catch (e) {
+			this._setError(`Roll modifiers were not saved: ${this._getErrorMessage(e)}. The working encounter is unchanged.`);
+		} finally {
+			this._setBusy(false);
+			this._focusAfterEffectUpdate(focused, id, this._selModRemove);
+		}
+	}
+
+	_getEffectName (effectId, property) {
+		return this._state.instances.flatMap(instance => instance[property])
+			.find(effect => effect.id === effectId)?.name;
+	}
+
+	_getTargetNames (ids) {
+		const labels = getEncounterInstanceLabels(this._state.instances);
+		const first = ids.slice(0, 8).map(id => labels.get(id)).join(", ");
+		return ids.length > 8 ? `${first}, and ${ids.length - 8} more` : first;
+	}
+
+	_focusAfterEffectUpdate (focused, id, fallback) {
+		if (focused !== document.body && focused?.isConnected && !focused.disabled) {
+			focused.focus({preventScroll: true});
+			return;
+		}
+		const title = id ? this._tiles.get(id)?.querySelector(".ew__statblock-title") : null;
+		if (title) {
+			title.tabIndex = -1;
+			title.focus({preventScroll: true});
+		} else if (!fallback.disabled) fallback.focus({preventScroll: true});
+		else this._eleEffectSummary.focus({preventScroll: true});
 	}
 
 	async _pRollSelected () {
@@ -293,6 +439,38 @@ export class EncounterWorkspacePage {
 		this._updateControls();
 	}
 
+	_renderPresetDetail () {
+		const preset = ENCOUNTER_DESECRATED_PRESETS.find(it => it.presetId === this._selPreset.value);
+		this._elePresetDetail.textContent = preset?.description || "";
+	}
+
+	_renderEffectPickers () {
+		const selected = new Set(this._state.selectedIds);
+		for (const [property, select] of [
+			["areaNotes", this._selNoteRemove],
+			["modifiers", this._selModRemove],
+		]) {
+			const previous = select.value;
+			const byId = new Map();
+			this._state.instances.forEach(instance => {
+				if (!selected.has(instance.id)) return;
+				instance[property].forEach(effect => {
+					const item = byId.get(effect.id) || {effect, count: 0};
+					item.count++;
+					byId.set(effect.id, item);
+				});
+			});
+			select.replaceChildren();
+			select.add(new Option(property === "areaNotes" ? "Choose an applied note..." : "Choose an applied modifier...", ""));
+			byId.forEach(({effect, count}, id) => {
+				const type = property === "areaNotes" ? effect.kind === "lair" ? "Lair note" : "Area trait" : "Modifier";
+				select.add(new Option(`${type}: ${effect.name} (${count} selected)`, id));
+			});
+			select.value = byId.has(previous) ? previous : "";
+		}
+		this._updateControls();
+	}
+
 	_clearRollResults () {
 		this._eleResults.hidden = true;
 		this._eleRollSummary.textContent = "";
@@ -322,7 +500,7 @@ export class EncounterWorkspacePage {
 			if (isFailure) row.className = "ew__result--failed";
 			const values = isFailure
 				? [entry.name, `${this._selRollType.selectedOptions[0].textContent} · ${this._selRollKey.selectedOptions[0].textContent}`, "—", "—", "—", entry.reason]
-				: [entry.name, entry.label, entry.die == null ? "—" : entry.die, getNpcTrackerSignedNumber(entry.bonus), entry.total == null ? "—" : entry.total, entry.statusText || "Normal"];
+				: [entry.name, entry.label, entry.die == null ? "—" : entry.die, getNpcTrackerSignedNumber(entry.bonus), entry.total == null ? "—" : entry.total, entry.sourcesText || "Normal"];
 			values.forEach((value, index) => {
 				const cell = row.insertCell();
 				cell.dataset.label = columns[index];
@@ -336,6 +514,7 @@ export class EncounterWorkspacePage {
 		this._tiles.clear();
 		this._checks.clear();
 		this._conditionContainers.clear();
+		this._effectContainers.clear();
 		this._rosterMeta.clear();
 		this._eleRoster.replaceChildren();
 		this._eleStatblocks.replaceChildren();
@@ -349,6 +528,9 @@ export class EncounterWorkspacePage {
 		this._selRollType.value = "ability";
 		this._renderRollKeys();
 		this._renderConditionPicker();
+		this._selPreset.replaceChildren();
+		ENCOUNTER_DESECRATED_PRESETS.forEach(preset => this._selPreset.add(new Option(preset.name, preset.presetId)));
+		this._renderPresetDetail();
 
 		this._eleName.textContent = sourceList.name;
 		if (!instances.length) {
@@ -404,6 +586,10 @@ export class EncounterWorkspacePage {
 			conditions.className = "ew__conditions";
 			conditions.setAttribute("aria-label", `Conditions for ${label}`);
 			this._conditionContainers.set(instance.id, conditions);
+			const effects = document.createElement("div");
+			effects.className = "ew__effects";
+			effects.setAttribute("aria-label", `Area effects for ${label}`);
+			this._effectContainers.set(instance.id, effects);
 			const table = document.createElement("table");
 			table.className = "ve-w-100 ve-stats";
 			const body = document.createElement("tbody");
@@ -416,17 +602,18 @@ export class EncounterWorkspacePage {
 				const failure = document.createElement("p");
 				failure.className = "ew__render-error";
 				failure.textContent = `Could not render this statblock: ${this._getErrorMessage(e)}`;
-				tile.append(title, conditions, failure);
+				tile.append(title, conditions, effects, failure);
 				this._tiles.set(instance.id, tile);
 				this._eleStatblocks.append(tile);
 				continue;
 			}
 			table.append(body);
-			tile.append(title, conditions, table);
+			tile.append(title, conditions, effects, table);
 			this._tiles.set(instance.id, tile);
 			this._eleStatblocks.append(tile);
 		}
 		this._renderConditions();
+		this._renderEffects();
 		this._updateTargets();
 	}
 
@@ -438,7 +625,7 @@ export class EncounterWorkspacePage {
 			if (!container || !meta) return;
 			container.replaceChildren();
 			const picker = getNpcTrackerConditionPickerModel({conditions: instance.conditions, conditionCatalog: this._referenceData.conditions});
-			meta.textContent = `${instance.monster.source} · CR ${instance.monster.cr?.cr || instance.monster.cr || "—"}${picker.active.length ? ` · ${picker.active.map(it => it.label).join(", ")}` : ""}`;
+			this._renderRosterMeta(instance, picker.active.map(it => it.label));
 			if (!picker.active.length) {
 				const empty = document.createElement("span");
 				empty.className = "ew__condition-empty";
@@ -469,6 +656,77 @@ export class EncounterWorkspacePage {
 		});
 	}
 
+	_renderRosterMeta (instance, conditionLabels = null) {
+		const meta = this._rosterMeta.get(instance.id);
+		if (!meta) return;
+		const activeConditions = conditionLabels ?? getNpcTrackerConditionPickerModel({
+			conditions: instance.conditions,
+			conditionCatalog: this._referenceData.conditions,
+		}).active.map(it => it.label);
+		const effectNames = [
+			...instance.areaNotes.map(it => it.name),
+			...instance.modifiers.map(it => it.name),
+		];
+		meta.textContent = [
+			`${instance.monster.source} · CR ${instance.monster.cr?.cr || instance.monster.cr || "—"}`,
+			...activeConditions,
+			...effectNames,
+		].join(" · ");
+	}
+
+	_renderEffects () {
+		const labels = getEncounterInstanceLabels(this._state.instances);
+		this._state.instances.forEach(instance => {
+			const container = this._effectContainers.get(instance.id);
+			if (!container) return;
+			container.replaceChildren();
+			this._renderRosterMeta(instance);
+			const entries = [
+				...instance.areaNotes.map(note => ({
+					title: `${note.kind === "lair" ? "Lair note (manual)" : "Area trait"}: ${note.name}`,
+					description: note.description,
+					onRemove: () => this._pUpdateAreaNote({isAdd: false, id: instance.id, noteId: note.id}),
+				})),
+				...instance.modifiers.map(modifier => ({
+					title: modifier.name,
+					description: [
+						modifier.scopes.includes("check") ? "Checks (including skills)" : "",
+						modifier.scopes.includes("save") ? "Saving throws" : "",
+						modifier.mode === "normal" ? "" : modifier.mode,
+						modifier.bonus ? getNpcTrackerSignedNumber(modifier.bonus) : "",
+					].filter(Boolean).join(" · "),
+					onRemove: () => this._pUpdateModifier({isAdd: false, id: instance.id, modifierId: modifier.id}),
+				})),
+			];
+			if (!entries.length) {
+				const empty = document.createElement("span");
+				empty.className = "ew__condition-empty";
+				empty.textContent = "No area effects";
+				container.append(empty);
+			}
+			entries.forEach(({title, description, onRemove}) => {
+				const item = document.createElement("div");
+				item.className = "ew__effect";
+				const body = document.createElement("div");
+				const heading = document.createElement("strong");
+				heading.textContent = title;
+				const detail = document.createElement("p");
+				detail.textContent = description;
+				body.append(heading, detail);
+				const remove = document.createElement("button");
+				remove.type = "button";
+				remove.className = "ve-btn ve-btn-default ve-btn-xs";
+				remove.textContent = "Remove";
+				remove.setAttribute("aria-label", `Remove ${title} from ${labels.get(instance.id)}`);
+				remove.disabled = this._isBusy;
+				remove.addEventListener("click", onRemove);
+				item.append(body, remove);
+				container.append(item);
+			});
+		});
+		this._renderEffectPickers();
+	}
+
 	async _pRemoveInstanceCondition (id, condition) {
 		if (this._isBusy) return;
 		this._setBusy(true);
@@ -492,7 +750,7 @@ export class EncounterWorkspacePage {
 		this._eleSummary.textContent = `${selected.size} of ${this._state.instances.length} selected as targets`;
 		this._checks.forEach((check, id) => check.checked = selected.has(id));
 		this._tiles.forEach((tile, id) => tile.classList.toggle("ew__statblock--selected", selected.has(id)));
-		this._updateControls();
+		this._renderEffectPickers();
 	}
 }
 

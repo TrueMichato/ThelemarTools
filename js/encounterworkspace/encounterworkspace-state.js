@@ -1,8 +1,13 @@
 import {getNpcTrackerCanonicalConditionName, getNpcTrackerConditionsAfterUpdate} from "../dmscreen/npctracker/dmscreen-npctracker-condition.js";
+import {
+	getEncounterEffectTargets,
+	validateEncounterAreaNote,
+	validateEncounterModifier,
+} from "./encounterworkspace-effects.js";
 
 const STORAGE_KEY = "encounterWorkspaceState";
 const PAGE = "encounterworkspace.html";
-const VERSION = 2;
+const VERSION = 3;
 const MAX_INSTANCES = 1000;
 
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -27,7 +32,7 @@ export class EncounterWorkspaceState {
 	}
 
 	static validate (raw) {
-		if (!raw || ![1, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
+		if (!raw || ![1, 2, VERSION].includes(raw.version)) throw new Error("This encounter save has an unsupported version. It has not been changed.");
 		if (
 			(raw.sourceList !== null && (typeof raw.sourceList?.name !== "string" || typeof raw.sourceList?.saveId !== "string"))
 			|| !Array.isArray(raw.instances)
@@ -43,11 +48,25 @@ export class EncounterWorkspaceState {
 				|| (instance.customHashId != null && typeof instance.customHashId !== "string")
 				|| typeof instance.monster?.name !== "string"
 				|| typeof instance.monster?.source !== "string"
-				|| (raw.version === VERSION && (
+				|| (raw.version >= 2 && (
 					!Array.isArray(instance.conditions)
 					|| instance.conditions.some(condition => typeof condition !== "string" || !getNpcTrackerCanonicalConditionName(condition))
 				))
+				|| (raw.version === VERSION && (!Array.isArray(instance.areaNotes) || !Array.isArray(instance.modifiers)))
 			) throw new Error("The saved encounter contains an invalid monster instance. It has not been changed.");
+			if (raw.version === VERSION) {
+				for (const [entries, validateEntry] of [
+					[instance.areaNotes, validateEncounterAreaNote],
+					[instance.modifiers, validateEncounterModifier],
+				]) {
+					const effectIds = new Set();
+					for (const entry of entries) {
+						validateEntry(entry);
+						if (effectIds.has(entry.id)) throw new Error("The saved encounter contains duplicate area effects. It has not been changed.");
+						effectIds.add(entry.id);
+					}
+				}
+			}
 			ids.add(instance.id);
 		}
 		if (
@@ -58,15 +77,18 @@ export class EncounterWorkspaceState {
 
 		const state = copy(raw);
 		state.version = VERSION;
-		if (raw.version === 1) state.instances.forEach(instance => instance.conditions = []);
-		else {
-			state.instances.forEach(instance => instance.conditions = getNpcTrackerConditionsAfterUpdate({
+		state.instances.forEach(instance => {
+			instance.conditions = raw.version === 1 ? [] : getNpcTrackerConditionsAfterUpdate({
 				conditions: instance.conditions,
 				condition: null,
 				isAdd: true,
-			}));
-		}
-		state.instances.forEach(instance => freezeSnapshot(instance.monster));
+			});
+			if (raw.version < VERSION) {
+				instance.areaNotes = [];
+				instance.modifiers = [];
+			}
+			freezeSnapshot(instance.monster);
+		});
 		return state;
 	}
 
@@ -111,6 +133,8 @@ export class EncounterWorkspaceState {
 					customHashId: item.customHashId || item.customhashid || null,
 					monster: freezeSnapshot(copy(resolved.entity)),
 					conditions: [],
+					areaNotes: [],
+					modifiers: [],
 				});
 				state.selectedIds.push(id);
 			}
@@ -139,6 +163,58 @@ export class EncounterWorkspaceState {
 				? {...instance, conditions: getNpcTrackerConditionsAfterUpdate({conditions: instance.conditions, condition: canonical, isAdd})}
 				: instance),
 		});
+	}
+
+	static withAreaNote (state, {note, noteId, isAdd, targetIds = state.selectedIds}) {
+		const {eligibleIds} = getEncounterEffectTargets(state, {targetIds});
+		if (isAdd) validateEncounterAreaNote(note);
+		else if (typeof noteId !== "string" || !noteId) throw new Error("Choose an area note to remove.");
+		const selected = new Set(eligibleIds);
+		const changedIds = [];
+		const next = this.validate({
+			...state,
+			instances: state.instances.map(instance => {
+				if (!selected.has(instance.id)) return instance;
+				const existing = instance.areaNotes || [];
+				if (isAdd && existing.some(it => it.id === note.id)) throw new Error("This area note ID is already in use.");
+				const areaNotes = isAdd ? [...existing, note] : existing.filter(it => it.id !== noteId);
+				if (areaNotes.length !== existing.length) changedIds.push(instance.id);
+				return {...instance, areaNotes};
+			}),
+		});
+		return {state: next, changedIds};
+	}
+
+	static withModifier (state, {modifier, modifierId, isAdd, targetIds = state.selectedIds}) {
+		if (isAdd) validateEncounterModifier(modifier);
+		else if (typeof modifierId !== "string" || !modifierId) throw new Error("Choose a roll modifier to remove.");
+		const {eligibleIds, skippedIds} = getEncounterEffectTargets(state, {
+			targetIds,
+			presetId: isAdd ? modifier.presetId : null,
+		});
+		const selected = new Set(eligibleIds);
+		const changedIds = [];
+		const next = this.validate({
+			...state,
+			instances: state.instances.map(instance => {
+				if (!selected.has(instance.id)) return instance;
+				const existing = instance.modifiers || [];
+				let modifiers;
+				if (isAdd && modifier.presetId) {
+					modifiers = [...existing.filter(it => !it.presetId), modifier];
+					if (existing.length !== modifiers.length || existing.some(it => it.presetId && it.presetId !== modifier.presetId)) changedIds.push(instance.id);
+				} else if (isAdd) {
+					if (existing.some(it => it.id === modifier.id)) throw new Error("This roll modifier ID is already in use.");
+					modifiers = [...existing, modifier];
+					changedIds.push(instance.id);
+				} else {
+					modifiers = existing.filter(it => it.id !== modifierId);
+					if (modifiers.length !== existing.length) changedIds.push(instance.id);
+				}
+				return {...instance, modifiers};
+			}),
+		});
+		return {state: next, changedIds, skippedIds};
 	}
 }
 
