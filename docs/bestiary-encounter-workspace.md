@@ -14,6 +14,8 @@ Above the roster, choose an **ability check**, **saving throw**, or **skill chec
 
 **Conditions** applies/removes a chosen condition on the selected instances only. Each statblock shows its own removable condition chips, and the roster summarizes them. The picker uses site conditions and installed homebrew where available; conditions already in an encounter remain visible and removable if their source later disappears. Hover a known chip for its definition. Normal 5e condition effects supported by the NPC Manager apply to these checks and saves: Poisoned and Frightened disadvantage on checks (including skills), Restrained disadvantage on Dexterity saves, and automatic failure of Strength and Dexterity saves for Paralyzed, Stunned, Unconscious, and Petrified. A chosen advantage and condition disadvantage cancel (and vice versa); the result explains why. Conditional effects are shown with the NPC Manager's assumptions, such as Frightened's source being in sight. No custom homebrew mechanics are inferred from condition text.
 
+If condition/skill references cannot load, the page reports the error and keeps standard fallback choices available; saved Bestiary list import remains enabled when its sources initialized successfully.
+
 Conditions and target selection are saved only on the encounter instances; the frozen monster snapshots and saved Bestiary list remain unchanged. Foundation v1 encounters load as v2 with empty condition lists until conditions are added. Rolls/results are transient, not persisted. Replacing the working encounter loses its local conditions after confirmation.
 
 HP tracking, attacks and initiative, Quick Actions, area traits, lair actions, and custom modifiers are deferred to the next milestone.

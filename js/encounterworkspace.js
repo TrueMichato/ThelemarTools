@@ -4,9 +4,10 @@ import {getNpcTrackerFallbackReferenceData, getNpcTrackerSkillDescriptors, pGetN
 import {getNpcTrackerConditionColor, getNpcTrackerConditionHoverMeta, getNpcTrackerConditionPickerModel} from "./dmscreen/npctracker/dmscreen-npctracker-condition.js";
 import {getNpcTrackerSignedNumber} from "./dmscreen/npctracker/dmscreen-npctracker-roll.js";
 
-class EncounterWorkspacePage {
-	constructor () {
-		this._store = new EncounterWorkspaceStore();
+export class EncounterWorkspacePage {
+	constructor ({store = new EncounterWorkspaceStore(), pGetReferenceData = pGetNpcTrackerReferenceData} = {}) {
+		this._store = store;
+		this._pGetReferenceData = pGetReferenceData;
 		this._state = EncounterWorkspaceState.getEmpty();
 		this._hasUnreadableSave = false;
 		this._isBusy = true;
@@ -58,9 +59,17 @@ class EncounterWorkspacePage {
 			await Promise.all([PrereleaseUtil.pInit(), BrewUtil2.pInit()]);
 			await ExcludeUtil.pInitialise();
 			this._isCatalogReady = true;
-			this._referenceData = await pGetNpcTrackerReferenceData();
 		} catch (e) {
 			catalogError = e;
+		}
+
+		let referenceError = null;
+		if (this._isCatalogReady) {
+			try {
+				this._referenceData = await this._pGetReferenceData();
+			} catch (e) {
+				referenceError = e;
+			}
 		}
 
 		try {
@@ -75,6 +84,7 @@ class EncounterWorkspacePage {
 			this._setBusy(false);
 		}
 		if (catalogError) this._setError(`Bestiary sources could not be initialized: ${this._getErrorMessage(catalogError)}. ${this._hasUnreadableSave ? "The saved encounter also could not be opened." : "The saved encounter is still available."} Importing another list is disabled until the page can load those sources.`);
+		else if (referenceError) this._setError(`Condition and skill reference data could not be loaded: ${this._getErrorMessage(referenceError)}. Standard conditions and skills remain available. You can still choose a saved Bestiary list.${this._hasUnreadableSave ? " The saved encounter also could not be opened; choose a saved list to replace it." : ""}`);
 	}
 
 	_getErrorMessage (error) { return String(error?.message || error).replace(/[.!?]+$/, ""); }
