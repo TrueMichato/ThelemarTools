@@ -366,6 +366,33 @@ class CharacterSheetRespecEngine {
 		};
 	}
 
+	_isMechanicallyCompleteSkillNoOp (decision, stored, selection, status) {
+		const expectedLevel = {
+			nestedSkill: 1,
+			nestedExpertise: 2,
+		}[decision?.type];
+		if (!expectedLevel || stored?.status !== "resolved" || !stored.receipt) return false;
+		if (status != null && status !== stored.status) return false;
+
+		const normalize = value => this._candidateState.normalizeSkillProficiencyKey?.(
+			typeof value === "string" ? value : value?.value ?? value?.name ?? value,
+		) || String(value || "").toLowerCase().replace(/\s+/g, "");
+		const toKeys = value => (value == null ? [] : (Array.isArray(value) ? value : [value]))
+			.map(normalize)
+			.filter(Boolean)
+			.sort();
+		const before = toKeys(stored.selection);
+		const after = toKeys(selection);
+		if (before.length !== after.length || before.some((key, ix) => key !== after[ix])) return false;
+
+		const ownershipType = expectedLevel === 2 ? "expertise" : "skills";
+		return after.every(skill => {
+			if (this._candidateState.getSkillProficiency(skill) < expectedLevel) return false;
+			const ownership = this._candidateState._getProgressionOwnershipEntry?.(ownershipType, skill);
+			return !!ownership?.sources?.includes(decision.semanticKey);
+		});
+	}
+
 	/**
 	 * Stage one linked graph edit.  The snapshot is intentionally at the state
 	 * boundary rather than just the ledger boundary: controller callbacks may
@@ -380,6 +407,7 @@ class CharacterSheetRespecEngine {
 		const pendingSnapshot = this._getPendingCompatibilityItems(this._candidateState);
 		const isDirtySnapshot = this._isDirty;
 		const undoSnapshot = this._undoSnapshot;
+
 		const {container} = this._getDecisionStore(decision);
 		const stored = container?.decisions?.find(it => it.id === decisionId || it.semanticKey === decision.semanticKey)
 			|| (container
@@ -395,6 +423,7 @@ class CharacterSheetRespecEngine {
 				})()
 				: null);
 		if (!stored) throw new Error("That progression decision could not be found in the draft ledger.");
+		if (this._isMechanicallyCompleteSkillNoOp(decision, stored, selection, status)) return this._manifest;
 
 		const rollback = error => {
 			this._candidateState.loadFromJson(stateSnapshot);

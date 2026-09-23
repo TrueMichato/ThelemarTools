@@ -189,6 +189,14 @@ origin remains. This prevents changing a class skill, tool, language, expertise,
 or spell from deleting the same value when a species, background, feature,
 another class level, or manual edit still supplies it.
 
+Skill proficiency state and skill-choice ownership use one persisted identity:
+lowercase with whitespace removed. Display labels such as `Animal Handling`
+remain in decision selections and receipts, while proficiency/expertise
+mechanics, ownership lookup, reversal, and reconciliation resolve them as
+`animalhandling`. Load merges legacy whitespace aliases in skill-specific
+stores, keeps the highest proficiency level, unions owners, and preserves
+meaningful custom skill punctuation.
+
 Materialized feature/resource rows carry their decision provenance where the
 feature path can provide it. Descendant teardown runs deepest-first and also
 clears chosen-subfeature records, resources, active states, and once-per-turn
@@ -285,6 +293,12 @@ pre-existing sparse-history array entry.
 - **Undo** restores the snapshot from immediately before the last successful
   Apply. Starting another edit consumes that undo opportunity.
 
+Re-selecting an unchanged skill is a clean no-op only when its canonical
+proficiency/expertise, decision ownership, resolved status, and receipt are all
+already complete. The guard runs before descendant reversal, so it neither
+dirties the draft nor consumes Undo. Missing mechanics, ownership, or receipts
+fall through the normal transaction and are repaired.
+
 Apply is disabled while any required decision is missing, invalid, or ambiguous,
 or while an optional decision contains an invalid/ambiguous selection.
 Rows are indented by graph depth and expose resolved, deferred, missing,
@@ -333,6 +347,7 @@ Focused Jest contracts live in:
 - `CharacterSheetProgressionManifest.test.js`
 - `CharacterSheetRespecBardSpells.test.js`
 - `CharacterSheetRespecEngine.test.js`
+- `CharacterSheetRespecSkillMechanics.test.js`
 - `CharacterSheetRespecWorkspace.test.js`
 - the existing `CharacterSheetRespec*.test.js` regression suites
 

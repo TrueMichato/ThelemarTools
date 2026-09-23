@@ -1880,7 +1880,6 @@ class CharacterSheetRespec {
 		const findFull = selected => options.find(option =>
 			CharacterSheetRespec._getDecisionOptionKey(option) === CharacterSheetRespec._getDecisionOptionKey(selected),
 		) || selected;
-		const normalizeSkill = value => String(value || "").toLowerCase().replace(/\s+/g, "").replace(/'s?/g, "");
 		const release = (type, value, fnRemove) => {
 			if (this._state.releaseProgressionOwnership(type, value, decision.semanticKey)) fnRemove();
 		};
@@ -1889,6 +1888,8 @@ class CharacterSheetRespec {
 		const valueName = value => typeof value === "string"
 			? value
 			: (value?.name || value?.choice || value?.value || "");
+		const normalizeSkill = value => this._state.normalizeSkillProficiencyKey?.(valueName(value))
+			|| String(valueName(value) || "").toLowerCase().replace(/\s+/g, "");
 		const normalizeValue = value => String(valueName(value) || "").trim().toLowerCase();
 		const removeSetValue = (type, value, remove) => {
 			release(type, value, remove);
@@ -1907,30 +1908,30 @@ class CharacterSheetRespec {
 			nestedSkill: {
 				type: "skills",
 				add: value => {
-					const skill = normalizeValue(value);
+					const skill = normalizeSkill(value);
 					if (skill && this._state.getSkillProficiency(skill) < 1) this._state.addSkillProficiency(skill);
 				},
 				remove: value => {
-					const skill = normalizeValue(value);
+					const skill = normalizeSkill(value);
 					if (skill) this._state.setSkillProficiency(skill, 0);
 				},
 			},
 			nestedSkillTool: {
 				type: "skills",
 				add: value => {
-					const skill = normalizeValue(value);
+					const skill = normalizeSkill(value);
 					if (skill && this._state.getSkillProficiency(skill) < 1) this._state.addSkillProficiency(skill);
 				},
 				remove: value => {
-					const skill = normalizeValue(value);
+					const skill = normalizeSkill(value);
 					if (skill) this._state.setSkillProficiency(skill, 0);
 				},
 			},
 			nestedExpertise: {
 				type: "expertise",
-				add: value => this._state.addExpertise(normalizeValue(value)),
+				add: value => this._state.addExpertise(normalizeSkill(value)),
 				remove: value => {
-					const skill = normalizeValue(value);
+					const skill = normalizeSkill(value);
 					if (!skill) return;
 					if (!decision.meta?.unplacedFeatExpertise) {
 						this._state.setSkillProficiency(skill, 1);
@@ -1990,7 +1991,7 @@ class CharacterSheetRespec {
 				.join(" ");
 			remove();
 			next.forEach(value => {
-				const skill = normalizeValue(value);
+				const skill = normalizeSkill(value);
 				if (!skill) return;
 				this._state.addNamedModifier({
 					name: `${ownerName} (${toTitleCase(valueName(value))})`,
@@ -2038,7 +2039,9 @@ class CharacterSheetRespec {
 		if (nestedSet) {
 			const beforeLevels = Object.fromEntries(
 				[...previous, ...next].map(value => {
-					const skill = normalizeValue(value);
+					const skill = ["nestedSkill", "nestedExpertise"].includes(decision.type)
+						? normalizeSkill(value)
+						: normalizeValue(value);
 					return [skill, skill ? this._state.getSkillProficiency(skill) : 0];
 				}),
 			);
@@ -2053,7 +2056,9 @@ class CharacterSheetRespec {
 				);
 				const choiceKey = decision.meta.featChoiceKey;
 				if (feat && choiceKey) {
-					const selectedValues = next.map(valueName);
+					const selectedValues = choiceKey === "expertise"
+						? next.map(normalizeSkill)
+						: next.map(valueName);
 					feat.choices = {...(feat.choices || {}), [choiceKey]: selectedValues};
 					feat._featChoices = {...(feat._featChoices || feat.choices), [choiceKey]: selectedValues};
 					feat.appliedEffects ||= {};
@@ -2062,9 +2067,9 @@ class CharacterSheetRespec {
 					const stillSelected = new Set([
 						...selectedValues,
 						...(feat.choices?.[otherChoiceKey] || []),
-					].map(normalizeValue));
+					].map(normalizeSkill));
 					for (const value of previous) {
-						const skill = normalizeValue(value);
+						const skill = normalizeSkill(value);
 						if (skill && !stillSelected.has(skill)) delete feat.appliedEffects.skillProficiencies[skill];
 					}
 					for (const skill of stillSelected) {
